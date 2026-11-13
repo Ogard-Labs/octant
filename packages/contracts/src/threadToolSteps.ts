@@ -7,8 +7,13 @@ const boundedNonEmptyText = (maximumBytes: number) =>
     Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
-/** How many tool calls one Chat or Work turn keeps, as many as a Code turn does. */
-export const MAX_THREAD_TOOL_STEPS_PER_TURN = 64;
+/**
+ * How many tool calls one Chat or Work turn keeps below Full access until a
+ * person changes it, as many as a Code turn does.
+ */
+export const DEFAULT_THREAD_TOOL_STEPS_PER_TURN = 64;
+/** The most a person may set either tool-step limit to. */
+export const MAX_THREAD_TOOL_STEPS_SETTING = 4_096;
 /** The most a step's progress or result message keeps. */
 export const MAX_THREAD_TOOL_STEP_SUMMARY_BYTES = 2_048;
 

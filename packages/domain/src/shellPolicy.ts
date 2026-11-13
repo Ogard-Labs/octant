@@ -41,6 +41,7 @@ import {
   type WorkspaceTabId,
 } from "@octant/contracts/shell";
 import { DEFAULT_BROWSER_CAPTURES_PER_THREAD } from "@octant/contracts/browser-capture";
+import { DEFAULT_THREAD_TOOL_STEPS_PER_TURN } from "@octant/contracts/thread-tool-steps";
 import { DEFAULT_SIDEBAR_BACKGROUND } from "@octant/contracts/theme";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR } from "@octant/contracts/user-profile";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -202,6 +203,8 @@ export function defaultShellSettings(): ShellSettings {
     agentBrowserDownloads: false,
     browserCapturesPerThread: DEFAULT_BROWSER_CAPTURES_PER_THREAD,
     keepToolCallRecords: true,
+    toolStepsPerTurn: DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+    fullAccessToolStepsPerTurn: 0,
     persistentBrowserOwner: false,
   };
 }

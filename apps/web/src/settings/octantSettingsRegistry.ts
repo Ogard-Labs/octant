@@ -1231,6 +1231,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "tool calls records inputs outputs keep store inspect what an agent ran returned chat work purge privacy switch",
         },
         {
+          id: settingId("tool-steps-per-turn"),
+          label: "Tool steps kept per turn",
+          scope: "host",
+          keywords:
+            "tool steps calls kept per turn limit count rows chat work transcript truncated more",
+        },
+        {
+          id: settingId("tool-steps-per-turn-full-access"),
+          label: "Tool steps kept per turn at Full access",
+          scope: "host",
+          keywords:
+            "tool steps calls kept per turn full access no limit off unlimited spend ceiling work",
+        },
+        {
           id: settingId("tool-approvals"),
           label: "Remembered tool approvals",
           scope: "host",

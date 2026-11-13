@@ -16,6 +16,8 @@ const turn = {
   threadId: "7d000000-0000-4000-8000-000000000001",
   turnId: "7d000000-0000-4000-8000-0000000000a1",
 };
+/** The turn as its recorder is made for it, under the default tool-step limit. */
+const recorded = { ...turn, callLimit: 64 };
 
 afterEach(() => {
   for (const directory of directories.splice(0)) {
@@ -56,7 +58,7 @@ function recorders(connection: SqliteConnection, enabled: () => boolean = () => 
 describe("thread tool-call recorder", () => {
   it("keeps what a runtime's own tool was given and returned under the call's step id and name", () => {
     const connection = open();
-    const recorder = recorders(connection)(turn);
+    const recorder = recorders(connection)(recorded);
     recorder.observe(event({ kind: "tool-start", toolCallId: "call-1", toolName: "Bash" }));
     recorder.observe(
       event({ kind: "tool-call-content", toolCallId: "call-1", part: "input", text: "ls -la" }),
@@ -83,7 +85,7 @@ describe("thread tool-call recorder", () => {
 
   it("keeps the input and the result of a tool Octant ran for the turn", () => {
     const connection = open();
-    recorders(connection)(turn).appTool({
+    recorders(connection)(recorded).appTool({
       toolCallId: "request-1",
       toolName: "octant_past_threads",
       inputJson: '{"query":"invoices"}',
@@ -103,7 +105,7 @@ describe("thread tool-call recorder", () => {
   it("keeps nothing while the setting is off, and resumes when it is turned back on", () => {
     const connection = open();
     let enabled = false;
-    const recorder = recorders(connection, () => enabled)(turn);
+    const recorder = recorders(connection, () => enabled)(recorded);
     recorder.appTool({
       toolCallId: "request-1",
       toolName: "web-search",
@@ -130,7 +132,7 @@ describe("thread tool-call recorder", () => {
     const issued = "broker-issued-value-7d41c0";
     noteIssuedSecret(issued);
     const key = `sk-ant-api03-${"a".repeat(80)}`;
-    recorders(connection)(turn).appTool({
+    recorders(connection)(recorded).appTool({
       toolCallId: "request-1",
       toolName: "shell",
       inputJson: JSON.stringify({ command: `curl -H "x-api-key: ${key}"` }),
@@ -146,7 +148,7 @@ describe("thread tool-call recorder", () => {
 
   it("does not keep the output of a call whose input names a protected secret file", () => {
     const connection = open();
-    recorders(connection)(turn).appTool({
+    recorders(connection)(recorded).appTool({
       toolCallId: "request-1",
       toolName: "read-file",
       inputJson: '{"path":"/home/person/.ssh/id_ed25519"}',
@@ -165,7 +167,7 @@ describe("thread tool-call recorder", () => {
 
   it("never fails the turn when a record cannot be written", () => {
     const connection = open();
-    const recorder = recorders(connection)(turn);
+    const recorder = recorders(connection)(recorded);
     connection.close();
     expect(() =>
       recorder.appTool({

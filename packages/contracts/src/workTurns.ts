@@ -31,7 +31,7 @@ import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirecto
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
-import { ThreadToolStepList } from "./threadToolStepList";
+import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { WorkThreadId } from "./workThreads";
 
@@ -46,6 +46,12 @@ const boundedNonEmptyText = (maximumBytes: number) =>
   );
 
 export const MAX_WORK_TURN_RESPONSE_BYTES = 64 * 1024;
+/**
+ * The most one live Work stream frame may weigh. A client refuses a heavier
+ * line, so the host sends a view to the transcript snapshot instead of a
+ * settled turn that would not fit.
+ */
+export const MAX_WORK_TURN_STREAM_FRAME_BYTES = 160 * 1024;
 export const MAX_WORK_TURN_FAILURE_BYTES = 8 * 1024;
 
 /**
@@ -458,12 +464,31 @@ export const WorkTurnStreamFrame = Schema.Union(
     requestId: WorkTurnRequestId,
     tasks: ThreadTaskProgressList,
   }).annotations(strict),
+  /**
+   * The turn's whole tool-step list. A host that streams each step as a
+   * change no longer sends it; it stays so a client still reads a host that
+   * does.
+   */
   Schema.Struct({
     kind: Schema.Literal("turn-tools"),
     sequence: Schema.Int.pipe(Schema.positive()),
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
     toolSteps: ThreadToolStepList,
+    toolStepsTruncated: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * One tool step that started, moved or ended, to put in the turn's list by
+   * its tool call id; absent when the list only became truncated. Restating
+   * the whole list at each tool event cost bytes that grew with the square of
+   * the turn's step limit.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("turn-tool-step"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    toolStep: Schema.optional(ThreadToolStep),
     toolStepsTruncated: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({

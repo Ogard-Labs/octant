@@ -33,14 +33,19 @@ import {
   type TurnStopReason,
   type TurnUsage,
   type ThreadTaskProgress,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   MAX_THREAD_TASKS_PER_TURN,
   restateThreadTaskList,
   upsertThreadTaskProgress,
+  type ThreadToolStep,
 } from "@octant/contracts";
 import {
   accumulateTurnUsage,
+  changedThreadToolStep,
+  isNativeHarnessDriverKind,
   markThreadToolStepOutsideContent,
   observeTurnMetrics,
+  recordThreadAppToolStep,
   recordThreadToolStep,
   startTurnMetrics,
   type ThreadToolSteps,
@@ -271,6 +276,21 @@ export interface ChatTurnRunnerInput {
     responseRef: ChatContentReference,
   ) => Effect.Effect<void, ChatFailure>;
   /**
+   * Journals one tool event as only the step it changed (none when the list
+   * only became truncated). The attempt was journaled whole at every tool
+   * event, so the bytes grew with the square of the step limit. Absent, the
+   * attempt is journaled whole, as a caller that keeps no step events does.
+   */
+  readonly persistToolStep?: (
+    attempt: ChatAttempt,
+    step: ThreadToolStep | undefined,
+  ) => Effect.Effect<void, ChatFailure>;
+  /**
+   * How many tool calls the attempt keeps: the person's setting. Chat has no
+   * Full access, so there is always a number; absent reads as the default.
+   */
+  readonly toolStepLimit?: number;
+  /**
    * Atomically persists a terminal provider failure and its support anchor.
    * The runner supplies the already-transitioned attempt so the caller never
    * has to commit the failure and diagnostics incident in separate writes.
@@ -483,12 +503,16 @@ export class ChatTurnRunner {
           },
           decodeChatFailure({ category: "failed", message: RUNTIME_OUTSIDE_CONTENT_REFUSAL }),
         );
-      // The row of a call whose result brought outside content carries the
-      // Watcher's tag, with what it found, on the attempt's own tool steps.
-      const markToolRow = (
-        toolCallId: string,
-        toolName: string,
-        labels: ReadonlyArray<ShieldWatcherLabel>,
+      const stepLimit = input.toolStepLimit ?? DEFAULT_THREAD_TOOL_STEPS_PER_TURN;
+      // An Octant Harness attempt's runtime announces no tool call of its
+      // own: every tool it has is one Octant runs for it, so the request is
+      // the only sign of the call and the host gives it its row.
+      const announcesNoCall = isNativeHarnessDriverKind(input.driver.kind);
+      // One step per tool call id on the attempt, journaled as the step that
+      // changed. A name, a state, and a bounded message; never the tool's
+      // input or output. Every whole attempt journaled later carries the list.
+      const foldToolSteps = (
+        fold: (before: ThreadToolSteps | undefined) => ThreadToolSteps | undefined,
       ) =>
         Effect.gen(function* () {
           const before: ThreadToolSteps | undefined =
@@ -498,11 +522,7 @@ export class ChatTurnRunner {
                   steps: currentAttempt.toolSteps,
                   truncated: currentAttempt.toolStepsTruncated === true,
                 };
-          const after = markThreadToolStepOutsideContent(before, {
-            toolCallId,
-            toolName,
-            mark: { labels },
-          });
+          const after = fold(before);
           if (after === undefined || after === before) return;
           currentAttempt = {
             ...currentAttempt,
@@ -510,8 +530,38 @@ export class ChatTurnRunner {
             ...(after.truncated ? { toolStepsTruncated: true } : {}),
             updatedAt: updatedAt(),
           };
-          yield* input.persistAttempt(currentAttempt);
+          if (input.persistToolStep === undefined) yield* input.persistAttempt(currentAttempt);
+          else yield* input.persistToolStep(currentAttempt, changedThreadToolStep(before, after));
         });
+      // The row of a call whose result brought outside content carries the
+      // Watcher's tag, with what it found, on the attempt's own tool steps.
+      const markToolRow = (
+        toolCallId: string,
+        toolName: string,
+        labels: ReadonlyArray<ShieldWatcherLabel>,
+      ) =>
+        foldToolSteps((before) =>
+          markThreadToolStepOutsideContent(
+            before,
+            { toolCallId, toolName, mark: { labels } },
+            stepLimit,
+          ),
+        );
+      // Keyed by the request id, which the call's record is kept under, so
+      // the row opens that record.
+      const showAppTool = (
+        call: { readonly requestId: string; readonly toolName: string },
+        state: "started" | "completed" | "failed",
+      ) =>
+        announcesNoCall
+          ? foldToolSteps((before) =>
+              recordThreadAppToolStep(
+                before,
+                { toolCallId: call.requestId, toolName: call.toolName, state },
+                stepLimit,
+              ),
+            )
+          : Effect.void;
       // An earlier attempt's read that could not be marked is still in the
       // session this attempt would resume.
       if (outsideContentMarks.settleOwed(String(input.thread.id)).status === "refused") {
@@ -1337,6 +1387,7 @@ export class ChatTurnRunner {
                     executionSignal === undefined
                       ? toolAbort.signal
                       : AbortSignal.any([executionSignal, toolAbort.signal]);
+                  yield* showAppTool(event, "started");
                   // App-owned work suspends the idle timeout, so the call gets
                   // the same window as its own deadline: a tool that never
                   // returns ends the turn with a named cause instead of
@@ -1400,6 +1451,7 @@ export class ChatTurnRunner {
                       execution.outsideContent.labels,
                     );
                   }
+                  yield* showAppTool(event, execution.isError === true ? "failed" : "completed");
                   const resultJson = boundedToolResultJson(execution.result);
                   input.toolCallRecords?.appTool({
                     toolCallId: event.requestId,
@@ -1480,26 +1532,7 @@ export class ChatTurnRunner {
                   event.kind === "tool-success" ||
                   event.kind === "tool-failure"
                 ) {
-                  // One step per provider tool call id, restated whole on the
-                  // attempt like the task list, so a replayed attempt-updated
-                  // is the full state. A name, a state, and a bounded message;
-                  // never the tool's input or output.
-                  const before: ThreadToolSteps | undefined =
-                    currentAttempt.toolSteps === undefined
-                      ? undefined
-                      : {
-                          steps: currentAttempt.toolSteps,
-                          truncated: currentAttempt.toolStepsTruncated === true,
-                        };
-                  const after = recordThreadToolStep(before, event);
-                  if (after === undefined || after === before) return;
-                  currentAttempt = {
-                    ...currentAttempt,
-                    toolSteps: after.steps,
-                    ...(after.truncated ? { toolStepsTruncated: true } : {}),
-                    updatedAt: updatedAt(),
-                  };
-                  yield* input.persistAttempt(currentAttempt);
+                  yield* foldToolSteps((before) => recordThreadToolStep(before, event, stepLimit));
                   return;
                 }
                 if (event.kind === "waiting") {

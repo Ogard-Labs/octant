@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  MAX_THREAD_TOOL_STEPS_PER_TURN,
   MAX_TOOL_CALL_RECORD_INPUT_BYTES,
   MAX_TOOL_CALL_RECORD_OUTPUT_BYTES,
 } from "@octant/contracts";
@@ -42,6 +41,7 @@ function part(overrides: Partial<ThreadToolCallPartInput> = {}): ThreadToolCallP
     mode: "work",
     threadId,
     turnId,
+    callsPerTurn: 64,
     toolCallId: "call-1",
     toolName: "Bash",
     part: "input",
@@ -166,22 +166,36 @@ describe("thread tool-call record store", () => {
     ).toHaveLength(1);
   });
 
-  it("keeps records for no more calls in a turn than the turn keeps tool steps", () => {
+  it("keeps records for no more calls in a turn than the turn's tool-step limit", () => {
     const connection = open();
-    for (let index = 0; index < MAX_THREAD_TOOL_STEPS_PER_TURN; index += 1) {
-      writeThreadToolCallPart(connection, part({ toolCallId: `call-${index}` }));
+    const callsPerTurn = 3;
+    for (let index = 0; index < callsPerTurn; index += 1) {
+      writeThreadToolCallPart(connection, part({ toolCallId: `call-${index}`, callsPerTurn }));
     }
-    expect(writeThreadToolCallPart(connection, part({ toolCallId: "one-more" }))).toEqual({
-      status: "refused",
-      reason: "turn-full",
-    });
+    expect(
+      writeThreadToolCallPart(connection, part({ toolCallId: "one-more", callsPerTurn })),
+    ).toEqual({ status: "refused", reason: "turn-full" });
     // A call already kept still takes its output.
     expect(
-      writeThreadToolCallPart(connection, part({ toolCallId: "call-0", part: "output" })),
+      writeThreadToolCallPart(
+        connection,
+        part({ toolCallId: "call-0", part: "output", callsPerTurn }),
+      ),
     ).toEqual({ status: "kept" });
-    expect(readThreadToolCallRecords(connection, turn)).toHaveLength(
-      MAX_THREAD_TOOL_STEPS_PER_TURN,
-    );
+    expect(readThreadToolCallRecords(connection, turn)).toHaveLength(callsPerTurn);
+  });
+
+  it("keeps every call's record for a turn with no tool-step limit, inside the thread's total", () => {
+    const connection = open();
+    for (let index = 0; index < 70; index += 1) {
+      expect(
+        writeThreadToolCallPart(
+          connection,
+          part({ toolCallId: `call-${index}`, callsPerTurn: undefined }),
+        ),
+      ).toEqual({ status: "kept" });
+    }
+    expect(readThreadToolCallRecords(connection, turn)).toHaveLength(70);
   });
 
   it("lists a thread's records oldest first with the turn each belongs to", () => {

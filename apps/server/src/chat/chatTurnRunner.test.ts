@@ -3698,6 +3698,177 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.toolStepsTruncated).toBeUndefined();
   });
 
+  /** Runs one attempt over scripted runtime events and collects what it journals. */
+  async function runToolTurn(
+    events: ReadonlyArray<Record<string, unknown>>,
+    extra: {
+      readonly driverKind?: string;
+      readonly toolStepLimit?: number;
+      readonly execute?: (call: { readonly name: string }) => Promise<{
+        readonly result: unknown;
+        readonly isError?: boolean;
+      }>;
+    } = {},
+  ) {
+    const attempts: Array<ChatAttempt> = [];
+    const steps: Array<{ readonly attempt: ChatAttempt; readonly step: unknown }> = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Queue.offerAll(
+          queue,
+          [...events, { kind: "text-delta", text: "Done" }, { kind: "completed" }].map((event) => ({
+            ...event,
+            sessionId,
+          })) as never,
+        ),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: {
+            ...(extra.driverKind === undefined ? {} : { kind: extra.driverKind }),
+            acquire: () => Effect.succeed(connection),
+          } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          ...(extra.toolStepLimit === undefined ? {} : { toolStepLimit: extra.toolStepLimit }),
+          ...(extra.execute === undefined
+            ? {}
+            : {
+                appManagedTools: {
+                  definitions: [{ name: "read-file" }, { name: "run-command" }] as never,
+                  execute: extra.execute as never,
+                  close: async () => undefined,
+                },
+              }),
+          persistAttempt: (next) => {
+            attempts.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
+            attempts.push(next);
+            return Effect.void;
+          },
+          persistToolStep: (next, step) => {
+            steps.push({ attempt: next, step });
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000060"),
+              digest: "a".repeat(64),
+              byteLength: 4,
+            }),
+        }),
+      ),
+    );
+    return { attempts, steps };
+  }
+
+  it("journals each tool event as the one step it changed, and never the whole attempt for it", async () => {
+    const { attempts, steps } = await runToolTurn([
+      { kind: "tool-start", toolCallId: "call-1", toolName: "Web search" },
+      { kind: "tool-start", toolCallId: "call-2", toolName: "Fetch page" },
+      { kind: "tool-progress", toolCallId: "call-1", message: "Searching" },
+      { kind: "tool-success", toolCallId: "call-1", summary: "3 results" },
+      { kind: "tool-failure", toolCallId: "call-2", message: "Timed out" },
+    ]);
+    expect(steps.map(({ step }) => step)).toEqual([
+      { toolCallId: "call-1", toolName: "Web search", state: "started" },
+      { toolCallId: "call-2", toolName: "Fetch page", state: "started" },
+      { toolCallId: "call-1", toolName: "Web search", state: "running", summary: "Searching" },
+      { toolCallId: "call-1", toolName: "Web search", state: "completed", summary: "3 results" },
+      { toolCallId: "call-2", toolName: "Fetch page", state: "failed", summary: "Timed out" },
+    ]);
+    // No tool event journaled the attempt whole: as many whole attempts as a
+    // reply with no tool call. The settled attempt carries the list.
+    expect(attempts).toHaveLength((await runToolTurn([])).attempts.length);
+    expect(attempts.at(-1)?.toolSteps).toHaveLength(2);
+  });
+
+  it("keeps as many tool calls as the person's limit and says once that the attempt called more", async () => {
+    const { attempts, steps } = await runToolTurn(
+      Array.from({ length: 5 }, (_unused, index) => ({
+        kind: "tool-start",
+        toolCallId: `call-${String(index)}`,
+        toolName: "Read",
+      })),
+      { toolStepLimit: 3 },
+    );
+    expect(attempts.at(-1)?.toolSteps).toHaveLength(3);
+    expect(attempts.at(-1)?.toolStepsTruncated).toBe(true);
+    // Three steps, then one change that carries no step: the list became truncated.
+    expect(steps.map(({ step }) => step === undefined)).toEqual([false, false, false, true]);
+    expect(steps.at(-1)?.attempt.toolStepsTruncated).toBe(true);
+  });
+
+  it("gives an Octant Harness attempt's tool call a row that opens its record, started and then completed or failed", async () => {
+    const { attempts, steps } = await runToolTurn(
+      [
+        { kind: "tool-request", requestId: "call-1", toolName: "read-file", inputJson: "{}" },
+        { kind: "tool-request", requestId: "call-2", toolName: "run-command", inputJson: "{}" },
+      ],
+      {
+        driverKind: "openai-compatible",
+        execute: async ({ name }) =>
+          name === "read-file"
+            ? { result: { text: "hello" } }
+            : { result: { error: "exit 1" }, isError: true },
+      },
+    );
+    expect(steps.map(({ step }) => step)).toEqual([
+      { toolCallId: "call-1", toolName: "read-file", state: "started" },
+      { toolCallId: "call-1", toolName: "read-file", state: "completed" },
+      { toolCallId: "call-2", toolName: "run-command", state: "started" },
+      { toolCallId: "call-2", toolName: "run-command", state: "failed" },
+    ]);
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "read-file", state: "completed" },
+      { toolCallId: "call-2", toolName: "run-command", state: "failed" },
+    ]);
+  });
+
+  it("gives a runtime that announces its own calls no second row for a tool Octant ran", async () => {
+    const { attempts } = await runToolTurn(
+      [{ kind: "tool-request", requestId: "tool-1", toolName: "read-file", inputJson: "{}" }],
+      { driverKind: "claude", execute: async () => ({ result: { text: "hello" } }) },
+    );
+    expect(attempts.at(-1)?.toolSteps).toBeUndefined();
+  });
+
   it("hands a tool call's input and output to the attempt's record and journals neither on its tool steps", async () => {
     const updates: Array<ChatAttempt> = [];
     const observed: Array<{ readonly kind: string }> = [];

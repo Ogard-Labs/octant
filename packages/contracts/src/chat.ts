@@ -46,7 +46,7 @@ import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
-import { ThreadToolStepList } from "./threadToolStepList";
+import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -1278,6 +1278,27 @@ export const ChatAttemptResponseAppended = Schema.Struct({
 }).annotations(strict);
 export type ChatAttemptResponseAppended = typeof ChatAttemptResponseAppended.Type;
 
+/**
+ * One tool step of an attempt that started, moved or ended, to put in the
+ * attempt's `toolSteps` by its tool call id. `attempt-updated` carries the
+ * whole attempt, so journaling it at every tool event wrote the step list
+ * again each time, bytes that grew with the square of the step limit. This
+ * event carries the one step and the attempt's new `updatedAt`. `toolStep` is
+ * absent when the list only became truncated; `toolStepsTruncated` says the
+ * attempt called more tools than it keeps. Everything else about the attempt
+ * is unchanged since its last `attempt-updated`.
+ */
+export const ChatAttemptToolStepChanged = Schema.Struct({
+  kind: Schema.Literal("attempt-tool-step"),
+  threadId: ChatThreadId,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  toolStep: Schema.optional(ThreadToolStep),
+  toolStepsTruncated: Schema.optional(Schema.Literal(true)),
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatAttemptToolStepChanged = typeof ChatAttemptToolStepChanged.Type;
+
 export const ChatTurnRouteDecided = Schema.Struct({
   kind: Schema.Literal("turn-route-decided"),
   decision: ChatTurnRouteDecision,
@@ -1330,6 +1351,7 @@ export const ChatPublicEvent = Schema.Union(
   ChatTurnCreated,
   ChatAttemptUpdated,
   ChatAttemptResponseAppended,
+  ChatAttemptToolStepChanged,
   ChatTurnRouteDecided,
   ChatAttachmentUpdated,
   ChatCitationRecorded,
@@ -1363,7 +1385,7 @@ export const ChatEventFrame = Schema.Struct({
    * because a client decoding frames strictly would refuse an event it does
    * not know. `attempt-response-appended` is opt-in the same way; subscribers
    * without `appended` receive the attempt as a full `attempt-updated` frame
-   * instead.
+   * instead. So is `attempt-tool-step`, for subscribers without `toolSteps`.
    */
   event: Schema.Union(ChatPublicEvent, ChatCompactionSettled),
   /**
@@ -1385,6 +1407,7 @@ export const CHAT_EVENT_NAMES = [
   "chat.turn-created@1",
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
+  "chat.attempt-tool-step@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -1443,6 +1466,9 @@ export const decodeChatThreadUpdated = Schema.decodeUnknownSync(ChatThreadUpdate
 export const decodeChatTurnCreated = Schema.decodeUnknownSync(ChatTurnCreated);
 export const decodeChatThreadRewound = Schema.decodeUnknownSync(ChatThreadRewound);
 export const decodeChatAttemptUpdated = Schema.decodeUnknownSync(ChatAttemptUpdated);
+export const decodeChatAttemptToolStepChanged = Schema.decodeUnknownSync(
+  ChatAttemptToolStepChanged,
+);
 export const decodeChatAttemptResponseAppended = Schema.decodeUnknownSync(
   ChatAttemptResponseAppended,
 );

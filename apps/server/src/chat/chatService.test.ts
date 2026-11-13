@@ -10211,6 +10211,40 @@ function streamedReplyDriver(deltas: ReadonlyArray<string>): ProviderDriver {
   } as unknown as ProviderDriver;
 }
 
+/** A provider whose reply calls one tool of its own before it answers. */
+function toolCallingDriver(): ProviderDriver {
+  return {
+    acquire: () =>
+      Effect.sync(() => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        let sessionId = "";
+        const emit = (event: Record<string, unknown>) =>
+          Queue.offer(queue, { sessionId, ...event } as never);
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              sessionId = input.sessionId;
+              return { sessionId: input.sessionId };
+            }),
+          send: () =>
+            Effect.gen(function* () {
+              yield* emit({ kind: "tool-start", toolCallId: "call-1", toolName: "Web search" });
+              yield* emit({ kind: "tool-success", toolCallId: "call-1", summary: "3 results" });
+              yield* emit({ kind: "text-delta", text: "Found it." });
+              yield* emit({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+              yield* emit({ kind: "completed" });
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      }),
+  } as unknown as ProviderDriver;
+}
+
 /** Journal appends that carry at least one streamed appended-delta event. */
 function appendedCommits(append: {
   readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> };
@@ -10401,6 +10435,69 @@ describe("ChatService streamed delta bodies", () => {
         frame.event.kind === "attempt-response-appended" ? [frame.contents?.[0]?.body] : [],
       ),
     ).toEqual(deltas.slice(1));
+  });
+});
+
+describe("ChatService tool steps", () => {
+  it("journals each tool event as the step it changed and streams it so to a subscriber that asked", async () => {
+    const { service, persistence } = openFixture({ driver: toolCallingDriver() });
+    const append = vi.spyOn(persistence.journal, "append");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Tool call",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const journaled = append.mock.calls.flatMap(
+      ([request]) =>
+        (request as { events?: ReadonlyArray<{ eventName: string; payload: unknown }> }).events ??
+        [],
+    );
+    const steps = journaled.filter((event) => event.eventName === "chat.attempt-tool-step@1");
+    expect(
+      steps.map((event) => (event.payload as { toolStep?: { state: string } }).toolStep?.state),
+    ).toEqual(["started", "completed"]);
+    // A step event carries the one step, never the attempt.
+    expect(steps.every((event) => !("attempt" in (event.payload as object)))).toBe(true);
+    const completedStep = { toolCallId: "call-1", toolName: "Web search", state: "completed" };
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.toolSteps).toEqual([
+      { ...completedStep, summary: "3 results" },
+    ]);
+
+    // A strict reader is never sent the kind: it reads the whole attempt.
+    const strict = [];
+    for await (const frame of service.subscribe(created.thread.id, 0)) strict.push(frame);
+    expect(strict.some((frame) => frame.event.kind === "attempt-tool-step")).toBe(false);
+    expect(
+      strict.some(
+        (frame) =>
+          frame.event.kind === "attempt-updated" &&
+          frame.event.attempt.toolSteps?.[0]?.state === "completed",
+      ),
+    ).toBe(true);
+
+    const optedIn = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      toolSteps: true,
+    })) {
+      optedIn.push(frame);
+    }
+    expect(
+      optedIn.flatMap((frame) =>
+        frame.event.kind === "attempt-tool-step" ? [frame.event.toolStep?.state] : [],
+      ),
+    ).toEqual(["started", "completed"]);
   });
 });
 

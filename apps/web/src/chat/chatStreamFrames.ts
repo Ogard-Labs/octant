@@ -1,8 +1,8 @@
 import type { ChatEventFrame, ChatThreadView } from "@octant/contracts/chat";
 
 /**
- * Grow the thread view in place from a streamed `attempt-updated` or
- * `attempt-response-appended` frame.
+ * Grow the thread view in place from a streamed `attempt-updated`,
+ * `attempt-response-appended` or `attempt-tool-step` frame.
  *
  * Returns `undefined` when the frame cannot be applied without the host, and
  * the caller re-reads the thread instead: the attempt has settled, so its
@@ -65,6 +65,36 @@ export function applyChatAttemptFrame(
       contents: added.length === 0 ? view.contents : [...view.contents, ...added],
       lastSequence: frame.sequence,
     };
+  }
+
+  if (event.kind === "attempt-tool-step") {
+    const turnIndex = view.turns.findIndex((turn) => String(turn.id) === String(event.turnId));
+    const turn = view.turns[turnIndex];
+    if (turn === undefined) return undefined;
+    const attemptIndex = turn.attempts.findIndex(
+      (candidate) => String(candidate.id) === String(event.attemptId),
+    );
+    const attempt = turn.attempts[attemptIndex];
+    if (attempt === undefined) return undefined;
+    // A snapshot read after this frame was journaled already holds its step.
+    if (frame.sequence <= view.lastSequence) return view;
+    const toolSteps = (attempt.toolSteps ?? []).slice();
+    const changed = event.toolStep;
+    if (changed !== undefined) {
+      const stepIndex = toolSteps.findIndex((step) => step.toolCallId === changed.toolCallId);
+      if (stepIndex === -1) toolSteps.push(changed);
+      else toolSteps[stepIndex] = changed;
+    }
+    const attempts = turn.attempts.slice();
+    attempts[attemptIndex] = {
+      ...attempt,
+      ...(toolSteps.length === 0 ? {} : { toolSteps }),
+      ...(event.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
+      updatedAt: event.updatedAt,
+    };
+    const turns = view.turns.slice();
+    turns[turnIndex] = { ...turn, attempts };
+    return { ...view, turns, lastSequence: frame.sequence };
   }
 
   if (event.kind !== "attempt-updated") return undefined;

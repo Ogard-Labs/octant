@@ -26,6 +26,8 @@ export type ThreadToolCallRecorders = (turn: {
   readonly threadId: string;
   /** A Chat attempt id or a Work turn's request id. */
   readonly turnId: string;
+  /** The turn's tool-step limit: a call with no row keeps no record. `undefined` is no limit. */
+  readonly callLimit: number | undefined;
 }) => ThreadToolCallRecorder;
 
 /** How many path-shaped words of one input are judged; the rest of a longer input is not read. */
@@ -106,7 +108,10 @@ export function threadToolCallRecorders(options: {
         if (!options.enabled() || call.text === "") return;
         const toolName = toolNames.get(call.toolCallId);
         writeThreadToolCallPart(options.connection, {
-          ...turn,
+          mode: turn.mode,
+          threadId: turn.threadId,
+          turnId: turn.turnId,
+          callsPerTurn: turn.callLimit,
           toolCallId: call.toolCallId,
           ...(toolName === undefined ? {} : { toolName }),
           part: call.part,

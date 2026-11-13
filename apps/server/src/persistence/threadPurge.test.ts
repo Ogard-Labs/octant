@@ -1532,6 +1532,7 @@ function seedToolCallRecord(
       mode,
       threadId,
       turnId: toolCallTurnId,
+      callsPerTurn: 64,
       toolCallId: "call-1",
       toolName: "Bash",
       part,

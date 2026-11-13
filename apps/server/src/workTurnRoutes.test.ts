@@ -104,6 +104,45 @@ describe("Work turn live stream route", () => {
     expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 4, expect.any(AbortSignal));
   });
 
+  it("sends the view to the transcript snapshot instead of a frame heavier than a client accepts", async () => {
+    const subscribe = vi.fn(async function* () {
+      yield {
+        kind: "response-delta" as const,
+        sequence: 5,
+        threadId,
+        requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        text: "fits",
+      };
+      // A settled turn that kept thousands of tool steps weighs this much;
+      // control characters reach it here in few bytes of fixture.
+      yield {
+        kind: "response-delta" as const,
+        sequence: 6,
+        threadId,
+        requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        text: "\u0001".repeat(40_000),
+      };
+      yield {
+        kind: "response-delta" as const,
+        sequence: 7,
+        threadId,
+        requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        text: "never sent",
+      };
+    });
+    const route = routeFixture({ subscribe });
+
+    const response = await route(
+      request(`/api/work/turns/stream/${threadId}?afterSequence=4`, { method: "GET" }),
+    );
+    const lines = ((await response?.text()) ?? "").trim().split("\n");
+
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ kind: "response-delta", sequence: 5 }),
+      { kind: "snapshot-required", sequence: 6, threadId },
+    ]);
+  });
+
   it("rejects a stream query that omits the afterSequence key", async () => {
     const subscribe = vi.fn(async function* () {});
     const route = routeFixture({ subscribe });

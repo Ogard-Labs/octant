@@ -1,6 +1,7 @@
 import {
   decodeChatAttempt,
   decodeChatAttemptResponseAppended,
+  decodeChatAttemptToolStepChanged,
   decodeChatAttemptUpdated,
   decodeChatAttachment,
   decodeChatCitation,
@@ -92,6 +93,7 @@ const chatEventNames = new Set([
   "chat.turn-created@1",
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
+  "chat.attempt-tool-step@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -148,6 +150,9 @@ export class ChatProjection implements Projection {
         return;
       case "chat.attempt-response-appended@1":
         this.#applyAttemptResponseAppended(connection, event);
+        return;
+      case "chat.attempt-tool-step@1":
+        this.#applyAttemptToolStep(connection, event);
         return;
       case "chat.turn-route-decided@1":
         this.#applyTurnRouteDecided(connection, event);
@@ -382,12 +387,78 @@ export class ChatProjection implements Projection {
     }
   }
 
+  /**
+   * One tool step an attempt's tool event changed. The journal holds only
+   * that step; the attempt row supplies everything else, and takes the step
+   * in by its tool call id.
+   *
+   * The references streamed since the attempt's last whole event stay in
+   * their own rows: this event carries none, so nothing is folded in. The
+   * transcript search index holds reply text, never a tool step, and is left
+   * alone.
+   */
+  #applyAttemptToolStep(connection: SqliteConnection, event: EventEnvelope): void {
+    assertEnvelope(event.aggregateType === "chat-thread");
+    const changed = decodeProjection(() => decodeChatAttemptToolStepChanged(event.payload));
+    assertEnvelope(String(changed.threadId) === String(event.aggregateId));
+    const row = connection
+      .prepare(
+        "SELECT attempt_json, last_sequence FROM chat_attempt_projection WHERE attempt_id = ?",
+      )
+      .get(String(changed.attemptId)) as
+      | { readonly attempt_json: string; readonly last_sequence: number }
+      | undefined;
+    // Replay order guarantees an attempt-updated wrote this row first.
+    assertEnvelope(row !== undefined);
+    // A whole attempt journaled after this step already carries it.
+    if (row.last_sequence >= event.globalSequence) return;
+    const attempt = decodeProjection(() => decodeChatAttempt(JSON.parse(row.attempt_json)));
+    assertEnvelope(
+      String(attempt.turnId) === String(changed.turnId) &&
+        String(attempt.threadId) === String(changed.threadId),
+    );
+    const steps = (attempt.toolSteps ?? []).slice();
+    if (changed.toolStep !== undefined) {
+      const toolCallId = changed.toolStep.toolCallId;
+      const index = steps.findIndex((step) => step.toolCallId === toolCallId);
+      if (index === -1) steps.push(changed.toolStep);
+      else steps[index] = changed.toolStep;
+    }
+    this.#storeAttempt(
+      connection,
+      {
+        ...attempt,
+        ...(steps.length === 0 ? {} : { toolSteps: steps }),
+        ...(changed.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
+        updatedAt: changed.updatedAt,
+      },
+      event,
+    );
+  }
+
   #projectAttempt(
     connection: SqliteConnection,
     attempt: ChatAttempt,
     indexedContentIds: ReadonlySet<string>,
     event: EventEnvelope,
   ): void {
+    const updatedTurn = this.#storeAttempt(connection, attempt, event);
+    if (updatedTurn === undefined) return;
+    // A late attempt for a turn an edit already replaced must not bring its text back.
+    if (updatedTurn.rewound === undefined && !isTurnReplacedByEdit(connection, updatedTurn)) {
+      indexTranscriptSearchForAttempt(connection, updatedTurn, attempt, indexedContentIds, {
+        lastSequence: event.globalSequence,
+        updatedAt: attempt.updatedAt,
+      });
+    }
+  }
+
+  /** Writes the attempt's row and its copy on its turn; answers the turn, if it is projected. */
+  #storeAttempt(
+    connection: SqliteConnection,
+    attempt: ChatAttempt,
+    event: EventEnvelope,
+  ): ChatTurn | undefined {
     upsertAttempt(connection).run(
       attempt.id,
       attempt.turnId,
@@ -400,7 +471,7 @@ export class ChatProjection implements Projection {
     const turnRow = connection
       .prepare("SELECT turn_json FROM chat_turn_projection WHERE turn_id = ?")
       .get(attempt.turnId) as { readonly turn_json: string } | undefined;
-    if (turnRow === undefined) return;
+    if (turnRow === undefined) return undefined;
     const turn = decodeChatTurn(JSON.parse(turnRow.turn_json));
     const hasAttempt = turn.attempts.some((existing) => String(existing.id) === String(attempt.id));
     const attempts = hasAttempt
@@ -419,13 +490,7 @@ export class ChatProjection implements Projection {
       updatedTurn.createdAt,
       event.globalSequence,
     );
-    // A late attempt for a turn an edit already replaced must not bring its text back.
-    if (updatedTurn.rewound === undefined && !isTurnReplacedByEdit(connection, updatedTurn)) {
-      indexTranscriptSearchForAttempt(connection, updatedTurn, attempt, indexedContentIds, {
-        lastSequence: event.globalSequence,
-        updatedAt: attempt.updatedAt,
-      });
-    }
+    return updatedTurn;
   }
 
   #applyTurnRouteDecided(connection: SqliteConnection, event: EventEnvelope): void {
@@ -1205,7 +1270,8 @@ function attemptWithStreamedResponses(
     decodeChatAttempt({
       ...attempt,
       responseRefs: [...attempt.responseRefs, ...streamed],
-      updatedAt: last.updated_at,
+      // A tool step journaled after the last streamed delta is the later change.
+      updatedAt: last.updated_at > attempt.updatedAt ? last.updated_at : attempt.updatedAt,
     }),
   );
 }

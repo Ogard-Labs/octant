@@ -1951,6 +1951,26 @@ describe("SettingsView", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({ keepToolCallRecords: false });
   });
 
+  it("keeps 64 tool steps a turn below Full access and every step at Full access until the person sets a number", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Tool steps" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Tool steps kept per turn" })).toHaveValue(64);
+    const fullAccess = screen.getByRole("spinbutton", {
+      name: "Tool steps kept per turn at Full access",
+    });
+    expect(fullAccess).toHaveValue(0);
+    expect(screen.getByText(/0 means no limit/)).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Decrease Tool steps kept per turn" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ toolStepsPerTurn: 63 });
+    await user.click(
+      screen.getByRole("button", { name: "Increase Tool steps kept per turn at Full access" }),
+    );
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ fullAccessToolStepsPerTurn: 1 });
+  });
+
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
     const projectId = "44000000-0000-4000-8000-0000000000a1";
     const extensionClient = {

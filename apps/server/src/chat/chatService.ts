@@ -27,8 +27,10 @@ import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNati
 import { createHash } from "node:crypto";
 import {
   ActorId,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   WEB_SEARCH_TOOL_DEFINITION,
   CONTEXT_COMPACTION_EVENT_NAMES,
+  type ThreadToolStep,
   CorrelationId,
   EventId,
   UtcTimestamp,
@@ -360,6 +362,7 @@ const CHAT_EVENT_NAMES = new Set([
   "chat.turn-created@1",
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
+  "chat.attempt-tool-step@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -659,6 +662,11 @@ export interface ChatServiceOptions {
   readonly liveTurns?: LiveTurnRegistry;
   /** Keeps each attempt's tool-call input and output in purgeable storage; absent keeps none. */
   readonly toolCallRecorders?: ThreadToolCallRecorders;
+  /**
+   * How many tool calls an attempt keeps: the person's setting, read when an
+   * attempt starts. Absent reads as the default.
+   */
+  readonly toolStepsPerTurn?: () => number;
   /**
    * Whether the agent's own harness approval is waiting on a person in this
    * thread. Its turn is parked then, not executing, so the navigation row says
@@ -1080,6 +1088,12 @@ export interface ChatSubscribeOptions {
    * projection, because a strict event reader refuses a kind it does not know.
    */
   readonly appended?: boolean;
+  /**
+   * Receive each tool event as an `attempt-tool-step` frame, which carries
+   * only the step it changed. A subscriber that does not ask receives the
+   * whole attempt instead, for the same reason.
+   */
+  readonly toolSteps?: boolean;
 }
 
 export class ChatService {
@@ -1103,6 +1117,7 @@ export class ChatService {
   readonly #turnRunner: ChatTurnRunner;
   readonly #liveTurns?: LiveTurnRegistry;
   readonly #toolCallRecorders?: ThreadToolCallRecorders;
+  readonly #toolStepsPerTurn: () => number;
   readonly #awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly #researchRouter: ResearchRouter;
   readonly #contextMaintenanceTimeoutMs?: number;
@@ -1168,6 +1183,7 @@ export class ChatService {
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
+    this.#toolStepsPerTurn = options.toolStepsPerTurn ?? (() => DEFAULT_THREAD_TOOL_STEPS_PER_TURN);
     if (options.toolCallRecorders !== undefined) {
       this.#toolCallRecorders = options.toolCallRecorders;
     }
@@ -1970,6 +1986,7 @@ export class ChatService {
           envelope,
           options?.contents === true,
           options?.appended === true,
+          options?.toolSteps === true,
         );
         if (frame === undefined) continue;
         yield frame;
@@ -6489,6 +6506,30 @@ export class ChatService {
         pendingContent.delete(String(content.reference.contentId));
       }
     };
+    // One tool event, journaled as the step it changed. Deltas batched
+    // before it commit first, so the journal keeps the order they happened.
+    const persistToolStep = async (attempt: ChatAttempt, step: ThreadToolStep | undefined) => {
+      journalAppendedBatch();
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+        expectedVersion: readAggregateVersion(
+          this.#persistence.connection,
+          "chat-thread",
+          input.thread.id,
+        ),
+        events: [
+          this.#pending("chat.attempt-tool-step@1", {
+            kind: "attempt-tool-step",
+            threadId: attempt.threadId,
+            turnId: attempt.turnId,
+            attemptId: attempt.id,
+            ...(step === undefined ? {} : { toolStep: step }),
+            ...(attempt.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
+            updatedAt: attempt.updatedAt,
+          }),
+        ],
+      });
+    };
     const persistAppendedResponse = async (
       attempt: ChatAttempt,
       responseRef: ChatContentReference,
@@ -6536,6 +6577,9 @@ export class ChatService {
       };
       this.#nativeHarness?.turnStarted(harnessScope);
       let endedTurn: TurnEndSummary | undefined;
+      // Chat has no Full access, so the attempt keeps the person's number
+      // for the levels below it.
+      const toolStepLimit = this.#toolStepsPerTurn();
       try {
         await Effect.runPromise(
           Effect.scoped(
@@ -6571,6 +6615,7 @@ export class ChatService {
                       mode: "chat",
                       threadId: String(input.thread.id),
                       turnId: String(input.attempt.id),
+                      callLimit: toolStepLimit,
                     }),
                   }),
               onHarnessRetry: (notice) => {
@@ -6639,6 +6684,16 @@ export class ChatService {
                       message: "Chat attempt persistence failed.",
                     }),
                 }),
+              persistToolStep: (attempt, step) =>
+                Effect.tryPromise({
+                  try: () => persistToolStep(attempt, step),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat attempt persistence failed.",
+                    }),
+                }),
+              toolStepLimit,
               persistProviderFailure: (attempt, failure) =>
                 Effect.tryPromise({
                   try: () => persistAttempt(attempt, failure, true),
@@ -6954,6 +7009,7 @@ export class ChatService {
     },
     withContents: boolean,
     withAppended: boolean,
+    withToolSteps: boolean,
   ): ChatEventFrame | undefined {
     try {
       let event = decodeChatPublicEvent(envelope.payload);
@@ -7025,6 +7081,14 @@ export class ChatService {
           if (withContents) contents = this.#appendedContent(attempt);
         } else if (withContents) {
           contents = this.#contentBody(event.responseRef, event.threadId);
+        }
+      } else if (event.kind === "attempt-tool-step") {
+        if (!withToolSteps) {
+          // As for an appended delta: a subscriber that did not ask gets the
+          // whole attempt, in the state the step left it in or later.
+          const attempt = this.#persistence.readChatAttempt(String(event.attemptId));
+          if (attempt === undefined) return undefined;
+          event = decodeChatAttemptUpdated({ kind: "attempt-updated", attempt });
         }
       } else if (withContents && event.kind === "attempt-updated") {
         contents = this.#appendedContent(event.attempt);

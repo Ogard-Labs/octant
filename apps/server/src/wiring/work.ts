@@ -433,6 +433,8 @@ export function wireWork(deps: WorkDependencies) {
           (persistence.readShellSettings()?.settings ?? defaultShellSettings()).keepToolCallRecords,
         clock: () => new Date().toISOString(),
       }),
+      // The host setting, read when each turn starts.
+      toolStepSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
       confirmAgentMessagesDelivered: (messageIds) =>
         agentMessageService.confirmDelivered(messageIds),

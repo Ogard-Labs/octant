@@ -75,6 +75,8 @@ import {
   type AgentRun,
   type AgentRunId,
   type WorkTurnStreamFrame,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  type ThreadToolStep,
   type HarnessRetryNotice,
   type Project,
   type ProjectId,
@@ -110,7 +112,9 @@ import {
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   workProjectKeepsStatusFile,
+  changedThreadToolStep,
   clampWorkAccess,
+  threadToolStepLimit,
   workThreadAccessOf,
   workTurnCapabilityFacts,
   projectExtraFolderRoots,
@@ -532,6 +536,15 @@ export interface WorkTurnServiceDependencies {
   /** Keeps each turn's tool-call input and output in purgeable storage; absent keeps none. */
   readonly toolCallRecorders?: ThreadToolCallRecorders;
   /**
+   * The person's tool-step limits, read when a turn starts: how many calls a
+   * turn keeps below Full access, and at Full access (`0` is off). Absent
+   * reads as the defaults.
+   */
+  readonly toolStepSettings?: () => {
+    readonly toolStepsPerTurn: number;
+    readonly fullAccessToolStepsPerTurn: number;
+  };
+  /**
    * Read access to journaled subagent runs. A turn that claims to carry a
    * finished run's result is verified here — parent thread, terminal
    * status, and a delivery not already settled — so a caller cannot mark a
@@ -619,6 +632,7 @@ export class WorkTurnService {
   readonly #usageStore: WorkTurnUsageStore | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #toolCallRecorders: ThreadToolCallRecorders | undefined;
+  readonly #toolStepSettings: NonNullable<WorkTurnServiceDependencies["toolStepSettings"]>;
   readonly #agentRuns: WorkTurnServiceDependencies["agentRuns"];
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
@@ -684,6 +698,12 @@ export class WorkTurnService {
     this.#usageStore = dependencies.usageStore;
     this.#liveTurns = dependencies.liveTurns;
     this.#toolCallRecorders = dependencies.toolCallRecorders;
+    this.#toolStepSettings =
+      dependencies.toolStepSettings ??
+      (() => ({
+        toolStepsPerTurn: DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+        fullAccessToolStepsPerTurn: 0,
+      }));
     this.#agentRuns = dependencies.agentRuns;
   }
 
@@ -2320,6 +2340,13 @@ export class WorkTurnService {
     let usageFacts: WorkUsageFacts = {};
     let promptSent = false;
     let runOutcome: WorkTurnRuntimeOutcome | undefined;
+    // The level this turn runs at, which a caller's ceiling may hold below
+    // the thread's own: a routine's turn on a Full access thread keeps the
+    // limit of the level it runs at.
+    const toolStepLimit = threadToolStepLimit({
+      fullAccess: input.access === "full-access",
+      settings: this.#toolStepSettings(),
+    });
     try {
       if (input.access !== undefined) {
         this.#runningAccess.set(String(input.command.threadId), {
@@ -2549,16 +2576,22 @@ export class WorkTurnService {
                 mode: "work",
                 threadId: String(input.command.threadId),
                 turnId: String(input.command.requestId),
+                callLimit: toolStepLimit,
               }),
             }),
+        toolStepLimit: toolStepLimit ?? "off",
         onToolSteps: (toolSteps) => {
           if (input.signal.aborted) return;
+          const before = this.#liveToolSteps.get(String(input.command.requestId));
           this.#liveToolSteps.set(String(input.command.requestId), toolSteps);
-          this.#liveUpdates.appendToolSteps(
-            input.command.threadId,
-            input.command.requestId,
-            withoutPublishedSnapshots(toolSteps),
-          );
+          // Streamed as the one step that changed. The whole list is read
+          // from the transcript, which a view that falls behind is sent to.
+          const step = changedThreadToolStep(before, toolSteps);
+          if (step === undefined && toolSteps.truncated === (before?.truncated === true)) return;
+          this.#liveUpdates.appendToolStep(input.command.threadId, input.command.requestId, {
+            ...(step === undefined ? {} : { step: withoutPublishedSnapshot(step) }),
+            truncated: toolSteps.truncated,
+          });
         },
       });
       runOutcome = outcome;
@@ -3478,16 +3511,15 @@ function extraFolderContributions(
   ];
 }
 
+function withoutPublishedSnapshot(step: ThreadToolStep): ThreadToolStep {
+  if (step.published?.snapshot === undefined) return step;
+  const { snapshot: _settled, ...page } = step.published;
+  return { ...step, published: page };
+}
+
 function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps {
   if (!toolSteps.steps.some((step) => step.published?.snapshot !== undefined)) return toolSteps;
-  return {
-    ...toolSteps,
-    steps: toolSteps.steps.map((step) => {
-      if (step.published?.snapshot === undefined) return step;
-      const { snapshot: _settled, ...page } = step.published;
-      return { ...step, published: page };
-    }),
-  };
+  return { ...toolSteps, steps: toolSteps.steps.map(withoutPublishedSnapshot) };
 }
 
 /**

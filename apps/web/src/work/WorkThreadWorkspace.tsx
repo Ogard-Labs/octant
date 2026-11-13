@@ -630,6 +630,26 @@ function applyWorkTurnStreamFrame(
     };
     return next;
   }
+  if (frame.kind === "turn-tool-step") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    // One step a frame, put in the turn's list by its tool call id.
+    const toolSteps = (current.toolSteps ?? []).slice();
+    const changed = frame.toolStep;
+    if (changed !== undefined) {
+      const stepIndex = toolSteps.findIndex((step) => step.toolCallId === changed.toolCallId);
+      if (stepIndex === -1) toolSteps.push(changed);
+      else toolSteps[stepIndex] = changed;
+    }
+    const next = turns.slice();
+    next[index] = {
+      ...current,
+      ...(toolSteps.length === 0 ? {} : { toolSteps }),
+      ...(frame.toolStepsTruncated ? { toolStepsTruncated: true } : {}),
+    };
+    return next;
+  }
   if (frame.kind === "provider-retry" || frame.kind === "provider-retry-cleared") return turns;
   if (index === -1) return turns;
   const current = turns[index];

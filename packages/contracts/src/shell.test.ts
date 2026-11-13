@@ -110,6 +110,8 @@ const settings = {
   agentBrowserDownloads: false,
   browserCapturesPerThread: 200,
   keepToolCallRecords: true,
+  toolStepsPerTurn: 64,
+  fullAccessToolStepsPerTurn: 0,
   persistentBrowserOwner: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
@@ -212,6 +214,32 @@ describe("shell bootstrap contracts", () => {
     expect(
       decodeShellSettings({ ...settings, keepToolCallRecords: false }).keepToolCallRecords,
     ).toBe(false);
+  });
+
+  it("keeps 64 tool steps a turn below Full access and no limit at Full access for a store saved before the settings", () => {
+    const {
+      toolStepsPerTurn: _steps,
+      fullAccessToolStepsPerTurn: _fullAccessSteps,
+      ...saved
+    } = settings;
+    expect(decodeShellSettings(saved).toolStepsPerTurn).toBe(64);
+    // Zero is how the setting says off: no step limit at Full access.
+    expect(decodeShellSettings(saved).fullAccessToolStepsPerTurn).toBe(0);
+    const chosen = decodeShellSettings({
+      ...settings,
+      toolStepsPerTurn: 512,
+      fullAccessToolStepsPerTurn: 4_096,
+    });
+    expect(chosen.toolStepsPerTurn).toBe(512);
+    expect(chosen.fullAccessToolStepsPerTurn).toBe(4_096);
+    for (const value of [0, 4_097, 1.5]) {
+      expect(() => decodeShellSettings({ ...settings, toolStepsPerTurn: value })).toThrow();
+    }
+    for (const value of [-1, 4_097, 1.5]) {
+      expect(() =>
+        decodeShellSettings({ ...settings, fullAccessToolStepsPerTurn: value }),
+      ).toThrow();
+    }
   });
 
   it("defaults transcript text to the compact reading size", () => {

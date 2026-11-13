@@ -1,7 +1,6 @@
 import {
   decodeContextSubjectRef,
   decodeThreadToolCallRecord,
-  MAX_THREAD_TOOL_STEPS_PER_TURN,
   MAX_TOOL_CALL_RECORD_INPUT_BYTES,
   MAX_TOOL_CALL_RECORD_OUTPUT_BYTES,
   MAX_TOOL_CALL_RECORD_THREAD_BYTES,
@@ -19,9 +18,10 @@ import { THREAD_AGGREGATE_TYPE_BY_MODE } from "./threadIdentity";
  *
  * It is a store rather than a projection, and never the journal: the text is
  * thread content a purge has to destroy, no event carries it, and a rebuild
- * must not clear what no replay can restore. Chat journals a turn's whole
- * step list on every tool event, so anything kept on the step itself would be
- * written once per later event; here each call is written once. The table
+ * must not clear what no replay can restore. A Chat attempt is journaled
+ * whole whenever anything but a tool step or a streamed delta changes, so
+ * anything kept on the step itself would be written again by each of those
+ * events; here each call is written once. The table
  * carries `thread_id`, so the thread purge's sweep of thread-keyed rows takes
  * it without a rule of its own.
  */
@@ -30,6 +30,12 @@ export interface ThreadToolCallPartInput {
   readonly threadId: string;
   /** A Chat attempt id or a Work turn's request id. */
   readonly turnId: string;
+  /**
+   * The turn's tool-step limit: a call past it has no row to open, so it
+   * keeps no record. `undefined` is no limit, as a turn at Full access has
+   * until a person sets one; the thread's byte bound still holds.
+   */
+  readonly callsPerTurn: number | undefined;
   readonly toolCallId: string;
   readonly toolName?: string;
   readonly part: "input" | "output";
@@ -127,7 +133,7 @@ export function writeThreadToolCallPart(
       .get(input.mode, input.threadId, turnId, toolCallId) as
       | Pick<Row, "input_text" | "output_text" | "output_withheld">
       | undefined;
-    if (existing === undefined) {
+    if (existing === undefined && input.callsPerTurn !== undefined) {
       const held = connection
         .prepare(
           `SELECT count(*) AS calls FROM thread_tool_call_record_store
@@ -136,7 +142,7 @@ export function writeThreadToolCallPart(
         .get(input.mode, input.threadId, turnId) as { readonly calls: number };
       // A call past the turn's step limit has no row to open, so its record
       // would be unreachable.
-      if (held.calls >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+      if (held.calls >= input.callsPerTurn) {
         return { status: "refused", reason: "turn-full" };
       }
     }

@@ -49,6 +49,7 @@ import {
   ContextUsageReconciled,
   ChatAttachmentUpdated,
   ChatAttemptResponseAppended,
+  ChatAttemptToolStepChanged,
   ChatAttemptUpdated,
   ChatCitationRecorded,
   ChatDeleted,
@@ -572,6 +573,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("chat.turn-created@1", 1, ChatTurnCreated)
     .register("chat.attempt-updated@1", 1, ChatAttemptUpdated)
     .register("chat.attempt-response-appended@1", 1, ChatAttemptResponseAppended)
+    .register("chat.attempt-tool-step@1", 1, ChatAttemptToolStepChanged)
     .register("chat.turn-route-decided@1", 1, ChatTurnRouteDecided)
     .register("chat.attachment-updated@1", 1, ChatAttachmentUpdated)
     .register("chat.citation-recorded@1", 1, ChatCitationRecorded)

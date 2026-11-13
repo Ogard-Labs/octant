@@ -399,6 +399,9 @@ export function wireChat(deps: ChatDependencies) {
           (persistence.readShellSettings()?.settings ?? defaultShellSettings()).keepToolCallRecords,
         clock: () => new Date().toISOString(),
       }),
+      // The host setting, read when each attempt starts.
+      toolStepsPerTurn: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).toolStepsPerTurn,
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "chat",

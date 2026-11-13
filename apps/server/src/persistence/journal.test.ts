@@ -243,6 +243,8 @@ describe("Journal", () => {
         agentBrowserDownloads: false,
         browserCapturesPerThread: 200,
         keepToolCallRecords: true,
+        toolStepsPerTurn: 64,
+        fullAccessToolStepsPerTurn: 0,
         persistentBrowserOwner: false,
       },
     } as const;

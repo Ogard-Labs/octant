@@ -199,8 +199,10 @@ import {
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import {
   DEFAULT_BROWSER_CAPTURES_PER_THREAD,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   LOCAL_HOST_ID,
   MAX_BROWSER_CAPTURES_PER_THREAD,
+  MAX_THREAD_TOOL_STEPS_SETTING,
 } from "@octant/contracts";
 import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
 import type { PickerGroup } from "@octant/domain";
@@ -1604,6 +1606,42 @@ function ActiveSectionContent({
                   onCheckedChange={(checked) =>
                     props.onSettingsChange({ keepToolCallRecords: checked })
                   }
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
+          <SettingsSection title="Tool steps">
+            <div className="setgroup">
+              <SettingRow
+                description={`How many tool calls a Chat or Work turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row.`}
+                focused={focusedSetting === settingId("tool-steps-per-turn")}
+                label="Tool steps kept per turn"
+                scope="host"
+                settingId="tool-steps-per-turn"
+              >
+                <OctantNumberStepper
+                  label="Tool steps kept per turn"
+                  max={MAX_THREAD_TOOL_STEPS_SETTING}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ toolStepsPerTurn: value })}
+                  value={props.settings.toolStepsPerTurn}
+                />
+              </SettingRow>
+              <SettingRow
+                description="The same limit for a Work turn that runs at Full access. 0 means no limit: every call is kept, and the spend ceiling is what bounds the turn."
+                focused={focusedSetting === settingId("tool-steps-per-turn-full-access")}
+                label="Tool steps kept per turn at Full access"
+                scope="host"
+                settingId="tool-steps-per-turn-full-access"
+              >
+                <OctantNumberStepper
+                  label="Tool steps kept per turn at Full access"
+                  max={MAX_THREAD_TOOL_STEPS_SETTING}
+                  min={0}
+                  onChange={(value) =>
+                    props.onSettingsChange({ fullAccessToolStepsPerTurn: value })
+                  }
+                  value={props.settings.fullAccessToolStepsPerTurn}
                 />
               </SettingRow>
             </div>

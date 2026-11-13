@@ -311,6 +311,10 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
         // `attempt-response-appended` frame; without it the delta still
         // arrives as a full `attempt-updated` for strict event readers.
         const appendedParam = url.searchParams.get("appended");
+        // `toolSteps=1` takes each tool event as an `attempt-tool-step` frame
+        // carrying the one step it changed; without it the event arrives as
+        // a full `attempt-updated`.
+        const toolStepsParam = url.searchParams.get("toolSteps");
         // Opt-in flags are validated individually, but an unknown one is
         // ignored rather than refused: a newer client talking to an older
         // host asks for frames this host does not know yet, and the compat
@@ -320,7 +324,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
         if (
           afterSequenceParam === null ||
           url.searchParams.getAll("afterSequence").length > 1 ||
-          ["contents", "compaction", "appended"].some((name) => {
+          ["contents", "compaction", "appended", "toolSteps"].some((name) => {
             const values = url.searchParams.getAll(name);
             return values.length > 1 || (values.length === 1 && values[0] !== "1");
           })
@@ -348,6 +352,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
                 contents: contentsParam === "1",
                 compaction: compactionParam === "1",
                 appended: appendedParam === "1",
+                toolSteps: toolStepsParam === "1",
               }),
             afterSequence,
             ...(dependencies.waitForThreadChange === undefined

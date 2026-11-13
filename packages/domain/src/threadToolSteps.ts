@@ -1,6 +1,5 @@
 import {
   MAX_THREAD_TOOL_STEP_SUMMARY_BYTES,
-  MAX_THREAD_TOOL_STEPS_PER_TURN,
   type ProviderRuntimeEvent,
   type ShieldDecision,
   type ThreadRoutineReceipt,
@@ -14,6 +13,51 @@ import { redactDiagnosticText } from "./diagnosticsPolicy";
 export interface ThreadToolSteps {
   readonly steps: ThreadToolStepList;
   readonly truncated: boolean;
+}
+
+/**
+ * How many tool calls a turn keeps: the person's number for the level the
+ * turn runs at. At Full access it is off (`undefined`) until they set one,
+ * since the spend ceiling bounds the turn there; `0` is how the setting says
+ * off. The caller passes the level the turn runs at, never only the thread's
+ * stored level. Chat has no Full access.
+ */
+export function threadToolStepLimit(input: {
+  readonly fullAccess: boolean;
+  readonly settings: {
+    readonly toolStepsPerTurn: number;
+    readonly fullAccessToolStepsPerTurn: number;
+  };
+}): number | undefined {
+  if (!input.fullAccess) return input.settings.toolStepsPerTurn;
+  return input.settings.fullAccessToolStepsPerTurn === 0
+    ? undefined
+    : input.settings.fullAccessToolStepsPerTurn;
+}
+
+/** Whether a call with no step yet has no room under the turn's limit. */
+function full(steps: ThreadToolStepList, limit: number | undefined): boolean {
+  return limit !== undefined && steps.length >= limit;
+}
+
+/**
+ * The one step that differs between two readings of a turn's steps, so a
+ * change is journaled and streamed as that step and never as the whole list:
+ * restating the list at every tool event cost bytes that grew with the square
+ * of the limit. Every fold here changes at most one step and keeps the others
+ * by reference, and the newest calls change most, so this reads from the end.
+ * `undefined` when no step changed (the list only became truncated).
+ */
+export function changedThreadToolStep(
+  before: ThreadToolSteps | undefined,
+  after: ThreadToolSteps | undefined,
+): ThreadToolStep | undefined {
+  if (after === undefined || after === before) return undefined;
+  for (let index = after.steps.length - 1; index >= 0; index -= 1) {
+    const step = after.steps[index];
+    if (step !== undefined && step !== before?.steps[index]) return step;
+  }
+  return undefined;
 }
 
 const TRUNCATED_SUFFIX = " [truncated]";
@@ -56,6 +100,7 @@ function boundedIdentifier(text: string): string {
 export function recordThreadToolStep(
   current: ThreadToolSteps | undefined,
   event: ProviderRuntimeEvent,
+  limit: number | undefined,
 ): ThreadToolSteps | undefined {
   if (
     event.kind !== "tool-start" &&
@@ -69,7 +114,7 @@ export function recordThreadToolStep(
   const toolCallId = boundedIdentifier(event.toolCallId);
   const index = steps.findIndex((step) => step.toolCallId === toolCallId);
   const previous = index === -1 ? undefined : steps[index];
-  if (previous === undefined && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+  if (previous === undefined && full(steps, limit)) {
     return current?.truncated === true ? current : { steps, truncated: true };
   }
   const ended = previous?.state === "completed" || previous?.state === "failed";
@@ -133,12 +178,13 @@ export function markThreadToolStepOutsideContent(
     readonly toolName: string;
     readonly mark: ToolOutsideContentMark;
   },
+  limit: number | undefined,
 ): ThreadToolSteps | undefined {
   const steps = current?.steps ?? [];
   const toolCallId = boundedIdentifier(call.toolCallId);
   const index = steps.findIndex((step) => step.toolCallId === toolCallId);
   const previous = index === -1 ? undefined : steps[index];
-  if (previous === undefined && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+  if (previous === undefined && full(steps, limit)) {
     return current?.truncated === true ? current : { steps, truncated: true };
   }
   const labels = [...new Set([...(previous?.outsideContent?.labels ?? []), ...call.mark.labels])];
@@ -179,12 +225,13 @@ export function markThreadToolStepRoutine(
     readonly toolName: string;
     readonly routine: ThreadRoutineReceipt;
   },
+  limit: number | undefined,
 ): ThreadToolSteps | undefined {
   const steps = current?.steps ?? [];
   const toolCallId = boundedIdentifier(call.toolCallId);
   const index = steps.findIndex((step) => step.toolCallId === toolCallId);
   const previous = index === -1 ? undefined : steps[index];
-  if (previous === undefined && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+  if (previous === undefined && full(steps, limit)) {
     return current?.truncated === true ? current : { steps, truncated: true };
   }
   if (previous?.routine?.routineId === call.routine.routineId) return current;
@@ -197,6 +244,41 @@ export function markThreadToolStepRoutine(
           routine: call.routine,
         }
       : { ...previous, routine: call.routine };
+  const nextSteps = steps.slice();
+  if (index === -1) nextSteps.push(next);
+  else nextSteps[index] = next;
+  return { steps: nextSteps, truncated: current?.truncated === true };
+}
+
+/**
+ * The row of a tool Octant ran for a turn whose runtime announces no call of
+ * its own (an Octant Harness turn): started when the host takes the request,
+ * completed or failed when it answers. The step is keyed by the request id
+ * the call's record is kept under, so the row opens that record like any
+ * other. A tag or a routine the row already carries stays. Returns the same
+ * value when nothing changes.
+ */
+export function recordThreadAppToolStep(
+  current: ThreadToolSteps | undefined,
+  call: {
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly state: "started" | "completed" | "failed";
+  },
+  limit: number | undefined,
+): ThreadToolSteps | undefined {
+  const steps = current?.steps ?? [];
+  const toolCallId = boundedIdentifier(call.toolCallId);
+  const index = steps.findIndex((step) => step.toolCallId === toolCallId);
+  const previous = index === -1 ? undefined : steps[index];
+  if (previous === undefined && full(steps, limit)) {
+    return current?.truncated === true ? current : { steps, truncated: true };
+  }
+  if (previous?.state === call.state) return current;
+  const next: ThreadToolStep =
+    previous === undefined
+      ? { toolCallId, toolName: boundedIdentifier(call.toolName), state: call.state }
+      : { ...previous, state: call.state };
   const nextSteps = steps.slice();
   if (index === -1) nextSteps.push(next);
   else nextSteps[index] = next;
@@ -218,6 +300,7 @@ export function recordThreadShieldReview(
     readonly summary: string;
     readonly decision: ShieldDecision;
   },
+  limit: number | undefined,
 ): ThreadToolSteps {
   const steps = current?.steps ?? [];
   const toolCallId = boundedIdentifier(`shield:${review.requestId}`);
@@ -230,7 +313,7 @@ export function recordThreadShieldReview(
     shield: review.decision,
   };
   const index = steps.findIndex((step) => step.toolCallId === toolCallId);
-  if (index === -1 && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+  if (index === -1 && full(steps, limit)) {
     return current?.truncated === true ? current : { steps, truncated: true };
   }
   const nextSteps = steps.slice();

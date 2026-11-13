@@ -130,6 +130,8 @@ describe("octantSettingsRegistry", () => {
       "browser-agent-downloads",
       "browser-captures-per-thread",
       "tool-call-records",
+      "tool-steps-per-turn",
+      "tool-steps-per-turn-full-access",
       "tool-approvals",
       "network-limits",
       "safe-networks",
