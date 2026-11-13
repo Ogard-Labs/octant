@@ -7,7 +7,7 @@ import { relative, resolve, sep } from "node:path";
  * component boundary check covers .tsx; this one covers every .css file the
  * renderer ships.
  *
- * Colour literals and undefined tokens fail closed. The six other rules ratchet against
+ * Colour literals and undefined tokens fail closed. The other rules ratchet against
  * `scripts/ui-stylesheet-baseline.json`: a file may not add a finding, and a
  * fix must lower the recorded count so the baseline never overstates.
  */
@@ -28,6 +28,8 @@ export type StylesheetRule =
   | "heavy-weight"
   | "control-repaint"
   | "spacing-scale"
+  | "radius-token"
+  | "control-height-scale"
   | "undefined-token";
 
 export interface StylesheetFinding {
@@ -66,6 +68,41 @@ const MOTION_TOKEN = /var\(--oct-motion-[a-z-]+\)/;
 const SPACING_PROPERTY =
   /^(?:gap|row-gap|column-gap|padding(?:-(?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))?|margin(?:-(?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))?)$/;
 const SPACING_LITERAL = /(?<![\w.-])(\d*\.?\d+)px\b/g;
+
+// A corner is a radius token, `0`, `50%`, or the 1-4px of a chart bar, mark or
+// status dot (DESIGN.md, "Spacing, shapes, and depth"). A value that reads a
+// radius token is derived from it (`max(2px, calc(var(--oct-radius-sm) - 2px))`
+// is a part inside a control), so only a value with no token is read literally.
+const RADIUS_PROPERTY =
+  /^border(?:-(?:top|bottom)-(?:left|right)|-(?:start|end)-(?:start|end))?-radius$/;
+const RADIUS_TOKEN = /var\(\s*--(?:oct-)?radius(?:-[a-z0-9]+)*\s*[,)]/;
+const RADIUS_KEYWORD = /^(?:0|0px|50%|inherit|initial|unset|revert|revert-layer)$/;
+const RADIUS_MARK_PX = /^[1-4]px$/;
+
+function radiusOnScale(value: string): boolean {
+  const bare = value.replace(IMPORTANT_ANNOTATION, "").trim().toLowerCase();
+  if (RADIUS_TOKEN.test(bare)) return true;
+  const parts = bare.split(/[\s/]+/).filter(Boolean);
+  return parts.length > 0 && parts.every((p) => RADIUS_KEYWORD.test(p) || RADIUS_MARK_PX.test(p));
+}
+
+// Recipe controls take their height in rem so they grow with the interface
+// size, rounded to a whole 2px. At the 13px root DESIGN.md allows 20, 24, 28
+// and 32px; a recipe asking for another height is off the control scale.
+const CONTROL_HEIGHT_PX = [20, 24, 28, 32];
+const ROOT_PX = 13;
+const RECIPE_SOURCE = /(?:^|\/)ui\/(?:base|shadcn)\/[^/]+\.tsx$/;
+const FIXED_SIZE_UTILITY = /(?<![\w-])(?:h|size)-\[([^\]\s]+)\]/g;
+const ARBITRARY_RADIUS_UTILITY = /(?<![\w-])rounded(?:-[a-z]{1,2})?-\[([^\]\s]+)\]/g;
+const INLINE_RADIUS = /\bborderRadius:\s*(?:(\d+)\b|(["'`])([^"'`$]*)\2)/g;
+
+function controlHeightOnScale(value: string): boolean {
+  const inner = /^round\((?:(?:up|down|nearest|to-zero),)?([^,]+),[^)]*\)$/.exec(value);
+  const measure = /^(\d*\.?\d+)(rem|px)$/.exec(inner ? (inner[1] ?? "") : value);
+  if (measure === null) return true;
+  const px = Number(measure[1]) * (measure[2] === "rem" ? ROOT_PX : 1);
+  return CONTROL_HEIGHT_PX.some((step) => Math.abs(px - step) < 0.2);
+}
 
 const ACCESSIBILITY_MEDIA =
   /prefers-reduced-motion|prefers-reduced-transparency|prefers-contrast|forced-colors/;
@@ -406,6 +443,9 @@ export function findStylesheetFindings(
       if (name === "font-size" && !fontSizeOnScale(value)) {
         push("font-size-scale", `font-size ${value} is not a type-scale token`);
       }
+      if (!isToken && RADIUS_PROPERTY.test(name) && !radiusOnScale(value)) {
+        push("radius-token", `${property} ${value} is not a radius token`);
+      }
       if (!isToken && !exempt && SPACING_PROPERTY.test(name) && !spacingOnScale(value)) {
         push("spacing-scale", `${property} ${value} is off the 4px spacing scale`);
       }
@@ -428,6 +468,46 @@ export function findStylesheetFindings(
             `${property} repaints ${repainted.primitive} through .${repainted.className}`,
           );
         }
+      }
+    }
+  }
+  return findings;
+}
+
+/**
+ * The shape rules that live in component source rather than a stylesheet: a
+ * recipe's fixed control height, and a corner written as a literal in a class
+ * or an inline style. Tailwind's named corners (`rounded-md`) resolve to the
+ * radius tokens in tailwind.css, so only an arbitrary value can go off them.
+ */
+export function findComponentScaleFindings(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<StylesheetFinding> {
+  const findings: StylesheetFinding[] = [];
+  for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    const normalized = file.split(sep).join("/");
+    const push = (rule: StylesheetRule, index: number, detail: string): void => {
+      findings.push({ rule, file: normalized, line: lineAt(source, index), detail });
+    };
+    if (RECIPE_SOURCE.test(normalized)) {
+      for (const match of source.matchAll(FIXED_SIZE_UTILITY)) {
+        const value = match[1] ?? "";
+        if (!controlHeightOnScale(value)) {
+          push("control-height-scale", match.index, `${match[0]} is off the 20/24/28/32 scale`);
+        }
+      }
+    }
+    for (const match of source.matchAll(ARBITRARY_RADIUS_UTILITY)) {
+      if (!radiusOnScale((match[1] ?? "").replace(/_/g, " "))) {
+        push("radius-token", match.index, `${match[0]} is not a radius token`);
+      }
+    }
+    for (const match of source.matchAll(INLINE_RADIUS)) {
+      const value = match[1] === undefined ? (match[3] ?? "") : `${match[1]}px`;
+      if (!radiusOnScale(value)) {
+        push("radius-token", match.index, `borderRadius ${value} is not a radius token`);
       }
     }
   }
@@ -488,6 +568,8 @@ export function countFindings(
     "heavy-weight": {},
     "control-repaint": {},
     "spacing-scale": {},
+    "radius-token": {},
+    "control-height-scale": {},
     "undefined-token": {},
   };
   for (const finding of findings) {
@@ -513,6 +595,8 @@ const RATCHETED_RULES: ReadonlyArray<StylesheetRule> = [
   "heavy-weight",
   "control-repaint",
   "spacing-scale",
+  "radius-token",
+  "control-height-scale",
 ];
 
 export function compareWithBaseline(
@@ -599,6 +683,7 @@ async function main(): Promise<void> {
   const { stylesheets, components } = await rendererFiles(root);
   const findings = [
     ...findStylesheetFindings(stylesheets, collectPrimitiveClasses(components)),
+    ...findComponentScaleFindings(components),
     ...findUndefinedTokenFindings(stylesheets, collectScriptedTokens(await scriptSources(root))),
   ];
   const baselineFile = resolve(root, BASELINE_PATH);
@@ -612,7 +697,9 @@ async function main(): Promise<void> {
   const baseline = JSON.parse(await readFile(baselineFile, "utf8")) as StylesheetBaseline;
   const problems = compareWithBaseline(findings, baseline);
   if (problems.length === 0) {
-    console.log("Stylesheets match the type, motion, spacing, and colour contract.");
+    console.log(
+      "Stylesheets match the type, motion, spacing, radius, control-height, and colour contract.",
+    );
     return;
   }
 

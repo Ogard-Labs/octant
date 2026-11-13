@@ -3,6 +3,7 @@ import {
   collectPrimitiveClasses,
   collectScriptedTokens,
   compareWithBaseline,
+  findComponentScaleFindings,
   findStylesheetFindings,
   findUndefinedTokenFindings,
   serializeBaseline,
@@ -496,5 +497,83 @@ describe("UI stylesheet check", () => {
       "font-size-scale": { [CSS]: 1 },
       important: { [CSS]: 1 },
     });
+  });
+
+  it("flags a corner that is not a radius token, and keeps the allowed shapes", () => {
+    const findings = findStylesheetFindings({
+      [CSS]: [
+        ".a { border-radius: 8px; }",
+        ".b { border-radius: 0.5rem; }",
+        ".c { border-top-left-radius: 9999px; }",
+        ".d { border-radius: 100%; }",
+        ".e { border-radius: 6px 6px 0 0; }",
+      ].join("\n"),
+    });
+    expect(findings.map((finding) => [finding.rule, finding.line])).toEqual([
+      ["radius-token", 1],
+      ["radius-token", 2],
+      ["radius-token", 3],
+      ["radius-token", 4],
+      ["radius-token", 5],
+    ]);
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          ".a { border-radius: var(--oct-radius-sm); }",
+          ".b { border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0; }",
+          ".c { border-radius: max(2px, calc(var(--oct-radius-sm) - 2px)); }",
+          ".d { border-radius: 50%; }",
+          ".e { border-radius: 0; }",
+          ".f { border-radius: 2px 2px 0 0; }",
+          ".g { border-radius: inherit; }",
+          ".h { border-end-end-radius: var(--oct-radius-pill); }",
+          ".i { --note-radius: 8px; }",
+        ].join("\n"),
+      }),
+    ).toEqual([]);
+  });
+
+  it("flags a literal corner in a class or an inline style but not a named one", () => {
+    const findings = findComponentScaleFindings({
+      "apps/web/src/feature/Card.tsx": [
+        'const a = "rounded-[10px] p-2";',
+        'const b = "rounded-t-[var(--oct-radius-md)] rounded-md rounded-full";',
+        "const c = { borderRadius: 10 };",
+        'const d = { borderRadius: "var(--oct-radius-sm)" };',
+        "const e = { borderRadius: `var(--oct-radius-${name})` };",
+      ].join("\n"),
+    });
+    expect(findings.map((finding) => [finding.rule, finding.line])).toEqual([
+      ["radius-token", 1],
+      ["radius-token", 3],
+    ]);
+  });
+
+  it("flags a recipe height off the 20, 24, 28, 32 scale and only in the shared recipes", () => {
+    const recipe = [
+      'const ok = "h-[round(2.154rem,2px)] size-[round(down,1.538rem,2px)] h-[28px] h-(--oct-space-5)";',
+      'const off = "h-[round(1.25rem,2px)] size-[1.15rem] h-[30px] min-h-[4rem]";',
+    ].join("\n");
+    const findings = findComponentScaleFindings({
+      "apps/web/src/ui/base/OctantThing.tsx": recipe,
+      "apps/web/src/feature/Panel.tsx": recipe,
+    });
+    expect(findings.map((finding) => [finding.rule, finding.file, finding.line])).toEqual([
+      ["control-height-scale", "apps/web/src/ui/base/OctantThing.tsx", 2],
+      ["control-height-scale", "apps/web/src/ui/base/OctantThing.tsx", 2],
+      ["control-height-scale", "apps/web/src/ui/base/OctantThing.tsx", 2],
+    ]);
+  });
+
+  it("ratchets radius and control-height findings and records them in the baseline", () => {
+    const findings = [
+      ...findStylesheetFindings({ [CSS]: ".a { border-radius: 8px; }" }),
+      ...findComponentScaleFindings({ "apps/web/src/ui/base/OctantThing.tsx": 'x = "h-[30px]";' }),
+    ];
+    expect(JSON.parse(serializeBaseline(findings))).toEqual({
+      "radius-token": { [CSS]: 1 },
+      "control-height-scale": { "apps/web/src/ui/base/OctantThing.tsx": 1 },
+    });
+    expect(compareWithBaseline(findings, {})).toHaveLength(2);
   });
 });
