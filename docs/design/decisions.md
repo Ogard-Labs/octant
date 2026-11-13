@@ -2278,7 +2278,7 @@ There is one runtime theme authority and one owned control layer. Feature code p
 - Removing an existing repaint is a separate batch per pull request with before and after screenshots, and the maintainer approves the visual change (burn-down still in progress).
 - A development-only component gallery draws every shared adapter under the shipped stylesheets, and a new adapter must appear in it (a test enforces this).
 
-Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Component gallery](../../DESIGN.md#component-gallery) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
+Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Enforcement](../../DESIGN.md#enforcement), [Spacing](../../DESIGN.md#spacing), [Menus](../../DESIGN.md#menus), [Components](../../DESIGN.md#components), [Component gallery](../../DESIGN.md#component-gallery) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
 
 ### Portable design tokens
 
@@ -2301,7 +2301,7 @@ Every list, board, reader and preference page is one `Surface`. Settings groups 
 - A destination page and Settings show their own outline while they load (a title bar and rows; a rail and a page), not a line of text, so nothing changes place when they arrive. The words stay for assistive technology, and the skeleton's sheen stops under reduced motion.
 - Background refresh preserves loaded controls and active drafts; status slots are bounded so a changed status never pushes the form below it.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell) and [Settings stability](settings.md#settings-stability).
+Status: Built. Since: —. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell), [Settings layout](../../DESIGN.md#settings-layout), [Empty, loading, and whole-window states](../../DESIGN.md#empty-loading-and-whole-window-states), [Settings: Settings sheet](settings.md#settings-sheet), [Groups and pages](settings.md#groups-and-pages) and [Settings stability](settings.md#settings-stability).
 
 ### User profile
 
@@ -2310,7 +2310,7 @@ The user profile (optional name, email, accent and avatar) authenticates and aut
 - An avatar image is inlined in settings, downscaled to 128 px and at most 96 KB encoded. _Here only._
 - The avatar lookup by email hash is the one part that leaves the Mac. It runs only on a button press, says it sends a hash, and copies the result so the host never contacts the service again by itself. _Here only._
 
-Status: Built. Since: —. Detail: [DESIGN.md: Optional Settings details](settings.md#optional-settings-details).
+Status: Built. Since: —. Detail: [Settings: Optional Settings details](settings.md#optional-settings-details).
 
 ### Approvals and confirmations
 
@@ -2367,7 +2367,7 @@ The Usage page reports what was measured and shows each provider with a bundled 
 - Provider logos are locally bundled and licensed, never fetched at runtime, and never drawn approximately. Unknown providers get a truthful fallback.
 - Interface icons use four sizes (12, 14, 16, 20) and one stroke (1.5), set once for the app; a contract test refuses any other.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](settings.md#usage) and [Icons](../../DESIGN.md#icons).
+Status: Built. Since: —. Detail: [Settings: Usage](settings.md#usage) and [DESIGN.md: Icons](../../DESIGN.md#icons).
 
 ### Reply detail
 
@@ -2384,7 +2384,7 @@ Reply detail chooses how much of a turn's thinking and tool calls the transcript
 - A disclosure opened or closed by hand keeps that state while its turn stays mounted and the thread's level is unchanged; a change of that level resets every disclosure to the new level.
 - The thinking preview is hidden from assistive technology so it is never read twice, and every disclosure keeps `open` and `aria-expanded` in step.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Transcript](thread-view.md#transcript).
+Status: Built. Since: —. Detail: [Thread view: Reply detail](thread-view.md#reply-detail) and [Transcript](thread-view.md#transcript).
 
 ## Workspace
 
@@ -2803,7 +2803,7 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - The person can draw on a kept capture and add it to the thread's message: "Draw on page" keeps a capture through the Screenshot route and draws on that picture only, then "Add to chat" hands a PNG to the thread's composer as an ordinary image attachment. It sends nothing, stores nothing beside the capture, and is offered only in a Work or Code thread's Browser.
 - Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Partly built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
+Status: Partly built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings), and [Draw on page toolbar](browser-captures.md#draw-on-page-toolbar).
 
 ### Browser for agents
 
@@ -2836,7 +2836,7 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - Download-source review preserves every attested origin. Code refuses a review that cannot fit its complete approval-summary byte limit; it never approves a truncated chain.
 - Threads of a Project drive their own pages at the same time without waiting on each other. An agent's action reaches only its own thread's context, checked on the server by thread as well as authority. The Project browser dock lists each thread's live page by title or host, owner thread, and an "Agent active" mark, as names only: a selected page shows its thread's own picture read-only, and a paired device sees a stored-profile page by its existence alone.
 
-Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Page lifetime](browser-agent-tool.md#page-lifetime), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Page audits](browser-agent-tool.md#page-audits), [Download](browser-agent-tool.md#download), [Parallel threads](browser-agent-tool.md#parallel-threads), and [Bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
+Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Page lifetime](browser-agent-tool.md#page-lifetime), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Page audits](browser-agent-tool.md#page-audits), [Download](browser-agent-tool.md#download), [Parallel threads](browser-agent-tool.md#parallel-threads), and [Bounded page scripts](browser-agent-tool.md#bounded-page-scripts), and [Workspace: Browser toolbar](workspace.md#browser-toolbar).
 
 ### Browser profiles and extensions
 
