@@ -220,6 +220,8 @@ import {
   NativeHarnessEndpointRegistry,
 } from "../harness/nativeHarnessEndpointRegistry";
 import {
+  appToolThreadLevel,
+  browserToolTransport,
   claudePlanUsageStateDirectory,
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
@@ -1186,10 +1188,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       carriesAppManagedTools: (thread) => {
         const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
         return (
-          observed?.capabilities.appManagedTools === "supported" ||
-          observed?.verifiedToolModelIds?.some(
-            (candidate) => String(candidate) === String(thread.modelId),
-          ) === true
+          browserToolTransport(observed, String(thread.modelId), appToolThreadLevel(thread)) ===
+          true
         );
       },
     });

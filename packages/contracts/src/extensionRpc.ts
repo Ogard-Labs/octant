@@ -27,6 +27,7 @@ import {
   ExtensionProvenance,
   ExtensionPublisherKeyFingerprint,
   SourceQualifiedSkill,
+  SourceQualifiedSkillId,
   StandaloneSkillRecord,
 } from "./extensions";
 import { ExtensionToolGrantId, extensionToolGrantRecordedFields } from "./extensionEvents";
@@ -577,7 +578,9 @@ export const ExtensionCommand = Schema.Union(
   /**
    * `trust` installs and trusts in one confirmed step, and `enable` with it
    * also turns the package and its components on; each step is journaled as
-   * its own event. Left out, the package installs untrusted and switched
+   * its own event. For a package that holds a provider driver this is the one
+   * flow that admits an outside driver: it switches on the plugin and its
+   * driver component. Left out, the package installs untrusted and switched
    * off, and trusting and turning on stay separate commands. Nothing is
    * turned on without trust, so `enable` alone is refused.
    */
@@ -696,6 +699,17 @@ export const SkillFolderSelection = Schema.Struct({ folderPath: SkillFolderPath 
 );
 export type SkillFolderSelection = typeof SkillFolderSelection.Type;
 
+/**
+ * Two same-named skills were both on where one thread would see both, and the
+ * host kept the Project's copy and turned the other off.
+ */
+export const ProjectSkillInUse = Schema.Struct({
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  used: SourceQualifiedSkillId,
+  gaveWay: SourceQualifiedSkillId,
+}).annotations(strict);
+export type ProjectSkillInUse = typeof ProjectSkillInUse.Type;
+
 export const ExtensionSnapshot = Schema.Struct({
   sequence: GlobalSequence,
   snapshotAt: UtcTimestamp,
@@ -703,6 +717,8 @@ export const ExtensionSnapshot = Schema.Struct({
   skills: Schema.optional(Schema.Array(StandaloneSkillRecord).pipe(Schema.maxItems(4096))),
   skillRoots: Schema.optional(Schema.Array(SkillRootStatus).pipe(Schema.maxItems(34))),
   collisions: Schema.Array(ExtensionSkillCollision).pipe(Schema.maxItems(4096)),
+  /** Absent when the host chose no Project copy over another skill. */
+  projectSkillsInUse: Schema.optional(Schema.Array(ProjectSkillInUse).pipe(Schema.maxItems(4096))),
 }).annotations(strict);
 export type ExtensionSnapshot = typeof ExtensionSnapshot.Type;
 
@@ -887,6 +903,11 @@ export const ExtensionCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("extension-state-updated"),
     snapshot: ExtensionSnapshot,
+    /**
+     * Set only when the one install-trust-enable flow stopped early: the step
+     * the host refused. The steps before it stand, as the snapshot shows.
+     */
+    stoppedAt: Schema.optional(Schema.Literal("trust", "enable")),
     /** Set only when the update was a user-added server: the package that add created. */
     addedPackage: Schema.optional(
       Schema.Struct({

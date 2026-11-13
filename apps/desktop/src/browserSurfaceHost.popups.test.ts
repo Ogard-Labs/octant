@@ -158,9 +158,16 @@ async function presentedSurface(options: { readonly agentAttached?: boolean } = 
     dismissedSelects,
     writeText,
     /** Start an agent action that holds the page until `finish` is called. */
-    agentNavigation: () => {
+    agentNavigation: (dialog?: {
+      readonly action: "accept" | "dismiss";
+      readonly text?: string;
+    }) => {
       const action = host
-        .act(contextId, { kind: "navigate", target: "https://example.com/next" })
+        .act(contextId, {
+          kind: "navigate",
+          target: "https://example.com/next",
+          ...(dialog === undefined ? {} : { dialog }),
+        })
         .catch(() => undefined);
       return {
         action,
@@ -430,6 +437,40 @@ describe("page popups in Stable's hidden Browser window", () => {
     });
     await agent.finish();
     expect(await surface.send({ kind: "popup" })).toEqual({ status: "idle" });
+    surface.host.closeContext(contextId);
+  });
+
+  it("answers the first dialog an agent action raises as the agent said, and the next by the fixed rule", async () => {
+    const surface = await presentedSurface();
+    const agent = surface.agentNavigation({ action: "accept", text: "Ada" });
+    await vi.waitFor(() => expect(surface.webContents.loadURL).toHaveBeenCalled());
+    surface.emit("Page.javascriptDialogOpening", { type: "prompt", message: "Your name?" });
+    surface.emit("Page.javascriptDialogOpening", { type: "prompt", message: "And again?" });
+    const answers = surface.commands.filter(
+      (command) => command.method === "Page.handleJavaScriptDialog",
+    );
+    expect(answers.map((command) => command.params)).toEqual([
+      { accept: true, promptText: "Ada" },
+      { accept: false },
+    ]);
+    await agent.finish();
+    surface.host.closeContext(contextId);
+  });
+
+  it("withholds an agent's text from a prompt that asks for a credential", async () => {
+    const surface = await presentedSurface();
+    const agent = surface.agentNavigation({ action: "accept", text: "hunter2" });
+    await vi.waitFor(() => expect(surface.webContents.loadURL).toHaveBeenCalled());
+    surface.emit("Page.javascriptDialogOpening", {
+      type: "prompt",
+      message: "Enter your password",
+    });
+    expect(
+      surface.commands
+        .filter((command) => command.method === "Page.handleJavaScriptDialog")
+        .map((command) => command.params),
+    ).toEqual([{ accept: false }]);
+    await agent.finish();
     surface.host.closeContext(contextId);
   });
 

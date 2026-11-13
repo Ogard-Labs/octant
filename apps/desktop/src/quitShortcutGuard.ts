@@ -4,6 +4,8 @@ export const QUIT_SHORTCUT_WINDOW_MS = 1500;
 export interface QuitShortcutGuardOptions {
   /** Monotonic milliseconds. */
   readonly now: () => number;
+  /** The person's setting, read on every press; off quits on the first one. */
+  readonly needsSecondPress: () => boolean;
   /** Shows the "press again" notice; false when no window could show it. */
   readonly showNotice: () => boolean;
   /** Starts the guarded shutdown. */
@@ -15,7 +17,8 @@ export interface QuitShortcutGuardOptions {
  * cannot tell a held key from a tap, so a short double-press window stands in
  * for hold-to-quit. Choosing Quit with the pointer is deliberate and quits at
  * once. With no window to carry the notice, the first press quits directly: a
- * hint nobody can see would only make the app seem to ignore the key.
+ * hint nobody can see would only make the app seem to ignore the key. A person
+ * who turned the second press off gets the same guarded shutdown on the first.
  */
 export function createQuitShortcutGuard(options: QuitShortcutGuardOptions): {
   readonly request: (request: { readonly viaShortcut: boolean }) => void;
@@ -26,7 +29,7 @@ export function createQuitShortcutGuard(options: QuitShortcutGuardOptions): {
       const at = options.now();
       const confirmed = firstPressAt !== undefined && at - firstPressAt <= QUIT_SHORTCUT_WINDOW_MS;
       firstPressAt = undefined;
-      if (!viaShortcut || confirmed || !options.showNotice()) {
+      if (!viaShortcut || confirmed || !options.needsSecondPress() || !options.showNotice()) {
         options.quit();
         return;
       }

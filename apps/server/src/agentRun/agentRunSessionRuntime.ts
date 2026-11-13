@@ -381,13 +381,16 @@ export interface AgentRunSessionRuntimeOptions {
    */
   readonly toolEffects?: (run: AgentRun) => TurnToolEffects;
   /**
-   * Whether this child's provider transport can carry app-managed tools.
+   * Whether this child's provider transport can carry app-managed tools at
+   * the level the child's session runs at: a runtime that cannot prove tool
+   * exclusivity carries them at Full access and nowhere below it.
    * When tools are offered and the transport is not supported, start fails
    * closed instead of dropping them.
    */
   readonly appManagedToolTransport?: (input: {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
+    readonly executionPolicy: AgentRunAuthority["executionPolicy"];
   }) => "supported" | "unsupported" | "unavailable";
   readonly onSessionSettled?: (input: {
     readonly runId: AgentRunId;
@@ -583,6 +586,7 @@ export function createAgentRunSessionRuntime(
       const transport = options.appManagedToolTransport?.({
         providerInstanceId: target.providerInstanceId,
         modelId: target.modelId,
+        executionPolicy: authority.executionPolicy,
       });
       if (transport !== undefined && transport !== "supported") {
         throw new AgentRunSessionError(

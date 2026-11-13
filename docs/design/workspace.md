@@ -1572,8 +1572,10 @@ add menu under attach, with no confirmation, and the card moves to Done and
 stays there until **Reopen** undoes it in one click; a Code thread reaches Done by its objectively satisfied
 delivery target, or when a person marks it Done whatever that target says,
 which is recorded as the person's override. An agent never marks a thread Done
-(maintainer request, 2026-11-12). Not built yet: today Mark done asks for a
-confirmation and a person cannot mark a Code thread Done
+(maintainer request, 2026-11-12). While a Work task is marked, its composer
+says so and carries the Reopen button. A Code thread is marked with **Mark
+done** in its row's menus in the sidebar, where **Reopen** takes its place
+once it is marked
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and
@@ -2910,8 +2912,9 @@ reach the shell.
   managed server) if shutdown has not finished.
 - The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds while
   the setting "Press ⌘Q twice to quit" is on, which is its default; with it
-  off, one press enters the guarded shutdown (maintainer request, 2026-11-12;
-  not built yet: today the double press cannot be turned off). The
+  off, one press enters the guarded shutdown (maintainer request, 2026-11-12).
+  The switch is in Settings › General under Quitting, shown only in the Mac
+  app; the app starts guarded and learns the choice when settings load. The
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first

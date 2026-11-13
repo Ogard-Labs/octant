@@ -66,7 +66,7 @@ function fixture(shell = false) {
 }
 describe("owner approval recovery consent", () => {
   it.each([false, true])(
-    "shows all file or Shell facts before a fresh one-use answer and clears consumed consent: %s",
+    "shows all file or Shell facts before a one-use answer and clears consumed consent: %s",
     async (shell) => {
       const f = fixture(shell),
         user = userEvent.setup();
@@ -89,7 +89,7 @@ describe("owner approval recovery consent", () => {
       ).toBeVisible();
       if (shell) expect(screen.getByText(/Working folder: \/fixture/)).toBeVisible();
       expect(screen.getByText(/Runs on Home host/)).toBeVisible();
-      await user.click(screen.getByRole("button", { name: "Unlock and allow once" }));
+      await user.click(screen.getByRole("button", { name: "Allow once" }));
       expect(f.answerApproval).toHaveBeenCalledWith({
         ownerMemberId: target.ownerMemberId,
         hostMemberId: target.hostMemberId,
@@ -101,7 +101,7 @@ describe("owner approval recovery consent", () => {
         actionDigest: target.actionDigest,
         approved: true,
       });
-      expect(screen.queryByRole("button", { name: "Unlock and allow once" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
       expect(
         screen.queryByText(
           shell

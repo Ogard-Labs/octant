@@ -7,6 +7,10 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createCodeLanguageAgentTools } from "./codeLanguageAgentTools";
 import type { CodeLanguageAgentRead, CodeLanguageAgentReadResult } from "./codeLanguageService";
@@ -59,6 +63,7 @@ function tools(
     readonly authority?: () => typeof authority | undefined;
     readonly answer?: CodeLanguageAgentReadResult;
     readonly served?: boolean;
+    readonly marked?: "recorded" | "refused";
   } = {},
 ) {
   const thread = input.thread ?? codeThread();
@@ -117,6 +122,12 @@ function tools(
             }),
   );
   const servesAgentsIn = vi.fn(() => input.served ?? true);
+  const recordExternalContentIngestion = vi.fn(
+    (_mark: RecordExternalContentIngestionInput): ExternalContentIngestionResult =>
+      input.marked === "refused"
+        ? { kind: "refused", reason: "contended" }
+        : { kind: "ignored", reason: "not-tainting" },
+  );
   const offered = createCodeLanguageAgentTools({
     windowId,
     thread,
@@ -124,6 +135,7 @@ function tools(
     readThread: input.current ?? (() => thread),
     authority: input.authority ?? (() => authority),
     externalContentIngested: () => false,
+    recordExternalContentIngestion,
     language: { readForAgent, servesAgentsIn },
     uuid: () => `80000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
   });
@@ -133,7 +145,7 @@ function tools(
   };
   const call = async (value: unknown, name: string = CODE_LANGUAGE_TOOL_NAME) =>
     set.execute({ name, inputJson: JSON.stringify(value) });
-  return { offered, set, call, readForAgent, servesAgentsIn };
+  return { offered, set, call, readForAgent, servesAgentsIn, recordExternalContentIngestion };
 }
 
 describe("Code language agent tools", () => {
@@ -142,7 +154,48 @@ describe("Code language agent tools", () => {
     expect(covered.offered?.definitions.map((definition) => definition.name)).toEqual([
       CODE_LANGUAGE_TOOL_NAME,
     ]);
-    expect(covered.servesAgentsIn).toHaveBeenCalledWith(["/checkout"]);
+    expect(covered.servesAgentsIn).toHaveBeenCalledWith(["/checkout"], {
+      projectId: codeThread().projectId,
+      posture: "plan",
+    });
+  });
+
+  it("marks an answer a repository-tooling server computed as outside content, and withholds one it cannot mark", async () => {
+    const thread = codeThread({ executionPolicy: "approval-gated" });
+    const answer: CodeLanguageAgentReadResult = {
+      status: "diagnostics",
+      threadId: thread.id,
+      checkoutId: thread.checkoutId,
+      fileId: "50000000-0000-4000-8000-000000000001" as never,
+      diagnostics: [],
+      truncated: false,
+      repositoryTooling: true,
+    };
+    const tooling = tools({ thread, answer });
+    await expect(tooling.call({ operation: "diagnostics", path: "src/b.ts" })).resolves.toEqual({
+      result: { path: "src/b.ts", diagnostics: [], truncated: false },
+      isError: false,
+      outsideContent: { labels: [] },
+    });
+    expect(tooling.recordExternalContentIngestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: thread.id,
+        provenance: { origin: "tool-result", sourceLabel: CODE_LANGUAGE_TOOL_NAME },
+        authorized: true,
+      }),
+    );
+
+    const unmarked = tools({ thread, answer, marked: "refused" });
+    await expect(unmarked.call({ operation: "diagnostics", path: "src/b.ts" })).resolves.toEqual({
+      result: { error: "tool-unavailable" },
+      isError: true,
+    });
+
+    // The bundled server's answer is Octant's own reading of the checkout.
+    const bundled = tools({ thread });
+    const plain = await bundled.call({ operation: "diagnostics", path: "src/b.ts" });
+    expect(plain).not.toHaveProperty("outsideContent");
+    expect(bundled.recordExternalContentIngestion).not.toHaveBeenCalled();
   });
 
   it("offers nothing where no server an agent may start covers the checkout, or a profile leaves the tool out", () => {

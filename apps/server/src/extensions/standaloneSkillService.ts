@@ -12,6 +12,7 @@ import type {
   StandaloneSkillRecord,
 } from "@octant/contracts/extensions";
 import type { StandaloneSkillActivationState } from "@octant/contracts/shell";
+import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts";
 import { sourceQualifiedSkillId, bundledSkillRecords } from "@octant/plugin-host";
 import { skillReachesAudience, type SkillAudience } from "@octant/plugin-host/skills";
 import type { ExtensionLifecycleService } from "./extensionLifecycleService";
@@ -78,6 +79,7 @@ export class StandaloneSkillService {
   >;
   readonly #activationStore: StandaloneSkillActivationStore;
   readonly #inspections = new Map<string, InspectedExtensionPackage>();
+  readonly #clock: () => string;
   #activations: Readonly<Record<string, StandaloneSkillActivationState>> = {};
 
   constructor(options: {
@@ -89,11 +91,13 @@ export class StandaloneSkillService {
       "snapshot" | "install" | "update" | "uninstall"
     >;
     readonly activationStore?: StandaloneSkillActivationStore;
+    readonly clock?: () => string;
   }) {
     this.#discovery = options.discovery;
     this.#marketplace = options.marketplace;
     this.#lifecycle = options.lifecycle;
     this.#activationStore = options.activationStore ?? IN_MEMORY_EMPTY_STORE;
+    this.#clock = options.clock ?? (() => new Date().toISOString());
   }
 
   async reconcile(): Promise<ExtensionSnapshot> {
@@ -105,29 +109,35 @@ export class StandaloneSkillService {
   }
 
   /**
-   * An activation file written before one-at-a-time held can leave two
-   * same-named skills on where one thread would see both. Neither wins on its
-   * own: both are turned off, the collision is listed, and the person chooses.
+   * An activation file written before one-at-a-time held, or a skill that
+   * comes back after another was turned on, can leave two same-named skills
+   * on where one thread would see both. Between a Project's copy and a skill
+   * every thread shares, the Project's copy is used and the other is turned
+   * off with a notice, unless the person turned the shared one on later by
+   * hand. Any other pair has no default: both are turned off, the collision
+   * is listed, and the person chooses.
    */
   async #turnOffConflictingSkills(): Promise<void> {
     const candidates = this.#candidates().map((record) => this.#applyActivation(record));
     const updated: Record<string, StandaloneSkillActivationState> = {};
     for (const record of candidates) {
-      if (
-        isActive(record) &&
-        candidates.some(
-          (other) =>
-            other !== record &&
-            other.skill.name === record.skill.name &&
-            isActive(other) &&
-            skillsShareAnAudience(record, other),
-        )
-      ) {
-        updated[String(record.skill.qualifiedId)] = {
-          ...this.#activationOf(record),
-          desiredEnabled: false,
-        };
-      }
+      if (!isActive(record)) continue;
+      const rivals = candidates.filter(
+        (other) =>
+          other !== record &&
+          other.skill.name === record.skill.name &&
+          isActive(other) &&
+          skillsShareAnAudience(record, other),
+      );
+      const stronger = rivals.filter((rival) => this.#keptOfPair(record, rival) !== record);
+      if (stronger.length === 0) continue;
+      const projectCopy = stronger.find(
+        (rival) => isProjectCopy(rival) && this.#keptOfPair(record, rival) === rival,
+      );
+      updated[String(record.skill.qualifiedId)] = {
+        ...turnedOff(this.#activationOf(record)),
+        ...(projectCopy === undefined ? {} : { gaveWayTo: String(projectCopy.skill.qualifiedId) }),
+      };
     }
     if (Object.keys(updated).length === 0) return;
     this.#activations = { ...this.#activations, ...updated };
@@ -155,14 +165,61 @@ export class StandaloneSkillService {
     );
     const activated = [...discovered, ...bundled].map((skill) => this.#applyActivation(skill));
     const catalog = resolveStandaloneSkillCatalog(activated);
+    const projectSkillsInUse = this.#projectSkillsInUse(activated);
     return {
       ...base,
+      ...(projectSkillsInUse.length === 0 ? {} : { projectSkillsInUse }),
       ...(this.#discovery.rootStatuses === undefined
         ? {}
         : { skillRoots: this.#discovery.rootStatuses() }),
       skills: [...catalog.skills, ...installed],
       collisions: [...base.collisions, ...catalog.collisions],
     };
+  }
+
+  /**
+   * Which of two same-named skills that are both on stays on, or neither.
+   * Only a Project's copy against a skill every thread shares has an answer.
+   */
+  #keptOfPair(
+    left: StandaloneSkillRecord,
+    right: StandaloneSkillRecord,
+  ): StandaloneSkillRecord | undefined {
+    const project =
+      isProjectCopy(left) && isSharedSkill(right)
+        ? left
+        : isProjectCopy(right) && isSharedSkill(left)
+          ? right
+          : undefined;
+    if (project === undefined) return undefined;
+    const shared = project === left ? right : left;
+    const sharedChosenAt = this.#activations[String(shared.skill.qualifiedId)]?.chosenAt;
+    const projectChosenAt = this.#activations[String(project.skill.qualifiedId)]?.chosenAt;
+    // The person's own later choice of the shared skill outranks the default.
+    return sharedChosenAt !== undefined &&
+      (projectChosenAt === undefined || sharedChosenAt > projectChosenAt)
+      ? shared
+      : project;
+  }
+
+  /** The skills turned off for a Project's copy that is still the one in use. */
+  #projectSkillsInUse(
+    activated: ReadonlyArray<StandaloneSkillRecord>,
+  ): ReadonlyArray<NonNullable<ExtensionSnapshot["projectSkillsInUse"]>[number]> {
+    return activated.flatMap((record) => {
+      const gaveWayTo = this.#activations[String(record.skill.qualifiedId)]?.gaveWayTo;
+      if (gaveWayTo === undefined || record.desiredEnabled) return [];
+      const used = activated.find((other) => String(other.skill.qualifiedId) === gaveWayTo);
+      return used === undefined || !isActive(used)
+        ? []
+        : [
+            {
+              name: record.skill.name,
+              used: used.skill.qualifiedId,
+              gaveWay: record.skill.qualifiedId,
+            },
+          ];
+    });
   }
 
   async execute(command: SkillCommand, signal?: AbortSignal): Promise<ExtensionCommandResult> {
@@ -261,7 +318,9 @@ export class StandaloneSkillService {
         this.#activations = {
           ...this.#activations,
           ...updated,
-          [key]: { ...existing, desiredEnabled: command.desired },
+          [key]: command.desired
+            ? { ...turnedOff(existing), desiredEnabled: true, chosenAt: this.#chosenNow() }
+            : turnedOff(existing),
         };
         break;
       }
@@ -270,7 +329,13 @@ export class StandaloneSkillService {
         this.#activations = {
           ...this.#activations,
           ...updated,
-          [key]: { ...existing, reviewed: true, trusted: true, desiredEnabled: true },
+          [key]: {
+            ...turnedOff(existing),
+            reviewed: true,
+            trusted: true,
+            desiredEnabled: true,
+            chosenAt: this.#chosenNow(),
+          },
         };
         break;
       }
@@ -280,6 +345,10 @@ export class StandaloneSkillService {
       kind: "extension-state-updated",
       snapshot: this.snapshot(this.#lifecycle.snapshot()),
     };
+  }
+
+  #chosenNow(): UtcTimestamp {
+    return decodeUtcTimestamp(this.#clock());
   }
 
   /** The skills whose activation this service owns: discovered and built-in. */
@@ -334,10 +403,7 @@ export class StandaloneSkillService {
         candidate.skill.name === target.skill.name &&
         skillsShareAnAudience(candidate, target)
       ) {
-        updated[String(candidate.skill.qualifiedId)] = {
-          ...this.#activationOf(candidate),
-          desiredEnabled: false,
-        };
+        updated[String(candidate.skill.qualifiedId)] = turnedOff(this.#activationOf(candidate));
       }
     }
     return updated;
@@ -497,6 +563,28 @@ function standaloneEffectiveState(
     return { kind: "blocked", reason: "component-disabled" };
   }
   return { kind: "effective" };
+}
+
+/**
+ * A skill's stored decision once it is off: its review and trust stay, and
+ * the record of a person's choice or of having given way goes with the "on".
+ */
+function turnedOff(activation: StandaloneSkillActivationState): StandaloneSkillActivationState {
+  return {
+    reviewed: activation.reviewed,
+    trusted: activation.trusted,
+    desiredEnabled: false,
+  };
+}
+
+/** A skill found at a Project root, shared by that Project's threads. */
+function isProjectCopy(record: Pick<StandaloneSkillRecord, "scope" | "projectScope">): boolean {
+  return record.projectScope !== undefined && record.scope === undefined;
+}
+
+/** A skill every thread sees: user-global, built-in, or from a folder a person turned on. */
+function isSharedSkill(record: Pick<StandaloneSkillRecord, "scope" | "projectScope">): boolean {
+  return record.projectScope === undefined && record.scope === undefined;
 }
 
 function isActive(record: StandaloneSkillRecord): boolean {

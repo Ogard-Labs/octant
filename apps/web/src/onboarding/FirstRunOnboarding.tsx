@@ -84,6 +84,11 @@ export interface FirstRunOnboardingProps {
   readonly autoSupportedFor?: (providerInstanceId: ProviderInstanceId) => boolean;
   /** Records the mode new threads start in. Absent hides the step's answer. */
   readonly onSetDefaultMode?: (mode: PermissionMode) => Promise<boolean>;
+  /**
+   * Records whether Octant may check for updates on its own. Absent hides the
+   * question: the window cannot update the app it shows.
+   */
+  readonly onSetUpdateChecks?: ((allowed: boolean) => Promise<boolean>) | undefined;
 
   readonly projects: ReadonlyArray<FirstRunHandoffProject>;
   /** Open the Project create surface — the same Choose a folder flow the shell uses. */
@@ -123,6 +128,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [step, setStep] = useState<FirstRunStepId>("providers");
   const [chosenMode, setChosenMode] = useState<PermissionMode>();
   const [modeRecorded, setModeRecorded] = useState(false);
+  // Off until the person answers: first run is where the question is asked,
+  // so nothing earlier can have turned checks on.
+  const [updateChecksAllowed, setUpdateChecksAllowed] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(
     props.capabilities?.computerUse?.setupPending === true,
   );
@@ -401,7 +409,22 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           )}
           {handoffOpen ? (
             <>
-              <FirstRunReadinessStep handoff={handoff} onSetup={openSetup} />
+              <FirstRunReadinessStep
+                handoff={handoff}
+                onSetup={openSetup}
+                updateChecks={
+                  props.onSetUpdateChecks === undefined
+                    ? undefined
+                    : {
+                        allowed: updateChecksAllowed,
+                        onChange: (allowed) => {
+                          setUpdateChecksAllowed(allowed);
+                          const write = props.onSetUpdateChecks;
+                          if (write !== undefined) track(write(allowed));
+                        },
+                      }
+                }
+              />
               {capabilitiesDismissed || props.capabilities === undefined ? null : (
                 <FirstTaskCapabilities
                   {...props.capabilities}

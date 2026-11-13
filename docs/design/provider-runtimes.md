@@ -800,9 +800,26 @@ receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime. Ordinary inherited configuration does not supply that attestation and,
 below Full access, continues to report app tools as unsupported. At Full access
 such a runtime is still offered Octant's tools, labelled as mixed with tools
-Octant did not supply (maintainer request, 2026-11-12; not built yet: today
-it reports app tools as unsupported at every level). Process exit, stream failure,
-interruption, and scope cleanup retire pending tool requests.
+Octant did not supply (maintainer request, 2026-11-12). The adapter reports
+this as a separate capability, `appManagedToolsAtFullAccess: "mixed"`, beside
+`appManagedTools`, which keeps answering for every guarded level; the host
+resolves the two against the thread's level, and the thread's access details
+show "mixed with tools Octant did not supply". Full access launches the
+runtime outside the sandbox the receipt rests on, so a release that proves
+exclusivity below Full access is mixed there too, unless the thread keeps the
+opt-in sandbox. The capability is reported only when the connection check saw
+the runtime accept the tool endpoint's declaration; that check runs on macOS
+only, so on Linux nothing is reported as mixed. Every reader of the tool
+gate follows the level the turn runs at (maintainer decision, 2026-11-13): a
+child agent session reads the level its own session runs at; a routine's own
+Browser target reads its running turn's level; a saved flow, which runs
+between turns, reads the level its thread holds then. While a person reviews
+a routine's Browser permission no turn runs, so a routine opted into its
+Project's level is read at Full access there and stays reviewable; a review
+offers no tool, and each turn is still judged at its own level. Below Full
+access all three read `appManagedTools` alone, as before.
+Process exit, stream failure, interruption, and scope cleanup retire pending
+tool requests.
 
 ## Subscription sign-in dialects
 

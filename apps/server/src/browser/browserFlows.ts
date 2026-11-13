@@ -349,13 +349,20 @@ const UNSTORED_OPERATIONS: ReadonlySet<string> = new Set([
 
 /**
  * The operation as the tool takes it, without the call-level extras that mean
- * nothing on a later page: the observation revision it was chosen from and the
- * `include` it asked for.
+ * nothing on a later page: the observation revision it was chosen from, the
+ * `include` it asked for, and its dialog answer. A replay's dialogs take the
+ * fixed rule, so a saved flow never carries prompt text or an agreement nobody
+ * reviews at replay.
  */
 export function browserToolInputRecord(
   input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
 ): Record<string, unknown> {
-  const { expectedObservationRevision: _revision, include: _include, ...rest } = input;
+  const {
+    expectedObservationRevision: _revision,
+    include: _include,
+    dialog: _dialog,
+    ...rest
+  } = input;
   const record: Record<string, unknown> = { ...rest };
   if ("to" in rest) {
     delete record.to;

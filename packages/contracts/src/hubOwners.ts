@@ -105,6 +105,19 @@ export const PairedMergeUnlockRequest = Schema.Struct({ enabled: Schema.Boolean 
 export type PairedMergeUnlockRequest = typeof PairedMergeUnlockRequest.Type;
 export const decodePairedMergeUnlockRequest = Schema.decodeUnknownSync(PairedMergeUnlockRequest);
 
+/**
+ * A window chooses whether each runtime approval answer from an owner device
+ * needs its own fresh unlock on this host, instead of riding the device's open
+ * five-minute session.
+ */
+export const OwnerApprovalAnswerUnlockRequest = Schema.Struct({
+  enabled: Schema.Boolean,
+}).annotations(strict);
+export type OwnerApprovalAnswerUnlockRequest = typeof OwnerApprovalAnswerUnlockRequest.Type;
+export const decodeOwnerApprovalAnswerUnlockRequest = Schema.decodeUnknownSync(
+  OwnerApprovalAnswerUnlockRequest,
+);
+
 export const HubRoleRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);
 export type HubRoleRequest = typeof HubRoleRequest.Type;
 export const decodeHubRoleRequest = Schema.decodeUnknownSync(HubRoleRequest);

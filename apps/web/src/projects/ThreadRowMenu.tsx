@@ -5,6 +5,7 @@ import {
   Archive,
   BellRing,
   Check,
+  CircleCheck,
   Clock,
   Copy,
   Download,
@@ -56,6 +57,12 @@ export interface ThreadRowActions {
    */
   readonly onCompleteThread?: (threadId: string) => void;
   readonly onReopenThread?: (threadId: string) => void;
+  /**
+   * Marks a Code thread Done as the person's override of its delivery target;
+   * {@link onReopenThread} undoes it. Absent where the host has no such mark
+   * to set from a row, such as Chat and Work rows.
+   */
+  readonly onMarkThreadDone?: (threadId: string) => void;
   /**
    * Hides the thread until the ISO wake time. Paired with
    * {@link onWakeThread} the same way. Absent when the host cannot snooze.
@@ -147,6 +154,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onArchiveThread === undefined &&
     actions.onCompleteThread === undefined &&
     actions.onReopenThread === undefined &&
+    actions.onMarkThreadDone === undefined &&
     actions.onSnoozeThread === undefined &&
     actions.onWakeThread === undefined &&
     actions.onCompleteFollowUp === undefined &&
@@ -193,10 +201,12 @@ export function ThreadRowMenu(props: {
     props.actions.onCompleteFollowUp !== undefined ||
     props.actions.onMarkFollowUp !== undefined;
   const hasCoordinatorActions = threadCoordinatorMenuOffers(props.thread, props.actions);
+  // Reopen undoes either way a person closed the thread: put away, or
+  // marked Done.
+  const closed = props.thread.completedAt !== undefined || props.thread.markedDone === true;
   const hasLifecycleActions =
-    (props.thread.completedAt === undefined
-      ? props.actions.onCompleteThread
-      : props.actions.onReopenThread) !== undefined ||
+    (closed ? props.actions.onReopenThread : props.actions.onCompleteThread) !== undefined ||
+    (props.thread.markedDone !== true && props.actions.onMarkThreadDone !== undefined) ||
     (props.thread.snooze === undefined
       ? props.actions.onSnoozeThread
       : props.actions.onWakeThread) !== undefined;
@@ -298,7 +308,17 @@ export function ThreadRowMenu(props: {
         <>
           <OctantContextMenuSeparator />
           <OctantContextMenuGroup>
-            {props.thread.completedAt !== undefined ? (
+            {props.thread.markedDone === true ||
+            props.actions.onMarkThreadDone === undefined ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label="Mark done"
+                onClick={() => props.actions.onMarkThreadDone?.(threadId)}
+              >
+                <MenuContent icon={CircleCheck}>Mark done</MenuContent>
+              </OctantContextMenuItem>
+            )}
+            {closed ? (
               props.actions.onReopenThread === undefined ? null : (
                 <OctantContextMenuItem
                   className="thread-row-context-menu__item"

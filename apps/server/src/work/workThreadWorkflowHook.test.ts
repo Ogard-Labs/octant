@@ -104,6 +104,27 @@ describe("withWorkflowLifecycle", () => {
     expect(recordThreadLifecycle).not.toHaveBeenCalled();
   });
 
+  it("records a reopened thread as active, so a thread marked Done gets a fresh workflow", async () => {
+    const threads = createThreads({
+      kind: "thread-updated",
+      thread: activeThread,
+    } as unknown as WorkThreadCommandResult);
+    const recordThreadLifecycle = vi.fn();
+    const wrapped = withWorkflowLifecycle({
+      threads,
+      workflows: { recordThreadLifecycle },
+    });
+
+    await wrapped.execute(windowId, { kind: "reopen-work-thread" });
+
+    expect(recordThreadLifecycle).toHaveBeenCalledWith({
+      projectId: activeThread.projectId,
+      relatedThreadId: activeThread.id,
+      label: activeThread.title,
+      lifecycle: "active",
+    });
+  });
+
   it("propagates the underlying execute rejection without recording a lifecycle fact", async () => {
     const recordThreadLifecycle = vi.fn();
     const threads: WorkThreadRouteService = {

@@ -80,8 +80,8 @@ export function OwnerApprovalSection({ spokes }: { readonly spokes: ReadonlyArra
     <SettingsSection title="Owner approval recovery">
       <p className="settings-section-line">
         Recover one waiting Code or Work file-action approval. Reading private details needs an
-        unlock; Allow once and Deny each need a new unlock for that exact answer. Nothing is
-        remembered.
+        unlock, which then covers Allow once and Deny for five minutes unless that computer asks for
+        an unlock per answer. Nothing is remembered.
       </p>
       <label>
         Computer
@@ -141,7 +141,7 @@ export function OwnerApprovalSection({ spokes }: { readonly spokes: ReadonlyArra
                 {JSON.stringify(JSON.parse(selected.action.input), null, 2)}
               </pre>
               <OctantButton type="button" disabled={busy} onClick={() => void answer(true)}>
-                Unlock and allow once
+                Allow once
               </OctantButton>
               <OctantButton
                 type="button"
@@ -149,14 +149,14 @@ export function OwnerApprovalSection({ spokes }: { readonly spokes: ReadonlyArra
                 disabled={busy}
                 onClick={() => void answer(false)}
               >
-                Unlock and deny
+                Deny
               </OctantButton>
             </>
           )}
         </>
       )}
       {message === "" ? null : <SettingsState kind="empty">{message}</SettingsState>}
-      {busy ? <p role="status">Waiting for this host and your fresh unlock…</p> : null}
+      {busy ? <p role="status">Waiting for this host and your unlock…</p> : null}
     </SettingsSection>
   );
 }

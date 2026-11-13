@@ -9,6 +9,7 @@ import {
   type TaskAccessSnapshot,
   type WindowId,
 } from "@octant/contracts";
+import { threadAppToolSupport } from "@octant/domain";
 import { permissionModeOf, type ThreadAccess } from "@octant/domain/guardrail-policy";
 import type { HostShield } from "../shield/hostShield";
 
@@ -228,7 +229,16 @@ export function createTaskAccessFacts(deps: TaskAccessFactsDependencies) {
                   "forceStop",
                 ] as const
               ).flatMap((id) => {
-                const support = observed.capabilities[id];
+                // Octant's tools are the one capability the thread's level
+                // changes: a runtime that cannot prove they are the only
+                // tools entering it carries them at Full access, as mixed.
+                const support =
+                  id === "appManagedTools"
+                    ? threadAppToolSupport(observed.capabilities, {
+                        executionPolicy: (facts.effective ?? facts.selected).executionPolicy,
+                        fullAccessSandbox: facts.selected.fullAccessSandbox,
+                      })
+                    : observed.capabilities[id];
                 return support === undefined ? [] : [{ id, support }];
               }),
       },

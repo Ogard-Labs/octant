@@ -202,6 +202,11 @@ function standaloneSkillSummarySourceLabel(skill: StandaloneSkillRecord): string
   return "Project skill";
 }
 
+/** A package that holds a provider driver is an outside driver, admitted by its own flow. */
+function holdsProviderDriver(preview: ExtensionPackagePreview): boolean {
+  return preview.review.components.some((component) => component.kind === "provider-driver");
+}
+
 function licenseLabel(license: ExtensionPackagePreview["review"]["license"]): string {
   switch (license.kind) {
     case "spdx":
@@ -838,6 +843,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
    * the Library's: it never turns into an npm update that Marketplace left
    * pending, and it leaves Marketplace's own review state alone. Returns the
    * failure message, if any.
+   * For an outside provider driver, Install and trust is the driver flow:
+   * the host also switches it on, and names the step it refused if it
+   * stopped early.
    */
   const confirmInstall = useCallback(
     async (
@@ -872,7 +880,16 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           setNpmUpdateOf(undefined);
         }
         await reload();
-        return undefined;
+        // The steps before the refused one stand, so the package is listed
+        // under Installed; the banner says where the flow stopped.
+        const stopped =
+          installed.kind !== "extension-state-updated" || installed.stoppedAt === undefined
+            ? undefined
+            : installed.stoppedAt === "trust"
+              ? `${entry.displayName} is installed, but Octant refused to trust its source, so it stays untrusted and switched off. Review it under Installed.`
+              : `${entry.displayName} is installed and trusted, but could not be switched on. Switch it on under Installed.`;
+        if (stopped !== undefined) setFailure({ category: "blocked", message: stopped });
+        return stopped;
       } catch {
         setFailure({
           category: "unavailable" as never,
@@ -1544,6 +1561,32 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </div>
           </SettingsSection>
 
+          {(snapshot.projectSkillsInUse ?? []).length > 0 ? (
+            <ul
+              aria-label="Project skills in use"
+              className="extensions-settings__diagnostics settings-collection-scroll"
+              tabIndex={0}
+            >
+              {(snapshot.projectSkillsInUse ?? []).map((notice) => {
+                const named = (qualifiedId: string) =>
+                  snapshot.skills?.find(
+                    (skill) => String(skill.skill.qualifiedId) === String(qualifiedId),
+                  )?.displayName ?? notice.name;
+                return (
+                  <li
+                    aria-label={`Project skill in use: ${notice.name}`}
+                    key={`${String(notice.used)}:${String(notice.gaveWay)}`}
+                    role="status"
+                  >
+                    Two skills named <strong>{notice.name}</strong> were on. The Project's copy,{" "}
+                    {named(notice.used)}, is used, and {named(notice.gaveWay)} was turned off. Turn{" "}
+                    {named(notice.gaveWay)} on to use it instead.
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+
           {snapshot.collisions.length > 0 ? (
             <SettingsDisclosure
               title="Name collisions"
@@ -2002,13 +2045,18 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         variant="secondary"
                         aria-label="Install and trust"
                         disabled={installing}
-                        onClick={() => void confirmInstall(localPreview.entry, "trust")}
+                        onClick={() =>
+                          void confirmInstall(
+                            localPreview.entry,
+                            holdsProviderDriver(localPreview) ? "turn-on" : "trust",
+                          )
+                        }
                         type="button"
                       >
                         Install and trust
                       </OctantButton>
                     )}
-                    {npmUpdateOf !== undefined ? null : (
+                    {npmUpdateOf !== undefined || holdsProviderDriver(localPreview) ? null : (
                       <OctantButton
                         variant="secondary"
                         aria-label="Install, trust and turn on"
@@ -2019,7 +2067,15 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         Install, trust and turn on
                       </OctantButton>
                     )}
-                    {npmUpdateOf !== undefined ? null : (
+                    {npmUpdateOf !== undefined ? null : holdsProviderDriver(localPreview) ? (
+                      <p className="extensions-settings__state">
+                        Install and trust installs this driver, trusts it at this digest and
+                        switches it on, in that order, stopping at the first step Octant refuses.
+                        Confirm install only adds it, untrusted and switched off. Adding a provider
+                        from it, the connection check and Verify tools stay separate steps. Octant
+                        ran nothing from the package.
+                      </p>
+                    ) : (
                       <p className="extensions-settings__state">
                         Confirm install adds it untrusted and switched off; Install and trust also
                         trusts it, and it stays switched off; Install, trust and turn on does all

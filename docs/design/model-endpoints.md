@@ -184,8 +184,11 @@ on the host itself: in the terminal that ran the command, or in a local
 desktop window, never in a paired or remote client; the sign-in panel
 otherwise signs in through the browser
 ([Enterprise provider identity](enterprise-provider-identity.md) owns the
-rule; maintainer request, 2026-11-12; not built yet: today the code appears
-only in the terminal). Diagnostics adds "Signed in for", the tenant, client, and origin the
+rule; maintainer request, 2026-11-12). Built: in a local desktop window a
+signed-out endpoint that opted in shows "Sign in with a code" under the
+browser sign-in; it shows the terms, then the code, its page, and a line
+saying to enter a code only because the person just started the sign-in
+there. Diagnostics adds "Signed in for", the tenant, client, and origin the
 last check bound to.
 
 Row states read the host's reason: Sign in to use (no sign-in), Sign in again
@@ -238,9 +241,10 @@ hub, peer or agent grant begins one or shows a code. Not built yet: today a
 paired or remote client never begins one or shows a code. The card also offers
 the
 opt-in "Use my AWS profile", off by default, which reads the person's existing
-cloud profile in place of the portal sign-in (maintainer request, 2026-11-12;
-not built yet: today the sign-in begins only in a terminal and no cloud
-profile is read). Add endpoint's Amazon Bedrock card opens its
+cloud profile in place of the portal sign-in (maintainer request, 2026-11-12).
+Built: a local desktop window's card shows "Sign in with a code" beside the
+terminal command, and a paired or remote client keeps the command alone. Not
+built yet: "Use my AWS profile"; no cloud profile is read. Add endpoint's Amazon Bedrock card opens its
 own Connect: Name, Region (where the models run), Access portal, Portal
 region, Account ID, Role (the permission set), and Model IDs (1 to 64, since
 Bedrock lists none a role may use), each with a one-line hint, and no key or

@@ -35,6 +35,7 @@ function fixture() {
   let enabled = true;
   let observed = true;
   let providerReview = false;
+  let mixedTools = false;
   let chosen: { providerInstanceId: typeof account; modelId: typeof model } | undefined;
   let chosenUnavailable = false;
   const connect = vi.fn(() => {
@@ -81,7 +82,8 @@ function fixture() {
             readiness: "ready",
             capabilities: {
               approvals: "supported",
-              appManagedTools: "supported",
+              appManagedTools: mixedTools ? "unsupported" : "supported",
+              ...(mixedTools ? { appManagedToolsAtFullAccess: "mixed" } : {}),
               nativeWebResearch: "unsupported",
               nativeChildAgents: "unsupported",
             },
@@ -107,6 +109,9 @@ function fixture() {
     },
     setProviderReview: () => {
       providerReview = true;
+    },
+    setMixedTools: () => {
+      mixedTools = true;
     },
     unavailableJudge: () => {
       chosen = {
@@ -198,6 +203,26 @@ describe("host task access facts", () => {
       outsideContent: { read: true, effect: "recorded" },
     });
     expect(f.getFacts().outsideContent).toBe(true);
+  });
+  it("labels Octant's tools mixed for a Full access thread whose runtime cannot prove tool exclusivity", () => {
+    const f = fixture();
+    f.setMixedTools();
+    const tools = () =>
+      f.read()?.runtime.capabilities.find((capability) => capability.id === "appManagedTools");
+    expect(tools()).toEqual({ id: "appManagedTools", support: "unsupported" });
+    f.setFacts({
+      ...f.getFacts(),
+      selected: { executionPolicy: "full-access" },
+      effective: { executionPolicy: "full-access" },
+    });
+    expect(tools()).toEqual({ id: "appManagedTools", support: "mixed" });
+    // A running turn held below Full access is not offered the tools.
+    f.setFacts({
+      ...f.getFacts(),
+      selected: { executionPolicy: "full-access" },
+      effective: { executionPolicy: "approval-gated", autoApprove: false },
+    });
+    expect(tools()).toEqual({ id: "appManagedTools", support: "unsupported" });
   });
   it("distinguishes disabled and unknown observations, preserves current default uncertainty", () => {
     const f = fixture();
