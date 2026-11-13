@@ -117,6 +117,7 @@ describe("host recovery", () => {
 
   it("accepts only its own action links", () => {
     expect(decodeHostRecoveryAction(hostRecoveryActionUrl("rebuild"))).toBe("rebuild");
+    expect(decodeHostRecoveryAction(hostRecoveryActionUrl("export"))).toBe("export");
     expect(decodeHostRecoveryAction("octant-recovery://reset")).toBeUndefined();
     expect(decodeHostRecoveryAction("https://example.com/rebuild")).toBeUndefined();
   });
@@ -130,5 +131,6 @@ describe("host recovery", () => {
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img src=x&gt;");
     expect(html).toContain(hostRecoveryActionUrl("retry"));
+    expect(html).toContain(hostRecoveryActionUrl("export"));
   });
 });

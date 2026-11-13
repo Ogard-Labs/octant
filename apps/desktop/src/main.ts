@@ -110,6 +110,7 @@ import {
   makeLinkedSecretStores,
   prepareHostRuntimePaths,
   readHostInfoReceipt,
+  recordHostCrash,
   ServicePolicyStore,
   addApiKey,
   ApiKeyPoolError,
@@ -256,6 +257,7 @@ import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import { createRuntimeBinaryPicker } from "./runtimeBinaryPicker";
 import { createBrowserProofSaver } from "./browserProofSaver";
 import { createSupportBundleSaver } from "./supportBundleSaver";
+import { buildRecoverySupportBundle } from "./recoverySupportBundle";
 import {
   createSingleFlight,
   assertAutomaticHostStartupEnabled,
@@ -263,6 +265,8 @@ import {
   probeHostInfoReceipt,
   probeLocalHost,
   createStderrTail,
+  ServerExitedBeforeReady,
+  type StderrTail,
   reserveLoopbackPort,
   resolveManagedServerUrl,
   resolveStableHostAttachment,
@@ -1408,6 +1412,37 @@ app.setPath(
 );
 
 let server: ChildProcess | undefined;
+// The running managed server's stderr tail, read when it exits unexpectedly.
+let serverStderrTail: StderrTail | undefined;
+
+/**
+ * Keeps a local crash record for a managed host that ended unexpectedly. The
+ * native Windows host keeps its data in an owned profile this does not write
+ * into, so only the POSIX host gets one. A record that cannot be written is
+ * reported on stderr and never blocks recovery.
+ */
+async function keepHostCrashRecord(
+  exitReason: string,
+  lastLines: () => Promise<ReadonlyArray<string>>,
+): Promise<void> {
+  if (desktopWindowsHost !== undefined) return;
+  const outcome = await recordHostCrash(desktopDataDirectory, {
+    recordedAt: new Date().toISOString(),
+    process: "host",
+    exitReason,
+    lastLines: await lastLines().catch(() => []),
+    homeDirectory: homedir(),
+  });
+  if (outcome.status === "failed")
+    writeDiagnostic(`[octant] crash record not kept: ${outcome.reason}`);
+}
+
+function exitReasonOf(child: {
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+}): string {
+  return child.signalCode !== null ? `signal ${child.signalCode}` : `exit code ${child.exitCode}`;
+}
 let desktopHostLaunch: DesktopHostLaunch | undefined;
 let acceptedQuitLaunch: DesktopHostLaunch | undefined;
 let desktopQuitAccepted = false;
@@ -1923,6 +1958,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
   const serverStderr = createStderrTail();
+  serverStderrTail = serverStderr;
   const instanceId = randomUUID();
   const launch = createDesktopHostLaunch({
     shutdownServer:
@@ -2325,6 +2361,14 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
       activityUnconfirmed: true,
     });
     updateHostTray();
+  },
+  recordCrash: (child) => {
+    const tail = serverStderrTail;
+    void keepHostCrashRecord(exitReasonOf(child), async () => {
+      if (tail === undefined) return [];
+      await tail.drained(STDERR_DRAIN_TIMEOUT_MS);
+      return tail.text().split("\n");
+    });
   },
 });
 
@@ -4906,6 +4950,12 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   // offers the repairs that refusal allows; the Windows host keeps its store in
   // a native owned profile the offline maintenance command does not open.
   const refusal = desktopWindowsHost === undefined ? readHostStartupRefusal(error) : undefined;
+  if (error instanceof ServerExitedBeforeReady) {
+    // The error already carries the redacted stderr tail after its first line.
+    await keepHostCrashRecord(refusal?.category ?? exitReasonOf(error), async () =>
+      error.message.split("\n").slice(1),
+    );
+  }
   if (refusal !== undefined) {
     const choice = await showHostRecovery({
       refusal,
@@ -4926,6 +4976,19 @@ async function handleFatalStartup(error: unknown): Promise<void> {
         ...process.env,
         OCTANT_DATA_DIR: desktopDataDirectory,
         ...desktopHostStartup.hostEnvironment,
+      },
+      supportBundle: {
+        defaultDirectory: app.getPath("downloads"),
+        build: (now) =>
+          buildRecoverySupportBundle({
+            bundleId: randomUUID(),
+            now,
+            octantVersion: app.getVersion(),
+            runtime: `electron ${process.versions.electron}`,
+            dataDirectory: desktopDataDirectory,
+            serviceLogPath: desktopPosixHostPaths().serviceLogPath,
+            homeDirectory: homedir(),
+          }),
       },
     }).catch(() => "quit" as const);
     // Starting again is a fresh launch: the refused start already released
