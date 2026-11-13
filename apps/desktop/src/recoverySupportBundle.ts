@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, release, totalmem } from "node:os";
 import {
   buildSupportBundleFiles,
@@ -8,6 +10,24 @@ import {
 import { BoundedHostLogStore, readHostCrashRecords } from "@octant/host-runtime";
 
 const MB = 1024 * 1024;
+
+/**
+ * Writes the bundle owner-only, replacing any file at `path`. `writeFile`'s
+ * mode applies only when it creates the file, so writing over an existing
+ * world-readable file would keep its permissions; an exclusively created
+ * temporary file beside it, renamed over the destination, never does. This is
+ * the same staging the host's save route uses.
+ */
+export async function writeOwnerOnlyFile(path: string, bytes: Uint8Array): Promise<void> {
+  const staged = `${path}.octant-${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    await writeFile(staged, bytes, { mode: 0o600, flag: "wx" });
+    await rename(staged, path);
+  } catch (error) {
+    await rm(staged, { force: true });
+    throw error;
+  }
+}
 
 /**
  * The support bundle the recovery screen saves while the host is not running.

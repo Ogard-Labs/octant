@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { app, BrowserWindow, dialog } from "electron";
 import {
@@ -12,6 +11,7 @@ import {
   type HostRecoveryScreen,
   type HostStartupRefusal,
 } from "./hostRecovery";
+import { writeOwnerOnlyFile } from "./recoverySupportBundle";
 import { defaultSupportBundleFileName } from "./supportBundleSaver";
 
 const MAINTENANCE_OUTPUT_LIMIT = 16_384;
@@ -136,7 +136,7 @@ async function saveSupportBundle(
     const path = /\.zip$/i.test(selection.filePath)
       ? selection.filePath
       : `${selection.filePath}.zip`;
-    await writeFile(path, await bundle.build(now), { mode: 0o600 });
+    await writeOwnerOnlyFile(path, await bundle.build(now));
     return {
       status: "saved",
       message: `Saved ${basename(path)}. Read it before you share it; Octant sent nothing.`,

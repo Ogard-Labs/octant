@@ -1,14 +1,30 @@
-import { mkdtemp } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BoundedHostLogStore, recordHostCrash } from "@octant/host-runtime";
 import { describe, expect, it } from "vitest";
-import { buildRecoverySupportBundle } from "./recoverySupportBundle";
+import { buildRecoverySupportBundle, writeOwnerOnlyFile } from "./recoverySupportBundle";
 
 const HOME = "/Users/ada";
 const SECRET = "sk-abcdefghijklmnop1234";
 
 describe("recovery support bundle", () => {
+  it.skipIf(process.platform === "win32")(
+    "replaces an existing readable file with an owner-only bundle and leaves no staged file",
+    async () => {
+      const folder = await mkdtemp(join(tmpdir(), "octant-recovery-save-"));
+      const destination = join(folder, "octant-diagnostics.zip");
+      await writeFile(destination, "old");
+      await chmod(destination, 0o644);
+
+      await writeOwnerOnlyFile(destination, new TextEncoder().encode("bundle"));
+
+      expect((await stat(destination)).mode & 0o777).toBe(0o600);
+      expect(await readFile(destination, "utf8")).toBe("bundle");
+      expect(await readdir(folder)).toEqual(["octant-diagnostics.zip"]);
+    },
+  );
+
   it("holds the crash records and host log, redacted, and marks host-only sections not available", async () => {
     const data = await mkdtemp(join(tmpdir(), "octant-recovery-bundle-"));
     const serviceLogPath = join(data, "logs", "service.log");
