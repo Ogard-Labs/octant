@@ -57,6 +57,9 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   });
 
   return {
+    appendOutput: (chunk) => {
+      if (chunk !== "") terminal.write(chunk);
+    },
     dispose: () => {
       observer?.disconnect();
       plateWatch.disconnect();
@@ -67,6 +70,11 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
     },
     focus: () => terminal.focus(),
     readSelection: () => terminal.getSelection(),
+    replaceOutput: (nextOutput) => {
+      output = "";
+      terminal.reset();
+      if (nextOutput !== "") terminal.write(nextOutput);
+    },
     setInteractive: (next) => {
       interactive = next;
       terminal.options.disableStdin = !next;

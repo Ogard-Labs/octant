@@ -13,11 +13,18 @@ import { useTerminalColorProjection } from "../theme/ThemeSettingsProvider";
 import { useTypographyProjection } from "../theme/TypographyProvider";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
+export interface TerminalOutputSink {
+  readonly append: (chunk: string) => void;
+  readonly replace: (output: string) => void;
+}
+
 export interface XtermAdapterSession {
+  readonly appendOutput?: (chunk: string) => void;
   readonly dispose: () => void;
   readonly focus: () => void;
   /** The text the user has selected in the terminal, empty when none is. */
   readonly readSelection?: () => string;
+  readonly replaceOutput?: (output: string) => void;
   readonly setInteractive: (interactive: boolean) => void;
   readonly setOutput: (output: string) => void;
   readonly setTypography?: (typography: TerminalTypographyProjection) => void;
@@ -51,6 +58,7 @@ export interface XtermTerminalAdapterProps {
   readonly interactive: boolean;
   readonly loadRuntime?: () => Promise<XtermAdapterRuntime>;
   readonly onData: (data: string) => void;
+  readonly onOutputSink?: (sink: TerminalOutputSink | undefined) => void;
   readonly onResize: (columns: number, rows: number) => void;
   /**
    * Hands the caller a way to read the terminal's current selection, and
@@ -77,11 +85,62 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
   const latestTypography = useRef(typography);
   const latestColors = useRef(colors);
   const session = useRef<XtermAdapterSession | undefined>(undefined);
+  const pendingWrites = useRef<Array<{ readonly replace: boolean; readonly text: string }>>([]);
+  const legacyOutput = useRef(props.output);
   const loader = props.loadRuntime ?? loadXtermRuntime;
 
   useLayoutEffect(() => {
     latestProps.current = props;
   }, [props]);
+
+  const deliverToSession = (
+    target: XtermAdapterSession,
+    write: { readonly replace: boolean; readonly text: string },
+  ) => {
+    if (write.replace) {
+      if (target.replaceOutput !== undefined) {
+        target.replaceOutput(write.text);
+        return;
+      }
+      legacyOutput.current = write.text;
+      target.setOutput(write.text);
+      return;
+    }
+    if (write.text === "") return;
+    if (target.appendOutput !== undefined) {
+      target.appendOutput(write.text);
+      return;
+    }
+    legacyOutput.current = `${legacyOutput.current}${write.text}`;
+    target.setOutput(legacyOutput.current);
+  };
+
+  useEffect(() => {
+    const sink: TerminalOutputSink = {
+      append: (chunk) => {
+        if (chunk === "") return;
+        const mounted = session.current;
+        if (mounted === undefined) {
+          pendingWrites.current.push({ replace: false, text: chunk });
+          return;
+        }
+        deliverToSession(mounted, { replace: false, text: chunk });
+      },
+      replace: (output) => {
+        const mounted = session.current;
+        if (mounted === undefined) {
+          pendingWrites.current = [{ replace: true, text: output }];
+          return;
+        }
+        deliverToSession(mounted, { replace: true, text: output });
+      },
+    };
+    latestProps.current.onOutputSink?.(sink);
+    return () => {
+      pendingWrites.current = [];
+      latestProps.current.onOutputSink?.(undefined);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     latestTypography.current = typography;
@@ -130,6 +189,12 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
           return;
         }
         session.current = mounted;
+        legacyOutput.current = latestProps.current.output;
+        const queued = pendingWrites.current;
+        pendingWrites.current = [];
+        for (const write of queued) {
+          deliverToSession(mounted, write);
+        }
         const read = mounted.readSelection;
         latestProps.current.onSelectionReader?.(read === undefined ? undefined : () => read());
       })
@@ -144,7 +209,11 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
     };
   }, [loader, hintId]);
 
-  useEffect(() => session.current?.setOutput(props.output), [props.output]);
+  useEffect(() => {
+    if (session.current === undefined) return;
+    legacyOutput.current = props.output;
+    session.current.setOutput(props.output);
+  }, [props.output]);
   useEffect(() => session.current?.setInteractive(props.interactive), [props.interactive]);
   useEffect(() => session.current?.setTypography?.(typography), [typography]);
   useEffect(() => session.current?.setColors?.(colors), [colors]);
