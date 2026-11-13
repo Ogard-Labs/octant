@@ -1,7 +1,13 @@
 import { render, waitFor } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ProjectIcon, ProjectIconContext, createProjectIconSource } from "./ProjectIcon";
+import { StrictMode } from "react";
+import {
+  ProjectIcon,
+  ProjectIconContext,
+  ProjectIconProvider,
+  createProjectIconSource,
+} from "./ProjectIcon";
 
 function answer(status: number) {
   return { ok: status >= 200 && status < 300, status, blob: async () => new Blob(["x"]) };
@@ -34,6 +40,75 @@ function mount(source: ReturnType<typeof createProjectIconSource>) {
 }
 
 describe("Project icon", () => {
+  it("releases cached blobs when its window source closes", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:owned");
+    URL.revokeObjectURL = vi.fn();
+    const { source, fetcher } = sourceFor(200);
+    expect(await source.load("p1")).toBe("blob:owned");
+    source.dispose();
+    source.dispose();
+    expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:owned");
+    expect(source.peek("p1")).toBeUndefined();
+    expect(await source.load("p2")).toBeNull();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("cancels pending requests and does not retain an icon that arrives after disposal", async () => {
+    const body = Promise.withResolvers<Blob>();
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(new Blob(["icon"])));
+    const response = new Response();
+    vi.spyOn(response, "blob").mockReturnValue(body.promise);
+    fetcher.mockResolvedValue(response);
+    URL.createObjectURL = vi.fn(() => "blob:late");
+    URL.revokeObjectURL = vi.fn();
+    const source = createProjectIconSource({
+      serverUrl: "http://127.0.0.1:1",
+      windowCapability: "c",
+      fetcher,
+    });
+    const loading = source.load("p1");
+    await waitFor(() => expect(response.blob).toHaveBeenCalled());
+    source.dispose();
+    const init = fetcher.mock.calls[0]?.[1];
+    expect(init?.signal?.aborted).toBe(true);
+    body.resolve(new Blob(["late"]));
+    expect(await loading).toBeNull();
+    expect(source.peek("p1")).toBeUndefined();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("replaces and releases icons with the window credential, including StrictMode remounts", async () => {
+    let created = 0;
+    URL.createObjectURL = vi.fn(() => `blob:icon-${++created}`);
+    URL.revokeObjectURL = vi.fn();
+    const fetcher = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response(new Blob(["icon"])));
+    const tree = (capability: string) => (
+      <StrictMode>
+        <ProjectIconProvider serverUrl="http://127.0.0.1:1" windowCapability={capability}>
+          <ProjectIcon fallback={<span>fallback</span>} projectId="p1" size={16} />
+        </ProjectIconProvider>
+      </StrictMode>
+    );
+    const view = render(tree("first"));
+    try {
+      await waitFor(() =>
+        expect(view.container.querySelector("img")?.getAttribute("src")).toBe("blob:icon-1"),
+      );
+      view.rerender(tree("second"));
+      await waitFor(() =>
+        expect(view.container.querySelector("img")?.getAttribute("src")).toBe("blob:icon-2"),
+      );
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:icon-1");
+      view.unmount();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:icon-2");
+    } finally {
+      view.unmount();
+      fetcher.mockRestore();
+    }
+  });
+
   it("asks the host once for an icon however often the row is shown again", async () => {
     URL.createObjectURL = vi.fn(() => "blob:icon");
     const { fetcher, source } = sourceFor(200);

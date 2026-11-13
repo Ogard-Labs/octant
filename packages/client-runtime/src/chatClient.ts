@@ -43,7 +43,7 @@ export interface ChatClientOptions {
 
 export interface ChatClient {
   bootstrap(): Promise<ChatBootstrap>;
-  navigation(): Promise<ChatNavigation>;
+  navigation(signal?: AbortSignal): Promise<ChatNavigation>;
   search(query: string): Promise<ReadonlyArray<ChatBootstrap["threads"][number]>>;
   searchTranscript(query: string): Promise<ChatTranscriptSearch>;
   thread(threadId: ChatThreadId): Promise<ChatThreadView>;
@@ -93,11 +93,11 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
         decodeHostAnswer(ChatBootstrap),
       );
     },
-    navigation() {
+    navigation(signal) {
       return request(
         fetch,
         new URL("/api/chat/navigation", options.baseUrl).toString(),
-        { method: "GET", headers },
+        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
         decodeHostAnswer(ChatNavigation),
       );
     },

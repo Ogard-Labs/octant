@@ -394,11 +394,22 @@ The packaged desktop has a fixed, one-file launch bootstrap that imports only
 launch-role admission. The host-owning main, Canvas prototype host, terminal
 launcher, and Nightly client are separate fixed one-file runtimes and load only
 after that role is selected; Stable does not ship the Nightly client, and
-packaging refuses undeclared desktop JavaScript chunks. After host admission,
+packaging refuses undeclared desktop JavaScript chunks. Canvas role admission
+awaits its runtime load and pre-ready storage, scheme and Chromium-switch setup;
+the runtime then schedules page startup after Electron ready without holding
+entry evaluation open. The containment smoke exercises that same role-selecting
+entry and separate runtime. After host admission,
 Electron preconnects the renderer's loopback origin before constructing its
 `BrowserWindow`. Menu-bar activity and fleet refresh then run beside window
 preparation instead of delaying first paint; host readiness, bridge projection,
 and window-authority registration remain required before renderer navigation.
+
+Chat navigation shares one in-flight read between timer and Machine invalidations,
+with one pending follow-up for notices received during that read. Hidden windows
+hold invalidations until visible. Reads have a ten-second deadline and are
+cancelled when their controller is replaced or unmounted; failure keeps the last
+authoritative facts. This bounds snapshot decoding as well as transport work
+without delaying transcript frames or dropping the final navigation refresh.
 
 One desktop-owned launch keeps a fixed inventory of the server child, native
 brokers, constructed services, and managed-tool service as each is acquired.

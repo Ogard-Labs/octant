@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ChatClientFailure, createChatClient, MAX_CHAT_NDJSON_LINE_BYTES } from "./chatClient";
+import { createRequestCoordinator } from "./requestCoordinator";
 
 const baseUrl = "http://127.0.0.1:4310";
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -7,6 +8,32 @@ const threadId = "00000000-0000-4000-8000-000000000802";
 const now = "2026-07-19T12:00:00.000Z";
 
 describe("chat client", () => {
+  it("releases a coordinated navigation request when its window cancels the read", async () => {
+    let requestedSignal: AbortSignal | null | undefined;
+    const fetch = vi.fn<typeof globalThis.fetch>((_url, init) => {
+      requestedSignal = init?.signal;
+      return new Promise((_resolve, reject) => {
+        requestedSignal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Cancelled", "AbortError")),
+          { once: true },
+        );
+      });
+    });
+    const client = createChatClient({
+      baseUrl,
+      fetch: createRequestCoordinator({ fetch }),
+      windowCapability: capability,
+    });
+    const lifetime = new AbortController();
+    const reading = client.navigation(lifetime.signal);
+    const rejected = expect(reading).rejects.toBeDefined();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    lifetime.abort();
+    await rejected;
+    expect(requestedSignal?.aborted).toBe(true);
+  });
+
   it("discards an unsent attachment through the authenticated attachment boundary", async () => {
     const attachmentId = "00000000-0000-4000-8000-000000000803";
     const purged = {

@@ -70,7 +70,7 @@ if (
     process.stderr.write(`${role.message}\n`);
     app.exit(1);
   } else if (role.kind === "canvas") {
-    void runCanvasPrototypeHostRuntime();
+    await runCanvasPrototypeHostRuntime();
   } else if (role.kind === "terminal") {
     const { runTerminalLauncher } = await loadTerminalLauncherRuntime();
     const code = await runTerminalLauncher(role.args, {
@@ -102,7 +102,7 @@ if (
     await launchDesktop();
   }
 } else if (process.argv.includes(CANVAS_PROTOTYPE_HOST_SWITCH)) {
-  void runCanvasPrototypeHostRuntime();
+  await runCanvasPrototypeHostRuntime();
 } else {
   await launchDesktop();
 }
@@ -110,6 +110,9 @@ if (
 class NightlyTestHostFailure extends Error {}
 
 async function runCanvasPrototypeHostRuntime(): Promise<void> {
+  // Electron must not emit ready until this runtime has configured its
+  // private storage, resolver switches and privileged scheme. The runtime
+  // returns after setup; painting starts later, when Electron is ready.
   const { runCanvasPrototypeHost } = await loadCanvasPrototypeHostRuntime();
   await runCanvasPrototypeHost();
 }

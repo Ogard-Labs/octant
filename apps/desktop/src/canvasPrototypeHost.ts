@@ -804,6 +804,8 @@ function sessionPort(session: Session): CanvasPrototypeHostSessionPort {
 /**
  * Runs this process as the prototype host. The desktop app starts it with an
  * IPC channel; when that channel closes, the app is gone and so is this.
+ * Resolves after pre-ready setup, so the entry can await it without blocking
+ * Electron ready on the pages that need ready to start.
  */
 export async function runCanvasPrototypeHost(): Promise<void> {
   const { app, BrowserWindow, ipcMain, protocol, session } = await import("electron");
@@ -846,87 +848,99 @@ export async function runCanvasPrototypeHost(): Promise<void> {
   // A closed page is not the end of the host: it stays until the app is gone.
   app.on("window-all-closed", () => undefined);
 
-  await app.whenReady();
-  const pageSession = session.fromPartition(CANVAS_PROTOTYPE_PARTITION);
-  const preload = resolve(
-    dirname(fileURLToPath(import.meta.url)),
-    CANVAS_PROTOTYPE_PRELOAD_FILENAME,
-  );
-  const bridges = new Map<number, (payload: unknown) => void>();
-  ipcMain.on(CANVAS_PROTOTYPE_PAGE_BRIDGE_CHANNEL, (event, payload: unknown) => {
-    bridges.get(event.sender.id)?.(payload);
-  });
+  void app
+    .whenReady()
+    .then(() => {
+      const pageSession = session.fromPartition(CANVAS_PROTOTYPE_PARTITION);
+      const preload = resolve(
+        dirname(fileURLToPath(import.meta.url)),
+        CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+      );
+      const bridges = new Map<number, (payload: unknown) => void>();
+      ipcMain.on(CANVAS_PROTOTYPE_PAGE_BRIDGE_CHANNEL, (event, payload: unknown) => {
+        bridges.get(event.sender.id)?.(payload);
+      });
 
-  const host = createCanvasPrototypeHost({
-    session: sessionPort(pageSession),
-    send,
-    createPage: ({ width, height, scaleFactor }) => {
-      const window = new BrowserWindow({
-        show: false,
-        width,
-        height,
-        useContentSize: true,
-        webPreferences: {
-          contextIsolation: true,
-          nodeIntegration: false,
-          nodeIntegrationInSubFrames: false,
-          offscreen: { deviceScaleFactor: scaleFactor },
-          plugins: false,
-          preload,
-          sandbox: true,
-          session: pageSession,
-          webSecurity: true,
-          webviewTag: false,
+      const host = createCanvasPrototypeHost({
+        session: sessionPort(pageSession),
+        send,
+        createPage: ({ width, height, scaleFactor }) => {
+          const window = new BrowserWindow({
+            show: false,
+            width,
+            height,
+            useContentSize: true,
+            webPreferences: {
+              contextIsolation: true,
+              nodeIntegration: false,
+              nodeIntegrationInSubFrames: false,
+              offscreen: { deviceScaleFactor: scaleFactor },
+              plugins: false,
+              preload,
+              sandbox: true,
+              session: pageSession,
+              webSecurity: true,
+              webviewTag: false,
+            },
+          });
+          const contents = window.webContents;
+          const id = contents.id;
+          contents.setFrameRate(FRAME_RATE);
+          return {
+            onPaint: (listener) =>
+              contents.on("paint", (_event, dirty, image) => listener(paintOf(dirty, image))),
+            onCursor: (listener) => contents.on("cursor-changed", (_event, type) => listener(type)),
+            onBridge: (listener) => {
+              bridges.set(id, listener);
+            },
+            onGone: (listener) => {
+              contents.on("render-process-gone", () => listener());
+              contents.on("unresponsive", () => listener());
+            },
+            onNavigation: (listener) => {
+              // The load this process starts is not one of these; every
+              // navigation the page or a redirect starts is.
+              contents.on("will-navigate", (event) => listener(event));
+              contents.on("will-redirect", (event) => listener(event));
+              contents.on("will-frame-navigate", (event) => listener(event));
+            },
+            refuseNewWindows: () => contents.setWindowOpenHandler(() => ({ action: "deny" })),
+            refuseNonProxiedUdp: () =>
+              contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp"),
+            refuseUnloadPrompts: () =>
+              contents.on("will-prevent-unload", (event) => event.preventDefault()),
+            load: (url) => {
+              void contents.loadURL(url).catch(() => undefined);
+            },
+            input: (input) => {
+              if (window.isDestroyed()) return;
+              if (input.type === "focus") window.focusOnWebView();
+              else if (input.type === "blur") window.blurWebView();
+              else if (input.type === "edit") runEditCommand(contents, input.command);
+              else {
+                const event = electronInput(input);
+                if (event !== undefined) contents.sendInputEvent(event);
+              }
+            },
+            setSize: (nextWidth, nextHeight) => {
+              if (!window.isDestroyed()) window.setContentSize(nextWidth, nextHeight);
+            },
+            close: () => {
+              bridges.delete(id);
+              if (!window.isDestroyed()) window.destroy();
+            },
+          };
         },
       });
-      const contents = window.webContents;
-      const id = contents.id;
-      contents.setFrameRate(FRAME_RATE);
-      return {
-        onPaint: (listener) =>
-          contents.on("paint", (_event, dirty, image) => listener(paintOf(dirty, image))),
-        onCursor: (listener) => contents.on("cursor-changed", (_event, type) => listener(type)),
-        onBridge: (listener) => {
-          bridges.set(id, listener);
-        },
-        onGone: (listener) => {
-          contents.on("render-process-gone", () => listener());
-          contents.on("unresponsive", () => listener());
-        },
-        onNavigation: (listener) => {
-          // The load this process starts is not one of these; every
-          // navigation the page or a redirect starts is.
-          contents.on("will-navigate", (event) => listener(event));
-          contents.on("will-redirect", (event) => listener(event));
-          contents.on("will-frame-navigate", (event) => listener(event));
-        },
-        refuseNewWindows: () => contents.setWindowOpenHandler(() => ({ action: "deny" })),
-        refuseNonProxiedUdp: () => contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp"),
-        refuseUnloadPrompts: () =>
-          contents.on("will-prevent-unload", (event) => event.preventDefault()),
-        load: (url) => {
-          void contents.loadURL(url).catch(() => undefined);
-        },
-        input: (input) => {
-          if (window.isDestroyed()) return;
-          if (input.type === "focus") window.focusOnWebView();
-          else if (input.type === "blur") window.blurWebView();
-          else if (input.type === "edit") runEditCommand(contents, input.command);
-          else {
-            const event = electronInput(input);
-            if (event !== undefined) contents.sendInputEvent(event);
-          }
-        },
-        setSize: (nextWidth, nextHeight) => {
-          if (!window.isDestroyed()) window.setContentSize(nextWidth, nextHeight);
-        },
-        close: () => {
-          bridges.delete(id);
-          if (!window.isDestroyed()) window.destroy();
-        },
-      };
-    },
-  });
-  process.on("message", (command: CanvasPrototypeHostCommand) => host.receive(command));
-  await host.start();
+      process.on("message", (command: CanvasPrototypeHostCommand) => host.receive(command));
+      return host.start();
+    })
+    .catch(() => {
+      try {
+        send({ kind: "unavailable", reason: "Octant could not start its Canvas prototype host." });
+        removeData();
+      } finally {
+        app.exit(1);
+      }
+    });
 }

@@ -436,6 +436,11 @@ Status: Designed, not built. Since: 2026-11-12. Detail: [Architecture: Current R
 
 ### Desktop, server and renderer roles
 
+- Canvas role startup finishes its storage, scheme and Chromium-switch setup
+  before Electron ready, while page startup waits for ready without blocking
+  entry evaluation. Chat navigation keeps one in-flight read and one pending
+  refresh, pauses hidden windows and cancels obsolete reads. Detail:
+  [Process topology](../architecture.md#process-topology).
 - Crash recovery retains desktop lifetime through replacement-window preparation;
   last-window quit must not race it. Explicit quit wins and recovery is bounded
   to two replacements per minute.
@@ -682,6 +687,8 @@ A Project shows the favicon or app icon found inside its own folder wherever Pro
 - A file counts only when no component of its path below the Project's folder is a symbolic link (the host opens it anchored to the folder with a no-follow open on macOS and Linux, and finds no icon on other platforms, so a link swapped in during the lookup cannot lead outside; an icon reached through any link, even inside the folder, is not used), it is a regular file of at most 256 KB, and its first bytes match its extension; a Chat Project, which has no folder, has no icon.
 - It is served on the authenticated Project API (a window capability, or a paired device's read of the host) with `nosniff`, a script-forbidding content security policy and an ETag; a missing icon is a plain 404, not a logged error.
 - The renderer draws it as an `<img>` at the icon scale, fetched once per Project per session, so the polled navigation model never causes a request.
+- Replacing the window host or credential, or unmounting its icon provider,
+  cancels pending requests and releases cached object URLs, including late answers.
 
 Status: Built. Since: 2026-11-11. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
 

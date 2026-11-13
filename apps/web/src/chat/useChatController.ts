@@ -284,7 +284,7 @@ export function useChatController(options: ChatControllerOptions) {
   const mounted = useRef(true);
   const activeThreadIdRef = useRef(options.activeThreadId);
   const bootstrapGeneration = useRef(0);
-  const navigationGeneration = useRef(0);
+  const requestNavigation = useRef<(() => void) | undefined>(undefined);
   const threadGeneration = useRef(0);
   const streamAbort = useRef<AbortController | undefined>(undefined);
   const pendingSubmissionIds = useRef(new Map<string, ChatSubmissionId>());
@@ -754,58 +754,64 @@ export function useChatController(options: ChatControllerOptions) {
     };
   }, [loadBootstrap]);
 
+  const navigationReady = bootstrap !== undefined;
   useEffect(() => {
-    if (bootstrap === undefined || navigationRefreshMs <= 0) return;
-    let cancelled = false;
+    if (!navigationReady) return;
+    const lifetime = new AbortController();
     let inFlight = false;
-    const refresh = async () => {
-      if (!documentIsVisible() || inFlight) return;
+    let pending = false;
+    const drain = async () => {
+      if (inFlight || lifetime.signal.aborted || !documentIsVisible()) return;
       inFlight = true;
-      const request = ++navigationGeneration.current;
       try {
-        try {
-          const next = await client.navigation();
-          if (cancelled || !mounted.current || request !== navigationGeneration.current) return;
-          applyNavigation(next.threads);
-        } catch {
-          // Keep the indicator unknown or at its last authoritative value until refresh works.
+        while (pending && !lifetime.signal.aborted && documentIsVisible()) {
+          pending = false;
+          try {
+            const next = await client.navigation(
+              AbortSignal.any([lifetime.signal, AbortSignal.timeout(10_000)]),
+            );
+            if (lifetime.signal.aborted || !mounted.current) return;
+            // Reads finish in order. A notice during this read asks for one
+            // fresh snapshot afterwards, without multiplying decodes of the
+            // coordinator's shared response or starving a long-running turn.
+            applyNavigation(next.threads);
+          } catch {
+            // Retain the last authoritative facts; a later notice or tick retries.
+          }
         }
       } finally {
         inFlight = false;
       }
     };
-    const stop = scheduleVisibleInterval(() => void refresh(), Math.max(10, navigationRefreshMs), {
-      runImmediately: true,
-    });
-    return () => {
-      cancelled = true;
-      navigationGeneration.current += 1;
-      stop();
+    const request = () => {
+      pending = true;
+      void drain();
     };
-  }, [applyNavigation, bootstrap, client, navigationRefreshMs]);
+    requestNavigation.current = request;
+    const visible = () => {
+      if (pending) void drain();
+    };
+    if (navigationRefreshMs <= 0) document.addEventListener("visibilitychange", visible);
+    const stop =
+      navigationRefreshMs > 0
+        ? scheduleVisibleInterval(request, Math.max(10, navigationRefreshMs), {
+            runImmediately: true,
+          })
+        : undefined;
+    return () => {
+      lifetime.abort();
+      pending = false;
+      if (requestNavigation.current === request) requestNavigation.current = undefined;
+      document.removeEventListener("visibilitychange", visible);
+      stop?.();
+    };
+  }, [applyNavigation, client, navigationReady, navigationRefreshMs]);
 
   useEffect(() => {
-    if (
-      options.changeRevision === undefined ||
-      options.changeRevision <= 0 ||
-      bootstrap === undefined
-    )
+    if (options.changeRevision === undefined || options.changeRevision <= 0 || !navigationReady)
       return;
-    let cancelled = false;
-    const request = ++navigationGeneration.current;
-    void client
-      .navigation()
-      .then((next) => {
-        if (!cancelled && mounted.current && request === navigationGeneration.current) {
-          applyNavigation(next.threads);
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-      if (request === navigationGeneration.current) navigationGeneration.current += 1;
-    };
-  }, [applyNavigation, bootstrap, client, options.changeRevision]);
+    requestNavigation.current?.();
+  }, [client, navigationReady, navigationRefreshMs, options.changeRevision]);
 
   useEffect(() => {
     activeThreadIdRef.current = options.activeThreadId;

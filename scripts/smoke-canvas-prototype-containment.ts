@@ -555,17 +555,20 @@ const built = await Bun.build({
   format: "esm",
   external: ["electron"],
 });
-// The prototype host, built the way the desktop entry runs it: its program
-// and, beside it, the page preload it loads.
-const hostEntry = join(work, "probe-host-entry.ts");
-await Bun.write(
-  hostEntry,
-  `import { runCanvasPrototypeHost } from ${JSON.stringify(join(root, "apps/desktop/src/canvasPrototypeHost.ts"))};\nvoid runCanvasPrototypeHost();\n`,
-);
+// Use the actual role-selecting entry and its separate runtime: a static
+// test-only import would miss setup that races Electron ready across the load.
 const builtHost = await Bun.build({
-  entrypoints: [hostEntry],
+  entrypoints: [join(root, "apps/desktop/src/entry.ts")],
   outdir: work,
   naming: "probe-host.mjs",
+  target: "node",
+  format: "esm",
+  external: ["electron"],
+});
+const builtRuntime = await Bun.build({
+  entrypoints: [join(root, "apps/desktop/src/canvasPrototypeHost.ts")],
+  outdir: work,
+  naming: "canvasPrototypeHost.mjs",
   target: "node",
   format: "esm",
   external: ["electron"],
@@ -578,11 +581,13 @@ const builtPreload = await Bun.build({
   format: "cjs",
   external: ["electron"],
 });
-if (!built.success || !builtHost.success || !builtPreload.success) {
+if (!built.success || !builtHost.success || !builtRuntime.success || !builtPreload.success) {
   console.error(
     JSON.stringify({
       status: "build-failed",
-      logs: [...built.logs, ...builtHost.logs, ...builtPreload.logs].map(String),
+      logs: [...built.logs, ...builtHost.logs, ...builtRuntime.logs, ...builtPreload.logs].map(
+        String,
+      ),
     }),
   );
   process.exit(1);

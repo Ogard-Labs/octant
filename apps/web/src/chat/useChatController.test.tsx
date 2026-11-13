@@ -411,13 +411,86 @@ describe("useChatController", () => {
     unmount();
   });
 
-  it("does not let a slower timer read overwrite a newer Machine revision", async () => {
-    const timerRead = deferred<ReturnType<typeof decodeChatNavigation>>();
-    const revisionRead = deferred<ReturnType<typeof decodeChatNavigation>>();
-    const navigation = vi
-      .fn()
-      .mockImplementationOnce(() => timerRead.promise)
-      .mockImplementationOnce(() => revisionRead.promise);
+  it.each(["responds", "fails"])(
+    "coalesces a burst into one fresh read when the pending read %s",
+    async (outcome) => {
+      const timerRead = deferred<ReturnType<typeof decodeChatNavigation>>();
+      const revisionRead = deferred<ReturnType<typeof decodeChatNavigation>>();
+      const navigation = vi
+        .fn(async () => decodeChatNavigation({ threads: [] }))
+        .mockImplementationOnce(() => timerRead.promise)
+        .mockImplementationOnce(() => revisionRead.promise);
+      const client = createMockClient({
+        bootstrap: vi.fn(async () => bootstrap()),
+        navigation,
+        thread: vi.fn(async () => threadView(0)),
+        subscribe: vi.fn(async function* () {}),
+      });
+      const { result, rerender, unmount } = renderHook(
+        ({ changeRevision }) =>
+          useChatController({
+            changeRevision,
+            client,
+            navigationRefreshMs: 60_000,
+            serverUrl: "http://127.0.0.1",
+            windowCapability: capability,
+          }),
+        { initialProps: { changeRevision: 0 } },
+      );
+      await waitFor(() => expect(navigation).toHaveBeenCalledOnce());
+
+      for (let changeRevision = 1; changeRevision <= 50; changeRevision++) {
+        rerender({ changeRevision });
+      }
+      expect(navigation).toHaveBeenCalledOnce();
+      if (outcome === "fails") timerRead.reject(new Error("host restarted"));
+      else timerRead.resolve(decodeChatNavigation({ threads: [] }));
+      await waitFor(() => expect(navigation).toHaveBeenCalledTimes(2));
+      const threads = bootstrap().threads;
+      revisionRead.resolve(
+        decodeChatNavigation({
+          threads: threads.map((thread) => ({
+            id: thread.id,
+            title: thread.title,
+            providerInstanceId: thread.providerInstanceId,
+            updatedAt: "2026-07-19T12:02:00.000Z",
+            lastSequence: 2,
+            followUpOpen: false,
+          })),
+        }),
+      );
+      await waitFor(() => expect(result.current.navigation[0]?.updatedAt).toContain("12:02"));
+      expect(navigation).toHaveBeenCalledTimes(2);
+      unmount();
+    },
+  );
+
+  it("cancels navigation and drops a queued refresh when the window closes", async () => {
+    const reading = deferred<ReturnType<typeof decodeChatNavigation>>();
+    const navigation = vi.fn<ChatClient["navigation"]>(() => reading.promise);
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      navigation,
+      thread: vi.fn(async () => threadView(0)),
+      subscribe: vi.fn(async function* () {}),
+    });
+    const { rerender, unmount } = renderHook(
+      ({ changeRevision }) => useChatController({ client, changeRevision, navigationRefreshMs: 0 }),
+      { initialProps: { changeRevision: 1 } },
+    );
+    await waitFor(() => expect(navigation).toHaveBeenCalledOnce());
+    rerender({ changeRevision: 2 });
+    const signal = navigation.mock.calls[0]?.[0];
+    expect(signal?.aborted).toBe(false);
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => reading.resolve(decodeChatNavigation({ threads: [] })));
+    expect(navigation).toHaveBeenCalledOnce();
+  });
+
+  it("holds hidden-window invalidations and catches up once when visible", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const navigation = vi.fn(async () => decodeChatNavigation({ threads: [] }));
     const client = createMockClient({
       bootstrap: vi.fn(async () => bootstrap()),
       navigation,
@@ -425,50 +498,21 @@ describe("useChatController", () => {
       subscribe: vi.fn(async function* () {}),
     });
     const { result, rerender, unmount } = renderHook(
-      ({ changeRevision }) =>
-        useChatController({
-          changeRevision,
-          client,
-          navigationRefreshMs: 60_000,
-          serverUrl: "http://127.0.0.1",
-          windowCapability: capability,
-        }),
-      { initialProps: { changeRevision: 0 } },
+      ({ changeRevision }) => useChatController({ client, changeRevision, navigationRefreshMs: 0 }),
+      { initialProps: { changeRevision: 1 } },
     );
-    await waitFor(() => expect(navigation).toHaveBeenCalledOnce());
-
-    rerender({ changeRevision: 1 });
-    await waitFor(() => expect(navigation).toHaveBeenCalledTimes(2));
-    const threads = bootstrap().threads;
-    revisionRead.resolve(
-      decodeChatNavigation({
-        threads: threads.map((thread) => ({
-          id: thread.id,
-          title: thread.title,
-          providerInstanceId: thread.providerInstanceId,
-          updatedAt: "2026-07-19T12:02:00.000Z",
-          lastSequence: 2,
-          followUpOpen: false,
-        })),
-      }),
-    );
-    await waitFor(() => expect(result.current.navigation[0]?.updatedAt).toContain("12:02"));
-    timerRead.resolve(
-      decodeChatNavigation({
-        threads: threads.map((thread) => ({
-          id: thread.id,
-          title: thread.title,
-          providerInstanceId: thread.providerInstanceId,
-          updatedAt: "2026-07-19T12:01:00.000Z",
-          lastSequence: 1,
-          followUpOpen: false,
-        })),
-      }),
-    );
-    await act(async () => Promise.resolve());
-
-    expect(result.current.navigation[0]?.updatedAt).toContain("12:02");
-    unmount();
+    try {
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      rerender({ changeRevision: 2 });
+      rerender({ changeRevision: 3 });
+      expect(navigation).not.toHaveBeenCalled();
+      visibility.mockReturnValue("visible");
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      expect(navigation).toHaveBeenCalledOnce();
+    } finally {
+      unmount();
+      visibility.mockRestore();
+    }
   });
 
   it("keeps the last authoritative navigation facts when a refresh fails", async () => {
