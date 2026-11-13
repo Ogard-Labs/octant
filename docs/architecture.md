@@ -16892,7 +16892,14 @@ cards; general Azure CLI credentials remain unavailable by design.
   - **Browser cookies and saved logins:** profile cookie, login, and key
     stores under `~/Library/Application Support` (five levels) and the
     browser cookie folders on macOS; under `~/.config` and the browser
-    profile folders on Linux.
+    profile folders on Linux. Desktop chat apps are embedded browser
+    profiles, so their cookie files match already; the `Local Storage`
+    folders where Slack (direct and App Store builds) and Discord keep the
+    signed-in session token are listed too, on Linux under `~/.config`.
+    Only named stores are listed, never a whole Application Support or
+    `~/.config` folder, so ordinary app settings stay readable (maintainer
+    decision, 2026-11-13). Stores without a fixed path (a KeePassXC database
+    the person places) are left to the person's own protected paths.
   - **Octant's own secrets:** the bridge secret, the data directory's
     `remote` and `integrations` folders, and the runtime directory's
     `*.secret` files.

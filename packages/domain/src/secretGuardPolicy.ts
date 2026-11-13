@@ -208,10 +208,22 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
             names("Library/Application Support/Firefox/Profiles", PROFILE_LOGIN_STORE_NAME, 2),
             home("Library/Cookies"),
             home("Library/Containers/com.apple.Safari/Data/Library/Cookies"),
+            // Desktop chat apps are embedded browser profiles: their Cookies
+            // already match the profile stores above, but each keeps its
+            // signed-in session token in Local Storage, which replays as the
+            // person. Only that folder is listed; the rest of each app's
+            // settings stay readable.
+            home("Library/Application Support/Slack/Local Storage"),
+            home(
+              "Library/Containers/com.tinyspeck.slackmacgap/Data/Library/Application Support/Slack/Local Storage",
+            ),
+            home("Library/Application Support/discord/Local Storage"),
           ]
         : [
             names(".config", PROFILE_STORE_NAME, 5),
             names(".mozilla/firefox", PROFILE_LOGIN_STORE_NAME, 2),
+            home(".config/Slack/Local Storage"),
+            home(".config/discord/Local Storage"),
           ],
     },
     {
