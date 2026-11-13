@@ -495,7 +495,7 @@
 
 .welcome {
   display: flex;
-  width: min(100% - 40px, var(--oct-composer-width));
+  width: min(100% - var(--oct-thread-gutter), var(--oct-composer-width));
   min-width: 0;
   flex-direction: column;
   align-items: stretch;

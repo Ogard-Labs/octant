@@ -311,7 +311,11 @@ capped ([Starting workers](#starting-workers)).
   continue when a person runs a turn on either. The wake turns and hops are
   recorded in host storage, so a restart neither resets the hourly bound nor
   lets a round past the bound wake; pending state notices stay in memory, since the
-  first sweep after a restart reads every worker's state again.
+  first sweep after a restart reads every worker's state again. Each wake is
+  journaled when it is decided and when its turn starts or it is dropped, with
+  only the worker change a notice wake was decided on, so a restart continues
+  or holds a wake that never started its turn
+  ([Architecture: coordinator wake restart recovery](../architecture.md#persistence)).
 
 Rationale: without notices, a coordinator learns that a worker finished only by
 polling with `wait`, which spends its turn budget and its context. A closed set

@@ -16,6 +16,7 @@ import type {
 } from "@octant/contracts";
 import { decodeDesktopPaneRequest } from "@octant/contracts";
 import { Clock, Monitor, Power, RotateCw } from "lucide-react";
+import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { DeviceLine } from "../device/DeviceLine";
 import { DeviceSpinner } from "../device/DeviceStage";
@@ -288,6 +289,10 @@ export function DesktopPane(props: {
   return (
     <section aria-label="Desktop" className="device-pane desktop-pane">
       <DesktopToolbar
+        describe={(lease) => {
+          const place = desktopWhere(providers, lease);
+          return `${providerName(providers, String(lease.providerId))}${place === undefined ? "" : ` · ${place}`}`;
+        }}
         leases={leases}
         now={now}
         onExtend={(lease) => {
@@ -458,8 +463,10 @@ function StartConfirmation(props: {
   );
 }
 
-function DesktopToolbar(props: {
+export function DesktopToolbar(props: {
   readonly title: string;
+  /** Provider and place of a lease, said under its name in the desktops menu. */
+  readonly describe: (lease: DesktopLease) => string;
   readonly state: DesktopPaneState;
   readonly leases: ReadonlyArray<DesktopLease>;
   readonly selected: DesktopLease | undefined;
@@ -473,6 +480,54 @@ function DesktopToolbar(props: {
   const lease = "lease" in state ? state.lease : undefined;
   const running = lease?.state === "ready";
   const extendable = running && lease !== undefined && extensionMinutes(lease) > 0;
+  // The provider and place of a desktop off this computer, which can bill, stay
+  // in words beside its state; they do not fold away.
+  const items: DockBarItem[] = [
+    {
+      kind: "text",
+      id: "where",
+      text: props.title,
+      dot: dotFor(state),
+      cue: true,
+    },
+    { kind: "text", id: "state", text: stateWords(state, props.now()), live: true },
+  ];
+  if (props.leases.length > 1)
+    items.push({
+      kind: "choice",
+      id: "desktops",
+      label: "Desktops",
+      options: props.leases.map((each, index) => ({
+        id: String(each.leaseId),
+        label: `Desktop ${index + 1}`,
+        description: props.describe(each),
+      })),
+      value: String(props.selected?.leaseId ?? ""),
+      onChange: (id) => {
+        const chosen = props.leases.find((each) => String(each.leaseId) === id);
+        if (chosen !== undefined) props.onSelect(chosen);
+      },
+    });
+  if (extendable && lease !== undefined)
+    items.push({
+      kind: "button",
+      id: "extend",
+      label: `Add ${extensionMinutes(lease)} minutes`,
+      icon: Clock,
+      disabled: props.pending !== undefined,
+      onSelect: () => props.onExtend(lease),
+    });
+  if (running)
+    items.push({
+      kind: "button",
+      id: "release",
+      label: "Release desktop",
+      icon: Power,
+      disabled: props.pending !== undefined,
+      onSelect: props.onRelease,
+    });
+  const hosted = useDockBarControls(items);
+  if (hosted !== undefined) return null;
   return (
     <div aria-label="Desktop controls" className="device-toolbar" role="toolbar">
       <span className="device-toolbar__device">

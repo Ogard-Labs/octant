@@ -123,6 +123,14 @@ function sources(
         message: `Refused with api_key=${SEEDED_KEY} opening ${HOME}/Dev/private-plan/notes.md`,
       },
     ],
+    readCrashRecords: async () => [
+      {
+        recordedAt: "2026-10-31T09:58:00.000Z",
+        process: "host",
+        exitReason: "signal SIGKILL",
+        lastLines: [`opening ${HOME}/Dev/private-plan/store.db with token=${SEEDED_KEY}`],
+      },
+    ],
     codeSettings: () => undefined,
     codeThreadPolicies: () => ["approval-gated", "approval-gated", "full-access"],
     platformCapabilities: ["platform:sandbox-exec"],
@@ -191,6 +199,10 @@ describe("exportSupportBundle", () => {
     expect(byPath("providers.json").enabled[0].capabilities.streaming).toBe("supported");
     expect(byPath("providers.json").disabledCount).toBe(1);
     expect(byPath("host-log.json").lines[0].event).toBe("provider.failed");
+    expect(byPath("crash-records.json").records[0]).toMatchObject({
+      process: "host",
+      exitReason: "signal SIGKILL",
+    });
     expect(byPath("journal-events.json").events[0].name).toBe(
       "diagnostics.failure-incident-recorded@2",
     );
@@ -335,6 +347,7 @@ describe("previewSupportBundle", () => {
     );
     expect(preview.sections.find((section) => section.id === "providers")?.entries).toBe(1);
     expect(preview.sections.find((section) => section.id === "host-log")?.entries).toBe(1);
+    expect(preview.sections.find((section) => section.id === "crash-records")?.entries).toBe(1);
     const recorded = base.connection
       .prepare("SELECT count(*) AS n FROM event_journal WHERE event_name = ?")
       .get("diagnostics.support-bundle-exported@1") as { n: number };

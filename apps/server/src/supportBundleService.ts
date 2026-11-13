@@ -18,6 +18,7 @@ import {
   describeSupportBundle,
   SUPPORT_BUNDLE_JOURNAL_EVENT_LIMIT,
   SUPPORT_BUNDLE_LOG_LINE_LIMIT,
+  type SupportBundleCrashRecord,
   type SupportBundleFacts,
   type SupportBundleProviderFact,
 } from "@octant/domain";
@@ -48,6 +49,8 @@ export interface SupportBundleSources {
       readonly message: string;
     }>
   >;
+  /** Local crash records the desktop kept, newest first. */
+  readonly readCrashRecords?: () => Promise<ReadonlyArray<SupportBundleCrashRecord>>;
   readonly codeSettings: () => CodeSettings | undefined;
   readonly codeThreadPolicies: () => ReadonlyArray<string>;
   readonly platformCapabilities: ReadonlyArray<string>;
@@ -228,6 +231,13 @@ export async function gatherSupportBundleFacts(
   const generatedAt = (sources.clock ?? (() => new Date().toISOString()))();
   const providers = attempt(() => readProviders(sources));
   const hostLog = await readHostLog(sources).catch(() => undefined);
+  const crashRecords =
+    sources.readCrashRecords === undefined
+      ? undefined
+      : await sources
+          .readCrashRecords()
+          .then((records) => ({ records }))
+          .catch(() => undefined);
   const journalEvents = attempt(() => readJournalEvents(sources.connection));
   const confinement = attempt(() => readConfinement(sources));
   const processFacts = attempt(() => readProcess(sources));
@@ -248,6 +258,7 @@ export async function gatherSupportBundleFacts(
     },
     ...(providers === undefined ? {} : { providers }),
     ...(hostLog === undefined ? {} : { hostLog }),
+    ...(crashRecords === undefined ? {} : { crashRecords }),
     ...(journalEvents === undefined ? {} : { journalEvents }),
     ...(confinement === undefined ? {} : { confinement }),
     ...(processFacts === undefined ? {} : { process: processFacts }),

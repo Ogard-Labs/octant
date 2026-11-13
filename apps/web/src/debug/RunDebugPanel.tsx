@@ -12,6 +12,7 @@ import type {
   CodeDebugConfigurationsResult,
 } from "@octant/contracts/code-debug";
 import { Bug, Play, Plus, RotateCw } from "lucide-react";
+import { useDockBarControls } from "../shell/dockBarControls";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { codeEditorRevealKey, requestCodeEditorReveal } from "../code/codeEditorReveal";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -115,6 +116,8 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
   }>();
   const warn = useCallback((text: string) => setNotice({ tone: "warning", text }), []);
   const [ended, setEnded] = useState<string>();
+  /** The name of a session a host restart ended, offered back as an ordinary start. */
+  const [endedByRestart, setEndedByRestart] = useState<string>();
   const [pending, setPending] = useState<string>();
   useEffect(() => {
     setPending(undefined);
@@ -288,25 +291,52 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
   );
 
   const session = thread.session;
-  return (
-    <section aria-label="Run and debug" className="run-debug">
-      <header className="run-debug__toolbar">
-        <Bug aria-hidden="true" size={16} />
-        <h2 className="run-debug__title">Run and debug</h2>
-        {session === undefined && !localOnly ? (
-          <OctantIconButton
-            disabled={listing.kind === "loading"}
-            label="Refresh configurations"
-            onClick={() => {
+  const restartConfiguration =
+    endedByRestart === undefined || listing.kind !== "listed"
+      ? undefined
+      : listing.result.approved.find((entry) => entry.configuration.name === endedByRestart)
+          ?.configuration;
+  const refreshable = session === undefined && !localOnly;
+  const hosted = useDockBarControls(
+    refreshable
+      ? [
+          {
+            kind: "button",
+            id: "refresh",
+            label: "Refresh configurations",
+            icon: RotateCw,
+            onSelect: () => {
               void refresh();
               validation.refresh();
-            }}
-            type="button"
-          >
-            <RotateCw aria-hidden="true" size={14} />
-          </OctantIconButton>
-        ) : null}
-      </header>
+            },
+            disabled: listing.kind === "loading",
+          },
+        ]
+      : [],
+  );
+  return (
+    <section aria-label="Run and debug" className="run-debug">
+      {hosted !== undefined ? (
+        <h2 className="visually-hidden">Run and debug</h2>
+      ) : (
+        <header className="run-debug__toolbar">
+          <Bug aria-hidden="true" size={16} />
+          <h2 className="run-debug__title">Run and debug</h2>
+          {session === undefined && !localOnly ? (
+            <OctantIconButton
+              disabled={listing.kind === "loading"}
+              label="Refresh configurations"
+              onClick={() => {
+                void refresh();
+                validation.refresh();
+              }}
+              type="button"
+            >
+              <RotateCw aria-hidden="true" size={14} />
+            </OctantIconButton>
+          ) : null}
+        </header>
+      )}
       <div className="run-debug__content">
         {!localOnly &&
         (listing.kind === "listed" ||
@@ -330,8 +360,9 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
             client={client}
             key={String(session.sessionId)}
             name={session.name}
-            onEnded={(text) => {
+            onEnded={(text, reason) => {
               store.setSession(key, undefined);
+              setEndedByRestart(reason === "host-restarted" ? session.name : undefined);
               if (text === LOCAL_ONLY_TEXT) setLocalOnly(true);
               else setEnded(text);
               void refresh();
@@ -345,6 +376,27 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
         ) : (
           <div className="run-debug__body">
             {ended === undefined ? null : <EndedLine text={ended} />}
+            {/* A session a host restart ended is offered back by the confirmed
+                configuration of the same name, through the ordinary Start: the
+                host checks that confirmation and the thread as they are now,
+                and nothing the ended session held carries over. */}
+            {restartConfiguration === undefined ? null : (
+              <OctantButton
+                className="run-debug__restart"
+                disabled={pending !== undefined}
+                focusableWhenDisabled
+                onClick={() => {
+                  setEndedByRestart(undefined);
+                  void start(restartConfiguration);
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <RotateCw aria-hidden="true" size={14} />
+                Restart {restartConfiguration.name}
+              </OctantButton>
+            )}
             {notice === undefined ? null : (
               <OctantAlert tone={notice.tone}>{notice.text}</OctantAlert>
             )}

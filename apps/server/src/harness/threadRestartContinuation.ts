@@ -84,7 +84,7 @@ export interface ThreadRestartContinuationPorts {
 
 type Entries = Pick<HostRestartRecovery, "continued" | "held">;
 
-const HOLD_DETAIL: Record<"turned-off" | "opted-out" | "crash-loop", string> = {
+export const HOLD_DETAIL: Record<"turned-off" | "opted-out" | "crash-loop", string> = {
   "turned-off": "Continue after restart is off in Settings, so this thread waits for you.",
   "opted-out": "Continue after restart is off for this thread, so it waits for you.",
   "crash-loop":

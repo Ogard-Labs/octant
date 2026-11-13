@@ -543,6 +543,85 @@ describe("Run and debug panel", () => {
     expect(store.read(key).session).toBeUndefined();
   });
 
+  it("offers a session a host restart ended back in one click as a fresh start the host may refuse", async () => {
+    const user = userEvent.setup();
+    const { client, session } = fakeHost({
+      start: { status: "refused", reason: "plan-read-only" },
+    });
+    session.mockResolvedValue(
+      decodeCodeDebugSessionResult({
+        status: "state",
+        state: { status: "ended", endReason: "host-restarted" },
+        revision: 1,
+        exceptionFilters: [],
+        output: [],
+        outputDropped: false,
+      }),
+    );
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    const store = new CodeDebugWindowState();
+    store.setSession(key, {
+      sessionId: decodeCodeDebugSessionId(sessionId),
+      name: "Run the fixture",
+    });
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        pollMs={fast}
+        store={store}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText("The session ended because the host restarted.")).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: "Restart Run the fixture" }));
+    expect(client.start).toHaveBeenCalledWith({
+      threadId,
+      checkoutId,
+      configuration,
+      breakpoints: [],
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Plan is read-only, so nothing can be started from it.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Restart Run the fixture" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers no restart for a session that ended for any reason but a host restart", async () => {
+    const { client, session } = fakeHost();
+    session.mockResolvedValue(
+      decodeCodeDebugSessionResult({
+        status: "state",
+        state: { status: "ended", endReason: "host-shutdown" },
+        revision: 1,
+        exceptionFilters: [],
+        output: [],
+        outputDropped: false,
+      }),
+    );
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    const store = new CodeDebugWindowState();
+    store.setSession(key, {
+      sessionId: decodeCodeDebugSessionId(sessionId),
+      name: "Run the fixture",
+    });
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        pollMs={fast}
+        store={store}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText("The session ended because the host shut down.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Restart/ })).not.toBeInTheDocument();
+  });
+
   it("shows a paired browser that debugging stays on this computer and offers it nothing to start", async () => {
     const { client } = fakeHost();
     vi.mocked(client.configurations).mockRejectedValue(

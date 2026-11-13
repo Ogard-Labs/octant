@@ -16,7 +16,12 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-function harness(overrides: { activeTurns?: number } = {}) {
+function harness(
+  overrides: {
+    activeTurns?: number;
+    keepCrashRecord?: ConstructorParameters<typeof HostMemoryGuard>[0]["keepCrashRecord"];
+  } = {},
+) {
   const state = {
     signal: "normal" as SystemMemorySignal,
     rss: 500 * 1024 ** 2,
@@ -35,6 +40,9 @@ function harness(overrides: { activeTurns?: number } = {}) {
     clock: () => state.now,
     log: (line) => logs.push(line),
     setTimer: () => ({ unref: () => undefined, clear: () => undefined }),
+    ...(overrides.keepCrashRecord === undefined
+      ? {}
+      : { keepCrashRecord: overrides.keepCrashRecord }),
   });
   return { guard, state, logs, releaseIdle, trimCaches };
 }
@@ -238,6 +246,29 @@ describe("HostMemoryGuard", () => {
       processMegabytes: 4608,
     });
     expect(second.logs.join("\n")).toContain("previous host stopped without a clean exit");
+  });
+
+  it("names the crash record kept for an unclean previous stop, and keeps none after a clean one", async () => {
+    const keepCrashRecord = vi.fn(async () => ({
+      recordedAt: "2026-10-31T10:01:00.000Z",
+      exitReason: "stopped without a clean exit",
+    }));
+    const first = harness();
+    await first.guard.start();
+    await first.guard.sample();
+
+    const second = harness({ keepCrashRecord });
+    await second.guard.start();
+    expect(keepCrashRecord).toHaveBeenCalledOnce();
+    expect(second.guard.report().previousStop?.crashRecord).toEqual({
+      recordedAt: "2026-10-31T10:01:00.000Z",
+      exitReason: "stopped without a clean exit",
+    });
+    await second.guard.stop();
+
+    const third = harness({ keepCrashRecord });
+    await third.guard.start();
+    expect(keepCrashRecord).toHaveBeenCalledOnce();
   });
 
   it("starts clean when the state file is missing, unreadable, or not ours", async () => {

@@ -451,10 +451,6 @@ html[data-octant-native-host="true"]
   min-height: 0;
   flex: 0 0 auto;
   padding: 0;
-  /* The recipe's transparent 1px border made the button 34px around its 32px
-     face; the margin gives the border back, so the button takes its face's
-     32px in the column. */
-  margin: -1px;
 }
 
 .sidebar-rail__face {
@@ -496,7 +492,7 @@ html[data-octant-native-host="true"]
   height: 16px;
   box-sizing: border-box;
   padding: 0 var(--oct-space-1);
-  border: 1px solid color-mix(in oklab, var(--oct-fg) 14%, transparent);
+  border: 1px solid var(--oct-hairline);
   border-radius: var(--oct-radius-pill);
   background: var(--octant-sidebar-opaque);
   color: var(--oct-fg);
@@ -543,7 +539,7 @@ html[data-octant-native-host="true"]
   height: 1px;
   flex: 0 0 auto;
   margin: var(--oct-space-1) 0;
-  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  background: var(--oct-hairline);
 }
 
 .window-chrome__leading {
@@ -1112,7 +1108,7 @@ html[data-octant-native-host="true"]
   justify-content: space-between;
   gap: var(--oct-space-2);
   padding: var(--oct-space-3);
-  border: 1px solid color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  border: 1px solid var(--oct-hairline);
   border-radius: var(--oct-radius-sm);
   background: var(--sidebar-tile-fill);
   color: var(--oct-fg);
@@ -2544,7 +2540,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   z-index: 1;
   box-sizing: border-box;
   display: flex;
-  width: min(100% - 40px, var(--oct-composer-width));
+  width: min(100% - var(--oct-thread-gutter), var(--oct-composer-width));
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
@@ -3096,14 +3092,14 @@ form > .work-composer-adapter__attachments {
 
 .work-thread-workspace__transcript {
   display: grid;
-  width: min(100% - 40px, var(--oct-thread-measure));
+  width: var(--oct-thread-column);
   gap: var(--oct-space-4);
   padding: clamp(20px, 3vh, 36px) 0 28px;
   margin: 0 auto;
 }
 
 .work-thread-workspace__transcript-trail {
-  width: min(100% - 40px, var(--oct-thread-measure));
+  width: var(--oct-thread-column);
   padding-bottom: 28px;
   margin: 0 auto;
 }

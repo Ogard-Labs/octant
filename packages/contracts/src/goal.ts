@@ -94,6 +94,11 @@ export const ThreadGoal = Schema.Struct({
   updatedAt: UtcTimestamp,
   completedAt: Schema.optional(UtcTimestamp),
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /**
+   * The newest usage charges by their charge id (a goal-loop round id), so a
+   * charge repeated after a restart is recognised and not added twice.
+   */
+  recentChargeIds: Schema.optional(Schema.Array(Schema.UUID).pipe(Schema.maxItems(32))),
   version: AggregateVersion,
 }).annotations(strict);
 export type ThreadGoal = typeof ThreadGoal.Type;
@@ -164,6 +169,8 @@ export const RecordThreadGoalUsageCommand = Schema.Struct({
   deltaTokens: NonNegativeInt,
   deltaElapsedMs: NonNegativeInt,
   deltaTurns: NonNegativeInt,
+  /** Identifies one charge; a charge id the goal already holds is refused, never added again. */
+  chargeId: Schema.optional(Schema.UUID),
 }).annotations(strict);
 export type RecordThreadGoalUsageCommand = typeof RecordThreadGoalUsageCommand.Type;
 

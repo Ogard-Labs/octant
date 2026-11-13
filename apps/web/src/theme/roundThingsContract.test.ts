@@ -102,7 +102,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   // Meters, progress bars, and their fills.
   ".meter",
   ".ctxmeter",
-  ".range",
   ".zen-timer-bar",
   ".context-window-popover__meter",
   ".context-window-popover__limit-meter",
@@ -125,8 +124,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".provider-limits__window meter::-webkit-meter-optimum-value",
   ".provider-limits__window meter::-moz-meter-bar",
   // A slider's thumb, a scrollbar's thumb, and a sheet's grabber.
-  ".range::-webkit-slider-thumb",
-  ".range::-moz-range-thumb",
   ".octant-slider::-webkit-slider-thumb",
   ".octant-slider::-moz-range-thumb",
   ".canvas-mockup__slider-knob",

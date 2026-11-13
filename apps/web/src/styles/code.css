@@ -98,6 +98,18 @@
   padding: var(--oct-space-2) var(--oct-space-4);
 }
 
+.code-terminal-pane__ended {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+}
+
+.code-terminal-pane__ended > p {
+  margin: 0;
+}
+
 .code-delivery-pane__warning {
   color: var(--oct-warn-fg);
   background: var(--oct-warn-soft);
@@ -1228,6 +1240,11 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   overflow: auto;
 }
 
+/* Hosted, the panel's first text stands on the bar's 12px edge. */
+.work-files-panel[data-bar-hosted="true"] {
+  padding-inline: var(--oct-space-3);
+}
+
 .work-files-panel__toolbar {
   display: flex;
   justify-content: flex-end;
@@ -1389,7 +1406,10 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
-  padding: 0 4px;
+  /* The first button is centred on the column the navigation rows' 16px icons
+     stand on (the nav inset plus half the icon), so the folder glyph and the
+     glyphs of the rows below it share one centre line. */
+  padding: 0 4px 0 calc(var(--oct-nav-inset) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2);
   /* The views share one row with the filter and the list switch. Wrapping
      them stacked a narrow sidebar's toolbar into three ragged rows, so the
      views scroll sideways instead, without a scrollbar over the glyphs. */
@@ -2591,6 +2611,28 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-project-pull-requests[data-presentation="dock"] .surface-toolbar {
   flex-wrap: wrap;
+}
+
+/* Hosted by a bar or the single row, the toolbar is the one 32px row on the
+   bar's insets and hairline, reaching the tile's edges: search is content. */
+.code-project-pull-requests[data-bar-hosted="true"] {
+  padding-top: 0;
+}
+
+.code-project-pull-requests[data-bar-hosted="true"] .surface-toolbar {
+  height: 32px;
+  flex-wrap: nowrap;
+  margin: 0 calc(-1 * var(--oct-space-3));
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+}
+
+.code-project-pull-requests[data-bar-hosted="true"] .surface-toolbar__search {
+  min-width: 0;
+}
+
+.code-project-pull-requests[data-bar-hosted="true"] .surface-toolbar__search input {
+  height: 24px;
 }
 
 .guardrail-level {

@@ -61,6 +61,12 @@ export interface BrowserCredentialUseOptions {
   readonly metadata: (item: BrowserCredentialMetadata["item"]) => Promise<BrowserMetadataAnswer>;
   readonly record: (record: BrowserCredentialJournalRecord) => void;
   readonly now: () => number;
+  /**
+   * The desktop's wall clock. Fill deadlines are kept on `now` (the process
+   * authority clock); the desktop checks the deadlines it is sent against its
+   * own wall time, so each one crosses as the time remaining from this clock.
+   */
+  readonly wallNow?: () => number;
   readonly uuid: () => string;
 }
 export interface BrowserCredentialFillLease {
@@ -77,6 +83,9 @@ export function browserCredentialRefusal(
 }
 export function createBrowserCredentialUseService(options: BrowserCredentialUseOptions) {
   const hostSessionId = options.uuid();
+  const wallNow = options.wallNow ?? Date.now;
+  const desktopDeadline = (expires: number) =>
+    new Date(wallNow() + Math.max(0, expires - options.now())).toISOString();
   const grants = new Map<string, BrowserCredentialGrant>();
   const fillPlans = new Map<
     string,
@@ -320,11 +329,10 @@ export function createBrowserCredentialUseService(options: BrowserCredentialUseO
       windowId,
       grant,
       target,
-      expires: Math.min(
-        Date.parse(prepared.expiresAt),
-        Date.parse(grant.expiresAt),
-        options.now() + 180_000,
-      ),
+      // The desktop's own deadline is wall time and stays its own check;
+      // comparing it with the authority clock would end a fresh plan early
+      // after the wall clock was set back.
+      expires: Math.min(Date.parse(grant.expiresAt), options.now() + 180_000),
       abort: new AbortController(),
       state: "prepared",
       operation: undefined,
@@ -382,7 +390,7 @@ export function createBrowserCredentialUseService(options: BrowserCredentialUseO
         owner,
         planId: command.planId,
         ...(metadata
-          ? { metadata: plan.grant.metadata, expiresAt: new Date(plan.expires).toISOString() }
+          ? { metadata: plan.grant.metadata, expiresAt: desktopDeadline(plan.expires) }
           : {}),
       });
     const stopHost = () => {
@@ -439,7 +447,7 @@ export function createBrowserCredentialUseService(options: BrowserCredentialUseO
           windowId,
           plan.target,
           command.planId,
-          new Date(plan.expires).toISOString(),
+          desktopDeadline(plan.expires),
         );
       }
       const status =

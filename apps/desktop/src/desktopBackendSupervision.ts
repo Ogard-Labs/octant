@@ -40,6 +40,8 @@ export function classifyDesktopBackendFailure(error: unknown): DesktopBackendFai
 export interface DesktopBackendSupervisorPorts {
   readonly restart: () => Promise<ManagedChildProcess | undefined>;
   readonly reportFatal: (error: unknown) => void;
+  /** Keeps a local crash record for an exit nobody asked for. Never throws. */
+  readonly recordCrash?: (child: ManagedChildProcess) => void;
   readonly now?: () => number;
   readonly schedule?: (run: () => void, delayMs: number) => () => void;
 }
@@ -158,6 +160,7 @@ export function createDesktopBackendSupervisor(
     // hostLifecycle.restart() stops the process we are replacing. That
     // expected exit must not count as a crash or start a second restart.
     if (status === "restarting") return;
+    ports.recordCrash?.(child);
     const backoff = nextRestartBackoff({ failures, now: now() });
     if (backoff.crashLoop) {
       gaveUp(new Error("The managed server kept exiting and could not be restarted."));

@@ -5,6 +5,7 @@ import type {
   CodeDebugChildSummary,
   CodeDebugOutputEntry,
   CodeDebugScope,
+  CodeDebugSessionEndReason,
   CodeDebugSessionId,
   CodeDebugSessionRequest,
   CodeDebugSessionResult,
@@ -95,8 +96,8 @@ export function useCodeDebugSession(input: {
   readonly onChildGone?: () => void;
   /** The session reached the program and stopped in a checkout file, or left it. */
   readonly onStoppedAt: (frame: CodeDebugStackFrame | undefined) => void;
-  /** The session is over; the words say why. */
-  readonly onEnded: (text: string) => void;
+  /** The session is over; the words say why, and the reason when the host gave one. */
+  readonly onEnded: (text: string, reason?: CodeDebugSessionEndReason) => void;
   readonly pollMs?: { readonly running?: number; readonly stopped?: number };
 }): readonly [DebugSessionView, DebugSessionControls] {
   const { client, threadId, checkoutId, sessionId, child } = input;
@@ -151,17 +152,17 @@ export function useCodeDebugSession(input: {
     );
   }, []);
 
-  const end = useCallback((text: string) => {
+  const end = useCallback((text: string, reason?: CodeDebugSessionEndReason) => {
     if (ended.current) return;
     ended.current = true;
     callbacks.current.onStoppedAt(undefined);
-    callbacks.current.onEnded(text);
+    callbacks.current.onEnded(text, reason);
   }, []);
 
   // A child's end is not the session's: the view goes back to the program.
   const endTarget = useCallback(
-    (text: string) => {
-      if (child === undefined) end(text);
+    (text: string, reason?: CodeDebugSessionEndReason) => {
+      if (child === undefined) end(text, reason);
       else callbacks.current.onChildGone?.();
     },
     [child, end],
@@ -213,7 +214,7 @@ export function useCodeDebugSession(input: {
       setNotice((current) => (current === UNREACHABLE_TEXT ? undefined : current));
       switch (answer.status) {
         case "ended":
-          endTarget(endReasonText(answer.endReason));
+          endTarget(endReasonText(answer.endReason), answer.endReason);
           return answer;
         case "refused":
           if (answer.reason === "no-session") endTarget(refusalText(answer.reason));
@@ -328,7 +329,7 @@ export function useCodeDebugSession(input: {
           ...answer.output.map((entry): DebugConsoleItem => ({ kind: "output", entry })),
         ]);
         if (answer.state.status === "ended") {
-          end(endReasonText(answer.state.endReason, answer.state.exitCode));
+          end(endReasonText(answer.state.endReason, answer.state.exitCode), answer.state.endReason);
           return;
         }
         if (answer.state.status === "stopped") {

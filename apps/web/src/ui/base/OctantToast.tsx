@@ -52,7 +52,7 @@ export function OctantToast({
         className="toast__dismiss"
         label="Dismiss notification"
         onClick={onDismiss}
-        size="icon"
+        size="icon-sm"
         type="button"
       >
         <X aria-hidden="true" size={14} />
