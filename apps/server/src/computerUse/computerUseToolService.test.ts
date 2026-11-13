@@ -1111,7 +1111,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         `Allow this one action in notes-app on this thread's disposable desktop for "Notes app".`,
         `Allow this one action in notes-app on this thread's disposable desktop for "Notes app".`,
       ]);
-      // The lease service asks for the file even under Full access once tainted.
+      // The lease service is told the thread is marked, so an answer from before the mark does not cover it.
       await tools.execute(call({ operation: "send-file", path: "dist/notes-app" }));
       expect(f.sendFile.mock.calls[0]?.[3]).toBe(true);
     } finally {
@@ -1173,7 +1173,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       await expect(tools.execute(send)).resolves.toEqual({ result: sent, isError: false });
       expect(f.transfers).toEqual(["dist/notes-app", "dist/notes-app"]);
       expect(f.asked[0]).toBe(
-        `Send dist/notes-app (9 bytes, SHA-256 ${"a".repeat(64)}) into this thread's disposable desktop on This host for "Notes app"?`,
+        `Send dist/notes-app (9 bytes, SHA-256 ${"a".repeat(64)}) into this thread's disposable desktop on This host for "Notes app"? Approving also covers this thread's later files into that desktop.`,
       );
     } finally {
       await f.service.close();

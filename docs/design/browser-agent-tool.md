@@ -298,9 +298,8 @@ and an answer the person may remember for the site, folder and profile; a recurr
 instead use the explicit manifest below. At Full access an upload does not ask
 and the path checks below still hold
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
-request, 2026-11-12). Not built yet: Code's tool approval offers no "Always
-allow", so below Full access a Code upload asks every time, and an unanswered
-ask still expires instead of waiting.
+request, 2026-11-12). Not built yet: an unanswered ask still expires instead
+of waiting.
 
 - `upload` puts files into one file field. `files` names them relative to the
   thread's workspace: the Work thread's Project folder, or the Code thread's
@@ -308,12 +307,16 @@ ask still expires instead of waiting.
   plain file are refused before anyone is asked.
 - A symbolic link is refused, at the file and anywhere between the workspace
   and the file: the file's canonical path must be the path named.
-- At most 5 files, each at most 25 MB. The size is a Settings default the
-  person can change (Settings › Permissions › Browser uploads and downloads ›
-  Largest file, 1 MB to 1 GB; the ceiling is fixed because a save reads the
-  whole held file into memory and journaled receipts bound their size by it).
-  A recurring manifest keeps 25 MB whatever the setting says. Not built yet:
-  the count of 5 files per upload is still fixed.
+- At most 5 files, each at most 25 MB. Both are Settings defaults the person
+  can change (Settings › Permissions › Browser uploads and downloads): Largest
+  file, 1 MB to 1 GB (the ceiling is fixed because a save reads the whole held
+  file into memory and journaled receipts bound their size by it), and Files
+  per upload, 1 to 50 (maintainer decision, 2026-11-13; the ceiling is fixed
+  because every file is copied to a private folder before the page gets it,
+  and a context keeps its last uploads' copies until it closes). Both are
+  shell settings, journaled like every shell setting, and read for each
+  upload. A recurring manifest keeps 25 MB and 5 files whatever the settings
+  say.
 - The host copies each checked file into a private temporary folder before it
   asks, reading it through a descriptor that does not follow a link and that
   must still be the file it checked, and the page receives the copies. A file
@@ -325,23 +328,24 @@ ask still expires instead of waiting.
 - For an ordinary upload below Full access, the person is asked, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
   covers those files to that site once, or, with "Always allow", later uploads
-  to that site from this thread's workspace on a page in the same Browser
-  profile. The remembered answer is one direction, one site, one workspace
-  folder and one profile (maintainer decision, 2026-11-12): the entry
-  records the stored profile the page was in, a later transfer is covered only
-  on a page in that same profile, and an entry with no profile covers Private
-  pages alone, because a site's signed-in session differs by profile and an
-  answer about a Private page says nothing about the same site signed in as
-  the person. It is journaled in the shell
-  settings like a remembered site, lifts
-  no path or size check, and is listed, with its profile, with a Forget control
-  in Settings › Permissions › Browser uploads and downloads. Not built yet: it
-  grows only through the approval answer of a window of this computer (a
-  paired device's answer covers one upload), and an
-  answer remembered before the profile was recorded carries none, so it covers
-  Private pages only and a profile page asks once more. An unanswered ask waits in Needs
-  you. At Full access nothing is asked. Work asks in the thread's
-  Browser approval card; Code asks in the thread's tool approval.
+  to that site from that folder in that profile: the remembered answer is
+  keyed by site, folder and profile (maintainer decision, 2026-11-12). Built:
+  the remembered answer is one direction, one site, one workspace folder and
+  one profile: the entry records the stored profile the page was in, and a
+  later transfer is covered only on a page in that same profile, because a
+  site's signed-in session differs by profile. It
+  is journaled in the shell settings like a remembered site, lifts no path or
+  size check, and is listed, with its profile, with a Forget control in
+  Settings › Permissions › Browser uploads and downloads. Not built yet: it
+  grows only through the approval answer of a window
+  of this computer (a paired device's answer covers one upload), and
+  an answer remembered before the profile was recorded carries none and covers Private pages alone, so a profile page asks once more. An unanswered ask waits in Needs
+  you. At Full access nothing is asked. Work and Code both ask in the
+  thread's Browser approval card ("Upload once", "Always allow" or "Deny"),
+  through one host function that reads the remembered answer and raises the
+  card, so the key of a remembered answer is the same in both modes
+  (maintainer decision, 2026-11-13). A Code thread's workspace folder is its
+  checkout.
 - Only the agent tool can upload: it resolves the files and holds the answer,
   and the server's Browser service refuses an upload that did not come with
   them, so no route or paired device can hand a runtime a path. A CLI in a
@@ -412,11 +416,11 @@ At Full access the switch is on by default and a save does not ask; below Full
 access the person turns it on and answers for the file, an answer they may
 remember for the site, folder and profile, or separately reviews the bounded routine download manifest below
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
-request, 2026-11-12). Not built yet: no control turns holding off for a
-thread at Full access; Code's tool approval offers no "Always allow", so below
-Full access a Code save asks every time; an unanswered ask still expires
-instead of waiting; and the person's own download, built in the desktop pane's
-download handler, has not been run in a packaged window.
+request, 2026-11-12). At Full access a download is not kept waiting for a
+second call either: it is saved as the action that started it answers
+(maintainer decision, 2026-11-13). Not built yet: an unanswered ask still
+expires instead of waiting; and the person's own download, built in the
+desktop pane's download handler, has not been run in a packaged window.
 
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default below Full access and on by default for a thread at Full access.
@@ -438,6 +442,20 @@ download handler, has not been run in a packaged window.
   uploads; Downloads kept waiting, 1 to 50). The server sends the current
   limits to the runtime with each action that may hold. A download a page
   starts on its own between actions is cancelled as it is with the switch off.
+- **No holding at Full access.** Holding exists so a person can be asked
+  about the file. A turn at Full access asks nobody, so each download its
+  action started is saved into `downloads/` of the thread's workspace as that
+  action answers, by the same save `download-save` runs, and the answer's
+  `downloads` reports it as `saved` with its workspace path, size and sniffed
+  type, or as `refused` with the reason (maintainer decision, 2026-11-13). The
+  level is the one the turn runs at. What is not a review stays: the runtime
+  still receives the file in its private temporary folder first, because the
+  size cap and the type sniff need the bytes before they reach the workspace;
+  a file over the cap is still stopped; a symbolic link on the path is still
+  refused; and the save is still journaled. A turn on a paired device, which
+  is not at the computer the file would land on, and a routine's manifest,
+  which names its own destination, save nothing this way. Below Full access
+  nothing changes: the file is held and `download-save` asks.
 - **The person's own download.** A download the person starts in the Browser
   pane saves to the person's Downloads folder at every level, whatever the
   switch says; it never enters the workspace and the agent is told nothing
@@ -467,15 +485,15 @@ download handler, has not been run in a packaged window.
   names the file, its size, its type, the requesting page and the attested
   source origins separately. Without a native receipt, it says "Download
   source: unverified." A page address is never substituted as source proof.
-  Code refuses a save whose complete review exceeds its approval-summary byte
-  limit; it never offers approval of a truncated source chain. The answer covers that file
+  The card carries the whole attested chain, in Code as in Work. The answer covers that file
   once, or, with "Always allow", later saves from that site into that folder
   in that profile: the remembered answer is keyed by site, folder and profile
-  (maintainer decision, 2026-11-12), remembered and forgotten as an
-  upload's is (built). At Full access the save is not asked and the checks, the
-  destination rules and the journal record still apply. Work asks in the thread's
-  Browser approval card ("Save once", "Always allow" or "Deny"); Code asks in the thread's tool
-  approval.
+  (maintainer decision, 2026-11-12). Built: "Always allow" covers later saves
+  from that site into this thread's workspace, remembered and forgotten as an
+  upload's is, keyed by profile as an upload's is. At Full access the save is not asked and the checks, the
+  destination rules and the journal record still apply. Work and Code both ask in the thread's
+  Browser approval card ("Save once", "Always allow" or "Deny"), through the same host
+  function an upload asks through (maintainer decision, 2026-11-13).
 - **Where it lands.** In `downloads/` at the root of the thread's workspace:
   the Work thread's Project folder, or the Code thread's checkout, the same
   root an upload reads from. The name is the safe basename (no path part, no

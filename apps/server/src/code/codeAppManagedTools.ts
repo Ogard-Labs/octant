@@ -9,8 +9,8 @@ import type { BrowserPageScriptInput } from "../browser/browserAutomationService
 import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
 import { browserSignInOriginRefusal } from "../browser/browserRecoveryMessages";
 import { browserToolImage } from "../browser/browserToolImage";
-import { admitBrowserUpload, browserUploadSummary } from "../browser/browserUploadFiles";
-import { browserDownloadQuestion } from "@octant/domain";
+import { admitBrowserUpload } from "../browser/browserUploadFiles";
+import { askBrowserTransfer, type BrowserTransferApprovals } from "../browser/browserTransferAsk";
 import {
   browserCallOrigin,
   browserOperationRefusedInPlan,
@@ -19,6 +19,7 @@ import {
   browserPageScriptToolResult,
   browserDownloadSavedResult,
   browserToolResult,
+  landHeldDownloads,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
   handBrowserToPerson,
@@ -61,7 +62,6 @@ import type {
 import {
   ANY_BROWSER_ORIGIN,
   MAX_BROWSER_TABS_PER_CONTEXT,
-  MAX_CODE_OPERATION_SUMMARY_BYTES,
   sameToolActionAuthority,
 } from "@octant/contracts";
 import {
@@ -611,32 +611,29 @@ export interface CodeAppManagedToolsOptions {
     }) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   };
   /**
-   * Asks the person, in the thread, to let the agent upload named files to a
-   * page, and names the thread's checkout, the only folder an upload sends
-   * from. Absent, an upload is refused.
+   * Names the thread's checkout, the only folder an upload sends from, and the
+   * Browser approval card that asks the person, as Work asks, so an "Always
+   * allow" answer is stored and read in one place for both modes. Absent, an
+   * upload is refused; without `approvals`, one below Full access is.
    */
   readonly browserUpload?: {
     readonly root: string;
     /** The person's per-file upload limit in bytes; absent, the default. */
     readonly fileLimitBytes?: () => number;
-    readonly request: (
-      summary: string,
-      signal?: AbortSignal,
-    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+    /** The person's files-per-upload count; absent, the default. */
+    readonly fileCountLimit?: () => number;
+    readonly approvals?: BrowserTransferApprovals;
   };
   /**
-   * Asks the person, in the thread, to let the agent save a download into the
-   * thread's checkout (its `downloads/` folder), and says who may not be asked:
-   * a paired device is not at the computer the file would land on. Absent, a
+   * Names the thread's checkout, whose `downloads/` folder a save lands in,
+   * the approval card that asks the person, and who may not be asked: a
+   * paired device is not at the computer the file would land on. Absent, a
    * download is neither held nor saved.
    */
   readonly browserDownload?: {
     readonly root: string;
     readonly refusal?: (windowId: WindowId) => string | undefined;
-    readonly request: (
-      summary: string,
-      signal?: AbortSignal,
-    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+    readonly approvals?: BrowserTransferApprovals;
   };
   readonly apple?: CodeAppleToolPort;
   readonly android?: CodeAndroidToolPort;
@@ -1694,15 +1691,20 @@ async function browserToolOne(
       workspaceRoot: download.root,
       ...(signal === undefined ? {} : { signal }),
       ...(savesUnasked ? { fullAccess: true as const } : {}),
-      ask: (facts, pageOrigin) => {
-        if (savesUnasked) return Promise.resolve("approved" as const);
-        const question = browserDownloadQuestion(pageOrigin, facts);
-        // Code journals bounded approval summaries. Refuse before that layer
-        // could truncate the source chain and hide its final origin.
-        return Buffer.byteLength(question, "utf8") > MAX_CODE_OPERATION_SUMMARY_BYTES
-          ? Promise.resolve("cancelled" as const)
-          : download.request(question, signal);
-      },
+      ask: (facts, pageOrigin) =>
+        savesUnasked
+          ? Promise.resolve("approved" as const)
+          : askBrowserTransfer(download.approvals, {
+              direction: "download",
+              windowId: options.windowId,
+              threadId: String(threadId),
+              authority,
+              origin: pageOrigin,
+              profile,
+              workspaceRoot: download.root,
+              file: facts,
+              signal,
+            }),
     });
     return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
   }
@@ -1718,12 +1720,23 @@ async function browserToolOne(
       workspaceRoot: upload?.root,
       files: input.files,
       ...(upload?.fileLimitBytes === undefined ? {} : { maxFileBytes: upload.fileLimitBytes() }),
+      ...(upload?.fileCountLimit === undefined ? {} : { maxFiles: upload.fileCountLimit() }),
       ask: (files) =>
         upload === undefined
           ? Promise.resolve("denied")
           : uploadsUnasked
             ? Promise.resolve("approved")
-            : upload.request(browserUploadSummary(origin, files), signal),
+            : askBrowserTransfer(upload.approvals, {
+                direction: "upload",
+                windowId: options.windowId,
+                threadId: String(threadId),
+                authority,
+                origin,
+                profile,
+                workspaceRoot: upload.root,
+                files,
+                signal,
+              }),
     });
     if (admitted.status === "refused") return failure(admitted.reason);
     uploadFiles = admitted.paths;
@@ -1780,13 +1793,33 @@ async function browserToolOne(
   }
   if (acted.snapshot.failure === undefined)
     options.browserApproval?.rememberBinding?.(String(context.contextId));
+  const download = options.browserDownload;
+  const saveDownload = options.browser.saveDownload;
+  const arrived =
+    currentAuthorityFailure(options) === undefined &&
+    download !== undefined &&
+    saveDownload !== undefined &&
+    download.refusal?.(options.windowId) === undefined
+      ? await landHeldDownloads(acted.snapshot, (downloadId) =>
+          saveDownload({
+            windowId: options.windowId,
+            threadId,
+            downloadId,
+            workspaceRoot: download.root,
+            fullAccess: true,
+            ...(signal === undefined ? {} : { signal }),
+            ask: () => Promise.resolve("approved" as const),
+          }),
+        )
+      : { snapshot: acted.snapshot, landed: [] };
   return browserToolResult(
     afterSignIn &&
-      acted.snapshot.failure?.category === "policy-denied" &&
-      acted.snapshot.failure.reason === "origin-not-approved"
-      ? { ...acted.snapshot, failure: browserSignInOriginRefusal() }
-      : acted.snapshot,
+      arrived.snapshot.failure?.category === "policy-denied" &&
+      arrived.snapshot.failure.reason === "origin-not-approved"
+      ? { ...arrived.snapshot, failure: browserSignInOriginRefusal() }
+      : arrived.snapshot,
     browserToolWantsScreenshot(input),
+    arrived.landed,
   );
 }
 

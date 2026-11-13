@@ -536,6 +536,9 @@ export function wireWork(deps: WorkDependencies) {
               flows: browserFlows,
               approvals: browserToolApprovalService,
               uploadRoot: () => input.projectRoot,
+              uploadFileCountLimit: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .browserUploadFileCountLimit,
               uploadFileLimitBytes: () =>
                 browserTransferLimits(
                   persistence.readShellSettings()?.settings ?? defaultShellSettings(),

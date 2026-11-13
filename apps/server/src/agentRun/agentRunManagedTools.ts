@@ -40,6 +40,7 @@ export interface AgentsManagedToolsOptions {
   readonly parentThreadId: string;
   readonly listTargets: () => ReadonlyArray<AgentsToolTarget>;
   readonly isTainted: () => boolean;
+  readonly askMarkedDelegation?: () => Promise<boolean>;
   readonly isPaused?: () => boolean;
   readonly routing?: AgentRunDelegationRouting;
   readonly projectId?: string | undefined;

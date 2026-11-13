@@ -125,7 +125,10 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
     | "processAuthorityTime"
     | "windowAuthorityStore"
   > &
-  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
+  Pick<
+    AgentRunsWiring,
+    "externalContentIngestionStore" | "managedWorktreeReceipts" | "threadStandingAnswers"
+  > &
   Pick<UsageWiring, "validationEventStore"> &
   Pick<
     FoundationsWiring,
@@ -147,6 +150,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     processAuthorityNow,
     processAuthorityTime,
     providerRuntimeRegistry,
+    threadStandingAnswers,
     validationEventStore,
     windowAuthorityStore,
     workThreadProjection,
@@ -248,6 +252,12 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     daemonReady: () => cuaDaemonReady,
   });
   const desktopLeases = createDesktopLeaseService({
+    transferAnswers: {
+      covers: (owner, markedNow) =>
+        threadStandingAnswers.covers(String(owner.threadId), "desktop-file-transfer", markedNow),
+      record: (owner, threadMarked) =>
+        threadStandingAnswers.record(String(owner.threadId), "desktop-file-transfer", threadMarked),
+    },
     journal: persistence.journal,
     projection: persistence.desktopLeaseProjection,
     hostTag: desktopHostTag,

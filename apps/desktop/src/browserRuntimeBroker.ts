@@ -26,7 +26,7 @@ import {
   decodeImportedCookie,
   MAX_BROWSER_HELD_DOWNLOAD_LIMIT,
   MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
-  MAX_BROWSER_UPLOAD_FILES,
+  MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
   decodeStoredBrowserProfile,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_COOKIES_PER_IMPORT_BATCH,
@@ -698,7 +698,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     (value.files === undefined ||
       (Array.isArray(value.files) &&
         value.files.length >= 1 &&
-        value.files.length <= MAX_BROWSER_UPLOAD_FILES &&
+        value.files.length <= MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT &&
         value.files.every(
           (file) => typeof file === "string" && file.length <= 4096 && file.startsWith("/"),
         ))) &&

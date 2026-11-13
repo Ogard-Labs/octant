@@ -211,8 +211,18 @@ export type BrowserObservationPart = typeof BrowserObservationPart.Type;
 export const BrowserTabId = Schema.String.pipe(Schema.pattern(/^t[1-9][0-9]{0,3}$/));
 export type BrowserTabId = typeof BrowserTabId.Type;
 
-/** How many files one upload may send. */
+/**
+ * How many files one upload may send unless the person chose another count in
+ * Settings (`browserUploadFileCountLimit`). A recurring manifest keeps this
+ * bound whatever the setting says.
+ */
 export const MAX_BROWSER_UPLOAD_FILES = 5;
+/**
+ * The most files per upload a person may choose. It is fixed because every
+ * file is copied to a private folder before the page gets it, and a context
+ * keeps the copies of its last uploads until it closes.
+ */
+export const MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT = 50;
 /**
  * The largest file an upload or an agent's download may carry unless the
  * person chose another limit in Settings (`browserTransferFileLimitMegabytes`).
@@ -559,7 +569,7 @@ export const BrowserActionRequest = Schema.Struct({
   files: Schema.optional(
     Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))).pipe(
       Schema.minItems(1),
-      Schema.maxItems(MAX_BROWSER_UPLOAD_FILES),
+      Schema.maxItems(MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT),
     ),
   ),
   /** The tab a `tab-select` or `tab-close` names. */

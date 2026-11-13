@@ -11,6 +11,8 @@ import {
   DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
   MAX_BROWSER_HELD_DOWNLOADS,
   MAX_BROWSER_HELD_DOWNLOAD_LIMIT,
+  MAX_BROWSER_UPLOAD_FILES,
+  MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
   MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
 } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
@@ -919,6 +921,14 @@ export const ShellSettings = Schema.Struct({
   browserHeldDownloadLimit: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_BROWSER_HELD_DOWNLOAD_LIMIT)),
     { default: () => MAX_BROWSER_HELD_DOWNLOADS },
+  ),
+  /**
+   * How many files an agent may send in one upload. Decodes to the former
+   * fixed count when absent.
+   */
+  browserUploadFileCountLimit: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT)),
+    { default: () => MAX_BROWSER_UPLOAD_FILES },
   ),
   /**
    * Uploads and download saves the person answered "Always allow". Grows only

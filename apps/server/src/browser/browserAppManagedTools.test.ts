@@ -1228,6 +1228,79 @@ describe("octant_browser profile argument", () => {
     );
   });
 
+  it("saves a download an action started straight into the workspace at Full access, and reports where it landed", async () => {
+    const { run, act, request, saveDownload } = fixture({
+      fullAccess: true,
+      uploadRoot: "/workspace",
+      inspect: openPage(),
+      modelBindings: boundPage(),
+    });
+    act.mockResolvedValueOnce(
+      snapshot({
+        status: "running",
+        observation: {
+          revision: 3,
+          downloads: [
+            {
+              state: "held",
+              downloadId: "d1",
+              name: "report.pdf",
+              sizeBytes: 4,
+              mediaType: "application/pdf",
+            },
+            { state: "refused", name: "huge.bin", reason: "too-large" },
+          ],
+        } as never,
+      }),
+    );
+
+    const answer = await run({ operation: "click", ref: "e1" });
+    expect(answer).toMatchObject({
+      isError: false,
+      result: {
+        page: {
+          downloads: [
+            { state: "refused", name: "huge.bin", reason: "too-large" },
+            {
+              state: "saved",
+              name: "report.pdf",
+              path: "downloads/report.pdf",
+              sizeBytes: 4,
+              mediaType: "application/pdf",
+            },
+          ],
+        },
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(saveDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ downloadId: "d1", workspaceRoot: "/workspace", fullAccess: true }),
+    );
+  });
+
+  it("keeps a download held for the agent's own save below Full access", async () => {
+    const { run, act, saveDownload } = fixture({
+      uploadRoot: "/workspace",
+      inspect: openPage(),
+      modelBindings: boundPage(),
+    });
+    const held = {
+      state: "held",
+      downloadId: "d1",
+      name: "report.pdf",
+      sizeBytes: 4,
+      mediaType: "application/pdf",
+    };
+    act.mockResolvedValueOnce(
+      snapshot({ status: "running", observation: { revision: 3, downloads: [held] } as never }),
+    );
+
+    expect(await run({ operation: "click", ref: "e1" })).toMatchObject({
+      result: { page: { downloads: [held] } },
+    });
+    expect(saveDownload).not.toHaveBeenCalled();
+  });
+
   it("asks before saving a download below Full access, where the service still refuses a program", async () => {
     const { run, act, request, saveDownload } = fixture({
       uploadRoot: "/workspace",

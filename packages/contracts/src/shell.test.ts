@@ -110,6 +110,7 @@ const settings = {
   agentBrowserDownloads: false,
   browserTransferFileLimitMegabytes: 25,
   browserHeldDownloadLimit: 5,
+  browserUploadFileCountLimit: 5,
   rememberedBrowserTransfers: [],
   persistentBrowserOwner: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
@@ -222,6 +223,17 @@ describe("shell bootstrap contracts", () => {
       decodeShellSettings({ ...settings, browserTransferFileLimitMegabytes: 1025 }),
     ).toThrow();
     expect(() => decodeShellSettings({ ...settings, browserHeldDownloadLimit: 0 })).toThrow();
+  });
+
+  it("reads settings saved before the files-per-upload setting as the former five, and holds it to 1 through 50", () => {
+    const { browserUploadFileCountLimit: _count, ...before } = settings;
+    expect(decodeShellSettings(before).browserUploadFileCountLimit).toBe(5);
+    expect(
+      decodeShellSettings({ ...settings, browserUploadFileCountLimit: 50 })
+        .browserUploadFileCountLimit,
+    ).toBe(50);
+    expect(() => decodeShellSettings({ ...settings, browserUploadFileCountLimit: 0 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, browserUploadFileCountLimit: 51 })).toThrow();
   });
 
   it("draws the usage bars smooth unless someone chose the pixelated cells", () => {

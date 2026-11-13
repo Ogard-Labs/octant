@@ -11,6 +11,7 @@ import {
   BrowserThreadId,
   BrowserDownloadSource,
   MAX_BROWSER_THREAD_CONTEXTS,
+  MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
 } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
 import {
@@ -92,7 +93,7 @@ export const BrowserToolApproval = Schema.Struct({
           name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
           sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
         }).annotations(strict),
-      ).pipe(Schema.minItems(1), Schema.maxItems(5)),
+      ).pipe(Schema.minItems(1), Schema.maxItems(MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT)),
     }).annotations(strict),
   ),
   /**

@@ -875,13 +875,15 @@ download the person starts in the Browser pane saves to the Downloads folder
 at every level. Ordinary uploads do not ask at Full access; below it they ask
 and "Always allow" is remembered per site, folder and profile, as for a
 save. The size and held-file caps are
-Settings defaults, not constants (maintainer request, 2026-11-12). Not built
-yet: a remembered answer recorded before the profile was part of it carries
-no profile and covers Private pages only, so a profile page asks once more;
-no control turns holding off for a thread at Full access, the count of
-five files per upload is still fixed, Code's tool approval offers no "Always
-allow", an unanswered ask still expires instead of waiting, and the person's
-own download has not been run in a packaged window. A local person may separately review a
+Settings defaults, not constants (maintainer request, 2026-11-12), and so is
+the count of files one upload may send, five by default. Work and Code ask on
+the same Browser approval card and read the remembered answer through one
+function, so "Always allow" exists in both. At Full access a download is not
+held for a second call: it is saved into `downloads/` as the action that
+started it answers, with the size cap, the link checks and the journal record
+unchanged (maintainer decision, 2026-11-13). Not built yet: an unanswered ask
+still expires instead of waiting, and the person's own download has not been
+run in a packaged window. A local person may separately review a
 fixed-content routine upload manifest from one approved Project folder, binding
 caller/model/authority, profile/site, exact files, quota and expiry. It grants no
 account access or downloads; revocation and expiry close affected contexts, and
@@ -2652,9 +2654,15 @@ authorized parent target; a configured but unavailable or disallowed route does
 not bypass its settings. The selected target and routing decisions remain
 visible. Off, paused, and unauthorized parents cannot start helpers. A parent
 that read outside content can: at Full access delegation is not refused and
-the mark follows into the child; below Full access the person (the reviewer at
-Auto) is asked once per thread (maintainer request, 2026-11-12). Not built
-yet: below Full access a tainted parent is still refused rather than asked.
+the mark follows into the child; below Full access the person is asked once
+per thread and their yes is journaled for the thread
+(`thread.standing-answer-recorded@1`, erased with the thread), so later
+helpers start unasked and a waiting helper is kept; Plan stays refused
+(maintainer decision, 2026-11-13). The level is the one the turn runs at.
+Built for a Code thread, which asks in the thread's tool approval. Not built
+yet: a Work or Chat thread below Full access is still refused, because their
+turns have no way to ask a person from a host tool, and the reviewer at Auto
+does not answer in the person's place.
 
 Parent conversation context is opt-in and fixed at admission. Chat uses its
 admitted conversation; Work and Code expose bounded accepted prompts and

@@ -11,6 +11,7 @@ import { browserAgentAvailability, browserProfileFromChoice } from "@octant/doma
 import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
+import { askBrowserTransfer } from "./browserTransferAsk";
 import {
   browserCallOrigin,
   browserDownloadSavedResult,
@@ -18,6 +19,7 @@ import {
   browserPageReach,
   browserToolAction,
   browserToolResult,
+  landHeldDownloads,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
   handBrowserToPerson,
@@ -199,6 +201,8 @@ export interface BrowserAppManagedToolsOptions {
   readonly uploadRoot?: () => string | undefined;
   /** The person's per-file upload limit in bytes, read for each upload; absent, the default. */
   readonly uploadFileLimitBytes?: () => number;
+  /** The person's files-per-upload count, read for each upload; absent, the default. */
+  readonly uploadFileCountLimit?: () => number;
   readonly downloadPermission?: (input: {
     readonly permissionId: string;
     readonly profile: StoredBrowserProfile;
@@ -210,29 +214,6 @@ export interface BrowserAppManagedToolsOptions {
     readonly files: ReadonlyArray<string>;
   }) => ReturnType<BrowserUploadPermissions["prepare"]>;
   readonly uuid: () => string;
-}
-
-/** Whether the person answered "Always allow" for this direction, site, workspace and profile. */
-function transferRemembered(
-  options: BrowserAppManagedToolsOptions,
-  direction: "upload" | "download",
-  origin: string,
-  workspaceRoot: string | undefined,
-  profile: StoredBrowserProfile | undefined,
-): boolean {
-  return (
-    workspaceRoot !== undefined &&
-    options.approvals?.isTransferRemembered?.({
-      direction,
-      origin,
-      workspaceRoot,
-      ...(profile === undefined ? {} : { profile }),
-    }) === true
-  );
-}
-
-function workspaceOf(workspaceRoot: string | undefined): { readonly workspaceRoot?: string } {
-  return workspaceRoot === undefined ? {} : { workspaceRoot };
 }
 
 export interface BrowserModelBinding {
@@ -573,21 +554,20 @@ export function createBrowserAppManagedTools(
               finalAdmission: permission.reserve,
             }),
         ask: async (facts, pageOrigin) =>
-          savesUnasked ||
-          (permission === undefined &&
-            transferRemembered(options, "download", pageOrigin, options.uploadRoot?.(), profile))
+          savesUnasked
             ? "approved"
             : permission === undefined
-              ? (approvals?.request({
+              ? askBrowserTransfer(approvals, {
+                  direction: "download",
                   windowId: options.windowId,
                   threadId: String(options.threadId),
                   authority,
                   origin: pageOrigin,
-                  ...(profile === undefined ? {} : { profile }),
-                  download: facts,
-                  ...workspaceOf(options.uploadRoot?.()),
-                  ...(signal === undefined ? {} : { signal }),
-                }) ?? "denied")
+                  profile,
+                  workspaceRoot: options.uploadRoot?.(),
+                  file: facts,
+                  signal,
+                })
               : permission.inspect(facts, pageOrigin),
       });
       return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
@@ -628,23 +608,24 @@ export function createBrowserAppManagedTools(
         ...(permission !== undefined || options.uploadFileLimitBytes === undefined
           ? {}
           : { maxFileBytes: options.uploadFileLimitBytes() }),
+        ...(permission !== undefined || options.uploadFileCountLimit === undefined
+          ? {}
+          : { maxFiles: options.uploadFileCountLimit() }),
         ask: (files) =>
           permission?.approve(files) ??
-          (uploadsUnasked ||
-          transferRemembered(options, "upload", origin, options.uploadRoot?.(), profile)
+          (uploadsUnasked
             ? Promise.resolve("approved" as const)
-            : approvals === undefined
-              ? Promise.resolve("denied" as const)
-              : approvals.request({
-                  windowId: options.windowId,
-                  threadId: String(options.threadId),
-                  authority,
-                  origin,
-                  ...(profile === undefined ? {} : { profile }),
-                  upload: files,
-                  ...workspaceOf(options.uploadRoot?.()),
-                  ...(signal === undefined ? {} : { signal }),
-                })),
+            : askBrowserTransfer(approvals, {
+                direction: "upload",
+                windowId: options.windowId,
+                threadId: String(options.threadId),
+                authority,
+                origin,
+                profile,
+                workspaceRoot: options.uploadRoot?.(),
+                files,
+                signal,
+              })),
       });
       if (admitted.status === "refused") return failure(admitted.reason);
       uploadFiles = admitted.paths;
@@ -710,13 +691,36 @@ export function createBrowserAppManagedTools(
     ) {
       return failure("browser-screenshot-unavailable");
     }
+    // A routine's manifest names its own destination, so only an ordinary
+    // turn's downloads land without a second call.
+    const saveDownload = options.browser.saveDownload;
+    const landsIn = options.uploadRoot?.();
+    const arrived =
+      fullAccess &&
+      saveDownload !== undefined &&
+      landsIn !== undefined &&
+      options.downloadPermission === undefined &&
+      options.approvals?.isPairedDevice?.(options.windowId) !== true
+        ? await landHeldDownloads(acted, (downloadId) =>
+            saveDownload({
+              windowId: options.windowId,
+              threadId: options.threadId,
+              downloadId,
+              workspaceRoot: landsIn,
+              fullAccess: true,
+              ...(signal === undefined ? {} : { signal }),
+              ask: () => Promise.resolve("approved" as const),
+            }),
+          )
+        : { snapshot: acted, landed: [] };
     return browserToolResult(
       afterSignIn &&
-        acted.failure?.category === "policy-denied" &&
-        acted.failure.reason === "origin-not-approved"
-        ? { ...acted, failure: browserSignInOriginRefusal() }
-        : acted,
+        arrived.snapshot.failure?.category === "policy-denied" &&
+        arrived.snapshot.failure.reason === "origin-not-approved"
+        ? { ...arrived.snapshot, failure: browserSignInOriginRefusal() }
+        : arrived.snapshot,
       browserToolWantsScreenshot(input),
+      arrived.landed,
     );
   };
   const activeContextId = (): string | undefined => {

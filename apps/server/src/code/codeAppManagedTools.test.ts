@@ -1507,8 +1507,8 @@ describe("Code app-managed tools", () => {
           remember: vi.fn(),
           forget: vi.fn(),
         },
-        browserUpload: { root: "/checkout", request: ask },
-        browserDownload: { root: "/checkout", request: ask },
+        browserUpload: { root: "/checkout", approvals: { request: ask } },
+        browserDownload: { root: "/checkout", approvals: { request: ask } },
         browserSignIn: { refusal: () => undefined, request: ask as never },
         browserFlows: {
           service: { list: () => [], get: () => undefined, save: save as never },
@@ -1642,6 +1642,9 @@ describe("Code app-managed tools", () => {
       readonly source?: BrowserDownloadSource;
       readonly refusal?: string;
       readonly request?: ReturnType<typeof vi.fn>;
+      readonly remembered?: boolean;
+      /** What an action on the page answers with. */
+      readonly act?: BrowserAutomationSnapshot;
     }) {
       const current = thread(
         options.executionPolicy === undefined ? {} : { executionPolicy: options.executionPolicy },
@@ -1674,6 +1677,7 @@ describe("Code app-managed tools", () => {
         },
       );
       const request = options.request ?? vi.fn(async () => "approved" as const);
+      const isTransferRemembered = vi.fn(() => options.remembered === true);
       const tools = createCodeAppManagedTools({
         windowId,
         thread: current,
@@ -1690,18 +1694,18 @@ describe("Code app-managed tools", () => {
         browserDownload: {
           root: "/checkout",
           ...(options.refusal === undefined ? {} : { refusal: () => options.refusal }),
-          request: request as never,
+          approvals: { request: request as never, isTransferRemembered },
         },
         browser: {
           resolveAuthority: () => browserAuthority(),
           inspectThread: () => browserSnapshot(browserAuthority()),
           create: vi.fn(),
-          act: vi.fn(),
+          act: vi.fn(async () => options.act ?? browserSnapshot(browserAuthority())),
           saveDownload: saveDownload as never,
           releaseThread: vi.fn(),
         },
       });
-      return { tools, saveDownload, request };
+      return { tools, saveDownload, request, isTransferRemembered };
     }
     const save = (tools: ReturnType<typeof downloadTools>["tools"]) =>
       tools.execute({
@@ -1709,7 +1713,7 @@ describe("Code app-managed tools", () => {
         inputJson: JSON.stringify({ operation: "download-save", downloadId: "d1" }),
       });
 
-    it("asks the thread's tool approval, naming the file, its size, its type and the site", async () => {
+    it("asks on the Browser approval card with the file, the site and the checkout, so the answer can be remembered", async () => {
       const { tools, saveDownload, request } = downloadTools({ executionPolicy: "approval-gated" });
       const result = await save(tools);
       expect(result).toMatchObject({ isError: false, result: { saved: "downloads/report.pdf" } });
@@ -1717,11 +1721,71 @@ describe("Code app-managed tools", () => {
         expect.objectContaining({ workspaceRoot: "/checkout", downloadId: "d1" }),
       );
       expect(request).toHaveBeenCalledWith(
-        "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: unverified.",
-        undefined,
+        expect.objectContaining({
+          windowId,
+          origin: "https://example.com",
+          workspaceRoot: "/checkout",
+          download: { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+        }),
       );
       // Below Full access the service keeps refusing a program or installer.
       expect(saveDownload.mock.calls[0]?.[0].fullAccess).toBeUndefined();
+    });
+
+    it("saves below Full access without asking once the person answered Always allow for the site and checkout", async () => {
+      const { tools, request, isTransferRemembered } = downloadTools({
+        executionPolicy: "approval-gated",
+        remembered: true,
+      });
+      expect(await save(tools)).toMatchObject({
+        isError: false,
+        result: { saved: "downloads/report.pdf" },
+      });
+      expect(isTransferRemembered).toHaveBeenCalledWith({
+        direction: "download",
+        origin: "https://example.com",
+        workspaceRoot: "/checkout",
+      });
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it("saves a download an action started straight into the checkout at Full access, and keeps it held below", async () => {
+      const held = {
+        state: "held" as const,
+        downloadId: "d1",
+        name: "report.pdf",
+        sizeBytes: 1_258_291,
+        mediaType: "application/pdf",
+      };
+      const clicked = (tools: ReturnType<typeof downloadTools>["tools"]) =>
+        tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "click", ref: "e1" }),
+        });
+      const page = {
+        ...browserSnapshot(browserAuthority()),
+        observation: { revision: 4, downloads: [held] } as never,
+      };
+
+      const full = downloadTools({ act: page });
+      expect(await clicked(full.tools)).toMatchObject({
+        isError: false,
+        result: {
+          page: {
+            downloads: [{ state: "saved", name: "report.pdf", path: "downloads/report.pdf" }],
+          },
+        },
+      });
+      expect(full.request).not.toHaveBeenCalled();
+      expect(full.saveDownload).toHaveBeenCalledWith(
+        expect.objectContaining({ downloadId: "d1", workspaceRoot: "/checkout", fullAccess: true }),
+      );
+
+      const gated = downloadTools({ executionPolicy: "approval-gated", act: page });
+      expect(await clicked(gated.tools)).toMatchObject({
+        result: { page: { downloads: [held] } },
+      });
+      expect(gated.saveDownload).not.toHaveBeenCalled();
     });
 
     it("saves a download unasked at Full access, where the service may save a program", async () => {
@@ -1736,7 +1800,7 @@ describe("Code app-managed tools", () => {
       );
     });
 
-    it("refuses a source chain that cannot be reviewed in full without asking or saving", async () => {
+    it("puts the whole attested source chain on the card, however long it is", async () => {
       const origins = Array.from(
         { length: 16 },
         (_, index) => `https://${"a".repeat(63)}.${"b".repeat(60)}${index}.example`,
@@ -1745,11 +1809,12 @@ describe("Code app-managed tools", () => {
         executionPolicy: "approval-gated",
         source: { kind: "https-origin-chain", origins },
       });
-      expect(await save(tools)).toEqual({
-        result: { error: "browser-download-cancelled" },
-        isError: true,
-      });
-      expect(request).not.toHaveBeenCalled();
+      expect(await save(tools)).toMatchObject({ isError: false });
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          download: expect.objectContaining({ source: { kind: "https-origin-chain", origins } }),
+        }),
+      );
     });
 
     it("keeps the Code turn cancellation signal through download preparation and approval", async () => {
@@ -1761,7 +1826,7 @@ describe("Code app-managed tools", () => {
         signal: abort.signal,
       });
       expect(saveDownload).toHaveBeenCalledWith(expect.objectContaining({ signal: abort.signal }));
-      expect(request).toHaveBeenCalledWith(expect.any(String), abort.signal);
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ signal: abort.signal }));
     });
 
     it("refuses on a paired device's turn and in Plan mode, asking no one", async () => {
@@ -1782,7 +1847,10 @@ describe("Code app-managed tools", () => {
   });
 
   describe("uploading a file", () => {
-    async function uploadTools(executionPolicy: "full-access" | "approval-gated") {
+    async function uploadTools(
+      executionPolicy: "full-access" | "approval-gated",
+      remembered = false,
+    ) {
       const folder = await realpath(await mkdtemp(join(tmpdir(), "octant-code-upload-")));
       const workspace = join(folder, "workspace");
       await mkdir(workspace);
@@ -1792,7 +1860,8 @@ describe("Code app-managed tools", () => {
       const act = vi.fn(async (_input: { readonly uploadFiles?: ReadonlyArray<string> }) =>
         browserSnapshot(browserAuthority()),
       );
-      const request = vi.fn(async () => "approved" as const);
+      const request = vi.fn(async (_input: unknown) => "approved" as const);
+      const isTransferRemembered = vi.fn(() => remembered);
       const tools = createCodeAppManagedTools({
         windowId,
         thread: current,
@@ -1806,7 +1875,11 @@ describe("Code app-managed tools", () => {
           remember: vi.fn(),
           forget: vi.fn(),
         },
-        browserUpload: { root: workspace, request },
+        browserUpload: {
+          root: workspace,
+          fileCountLimit: () => 1,
+          approvals: { request, isTransferRemembered },
+        },
         browser: {
           resolveAuthority: () => browserAuthority(),
           inspectThread: () => browserSnapshot(browserAuthority()),
@@ -1820,8 +1893,42 @@ describe("Code app-managed tools", () => {
           name: CODE_BROWSER_TOOL_NAME,
           inputJson: JSON.stringify({ operation: "upload", ref: "e1", files }),
         });
-      return { folder, act, request, upload };
+      return { folder, workspace, act, request, upload, isTransferRemembered };
     }
+
+    it("uploads below Full access without asking once the person answered Always allow for the site and checkout", async () => {
+      const { folder, workspace, act, request, upload, isTransferRemembered } = await uploadTools(
+        "approval-gated",
+        true,
+      );
+      try {
+        expect(await upload(["report.txt"])).toMatchObject({ isError: false });
+        expect(isTransferRemembered).toHaveBeenCalledWith({
+          direction: "upload",
+          origin: "https://example.com",
+          workspaceRoot: workspace,
+        });
+        expect(request).not.toHaveBeenCalled();
+        expect(act.mock.calls[0]?.[0].uploadFiles).toHaveLength(1);
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses more files in one upload than the person's setting allows, asking no one", async () => {
+      const { folder, workspace, act, request, upload } = await uploadTools("approval-gated");
+      try {
+        await writeFile(join(workspace, "second.txt"), "second");
+        expect(await upload(["report.txt", "second.txt"])).toEqual({
+          result: { error: "upload-invalid-files" },
+          isError: true,
+        });
+        expect(request).not.toHaveBeenCalled();
+        expect(act).not.toHaveBeenCalled();
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
 
     it("uploads a file from the thread's workspace unasked at Full access", async () => {
       const { folder, act, request, upload } = await uploadTools("full-access");
@@ -1852,8 +1959,8 @@ describe("Code app-managed tools", () => {
       }
     });
 
-    it("still asks the thread's tool approval below Full access, and sends nothing a person denies", async () => {
-      const { folder, act, request, upload } = await uploadTools("approval-gated");
+    it("still asks below Full access, on the Browser approval card, and sends nothing a person denies", async () => {
+      const { folder, workspace, act, request, upload } = await uploadTools("approval-gated");
       try {
         request.mockResolvedValueOnce("denied" as never);
         expect(await upload(["report.txt"])).toEqual({
@@ -1861,8 +1968,11 @@ describe("Code app-managed tools", () => {
           isError: true,
         });
         expect(request).toHaveBeenCalledWith(
-          "Let the agent upload report.txt (6 B) to https://example.com?",
-          undefined,
+          expect.objectContaining({
+            origin: "https://example.com",
+            workspaceRoot: workspace,
+            upload: [expect.objectContaining({ name: "report.txt", sizeBytes: 6 })],
+          }),
         );
         expect(act).not.toHaveBeenCalled();
       } finally {

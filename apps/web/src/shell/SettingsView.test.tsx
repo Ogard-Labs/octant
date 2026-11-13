@@ -1948,6 +1948,18 @@ describe("SettingsView", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({ browserHeldDownloadLimit: 10 });
   });
 
+  it("lets the person change how many files one upload may send from the default five", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    const user = userEvent.setup();
+    const files = screen.getByRole("combobox", { name: "Files per upload" });
+    expect(files).toHaveTextContent("5 files");
+    await user.click(files);
+    await user.click(await screen.findByRole("option", { name: "20 files" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserUploadFileCountLimit: 20 });
+  });
+
   it("lists each always-allowed Browser upload and download with its site and folder, and forgets the one the person picks", async () => {
     const onSettingsChange = vi.fn();
     const upload = {

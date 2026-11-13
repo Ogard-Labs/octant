@@ -243,6 +243,7 @@ describe("Journal", () => {
         agentBrowserDownloads: false,
         browserTransferFileLimitMegabytes: 25,
         browserHeldDownloadLimit: 5,
+        browserUploadFileCountLimit: 5,
         rememberedBrowserTransfers: [],
         persistentBrowserOwner: false,
       },

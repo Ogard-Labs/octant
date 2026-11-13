@@ -523,9 +523,10 @@ export function createComputerUseToolService(options: {
 
   /**
    * An agent's transfer into its bound desktop. The lease service reads and
-   * hashes the file first and decides whether anyone is asked; when it asks,
-   * the question goes to this turn's thread with the path, size, hash, and
-   * where the file goes.
+   * hashes the file first and decides whether anyone is asked: nobody at Full
+   * access, and below it once per thread for a desktop on this machine. When
+   * it asks, the question goes to this turn's thread with the path, size,
+   * hash, and where the file goes.
    */
   async function sendFile(
     owner: ComputerUseOwner,
@@ -555,11 +556,14 @@ export function createComputerUseToolService(options: {
         path,
         async (request) => {
           const { artifact, provider } = request;
-          const offMachine =
+          // A file leaving the machine is asked about every time; one that
+          // stays on it is asked about once for the thread, and the card
+          // says which answer the person is giving.
+          const covers =
             request.asks === "off-machine"
               ? ` This sends the file off this machine to ${provider.displayName}.`
-              : "";
-          const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${offMachine}`;
+              : " Approving also covers this thread's later files into that desktop.";
+          const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${covers}`;
           return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
         },
         options.externalContentIngested(owner),

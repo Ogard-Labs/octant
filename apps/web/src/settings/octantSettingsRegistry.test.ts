@@ -130,6 +130,7 @@ describe("octantSettingsRegistry", () => {
       "browser-agent-downloads",
       "browser-transfer-file-limit",
       "browser-held-download-limit",
+      "browser-upload-file-count-limit",
       "tool-approvals",
       "network-limits",
       "safe-networks",
