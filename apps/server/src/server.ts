@@ -1797,6 +1797,7 @@ export function startOctantServer(
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
+      personQuitRoutes,
       supportBundleRoutes,
       delegationAdministrationRoutes,
       threadMoveAdministrationRoutes,
@@ -1982,6 +1983,7 @@ export function startOctantServer(
                 (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await agentAccessAdministrationRoutes(request)) ??
+                (await personQuitRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??

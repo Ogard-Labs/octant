@@ -87,6 +87,7 @@ import {
   type LocalDeviceAdministrationPort,
 } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
+import { createPersonQuitRouteHandler } from "../personQuit";
 import { createSupportBundleRouteHandler } from "../supportBundleRoutes";
 import { readEventLoopLagCounters } from "../eventLoopLag";
 import { slowStatementTally } from "../persistence/slowStatementLog";
@@ -2418,6 +2419,10 @@ export function wireRemote(deps: RemoteDependencies) {
       },
     }),
   });
+  const personQuitRoutes = createPersonQuitRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    dataDirectory: persistence.dataDirectory,
+  });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
     diagnostics: composeHostDiagnostics,
@@ -2512,6 +2517,7 @@ export function wireRemote(deps: RemoteDependencies) {
     threadMoveAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
+    personQuitRoutes,
     supportBundleRoutes,
     hubAdministrationRoutes,
     localDeviceAdministrationRoutes,

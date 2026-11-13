@@ -17,6 +17,7 @@ import {
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
+  CANVAS_DECISION_FORM_SCHEMA_VERSION,
   CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION,
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_MAX_DESIGN_BRAND_TOKENS,
@@ -2304,7 +2305,7 @@ describe("tabs and columns layout groups", () => {
     expect(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION).toBe(19);
     expect(CANVAS_THREAD_OWNED_SCHEMA_VERSION).toBe(20);
     expect(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION).toBe(21);
-    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION);
+    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_DECISION_FORM_SCHEMA_VERSION);
   });
 
   it("keeps every version through the current one decodable when it gates nothing new", () => {
@@ -2611,15 +2612,9 @@ describe("choice block", () => {
     ).toThrow(/choice block requires Canvas schema version 27/);
   });
 
-  it("holds the questionnaire's bounds: one to four questions with distinct ids and valid limits", () => {
+  it("holds the questionnaire's per-question bounds: at least one question with distinct ids and valid limits", () => {
     const [first, second] = choice.questions;
     expect(() => decodeCanvasBlock({ ...choice, questions: [] })).toThrow();
-    expect(() =>
-      decodeCanvasBlock({
-        ...choice,
-        questions: [1, 2, 3, 4, 5].map((n) => ({ ...first, id: `q${String(n)}` })),
-      }),
-    ).toThrow();
     expect(() =>
       decodeCanvasBlock({ ...choice, questions: [first, { ...second, id: "rollout" }] }),
     ).toThrow();
@@ -2628,6 +2623,58 @@ describe("choice block", () => {
     ).toThrow();
     expect(() => decodeCanvasBlock({ ...choice, prompt: "" })).toThrow();
     expect(() => decodeCanvasBlock({ ...choice, prompt: "x".repeat(1_025) })).toThrow();
+  });
+
+  it("asks as many questions as a long decision list needs, unlike the four of an inline questionnaire", () => {
+    const [first] = choice.questions;
+    const questions = Array.from({ length: 40 }, (_, n) => ({ ...first, id: `q${String(n)}` }));
+    expect(decodeCanvasBlock({ ...choice, questions })).toMatchObject({ questions });
+  });
+
+  it("groups questions into sections at version 29 and refuses a grouping that misplaces one", () => {
+    const [first] = choice.questions;
+    const questions = [
+      { ...first, id: "a", allowNote: false },
+      { ...first, id: "b" },
+    ];
+    const sections = [
+      { id: "s1", title: "Access", intro: "Who may do it", questionIds: ["a"] },
+      { id: "s2", title: "Reach", questionIds: ["b"] },
+    ];
+    const form = {
+      ...choice,
+      schemaVersion: CANVAS_DECISION_FORM_SCHEMA_VERSION,
+      questions,
+      sections,
+    };
+    expect(
+      decodeCanvasDefinition({
+        ...document,
+        schemaVersion: CANVAS_DECISION_FORM_SCHEMA_VERSION,
+        blocks: [form],
+      }).blocks,
+    ).toEqual([form]);
+    expect(() =>
+      decodeCanvasDefinition({
+        ...document,
+        schemaVersion: 28,
+        blocks: [{ ...form, schemaVersion: 28 }],
+      }),
+    ).toThrow(/sections and per-question notes require Canvas schema version 29/);
+    for (const bad of [
+      [{ id: "s1", title: "Only", questionIds: ["a"] }],
+      [
+        { id: "s1", title: "A", questionIds: ["a", "b"] },
+        { id: "s2", title: "B", questionIds: ["b"] },
+      ],
+      [
+        { id: "s1", title: "A", questionIds: ["a"] },
+        { id: "s1", title: "B", questionIds: ["b"] },
+      ],
+      [{ id: "s1", title: "A", questionIds: ["a", "zz", "b"] }],
+    ]) {
+      expect(() => decodeCanvasBlock({ ...form, sections: bad })).toThrow();
+    }
   });
 
   it("refuses an answer or any field the block does not define", () => {
