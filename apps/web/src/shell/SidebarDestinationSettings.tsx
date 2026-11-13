@@ -36,7 +36,7 @@ export interface SidebarDestinationSettingsProps {
 export function SidebarDestinationSettings(props: SidebarDestinationSettingsProps) {
   const destinations = sidebarDestinationOrder(props.customization);
   return (
-    <div className="flex w-full flex-col gap-3">
+    <div className="flex w-full flex-col gap-2">
       <ul className="flex flex-col">
         {destinations.map((destination, index) => (
           <li className="flex items-center justify-between gap-2 py-1" key={destination.id}>
@@ -51,7 +51,7 @@ export function SidebarDestinationSettings(props: SidebarDestinationSettingsProp
                 }
               }}
               options={visibilityOptions[destination.placement]}
-              triggerClassName="w-36 shrink-0"
+              triggerClassName="w-[9rem] shrink-0"
               value={sidebarDestinationVisibility(props.customization, destination.id)}
             />
             <span className="flex shrink-0 items-center gap-1">

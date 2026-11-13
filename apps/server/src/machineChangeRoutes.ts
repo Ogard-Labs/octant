@@ -1,7 +1,9 @@
 import {
   decodeMachineChangeFrame,
+  MachineChangeEpoch,
   type MachineChangeFrame,
 } from "@octant/contracts/machine-changes";
+import { Schema } from "effect";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -10,6 +12,7 @@ export interface MachineChangeRouteDependencies {
   readonly feed: {
     readonly subscribe: (input: {
       readonly afterSequence: number;
+      readonly epoch?: string;
       readonly signal: AbortSignal;
     }) => AsyncIterable<MachineChangeFrame>;
   };
@@ -47,11 +50,21 @@ export function createMachineChangeRouteHandler(dependencies: MachineChangeRoute
       );
     }
     const afterSequence = Number(url.searchParams.get("afterSequence"));
-    if (url.searchParams.size !== 1 || !Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+    const epoch = url.searchParams.get("epoch");
+    if (
+      url.searchParams.size !== (epoch === null ? 1 : 2) ||
+      !Number.isSafeInteger(afterSequence) ||
+      afterSequence < 0 ||
+      (epoch !== null && !Schema.is(MachineChangeEpoch)(epoch))
+    ) {
       return failure("Machine change cursor is invalid.", 400, origin);
     }
     return streamResponse(
-      dependencies.feed.subscribe({ afterSequence, signal: request.signal }),
+      dependencies.feed.subscribe({
+        afterSequence,
+        ...(epoch === null ? {} : { epoch }),
+        signal: request.signal,
+      }),
       request.signal,
       origin,
     );

@@ -38,12 +38,11 @@ A conversation whose turn was cut off by a host restart shows a notice above
 its composer: "Octant restarted before this turn finished. Review any changes
 before continuing." Its **Resume** button explicitly submits one continuation
 in the same thread. Completed turns, deliberate stops, and a lost renderer
-connection alone do not show it. By default no interrupted turn continues by
-itself. One setting, "Resume interrupted turns after a restart", off by
-default, changes that: when it is on, a turn with no uncertain side effect
-resumes by itself, and a turn whose last effect is uncertain still waits for
-the person (maintainer request, 2026-11-12). Not built yet: today the setting
-does not exist and every interrupted turn waits for Resume.
+connection alone do not show it. A turn a restart cut off continues by
+itself, once, as the host, unless its thread is held: Continue after restart is
+off in Settings or for the thread, its last effect is uncertain, or its provider
+cannot resume it. Only a held thread shows this notice (maintainer request,
+2026-11-12; [Continuing a turn a restart cut off](decisions.md#continuing-a-turn-a-restart-cut-off)).
 
 The server tracks turn start and settlement for every provider through the
 existing session journal; routing and advisor behavior remain provider-specific.
@@ -382,7 +381,11 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   thread a coordinator once its creation is confirmed, before the first
   message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
   coordinating** on a coordinator (never on a worker), the **Wake when a message
-  arrives** checkbox, and on a worker the **Wake for coordinator** checkbox.
+  arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
+  the **Continue after restart** checkbox, on until a person turns it off for
+  that thread ([Architecture: Persistence](../architecture.md#persistence)).
+  A Chat or Work thread's row menu carries the same **Continue after restart**
+  checkbox.
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.
@@ -416,8 +419,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   read, review dialog, and one-decision-at-a-time guard. The review starts on
   the requested provider, model, and level and offers no mode above that level.
   A paired browser's Code workspace and the phone's Code thread screen show the
-  same cards read-only, with "Approve at a window on this computer" and no
-  decision.
+  same cards and decide them as a window does (maintainer decision, 2026-11-12;
+  not built yet: today they are read-only there, with "Approve at a window on
+  this computer" and no decision).
 - **Owner devices.** The owner access recovery screen (phone, and a browser's
   owner section) shows a chosen Code thread's **Wake when a message arrives**
   and, on a worker, **Wake for coordinator**, each change under its own fresh
@@ -889,8 +893,10 @@ with the stage: no gap and no corner, one 1px line between two panes
 ([DESIGN.md](../../DESIGN.md#shapes-and-depth) owns the material), and one
 under the title band along the top. The divider's hit area is 8px wide,
 centred on that line; it is empty at rest, shows the strong border while hovered
-and the meta ink while grabbed, and keeps no accent line after a click. A window of 680px or less keeps
-its rounded tiles. Columns stand side by side only when the tile area can give each 280px and
+and the meta ink while grabbed, and keeps no accent line after a click. At 960px and below the dock is a
+sheet over the page (a floating container with its own 12px corner) that holds
+one tool, so its tile is the same square pane with no neighbour: a tile is square
+and flat at every width, and no width gives one a corner, a rim or a gap. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
 from a 1100px window up), because at 560px two tools could never stand side by
 side in a 1440px window: with the sidebar open a second column widens the dock to
@@ -1009,8 +1015,9 @@ controls: the pull request's labels (a button removes one) and the
 repository's other labels (a button adds one; no free-text label), a comment
 box, a reply box on each open review thread, and Close or Reopen pull request.
 A comment or reply says it posts under the person's name; a refusal is one
-alert line under the section, and a paired device is told only the desktop
-window can do it. Rules and limits are owned by
+alert line under the section, and, until a paired device uses the same controls
+(not built yet), it is told only the desktop window can do it. Rules and limits
+are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
@@ -1887,6 +1894,8 @@ kinds, labelling the leftover; it adds no authority of its own.
 An agent can ask for related decisions through the app-owned `ask-user` tool
 in Chat, Work, and Code. A questionnaire belongs in its originating thread,
 with one compact card containing up to four questions. It creates no Canvas.
+More than four decisions belong in a Canvas [choice block](canvas.md#choice-block),
+which has no question limit; the tool's description tells agents so.
 Each question offers one choice or several choices, optional descriptions,
 and an optional written alternative. Recommendations are labelled and never
 preselected. A person can add a comment alongside their choices by default.

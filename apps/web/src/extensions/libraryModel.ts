@@ -440,11 +440,18 @@ function skillItem(skill: StandaloneSkill): LibraryItem {
 }
 
 function connectorItem(entry: ConnectorCatalogEntry): LibraryItem {
-  const host = new URL(entry.url).host;
-  const lines = [`Sends your requests to ${host}; tool calls follow the thread's approval policy`];
+  const host =
+    entry.auth.kind === "command" ? (entry.egress ?? []).join(", ") : new URL(entry.url).host;
+  const lines = [
+    entry.auth.kind === "command"
+      ? `Runs ${entry.auth.package.name}@${entry.auth.package.version} on this computer and reaches only ${host}; ${entry.auth.askEveryCall.join(" and ")} ask every time`
+      : `Sends your requests to ${host}; tool calls follow the thread's approval policy`,
+  ];
   if (entry.auth.kind === "sign-in")
     lines.push(`Signs in to ${host} and keeps the grant in the credential store`);
   if (entry.auth.kind === "key") lines.push("Uses a key you create, kept in the credential store");
+  if (entry.auth.kind === "command")
+    lines.push("Uses a login token you create, kept in the credential store");
   return {
     id: `connector:${entry.id}`,
     kind: "connector",

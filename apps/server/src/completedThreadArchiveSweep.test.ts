@@ -46,9 +46,9 @@ function fixture(options: {
 }
 
 describe("completed thread archive sweep", () => {
-  it("archives only completed threads whose completion is older than the window, in every mode", () => {
+  it("archives only completed threads whose completion is older than the window, in every mode", async () => {
     const { sweep, archive } = fixture({});
-    expect(sweep.pass()).toEqual({
+    expect(await sweep.pass()).toEqual({
       archived: [
         { mode: "code", threadId: oldEnough.id },
         { mode: "chat", threadId: chatOldEnough.id },
@@ -60,22 +60,22 @@ describe("completed thread archive sweep", () => {
     expect(archive).toHaveBeenCalledWith(chatOldEnough.id, { afterDays: 7, now });
   });
 
-  it("does nothing when the person turned the timer off", () => {
+  it("does nothing when the person turned the timer off", async () => {
     const { sweep, archive } = fixture({ afterDays: null });
-    expect(sweep.pass()).toEqual({ archived: [], skipped: [] });
+    expect(await sweep.pass()).toEqual({ archived: [], skipped: [] });
     expect(archive).not.toHaveBeenCalled();
   });
 
-  it("reports a thread the host declined to archive as skipped rather than archived", () => {
+  it("reports a thread the host declined to archive as skipped rather than archived", async () => {
     const { sweep, archive } = fixture({});
     archive.mockReturnValueOnce({ status: "skipped", reason: "not-due" });
-    expect(sweep.pass()).toEqual({
+    expect(await sweep.pass()).toEqual({
       archived: [{ mode: "chat", threadId: chatOldEnough.id }],
       skipped: [{ mode: "code", threadId: oldEnough.id, reason: "not-due" }],
     });
   });
 
-  it("keeps the pass going when one thread changed under it or its service failed", () => {
+  it("keeps the pass going when one thread changed under it or its service failed", async () => {
     const { sweep, archive } = fixture({});
     archive.mockImplementationOnce(() => {
       throw new ConcurrencyConflict({
@@ -85,37 +85,38 @@ describe("completed thread archive sweep", () => {
         actualVersion: 2,
       });
     });
-    expect(sweep.pass()).toEqual({
+    expect(await sweep.pass()).toEqual({
       archived: [{ mode: "chat", threadId: chatOldEnough.id }],
       skipped: [{ mode: "code", threadId: oldEnough.id, reason: "changed" }],
     });
     archive.mockImplementationOnce(() => {
       throw new Error("store busy");
     });
-    expect(sweep.pass().skipped).toEqual([
+    expect((await sweep.pass()).skipped).toEqual([
       { mode: "code", threadId: oldEnough.id, reason: "failed" },
     ]);
   });
 
-  it("runs a pass on start, again each interval, and never after stop", () => {
+  it("runs a pass on start, again each interval, and never after stop", async () => {
     vi.useFakeTimers();
     try {
       const { sweep, archive, clock } = fixture({ intervalMs: 1_000 });
       sweep.start();
+      await vi.advanceTimersByTimeAsync(0);
       expect(archive).toHaveBeenCalledTimes(2);
       clock.nowMs += 1_000;
-      vi.advanceTimersByTime(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(archive).toHaveBeenCalledTimes(4);
       sweep.stop();
       clock.nowMs += 5_000;
-      vi.advanceTimersByTime(5_000);
+      await vi.advanceTimersByTimeAsync(5_000);
       expect(archive).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("survives a pass that throws and tries again on the next interval", () => {
+  it("survives a pass that throws and tries again on the next interval", async () => {
     vi.useFakeTimers();
     try {
       let reads = 0;
@@ -142,12 +143,38 @@ describe("completed thread archive sweep", () => {
         intervalMs: 1_000,
       });
       sweep.start();
+      await vi.advanceTimersByTimeAsync(0);
       expect(archive).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(archive).toHaveBeenCalledTimes(1);
       sweep.stop();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("lets other host work run between batches of a large sweep", async () => {
+    const threads = Array.from({ length: 1_000 }, (_, index) => ({
+      ...oldEnough,
+      id: `code-old-${index}`,
+    }));
+    let archivedBeforeInterleavedTask: number | undefined;
+    const archive = vi.fn((): CompletedThreadArchiveOutcome => ({ status: "archived" }));
+    const sweep = new CompletedThreadArchiveSweep({
+      sources: [{ mode: "code", threads: () => threads, archive }],
+      archiveAfterDays: () => 7,
+      clock: () => nowMs,
+      batchSize: 100,
+    });
+    // Stands in for a Stop or an approval answer that arrives mid-sweep.
+    setImmediate(() => {
+      archivedBeforeInterleavedTask = archive.mock.calls.length;
+    });
+
+    const summary = await sweep.pass();
+
+    expect(summary.archived).toHaveLength(1_000);
+    expect(archivedBeforeInterleavedTask).toBeDefined();
+    expect(archivedBeforeInterleavedTask).toBeLessThanOrEqual(100);
   });
 });

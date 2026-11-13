@@ -299,7 +299,7 @@ describe("startOctantServer", () => {
       .mockResolvedValue();
     const reapSessions = vi
       .spyOn(ChatService.prototype, "reapStaleProviderSessions")
-      .mockResolvedValue({ reaped: 0, resumable: 0 });
+      .mockResolvedValue({ reaped: 0, resumable: 0, cutOff: [] });
 
     await Effect.runPromise(
       Effect.scoped(
@@ -1657,6 +1657,99 @@ describe("startOctantServer", () => {
       ),
     ).resolves.toBeUndefined();
     expect(observe).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops an abandoned root probe: its Git read is aborted and nothing starts after a filesystem read", async () => {
+    const projectId = "00000000-0000-4000-8000-000000001501";
+    const revisionId = "00000000-0000-4000-8000-000000001502";
+    const repositoryId = `repo_${"d".repeat(64)}` as `repo_${string}`;
+    const root = "/private/authorized-project";
+    const checkoutId = deriveExistingWorktreeCheckoutId({
+      projectId,
+      bindingRevisionId: revisionId,
+      repositoryId,
+      canonicalRoot: root,
+    });
+    let observeSignal: AbortSignal | undefined;
+    // A Git read that ends only when its signal is aborted, as a killed child does.
+    const observe = vi.fn(
+      (_root: string, signal: AbortSignal) =>
+        new Promise<never>((_resolve, reject) => {
+          observeSignal = signal;
+          signal.addEventListener("abort", () => reject(signal.reason));
+        }),
+    );
+    const stat = Promise.withResolvers<{ readonly device: string; readonly inode: string }>();
+    const options = {
+      projects: {
+        bootstrap: async () =>
+          ({
+            active: [{ id: projectId, type: "code", binding: { canonicalRoot: root } }],
+            archived: [],
+            availability: [],
+            memory: [],
+          }) as never,
+      },
+      readProject: () =>
+        ({
+          id: projectId,
+          type: "code",
+          lifecycle: "active",
+          binding: { canonicalRoot: root },
+          bindingHistory: [{ revisionId, currentBinding: { canonicalRoot: root } }],
+        }) as never,
+      repository: { observe },
+    };
+    const thread = {
+      id: "00000000-0000-4000-8000-000000001503",
+      projectId,
+      bindingRevisionId: revisionId,
+      repositoryId,
+    } as never;
+    const windowId = "00000000-0000-4000-8000-000000001505" as never;
+    const existing = {
+      id: checkoutId,
+      kind: "existing-worktree",
+      repositoryId,
+      availability: "available",
+      head: { kind: "detached", oid: "b".repeat(40) },
+    } as never;
+
+    const gitProbe = new AbortController();
+    const resolving = createExistingWorktreeCodeFileRootAuthority({
+      ...options,
+      statIdentity: async () => ({ device: "7", inode: "8" }),
+    }).resolve(windowId, thread, existing, "src/file.ts" as never, gitProbe.signal);
+    await vi.waitFor(() => expect(observeSignal).toBeDefined());
+    gitProbe.abort();
+    expect(observeSignal?.aborted).toBe(true);
+    await expect(resolving).resolves.toBeUndefined();
+
+    observe.mockClear();
+    const statProbe = new AbortController();
+    const plain = plainFolderCheckoutIdentity({
+      projectId: projectId as never,
+      bindingRevisionId: revisionId as never,
+      canonicalRoot: root,
+    });
+    const plainResolving = createExistingWorktreeCodeFileRootAuthority({
+      ...options,
+      statIdentity: () => stat.promise,
+    }).resolve(
+      windowId,
+      { ...(thread as object), repositoryId: plain.repositoryId } as never,
+      {
+        id: plain.checkoutId,
+        kind: "plain-folder",
+        repositoryId: plain.repositoryId,
+        availability: "available",
+      } as never,
+      "src/file.ts" as never,
+      statProbe.signal,
+    );
+    statProbe.abort();
+    stat.resolve({ device: "7", inode: "8" });
+    await expect(plainResolving).resolves.toBeUndefined();
   });
 
   it("keeps a branch checkout's file root after new commits but not after a branch switch", async () => {
@@ -3606,6 +3699,24 @@ describe("startOctantServer", () => {
       '{"product":"Octant","status":"failed","category":"storage-unavailable","message":"Octant storage is unavailable."}',
     );
     expect(output).not.toContain("sqlite");
+  });
+
+  it("names what a refused store needs so the desktop can offer only actions that help", () => {
+    const output = fatalStartupOutput(
+      new PersistenceStartupFailed({
+        category: "recovery-required",
+        message: "Octant storage requires recovery before startup.",
+        recovery: "removal-unfinished",
+      }),
+    );
+
+    expect(JSON.parse(output)).toEqual({
+      product: "Octant",
+      status: "failed",
+      category: "recovery-required",
+      message: "Octant storage requires recovery before startup.",
+      recovery: "removal-unfinished",
+    });
   });
 
   it("reports the Windows startup boundary without exposing its underlying dependency details", () => {

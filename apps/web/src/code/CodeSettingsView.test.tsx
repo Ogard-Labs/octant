@@ -280,6 +280,32 @@ describe("CodeSettingsView", () => {
     expect(screen.getByRole("switch", { name: "Language services" })).not.toBeChecked();
   });
 
+  it("shows Continue after restart on until a person turns it off, and sends only that change", async () => {
+    const update = vi.fn(async () => true);
+    const { rerender } = render(
+      <CodeSettingsView onUpdate={update} settings={settings as never} />,
+    );
+
+    const restart = screen.getByRole("switch", { name: "Continue after restart" });
+    expect(restart).toBeChecked();
+
+    await userEvent.setup().click(restart);
+    expect(update).toHaveBeenLastCalledWith({
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      defaultDiffLayout: "unified",
+      restartContinuation: false,
+    });
+
+    rerender(
+      <CodeSettingsView
+        onUpdate={update}
+        settings={{ ...settings, version: 2, restartContinuation: false } as never}
+      />,
+    );
+    expect(screen.getByRole("switch", { name: "Continue after restart" })).not.toBeChecked();
+  });
+
   it("shows the host's choice again when it refuses a switch or pick, and keeps typed text", async () => {
     const update = vi.fn(async () => false);
     const user = userEvent.setup();

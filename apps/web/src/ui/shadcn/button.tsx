@@ -59,10 +59,10 @@ const buttonVariants = cva(
       // which gives 20, 24, 28, and 32 at the default size.
       size: {
         default:
-          "h-[round(2.154rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-[round(down,1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
-        sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2.5 text-xs has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
-        lg: "h-[round(2.462rem,2px)] gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+          "h-[round(2.154rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
+        xs: "h-[round(down,1.538rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
+        sm: "h-[round(1.846rem,2px)] gap-1 rounded-md px-2 text-xs has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
+        lg: "h-[round(2.462rem,2px)] gap-1 px-2 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1",
         icon: "size-[round(2.154rem,2px)]",
         "icon-xs":
           "size-[round(down,1.538rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-xs)",
@@ -70,12 +70,13 @@ const buttonVariants = cva(
           "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
       },
     },
-    // A chip sizes itself, so its height and padding follow the label rather
-    // than a size step, which would otherwise win over the variant.
+    // A chip is one line on the small button's height (24px at the default
+    // size), so a row of suggestions shares one height with the controls beside
+    // it. Its own padding and height win over the size step.
     compoundVariants: [
       {
         variant: "chip",
-        class: "h-auto px-2 py-0.5 text-xs",
+        class: "h-[round(1.846rem,2px)] px-2 py-0 text-xs",
       },
     ],
     defaultVariants: {

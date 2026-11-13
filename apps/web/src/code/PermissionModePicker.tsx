@@ -231,10 +231,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                             ? "Auto · Recommended"
                             : option.label}
                         </span>
-                        <span
-                          className="text-xs text-muted-foreground"
-                          id={`${idPrefix}-${option.id}-note`}
-                        >
+                        <span className="oct-menu-detail" id={`${idPrefix}-${option.id}-note`}>
                           {note}
                         </span>
                       </span>
@@ -261,10 +258,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                   >
                     <span className="flex min-w-0 flex-col">
                       <span>Keep the sandbox</span>
-                      <span
-                        className="text-xs text-muted-foreground"
-                        id={`${idPrefix}-sandbox-note`}
-                      >
+                      <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
                         {sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL}
                       </span>
                     </span>

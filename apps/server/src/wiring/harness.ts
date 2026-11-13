@@ -117,6 +117,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "personMemory"
+    | "processAuthorityTime"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -192,6 +193,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessTranscripts,
     options,
     persistence,
+    processAuthorityTime,
     providerDataDirectory,
     runningWorkTurnAccess,
     runningWorkTurnSandbox,
@@ -251,6 +253,7 @@ export function wireHarness(deps: HarnessDependencies) {
   serverRegistry.servers = () => shieldServerStore.servers();
   serverRegistry.serversFor = (projectId) => shieldServerStore.serversFor(projectId);
   const serverPreviewTunnels = new ServerPreviewTunnels({
+    now: processAuthorityTime,
     address: (projectId) => {
       const project = serverProjectStore.project(projectId);
       const address = serverProjectStore.addressOf(projectId);
@@ -530,6 +533,54 @@ export function wireHarness(deps: HarnessDependencies) {
   const restartContinuation: {
     current: NativeHarnessSessionRouteDependencies["continueRecovery"];
   } = { current: undefined };
+  const recoveryBlockers = async (threadId: string): Promise<ReadonlyArray<string>> => {
+    const view = nativeHarnessSessions.read(threadId);
+    if (view === undefined) return [];
+    return nativeHarnessRecoveryBlockers(
+      {
+        providerInstance: (id) => persistence.readProviderInstance(id),
+        codeCheckout: (id) => {
+          try {
+            const thread = persistence.readCodeThread(decodeCodeThreadId(id));
+            return thread === undefined
+              ? undefined
+              : persistence.readCodeCheckout(thread.checkoutId);
+          } catch {
+            return undefined;
+          }
+        },
+        project: (id) => persistence.readProject(id),
+        directory: async (path) => {
+          const isDirectory = await statFromDisk(path)
+            .then((entry) => entry.isDirectory())
+            .catch(() => false);
+          return isDirectory ? await realpath(path).catch(() => undefined) : undefined;
+        },
+      },
+      view,
+    );
+  };
+  /**
+   * The host's own Resume of a session a restart left needing recovery, for a
+   * turn it continues by itself: the same blockers and the same settlement a
+   * person's Resume with Continue takes, in the same order, so the cut-off
+   * turn reads settled before the continuation starts.
+   */
+  const liftRestartRecovery = async (
+    threadId: string,
+  ): Promise<
+    { readonly kind: "none" | "lifted" } | { readonly kind: "held"; readonly detail: string }
+  > => {
+    const view = nativeHarnessSessions.read(threadId);
+    if (view?.session.status !== "recovery-required") return { kind: "none" };
+    const blockers = await recoveryBlockers(threadId);
+    if (blockers.length > 0)
+      return { kind: "held", detail: `Not ready to resume: ${blockers.join(" ")}`.slice(0, 255) };
+    for (const listener of recoveryLiftedListeners) listener({ threadId, mode: view.session.mode });
+    return nativeHarnessSessions.resume(threadId)
+      ? { kind: "lifted" }
+      : { kind: "held", detail: "The thread's harness session could not be resumed." };
+  };
   const leadDeliversSteering = (providerInstanceId: ProviderInstanceId): boolean => {
     const instance = persistence.readProviderInstance(providerInstanceId);
     return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
@@ -568,33 +619,7 @@ export function wireHarness(deps: HarnessDependencies) {
         kind: "refused",
         message: "Restart continuation is unavailable on this host.",
       }),
-    recoveryBlockers: async ({ threadId }) => {
-      const view = nativeHarnessSessions.read(threadId);
-      if (view === undefined) return [];
-      return nativeHarnessRecoveryBlockers(
-        {
-          providerInstance: (id) => persistence.readProviderInstance(id),
-          codeCheckout: (id) => {
-            try {
-              const thread = persistence.readCodeThread(decodeCodeThreadId(id));
-              return thread === undefined
-                ? undefined
-                : persistence.readCodeCheckout(thread.checkoutId);
-            } catch {
-              return undefined;
-            }
-          },
-          project: (id) => persistence.readProject(id),
-          directory: async (path) => {
-            const isDirectory = await statFromDisk(path)
-              .then((entry) => entry.isDirectory())
-              .catch(() => false);
-            return isDirectory ? await realpath(path).catch(() => undefined) : undefined;
-          },
-        },
-        view,
-      );
-    },
+    recoveryBlockers: ({ threadId }) => recoveryBlockers(threadId),
     followUps: followUpActions,
     answerQuestion: ({ threadId, questionId, answer }) =>
       nativeHarnessQuestions.answer(threadId, questionId, answer),
@@ -1077,6 +1102,7 @@ export function wireHarness(deps: HarnessDependencies) {
     runtimeForgeChanges,
     followUpCreation,
     restartContinuation,
+    liftRestartRecovery,
     followUpSuggestionRoutes,
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,

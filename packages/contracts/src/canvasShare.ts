@@ -4,6 +4,8 @@ import { Schema } from "effect";
 import {
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_CHOICE_PROMPT_LENGTH,
+  CANVAS_MAX_CHOICE_SECTION_INTRO_LENGTH,
+  CANVAS_MAX_CHOICE_SECTION_TITLE_LENGTH,
   CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_MAX_DESIGN_FRAMES,
   CANVAS_MAX_DIAGRAM_DETAIL_LENGTH,
@@ -43,6 +45,7 @@ import {
   CanvasDesignSize,
   CanvasDesignTheme,
   CanvasDiagramLayoutKind,
+  canvasChoiceUsesDecisionForm,
   canvasFlowUsesAnnotations,
   canvasMockupUsesLibrary,
   CanvasHeatmapDate,
@@ -77,7 +80,7 @@ import {
   type CanvasVersion,
 } from "./canvas";
 import { ActorId, UtcTimestamp } from "./events";
-import { QuestionnaireQuestions } from "./questionnaire";
+import { CanvasChoiceQuestions } from "./questionnaire";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
 
@@ -152,7 +155,10 @@ export const CANVAS_SHARE_MOCKUP_LIBRARY_SCHEMA_VERSION = 13;
 export const CANVAS_SHARE_DECK_SCHEMA_VERSION = 14;
 export const CANVAS_SHARE_FLOW_ANNOTATIONS_SCHEMA_VERSION = 15;
 export const CANVAS_SHARE_CHOICE_SCHEMA_VERSION = 16;
-export const CANVAS_SHARE_SCHEMA_VERSION = 16 as const;
+// Version 17 carries a decision form's sections and its questions' `allowNote`,
+// with Canvas schema version 29. A share never carries a person's answers.
+export const CANVAS_SHARE_DECISION_FORM_SCHEMA_VERSION = 17;
+export const CANVAS_SHARE_SCHEMA_VERSION = 17 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
@@ -167,10 +173,12 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 16 as const;
 // richer diagram fields, which a share carries, so share version 11 names
 // blocks up to 21. Version 23 adds the flow block, which a share carries
 // whole, so share version 12 names blocks up to 23. Version 27 adds the
-// choice block, so share version 16 names blocks up to 27. A later Canvas bump that
+// choice block, so share version 16 names blocks up to 27. Version 29 adds a
+// decision form's sections and notes, so share version 17 names blocks up to
+// 29. A later Canvas bump that
 // adds something a share
 // carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 27 as const;
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 29 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -187,6 +195,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   13,
   14,
   15,
+  16,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -1006,7 +1015,7 @@ export const CanvasStaticExportBlock = Schema.Union(
     ...exportBlockFields,
     kind: Schema.Literal("choice"),
     prompt: ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_CHOICE_PROMPT_LENGTH)),
-    questions: QuestionnaireQuestions.pipe(
+    questions: CanvasChoiceQuestions.pipe(
       Schema.filter(
         (questions) =>
           questions.every(
@@ -1019,6 +1028,33 @@ export const CanvasStaticExportBlock = Schema.Union(
               ),
           ),
         { message: () => "Canvas export questions must not contain secret-bearing text." },
+      ),
+    ),
+    // Sections group and title the questions; like the questions, they leave
+    // as text and are checked for secret-bearing words.
+    sections: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          id: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+          title: ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_CHOICE_SECTION_TITLE_LENGTH)),
+          intro: Schema.optional(
+            ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_CHOICE_SECTION_INTRO_LENGTH)),
+          ),
+          questionIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))).pipe(
+            Schema.minItems(1),
+          ),
+        }).annotations(strict),
+      ).pipe(
+        Schema.minItems(1),
+        Schema.filter(
+          (sections) =>
+            sections.every(
+              (section) =>
+                exportTextHasNoSecrets(section.title) &&
+                (section.intro === undefined || exportTextHasNoSecrets(section.intro)),
+            ),
+          { message: () => "Canvas export sections must not contain secret-bearing text." },
+        ),
       ),
     ),
   }).annotations(strict),
@@ -1181,10 +1217,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         (document.schemaVersion >= CANVAS_SHARE_FLOW_ANNOTATIONS_SCHEMA_VERSION ||
           !document.blocks.some((block) => canvasFlowUsesAnnotations(block))) &&
         (document.schemaVersion >= CANVAS_SHARE_CHOICE_SCHEMA_VERSION ||
-          !document.blocks.some((block) => block.kind === "choice")),
+          !document.blocks.some((block) => block.kind === "choice")) &&
+        (document.schemaVersion >= CANVAS_SHARE_DECISION_FORM_SCHEMA_VERSION ||
+          !document.blocks.some((block) => canvasChoiceUsesDecisionForm(block))),
       {
         message: () =>
-          "Flow blocks require Canvas share version 12, the mockup library requires Canvas share version 13, a deck block requires Canvas share version 14, flow callouts require Canvas share version 15, and a choice block requires Canvas share version 16.",
+          "Flow blocks require Canvas share version 12, the mockup library requires Canvas share version 13, a deck block requires Canvas share version 14, flow callouts require Canvas share version 15, a choice block requires Canvas share version 16, and a decision form's sections and notes require Canvas share version 17.",
       },
     ),
   );

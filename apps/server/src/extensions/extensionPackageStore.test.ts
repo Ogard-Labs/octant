@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -243,6 +243,22 @@ async function setup(options: { readonly outsideDriverRuntime?: OutsideDriverRun
 }
 
 describe("host-private immutable extension package store", () => {
+  it("removes an uninstalled extension's plugin data, such as a stored login, and no one else's", async () => {
+    const { store } = await setup();
+    const mine = "55000000-0000-4000-8000-000000000001";
+    const other = "55000000-0000-4000-8000-000000000002";
+    const root = store.pluginDataRoot();
+    for (const name of [`${mine}-pkg-a`, `${mine}-pkg-b`, `${other}-pkg-a`]) {
+      await mkdir(join(root, name), { recursive: true });
+      await writeFile(join(root, name, "tokens.json"), "{}");
+    }
+    await store.removePluginData(mine);
+    expect(await readdir(root)).toEqual([`${other}-pkg-a`]);
+    await store.removePluginData("../../etc");
+    await store.removePluginData("not-a-uuid");
+    expect(await readdir(root)).toEqual([`${other}-pkg-a`]);
+  });
+
   it("authorizes a reviewed host executable for a configuration-backed server", async () => {
     const { store, dataDirectory } = await setup();
     const target = await store.promote(await store.stage(configuredServerInspection()));

@@ -236,6 +236,44 @@ describe("MachineChangeFeed", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("requires a snapshot after a restart even when the old cursor sits below the new head", async () => {
+    const before = new MachineChangeFeed();
+    const listening = new AbortController();
+    const seen = before.subscribe({ afterSequence: 0, signal: listening.signal });
+    before.publish(["chat-navigation"]);
+    before.publish(["chat-navigation"]);
+    const last = await seen.next();
+    await seen.next();
+    listening.abort();
+    expect(last.value).toMatchObject({ kind: "changed", sequence: 1, epoch: before.epoch() });
+
+    // The host restarts and the new process publishes past the old cursor.
+    const after = new MachineChangeFeed();
+    for (let index = 0; index < 5; index += 1) after.publish(["work-navigation"]);
+    expect(after.epoch()).not.toBe(before.epoch());
+
+    const resumed = after.subscribe({
+      afterSequence: 2,
+      epoch: before.epoch(),
+      signal: new AbortController().signal,
+    });
+    await expect(resumed.next()).resolves.toMatchObject({
+      done: false,
+      value: { kind: "snapshot-required", sequence: 5, epoch: after.epoch() },
+    });
+    await expect(resumed.next()).resolves.toMatchObject({ done: true });
+
+    // The same process's own cursor still resumes.
+    const current = after.subscribe({
+      afterSequence: 4,
+      epoch: after.epoch(),
+      signal: new AbortController().signal,
+    });
+    await expect(current.next()).resolves.toMatchObject({
+      value: { kind: "changed", sequence: 5, epoch: after.epoch() },
+    });
+  });
+
   it("does not invalidate Code navigation for provider text deltas", async () => {
     const feed = new MachineChangeFeed();
     const controller = new AbortController();

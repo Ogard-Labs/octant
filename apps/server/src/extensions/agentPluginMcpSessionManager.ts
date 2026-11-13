@@ -25,6 +25,7 @@ import {
   type McpToolDefinition,
 } from "./agentPluginMcpClient";
 import { prepareAgentPluginMcpRuntime } from "./agentPluginMcpRuntime";
+import { startHostAllowListProxy } from "./hostAllowListProxy";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import { recordShieldWatcherLabels } from "../providers/appManagedToolTaint";
 import type {
@@ -55,6 +56,7 @@ export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
   readonly session: AgentPluginMcpSession;
   readonly tools: ReadonlyArray<McpToolDefinition>;
   readonly reach: ExtensionToolReach;
+  readonly askEveryCall: ReadonlyArray<string>;
   readonly authenticationGeneration: number;
   readonly authentication?: McpSessionAuthentication;
   /** Each tool's definition digest, taken once from the listing at connect. */
@@ -77,6 +79,8 @@ export interface ExtensionToolCall {
   readonly digest: string;
   readonly definitionDigest: string;
   readonly reach: ExtensionToolReach;
+  /** True when the catalog lists this tool as ask-every-call. */
+  readonly askEveryCall?: boolean;
   readonly providerToolName: string;
   readonly mcpToolName: string;
   readonly inputJson: string;
@@ -103,6 +107,19 @@ type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
   readonly serverNameHint: string;
   /** True for a package the host wrote for a server the person added by hand. */
   readonly userAdded: boolean;
+  /**
+   * The hosts a stdio server may reach through the host's proxy, from the
+   * bundled catalog entry the host's own store vouches for. Never read from
+   * the package.
+   */
+  readonly egressHosts?: ReadonlyArray<string>;
+  /** Tool names the catalog entry lists as ask-every-call, from the same vouched source. */
+  readonly askEveryCall?: ReadonlyArray<string>;
+  /**
+   * The server keeps one login in its plugin data, which two processes must not
+   * share (a second refresh revokes it), so at most one process runs at a time.
+   */
+  readonly exclusive?: true;
 };
 
 export interface AgentPluginMcpSessionManagerOptions {
@@ -137,6 +154,10 @@ export interface AgentPluginMcpSessionManagerOptions {
    * broker: a third-party package never gets to name a secret.
    */
   readonly isUserAddedSource?: (sourceRef: string) => boolean;
+  /** The catalog's listed hosts for a package the host wrote for a command connector. */
+  readonly egressHostsForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
+  readonly askEveryCallForSource?: (sourceRef: string) => ReadonlyArray<string> | undefined;
+  readonly exclusiveForSource?: (sourceRef: string) => boolean;
   readonly resolveUserAddedSecrets?: (
     launch: AgentPluginsMcpLaunchSpec,
     target: { readonly extensionId: string; readonly componentId: string },
@@ -160,6 +181,11 @@ export class AgentPluginMcpSessionManager {
   readonly #recordExternalContentIngestion: AgentPluginMcpSessionManagerOptions["recordExternalContentIngestion"];
   readonly #uuid: () => string;
   readonly #isUserAddedSource: AgentPluginMcpSessionManagerOptions["isUserAddedSource"];
+  readonly #egressHostsForSource: AgentPluginMcpSessionManagerOptions["egressHostsForSource"];
+  readonly #askEveryCallForSource: AgentPluginMcpSessionManagerOptions["askEveryCallForSource"];
+  readonly #exclusiveForSource: AgentPluginMcpSessionManagerOptions["exclusiveForSource"];
+  /** Packages whose one process is running or starting, by package and component. */
+  readonly #exclusiveHolders = new Set<string>();
   readonly #resolveUserAddedSecrets: AgentPluginMcpSessionManagerOptions["resolveUserAddedSecrets"];
   readonly #bindUserAddedAuthentication: AgentPluginMcpSessionManagerOptions["bindUserAddedAuthentication"];
   readonly #sessions = new Map<string, AgentPluginMcpSessionRecord>();
@@ -212,6 +238,9 @@ export class AgentPluginMcpSessionManager {
     this.#uuid = options.uuid ?? randomUUID;
     this.#now = options.now ?? (() => new Date());
     this.#isUserAddedSource = options.isUserAddedSource;
+    this.#egressHostsForSource = options.egressHostsForSource;
+    this.#askEveryCallForSource = options.askEveryCallForSource;
+    this.#exclusiveForSource = options.exclusiveForSource;
     this.#resolveUserAddedSecrets = options.resolveUserAddedSecrets;
     this.#bindUserAddedAuthentication = options.bindUserAddedAuthentication;
   }
@@ -379,6 +408,7 @@ export class AgentPluginMcpSessionManager {
                 digest: record.digest,
                 definitionDigest,
                 reach: record.reach,
+                ...(record.askEveryCall.includes(indexed.toolName) ? { askEveryCall: true } : {}),
                 providerToolName: name,
                 mcpToolName: indexed.toolName,
                 inputJson,
@@ -558,6 +588,12 @@ export class AgentPluginMcpSessionManager {
       for (const componentState of packageState.components) {
         if (componentState.effectiveState.kind !== "effective") continue;
         if (componentState.component.kind !== "mcp-server") continue;
+        const sourceRef =
+          "sourceRef" in packageState.source ? packageState.source.sourceRef : undefined;
+        const egressHosts =
+          sourceRef === undefined ? undefined : this.#egressHostsForSource?.(sourceRef);
+        const askEveryCall =
+          sourceRef === undefined ? undefined : this.#askEveryCallForSource?.(sourceRef);
         const key = {
           extensionId: packageState.extensionId,
           packageId: packageState.packageId,
@@ -570,6 +606,11 @@ export class AgentPluginMcpSessionManager {
           userAdded:
             "sourceRef" in packageState.source &&
             this.#isUserAddedSource?.(packageState.source.sourceRef) === true,
+          ...(egressHosts === undefined || egressHosts.length === 0 ? {} : { egressHosts }),
+          ...(askEveryCall === undefined || askEveryCall.length === 0 ? {} : { askEveryCall }),
+          ...(sourceRef !== undefined && this.#exclusiveForSource?.(sourceRef) === true
+            ? { exclusive: true as const }
+            : {}),
         };
         desired.set(sessionKey(key), key);
       }
@@ -813,6 +854,26 @@ export class AgentPluginMcpSessionManager {
                 supervisor: this.#stdioSupervisor,
                 target,
                 platform: this.#platform,
+                ...(target.egressHosts === undefined ? {} : { egressHosts: target.egressHosts }),
+                ...(target.exclusive === true
+                  ? {
+                      exclusive: {
+                        acquire: () => {
+                          const key = `${target.extensionId}:${target.packageId}:${target.componentId}`;
+                          if (this.#exclusiveHolders.has(key)) return undefined;
+                          this.#exclusiveHolders.add(key);
+                          // Effective once: a late second release (exit, then stop)
+                          // must not delete a later holder's entry.
+                          let released = false;
+                          return () => {
+                            if (released) return;
+                            released = true;
+                            this.#exclusiveHolders.delete(key);
+                          };
+                        },
+                      },
+                    }
+                  : {}),
               }),
             }),
       });
@@ -840,8 +901,15 @@ export class AgentPluginMcpSessionManager {
       session,
       tools: session.tools,
       // A stdio server only ever starts through `supervisedStdioProcessPort`,
-      // which denies it the network and confines its writes to plugin data.
-      reach: session.transport === "stdio" ? "confined-stdio" : "network",
+      // which denies it the network, or lets it reach only its catalog entry's
+      // hosts through the host's proxy, and confines its writes to plugin data.
+      reach:
+        session.transport !== "stdio"
+          ? "network"
+          : target.egressHosts === undefined
+            ? "confined-stdio"
+            : "proxied-stdio",
+      askEveryCall: target.askEveryCall ?? [],
       authenticationGeneration,
       ...(authentication === undefined ? {} : { authentication }),
       toolDefinitionDigests: new Map(
@@ -1083,6 +1151,9 @@ function supervisedStdioProcessPort(input: {
   readonly supervisor: Pick<ExtensionSupervisor, "startInteractive">;
   readonly target: AgentPluginMcpSessionKey;
   readonly platform: NodeJS.Platform;
+  readonly egressHosts?: ReadonlyArray<string>;
+  /** Returns a release, or undefined when another process already holds the one slot. */
+  readonly exclusive?: { readonly acquire: () => (() => void) | undefined };
 }): AgentPluginMcpStdioProcessPort {
   return {
     start: async (launch, signal) => {
@@ -1113,6 +1184,25 @@ function supervisedStdioProcessPort(input: {
             : launcherCommandRefusal(launch.name, launch.command),
         );
       }
+      const release = input.exclusive?.acquire();
+      if (input.exclusive !== undefined && release === undefined) {
+        throw new Error(
+          "This connector keeps one login for the whole computer and is already running for another thread. It frees up when that thread's connection closes.",
+        );
+      }
+      let proxy: Awaited<ReturnType<typeof startHostAllowListProxy>> | undefined;
+      try {
+        proxy =
+          input.egressHosts === undefined
+            ? undefined
+            : await startHostAllowListProxy({ allowedHosts: input.egressHosts });
+      } catch (error) {
+        // No process started, so the one slot must not stay taken.
+        release?.();
+        throw error;
+      }
+      const proxyAddress =
+        proxy === undefined ? undefined : `http://127.0.0.1:${String(proxy.port)}`;
       const runtime: ExtensionRuntimeStartInput = {
         extensionId: input.target.extensionId,
         packageId: input.target.packageId,
@@ -1129,6 +1219,13 @@ function supervisedStdioProcessPort(input: {
           ...launch.env,
           HOME: pluginData,
           TMPDIR: pluginData,
+          ...(proxyAddress === undefined
+            ? {}
+            : {
+                HTTPS_PROXY: proxyAddress,
+                https_proxy: proxyAddress,
+                NODE_USE_ENV_PROXY: "1",
+              }),
         },
         effective: true,
         approved: true,
@@ -1140,18 +1237,40 @@ function supervisedStdioProcessPort(input: {
           allowRead: [pluginRoot, pluginData, launch.cwd],
           allowWrite: [pluginData],
           allowNetwork: false,
+          ...(proxy === undefined ? {} : { allowLoopbackPorts: [proxy.port] }),
         },
       };
-      const started = await input.supervisor.startInteractive(runtime, signal);
+      let started: Awaited<ReturnType<typeof input.supervisor.startInteractive>>;
+      try {
+        started = await input.supervisor.startInteractive(runtime, signal);
+      } catch (error) {
+        await proxy?.stop();
+        release?.();
+        throw error;
+      }
       if (started.process.stdin === undefined || started.process.stdout === undefined) {
         await started.process.stop().catch(() => undefined);
+        await proxy?.stop();
+        release?.();
         throw new Error("Supervised MCP process did not expose stdio.");
       }
       return {
         stdin: started.process.stdin,
         stdout: started.process.stdout,
-        stop: started.process.stop,
-        once: (_event, listener) => started.process.once("exit", () => listener()),
+        stop: async () => {
+          try {
+            await started.process.stop();
+          } finally {
+            await proxy?.stop();
+            release?.();
+          }
+        },
+        once: (_event, listener) =>
+          started.process.once("exit", () => {
+            void proxy?.stop();
+            release?.();
+            listener();
+          }),
       };
     },
   };

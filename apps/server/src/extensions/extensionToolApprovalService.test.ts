@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { WindowId } from "@octant/contracts";
 import {
@@ -211,6 +212,32 @@ describe("extension tool approval service", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("refuses a prompt whose elapsed time is up even when the wall clock is set back", async () => {
+    let wallClockMs = Date.parse("2026-08-09T06:00:00.000Z");
+    let elapsedMs = 1_000;
+    const clock = new ProcessAuthorityClock({
+      wallClock: () => wallClockMs,
+      suspendAwareElapsedSource: () => elapsedMs,
+    });
+    const service = new ExtensionToolApprovalService({
+      uuid: () => "44000000-0000-4000-8000-000000000001",
+      now: clock.now(),
+      ttlMs: 1_000,
+    });
+    const pending = request(service);
+    elapsedMs += 1_000;
+    wallClockMs -= 60 * 60 * 1_000;
+
+    expect(service.list(atWindow(windowId))).toEqual([]);
+    expect(
+      service.decide(atWindow(windowId), {
+        approvalId: "44000000-0000-4000-8000-000000000001",
+        decision: "approved",
+      }),
+    ).toBe(false);
+    await expect(pending).resolves.toBe(false);
   });
 
   it("refuses a prompt the clock has passed, though its timer has not fired yet", async () => {

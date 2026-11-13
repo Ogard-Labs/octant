@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { connect, createServer } from "node:net";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { ServerPreviewTunnels, serverPreviewSshArguments } from "./serverPreviewTunnel";
 
 const server = { alias: "web", user: "deploy" };
@@ -7,7 +8,7 @@ const owned: ServerPreviewTunnels[] = [];
 afterEach(async () => {
   await Promise.all(owned.splice(0).map((tunnel) => tunnel.close()));
 });
-function fixture() {
+function fixture(now: () => number = () => Date.now()) {
   let current = true;
   const closedOwners = new Set<string>();
   const records: unknown[] = [];
@@ -19,6 +20,7 @@ function fixture() {
       records.push(record);
       return true;
     },
+    now,
   });
   owned.push(tunnels);
   return {
@@ -113,5 +115,25 @@ describe("owned server previews", () => {
       view: { remotePort: 3000, status: "listening" },
     });
     expect(tunnels.read("project", "window")).toBeUndefined();
+  });
+  it("closes a tunnel after its hour of elapsed time even when the wall clock is set back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const openedAt = Date.UTC(2026, 10, 1);
+      vi.setSystemTime(openedAt);
+      let elapsedMs = 1_000;
+      const clock = new ProcessAuthorityClock({
+        wallClock: () => Date.now(),
+        suspendAwareElapsedSource: () => elapsedMs,
+      });
+      const { tunnels } = fixture(clock.now());
+      expect((await tunnels.start("project", "window", 5173, 0)).kind).toBe("tunnel");
+      elapsedMs += 60 * 60 * 1_000 + 1;
+      vi.setSystemTime(openedAt - 60 * 60 * 1_000);
+      await tunnels.reconcile();
+      expect(tunnels.read("project", "window")).toMatchObject({ status: "revoked" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

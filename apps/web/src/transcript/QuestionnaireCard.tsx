@@ -2,7 +2,7 @@ import { useQuestionnaireDraft, type QuestionnaireDraftIdentity } from "./questi
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useId, useRef, useState } from "react";
 import type { Questionnaire, QuestionnaireResponse } from "@octant/contracts";
-import { validateQuestionnaireAnswer } from "@octant/domain";
+import { validateQuestionnaireAnswer, type QuestionnaireAnswerValidation } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -23,7 +23,14 @@ export interface QuestionnaireCardProps {
   /** The send button's words; a Canvas names the thread the answer goes to. */
   readonly submitLabel?: string | undefined;
   readonly className?: string | undefined;
+  /** The rule an answer is checked against; a Canvas form passes its own, without the inline ask's ceilings. */
+  readonly validateAnswer?: QuestionnaireAnswerRule | undefined;
 }
+
+export type QuestionnaireAnswerRule = (
+  questionnaire: Questionnaire,
+  text: string,
+) => QuestionnaireAnswerValidation;
 
 export interface QuestionnaireRefusal {
   readonly refused: string;
@@ -68,7 +75,8 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
   };
   const encoded = JSON.stringify(response);
   const valid =
-    validateQuestionnaireAnswer(props.questionnaire, encoded).status === "valid" &&
+    (props.validateAnswer ?? validateQuestionnaireAnswer)(props.questionnaire, encoded).status ===
+      "valid" &&
     customIds.every(
       (questionId) =>
         answers.find((answer) => answer.questionId === questionId)?.customAnswer !== undefined,
@@ -108,6 +116,7 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
         prompt={props.prompt}
         questionnaire={props.questionnaire}
         answer={sent}
+        validateAnswer={props.validateAnswer}
       />
     );
   return (
@@ -287,8 +296,12 @@ export function QuestionnaireSummary(props: {
   readonly prompt: string;
   readonly questionnaire: Questionnaire;
   readonly answer: string;
+  readonly validateAnswer?: QuestionnaireAnswerRule | undefined;
 }) {
-  const validated = validateQuestionnaireAnswer(props.questionnaire, props.answer);
+  const validated = (props.validateAnswer ?? validateQuestionnaireAnswer)(
+    props.questionnaire,
+    props.answer,
+  );
   if (validated.status === "invalid")
     return <p role="status">Submitted answers are unavailable.</p>;
   return (

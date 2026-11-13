@@ -198,8 +198,8 @@ every address raises its own confirmation, which names the whole address and
 is bound to it, and Allow input never covers it. Evidence and its log keep only
 `open-url completed (<origin>; path and query not recorded)`: the tool's own
 output can quote the address, so none of it is kept, for the same reason typed
-text is redacted. Not built yet: today an agent is refused, as with Repair
-input, and the agent tools do not offer Open URL.
+text is redacted. Not built yet: today an agent is refused, and the agent
+tools do not offer Open URL.
 
 ## Volume
 

@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./web": "./src/web.ts",
     "./status": "./src/status.ts",
+    "./service-manager": "./src/serviceManager.ts",
     "./mcp": "./src/mcpCommand.ts",
     "./agent-tools": "./src/agentMcpServer.ts",
     "./terminal-launcher": "./src/terminalLauncher.ts"

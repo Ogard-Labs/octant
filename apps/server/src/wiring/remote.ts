@@ -27,6 +27,7 @@ import {
   HubMemberId,
   ThreadRetentionThreadId,
   decodeCodeCommand,
+  type HostRestartRecovery,
   type MovedThreadReference,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -86,6 +87,7 @@ import {
   type LocalDeviceAdministrationPort,
 } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
+import { createPersonQuitRouteHandler } from "../personQuit";
 import { createSupportBundleRouteHandler } from "../supportBundleRoutes";
 import { readEventLoopLagCounters } from "../eventLoopLag";
 import { slowStatementTally } from "../persistence/slowStatementLog";
@@ -312,6 +314,8 @@ export type RemoteDependencies = {
     readonly threadMoveState: ThreadMoveStatePort;
     /** Tells owner phones, through the phone notification path, that a move waits. */
     readonly threadNotifications: Pick<ThreadNotificationDeliveryService, "notifyMoveWaiting">;
+    /** What this start did with the turns a restart cut off. */
+    readonly restartRecovery: () => HostRestartRecovery | undefined;
   };
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -2402,10 +2406,15 @@ export function wireRemote(deps: RemoteDependencies) {
       },
     }),
   });
+  const personQuitRoutes = createPersonQuitRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    dataDirectory: persistence.dataDirectory,
+  });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
     diagnostics: composeHostDiagnostics,
     memory: () => hostMemoryGuard.report(),
+    restartRecovery: deps.restartRecovery,
     memoryLimits: hostMemoryLimits,
     threadRetention,
     ...(options.hostControl?.servicePolicy === undefined
@@ -2495,6 +2504,7 @@ export function wireRemote(deps: RemoteDependencies) {
     threadMoveAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
+    personQuitRoutes,
     supportBundleRoutes,
     hubAdministrationRoutes,
     localDeviceAdministrationRoutes,

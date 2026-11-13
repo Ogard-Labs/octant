@@ -53,8 +53,19 @@ export function withStartupFailureReason(message: string, error: unknown): strin
 /** The fixed failure every unclassified startup error reports, with its reason when known. */
 export const UNCLASSIFIED_STARTUP_FAILURE = "Octant could not start the local server.";
 
-export function startupFailedOutput(category: string, message: string): string {
-  return JSON.stringify({ product: "Octant", status: "failed", category, message });
+/**
+ * The one line a refused start prints. The desktop reads `category` and
+ * `recovery` from it to choose what its recovery screen offers, so both stay
+ * fixed vocabulary and never carry raw error text.
+ */
+export function startupFailedOutput(category: string, message: string, recovery?: string): string {
+  return JSON.stringify({
+    product: "Octant",
+    status: "failed",
+    category,
+    message,
+    ...(recovery === undefined ? {} : { recovery }),
+  });
 }
 
 function codeOf(value: unknown): string | undefined {

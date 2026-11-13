@@ -202,6 +202,11 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                             Vendor setup guide
                           </a>
                         </span>
+                        {entry.auth.kind === "sign-in" &&
+                        entry.auth.clientSetup !== "registered" &&
+                        entry.auth.permissionNotice !== undefined ? (
+                          <span className="connectors__detail">{entry.auth.permissionNotice}</span>
+                        ) : null}
                         {connection !== undefined && connectionNeedsAttention(connection.state) ? (
                           <ConnectionStatus connection={connection} />
                         ) : null}
@@ -211,8 +216,8 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                             id={`${ids}-${entry.id}-local-reason`}
                           >
                             Requires the Octant window on this host.{" "}
-                            {entry.auth.kind === "key"
-                              ? "Have this service's API key ready; it stays in the host credential store."
+                            {entry.auth.kind === "key" || entry.auth.kind === "command"
+                              ? "Have this service's key or login token ready; it stays in the host credential store."
                               : entry.auth.kind === "sign-in"
                                 ? entry.auth.clientSetup === "registered"
                                   ? "Register the service's sign-in app on that host, then sign in with your account."
@@ -241,6 +246,9 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                                   registration: {
                                     guideUrl: entry.auth.setupGuide,
                                     requestedScopes: entry.auth.requestedScopes ?? [],
+                                    ...(entry.auth.setupSteps === undefined
+                                      ? {}
+                                      : { setupSteps: entry.auth.setupSteps }),
                                     ...(entry.auth.permissionNotice === undefined
                                       ? {}
                                       : { permissionNotice: entry.auth.permissionNotice }),
@@ -253,7 +261,8 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                             extensionId={installed.extensionId}
                           />
                         ) : null}
-                        {keyFor === entry.id && entry.auth.kind === "key" ? (
+                        {keyFor === entry.id &&
+                        (entry.auth.kind === "key" || entry.auth.kind === "command") ? (
                           <form
                             aria-label={`${entry.displayName} key`}
                             className="connectors__key"
@@ -264,7 +273,9 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                             }}
                           >
                             <OctantInput
-                              aria-label="Key"
+                              aria-label={
+                                entry.auth.kind === "command" ? entry.auth.secret.label : "Key"
+                              }
                               autoComplete="off"
                               className="settings-view__text-input"
                               onChange={(event) => setKey(event.currentTarget.value)}
@@ -280,9 +291,32 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                               Connect
                             </OctantButton>
                             <span className="connectors__detail">
-                              Create one at{" "}
-                              <a href={entry.auth.keyPage} rel="noreferrer" target="_blank">
-                                {new URL(entry.auth.keyPage).host}
+                              {entry.auth.kind === "command" ? (
+                                <>
+                                  Runs {entry.auth.package.name}@{entry.auth.package.version}{" "}
+                                  (checked against {entry.auth.package.integrity.slice(0, 19)}…) on
+                                  this computer, reaching only {entry.egress?.join(", ")}. Create
+                                  the token at{" "}
+                                </>
+                              ) : (
+                                <>Create one at </>
+                              )}
+                              <a
+                                href={
+                                  entry.auth.kind === "command"
+                                    ? entry.auth.secret.keyPage
+                                    : entry.auth.keyPage
+                                }
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                {
+                                  new URL(
+                                    entry.auth.kind === "command"
+                                      ? entry.auth.secret.keyPage
+                                      : entry.auth.keyPage,
+                                  ).host
+                                }
                               </a>
                               . Kept in {thisComputerName(hostPlatform)}&apos;s credential store.
                             </span>
@@ -305,7 +339,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                             }
                             disabled={!props.localHost || props.disabled || busyId !== undefined}
                             onClick={() => {
-                              if (entry.auth.kind === "key") {
+                              if (entry.auth.kind === "key" || entry.auth.kind === "command") {
                                 setKeyFor(keyFor === entry.id ? undefined : entry.id);
                                 setKey("");
                                 return;

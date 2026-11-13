@@ -14,6 +14,8 @@ export type ConnectorAuth =
       readonly clientSetup?: "registered";
       readonly setupGuide?: string;
       readonly requestedScopes?: readonly string[];
+      /** Numbered steps shown beside Client setup: what to do at the vendor, then in Octant. */
+      readonly setupSteps?: readonly string[];
       /** Plain-language authority disclosed before app consent, not a tool approval. */
       readonly permissionNotice?: string;
     }
@@ -25,7 +27,36 @@ export type ConnectorAuth =
       readonly keyPage: string;
     }
   /** The server answers without a credential. */
-  | { readonly kind: "none" };
+  | { readonly kind: "none" }
+  /**
+   * A program Octant runs instead of a hosted address: one npm package pinned
+   * by exact version and registry integrity, started with `node` on a file
+   * inside it. The host rebuilds the command from this entry; a request never
+   * supplies it.
+   */
+  | {
+      readonly kind: "command";
+      readonly package: {
+        readonly name: string;
+        readonly version: string;
+        /** The registry's `dist.integrity` for that version's tarball. */
+        readonly integrity: string;
+        /** The file `node` runs, relative to the package folder. */
+        readonly entry: string;
+      };
+      /** Fixed, non-secret environment. */
+      readonly env: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+      /** The one value the person provides; kept in the credential broker. */
+      readonly secret: {
+        readonly name: string;
+        readonly label: string;
+        readonly keyPage: string;
+      };
+      /** Env var that receives the server's token-store path inside its plugin data. */
+      readonly stateFileEnv?: string;
+      /** Tools that ask on every call; no remembered approval covers them. */
+      readonly askEveryCall: ReadonlyArray<string>;
+    };
 
 export type ConnectorCategory = "popular" | "developer-tools" | "business";
 
@@ -41,6 +72,12 @@ export interface ConnectorCatalogEntry {
   /** The vendor's own page on connecting to this server, shown beside the entry. */
   readonly docs: string;
   readonly auth: ConnectorAuth;
+  /**
+   * Hosts a locally started connector may reach through the host's proxy
+   * (`*.example.com` covers the names below example.com). Only an entry that
+   * names some is ever granted a network path; a hosted entry never has any.
+   */
+  readonly egress?: ReadonlyArray<string>;
 }
 
 export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string>> = {
@@ -70,6 +107,24 @@ export const CONNECTOR_CATEGORY_LABEL: Readonly<Record<ConnectorCategory, string
 export const GITHUB_REPOSITORY_PERMISSION_NOTICE =
   "Allows read and write access to public and private repositories and related organization resources available to your account. This OAuth App permission does not select individual repositories. Reusing the same app can change permissions returned to other connections; their original access policy is retained.";
 
+/**
+ * The Octant half of registering an app, the same for every entry that needs
+ * one. The vendor half stays with each entry, drawn only from what its own
+ * entry and guide already say, so a step never invents a vendor screen.
+ */
+const REGISTERED_APP_FINISH_STEPS: readonly string[] = [
+  "Paste the app's client ID into Client setup. If the app has a client secret, link its 1Password item there; link a secret store in Settings first.",
+  "Save client setup, then press Sign in and approve access in your browser.",
+];
+
+function registeredAppSteps(...vendorSteps: readonly string[]): readonly string[] {
+  return [
+    ...vendorSteps,
+    "Give the app the callback address shown in Client setup as its redirect address.",
+    ...REGISTERED_APP_FINISH_STEPS,
+  ];
+}
+
 const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
   ...GOOGLE_WORKSPACE_SERVICES.map(
     (service): ConnectorCatalogEntry => ({
@@ -84,6 +139,12 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
         clientSetup: "registered",
         setupGuide: "https://developers.google.com/workspace/guides/create-credentials#desktop-app",
         requestedScopes: service.scopes,
+        setupSteps: [
+          "In your own Google Cloud project, create a Desktop app client with Use this client for an AI-powered agent selected (the Google guide above shows where).",
+          `Enable ${service.api} and ${service.mcpApi} in that project.`,
+          "Paste the client ID into Client setup. This client needs no secret.",
+          "Save client setup, then press Sign in and approve access in your browser.",
+        ],
         permissionNotice: `Developer Preview requires an enrolled Workspace account and project. ${service.description} Public distribution requires Google's permission or general availability.`,
       },
     }),
@@ -101,6 +162,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       clientSetup: "registered",
       setupGuide: "https://docs.slack.dev/ai/slack-mcp-server/",
       requestedScopes: ["search:read.public"],
+      setupSteps: registeredAppSteps(
+        "Register a Slack app you own, as the Slack guide above describes, and grant it only the search:read.public scope.",
+      ),
     },
   },
   {
@@ -151,6 +215,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       clientSetup: "registered",
       setupGuide:
         "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
+      setupSteps: registeredAppSteps(
+        "In your HubSpot account, create your own MCP connector as the HubSpot guide above describes.",
+      ),
       permissionNotice:
         "Can read and write CRM data allowed by your HubSpot permissions and consent. Available tools depend on your subscription and account configuration. Create your own MCP connector and link its client secret before signing in.",
     },
@@ -229,6 +296,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       setupGuide:
         "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps",
       requestedScopes: ["read:user", "repo", "offline_access"],
+      setupSteps: registeredAppSteps(
+        "Register a GitHub OAuth App you own, as the GitHub guide above describes.",
+      ),
       permissionNotice: GITHUB_REPOSITORY_PERMISSION_NOTICE,
     },
   },
@@ -247,6 +317,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       setupGuide:
         "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
       requestedScopes: ["read:user", "offline_access"],
+      setupSteps: registeredAppSteps(
+        "Register a GitHub OAuth App you own, as the GitHub guide above describes.",
+      ),
     },
   },
   {
@@ -545,6 +618,20 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     auth: { kind: "sign-in" },
   },
   {
+    id: "composio",
+    displayName: "Composio",
+    description: "Reach Gmail, Google Drive and many other apps through Composio's hosted service.",
+    category: "business",
+    keywords: ["gmail", "google drive", "google calendar", "email", "aggregator", "integrations"],
+    url: "https://connect.composio.dev/mcp",
+    docs: "https://docs.composio.dev/docs/composio-connect",
+    auth: {
+      kind: "sign-in",
+      permissionNotice:
+        "Composio is a third-party hosted service. It stores the sign-ins you give it for other apps, and the content the agent reads or writes in them passes through its servers, not only between this Mac and the app. Octant does not control how long Composio keeps it.",
+    },
+  },
+  {
     id: "intercom",
     displayName: "Intercom",
     description: "Search conversations, contacts, and articles.",
@@ -576,6 +663,9 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
       kind: "sign-in",
       clientSetup: "registered",
       setupGuide: "https://developer.box.com/guides/box-mcp/remote/",
+      setupSteps: registeredAppSteps(
+        "Ask a Box admin to enable the Box MCP Server integration, as the Box guide above describes, and open its settings.",
+      ),
       permissionNotice:
         "Can read and change files and folders your Box account can reach, within the scopes set on the integration. A Box admin enables the Box MCP Server integration; copy its client ID and link its client secret before signing in.",
     },
@@ -609,6 +699,36 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
     url: "https://mcp.klaviyo.com/mcp",
     docs: "https://developers.klaviyo.com/en/docs/connect_to_the_klaviyo_mcp_server",
     auth: { kind: "sign-in" },
+  },
+  {
+    id: "jottacloud",
+    displayName: "Jottacloud",
+    description:
+      "Browse and read your Jottacloud files, read-only. Runs a pinned local program that reaches only Jottacloud.",
+    category: "business",
+    keywords: ["files", "storage", "cloud drive", "backup", "sync"],
+    // The package's registry page; never connected to. Octant downloads the pinned tarball.
+    url: "https://www.npmjs.com/package/@henrikogard/jottacloud-mcp/v/0.1.1",
+    docs: "https://github.com/henrikogaard/jottacloud-mcp#readme",
+    egress: ["*.jottacloud.com"],
+    auth: {
+      kind: "command",
+      package: {
+        name: "@henrikogard/jottacloud-mcp",
+        version: "0.1.1",
+        integrity:
+          "sha512-fBIXwNbPxBm9MkKDpNoxKtxmKd+BkGtp9UwXDiRIcHEctXjTs1rg8VntnxVH3cWA64zUFqZwUR/1jajBuMK12g==",
+        entry: "dist/stdio.bundle.mjs",
+      },
+      env: [{ name: "JOTTACLOUD_READ_ONLY", value: "1" }],
+      secret: {
+        name: "JOTTACLOUD_LOGIN_TOKEN",
+        label: "Login token",
+        keyPage: "https://www.jottacloud.com/web/secure",
+      },
+      stateFileEnv: "JOTTACLOUD_TOKEN_STORE",
+      askEveryCall: ["delete_file", "create_share_link"],
+    },
   },
   {
     id: "mercado-pago",

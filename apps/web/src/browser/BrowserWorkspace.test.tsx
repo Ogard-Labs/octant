@@ -1163,7 +1163,13 @@ describe("BrowserWorkspace", () => {
           // The composer is still uploading; the person discards and draws again.
           fireEvent.click(screen.getByRole("button", { name: "Discard drawing" }));
           await chooseDrawOnPage();
-          await screen.findByRole("toolbar", { name: "Drawing tools" });
+          // The second drawing opens through the same capture, read and decode
+          // as the first, so it gets the same time and not the one-second default.
+          await screen.findByRole(
+            "toolbar",
+            { name: "Drawing tools" },
+            { timeout: DRAWING_OPENS_WITHIN_MS },
+          );
           const layer = screen.getByRole("application", { name: "Page capture to draw on" });
           drag(layer, [20, 20], [120, 60]);
           answer({ status: "accepted" });

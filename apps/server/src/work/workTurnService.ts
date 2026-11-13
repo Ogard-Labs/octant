@@ -126,7 +126,11 @@ import {
 import type { WorkTurnWrittenFiles } from "@octant/contracts/work-turns";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { Effect, Schema } from "effect";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { WorkTurnFileObserver } from "./workTurnFileObserver";
@@ -149,7 +153,8 @@ import {
 import type { FramedExternalContent } from "../context/externalContentFraming";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
-import type { WorkTurnProjection } from "./workTurnProjection";
+import type { WorkTurnCutOffByRestart, WorkTurnProjection } from "./workTurnProjection";
+import type { RestartContinuationReadiness } from "../harness/threadRestartContinuation";
 import {
   WorkTurnRuntime,
   type WorkTurnRuntimeOutcome,
@@ -867,6 +872,50 @@ export class WorkTurnService {
     });
     if (decision.kind === "allow") return undefined;
     return decision.category === "stale" ? "binding-changed" : "project-unavailable";
+  }
+
+  /**
+   * Whether the turn a restart cut off is still owed a continuation, and
+   * whether its provider can take up the session it ran in. Only the
+   * thread's latest turn is owed one; a newer turn means the person moved
+   * on. A turn that was still only accepted never started its provider, so
+   * its message never reached it; a provider that keeps its own conversation
+   * resumes only from the cursor the turn carries. The continuation itself
+   * goes through ordinary admission, which takes up that session again.
+   */
+  restartContinuationReadiness(
+    thread: WorkThread | undefined,
+    cut: Pick<WorkTurnCutOffByRestart, "requestId" | "reachedRuntime">,
+  ): RestartContinuationReadiness {
+    if (thread === undefined || thread.lifecycle !== "active") return { kind: "settled" };
+    const latest = this.#projection.latestForThread(thread.id);
+    if (
+      latest === undefined ||
+      String(latest.requestId) !== String(cut.requestId) ||
+      latest.status !== "failed" ||
+      latest.failure?.category !== "interrupted"
+    )
+      return { kind: "settled" };
+    const owed = {
+      kind: "owed" as const,
+      continuationOf: String(latest.requestId),
+      optedOut: thread.restartContinuationOff === true,
+    };
+    if (!cut.reachedRuntime)
+      return {
+        ...owed,
+        cannotResume:
+          "The turn stopped before it reached its provider, so its message was never sent. Send it again.",
+      };
+    const driver = this.#resolveDriver(latest.authority.providerInstanceId);
+    if (driver === undefined)
+      return { ...owed, cannotResume: "This thread's provider is unavailable." };
+    if (driver.conversationOwnership === "provider" && latest.resumeCursor === undefined)
+      return {
+        ...owed,
+        cannotResume: "This thread's provider cannot resume the session the turn ran in.",
+      };
+    return owed;
   }
 
   /** Whether a turn on this thread is being prepared and not yet accepted. */
@@ -3280,7 +3329,10 @@ export class WorkTurnService {
       return this.#failure("stale", "Work turn changed; reload and retry.");
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#failure("unavailable", "Octant Work turn service is unavailable.");
+      return this.#failure(
+        "unavailable",
+        persistenceFailureMessage(error, "Octant Work turn service is unavailable."),
+      );
     }
     return this.#failure("unavailable", "Octant Work turn service is unavailable.");
   }

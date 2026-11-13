@@ -554,3 +554,57 @@ export function guardrailScopeOf(input: {
   }
   return input.mode === input.globalDefault ? "global" : "thread";
 }
+
+/** Why an allow answered after the thread's posture changed is refused. */
+export const APPROVAL_POSTURE_CHANGED_MESSAGE =
+  "This thread's permissions changed since this was asked, so it asks again.";
+
+/**
+ * The posture a pending approval is asked under, as one comparable value: the
+ * mode, who answers prompts, the Full access sandbox, how long a grant lasts,
+ * and the coordinator gate. Two asks under the same posture read the same.
+ */
+export function approvalPostureOf(
+  access: ThreadAccess & {
+    readonly permissionPersistence?: string | undefined;
+    readonly coordinator?: boolean | undefined;
+  },
+): string {
+  return JSON.stringify([
+    access.executionPolicy,
+    access.autoApprove === true,
+    access.fullAccessSandbox === true,
+    access.permissionPersistence ?? null,
+    access.coordinator === true,
+  ]);
+}
+
+/** A Work thread's posture for {@link approvalPostureOf}: its access level and sandbox. */
+export function workApprovalPostureOf(thread: {
+  readonly access: WorkAccess;
+  readonly fullAccessSandbox?: boolean | undefined;
+}): string {
+  return approvalPostureOf({
+    ...workThreadAccessOf(thread.access),
+    fullAccessSandbox: thread.fullAccessSandbox,
+  });
+}
+
+/**
+ * Whether a person's answer to a pending approval may reach the provider. An
+ * allow given under a wider posture must not take effect after the person
+ * narrowed it, and an allow given under any other posture than the one the
+ * thread holds now was not decided against it, so either is asked again under
+ * the current posture. A denial never widens and is delivered as given. A
+ * posture that cannot be read matches nothing.
+ */
+export function approvalAnswerUnderPosture(input: {
+  readonly approved: boolean;
+  readonly askedUnder: string | undefined;
+  readonly current: string | undefined;
+}): "deliver" | "ask-again" {
+  if (!input.approved) return "deliver";
+  return input.askedUnder !== undefined && input.askedUnder === input.current
+    ? "deliver"
+    : "ask-again";
+}

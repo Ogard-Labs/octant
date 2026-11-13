@@ -1,12 +1,24 @@
 import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
+import { readHostStartupRefusal } from "./hostRecovery";
+import { showHostRecovery } from "./hostRecoveryWindow";
 import {
   attachWindowsDesktopHost,
   resolveWindowsDesktopHost,
   requestWindowsDesktopHostStop,
 } from "./windowsDesktopHost";
-import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
+import {
+  DESKTOP_BACKGROUND_SERVICE_SWITCH,
+  DESKTOP_HOST_ONLY_SWITCH,
+  resolvePackagedDesktopLaunch,
+} from "./desktopLaunch";
+import { createUserServiceManager } from "@octant/cli/service-manager";
+import {
+  createBackgroundHostSettings,
+  decodeBackgroundHostChange,
+  type BackgroundHostSettings,
+} from "./backgroundHost";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
@@ -265,6 +277,7 @@ import {
   type HostAdmission,
   type LocalHostDescriptor,
 } from "./hostLifecycle";
+import { reportPersonQuit, watchSystemShutdown } from "./personQuitReport";
 import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
 import {
   buildMenuBarItems,
@@ -1436,6 +1449,9 @@ let quitCanPrompt = false;
 // Set once a start-up has failed: a signal quit then ends the app instead of
 // being swallowed while the failure is released and shown.
 let quitAfterFailedStartup: (() => void) | undefined;
+// Whether the system announced a restart, shutdown or session end. Until the
+// app is ready nothing is watching, and nothing has announced one.
+let systemShuttingDown: () => boolean = () => false;
 let handlersInstalled = false;
 let projectRootPicker: ReturnType<typeof createProjectRootPicker> | undefined;
 const projectWindowLifecycle = createProjectWindowAuthorityLifecycle();
@@ -3873,6 +3889,18 @@ function installIpcHandlers(): void {
     if (typeof value !== "boolean") throw new Error("Octant rejected an invalid update setting.");
     return appUpdates().setAutomaticChecks(value);
   });
+  // Only Octant's own top-level windows reach these: a paired device talks to
+  // the host over the network and a Nightly client's bridge omits them.
+  ipcMain.handle(IPC_CHANNELS.backgroundHostState, (event) => {
+    ownedTopLevelWindowContext(event);
+    return backgroundHost().read();
+  });
+  ipcMain.handle(IPC_CHANNELS.backgroundHostChange, (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    const change = decodeBackgroundHostChange(value);
+    if (change === undefined) throw new Error("Octant rejected an invalid background setting.");
+    return backgroundHost().change(change);
+  });
   ipcMain.handle(IPC_CHANNELS.appUpdateRing, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     // Checked against the known rings rather than passed through: the ring
@@ -4782,6 +4810,17 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
   desktopBackendSupervisor.release();
   // Closing admission here fences a client arriving during the later flush.
   quitAccepted = true;
+  // A person's quit asks the host to hold, not continue, the turns it cuts
+  // off; a quit the system asked for continues them at the next start. Sent
+  // before the host stops, while it still answers, and bounded so it never
+  // holds the quit.
+  await reportPersonQuit({
+    interactive,
+    systemShuttingDown: systemShuttingDown(),
+    host: hostLifecycle.snapshot(),
+    brokerHeaders: desktopBrokerHeaders(),
+    fetch: globalThis.fetch,
+  });
   // Armed only once the quit is accepted, so the time a person spends on the
   // confirmation does not count against it.
   armQuitDeadline({
@@ -4796,11 +4835,81 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
   finishQuit();
 }
 
+let backgroundHostSettings: BackgroundHostSettings | undefined;
+function backgroundHost(): BackgroundHostSettings {
+  // The service starts this app's windowless host, so it exists only for an
+  // installed app on a system with a per-user service manager; a development
+  // run has no stable executable to point a login service at.
+  const serviceSupported =
+    app.isPackaged &&
+    desktopWindowsHost === undefined &&
+    (process.platform === "darwin" || process.platform === "linux");
+  backgroundHostSettings ??= createBackgroundHostSettings({
+    service: serviceSupported
+      ? createUserServiceManager({
+          paths: desktopPosixHostPaths(),
+          uid: process.getuid?.() ?? 0,
+          executable: process.execPath,
+          hostArguments: [DESKTOP_HOST_ONLY_SWITCH, DESKTOP_BACKGROUND_SERVICE_SWITCH],
+        })
+      : undefined,
+    loginItem:
+      process.platform === "darwin"
+        ? {
+            read: () => app.getLoginItemSettings().openAtLogin,
+            write: (openAtLogin) => app.setLoginItemSettings({ openAtLogin }),
+          }
+        : undefined,
+  });
+  return backgroundHostSettings;
+}
+
 async function handleFatalStartup(error: unknown): Promise<void> {
   preparingQuit = true;
   desktopQuitAccepted = true;
   hostLifecycle.acceptQuit();
   desktopBackendSupervisor.release();
+  // A host that refused with its own record gets the recovery screen, which
+  // offers the repairs that refusal allows; the Windows host keeps its store in
+  // a native owned profile the offline maintenance command does not open.
+  const refusal = desktopWindowsHost === undefined ? readHostStartupRefusal(error) : undefined;
+  if (refusal !== undefined) {
+    const choice = await showHostRecovery({
+      refusal,
+      packaged: app.isPackaged,
+      root: resolveDesktopHostRoot({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+        appRoot: repositoryRoot(),
+      }),
+      execPath: resolveDesktopNodeRuntime({
+        packaged: app.isPackaged,
+        platform: process.platform,
+        resourcesPath: process.resourcesPath,
+        execPath: process.execPath,
+      }),
+      env: {
+        ...process.env,
+        OCTANT_DATA_DIR: desktopDataDirectory,
+        ...desktopHostStartup.hostEnvironment,
+      },
+    }).catch(() => "quit" as const);
+    // Starting again is a fresh launch: the refused start already released
+    // everything it held, and a relaunch reuses the ordinary startup path.
+    if (choice === "retry") app.relaunch();
+    armQuitDeadline({
+      forceExit: forceExitAfterStalledQuit(),
+    });
+    await shutDownForQuit({
+      closeAdmission: closeBrowserAdmissionForQuit,
+      flushWindowState: async () => undefined,
+      stopHost: stopHostForQuit,
+      log: logQuitProblem,
+    });
+    finishQuit();
+    return;
+  }
   await quitAfterStartupFailure({
     message: formatDesktopStartupFailure(error),
     log: logQuitProblem,
@@ -4989,9 +5098,24 @@ function startDesktopInstance(): void {
   void app
     .whenReady()
     .then(async () => {
+      systemShuttingDown = watchSystemShutdown({
+        powerMonitor,
+        onSessionEnd: (listener) =>
+          app.on("browser-window-created", (_event, window) => {
+            window.on("query-session-end", listener);
+            window.on("session-end", listener);
+          }),
+      });
       const withoutWindow = hostOnly(process.argv.slice(1));
       if (withoutWindow) {
-        const waitForFirstNightlyWindow = desktopClientLifetime.firstNightlyWindowWait();
+        // The background service's host has no Nightly client to wait for: it
+        // runs until an explicit quit. Only a Nightly-owned launch arms the
+        // first-window grace that stops the host when no client arrives.
+        const launch = resolvePackagedDesktopLaunch(applicationIdentity, process.argv.slice(1));
+        const waitForFirstNightlyWindow =
+          launch.kind === "host-only" && launch.backgroundService === true
+            ? () => {}
+            : desktopClientLifetime.firstNightlyWindowWait();
         await startHostFromMenu();
         waitForFirstNightlyWindow();
       }

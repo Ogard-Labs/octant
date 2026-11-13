@@ -18,7 +18,11 @@ import {
 } from "@octant/contracts";
 import { resolveEffectiveProfile } from "@octant/domain";
 import { Schema } from "effect";
-import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  persistenceFailureMessage,
+} from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
@@ -349,7 +353,9 @@ export class AgentProfileService implements AgentProfileServiceApi {
       });
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#invalid("Agent profile service is unavailable.");
+      return this.#invalid(
+        persistenceFailureMessage(error, "Agent profile service is unavailable."),
+      );
     }
     return this.#invalid("Agent profile service is unavailable.");
   }
