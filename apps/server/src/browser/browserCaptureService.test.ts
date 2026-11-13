@@ -291,6 +291,59 @@ describe("BrowserCaptureService", () => {
     expect(left).toEqual(ids.slice(-3));
   });
 
+  it("retries a passed-over capture whose deletion failed at the next keep, and never lists it again", async () => {
+    const { directory, service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    const fifth = String(ids[4]);
+    const remove = BrowserCaptureStore.prototype.remove;
+    const deletionFails = vi
+      .spyOn(BrowserCaptureStore.prototype, "remove")
+      .mockImplementation(function (this: BrowserCaptureStore, threadId, captureId) {
+        return String(captureId) === fifth
+          ? Promise.reject(new Error("disk busy"))
+          : remove.call(this, threadId, captureId);
+      });
+    ids.push(kept(await service.keep(request({ title: "Deletion fails" }))));
+    expect(existsSync(captureDirectory(directory, threadA, fifth))).toBe(true);
+    deletionFails.mockRestore();
+
+    capturesPerThread = KEPT;
+    expect(service.list(threadA).map((capture) => String(capture.captureId))).not.toContain(fifth);
+    capturesPerThread = 3;
+
+    ids.push(kept(await service.keep(request({ title: "Deletion retried" }))));
+    const left = ids.filter((id) => existsSync(captureDirectory(directory, threadA, id)));
+    expect(left).toEqual(ids.slice(-3));
+  });
+
+  it("removes a passed-over capture whose deletion failed at recovery after the number is raised again", async () => {
+    const { directory, service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    const fifth = String(ids[4]);
+    const remove = BrowserCaptureStore.prototype.remove;
+    const deletionFails = vi
+      .spyOn(BrowserCaptureStore.prototype, "remove")
+      .mockImplementation(function (this: BrowserCaptureStore, threadId, captureId) {
+        return String(captureId) === fifth
+          ? Promise.reject(new Error("disk busy"))
+          : remove.call(this, threadId, captureId);
+      });
+    await service.keep(request({ title: "Deletion fails" }));
+    deletionFails.mockRestore();
+
+    capturesPerThread = KEPT;
+    await service.recover();
+    expect(existsSync(captureDirectory(directory, threadA, fifth))).toBe(false);
+  });
+
   it("keeps the newest 200 captures when the person chose no number", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-browser-capture-"));
     directories.push(directory);
