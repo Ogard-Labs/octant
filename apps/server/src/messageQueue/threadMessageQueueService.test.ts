@@ -1448,6 +1448,48 @@ describe("queue after a failure or a restart", () => {
     expect((await snapshot(reopened.service)).paused).toBe(true);
   });
 
+  it("keeps the restart guard after the host releases the queue behind its restart continuation", async () => {
+    const f = fixture();
+    await f.service.execute(windowId, enqueue());
+    await f.service.execute(windowId, enqueue(1));
+    const p = port();
+    p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "continuation", status: "active" },
+    });
+    const reopened = await restart(f, p);
+    await releaseQueueBehindRestartContinuation(reopened.service, {
+      scopeId: ROUTINE_HOST_SCOPE_ID,
+      threadId: String(scope.threadId),
+      mode: "chat",
+    });
+    expect((await snapshot(reopened.service)).holdReason).toBeUndefined();
+
+    // The host's own release reviewed nothing: a failed continuation holds.
+    p.setInspection(failedTurn("continuation"));
+    await reopened.service.tick();
+    expect(p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(reopened.service)).holdReason).toBe("failed");
+
+    const g = fixture();
+    await g.service.execute(windowId, enqueue());
+    const busy = port();
+    busy.setInspection({ status: "busy", binding: "authorized-target" });
+    const once = await restart(g, busy);
+    await releaseQueueBehindRestartContinuation(once.service, {
+      scopeId: ROUTINE_HOST_SCOPE_ID,
+      threadId: String(scope.threadId),
+      mode: "chat",
+    });
+    // No turn completed and no person resumed: another restart holds.
+    const twice = await restart(once);
+    await twice.service.tick();
+    await twice.service.tick();
+    expect(twice.p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(twice.service)).holdReason).toBe("host-restart");
+  });
+
   it("holds on a second restart in a row and on a failure that follows a restart", async () => {
     const f = fixture();
     await f.service.execute(windowId, enqueue());

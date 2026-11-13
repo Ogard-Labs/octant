@@ -24,6 +24,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { isRoutineHostScope } from "../routineHostScope";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   MAX_THREAD_MESSAGE_QUEUE_PRIVATE_CONTEXT_BYTES,
@@ -346,20 +347,26 @@ export class ThreadMessageQueueService {
           }
           authorizations.set(item.messageId, authorization(windowId, current, command.scope));
         }
-        // A person looked: the queue may again pass one failure by itself, and
-        // every message now waits under the window that resumed it.
         const {
           holdReason: _hold,
           continuedPast: _continuedPast,
           liftsAfterRestart: _lifts,
           ...withoutHold
         } = state;
+        // The host releasing a queue behind its own restart continuation
+        // reviewed nothing: the queue has continued past that restart, so a
+        // failure or another restart before a turn completes holds it, and
+        // each message keeps the window that queued it.
         const outcome = this.#store.write(
-          {
-            ...withoutHold,
-            paused: false,
-            items: state.items.map((item) => ({ ...item, queuedBy: windowId })),
-          },
+          isRoutineHostScope(windowId)
+            ? { ...withoutHold, paused: false, continuedPast: CONTINUED_PAST_RESTART }
+            : // A person looked: the queue may again pass one failure by itself,
+              // and every message now waits under the window that resumed it.
+              {
+                ...withoutHold,
+                paused: false,
+                items: state.items.map((item) => ({ ...item, queuedBy: windowId })),
+              },
           { command },
         );
         if (outcome === "applied")

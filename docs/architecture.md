@@ -5973,7 +5973,9 @@ ls-remote` against the thread's remote and the GitHub reads they already
   send failed. A Chat, Work or Code thread the host
   continues after the restart cut its turn off is released sooner: the host lifts that queue's restart hold under its
   own scope, so its messages follow the continuation through the same
-  dispatch checks (see Code restart recovery under Persistence). Closing a composer cannot delete an accepted queued attachment.
+  dispatch checks. That release is no review: it records the restart as
+  continued past, so a failed continuation or another restart before a turn
+  completes holds the queue (see Code restart recovery under Persistence). Closing a composer cannot delete an accepted queued attachment.
   Thread purge removes queued private content and retained attachments.
   A queued message remains bound to the provider, model and authority settings
   present at enqueue. After changing those settings, restore them before
