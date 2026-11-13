@@ -37,8 +37,15 @@ export function hostCrashRecordsDirectory(dataDirectory: string): string {
   return join(dataDirectory, "crash-records");
 }
 
+// A loop rather than /\/+$/: that pattern backtracks on long runs of "/".
+function withoutTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path[end - 1] === "/") end -= 1;
+  return path.slice(0, end);
+}
+
 function sweep(text: string, homeDirectory: string | undefined, limit: number): string {
-  const home = homeDirectory?.replace(/\/+$/, "");
+  const home = homeDirectory === undefined ? undefined : withoutTrailingSlashes(homeDirectory);
   const local = home === undefined || home.length < 2 ? text : text.split(home).join("~");
   // Redact the whole line before cutting it, so a cut cannot strip the
   // `token=` prefix the redaction recognizes a value by.
