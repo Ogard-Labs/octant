@@ -1,5 +1,12 @@
 import { ChevronDown, Ellipsis } from "lucide-react";
-import { useLayoutEffect, useState, type KeyboardEvent, type RefObject } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   OctantMenuGroup,
   OctantMenuGroupLabel,
@@ -162,7 +169,11 @@ function Rulers(props: { readonly items: ReadonlyArray<DockBarItem> }) {
             </span>
           </span>
         ) : item.kind === "text" ? (
-          <span className="dock-tile__tool-text" data-ruler={`text:${item.id}`} key={item.id}>
+          <span
+            className={item.cue === true ? "dock-tile__tool-cue" : "dock-tile__tool-text"}
+            data-ruler={`text:${item.id}`}
+            key={item.id}
+          >
             {item.dot === undefined ? null : <span className="device-dot" />}
             {item.text}
           </span>
@@ -334,6 +345,8 @@ function MoreMenu(props: {
 function moveAlongToolbar(event: KeyboardEvent<HTMLDivElement>) {
   const forward = event.key === "ArrowRight";
   if (!forward && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return;
+  // A modified key is the browser's or the system's (Alt+Left is Back), not the toolbar's.
+  if (event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
   const here = target.closest("button");
@@ -357,6 +370,49 @@ function moveAlongToolbar(event: KeyboardEvent<HTMLDivElement>) {
 }
 
 /**
+ * What must stay whole (cues, a control the tool draws itself). In the row it
+ * wraps onto further lines when it is wider than the bar, and the bar reserves
+ * the height it really has; where there is no row it scrolls in its own box,
+ * which a keyboard can reach and scroll.
+ */
+function CuesGroup(props: {
+  readonly fold: DockBarFold;
+  readonly scrollable: boolean;
+  readonly toolLabel: string;
+  readonly children: ReactNode;
+}) {
+  const group = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = group.current;
+    const host = node?.closest<HTMLElement>("[data-fold]");
+    if (node === null || host === null || host === undefined || props.fold !== "row") return;
+    const reserve = () =>
+      host.style.setProperty("--dock-cues-height", `${Math.max(node.offsetHeight, 32)}px`);
+    reserve();
+    if (typeof ResizeObserver === "undefined")
+      return () => host.style.removeProperty("--dock-cues-height");
+    const observer = new ResizeObserver(reserve);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      host.style.removeProperty("--dock-cues-height");
+    };
+  }, [props.fold]);
+  return (
+    <div
+      aria-label={props.scrollable ? `${props.toolLabel} status` : undefined}
+      className="dock-tile__tool-cues"
+      data-scrollable={props.scrollable ? "true" : undefined}
+      ref={group}
+      role={props.scrollable ? "group" : undefined}
+      tabIndex={props.scrollable ? 0 : undefined}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+/**
  * A tool's bar controls, as one labelled toolbar. Navigation and status lead,
  * after the tool's name; actions trail, ending where the tile's own Arrange and
  * Close begin. Each action is a 24px icon button, folded into one menu when the
@@ -366,6 +422,8 @@ export function DockBarRow(props: {
   readonly items: ReadonlyArray<DockBarItem>;
   readonly fold: DockBarFold;
   readonly toolLabel: string;
+  /** A host with no second row (the bottom panel) lets the cues scroll in their own box. */
+  readonly scrollCues?: boolean;
 }) {
   if (props.items.length === 0) return null;
   const actions = props.items.filter(isAction);
@@ -376,7 +434,7 @@ export function DockBarRow(props: {
       return (
         <span
           aria-live={item.live === true ? "polite" : undefined}
-          className="dock-tile__tool-text"
+          className={item.cue === true ? "dock-tile__tool-cue" : "dock-tile__tool-text"}
           key={item.id}
           title={item.text}
         >
@@ -426,7 +484,13 @@ export function DockBarRow(props: {
       <Rulers items={props.items} />
       <div className="dock-tile__tool-lead">{lead.map(drawItem)}</div>
       {rowable.length === 0 ? null : (
-        <div className="dock-tile__tool-cues">{rowable.map(drawItem)}</div>
+        <CuesGroup
+          fold={props.fold}
+          scrollable={props.scrollCues === true}
+          toolLabel={props.toolLabel}
+        >
+          {rowable.map(drawItem)}
+        </CuesGroup>
       )}
       {actions.length === 0 ? null : (
         <div className="dock-tile__tool-actions">

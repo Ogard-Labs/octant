@@ -82,6 +82,7 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
           <DockBarRow
             fold={fold === "row" ? "menu" : fold}
             items={items ?? []}
+            scrollCues
             toolLabel={props.activeSurface.label}
           />
         </div>

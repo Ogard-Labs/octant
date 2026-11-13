@@ -1037,6 +1037,18 @@
   margin-inline-start: auto;
 }
 
+/* A cue is never cut: no cap, no ellipsis, no shrinking. The bar measures it at
+   its full width, and where it cannot fit it moves to the row and wraps. */
+.dock-tile__tool-cue {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
 .dock-tile__tool-text {
   display: inline-flex;
   min-width: 0;
@@ -1176,21 +1188,40 @@
 
 .dock-tile__bar[data-fold="row"],
 .dock-tile__row[data-fold="row"] {
-  margin-bottom: 32px;
+  margin-bottom: var(--dock-cues-height, 32px);
 }
 
+/* The row wraps when its contents are wider than the bar: every cue stays whole,
+   on as many 32px lines as it takes, and the bar reserves the height it has
+   (--dock-cues-height, read from the row). Nothing in it shrinks. */
 :is(.dock-tile__bar, .dock-tile__row)[data-fold="row"] .dock-tile__tool-cues {
   position: absolute;
   top: 100%;
   right: 0;
   left: 0;
-  height: 32px;
+  flex-wrap: wrap;
+  min-height: 32px;
   padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
   box-shadow: inset 0 -1px 0 var(--octant-border-soft);
 }
 
+:is(.dock-tile__bar, .dock-tile__row)[data-fold="row"] .dock-tile__tool-cues > * {
+  min-height: 32px;
+  max-width: 100%;
+  align-items: center;
+  flex: none;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* No second row in the bottom panel: the cues scroll in their own box, which a
+   keyboard can focus and scroll, and Hide stays beside it. */
 .bottom-utility-panel__controls .dock-tile__tool-cues {
   overflow-x: auto;
+}
+
+.bottom-utility-panel__controls .dock-tile__tool-cues > * {
+  flex: none;
 }
 
 /* The words laid out unseen, so the bar knows how much room they need. */

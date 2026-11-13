@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RefreshCw } from "lucide-react";
 import { readFileSync } from "node:fs";
@@ -706,6 +706,107 @@ describe("a billed desktop's cue at the dock's minimum", () => {
   });
 });
 
+describe("cues that are never cut", () => {
+  const longPlace = "A cloud provider with a very long name · A place far away from here";
+  function Cues(props: { readonly two?: boolean }) {
+    useDockBarControls([
+      { kind: "text", id: "where", text: longPlace, cue: true },
+      ...(props.two === true
+        ? [
+            {
+              kind: "text" as const,
+              id: "billing",
+              text: "Billed to your account until it ends",
+              cue: true,
+            },
+          ]
+        : []),
+      {
+        kind: "button",
+        id: "view-only",
+        label: "View only",
+        words: true,
+        icon: RefreshCw,
+        onSelect: () => {},
+      },
+      { kind: "button", id: "home", label: "Home", icon: RefreshCw, onSelect: () => {} },
+    ]);
+    return null;
+  }
+
+  it("draws a cue longer than 16em in a class with no cap, no ellipsis and no shrinking, and moves it whole to the row", () => {
+    textWidth = 420;
+    barOfWidth(280);
+    render(dockOf(<Cues />));
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "row");
+    const cues = document.querySelector(".dock-tile__tool-cues") as HTMLElement;
+    const place = within(cues).getByText(longPlace);
+    expect(place).toHaveClass("dock-tile__tool-cue");
+    expect(place).not.toHaveClass("dock-tile__tool-text");
+    expect(place).toHaveAttribute("title", longPlace);
+    const cue = rule(".dock-tile__tool-cue");
+    expect(cue).toMatch(/flex:\s*none/);
+    expect(cue).not.toMatch(/max-width|text-overflow|overflow:\s*hidden/);
+  });
+
+  it("reserves the real height of a row that wraps, so two cues wider than the bar are both whole", () => {
+    textWidth = 420;
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains("dock-tile__tool-cues") ? 96 : 0;
+      },
+    );
+    barOfWidth(280);
+    render(dockOf(<Cues two />));
+    const bar = document.querySelector(".dock-tile__bar") as HTMLElement;
+    expect(bar).toHaveAttribute("data-fold", "row");
+    expect(bar.style.getPropertyValue("--dock-cues-height")).toBe("96px");
+    const cues = document.querySelector(".dock-tile__tool-cues") as HTMLElement;
+    expect(within(cues).getByText(longPlace)).toBeInTheDocument();
+    expect(within(cues).getByText("Billed to your account until it ends")).toBeInTheDocument();
+    expect(within(cues).getByRole("button", { name: "View only" })).toBeInTheDocument();
+    // The row wraps and nothing in it shrinks or is cut.
+    expect(dockStylesheet).toMatch(
+      /\[data-fold="row"\] \.dock-tile__tool-cues \{[^}]*flex-wrap:\s*wrap/,
+    );
+    expect(dockStylesheet).toMatch(
+      /\[data-fold="row"\] \.dock-tile__tool-cues > \* \{[^}]*flex:\s*none[^}]*white-space:\s*normal/,
+    );
+    expect(dockStylesheet).toMatch(/margin-bottom:\s*var\(--dock-cues-height, 32px\)/);
+  });
+
+  it("scrolls the cues in their own box in the bottom panel, which a keyboard reaches, with Hide beside it", () => {
+    const review = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === "review");
+    if (review === undefined) throw new Error("Missing review surface.");
+    textWidth = 420;
+    barOfWidth(280);
+    render(
+      <BottomUtilityPanel
+        activeSurface={review}
+        content={<Cues />}
+        height={260}
+        launchableSurfaces={[]}
+        onClose={() => {}}
+        onCommitHeight={() => {}}
+        onOpenTool={() => {}}
+        onPreviewHeight={() => {}}
+        tabs={[review]}
+      />,
+    );
+    const toolbar = document.querySelector(".bottom-utility-panel__toolbar") as HTMLElement;
+    const cues = within(toolbar).getByRole("group", { name: /status$/ });
+    expect(cues).toHaveAttribute("tabindex", "0");
+    expect(within(cues).getByText(longPlace)).toBeInTheDocument();
+    expect(dockStylesheet).toMatch(
+      /\.bottom-utility-panel__controls \.dock-tile__tool-cues \{[^}]*overflow-x:\s*auto/,
+    );
+    const labels = within(toolbar)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+    expect(labels.at(-1)).toBe("Hide bottom panel");
+  });
+});
+
 describe("a toolbar's keys", () => {
   function Switched() {
     const [view, setView] = useState("a");
@@ -764,6 +865,23 @@ describe("the slot at a folded width", () => {
     await userEvent.click(await screen.findByRole("menuitem", { name: "Refresh b" }));
     expect(second).toHaveBeenCalledTimes(1);
     expect(first).not.toHaveBeenCalled();
+  });
+});
+
+describe("a modified arrow key", () => {
+  it("is left to the browser: the toolbar neither moves focus nor prevents the default", () => {
+    render(<Dock layout={two} />);
+    const toolbar = screen.getByRole("toolbar", { name: "one controls" });
+    const [first] = within(toolbar).getAllByRole("button");
+    first?.focus();
+    for (const modifier of ["altKey", "metaKey", "ctrlKey", "shiftKey"] as const) {
+      const notPrevented = fireEvent.keyDown(first as HTMLElement, {
+        key: "ArrowRight",
+        [modifier]: true,
+      });
+      expect(notPrevented).toBe(true);
+      expect(first).toHaveFocus();
+    }
   });
 });
 
