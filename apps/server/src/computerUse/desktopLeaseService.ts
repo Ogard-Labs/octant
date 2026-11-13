@@ -442,21 +442,26 @@ export interface DesktopLeaseService {
     readonly monthlyCapUsdCents: number | undefined;
   }) => { readonly status: "spend"; readonly summary: DesktopSpendSummary } | DesktopLeaseRefusal;
   /**
-   * The host-wide lease settings. Only a person at a local window reads
-   * them, as only they change them.
+   * The host-wide lease settings. Only the host's own person reads them, at a
+   * local window or on a device they paired, as only they change them.
    */
   readonly leaseSettings: (input: {
     readonly actor: EventActor;
+    /** Whether a `remote-device` actor is a device the host's own person paired. */
+    readonly personPairedDevice?: boolean;
   }) =>
     | { readonly status: "lease-settings"; readonly settings: DesktopLeaseSettings }
     | DesktopLeaseRefusal;
   /**
-   * A person at a local window changing the lease settings; a field left out
-   * stays as it is. Every other actor is refused before anything is
-   * journaled, an agent in any posture included.
+   * The host's own person changing the lease settings, at a local window or
+   * on a device they paired, journaled as that device; a field left out stays
+   * as it is. Every other actor is refused before anything is journaled, an
+   * agent in any posture and a device the hub introduced included.
    */
   readonly setLeaseSettings: (input: {
     readonly actor: EventActor;
+    /** Whether a `remote-device` actor is a device the host's own person paired. */
+    readonly personPairedDevice?: boolean;
     readonly change: {
       readonly confirmBilledDesktops?: boolean | undefined;
       readonly leasesPerThread?: number | undefined;
@@ -2308,15 +2313,20 @@ export function createDesktopLeaseService(
     return { status: "spend", summary: spendSummary() };
   };
 
-  const leaseSettings: DesktopLeaseService["leaseSettings"] = ({ actor }) =>
-    desktopLeaseSettingsChangeAllowed(actor.kind)
+  const leaseSettings: DesktopLeaseService["leaseSettings"] = ({ actor, personPairedDevice }) =>
+    desktopLeaseSettingsChangeAllowed(actor.kind, personPairedDevice === true)
       ? { status: "lease-settings", settings: currentLeaseSettings() }
       : refused("not-permitted");
 
-  const setLeaseSettings: DesktopLeaseService["setLeaseSettings"] = ({ actor, change }) => {
-    // Checked before anything is journaled: no agent, device, or system
-    // actor stops a billed desktop asking or raises how many leases run.
-    if (!desktopLeaseSettingsChangeAllowed(actor.kind)) return refused("not-permitted");
+  const setLeaseSettings: DesktopLeaseService["setLeaseSettings"] = ({
+    actor,
+    change,
+    personPairedDevice,
+  }) => {
+    // Checked before anything is journaled: no agent, hub-introduced device,
+    // or system actor stops a billed desktop asking or raises how many leases run.
+    if (!desktopLeaseSettingsChangeAllowed(actor.kind, personPairedDevice === true))
+      return refused("not-permitted");
     const previous = currentLeaseSettings();
     const settings: DesktopLeaseSettings = {
       confirmBilledDesktops: change.confirmBilledDesktops ?? previous.confirmBilledDesktops,

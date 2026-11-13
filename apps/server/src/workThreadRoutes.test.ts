@@ -294,7 +294,7 @@ describe("Work thread routes", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses a paired device changing Wake when a message arrives for a Work thread", async () => {
+  it("lets a device the host's own person paired change Wake when a message arrives for a Work thread, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000040";
@@ -304,27 +304,40 @@ describe("Work thread routes", () => {
       expectedVersion: 1,
       wake: true,
     };
-    const remote = request("/api/work/threads/commands", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(command),
-    });
-    bindPrincipalRouteContext(remote, {
-      principal: createRemoteDevicePrincipal({
-        hostId: "local" as never,
-        deviceId: remoteDeviceId as never,
-        credentialGeneration: 1,
-        origin: "https://octant.invalid",
-        protocolVersion: 1,
-        capabilityDigest: "b".repeat(64),
-        sessionId: "73000000-0000-4000-8000-000000000041" as never,
-      }),
-      scopeId: remoteDeviceId as never,
-    });
-    const refused = await route(remote);
-    expect(refused?.status).toBe(403);
-    expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    const from = (admittedBy?: "host-person" | "hub-roster") => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000041" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    for (const restricted of [undefined, "hub-roster"] as const) {
+      const refused = await route(from(restricted));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    }
     expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(from("host-person")))?.status).toBe(200);
+    expect(execute).toHaveBeenLastCalledWith(
+      remoteDeviceId,
+      expect.objectContaining({ kind: "set-work-thread-message-wake" }),
+      { actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId } },
+    );
 
     const local = await route(
       request("/api/work/threads/commands", {

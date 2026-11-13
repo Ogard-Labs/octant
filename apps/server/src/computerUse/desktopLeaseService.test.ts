@@ -572,6 +572,35 @@ describe("desktop lease service", () => {
     expect(spendEvents(connection, "desktop.lease-settings-changed@1")).toHaveLength(2);
   });
 
+  it("lets a device the host's own person paired read and change the lease settings, journaled as the device, and refuses any other device", () => {
+    const { service, connection } = host();
+    expect(service.leaseSettings({ actor: paired })).toEqual({
+      status: "refused",
+      reason: "not-permitted",
+    });
+    expect(
+      service.setLeaseSettings({ actor: paired, change: { confirmBilledDesktops: false } }),
+    ).toEqual({ status: "refused", reason: "not-permitted" });
+    expect(spendEvents(connection, "desktop.lease-settings-changed@1")).toEqual([]);
+
+    expect(service.leaseSettings({ actor: paired, personPairedDevice: true })).toMatchObject({
+      status: "lease-settings",
+    });
+    expect(
+      service.setLeaseSettings({
+        actor: paired,
+        personPairedDevice: true,
+        change: { confirmBilledDesktops: false, leasesPerThread: 3 },
+      }),
+    ).toMatchObject({
+      status: "lease-settings",
+      settings: { confirmBilledDesktops: false, leasesPerThread: 3 },
+    });
+    expect(
+      spendEvents(connection, "desktop.lease-settings-changed@1").map((event) => event.actor),
+    ).toEqual(["remote-device"]);
+  });
+
   it("destroys and verifies a lease when it expires", async () => {
     const { service, state, backend } = host();
     const leaseId = await acquired(service, threadA);

@@ -1659,7 +1659,7 @@ describe("ShellService", () => {
     expect(append).toHaveBeenCalledTimes(1);
   });
 
-  it("replaces shell settings for a paired device that has no window here, journaled as that device", () => {
+  it("replaces shell settings for a paired device that has no window here, the stalled-turn and tool-call pause limits included, journaled as that device", () => {
     const { persistence, append } = persistenceStub();
     const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
     const deviceId = "00000000-0000-4000-8000-0000000002de";
@@ -1667,6 +1667,8 @@ describe("ShellService", () => {
     const settings = decodeShellSettings({
       ...defaultShellSettings(),
       threadReplyDetail: [{ mode: "code", threadId: "thread-1", level: "high" }],
+      stalledTurnLimitMinutes: 60,
+      providerToolCallPauseLimitMinutes: 30,
     });
 
     expect(service.readSettings()).toMatchObject({ version: 0 });
@@ -1676,7 +1678,18 @@ describe("ShellService", () => {
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
         aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
-        events: [expect.objectContaining({ eventName: "shell.settings-replaced", actor })],
+        events: [
+          expect.objectContaining({
+            eventName: "shell.settings-replaced",
+            actor,
+            payload: expect.objectContaining({
+              settings: expect.objectContaining({
+                stalledTurnLimitMinutes: 60,
+                providerToolCallPauseLimitMinutes: 30,
+              }),
+            }),
+          }),
+        ],
       }),
     );
   });

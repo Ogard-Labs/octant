@@ -295,8 +295,9 @@ request, 2026-11-12).
 
 The limit is a host setting (`stalledTurnLimitMinutes`, `null` for Off),
 journaled with the other shell settings and changed at a local window or a
-paired device (maintainer decision, 2026-11-12; not built yet: today the shell
-route is local-only and a paired device cannot).
+device the host's own person paired, through `/api/shell/settings`, journaled
+as the device (maintainer decisions, 2026-11-12 and 2026-11-13; built). A
+device the hub introduced, and a restricted one, cannot change it.
 Chat, Work and Code read it when a turn starts: a change applies from the
 next turn, and a running turn keeps the limit it started with. A turn cut off
 by the limit ends as it did under the fixed limit. With the setting Off, only

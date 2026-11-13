@@ -1,3 +1,4 @@
+import { eventActorForPrincipal } from "../principalEventActor";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { decodeBrowserThreadId } from "@octant/contracts";
@@ -146,6 +147,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "codeSessionAuthority"
     | "imageGenerationOffers"
     | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "liveTurns"
     | "onWindowRevoked"
     | "routineProposalService"
@@ -270,6 +272,7 @@ export function wireWork(deps: WorkDependencies) {
     canAccessCodeProject,
     codeProjectAccess,
     isPairedDeviceScope,
+    isRestrictedDeviceScope,
     canvasAgentToolPort,
     canvasService,
     chatAttachmentStore,
@@ -1527,7 +1530,13 @@ export function wireWork(deps: WorkDependencies) {
       journal: persistence.journal,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       clock: () => new Date().toISOString(),
-      isPairedDevice: isPairedDeviceScope,
+      // A device the host's own person paired manages the queue as a window
+      // does; any other device keeps to its own messages.
+      isRestrictedDevice: isRestrictedDeviceScope,
+      deviceActor: (scopeId) =>
+        isPairedDeviceScope(scopeId)
+          ? eventActorForPrincipal({ kind: "remote-device", deviceId: String(scopeId) })
+          : undefined,
       port: {
         ...threadMessageQueuePort,
         // A Code turn checks the Project against the request that sent it. A

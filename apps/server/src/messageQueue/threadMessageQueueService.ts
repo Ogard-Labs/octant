@@ -49,11 +49,19 @@ export interface ThreadMessageQueueServiceOptions {
   readonly actor: EventActor;
   readonly clock?: () => string;
   /**
-   * Whether a scope is a paired device's. A device queues a message and edits
-   * or removes its own; pausing, resuming and reordering the queue, and
-   * another's message, stay with a window on this host.
+   * Whether a scope is a device the host's own person did not pair: one the
+   * hub's roster introduced, or an unproved pairing. Such a device queues a
+   * message and edits or removes its own; pausing, resuming and reordering
+   * the queue, and another's message, stay with the host's own person, at a
+   * window here or on a device they paired (maintainer decision, 2026-11-13).
    */
-  readonly isPairedDevice?: (scopeId: WindowId) => boolean;
+  readonly isRestrictedDevice?: (scopeId: WindowId) => boolean;
+  /**
+   * The actor a command from a device's scope is journaled with, so a
+   * device's change names the device. Undefined for a window, whose change
+   * is journaled with `actor`.
+   */
+  readonly deviceActor?: (scopeId: WindowId) => EventActor | undefined;
 }
 /**
  * Whether a thread owes a turn. `active` is a turn its mode is running or has
@@ -71,7 +79,8 @@ export class ThreadMessageQueueService {
   readonly #store: ThreadMessageQueuePersistence;
   readonly #port: ThreadMessageQueueModePort;
   readonly #clock: () => string;
-  readonly #isPairedDevice: (scopeId: WindowId) => boolean;
+  readonly #isRestrictedDevice: (scopeId: WindowId) => boolean;
+  readonly #deviceActor: (scopeId: WindowId) => EventActor | undefined;
   readonly #locks = new Map<string, Promise<void>>();
   readonly #pendingTicks = new Set<string>();
   #allScopesTick: Promise<void> | undefined;
@@ -88,7 +97,8 @@ export class ThreadMessageQueueService {
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#store = new ThreadMessageQueuePersistence({ ...options, clock: this.#clock });
     this.#port = options.port;
-    this.#isPairedDevice = options.isPairedDevice ?? (() => false);
+    this.#isRestrictedDevice = options.isRestrictedDevice ?? (() => false);
+    this.#deviceActor = options.deviceActor ?? (() => undefined);
   }
   async read(
     windowId: WindowId,
@@ -152,6 +162,8 @@ export class ThreadMessageQueueService {
         snapshot: this.#store.snapshot(command.scope),
       });
       if (this.#disposed) return refused("authority-revoked");
+      const deviceActor = this.#deviceActor(windowId);
+      const actor = deviceActor === undefined ? {} : { actor: deviceActor };
       const receipt = this.#store.receipt(command.requestId);
       const previous =
         command.kind === "enqueue" ? this.#store.identity(command.messageId) : undefined;
@@ -180,7 +192,7 @@ export class ThreadMessageQueueService {
             : refused("invalid-payload");
       }
       const state = this.#store.state(command.scope);
-      if (this.#isPairedDevice(windowId)) {
+      if (this.#isRestrictedDevice(windowId)) {
         if (command.kind === "pause" || command.kind === "resume" || command.kind === "reorder")
           return refused("unauthorized");
         if (
@@ -239,7 +251,7 @@ export class ThreadMessageQueueService {
               },
             ],
           },
-          { command, content },
+          { command, ...actor, content },
         );
         if (outcome !== "applied") {
           await this.#release(content, "rollback");
@@ -293,7 +305,7 @@ export class ThreadMessageQueueService {
                   : value,
               ),
             },
-            { command, content: updated },
+            { command, ...actor, content: updated },
           );
           if (outcome === "applied" && this.#retained.has(item.messageId))
             this.#retained.set(item.messageId, updated);
@@ -301,7 +313,7 @@ export class ThreadMessageQueueService {
         }
         const outcome = this.#store.write(
           { ...state, items: state.items.filter((value) => value !== item) },
-          { command, settled: { messageId: item.messageId, status: "removed" } },
+          { command, ...actor, settled: { messageId: item.messageId, status: "removed" } },
         );
         if (outcome === "applied") {
           this.#authorized.delete(item.messageId);
@@ -322,7 +334,7 @@ export class ThreadMessageQueueService {
         const defined = items.filter((item) => item !== undefined);
         if (state.items.some((item, index) => item.status !== "queued" && defined[index] !== item))
           return refused("not-editable");
-        const outcome = this.#store.write({ ...state, items: defined }, { command });
+        const outcome = this.#store.write({ ...state, items: defined }, { command, ...actor });
         return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
       }
       if (command.kind === "resume") {
@@ -367,7 +379,7 @@ export class ThreadMessageQueueService {
                 paused: false,
                 items: state.items.map((item) => ({ ...item, queuedBy: windowId })),
               },
-          { command },
+          { command, ...actor },
         );
         if (outcome === "applied")
           for (const [key, value] of authorizations) this.#authorized.set(key, value);
@@ -375,7 +387,7 @@ export class ThreadMessageQueueService {
       }
       const outcome = this.#store.write(
         { ...state, paused: true, holdReason: "paused" },
-        { command },
+        { command, ...actor },
       );
       return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
     });

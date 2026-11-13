@@ -235,7 +235,8 @@ lease anyway.
   mandatory, and inside it a person confirms each billed lease in every
   posture, Full access included, while the setting "Confirm each billed
   desktop" is on, which is the default. Only a person changes that setting, at a
-  local window or a paired device, as with the cap. With it off, a billed lease
+  local window or a device the host's own person paired (maintainer decision,
+  2026-11-13; built); a device the hub introduced is refused. With it off, a billed lease
   inside
   the cap follows the thread's level as a host-local one does
   ([decision 2](#maintainer-decisions); exception 6 of
@@ -671,8 +672,10 @@ and Work-mode leasing if it is not delivered with Code.
   `packages/plugin-api/src/computerUse.ts`; the desktop form of
   `octant_computer` offers `extend`.
 - **Host.** `leaseSettings` and `setLeaseSettings` on the lease service
-  answer only a person at a local window (`not-permitted` otherwise; a paired
-  device is not built yet) before anything is journaled. `extend` takes an agent's own confirmation.
+  answer only the host's own person, at a local window or on a device they
+  paired, journaled as that device (maintainer decision, 2026-11-13);
+  `not-permitted` otherwise, a hub-introduced device included, before anything
+  is journaled. `extend` takes an agent's own confirmation.
 - **Settings.** Settings › Computer use › Disposable desktops
   (`apps/web/src/settings/DesktopLeaseSettings.tsx`).
 
@@ -698,8 +701,8 @@ Evidence: `desktopLeasePolicy.test.ts`, `desktopLeaseService.test.ts`
 (counts across a restart; an agent's extension under Full access, asked below
 it, refused in Plan, refused on a billed or off-machine lease; a billed and
 an off-machine start and a cloud transfer that do not ask with the setting
-off; the cap still refusing; an agent, a paired device, and the host refused
-the setting), `desktopPaneRoutes.test.ts`, `computerUseToolService.test.ts`,
+off; the cap still refusing; a person-paired device changing the setting as
+itself; an agent, a hub-introduced device, and the host refused the setting), `desktopPaneRoutes.test.ts`, `computerUseToolService.test.ts`,
 `DesktopLeaseSettings.test.tsx`, and `DesktopPane.test.tsx`. A billed
 provider's live run with the setting off is the maintainer's to make.
 
