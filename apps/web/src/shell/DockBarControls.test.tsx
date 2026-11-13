@@ -321,9 +321,10 @@ describe("the bar's sizes", () => {
     expect(rule(".dock-tile__control")).toMatch(/height:\s*24px/);
     expect(rule(".dock-tile__control > svg")).toMatch(/width:\s*var\(--oct-icon-sm\)/);
     expect(rule(".dock-bar-switch")).toMatch(/height:\s*28px/);
-    // The tray's 2px padding and the segments' 24px belong to the shared toggle group.
-    expect(rule(".dock-bar-switch")).not.toMatch(/padding/);
-    expect(rule(".dock-bar-switch__option")).not.toMatch(/height/);
+    // The ruler that decides the fold is plain spans with these classes, so the
+    // sizes must be here as well as on the shared toggle group.
+    expect(rule(".dock-bar-switch")).toMatch(/padding:\s*2px/);
+    expect(rule(".dock-bar-switch__option")).toMatch(/height:\s*24px/);
   });
 });
 

@@ -1077,13 +1077,16 @@
 }
 
 /* Navigation keeps its words: a small tray of segments, the tray 28px and each
-   segment 24px, centred in the bar's 32px (2px above and below). The tray's 2px
-   padding and the segments' 24px come from the shared toggle group. */
+   segment 24px, centred in the bar's 32px (2px above and below). The shared
+   toggle group sets the same padding and segment height on the real switch;
+   they are repeated here because the unseen ruler that decides the fold is
+   plain spans with these classes, and must measure the same width. */
 .dock-bar-switch {
   display: inline-flex;
   height: 28px;
   flex: none;
   align-items: center;
+  padding: 2px;
   gap: 0;
   border-radius: var(--oct-radius-sm);
   background: var(--octant-well);
@@ -1092,6 +1095,8 @@
 
 .dock-bar-switch__option {
   display: inline-flex;
+  height: 24px;
+  min-height: 24px;
   align-items: center;
   padding: 0 var(--oct-space-2);
   border: 0;
