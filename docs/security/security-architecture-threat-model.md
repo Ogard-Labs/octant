@@ -189,8 +189,7 @@ may do what a local window may on every forwarded route, with extension trust,
 credential write, Project binding, device approval and Full access included. The
 threat that follows is stated plainly. **A stolen or compromised paired device
 holds the person's full authority on that host**, up to Full access with no
-sandbox, storing, replacing or removing a provider key, the use of every
-credential the broker holds, and approving further devices, until its session ends or the device is revoked. What stands in front
+sandbox, storing, replacing or removing a provider key, the use of every credential the broker holds, changing the host's shell settings (turning on "Let agents download files", for one), wiping the usage ledger, and approving further devices, until its session ends or the device is revoked. What stands in front
 of it is the authentication of the device and no longer a list of actions: the
 device key, the pinned host identity over TLS, pairing approved only by a party
 the host already trusts, pairing and sign-in rate limits, session idle and

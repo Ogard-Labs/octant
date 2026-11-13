@@ -49,6 +49,7 @@ export type RemoteShellSurfaceKind =
   | "settings-read"
   | "shell-settings"
   | "design-systems"
+  | "usage-ledger"
   | "approvals"
   | "extension-install"
   | "provider-setup"
@@ -133,6 +134,14 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     availability: "local-host-only",
     // No catalogued action, as for shell settings above.
     catalogAction: "project.design-system.write",
+  },
+  {
+    id: "usage-ledger",
+    label: "Usage history and reset",
+    description: "Read the local provider usage history and reset or trim the usage ledger.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "usage.ledger.purge",
   },
   {
     id: "approvals",

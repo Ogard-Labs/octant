@@ -9,8 +9,6 @@ const GATE_ORIGIN = "https://octant.example:8443";
  * diagnostics export, and local-only administration.
  */
 const LOCAL_ONLY_PROBES = [
-  { path: "/api/usage/reset", method: "POST" },
-  { path: "/api/usage/retain", method: "POST" },
   { path: "/api/diagnostics/export", method: "POST" },
   { path: "/api/diagnostics/journal-growth", method: "GET" },
   { path: "/api/diagnostics/bundle", method: "POST" },

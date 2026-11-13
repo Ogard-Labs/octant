@@ -1112,6 +1112,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/usage/diagnostics",
     methods: ["POST"] as const,
   },
+  // The provider history read and the two host-wide ledger purges, for a
+  // device the host's own person paired; the routes refuse every other.
+  ...["/api/usage/local-history", "/api/usage/reset", "/api/usage/retain"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  })),
   {
     kind: "exact" as const,
     path: "/api/usage/host-health",

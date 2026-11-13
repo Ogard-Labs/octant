@@ -33,6 +33,7 @@ describe("remoteSurfaceMatrix", () => {
     ).toEqual([
       "shell-settings",
       "design-systems",
+      "usage-ledger",
       "approvals",
       "extension-install",
       "provider-setup",
@@ -52,7 +53,7 @@ describe("remoteSurfaceMatrix", () => {
   });
 
   it("lists every declared surface exactly once", () => {
-    expect(listRemoteShellSurfaces()).toHaveLength(15);
+    expect(listRemoteShellSurfaces()).toHaveLength(16);
   });
 });
 
@@ -121,6 +122,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "settings-read",
       "shell-settings",
       "design-systems",
+      "usage-ledger",
       "approvals",
       "extension-install",
       "provider-setup",
@@ -142,6 +144,7 @@ describe("what a session that acts as the host's own person reaches", () => {
     const local = [
       "shell-settings",
       "design-systems",
+      "usage-ledger",
       "approvals",
       "extension-install",
       "provider-setup",

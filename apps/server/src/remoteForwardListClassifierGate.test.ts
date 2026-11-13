@@ -14,11 +14,9 @@ describe("remote forward list vs route classifier", () => {
     expect(compareRemoteForwardListToClassifier()).toEqual([]);
   });
 
-  it("does not forward host-wide usage purges, diagnostics export, or host export", () => {
+  it("does not forward diagnostics export or host export", () => {
     const policy = createRemoteRoutePolicy({ origin });
     for (const probe of [
-      { path: "/api/usage/reset", method: "POST" },
-      { path: "/api/usage/retain", method: "POST" },
       { path: "/api/diagnostics/export", method: "POST" },
       { path: "/api/host-control/export", method: "GET" },
     ]) {

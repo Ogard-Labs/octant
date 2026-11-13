@@ -14300,7 +14300,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Developer tools, desktop recipe, provider trust, "Agents may merge",
     coordinator and wake switches, and Shield model; remembers a tool approval
     and reads and revokes remembered ones; installs, updates, trusts, enables,
-    and removes a package, adds a server, pins a plugin, and signs in to or reconnects a server; lists, reads, creates, and saves a Project's design systems (`/api/design-systems`; maintainer decision, 2026-11-13); searches, previews, installs, updates, and removes skills and reconciles the skill folders (`/api/extensions/skills`; maintainer decision, 2026-11-13); adds, changes, and removes a provider, starts a
+    and removes a package, adds a server, pins a plugin, and signs in to or reconnects a server; reads the local provider usage history and resets or trims the host's usage ledger, whose audit row names the device (`/api/usage/local-history`, `reset`, `retain`; maintainer decision, 2026-11-13); lists, reads, creates, and saves a Project's design systems (`/api/design-systems`; maintainer decision, 2026-11-13); searches, previews, installs, updates, and removes skills and reconciles the skill folders (`/api/extensions/skills`; maintainer decision, 2026-11-13); adds, changes, and removes a provider, starts a
     provider sign-in, and stores, replaces, or removes a provider key
     ([Provider credentials](#security-and-authority)); navigates and types in the host's agent Browser and reviews its session, upload, and download permissions, for every active Work or Code Project, since no workspace on the host is bound for a device; writes to a thread terminal and lists, reads, and starts a
     thread from a terminal session; merges a pull request or a stack, acts on
@@ -14330,7 +14330,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; provider cloud
     sessions; scanning the host for installed provider commands; choosing a new skill folder or a local plugin folder, which goes through the host's native folder picker; the replica store and its membership; and the whole host's
-    export, bulk data with no bound for a remote caller. Not built yet: usage reset, server Projects, disk cleanup, switching a Canvas to another design system, file-arrival and event routines, and diagnostics are not forwarded either, and creating or
+    export, bulk data with no bound for a remote caller. Not built yet: server Projects, disk cleanup, switching a Canvas to another design system, file-arrival and event routines, and diagnostics are not forwarded either, and creating or
     widening an agent grant stays on the loopback administration channel. In
     the Browser no device takes the page over from the agent or hands it
     back, reads a signed-in profile's page or a capture, grants login

@@ -301,7 +301,8 @@ export function classifyProductAction(request: Request): string | undefined {
     // Every Usage read is POST by construction — the routes answer 405 to any
     // other method — so admitting only GET/HEAD left the whole surface
     // unreadable from a paired browser. Reset and retain purge the host-wide
-    // ledger and stay denied for a remote device. Admission is still only
+    // ledger and the local history reads the home folder: none has an action
+    // here, so each stays denied for a device held to this catalogue. Admission is still only
     // forwarding: the route authenticates the window and scopes the read to
     // that window's Projects before answering.
     if (

@@ -173,6 +173,36 @@ describe("local provider usage history route", () => {
     expect(response?.status).toBe(403);
   });
 
+  it("reads the history for a device the host's own person paired", async () => {
+    const handler = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      sources: [source()],
+    });
+    const request = new Request("http://127.0.0.1/api/usage/local-history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        from: "2026-09-01T00:00:00.000Z",
+        to: "2026-09-09T23:59:59.999Z",
+        timeZone: "UTC",
+      }),
+    });
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "host-remote" as never,
+        deviceId: "device-remote" as never,
+        credentialGeneration: 1,
+        origin: "http://127.0.0.1",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "session-remote" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: "10000000-0000-4000-8000-000000000002" as never,
+    });
+    expect((await handler(request))?.status).toBe(200);
+  });
+
   it("rejects inverted ranges and invalid timezones before reading files", async () => {
     const store = new WindowAuthorityStore();
     store.register({ windowId, capability, now: Date.now() });
