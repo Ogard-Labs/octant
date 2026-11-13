@@ -614,6 +614,7 @@ export type ProvidersDependencies = Pick<
   > &
   Pick<
     AgentRunsWiring,
+    | "hostResourceBudget"
     | "agentRunChildWorktree"
     | "agentRunProcessSupervisor"
     | "agentRunSessionStore"
@@ -709,9 +710,21 @@ export function wireProviders(deps: ProvidersDependencies) {
     };
     const openCodeProcess =
       options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork, serverAccess });
-    const codexProcess =
+    const codexProcessPort =
       options.codexProcess ??
       makeCodexProcessLive({ octantVersion: version, runtimeNetwork, serverAccess });
+    const codexProcess: CodexProcessPort = {
+      start: (input) =>
+        Effect.suspend(() =>
+          codexProcessPort.start({
+            ...input,
+            environment: {
+              ...(input.environment ?? process.env),
+              ...deps.hostResourceBudget.nativeWorkerEnvironment(),
+            },
+          }),
+        ),
+    };
     const acpProcess = options.acpProcess ?? makeAcpProcessLive({ runtimeNetwork, serverAccess });
     const piProcess = options.piProcess ?? makePiProcessLive({ runtimeNetwork, serverAccess });
     const ohMyPiProcess = options.ohMyPiProcess ?? makeOhMyPiProcessLive();
@@ -1356,6 +1369,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       toolGrants: extensionToolGrantStore,
     });
     const preparationProcess = new RepositoryTestProcessPort({
+      resourceBudget: deps.hostResourceBudget,
       receiptDirectory: join(providerDataDirectory, "worktree-preparation-processes"),
     });
     const preparationRecovered = yield* Effect.promise(() =>
@@ -1553,13 +1567,24 @@ export function wireProviders(deps: ProvidersDependencies) {
       options.ohMyPiHome ??
       ((instanceId: ProviderInstance["id"]) =>
         join(providerDataDirectory, "providers", "oh-my-pi", instanceId));
-    const claudeProcess =
+    const claudeProcessPort =
       options.claudeProcess ??
       makeClaudeProcessLive({
         onProcessStarted: (process) => {
           return providerRuntimeRegistry.trackProcess(`claude:${process.pid}`, process);
         },
       });
+    const claudeProcess: ClaudeProcessPort = {
+      ...claudeProcessPort,
+      spawn: (confinement) => {
+        const spawn = claudeProcessPort.spawn(confinement);
+        return (input) =>
+          spawn({
+            ...input,
+            env: { ...input.env, ...deps.hostResourceBudget.nativeWorkerEnvironment() },
+          });
+      },
+    };
     const claudeSdk =
       options.claudeSdk ?? makeClaudeAgentSdkPort({ spawnClaudeCodeProcess: claudeProcess.spawn });
     const claudeResumeIdentityStore =

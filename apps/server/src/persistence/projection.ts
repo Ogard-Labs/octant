@@ -306,10 +306,7 @@ function rebuildProjectionInTransaction(input: ReplayInput): ProjectionCheckpoin
 
   input.projection.reset(input.connection);
   statements.remove.run(input.projection.name);
-  const initialUpdatedAt = input.clock();
-  statements.upsert.run(input.projection.name, 0, initialUpdatedAt);
   let lastSequence = 0;
-  let updatedAt = initialUpdatedAt;
 
   while (lastSequence < journalHead) {
     const events = input.journal
@@ -319,11 +316,13 @@ function rebuildProjectionInTransaction(input: ReplayInput): ProjectionCheckpoin
     for (const event of events) {
       applyProjection(input.connection, input.projection, event);
       lastSequence = event.globalSequence;
-      updatedAt = input.clock();
-      statements.upsert.run(input.projection.name, lastSequence, updatedAt);
     }
   }
 
+  // One checkpoint write for the whole rebuild: the enclosing transaction rolls
+  // back atomically on failure, so per-event checkpoints were unobservable.
+  const updatedAt = input.clock();
+  statements.upsert.run(input.projection.name, lastSequence, updatedAt);
   const rebuilt = checkpoint(input.projection.name, lastSequence, updatedAt);
   if (rebuilt.lastSequence === journalHead) {
     input.connection
@@ -362,17 +361,18 @@ function applyBatch(
 ): ProjectionCheckpoint {
   try {
     return input.connection.transaction(() => {
-      let current = checkpoint(
-        input.projection.name,
-        events[0]?.globalSequence ?? 0,
-        input.clock(),
-      );
+      const lastEvent = events.at(-1);
+      if (lastEvent === undefined) {
+        return checkpoint(input.projection.name, 0, input.clock());
+      }
       for (const event of events) {
         applyProjection(input.connection, input.projection, event);
-        statements.upsert.run(input.projection.name, event.globalSequence, input.clock());
-        current = checkpoint(input.projection.name, event.globalSequence, input.clock());
       }
-      return current;
+      // One checkpoint write and schema decode per committed batch rather than
+      // per event; any event failure rolls back the entire transaction.
+      const updatedAt = input.clock();
+      statements.upsert.run(input.projection.name, lastEvent.globalSequence, updatedAt);
+      return checkpoint(input.projection.name, lastEvent.globalSequence, updatedAt);
     })();
   } catch (error) {
     if (error instanceof ProjectionApplyFailure) {

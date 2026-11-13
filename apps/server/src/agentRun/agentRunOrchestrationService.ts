@@ -1373,20 +1373,24 @@ export class AgentRunOrchestrationService {
    * A released reservation can admit the oldest persisted capacity waiter.
    * The normal start path repeats approval and workspace checks before spawning it.
    */
-  #dequeueCapacityWaiter(excludedRunId?: AgentRunId): void {
+  retryResourceWaiters(): void {
+    this.#dequeueCapacityWaiter(undefined, true);
+  }
+
+  #dequeueCapacityWaiter(excludedRunId?: AgentRunId, fillAvailable = false): void {
     // A waiter this pass starts may hand its run slot straight back (the
     // provider was full) and ask for the next waiter. This pass is already
     // walking them, so a nested one would only start the same runs again.
     if (this.#dequeuing) return;
     this.#dequeuing = true;
     try {
-      this.#startQueuedWaiter(excludedRunId);
+      this.#startQueuedWaiter(excludedRunId, fillAvailable);
     } finally {
       this.#dequeuing = false;
     }
   }
 
-  #startQueuedWaiter(excludedRunId?: AgentRunId): void {
+  #startQueuedWaiter(excludedRunId?: AgentRunId, fillAvailable = false): void {
     for (const run of this.#persistence.snapshot().values()) {
       if (excludedRunId !== undefined && String(run.id) === String(excludedRunId)) continue;
       // A run parked on dependencies that all completed is waiting only for a
@@ -1407,7 +1411,12 @@ export class AgentRunOrchestrationService {
       const outcome = this.#startReserved(run);
       // A thread at its limit, or a waiter the parent no longer allows, used
       // no slot: the next waiter may still take the one that freed.
-      if (outcome === "thread-full" || outcome === "ended") continue;
+      if (
+        outcome === "thread-full" ||
+        outcome === "ended" ||
+        (fillAvailable && outcome === "started")
+      )
+        continue;
       return;
     }
   }
@@ -1552,6 +1561,7 @@ function boundedRecoveryReason(reason: string): string {
  */
 export function createInMemoryCapacityPort(
   limits: () => AgentRunConcurrency = () => DEFAULT_AGENT_RUN_CONCURRENCY,
+  onQueued?: () => void,
 ): AgentRunCapacityPort & {
   readonly queued: string[];
 } {
@@ -1568,7 +1578,8 @@ export function createInMemoryCapacityPort(
       const scope =
         reserved.size >= onHost ? "host" : forThread >= perThread ? "thread" : undefined;
       if (scope !== undefined) {
-        queued.push(String(runId));
+        if (!queued.includes(String(runId))) queued.push(String(runId));
+        onQueued?.();
         return { status: "queued", reason: "provider-capacity-saturated", scope };
       }
       const reservationId = `res-${next++}`;

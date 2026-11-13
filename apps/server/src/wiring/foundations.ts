@@ -23,7 +23,7 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { HostMemoryGuard } from "../hostMemoryGuard";
-import { readSystemMemory } from "../hostMemorySignal";
+import { readSystemMemory, type SystemMemorySample } from "../hostMemorySignal";
 import { readHostMemoryLimits } from "../persistence/hostMemoryLimitsProjection";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { WorkArtifactProjection } from "../work/workArtifactProjection";
@@ -123,6 +123,11 @@ export function wireFoundations(deps: FoundationsDependencies) {
   // The guard eases the host before the system has to kill it: it stops only
   // what is idle and never a running turn. `start` and `stop` belong to the
   // server's startup and shutdown, so a host that never binds writes nothing.
+  let resourceMemory: { readonly sample: SystemMemorySample; readonly at: number } | undefined;
+  const readResourceMemory = () =>
+    resourceMemory !== undefined && Date.now() - resourceMemory.at < 30_000
+      ? resourceMemory.sample
+      : undefined;
   const hostMemoryGuard = new HostMemoryGuard({
     stateFile: join(persistence.dataDirectory, "host-memory.json"),
     // The host itself keeps the crash record no watching desktop could: a
@@ -140,7 +145,11 @@ export function wireFoundations(deps: FoundationsDependencies) {
         ? undefined
         : { recordedAt: record.recordedAt, exitReason: record.exitReason };
     },
-    readSystem: () => readSystemMemory(),
+    readSystem: async () => {
+      const sample = await readSystemMemory();
+      resourceMemory = { sample, at: Date.now() };
+      return sample;
+    },
     readProcessRssBytes: () => process.memoryUsage.rss(),
     readLimits: () => readHostMemoryLimits(persistence.connection),
     relief: {
@@ -249,6 +258,7 @@ export function wireFoundations(deps: FoundationsDependencies) {
     codeBoardEventStore,
     codeEvidence,
     hostMemoryGuard,
+    readResourceMemory,
     isProjectPolicyTargetAllowed,
     providerRuntimeRegistry,
     selectCodeConversation,

@@ -298,6 +298,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     AgentRunsWiring,
+    | "hostResourceBudget"
     | "agentsManagedToolsFor"
     | "coordinatorWorkersHolder"
     | "externalContentIngestionStore"
@@ -593,6 +594,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
       });
       const repositoryTestProcessPort = new RepositoryTestProcessPort({
+        resourceBudget: deps.hostResourceBudget,
         receiptDirectory: join(providerDataDirectory, "code", "test-receipts"),
       });
       // A scaffold generator downloads what it writes, so it gets its own
@@ -601,6 +603,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // still writes only the checkout and this directory.
       const scaffoldWorkDirectory = join(providerDataDirectory, "code", "scaffold-work");
       const scaffoldProcessPort = new RepositoryTestProcessPort({
+        resourceBudget: deps.hostResourceBudget,
         receiptDirectory: join(providerDataDirectory, "code", "scaffold-receipts"),
         temporaryDirectory: scaffoldWorkDirectory,
       });

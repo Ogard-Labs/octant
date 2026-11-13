@@ -122,6 +122,7 @@ import {
   readCodePlannerDesignation,
   readCodeFileReference,
   readCodeFileReferences,
+  readCodeFileReferencesByContentId,
   readCodeRuntimeWork,
   readCodeRuntimeWorkAggregateVersion,
   readCodeRuntimeWorks,
@@ -271,6 +272,9 @@ export interface PersistenceService {
   readonly readCodeCheckouts: () => ReadonlyArray<CodeCheckoutIdentity>;
   readonly readCodeFileReference: (fileId: CodeFileId) => CodeFileReference | undefined;
   readonly readCodeFileReferences: (threadId: CodeThreadId) => ReadonlyArray<CodeFileReference>;
+  readonly readCodeFileReferencesByContentId: (
+    contentId: string,
+  ) => ReturnType<typeof readCodeFileReferencesByContentId>;
   readonly readCodeRuntimeWorkAggregateVersion: (workId: CodeRuntimeWorkId) => number;
   readonly readCodeRuntimeWork: (workId: CodeRuntimeWorkId) => CodeRuntimeWork | undefined;
   readonly readCodeRuntimeWorks: (
@@ -662,6 +666,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readCodeCheckouts: () => readCodeCheckouts(connection),
       readCodeFileReference: (fileId) => readCodeFileReference(connection, fileId),
       readCodeFileReferences: (threadId) => readCodeFileReferences(connection, threadId),
+      readCodeFileReferencesByContentId: (contentId) =>
+        readCodeFileReferencesByContentId(connection, contentId),
       readCodeRuntimeWorkAggregateVersion: (workId) =>
         readCodeRuntimeWorkAggregateVersion(connection, workId),
       readCodeRuntimeWork: (workId) => readCodeRuntimeWork(connection, workId),

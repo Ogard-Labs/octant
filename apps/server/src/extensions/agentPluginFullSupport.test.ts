@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { once } from "node:events";
 import {
   chmod,
   lstat,
@@ -11,6 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
 import { basename, dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
@@ -215,6 +217,53 @@ describe("Local Agent Plugins folder registry + resolver", () => {
 });
 
 describe("Agent Plugins MCP streamable-http connection", () => {
+  it("refuses a Streamable HTTP redirect without contacting its target", async () => {
+    let targetRequests = 0;
+    const target = createServer((_request, response) => {
+      targetRequests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }));
+    });
+    target.listen(0, "127.0.0.1");
+    await once(target, "listening");
+    const targetAddress = target.address();
+    if (targetAddress === null || typeof targetAddress === "string") {
+      target.close();
+      throw new Error("Redirect target did not bind a TCP port.");
+    }
+
+    const redirect = createServer((_request, response) => {
+      response.writeHead(307, {
+        location: `http://127.0.0.1:${String(targetAddress.port)}/private`,
+      });
+      response.end();
+    });
+    redirect.listen(0, "127.0.0.1");
+    await once(redirect, "listening");
+    const redirectAddress = redirect.address();
+    if (redirectAddress === null || typeof redirectAddress === "string") {
+      redirect.close();
+      target.close();
+      throw new Error("Redirect server did not bind a TCP port.");
+    }
+
+    try {
+      await expect(
+        connectAgentPluginMcpSession({
+          transport: "streamable-http",
+          name: "redirecting",
+          url: `http://127.0.0.1:${String(redirectAddress.port)}/mcp`,
+          headers: { "x-api-key": "secret" },
+        }),
+      ).rejects.toThrow();
+      expect(targetRequests).toBe(0);
+    } finally {
+      redirect.close();
+      target.close();
+      await Promise.all([once(redirect, "close"), once(target, "close")]);
+    }
+  });
+
   it("collects bounded tools/list pages", async () => {
     const cursors: Array<string | undefined> = [];
     const fetchImpl = (async (_input, init) => {
@@ -365,6 +414,7 @@ describe("Agent Plugins MCP streamable-http connection", () => {
     let deleteSignal: AbortSignal | undefined;
     const fetchImpl = (async (_input, init) => {
       if (init?.method === "DELETE") {
+        expect(init.redirect).toBe("error");
         deleteSignal = init.signal ?? undefined;
         return new Promise<Response>((_resolve, reject) => {
           deleteSignal?.addEventListener(

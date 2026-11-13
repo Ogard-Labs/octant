@@ -21,7 +21,9 @@ import {
   type AgentProfile,
   type AgentProfileScope,
   type Project,
+  type ProjectId,
   type CodeCheckoutIdentity,
+  type CodeFileReference,
   type CodeThreadId,
   type CodeEventFrame,
   type EventEnvelope,
@@ -709,22 +711,28 @@ describe("CodeService reads", () => {
   });
 
   it("authorizes content through its owning file reference and verifies stored metadata", async () => {
-    const fixture = serviceFixture();
+    const readCodeFileReferencesByContentId = vi.fn<
+      CodePersistencePort["readCodeFileReferencesByContentId"]
+    >(() => []);
+    const fixture = serviceFixture({ readCodeFileReferencesByContentId });
     const bytes = new TextEncoder().encode("hello");
     const reference = fixture.content.put(bytes);
     expect(reference.contentId).toBe(String(ids.content));
-    fixture.persistence.readCodeFileReferences.mockReturnValue([
-      decodeCodeFileReference({
-        id: ids.file,
-        threadId: ids.thread,
-        checkoutId: ids.checkout,
-        contentId: ids.content,
-        digest: reference.digest,
-        byteLength: reference.byteLength,
-        state: "available",
-        version: 1,
-        updatedAt: now,
-      }),
+    readCodeFileReferencesByContentId.mockReturnValue([
+      {
+        projectId: ids.project,
+        reference: decodeCodeFileReference({
+          id: ids.file,
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          contentId: ids.content,
+          digest: reference.digest,
+          byteLength: reference.byteLength,
+          state: "available",
+          version: 1,
+          updatedAt: now,
+        }),
+      },
     ]);
 
     await expect(fixture.service.readContent(ids.window, ids.content)).resolves.toEqual({
@@ -733,10 +741,67 @@ describe("CodeService reads", () => {
       byteLength: reference.byteLength,
     });
 
-    fixture.persistence.readCodeFileReferences.mockReturnValue([]);
+    readCodeFileReferencesByContentId.mockReturnValue([]);
     await expect(fixture.service.readContent(ids.window, ids.content)).rejects.toMatchObject({
       failure: { category: "unauthorized" },
     });
+  });
+
+  it("checks project access across every indexed content candidate without scanning threads", async () => {
+    let candidates: ReadonlyArray<{
+      readonly projectId: ProjectId;
+      readonly reference: CodeFileReference;
+    }> = [];
+    const readCodeFileReferencesByContentId = vi.fn(() => candidates);
+    const fixture = serviceFixture({ readCodeFileReferencesByContentId });
+    const otherProject = decodeProjectId("00000000-0000-4000-8000-000000001099");
+    const otherThread = decodeCodeThreadId("00000000-0000-4000-8000-000000001098");
+    const otherFile = decodeCodeFileId("00000000-0000-4000-8000-000000001097");
+    const bytes = new TextEncoder().encode("shared content");
+    const reference = fixture.content.put(bytes);
+    const forbiddenRef = decodeCodeFileReference({
+      id: otherFile,
+      threadId: otherThread,
+      checkoutId: ids.checkout,
+      contentId: reference.contentId,
+      digest: reference.digest,
+      byteLength: reference.byteLength,
+      state: "available",
+      version: 1,
+      updatedAt: now,
+    });
+    const allowedRef = decodeCodeFileReference({
+      id: ids.file,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      contentId: reference.contentId,
+      digest: reference.digest,
+      byteLength: reference.byteLength,
+      state: "available",
+      version: 1,
+      updatedAt: now,
+    });
+
+    candidates = [{ projectId: otherProject, reference: forbiddenRef }];
+    await expect(
+      fixture.service.readContent(ids.window, reference.contentId),
+    ).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.persistence.readCodeThreads).not.toHaveBeenCalled();
+
+    candidates = [
+      { projectId: otherProject, reference: forbiddenRef },
+      { projectId: ids.project, reference: allowedRef },
+    ];
+    await expect(fixture.service.readContent(ids.window, reference.contentId)).resolves.toEqual({
+      bytes,
+      digest: reference.digest,
+      byteLength: reference.byteLength,
+    });
+    expect(readCodeFileReferencesByContentId).toHaveBeenCalledTimes(2);
+    expect(fixture.persistence.readCodeThreads).not.toHaveBeenCalled();
+    expect(fixture.persistence.readCodeFileReferences).not.toHaveBeenCalled();
   });
 });
 
@@ -5419,6 +5484,7 @@ function serviceFixture(
     readonly terminalSessions?: TerminalSessionImportPort;
     readonly isProviderModelAllowed?: CodeServiceOptions["isProviderModelAllowed"];
     readonly serverCheckout?: CodeServiceOptions["serverCheckout"];
+    readonly readCodeFileReferencesByContentId?: CodePersistencePort["readCodeFileReferencesByContentId"];
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -5456,6 +5522,9 @@ function serviceFixture(
     readCodeFileReferences: vi.fn(
       () => [] as ReturnType<CodePersistencePort["readCodeFileReferences"]>,
     ),
+    readCodeFileReferencesByContentId:
+      options.readCodeFileReferencesByContentId ??
+      vi.fn(() => [] as ReturnType<CodePersistencePort["readCodeFileReferencesByContentId"]>),
     readCodeThreadView: vi.fn((threadId) => {
       const found = threads.find((candidate) => candidate.id === threadId);
       if (found === undefined) return undefined;

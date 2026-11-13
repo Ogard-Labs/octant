@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { AgentRunPolicySettings, decodeWindowId } from "@octant/contracts";
+import {
+  AgentRunPolicySettings,
+  DEFAULT_HOST_RESOURCE_POLICY,
+  decodeWindowId,
+} from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -53,11 +57,50 @@ function createHandler() {
   const windowAuthorityStore = new WindowAuthorityStore();
   const token = capability();
   windowAuthorityStore.register({ windowId, capability: token, now: 0 });
-  const handler = createAgentRunSettingsRouteHandler({ windowAuthorityStore, store, now: () => 0 });
+  const handler = createAgentRunSettingsRouteHandler({
+    windowAuthorityStore,
+    store,
+    now: () => 0,
+    resources: () => ({
+      policy: DEFAULT_HOST_RESOURCE_POLICY,
+      cores: 8,
+      cpuPercent: 95,
+      totalMemoryBytes: 16 * 2 ** 30,
+      availableMemoryBytes: 8 * 2 ** 30,
+      commands: 0,
+      workers: 1,
+      agents: 0,
+      activeCommands: 0,
+      queuedCommands: 1,
+      reason: "cpu-pressure",
+    }),
+  });
   return { handler, store, token };
 }
 
 describe("agentRunSettingsRoutes", () => {
+  it("exposes resource pressure only to an authenticated local window", async () => {
+    const { handler, token } = createHandler();
+    const path = "http://127.0.0.1/api/agent-run-settings/resources";
+    expect((await handler(new Request(path)))?.status).toBe(401);
+    const response = await handler(
+      new Request(path, { headers: { "x-octant-window-capability": token } }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      reason: "cpu-pressure",
+      commands: 0,
+      queuedCommands: 1,
+    });
+    expect(
+      (
+        await handler(
+          new Request(path, { method: "PUT", headers: { "x-octant-window-capability": token } }),
+        )
+      )?.status,
+    ).toBe(405);
+  });
+
   it("returns the current settings for an authenticated window", async () => {
     const { handler, token } = createHandler();
     const response = await handler(

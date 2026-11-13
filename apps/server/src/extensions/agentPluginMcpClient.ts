@@ -403,6 +403,7 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
     try {
       response = await this.#fetch(this.#url, {
         method: "POST",
+        redirect: "error",
         headers: this.#requestHeaders({
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
@@ -444,6 +445,7 @@ class StreamableHttpJsonRpcTransport implements JsonRpcTransport {
     try {
       await this.#fetch(this.#url, {
         method: "DELETE",
+        redirect: "error",
         headers,
         signal: controller.signal,
       });

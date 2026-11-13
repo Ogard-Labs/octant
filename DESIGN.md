@@ -1823,6 +1823,13 @@ pixel of drift in a render reads as a mistake.
 - _The rule beside reasoning_ is 1px in `--octant-border-strong`, not a 2px bar:
   the hairline is about 1.2:1, too faint to find.
 
+Settings > General includes Computer resources: Automatic limits, command/worker/helper
+ceilings, CPU target and memory reserve, Save limits, Pause new work and Refresh
+load. It uses the shared setting rows and controls, displays server-reported
+hardware and effective limits, and names the limits of native CLI child-process
+control. Resource admission behavior belongs to
+[local work resource limits](docs/architecture.md#local-work-resource-limits).
+
 ### Page shell
 
 Every list, board, reader, and preference page is a `Surface`:

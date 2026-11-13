@@ -7,6 +7,8 @@ export interface SystemMemorySample {
   readonly signal: SystemMemorySignal;
   /** Physical memory of the machine; zero when it could not be read. */
   readonly totalBytes: number;
+  /** Includes reclaimable memory where the platform measures it. */
+  readonly availableBytes?: number;
 }
 
 /**
@@ -83,7 +85,11 @@ export async function readSystemMemory(
       const text = await (options.readFile ?? ((path) => readFile(path, "utf8")))("/proc/meminfo");
       const info = parseLinuxMemoryInfo(text);
       if (info === undefined) return { signal: "unknown", totalBytes: total };
-      return { signal: classifyAvailableMemory(info), totalBytes: info.totalBytes };
+      return {
+        signal: classifyAvailableMemory(info),
+        totalBytes: info.totalBytes,
+        availableBytes: info.availableBytes,
+      };
     }
   } catch {
     return { signal: "unknown", totalBytes: total };

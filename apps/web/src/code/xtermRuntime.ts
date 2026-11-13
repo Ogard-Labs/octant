@@ -14,7 +14,7 @@ import {
 
 export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   let interactive = options.interactive;
-  let output = options.output;
+  let output: string | null = options.output;
   const typography = options.typography ?? DEFAULT_TERMINAL_TYPOGRAPHY;
   let colors = options.colors ?? DEFAULT_TERMINAL_COLORS;
   const terminal = new Terminal({
@@ -57,6 +57,13 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   });
 
   return {
+    appendOutput: (chunk) => {
+      if (chunk === "") return;
+      // Direct appends do not retain a transcript copy in memory, so any
+      // subsequent legacy setOutput call must reset instead of slicing stale text.
+      output = null;
+      terminal.write(chunk);
+    },
     dispose: () => {
       observer?.disconnect();
       plateWatch.disconnect();
@@ -67,13 +74,18 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
     },
     focus: () => terminal.focus(),
     readSelection: () => terminal.getSelection(),
+    replaceOutput: (nextOutput) => {
+      output = nextOutput;
+      terminal.reset();
+      if (nextOutput !== "") terminal.write(nextOutput);
+    },
     setInteractive: (next) => {
       interactive = next;
       terminal.options.disableStdin = !next;
     },
     setOutput: (nextOutput) => {
       if (nextOutput === output) return;
-      if (nextOutput.startsWith(output)) {
+      if (output !== null && nextOutput.startsWith(output)) {
         terminal.write(nextOutput.slice(output.length));
       } else {
         terminal.reset();

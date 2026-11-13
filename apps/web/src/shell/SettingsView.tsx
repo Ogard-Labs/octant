@@ -1,3 +1,4 @@
+import { HostResourceSettings } from "../settings/HostResourceSettings";
 import {
   useCallback,
   useEffect,
@@ -2443,6 +2444,12 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
   const hostPlatform = useHostPlatform();
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
+      {props.agentRunSettingsClient === undefined ? null : (
+        <HostResourceSettings
+          client={props.agentRunSettingsClient}
+          focusedSetting={String(focusedSetting ?? "")}
+        />
+      )}
       <SettingsSection
         description={`Everything is optional and kept on ${thisComputerName(hostPlatform)}.`}
         title="Your identity"

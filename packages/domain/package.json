@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./host-resource-policy": "./src/hostResourcePolicy.ts",
     "./agent-profile-policy": "./src/agentProfilePolicy.ts",
     "./agent-run-policy": "./src/agentRunPolicy.ts",
     "./agent-run-control-policy": "./src/agentRunControlPolicy.ts",

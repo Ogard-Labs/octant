@@ -437,6 +437,7 @@ const UNLISTED_SETTING_ROWS = new Set([
  * named here, which opens the page that lists the items.
  */
 const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
+  "resource-*": "resource-limits",
   "provider-*-display-name": "provider-display-name",
   "provider-*-binary-path": "provider-binary-path",
   "provider-*-authentication": "provider-authentication",
