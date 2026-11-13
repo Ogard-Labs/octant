@@ -90,12 +90,12 @@
 /* Placement only: the alert recipe paints it. One notice for a lost host
    connection, in the thread's own measure above the transcript. */
 .thread-connection-notice {
-  width: min(100% - 40px, var(--oct-thread-measure));
+  width: var(--oct-thread-column);
   margin: var(--oct-space-2) auto 0;
 }
 
 .chat-workspace__error {
-  width: min(100% - 40px, 720px);
+  width: min(100% - var(--oct-thread-gutter), 720px);
   margin: var(--oct-space-2) auto 0;
   padding: 8px var(--oct-space-3);
   color: var(--oct-danger-fg);
