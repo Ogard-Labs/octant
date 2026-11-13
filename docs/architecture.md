@@ -12729,11 +12729,11 @@ mechanisms are:
     its call or turn stopping, its thread's archive, its window's revocation
     where a window owns it, or the host stopping. What an ask holds is
     released by every one of those ends: an upload's staged copies and a
-    download's held file are deleted on any outcome but approval, an upload
-    or download question also ends when its page closes or is stopped, and a
-    page lives, without an
-    idle deadline, for as long as an upload or download question about it
-    waits. The pending-requests read (Needs you) lists every one of these
+    download's held file are deleted on any outcome but approval. An ask
+    about an open page (its site approval, a script, a sign-in, an upload or
+    a download) also ends when that page closes or is stopped, and the page
+    lives, without an idle deadline, for as long as the ask waits; the first
+    navigate's site approval has no page yet and ends only with its call. The pending-requests read (Needs you) lists every one of these
     asks, and each new one is told to the paired phones
     ([Pending requests across modes](#security-and-authority)). Expiry stays
     where a live secret or the host's own authority is at stake, each stated

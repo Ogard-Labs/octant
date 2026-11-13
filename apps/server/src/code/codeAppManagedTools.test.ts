@@ -2539,6 +2539,152 @@ describe("Code app-managed tools", () => {
     });
     expect(executeOperation).toHaveBeenCalled();
   });
+
+  describe("a Browser question about a page that closes while it waits", () => {
+    // Browser questions have no expiry, so the page's own end must withdraw
+    // one; otherwise it stays listed and a late Approve only meets a stale page.
+    function closingPage() {
+      const page = new AbortController();
+      const asked: Array<AbortSignal | undefined> = [];
+      const answer = (signal: AbortSignal | undefined) => {
+        asked.push(signal);
+        page.abort();
+        return signal?.aborted === true ? ("cancelled" as const) : ("approved" as const);
+      };
+      return { page, asked, answer };
+    }
+    function pageTools(
+      page: AbortSignal,
+      extra: Partial<Parameters<typeof createCodeAppManagedTools>[0]>,
+      live = false,
+    ) {
+      const snapshot = browserSnapshot(browserAuthority());
+      if (snapshot.context === undefined) throw new Error("expected Browser context");
+      const active = {
+        ...snapshot,
+        observation: { url: "https://example.com/", revision: 3, stale: false } as never,
+        context: live
+          ? { ...snapshot.context, presentation: "native-live" as const }
+          : snapshot.context,
+      };
+      const current = thread({ executionPolicy: "approval-gated" });
+      return createCodeAppManagedTools({
+        windowId,
+        thread: current,
+        readThread: () => current,
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browser: {
+          resolveAuthority: () => browserAuthority(),
+          inspectThread: () => active,
+          create: vi.fn(),
+          act: vi.fn(async () => active) as never,
+          releaseThread: vi.fn(),
+          runScript: vi.fn(),
+          holdForAsk: () => ({ release: () => undefined, signal: page }),
+        },
+        ...extra,
+      });
+    }
+
+    it("withdraws a run-script approval below Full access when its page closes", async () => {
+      const { page, asked, answer } = closingPage();
+      const current = thread({ executionPolicy: "approval-gated" });
+      const tools = pageTools(
+        page.signal,
+        {
+          browserSignIn: { refusal: () => undefined, request: vi.fn() },
+          browserProfiles: {
+            approvals: { request: vi.fn(async (request) => answer(request.signal)) },
+            readBinding: () => ({
+              modelId: String(current.modelId),
+              authority: browserAuthority(),
+            }),
+            rememberBinding: vi.fn(),
+            forgetBinding: vi.fn(),
+          },
+        },
+        true,
+      );
+      expect(
+        await tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({
+            operation: "run-script",
+            source: "42",
+            expectedObservationRevision: 3,
+          }),
+        }),
+      ).toEqual({ result: { error: "browser-approval-cancelled" }, isError: true });
+      expect(asked[0]?.aborted).toBe(true);
+    });
+
+    it("withdraws a site approval for the open page when the page closes", async () => {
+      const { page, asked, answer } = closingPage();
+      const tools = pageTools(page.signal, {
+        browserApproval: {
+          isApproved: () => false,
+          request: vi.fn(async (_origin: string, signal?: AbortSignal) => answer(signal)),
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+      });
+      expect(
+        await tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "snapshot" }),
+        }),
+      ).toEqual({ result: { error: "browser-approval-cancelled" }, isError: true });
+      expect(asked[0]?.aborted).toBe(true);
+    });
+
+    it("withdraws a site approval for a page bound to another model when the page closes", async () => {
+      const { page, asked, answer } = closingPage();
+      const tools = pageTools(page.signal, {
+        browserProfiles: {
+          approvals: { request: vi.fn(async (request) => answer(request.signal)) },
+          readBinding: () => ({ modelId: "another-model", authority: browserAuthority() }),
+          rememberBinding: vi.fn(),
+          forgetBinding: vi.fn(),
+        },
+      });
+      expect(
+        await tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "snapshot" }),
+        }),
+      ).toEqual({ result: { error: "browser-approval-cancelled" }, isError: true });
+      expect(asked[0]?.aborted).toBe(true);
+    });
+
+    it("withdraws a sign-in hand-off when its page closes", async () => {
+      const { page, asked, answer } = closingPage();
+      const tools = pageTools(
+        page.signal,
+        {
+          browserApproval: {
+            isApproved: () => true,
+            request: vi.fn(),
+            remember: vi.fn(),
+            forget: vi.fn(),
+          },
+          browserSignIn: {
+            refusal: () => undefined,
+            request: vi.fn(async (request) => answer(request.signal)),
+          },
+        },
+        true,
+      );
+      expect(
+        await tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "sign-in" }),
+        }),
+      ).toEqual({ result: { error: "browser-sign-in-cancelled" }, isError: true });
+      expect(asked[0]?.aborted).toBe(true);
+    });
+  });
 });
 
 describe("the Apple capability as an agent tool", () => {

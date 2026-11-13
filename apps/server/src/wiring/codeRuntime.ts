@@ -648,6 +648,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             act: (input) => browserAutomationService.act(input),
             releaseThread: (windowId, threadId) =>
               browserAutomationService.releaseThread(windowId, threadId),
+            holdForAsk: (windowId, threadId) =>
+              browserAutomationService.holdForAsk(windowId, threadId),
           },
           approvals: browserToolApprovalService,
         },

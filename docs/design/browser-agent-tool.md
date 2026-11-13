@@ -844,24 +844,27 @@ made active.
   a hung call, queued call, late answer or late input cannot extend or revive
   it. A timer that was already queued checks the latest deadline before expiry,
   and cannot restart a stopped context's scheduling.
-- **A waiting transfer question keeps its page.** An upload or download
-  question has no expiry (maintainer decision, 2026-11-13), and its page has
-  no idle deadline while the question waits, so a later answer still finds
-  the page. When the question ends, by an answer, the call or turn stopping,
+- **A waiting question keeps its page.** An upload, download, script or
+  site question about an open page has no expiry (maintainer decision,
+  2026-11-13), and its page has no idle deadline while the question waits, so
+  a later answer still finds the page. When the question ends, by an answer, the call or turn stopping,
   the thread's archive, the window's revocation or the host stopping, the
   page returns to a finite deadline (two minutes of grace, or its ordinary
   idle deadline if later). The staged upload copies and the held download
-  file are deleted on any outcome but approval, and an upload or download
-  question also ends when its page closes or is stopped, in Work and Code
-  alike, so a question that waits holds nothing after it
-  is withdrawn. A site approval holds no page and needs none.
+  file are deleted on any outcome but approval. Every question about an open
+  page, its site approval, a script, a sign-in, an upload or a download, also
+  ends when its page closes or is stopped, in Work, Code and a terminal's
+  Browser grant alike, so the turn goes on and a question that waits holds
+  nothing after it is withdrawn. The first navigate's site approval has no
+  page yet, so only its call or turn ends it.
 - **Handoffs have their own phase bounds.** A sign-in card has no expiry
   ([Asking the person to sign in](#asking-the-person-to-sign-in)), and its page
   has no deadline and holds no expiry timer while the card waits: the card is
   the wait, and a page that closed under it would leave the person a card
   with nothing to sign in to. The card ends, and the page returns to a finite
   deadline, when the person answers, the turn stops, the thread is archived,
-  the window's authority is revoked, or the host stops. A take-over's page is
+  the window's authority is revoked, the page is closed or stopped, or the
+  host stops. A take-over's page is
   retained for eleven minutes from the hold, and take-over
   input renews that eleven-minute hold, with the existing one-minute scheduling
   throttle. Answering the card or handing back replaces the hold with two

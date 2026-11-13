@@ -22,6 +22,7 @@ import {
   landHeldDownloads,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
+  askWhilePageLives,
   handBrowserToPerson,
   heldForPersonAnswer,
   heldWhileQueued,
@@ -1369,6 +1370,9 @@ async function browserToolOne(
   const postureFailure = browserAuthorityFailure(options, input.operation);
   if (postureFailure !== undefined) return failure(postureFailure);
   let snapshot = options.browser.inspectThread(options.windowId, threadId);
+  const browser = options.browser;
+  // Every question about the open page is withdrawn when that page ends.
+  const pageHold = () => browser.holdForAsk?.(options.windowId, threadId);
   // While the person signs in, the page is theirs; see Work's tool.
   if (snapshot.waitingForPerson !== undefined) {
     return heldForPersonAnswer(snapshot.waitingForPerson);
@@ -1429,15 +1433,17 @@ async function browserToolOne(
       )
         return failure("script-needs-a-local-person");
       if (!scriptBindingIsCurrent()) return failure("browser-approval-required");
-      const decision = await approvals.request({
-        windowId: options.windowId,
-        threadId: String(threadId),
-        authority,
-        origin,
-        ...(profile === undefined ? {} : { profile }),
-        script: { source: input.source },
-        ...(signal === undefined ? {} : { signal }),
-      });
+      const decision = await askWhilePageLives(pageHold, signal, (askSignal) =>
+        approvals.request({
+          windowId: options.windowId,
+          threadId: String(threadId),
+          authority,
+          origin,
+          ...(profile === undefined ? {} : { profile }),
+          script: { source: input.source },
+          ...(askSignal === undefined ? {} : { signal: askSignal }),
+        }),
+      );
       if (decision !== "approved") return failure(`browser-approval-${decision}`);
       const reviewed = options.browser.inspectThread(options.windowId, threadId).observation;
       if (
@@ -1582,14 +1588,21 @@ async function browserToolOne(
     const privateAtFullAccess =
       profile === undefined && currentAuthorityFailure(options) === undefined;
     if (!approved && !remembered && !privateAtFullAccess) {
-      const outcome = await profiles.approvals.request({
-        windowId: options.windowId,
-        threadId: String(threadId),
-        authority,
-        origin,
-        ...(profile === undefined ? {} : { profile }),
-        ...(signal === undefined ? {} : { signal }),
-      });
+      // The first navigate's question has no page yet, so only the call's
+      // signal withdraws it.
+      const outcome = await askWhilePageLives(
+        existing === undefined ? undefined : pageHold,
+        signal,
+        (askSignal) =>
+          profiles.approvals.request({
+            windowId: options.windowId,
+            threadId: String(threadId),
+            authority,
+            origin,
+            ...(profile === undefined ? {} : { profile }),
+            ...(askSignal === undefined ? {} : { signal: askSignal }),
+          }),
+      );
       if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
     }
     const changed = browserAuthorityFailure(options, input.operation);
@@ -1620,7 +1633,12 @@ async function browserToolOne(
     !remembered
   ) {
     if (options.browserApproval === undefined) return failure("browser-approval-required");
-    const outcome = await options.browserApproval.request(origin, signal);
+    const browserApproval = options.browserApproval;
+    const outcome = await askWhilePageLives(
+      existing === undefined ? undefined : pageHold,
+      signal,
+      (askSignal) => browserApproval.request(origin, askSignal),
+    );
     if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
     const changed = browserAuthorityFailure(options, input.operation);
     if (changed !== undefined || signal?.aborted === true)
@@ -1672,15 +1690,17 @@ async function browserToolOne(
     return handBrowserToPerson({
       hold: () => browser.holdForPerson?.(options.windowId, threadId) ?? (() => undefined),
       ask: () =>
-        signIn.request({
-          windowId: options.windowId,
-          threadId: String(threadId),
-          authority,
-          origin,
-          ...(profile === undefined ? {} : { profile }),
-          signIn: input.reason === undefined ? {} : { reason: input.reason },
-          ...(signal === undefined ? {} : { signal }),
-        }),
+        askWhilePageLives(pageHold, signal, (askSignal) =>
+          signIn.request({
+            windowId: options.windowId,
+            threadId: String(threadId),
+            authority,
+            origin,
+            ...(profile === undefined ? {} : { profile }),
+            signIn: input.reason === undefined ? {} : { reason: input.reason },
+            ...(askSignal === undefined ? {} : { signal: askSignal }),
+          }),
+        ),
       snapshotAfter: () => browserToolOne(options, { operation: "snapshot" }, signal, true),
     });
   }
@@ -1736,19 +1756,10 @@ async function browserToolOne(
       ask: async (files) => {
         if (upload === undefined) return "denied";
         if (uploadsUnasked) return "approved";
-        const hold = options.browser?.holdForAsk?.(options.windowId, threadId);
-        // The question has no expiry, so the page's end must withdraw it,
-        // as a download question's does; otherwise the turn stays parked
-        // and the admitted copies are kept.
-        const pageSignal = hold?.signal;
-        const askSignal =
-          pageSignal === undefined
-            ? signal
-            : signal === undefined
-              ? pageSignal
-              : AbortSignal.any([signal, pageSignal]);
-        try {
-          return await askBrowserTransfer(upload.approvals, {
+        // Withdrawn with its page, as a download question is; otherwise the
+        // turn stays parked and the admitted copies are kept.
+        return askWhilePageLives(pageHold, signal, (askSignal) =>
+          askBrowserTransfer(upload.approvals, {
             direction: "upload",
             windowId: options.windowId,
             threadId: String(threadId),
@@ -1758,10 +1769,8 @@ async function browserToolOne(
             workspaceRoot: upload.root,
             files,
             signal: askSignal,
-          });
-        } finally {
-          hold?.release();
-        }
+          }),
+        );
       },
     });
     if (admitted.status === "refused") return failure(admitted.reason);
