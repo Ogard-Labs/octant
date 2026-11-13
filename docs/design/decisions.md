@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Design system](#design-system)                                                       | 11        | 10      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 14      | 2            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
-| [Canvas](#canvas)                                                                     | 11        | 7       | 4            | 0                   |
+| [Canvas](#canvas)                                                                     | 12        | 8       | 4            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 3       | 3            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 5       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **250**   | **160** | **86**       | **4**               |
+| **All areas**                                                                         | **251**   | **161** | **86**       | **4**               |
 
 ## Principles and hard lines
 
@@ -1125,6 +1125,7 @@ Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.m
 A restart recovers what the journal can prove and never guesses that an ambiguous outcome succeeded.
 
 - Orphaned running Code turns become Waiting and orphaned Work turns settle as Interrupted; settled turns stay settled and repeated startup appends no duplicate recovery events. Other running Code work that reaches a remote (a push or pull request step) becomes ambiguous and keeps its thread Waiting; local Code work becomes interrupted. The next look at the checkout settles an unconfirmed push from the remote branch, and the next look at the pull request settles an unconfirmed creation, comment or review reply; an unreadable remote never settles it by guess. An unconfirmed update or merge stays unconfirmed. A turn a restart cut off continues by itself, once, as the host, on by default with a per-mode Continue after restart setting and a per-thread switch; a turn whose last effect is uncertain still waits for the person (maintainer request, 2026-11-12). Built for Code ([Continuing a turn a restart cut off](#continuing-a-turn-a-restart-cut-off)).
+- The host does not wait for those looks: after restart reconciliation it settles every active thread's unconfirmed push and pull request steps once, in the background, as the host, with the same reads and through the thread's own checkout, remote, and recorded pull request. Start-up never waits on it; it reads a few threads at a time, bounds each step's reads, skips archived threads and checkouts recorded as gone, and leaves a step unconfirmed on any unreachable remote, timeout, or failure. A person's look or retry on that thread waits for its pass.
 - A push whose failure Git did not attribute to the remote's refusal (a dropped connection, an unconfirmed remote update, a timeout) is ambiguous, not failed. A comment retried while an earlier attempt at the same text is unconfirmed is looked for among the person's own comments on the pull request that attempt recorded, and refused when that cannot be read. An attempt counts as landed only when more of the person's comments carry its text than did just before it was sent, so an older identical comment never stands in for it; a comment record without its pull request and prior count stays unconfirmed. Concurrent submissions of one push or pull request step with the same operation id run once. A pull request creation's `idempotencyKey` is optional and ignored; the operation id is what dedupes.
 - Outstanding approvals are recovered, but a parked provider question settles the attempt interrupted because the session that would consume the answer died.
 - Clients catch up from the authoritative snapshot, keep retrying while the host is unreachable, and renew a remote session from the device key rather than re-pairing.
@@ -1153,10 +1154,11 @@ After a crash, a force quit or a reboot, the host continues each turn the restar
 - The continuation is the same message a person's Resume sends: inspect first, do not repeat what may already have taken effect, ask again for approvals and answers.
 - Each mode has its own switch: Settings › Chat, Settings › Work and Settings › Code › Continue after restart, each on by default, because each mode already keeps its own settings record. Every thread's menu carries its own switch. Both are changed at a window on this computer or on a device its person paired, and the journal names the device (maintainer decision, 2026-11-12); a hub-introduced device and an agent grant are refused.
 - The thread waits for its person instead when Continue after restart is off in Settings or for the thread, when it holds a push or pull request step whose outcome the restart left unknown (Code: Chat and Work journal no such step), when its own automatic continuation was cut off by a restart twice, or when its provider cannot resume the session the turn ran in. A turn that never reached its provider waits too, so the person's message is sent again rather than lost.
+- After a person's deliberate quit (the app menu's Quit, ⌘Q, or closing the last window where that quits) while turns run, nothing is continued: each cut-off thread waits with the `quit` reason, and the notice reads "Octant was quit while threads were working. N threads wait for you." with a link to the first; the person continues it with the thread's ordinary Resume or next message. Maintainers decided this on 2026-11-12. The desktop only reports the quit, on a loopback route only its bridge secret opens, and the host keeps a one-start marker beside its store; no marker continues as before. A system restart, shutdown or session end (Electron's `powerMonitor` `shutdown` on macOS and Linux, a window's session end on Windows, or the non-interactive quit macOS sends) continues, and with the Background service on the host keeps running, so nothing is held. The Dock's Quit arrives as the same event a shutdown sends and continues.
 - Each recovery identity is continued at most once, and the crash-loop count survives the restart it counts.
 - Dispatch needs no window: it runs under the host's own scope and rechecks authority, posture and the spend ceiling through ordinary turn admission at that moment. Messages queued behind the cut-off turn follow the continuation; a queue its person paused stays paused.
 - Each start reports the threads it continued and the ones that wait, with links, in a notice: "Octant restarted. Continued N threads; M need you."
-- Built for Code, Chat and Work. A Chat answer the start interrupts and a Work turn the start settles as cut off are continued through each mode's ordinary send, so a person's own "continue" and the host's take the same path. A Chat answer already waiting on a question or approval at the restart is still settled interrupted when it is answered; asking it again is not built. Subagent runs, coordinator wakes, goal loops and settling lost remote steps at start are not built yet. A packaged-app `kill -9` smoke is a maintainer live check still owed.
+- Built for Code, Chat and Work. A Chat answer the start interrupts and a Work turn the start settles as cut off are continued through each mode's ordinary send, so a person's own "continue" and the host's take the same path. A Chat answer already waiting on a question or approval at the restart is still settled interrupted when it is answered; asking it again is not built. Subagent runs, coordinator wakes, goal loops and settling lost remote steps at start are not built yet. A packaged-app `kill -9` smoke, and a packaged-app quit, system restart and Windows session end, are maintainer live checks still owed.
 
 Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
@@ -2644,13 +2646,28 @@ Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.
 
 A `choice` block asks the person a question inside a Canvas; their answer goes to the Canvas's own thread as their own ordinary message.
 
-- The block takes the inline questionnaire's question shape and bounds (one to four questions), carries no answer, and is decoded strictly on the host.
+- The block takes the inline questionnaire's per-question shape and bounds (a prompt, single or multiple selection, one to eight options), carries no answer, and is decoded strictly on the host. It has no limit on how many questions it holds: a Canvas is a page, and a long decision list is its case. Only the inline `ask-user` questionnaire keeps its four-question ceiling, and the two have separate schemas.
+- Agents are told to use a choice block whenever they need answers to more than four questions, and `ask-user` says so too.
 - Choosing edits a local draft; only an explicit Send enqueues one message on the owning thread through its message queue from the person's window, so it runs or waits like a composer send under the thread's existing authority. It is never a host-initiated turn or an approval.
 - The message is host-framed text naming the Canvas, the block, and the chosen labels or written answer.
 - Where no thread can take the answer (no message queue in the window, a paired client, no host scope for the Canvas, an older version, the thread's own inline view, a shared snapshot or public share page, an export) the block reads only with a reason. A share never offers sending.
 - HTML design frames gain no submission ability.
 
 Status: Built. Since: 2026-11-11. Detail: [Canvas: Choice block](canvas.md#choice-block).
+
+### Decision forms in a Canvas
+
+A `choice` block is also how an agent asks for many decisions at once: no question limit, sections, a note on each question, answers that save on the Canvas as they are made, a progress count, an action that accepts the agent's recommendations, and a `read` the agent uses to get the answers.
+
+- The Canvas choice block has no limit on how many questions it holds, and its answer has no count or size ceiling; only the inline `ask-user` questionnaire keeps four questions. The two use separate schemas.
+- Agents are told to use a choice block for more than four decisions (the block's `describe` text, the Canvas tool description, and `ask-user`).
+- Sections, per-question notes, and `allowNote` arrive with Canvas schema version 29, and the form changes no document shape for a block that carries none of them.
+- Answers are journaled facts of a `canvas-choice-answers` aggregate per Canvas, not document versions. The host stamps the `local-user` author; no agent operation writes an answer; a paired client reads and cannot write. A question an agent revised keeps its answer only when its fingerprint is unchanged.
+- Each pick saves as made; Send answers is the explicit act that wakes the agent, through the thread's message queue under its existing authority, and is never an approval.
+- _Accept every recommendation not yet answered_ answers only the questions with an unambiguous recommendation, never replaces an answer, and marks what it made.
+- The owning thread's `read` returns the answers (a question reworded after it was answered reads `stale`); shares, public links, exports, and artifact sync do not carry answers or notes.
+
+Status: Built. Since: 2026-11-12. Live checks owed: rendered QA of a 24-question form and a real-provider smoke of an agent building and reading one. Detail: [Canvas: Decision forms](canvas.md#decision-forms).
 
 ### Canvas shares and exports
 

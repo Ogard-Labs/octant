@@ -163,6 +163,7 @@
     "./canvas-share-snapshot": "./src/canvasShareSnapshot.ts",
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts",
     "./canvas-board": "./src/canvasBoard.ts",
+    "./canvas-choice-answer": "./src/canvasChoiceAnswer.ts",
     "./canvas-tags": "./src/canvasTags.ts",
     "./computer-use-plugin": "./src/computerUsePlugin.ts",
     "./desktop-lease": "./src/desktopLease.ts",

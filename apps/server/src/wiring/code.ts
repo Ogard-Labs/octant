@@ -124,7 +124,10 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
   ) => Promise<{ readonly device: string; readonly inode: string }>;
 }): CodeFileRootAuthorityPort {
   return {
-    resolve: async (windowId, thread, checkout, relativePath) => {
+    resolve: async (windowId, thread, checkout, relativePath, signal) => {
+      // An abandoned probe stops between reads: a filesystem read cannot be
+      // interrupted, but nothing after it starts once the signal is aborted.
+      const abandoned = () => signal?.aborted === true;
       const bootstrap = await options.projects.bootstrap(windowId);
       const summary = bootstrap.active.find(
         (project) => project.id === thread.projectId && project.type === "code",
@@ -187,7 +190,7 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
           return undefined;
         }
         const rootIdentity = await options.statIdentity(repositoryRoot);
-        if (!bindingCurrent()) return undefined;
+        if (abandoned() || !bindingCurrent()) return undefined;
         return {
           fileId: stableCodeFileId(thread.id, checkout.id, relativePath),
           rootPath: repositoryRoot,
@@ -224,10 +227,20 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
         }
         rootPath = receipt.canonicalWorktreePath;
       }
-      const observation = await options.repository.observe(
-        repositoryRoot,
-        new AbortController().signal,
-      );
+      if (abandoned()) return undefined;
+      let observation: RepositoryIdentityObservation;
+      try {
+        observation = await options.repository.observe(
+          repositoryRoot,
+          signal ?? new AbortController().signal,
+        );
+      } catch (error) {
+        // An aborted probe's Git is killed and its read rejects; that is the
+        // probe stopping, not a failure to report.
+        if (abandoned()) return undefined;
+        throw error;
+      }
+      if (abandoned()) return undefined;
       const observedCheckout =
         checkout.kind === "existing-worktree"
           ? observation.status === "available"
@@ -252,7 +265,7 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
         return undefined;
       }
       const rootIdentity = await options.statIdentity(rootPath);
-      if (!bindingCurrent()) return undefined;
+      if (abandoned() || !bindingCurrent()) return undefined;
       return {
         fileId: stableCodeFileId(thread.id, checkout.id, relativePath),
         rootPath,

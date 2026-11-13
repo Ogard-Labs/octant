@@ -152,6 +152,9 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
       get: canvas.get,
       history: canvas.history,
       threadReferenceCards: canvas.threadReferenceCards,
+      // A person's saved decision-form answers are readable here; the write
+      // is the host window's own act and is never handed to a paired browser.
+      ...(canvas.choiceAnswers === undefined ? {} : { choiceAnswers: canvas.choiceAnswers }),
       ...(canvas.designAssets === undefined ? {} : { designAssets: canvas.designAssets }),
       ...(canvas.publicShares === undefined ? {} : { publicShares: canvas.publicShares }),
     },

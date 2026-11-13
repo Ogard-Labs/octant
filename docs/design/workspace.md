@@ -1892,6 +1892,8 @@ kinds, labelling the leftover; it adds no authority of its own.
 An agent can ask for related decisions through the app-owned `ask-user` tool
 in Chat, Work, and Code. A questionnaire belongs in its originating thread,
 with one compact card containing up to four questions. It creates no Canvas.
+More than four decisions belong in a Canvas [choice block](canvas.md#choice-block),
+which has no question limit; the tool's description tells agents so.
 Each question offers one choice or several choices, optional descriptions,
 and an optional written alternative. Recommendations are labelled and never
 preselected. A person can add a comment alongside their choices by default.
