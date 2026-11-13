@@ -291,9 +291,7 @@ describe("shell settings policy", () => {
     // An answer given on a Private page says so, and stays there.
     const onPrivate = { ...transfer, privatePage: true } as const;
     expect(browserTransferRemembered(inPersonal, onPrivate)).toBe(false);
-    expect(browserTransferRemembered([onPrivate], { ...transfer, profile: personal })).toBe(
-      false,
-    );
+    expect(browserTransferRemembered([onPrivate], { ...transfer, profile: personal })).toBe(false);
     expect(browserTransferRemembered([onPrivate], onPrivate)).toBe(true);
     // An answer remembered before the page was recorded names neither. It
     // was given for the site and the folder on any page, and still covers

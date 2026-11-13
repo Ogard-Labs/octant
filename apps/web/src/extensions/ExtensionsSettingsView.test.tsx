@@ -863,7 +863,7 @@ describe("ExtensionsSettingsView", () => {
           {
             code: "outside-driver-publisher-changed",
             message:
-              "Another publisher signed this provider driver. It stays held until you trust the new publisher or forget the old one.",
+              "Another publisher signed this package, or nobody did. It stays held until you trust the new publisher or forget the old one.",
           },
           { code: "other", message: "Something else." },
         ],

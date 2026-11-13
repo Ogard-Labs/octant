@@ -201,8 +201,8 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
     >
       <p className="endpoint-flow__detail">
         A command Octant starts on this computer, or an address it connects to. Add server also
-        trusts it and turns it on; Add only leaves both to you. Its tools ask for your approval
-        the first time one is used.
+        trusts it and turns it on; Add only leaves both to you. Its tools ask for your approval the
+        first time one is used.
       </p>
       <div className="endpoint-flow__field">
         <label htmlFor={`${ids}-name`}>Name</label>

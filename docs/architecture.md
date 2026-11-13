@@ -10360,12 +10360,14 @@ admission stays held. The command schema refuses `enable` without `trust`, and
 a refused trust turns nothing on. It is offered beside the other two on a
 Marketplace, npm, or local-folder preview, and the Library's reviewed plugin
 leads with it and keeps **Install only**; Trust and Turn on stay separate
-commands for a person who wants the steps apart. Not built yet: the one
-confirmation does not cover installing a standalone skill, which keeps Confirm
-install and Install and trust, and a server the person adds directly keeps its
-own sequence (Connectors and user-added MCP servers, below). Trust rules are
-unchanged: a signed provider
-driver pins its publisher key at that trust, and if the trust is refused the
+commands for a person who wants the steps apart. The same one confirmation
+covers a standalone skill and a server the person adds directly (maintainer
+decision, 2026-11-13; built): `install-skill` carries the same `trust` and
+`enable`, its preview offers **Install, trust and turn on** beside Confirm
+install and Install and trust, and adding a server sends the one-step install
+itself (Connectors and user-added MCP servers, below). Trust rules are
+unchanged: a signed package
+pins its publisher key at that trust, and if the trust is refused the
 package stays installed and untrusted. Choice: both one-step forms are offered
 for a new install only, never an update, because an update keeps the package's
 trust decision and a changed digest deserves its own look; a person who wants
@@ -10788,10 +10790,10 @@ that is not yet effective for the thread is refused and never reaches the model.
   ([the Full access rule](#security-and-authority); maintainer request,
   2026-11-12); a Plan turn on such a thread still asks. Built: the Full access
   rule, and below Full access a server asks once and that answer covers all
-  of its tools (next item). Not built yet: the answer is bound to the
-  server's signing key only for a package whose signature the host verifies
-  on install; any other is bound to the package version and digest (next
-  item). Who may
+  of its tools (next item). The answer is bound to the server's signing key
+  for a signed package, and for an unsigned one to its version and digest
+  and to the run of updates the host takes from the source the person
+  trusted (next item). Who may
   answer: a local window or a paired device, alike, for any prompt on a thread
   it may drive, with the same answers, remembering included (maintainer
   decision, 2026-11-12). Not built yet: today the three rules below hold:
@@ -10910,8 +10912,12 @@ that is not yet effective for the thread is refused and never reaches the model.
   below apply to both. The approval view states what an approval covers
   (`answerCovers`: `server`, `server-on-thread`, or `call`), and the web
   card's choices and copy follow it: "Allow all tools of this server", "Allow
-  this server in this thread", or "Approve once". Not built yet: the mobile
-  approval card does not show the new choices. The payloads hold
+  this server in this thread", or "Approve once". The phone's approval card
+  follows the same field with the same three choices and the same sentence
+  on what allowing covers, and offers "Allow only this tool" where the host
+  keeps the answer (maintainer decision, 2026-11-13; built). The card never
+  decides what is kept: for a turn whose answer the host does not keep it
+  receives `call` and shows Allow and Deny. The payloads hold
   identifiers and digests, never a call's arguments or result.
   - A grant grows only through that answer from a person, at a local window
     or a paired device (maintainer decision, 2026-11-12). No route, command,
@@ -10934,12 +10940,61 @@ that is not yet effective for the thread is refused and never reaches the model.
     approval, for a tool or for a whole server, also covers a version the
     same verified key signed; a changed tool listing still asks. A new key, a
     missing signature, a package with no pinned key, and an update that
-    widens what the package may do all ask again. Not built yet: the host
-    checks a signature on the way in only for a package that holds a provider
-    driver, so a key reads as verified only for a retained version of such a
-    package and only when it equals the pin (`readVerifiedPublisherKey`); any
-    other package's manifest could merely claim a key, so it reads as
-    unsigned, and an MCP plugin's update still asks.
+    widens what the package may do all ask again. The host verifies a
+    signature on the way in for every package kind that can carry one
+    (maintainer decision, 2026-11-13; built): an Agent Plugin, a Codex
+    plugin, a language server, a debug adapter and a Canvas export target
+    are checked with the provider driver's own check
+    (`readPackagePublisherSignature`: the same `octant-signature.json`, the
+    same Ed25519 message, with no protocol line), against the files as they
+    arrived and the name the source gives the package (the npm package's
+    name, else the plugin's own). A signature that does not verify refuses
+    the package; an unsigned package is still accepted. No author can state
+    a key: a manifest the host builds takes it from the verified signature
+    alone, and an authored manifest that names one is refused as a
+    host-assigned field. The key is pinned at the first trust of a signed
+    version for any kind, a version the pin did not sign (another key, or
+    none) is held for its publisher and loses its trust and its switch until
+    the person trusts the new publisher or forgets the old one, and a key
+    reads as verified only for a retained version and only when it equals
+    the pin (`readVerifiedPublisherKey`). Two packages carry no signature
+    because the host assembles them itself: a standalone skill, whose files
+    it re-roots under `skills/`, and a server the person adds by hand. The
+    signing tool signs any kind when given `--name` and `--version`.
+  - An unsigned package's update keeps the package's trust and its
+    remembered tool approvals when the host took it from the source the
+    person trusted (maintainer decision, 2026-11-13; built). The source is
+    what the host records for every package: its `source` (the folder, the
+    catalog entry, or the package reference) and, for a package fetched from
+    npm, the registry and the package name; the version and the tarball's
+    integrity are not part of it (`sameExtensionSource`). Such an update of a
+    trusted package that may do no more than the reviewed version is
+    journaled as `update-kept-from-source` after its commit
+    (`unsignedUpdateKeepsApprovals`), and the versions of one unbroken run of
+    such updates share an update line: a whole-server grant, a tool's grant
+    (its listing still compared), and a marked thread's answer given to one
+    version of the run hold for the later ones (`readUpdateLine`). The
+    installed card then shows an **Updated** notice with the previous and the
+    new version, both digests and the date, and **Roll back to v…**, one
+    press that selects the previous version again and journals its trust and
+    the switches it had (`rollback-package` with `restoreTrust`, honoured
+    only for the version the notice names; the previous version's files are
+    the retained copy every update keeps, verified before use). A roll back
+    ends every remembered approval of the package, as any roll back does,
+    so the server asks once more afterwards. It asks again, as before: when
+    the package was not trusted, when the update may do more, when the
+    source differs (every install path derives a package's identity from
+    its source, so a different source is a different package and a new
+    install), and wherever a key exists or existed, where the key rule above
+    decides, including an unsigned package whose update is signed. An
+    outside provider driver is left out and keeps its per-digest admission.
+    Accepted risk: whoever controls the trusted source, or the path to it,
+    can publish an update that runs under approvals already given. What
+    bounds it: the notice, the one-press roll back, the ask a server still
+    gets once per source and per marked thread, the asks no grant spares
+    (Plan, a tool the catalog marks ask-every-call), the capability check
+    that holds a wider update, and the confined launch
+    ([threat model, AC7](security/security-architecture-threat-model.md)).
   - A Plan turn is asked for every call, and the answer covers that call
     alone. A Chat thread outside a Project remembers a grant for the
     account (maintainer request, 2026-11-12): the same events with no
@@ -10958,13 +11013,19 @@ that is not yet effective for the thread is refused and never reaches the model.
     person accepts that for this server (maintainer decision, 2026-11-12).
     A Project's or the account's grant does not spare that question, and
     every MCP result marks its thread, so a network server asks once more
-    after that thread's first tool result. The answer is not a grant: the
-    authorizer keeps it for that thread, that server, and that package
-    version and digest, so another marked thread is asked for itself and an
+    after that thread's first tool result. The answer covers no other
+    thread: it is journaled as a recorded approval that names the thread
+    (`threadId` on `extension.tool-grant-recorded@1`, on the Project's or the
+    account's aggregate), for that server and that package version and
+    digest, so another marked thread is asked for itself and a host restart
+    does not ask this one again (maintainer decision, 2026-11-13; built). It
+    binds the package as a whole-server grant does, so it holds across an
+    update the same key signed or the same source supplied, and any other
     update asks the thread again. Uninstall, rollback, and withdrawn trust
-    end it along with the stored grants, so trusting or installing the same
-    version again does not revive it. Not built yet: the answer is held in
-    memory and not journaled, so a host restart asks that thread once more.
+    end it along with the stored grants, by the same revocation and the same
+    journal-order rule, so trusting or installing the same version again
+    does not revive it. Settings does not list it among remembered
+    approvals, because it spares no prompt anywhere else.
   - Disabling the plugin or component, archiving the Project, or switching a
     mode off leaves grants stored and unused. Uninstall, withdrawn source
     trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
@@ -11170,7 +11231,11 @@ the one server) into its own folder under the data directory and registers it
 under the `user-added` source kind, so the activation ladder, per-call
 approvals, remembered grants, taint rules, and the confined launch apply
 unchanged; the package is installed, trusted and switched on as one act,
-because the person just typed it in. A local window or a paired device adds one
+because the person just typed it in: the route sends the one-step install any
+plugin uses (`install-package` with `trust` and `enable`), journaled as the
+install, the trust and each switch. **Add only** in the dialog sends
+`installOnly`, which installs the server and leaves Trust and Turn on as the
+person's own steps (maintainer decision, 2026-11-13; built). A local window or a paired device adds one
 (`/api/extensions/user-servers`; maintainer decision, 2026-11-12; not built yet:
 today a paired device cannot). A value the person
 marks secret never enters the package: the host stores it in the credential

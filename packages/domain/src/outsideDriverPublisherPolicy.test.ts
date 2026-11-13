@@ -85,9 +85,9 @@ describe("outside driver publisher pinning", () => {
     ).toBe(false);
     const entry = { source: { kind: "catalog", catalogId: "octant", entryId: "notes" } } as const;
     expect(sameExtensionSource(entry, { source: { ...entry.source } })).toBe(true);
-    expect(
-      sameExtensionSource(entry, { source: { ...entry.source, entryId: "other" } }),
-    ).toBe(false);
+    expect(sameExtensionSource(entry, { source: { ...entry.source, entryId: "other" } })).toBe(
+      false,
+    );
     const npm = { packageName: "notes", registry: "https://registry.example/" };
     const fromNpm = { source: { kind: "plugin-package", sourceRef: "npm:notes" }, npm } as const;
     expect(sameExtensionSource(fromNpm, { ...fromNpm, npm: { ...npm } })).toBe(true);

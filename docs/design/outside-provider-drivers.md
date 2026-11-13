@@ -843,7 +843,12 @@ raw key>` that the host sets and a document that states it is refused, so
 - **Signing.** The author kit's signing tool
   (`@octant/provider-sdk/outside-driver-sign`, plain `.mjs`) writes the file.
   It reads a PKCS #8 Ed25519 private key from a file or from standard input,
-  never writes or prints it, and prints only the key's fingerprint.
+  never writes or prints it, and prints only the key's fingerprint. The same
+  file and check now cover every package kind that can carry a signature
+  ([Architecture: Extensions and skills](../architecture.md#extensions-and-skills));
+  a package that is not a driver has no driver document, so it is signed with
+  `--name` and `--version` as Octant shows them, and its signature lists no
+  protocol version.
 
 _Rationale: a file beside the driver document is the one place every source
 can carry unchanged, so a local folder and an npm package are checked

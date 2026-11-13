@@ -162,9 +162,7 @@ describe("MCP tool prompt on the phone", () => {
     await act(async () => {
       (narrow as HTMLElement | undefined)?.click();
     });
-    expect(answers).toEqual([
-      { kind: "decide", approvalId, decision: "approved", remember: true },
-    ]);
+    expect(answers).toEqual([{ kind: "decide", approvalId, decision: "approved", remember: true }]);
   });
 
   it("offers a marked thread's network server for the rest of that thread", async () => {

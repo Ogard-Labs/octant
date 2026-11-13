@@ -313,14 +313,20 @@ describe("remembered MCP tool approval", () => {
     });
     expect(
       decideExtensionToolGrant(
-        facts({ threadTainted: true, markedThreadAnswer: { ...seen, revoked: false }, grant: undefined }),
+        facts({
+          threadTainted: true,
+          markedThreadAnswer: { ...seen, revoked: false },
+          grant: undefined,
+        }),
       ),
     ).toEqual({ kind: "covered" });
   });
 
   it("does not carry an answer given on a marked thread to a thread that is not marked", () => {
     expect(
-      decideExtensionToolGrant(facts({ markedThreadAnswer: { ...seen, revoked: false }, grant: undefined })),
+      decideExtensionToolGrant(
+        facts({ markedThreadAnswer: { ...seen, revoked: false }, grant: undefined }),
+      ),
     ).toEqual({ kind: "ask", reason: "not-granted", answerCovers: "server" });
   });
 
@@ -385,7 +391,11 @@ describe("remembered MCP tool approval", () => {
   it("still asks a Plan turn on a marked thread whose server the person allowed there", () => {
     expect(
       decideExtensionToolGrant(
-        facts({ threadTainted: true, markedThreadAnswer: { ...seen, revoked: false }, planTurn: true }),
+        facts({
+          threadTainted: true,
+          markedThreadAnswer: { ...seen, revoked: false },
+          planTurn: true,
+        }),
       ),
     ).toEqual({ kind: "ask", reason: "plan-turn", answerCovers: "call" });
   });
