@@ -2681,7 +2681,8 @@ describe("canvas network routes", () => {
       readonly headers: Readonly<Record<string, string>>;
     }> = [];
     let journal: Journal | undefined;
-    const route = createRevisionRoute(new CanvasProjection(), {
+    const projection = new CanvasProjection();
+    const route = createRevisionRoute(projection, {
       extraBlocks: [prototype],
       journal: (opened) => {
         journal = opened;
@@ -2693,7 +2694,7 @@ describe("canvas network routes", () => {
       ...options,
     });
     if (access === undefined || journal === undefined) throw new Error("expected the switch");
-    return { route, access, journal, connections: () => connections };
+    return { route, access, journal, projection, connections: () => connections };
   }
 
   async function answer(route: ReturnType<typeof createRevisionRoute>, request: Request) {
@@ -2901,6 +2902,19 @@ describe("canvas network routes", () => {
     // Turning it on again does not bring the old page's token back.
     await setSwitch(route, true);
     expect((await viaProxy(route, token ?? "")).status).toBe(403);
+    expect(connections()).toHaveLength(1);
+  });
+
+  it("refuses the proxy to a page whose Canvas no longer exists, live token or not", async () => {
+    const { route, projection, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    expect((await viaProxy(route, token ?? "")).status).toBe(200);
+    // The Canvas was erased; nothing told the switch.
+    projection.evict([String(canvasId)]);
+    const response = await viaProxy(route, token ?? "");
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ refused: "token-not-live" });
     expect(connections()).toHaveLength(1);
   });
 

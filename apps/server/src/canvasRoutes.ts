@@ -2559,7 +2559,13 @@ async function serveNetworkRequest(
     readPrincipalRouteContext(request) === undefined
       ? network?.access.canvasForToken(token)
       : undefined;
-  if (network === undefined || canvasId === undefined) {
+  // A token outlives its Canvas for no request: one whose Canvas has been
+  // erased is refused here even if nothing told the switch.
+  if (
+    network === undefined ||
+    canvasId === undefined ||
+    dependencies.canvasProjection.getById(canvasId) === undefined
+  ) {
     return canvasNetworkProxyResponse({ status: "refused", reason: "token-not-live" });
   }
   if (request.method !== "GET") {

@@ -168,6 +168,8 @@ async function run(executable: string): Promise<void> {
     designRunTickets: tickets,
     resolveDesignAssets: async () => [],
     canvasNetwork: { access, proxy },
+    // The proxy route refuses a token whose Canvas is gone; this one exists.
+    canvasProjection: { getById: () => ({}) },
   } as unknown as Parameters<typeof createCanvasRouteHandler>[0]);
   const host = Bun.serve({
     hostname: "127.0.0.1",

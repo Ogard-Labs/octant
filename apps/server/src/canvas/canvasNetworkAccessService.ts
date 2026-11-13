@@ -134,6 +134,20 @@ export class CanvasNetworkAccessService {
     return entry.canvasId;
   }
 
+  /**
+   * Erased Canvases leave here with their journal: what was read of their
+   * switch is dropped, so it is off again and is read afresh if the identity
+   * is ever used again, and their pages' tokens are forgotten. Without this an
+   * erased Canvas's running page kept the proxy until its token aged out.
+   */
+  forget(canvasIds: ReadonlyArray<string>): void {
+    const erased = new Set(canvasIds);
+    for (const canvasId of erased) this.#switches.delete(canvasId);
+    for (const [token, entry] of this.#tokens) {
+      if (erased.has(String(entry.canvasId))) this.#tokens.delete(token);
+    }
+  }
+
   #revoke(canvasId: CanvasId): void {
     for (const [token, entry] of this.#tokens) {
       if (String(entry.canvasId) === String(canvasId)) this.#tokens.delete(token);

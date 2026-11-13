@@ -1752,6 +1752,11 @@ A request past a bound is refused with a reason the page can read.
 call, before the change is answered, so a page already running loses the
 proxy at its next request.
 
+**Erasing the Canvas** (with its thread or its Project) does the same: the
+purge tells the switch, which drops what it had read of that Canvas and
+forgets its tokens, and the proxy route refuses a token whose Canvas no longer
+exists whatever the switch last said.
+
 **What never carries the permission.** The switch belongs to the Canvas on
 this host and travels with nothing. A shared snapshot's prototype, a published
 page's snapshot, the agent's preview, an exported or saved HTML file, and a

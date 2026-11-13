@@ -1334,6 +1334,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     artifactMirrorRoutes,
     canvasAgentToolPort,
     canvasCommentService,
+    canvasNetworkAccess,
     canvasPublicShareService,
     canvasRoutes,
     canvasService,
