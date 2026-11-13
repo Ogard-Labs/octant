@@ -639,9 +639,15 @@ describe("Code delivery outcome contracts", () => {
     ).toThrow();
   });
 
-  it("offers no command that marks a Code thread Done by hand", () => {
-    // A person may mark a Work thread Done; a Code thread reaches Done only
-    // through its objectively satisfied delivery target.
+  it("offers one command that marks a Code thread Done as the person's override, and no way to claim the delivery target is satisfied", () => {
+    expect(
+      decodeCodeCommand({
+        kind: "mark-code-thread-done",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).toEqual({ kind: "mark-code-thread-done", threadId: ids.thread, expectedVersion: 1 });
+    expect(decodeCodeThread({ ...thread, markedDoneAt: now }).markedDoneAt).toBe(now);
     expect(() =>
       decodeCodeCommand({
         kind: "confirm-work-thread-completion",

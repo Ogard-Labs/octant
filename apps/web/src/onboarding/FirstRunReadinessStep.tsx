@@ -1,10 +1,18 @@
 import { Check, CircleDashed } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type { FirstRunHandoff, FirstRunHandoffSetupTarget } from "./firstRunHandoffModel";
 
 export interface FirstRunReadinessStepProps {
   readonly handoff: FirstRunHandoff;
   readonly onSetup: (target: FirstRunHandoffSetupTarget) => void;
+  /**
+   * The one first-run question about updates. Absent in a window that updates
+   * nothing, such as a browser reaching a host it does not install.
+   */
+  readonly updateChecks?:
+    | { readonly allowed: boolean; readonly onChange: (allowed: boolean) => void }
+    | undefined;
 }
 
 /** Memory is optional; the capability card reports its current host setting. */
@@ -95,6 +103,29 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
           })}
         </ul>
       </section>
+
+      {props.updateChecks === undefined ? null : (
+        <section aria-label="Updates" className="settings-card-section settings-card-section--open">
+          <h2>Updates</h2>
+          <ul className="setgroup first-run__providers" role="list">
+            <li className="setrow first-run__provider">
+              <span className="setrow-label">May Octant check for updates?</span>
+              <p className="setrow-hint">
+                A check sends only this version, platform and architecture. An update installs only
+                when you ask, on a relaunch you start. Setup does not ask again; the answer stays in
+                Settings under Automatic update checks.
+              </p>
+              <div className="setrow-control">
+                <OctantSwitch
+                  checked={props.updateChecks.allowed}
+                  label="Check for updates automatically"
+                  onCheckedChange={props.updateChecks.onChange}
+                />
+              </div>
+            </li>
+          </ul>
+        </section>
+      )}
 
       <p className="first-run__caveat" role="note">
         {FIRST_RUN_MEMORY_NOTICE}

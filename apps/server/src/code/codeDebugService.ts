@@ -1232,9 +1232,9 @@ export class CodeDebugService {
   /**
    * Why a running session must end now, or undefined while everything that
    * let it start still holds: an active thread outside Plan whose posture
-   * keeps the session's network level, its checkout available, and an
-   * approval on record covering the configuration and the adapter in the
-   * package state the session started from.
+   * keeps the session's network level, its checkout available, the adapter in
+   * the package state the session started from, and, below Full access, an
+   * approval on record covering the configuration and that adapter.
    */
   #endReasonFor(record: SessionRecord): CodeDebugSessionEndReason | undefined {
     const stored = this.#authority.readThread(record.threadId);
@@ -1260,6 +1260,9 @@ export class CodeDebugService {
     ) {
       return "approval-ended";
     }
+    // A session at Full access started without a confirmation and needs none
+    // to go on; leaving Full access changed its network above and ended it.
+    if (thread.executionPolicy === "full-access") return undefined;
     const covered = this.#approvals
       .approvals(record.projectId)
       .some(

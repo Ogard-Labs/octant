@@ -25,8 +25,9 @@ import type { ToolExtensionId } from "@octant/contracts/tool-actions";
 export type DebugSessionHostPlatform = "macos" | "linux" | "windows" | "other";
 
 /**
- * Who caused the start. Only the person at a local window starts a session:
- * a paired device and an agent are each refused, whatever the posture.
+ * Who caused the start. The person at a local window and the thread's agent
+ * each start a session at the thread's level; a paired device is refused,
+ * whatever the posture.
  */
 export type DebugSessionStarter = "local-window" | "remote-device" | "agent";
 
@@ -124,12 +125,18 @@ export function decideDebugSessionStart(
   // session could run in.
   if (request.mode !== "code") return { status: "refused", reason: "mode-prohibited" };
   if (request.posture === "plan") return { status: "refused", reason: "plan-read-only" };
-  // Starting runs the program on the host, which stays with the person at the
-  // machine; an approval on record does not let a device or an agent start it.
-  if (request.startedBy !== "local-window") {
+  // Starting runs the program on the host. A paired device never causes
+  // that, whatever is on record; the thread's agent may, at the thread's level.
+  if (request.startedBy === "remote-device") {
     return { status: "refused", reason: "local-host-required" };
   }
-  if (!request.approvals.some((approval) => approvalCovers(approval, request))) {
+  // At Full access the same thread already runs the program from an unwrapped
+  // shell, so a confirmation there protects nothing. Below it a configuration
+  // runs only once a person confirmed it, for a person and an agent alike.
+  if (
+    request.posture !== "full-access" &&
+    !request.approvals.some((approval) => approvalCovers(approval, request))
+  ) {
     return { status: "refused", reason: "approval-required" };
   }
   if (request.configurationPaths !== "resolve") {

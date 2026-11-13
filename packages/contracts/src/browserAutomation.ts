@@ -327,11 +327,31 @@ export const BrowserEmulationReport = Schema.Struct({
 }).annotations(strict);
 export type BrowserEmulationReport = typeof BrowserEmulationReport.Type;
 
-/** How a page's own dialog was answered; see the fixed policy in the spec. */
+export const MAX_BROWSER_DIALOG_ANSWER_TEXT = 1_024;
+
+/**
+ * The agent's answer to the first dialog its action raises. It is stated with
+ * the action, before any dialog opens, so a dialog never waits on a model turn.
+ * `text` is what an accepted prompt receives.
+ */
+export const BrowserDialogAnswer = Schema.Struct({
+  action: Schema.Literal("accept", "dismiss"),
+  text: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_BROWSER_DIALOG_ANSWER_TEXT))),
+}).annotations(strict);
+export type BrowserDialogAnswer = typeof BrowserDialogAnswer.Type;
+
+/**
+ * How a page's own dialog was answered, and by whom: the agent's stated answer
+ * or the fixed rule. Optional so a Browser that predates agent answers still
+ * decodes; absent means the rule.
+ */
 export const BrowserDialogReport = Schema.Struct({
   type: Schema.Literal("alert", "confirm", "prompt", "beforeunload"),
   message: Schema.String.pipe(Schema.maxLength(512)),
   answer: Schema.Literal("accepted", "dismissed"),
+  answeredBy: Schema.optional(Schema.Literal("agent", "rule")),
+  /** The agent's prompt text was not typed because the prompt asked for a credential. */
+  textWithheld: Schema.optional(Schema.Literal("credential-protected")),
 }).annotations(strict);
 export type BrowserDialogReport = typeof BrowserDialogReport.Type;
 
@@ -596,6 +616,8 @@ export const BrowserActionRequest = Schema.Struct({
   diagnosticsWarnings: Schema.optional(Schema.Boolean),
   /** Which audit an `audit` action reads. */
   auditKind: Schema.optional(BrowserAuditKind),
+  /** The answer for the first dialog this action raises; absent, the fixed rule. */
+  dialog: Schema.optional(BrowserDialogAnswer),
   value: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))),
   point: Schema.optional(BrowserViewportPoint),
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),

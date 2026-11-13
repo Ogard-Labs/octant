@@ -142,9 +142,9 @@ describe("debug session start policy", () => {
                       ? "mode-prohibited"
                       : posture === "plan"
                         ? "plan-read-only"
-                        : startedBy !== "local-window"
+                        : startedBy === "remote-device"
                           ? "local-host-required"
-                          : !approval.covers
+                          : posture !== "full-access" && !approval.covers
                             ? "approval-required"
                             : configurationPaths !== "resolve"
                               ? "configuration-invalid"
@@ -161,6 +161,39 @@ describe("debug session start policy", () => {
       }
     }
     expect(combinations).toBe(4 * 3 * 4 * 3 * approvalStates.length * 2);
+  });
+
+  it("starts for an agent unasked at Full access, only for a confirmed configuration below it, and never in Plan", () => {
+    const agent = { startedBy: "agent" as const, approvals: [] };
+    expect(decideDebugSessionStart(request({ ...agent, posture: "full-access" })).status).toBe(
+      "launch",
+    );
+    for (const posture of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(decideDebugSessionStart(request({ ...agent, posture }))).toEqual({
+        status: "refused",
+        reason: "approval-required",
+      });
+      expect(
+        decideDebugSessionStart(request({ startedBy: "agent", posture, approvals: [covering] }))
+          .status,
+      ).toBe("launch");
+    }
+    expect(decideDebugSessionStart(request({ startedBy: "agent", posture: "plan" }))).toEqual({
+      status: "refused",
+      reason: "plan-read-only",
+    });
+  });
+
+  it("starts for a person at a local window unasked at Full access, and never for a paired device", () => {
+    expect(decideDebugSessionStart(request({ posture: "full-access", approvals: [] })).status).toBe(
+      "launch",
+    );
+    for (const posture of ["approval-gated", "full-access"] as const) {
+      expect(decideDebugSessionStart(request({ startedBy: "remote-device", posture }))).toEqual({
+        status: "refused",
+        reason: "local-host-required",
+      });
+    }
   });
 
   it("launches the adapter and program in one capsule that writes only the checkout and session state", () => {

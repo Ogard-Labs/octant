@@ -159,6 +159,7 @@ import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
+import { OwnerApprovalAnswerUnlock } from "../hub/ownerApprovalAnswerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { FailoverService } from "../hub/failoverService";
 import { HubService, type HubPairingPort } from "../hub/hubService";
@@ -877,12 +878,17 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
   });
   pairedMergeUnlockSlot.bind(pairedMergeUnlock);
+  const ownerApprovalAnswerUnlock = new OwnerApprovalAnswerUnlock({
+    state: hubStateStore,
+    record: recordHubMembership,
+  });
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     hub: hubService,
     spoke: spokeLinkService,
     pairedMergeUnlock,
+    ownerApprovalAnswerUnlock,
     failover: failoverService,
     wake: wakeService,
     spokeWake: spokeWakeService,
@@ -1955,6 +1961,7 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     approvals: ownerApprovals,
+    approvalAnswerNeedsOwnUnlock: () => ownerApprovalAnswerUnlock.required(),
     browser: ownerBrowserControlService,
     hub: hubService,
     spoke: spokeLinkService,

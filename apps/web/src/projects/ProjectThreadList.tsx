@@ -17,6 +17,7 @@ import {
   BellRing,
   ChevronRight,
   CircleAlert,
+  CircleCheck,
   LoaderCircle,
   Check,
   Clock,
@@ -504,7 +505,16 @@ export function ThreadRowActionsGutter(props: {
             value: "archive",
           } as const,
         ]),
-    ...(props.thread.completedAt !== undefined
+    ...(props.thread.markedDone === true || props.actions.onMarkThreadDone === undefined
+      ? []
+      : [
+          {
+            icon: <CircleCheck aria-hidden="true" size={14} />,
+            label: "Mark thread done",
+            value: "mark-done",
+          } as const,
+        ]),
+    ...(props.thread.completedAt !== undefined || props.thread.markedDone === true
       ? props.actions.onReopenThread === undefined
         ? []
         : [
@@ -581,6 +591,7 @@ export function ThreadRowActionsGutter(props: {
             if (value === "archive") props.actions.onArchiveThread?.(threadId);
             if (value === "complete") props.actions.onCompleteThread?.(threadId);
             if (value === "reopen") props.actions.onReopenThread?.(threadId);
+            if (value === "mark-done") props.actions.onMarkThreadDone?.(threadId);
             if (value === "wake") props.actions.onWakeThread?.(threadId);
             const preset = snoozePresets.find((candidate) => `snooze:${candidate.id}` === value);
             if (preset !== undefined) props.actions.onSnoozeThread?.(threadId, preset.until);

@@ -91,6 +91,7 @@ function thread(
     readonly id?: CodeThread["id"];
     readonly lifecycle?: CodeThread["lifecycle"];
     readonly outcomeKind?: CodeDeliveryOutcomeKind;
+    readonly markedDoneAt?: string;
   } = {},
 ): CodeThread {
   return decodeCodeThread({
@@ -113,6 +114,7 @@ function thread(
       outcomeKind: overrides.outcomeKind ?? "opened-pr",
       confirmedAt: now,
     },
+    ...(overrides.markedDoneAt === undefined ? {} : { markedDoneAt: overrides.markedDoneAt }),
     version: 1,
     createdAt: now,
     updatedAt: now,
@@ -417,6 +419,18 @@ describe("CodeThreadMetadataService staleness", () => {
     expect(metadata.githubFreshness).toBe("stale");
     expect(metadata.linkedPullRequest).toEqual({ kind: "none", freshness: "stale" });
     expect(metadata.deliverySatisfaction).toBe("waiting");
+  });
+
+  it("reports a thread a person marked Done as done though its delivery target is unmet, and as waiting again without the mark", async () => {
+    const fixture = serviceFixture({ github: () => ({ status: "unavailable" }) });
+
+    const marked = await fixture.service.project([
+      input({ thread: thread({ markedDoneAt: now }) }),
+    ]);
+    const unmarked = await fixture.service.project([input()]);
+
+    expect(marked.threads[0]?.deliverySatisfaction).toBe("done");
+    expect(unmarked.threads[0]?.deliverySatisfaction).toBe("waiting");
   });
 
   it("throws in the GitHub source are treated as an unrefreshable observation", async () => {

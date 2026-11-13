@@ -751,13 +751,32 @@ runs, not when it was recorded.
   it, or give the text for a prompt (maintainer request, 2026-11-12). A dialog
   the agent does not answer is answered by one fixed rule: an alert and
   a leave-page question are accepted; a confirm and a prompt are dismissed, so
-  the page never gets an answer the agent did not give. Not built yet: today
-  the agent cannot answer and the fixed rule answers every dialog. Each dialog is
+  the page never gets an answer the agent did not give. Each dialog is
   reported in the next answer as `dialogs`, with its type, its message (at most
-  512 characters), and the answer. The headless Browser applies the rule to
-  every dialog; the desktop Browser applies it while an agent's action runs,
-  and a dialog that opens while the person drives stays theirs. The desktop
-  Browser leaves alone a page whose developer tools someone else attached.
+  512 characters), the answer, and `answeredBy` (`agent` or `rule`). The
+  headless Browser applies this to every dialog; the desktop Browser applies it
+  while an agent's action runs, and a dialog that opens while the person drives
+  stays theirs. The desktop Browser leaves alone a page whose developer tools
+  someone else attached.
+  - **How the agent answers.** A dialog blocks its page, so none ever waits for
+    a model turn: every dialog is answered the moment it opens. The agent
+    states its answer in advance, as `dialog` on the acting call that raises
+    the dialog: `{"action": "accept"}` or `{"action": "dismiss"}`, with `text`
+    (at most 1,024 characters) for a prompt. The agent learns a dialog exists
+    from the `dialogs` report of the call the rule answered, which changed
+    nothing on the page, and repeats that call with its answer. The answer goes
+    to the first dialog that one call raises; every later dialog, and every
+    dialog of a later call, takes the rule. A read, a tab operation, and `stop`
+    take no answer. The call's arguments and its `dialogs` report are the
+    record on the tool row. A dialog that was already open for the person when
+    an agent call starts still takes the rule.
+  - **Prompt text and credentials.** Text for a prompt whose message asks for
+    a credential (password, passcode, passphrase, one-time code, PIN, card,
+    SSN, secret, token, or API key, the words that mark a credential field) is
+    not typed: the rule dismisses the prompt and the report carries
+    `textWithheld: "credential-protected"`. Declining such a prompt is allowed.
+  - **Flows.** A saved flow keeps no dialog answer, so a replay's dialogs take
+    the rule and a flow never stores prompt text.
 - **Viewport and device.** `resize` makes the agent's page look like another
   device. Each field changes only what it names, and `resize` with none of them
   restores the page's own size, touch, and color scheme together.
@@ -1364,13 +1383,15 @@ Several threads of one Project may each drive their own page at the same time.
 
 `run-script` reaches the same owned native page as the fixed actions when a
 local Code or Work thread has Full access, or a local Code thread has a scoped
-script permission (Work at Full access: maintainer request, 2026-11-12; not
-built yet, today Work is refused). It takes `source` and the
+script permission (Work at Full access: maintainer request, 2026-11-12). It
+takes `source` and the
 `expectedObservationRevision` from a fresh page read. It opens no page or
 profile and takes no additional script approval at Full access. Existing site,
 profile, model, window, Project and thread authority still apply. Work below
 Full access, headless, paired, routine, managed-subagent and terminal-grant callers are
-currently refused. Scripts cannot enter `steps` or saved/replayed flows.
+currently refused. A Work turn runs a script only while the thread still holds
+the Full access its turn began with: a level changed mid-turn, either way,
+refuses the script and withholds a result already on its way. Scripts cannot enter `steps` or saved/replayed flows.
 
 Below Full access, a local Code task may request a separate one-use script
 permission. The prompt shows the exact source and HTTPS origin, names the task

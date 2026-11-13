@@ -1105,12 +1105,16 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
-  it("lets a person mark the task Done from the add menu, with no evidence text", async () => {
+  it("marks the task Done from the add menu with no confirmation, and Reopen undoes it in one click", async () => {
     const user = userEvent.setup();
-    const execute = vi.fn(async () => ({
-      kind: "thread-completion-confirmed" as const,
-      thread: workThread({ version: 2, completionConfirmed: true }),
-    }));
+    const execute = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "confirm-work-thread-completion"
+        ? {
+            kind: "thread-completion-confirmed" as const,
+            thread: workThread({ version: 2, completionConfirmed: true }),
+          }
+        : { kind: "thread-updated" as const, thread: workThread({ version: 3 }) },
+    );
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
       execute,
@@ -1128,32 +1132,37 @@ describe("WorkThreadWorkspace", () => {
     await screen.findByLabelText("Bound provider and model");
     await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
     await user.click(await screen.findByRole("menuitem", { name: "Mark done" }));
-    const dialog = await screen.findByRole("dialog", { name: "Mark this task Done?" });
-    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(execute).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Mark done" }));
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark done" }),
-    );
-
     expect(execute).toHaveBeenCalledWith({
       kind: "confirm-work-thread-completion",
       threadId,
       expectedVersion: 1,
       deliveryTarget: "Draft brief",
     });
-    expect(await screen.findByText("Marked Done.")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByText("This task is marked Done.")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add attachment or task action" }),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+
+    expect(execute).toHaveBeenLastCalledWith({
+      kind: "reopen-work-thread",
+      threadId,
+      expectedVersion: 2,
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("This task is marked Done.")).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "Add attachment or task action" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeEnabled();
   });
 
-  it("blocks artifact and provider mutations after completion until reactivation", async () => {
+  it("blocks artifact and provider mutations on a task marked Done until it is reopened", async () => {
     const threadClient = {
       bootstrap: vi.fn(async () => ({
         threads: [workThread({ completionConfirmed: true })],
@@ -1174,7 +1183,8 @@ describe("WorkThreadWorkspace", () => {
     expect(await screen.findByLabelText("Bound provider and model")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Work prompt" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
-    expect(screen.getByText(/Reactivate this task/)).toBeInTheDocument();
+    expect(screen.getByText("This task is marked Done.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reopen" })).toBeEnabled();
   });
 
   it("keeps post-preview Canvas tools out of the live thread toolbar", async () => {

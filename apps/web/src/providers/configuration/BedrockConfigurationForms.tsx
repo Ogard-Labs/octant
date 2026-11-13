@@ -3,6 +3,8 @@ import { AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
 import { thisComputerName, useHostPlatform } from "../../platform";
 import { SettingRow } from "../../settings/primitives";
+import { getInjectedHostBridge } from "../../shell/hostBridge";
+import { DeviceCodeSignIn } from "../DeviceCodeSignIn";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
@@ -123,12 +125,14 @@ type CloudSignInState =
   | { readonly kind: "refused"; readonly message: string };
 
 /**
- * An Amazon Bedrock endpoint's sign-in. It begins only in a terminal on the
- * host, where `octant provider sign-in` shows the portal's code: a code shown
- * on a page someone else can reach is how device-code phishing works, so this
- * panel never begins one. It reads whether the host holds a sign-in, names
- * the role and account, and signs out, which asks the portal to end the
- * session and deletes the sign-in on the host.
+ * An Amazon Bedrock endpoint's sign-in. It begins only on the host: in a
+ * terminal, where `octant provider sign-in` shows the portal's code, or in a
+ * local desktop window, which reaches the host-local sign-in through the
+ * desktop app. A code shown on a page someone else can reach is how
+ * device-code phishing works, so a paired device and a remote browser are
+ * offered the command and never a code. The panel also reads whether the host
+ * holds a sign-in, names the role and account, and signs out, which asks the
+ * portal to end the session and deletes the sign-in on the host.
  */
 export function CloudEndpointSignIn(props: {
   readonly instance: BedrockInstance;
@@ -142,8 +146,9 @@ export function CloudEndpointSignIn(props: {
    */
   readonly lastCheckRefusedSignIn?: boolean;
   readonly onStateChange?: (state: ProviderOAuthSignInState) => void;
-  /** Checks the endpoint again, so its state follows a sign-out at once. */
+  /** Checks the endpoint again, so its state follows a sign-out or a sign-in at once. */
   readonly onSignedOut?: () => void;
+  readonly onOpenExternalUrl?: (url: string) => void;
   readonly onProviderOAuth?: (
     command: ProviderOAuthCommand,
   ) => Promise<ProviderOAuthCommandResult | undefined>;
@@ -216,6 +221,8 @@ export function CloudEndpointSignIn(props: {
   const ended = state.kind === "signed-in" && props.lastCheckRefusedSignIn === true;
   const disabled = props.disabled || busy;
   const command = bedrockSignInCommand(props.instance.displayName);
+  // Present only in a local desktop window.
+  const deviceSignIn = getInjectedHostBridge()?.providerDeviceSignIn;
   return (
     <div aria-busy={busy} className="provider-card__edit-actions provider-oauth-sign-in">
       {busy ? (
@@ -259,11 +266,33 @@ export function CloudEndpointSignIn(props: {
           {state.kind === "signed-out" && state.notice !== undefined ? (
             <p role="status">{state.notice}</p>
           ) : null}
-          <p>
-            Sign in from a terminal on {computer}: run <code>{command}</code> and enter the code it
-            shows at your organization's access portal. Settings never shows the code. Then check
-            again.
-          </p>
+          {deviceSignIn === undefined ? (
+            <p>
+              Sign in from a terminal on {computer}: run <code>{command}</code> and enter the code
+              it shows at your organization's access portal. Settings never shows the code. Then
+              check again.
+            </p>
+          ) : (
+            <>
+              <DeviceCodeSignIn
+                disabled={disabled}
+                instanceId={instanceId}
+                instanceName={props.instance.displayName}
+                onSignedIn={() => {
+                  setChecks((count) => count + 1);
+                  props.onSignedOut?.();
+                }}
+                request={deviceSignIn}
+                {...(props.onOpenExternalUrl === undefined
+                  ? {}
+                  : { onOpenExternalUrl: props.onOpenExternalUrl })}
+              />
+              <p>
+                Or sign in from a terminal on {computer}: run <code>{command}</code> and enter the
+                code it shows at your organization's access portal. Then check again.
+              </p>
+            </>
+          )}
         </>
       ) : null}
       {ended ? (

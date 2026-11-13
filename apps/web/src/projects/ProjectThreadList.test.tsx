@@ -1131,6 +1131,41 @@ describe("completing and snoozing from a thread row", () => {
     expect(onReopenThread).toHaveBeenCalledWith("thread-one");
   });
 
+  it("marks a thread Done from its right-click menu where the host can, and offers Reopen once it is marked", async () => {
+    const onMarkThreadDone = vi.fn();
+    const onReopenThread = vi.fn();
+    const { rerender } = render(
+      <ProjectThreadRows
+        actions={{ onMarkThreadDone, onReopenThread }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    expect(screen.queryByRole("menuitem", { name: "Reopen" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Mark done" }));
+    expect(onMarkThreadDone).toHaveBeenCalledWith("thread-one");
+
+    rerender(
+      <ProjectThreadRows
+        actions={{ onMarkThreadDone, onReopenThread }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, markedDone: true }]}
+      />,
+    );
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    expect(screen.queryByRole("menuitem", { name: "Mark done" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Reopen" }));
+    expect(onReopenThread).toHaveBeenCalledWith("thread-one");
+  });
+
   it("snoozes a thread until a wake time chosen from the Snooze submenu", async () => {
     const onSnoozeThread = vi.fn();
     render(

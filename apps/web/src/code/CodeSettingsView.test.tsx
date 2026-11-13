@@ -209,10 +209,11 @@ describe("CodeSettingsView", () => {
     expect(screen.getByRole("heading", { name: "Thread defaults" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Coordinators" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Editor" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Devices" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "External editor" })).toBeVisible();
     expect(container.querySelector(".code-settings [data-slot='card']")).toBeNull();
     expect(container.querySelectorAll(".code-settings .settings-card-section--open")).toHaveLength(
-      5,
+      6,
     );
     // The five-way mode choice is a select like the Agents posture.
     expect(screen.getByRole("combobox", { name: "Default mode" })).toBeVisible();
@@ -278,6 +279,34 @@ describe("CodeSettingsView", () => {
       />,
     );
     expect(screen.getByRole("switch", { name: "Language services" })).not.toBeChecked();
+  });
+
+  it("shows Android snapshot boot off until a person turns it on, and keeps that choice", async () => {
+    const update = vi.fn(async () => true);
+    const { rerender } = render(
+      <CodeSettingsView onUpdate={update} settings={settings as never} />,
+    );
+
+    const snapshotBoot = screen.getByRole("switch", { name: "Android snapshot boot" });
+    expect(snapshotBoot).not.toBeChecked();
+    // The reason cold boot is the default stays beside the switch.
+    expect(screen.getByText(/can leave the emulator offline for minutes/)).toBeVisible();
+
+    await userEvent.setup().click(snapshotBoot);
+    expect(update).toHaveBeenLastCalledWith({
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      defaultDiffLayout: "unified",
+      androidEmulatorSnapshotBoot: true,
+    });
+
+    rerender(
+      <CodeSettingsView
+        onUpdate={update}
+        settings={{ ...settings, version: 2, androidEmulatorSnapshotBoot: true } as never}
+      />,
+    );
+    expect(screen.getByRole("switch", { name: "Android snapshot boot" })).toBeChecked();
   });
 
   it("shows Continue after restart on until a person turns it off, and sends only that change", async () => {

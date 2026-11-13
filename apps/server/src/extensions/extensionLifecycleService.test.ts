@@ -382,6 +382,17 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     expect(journaled).not.toContain("plugin-desired-changed");
   });
 
+  it("refuses the one install-trust-enable flow for a package that holds no provider driver, before installing it", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const before = context.journal.headSequence();
+    await expect(service.admitOutsideDriver(inspection())).rejects.toThrow(
+      "Only an outside provider driver",
+    );
+    expect(context.journal.headSequence()).toBe(before);
+    expect(service.snapshot().packages).toEqual([]);
+  });
+
   it("installs untrusted when trust is not asked for", async () => {
     const context = await setup();
     const snapshot = await context.makeService().install(inspection());

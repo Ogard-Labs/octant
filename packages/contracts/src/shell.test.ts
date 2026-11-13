@@ -93,6 +93,7 @@ const settings = {
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
+  quitShortcutNeedsSecondPress: true,
   marketplaceFetchesEnabled: true,
   completedThreadArchiveAfterDays: 7,
   autoCompactOctantWindowPercent: 85,
@@ -309,6 +310,18 @@ describe("shell bootstrap contracts", () => {
     expect(
       decodeShellSettings({ ...settings, automaticUpdateChecks: true }).automaticUpdateChecks,
     ).toBe(true);
+  });
+
+  it("decodes a store that never recorded the quit-shortcut choice to needing a second press", () => {
+    const { quitShortcutNeedsSecondPress: _omitted, ...withoutQuitChoice } = {
+      ...settings,
+      quitShortcutNeedsSecondPress: false,
+    };
+    expect(decodeShellSettings(withoutQuitChoice).quitShortcutNeedsSecondPress).toBe(true);
+    expect(
+      decodeShellSettings({ ...settings, quitShortcutNeedsSecondPress: false })
+        .quitShortcutNeedsSecondPress,
+    ).toBe(false);
   });
 
   it("keeps a start-screen card order and choice, and refuses a card named twice", () => {

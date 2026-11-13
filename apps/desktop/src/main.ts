@@ -363,6 +363,10 @@ import {
   type HubAdministrationControlRuntime,
 } from "./hubAdministrationControls";
 import { AgentAccessControlFailure, installAgentAccessIpcHandlers } from "./agentAccessControls";
+import {
+  installProviderDeviceSignInIpcHandlers,
+  ProviderDeviceSignInFailure,
+} from "./providerDeviceSignInControls";
 import { openMovedThreadThere } from "./threadMoveOpenThere";
 import {
   installPairedComputerIpcHandlers,
@@ -3502,6 +3506,21 @@ function installIpcHandlers(): void {
       };
     },
   });
+  installProviderDeviceSignInIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    runtimeFor: (event) => {
+      const context = ownedWindowContext(event as IpcMainInvokeEvent);
+      if (activeServerUrl === undefined) {
+        throw new ProviderDeviceSignInFailure("Octant sign-in with a code is unavailable.");
+      }
+      return {
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability: context.capability,
+        fetch: globalThis.fetch,
+      };
+    },
+  });
   installHostIdentityIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
@@ -3962,6 +3981,11 @@ function installIpcHandlers(): void {
         snapshot: hostLifecycle.snapshot,
       }),
     );
+  });
+  ipcMain.handle(IPC_CHANNELS.quitShortcutSecondPress, (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    // Only an explicit false lifts the guard; anything else keeps it.
+    quitShortcutNeedsSecondPress = value !== false;
   });
   ipcMain.handle(IPC_CHANNELS.appUpdateAutomatic, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
@@ -5091,8 +5115,15 @@ async function recoverWindowAfterRendererExit(
   }
 }
 
+/**
+ * Whether the quit shortcut needs a second press. The renderer reports the
+ * person's setting once settings load; until then the guard stays on.
+ */
+let quitShortcutNeedsSecondPress = true;
+
 const quitShortcutGuard = createQuitShortcutGuard({
   now: () => performance.now(),
+  needsSecondPress: () => quitShortcutNeedsSecondPress,
   showNotice: () => {
     // An opened server page has no preload bridge, so a hint sent there is never
     // shown; only a shell window that registered as a trusted renderer can show it.
