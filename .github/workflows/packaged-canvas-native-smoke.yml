@@ -254,7 +254,9 @@ jobs:
             out/native-package-provenance.json
           key: ${{ steps.package-source.outputs.key }}
       - name: Observe the real packaged primary window
-        timeout-minutes: 9
+        # The smoke bounds its own run at 720 s and the app watchdog at 750 s
+        # (scripts/smoke-packaged-canvas-native.ts); this leaves room for cleanup.
+        timeout-minutes: 14
         env:
           OCTANT_QA_CONTINUATION: ${{ github.event_name == 'workflow_dispatch' && inputs.full_route && '0' || '1' }}
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-canvas-native
