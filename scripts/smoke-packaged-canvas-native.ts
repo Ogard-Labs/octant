@@ -566,8 +566,12 @@ const timer = setInterval(() => {
       const title =
         rows.some((row) => /^["']?title["']\s*:\s*["']Weekly signups brief["'][,.]?$/.test(row)) ||
         (titleKey >= 0 && /^["']Weekly signups brief["'][,.]?$/.test(rows[titleKey + 1] ?? ""));
-      return rows.some((row) => /"kind"\s*:\s*"canvas-public-share-document"/.test(row)) && title;
+      return hasPublicShareKind(snapshot) && title;
     };
+    const hasPublicShareKind = (snapshot: typeof Snapshot.Type) =>
+      snapshot.texts.some((row) =>
+        /"kind"\s*:\s*"canvas-public-share-document"/.test(row.text.trim()),
+      );
     const observeUntil = async (
       stage: string,
       accept: (snapshot: typeof Snapshot.Type) => boolean,
@@ -1086,7 +1090,7 @@ const timer = setInterval(() => {
       (snapshot) =>
         snapshot.texts.filter((row) => row.text.trim() === "Export to Public link").length === 1 &&
         hasOwnedCardAccount(snapshot) &&
-        hasOwnedStaticPayload(snapshot) &&
+        hasPublicShareKind(snapshot) &&
         hasText(snapshot, "Updates"),
     );
     let renderedUpdateTarget: string | undefined;
@@ -1116,7 +1120,8 @@ const timer = setInterval(() => {
               ? "unverified: native static text unavailable"
               : "verified through already-exposed native static text",
           singleOwnedPublicationInventoried: true,
-          exactOwnedHostAndPayload: true,
+          exactOwnedHostAndPayloadKind: true,
+          payloadTitle: "proven from the stored publication after approval",
           mandatoryPostUpdateSameIDAndURL: true,
         },
         null,
@@ -1138,6 +1143,32 @@ const timer = setInterval(() => {
       !updated.record.passwordProtected
     )
       throw Error("The native password update did not retain the same link.");
+    // The update card's payload title is not read through OCR: on 2026-11-13
+    // (run 43464961284) the card was fully drawn, its kind, account and
+    // "Updates" rows read cleanly, but Vision read the small payload's title
+    // line merged with the wrapped summary line below it ("titron. ueskly
+    // sianups brief\", mpak cunnina meet eeee") on every capture for 60 s, so
+    // the stage never matched. The card's layout is static, so a garbled line
+    // stays garbled; whether it garbles depends on where the extra update rows
+    // place the payload. The approved payload is instead proven exactly here,
+    // from the single publication the owned service stored.
+    const storedUpdate: unknown = JSON.parse(
+      await readFile(
+        join(root, "share", "shares", `${published.record.publicShareId}.json`),
+        "utf8",
+      ),
+    );
+    if (
+      Schema.decodeUnknownSync(
+        Schema.Struct({
+          document: Schema.Struct({
+            kind: Schema.Literal("canvas-public-share-document"),
+            title: Schema.String,
+          }),
+        }),
+      )(storedUpdate).document.title !== "Weekly signups brief"
+    )
+      throw Error("The approved update did not carry the owned Canvas.");
     const locked = await fetch(publishedUrl);
     if (locked.status !== 401 || !(await locked.text()).includes("Password-protected Canvas"))
       throw Error("The updated public link did not require its password.");
