@@ -207,6 +207,7 @@ export * from "./managedRepositoryPolicy";
 export * from "./canvasShareSnapshotPolicy";
 export * from "./canvasShareAccessLogPolicy";
 export * from "./canvasBoardPolicy";
+export * from "./canvasChoiceAnswerPolicy";
 export * from "./canvasTagsPolicy";
 export * from "./workspacePresetPolicy";
 export * from "./appUpdatePolicy";

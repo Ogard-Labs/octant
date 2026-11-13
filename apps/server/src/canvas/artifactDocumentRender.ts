@@ -1184,24 +1184,44 @@ function piecesFor(
           .filter((part) => part.length > 0)
           .join(" — "),
       );
-    case "choice":
+    case "choice": {
       // A file has no thread to answer to, so the question reads as its options.
+      // Sections, when the form has them, head the questions they place.
+      const questionPieces = (question: (typeof block.questions)[number]): ReadonlyArray<Piece> => [
+        { kind: "heading", level: 3, text: reading(question.prompt) },
+        {
+          kind: "list",
+          items: question.options.map((option) =>
+            option.description === undefined
+              ? reading(option.label)
+              : `${reading(option.label)} — ${reading(option.description)}`,
+          ),
+        },
+      ];
+      const groups = block.sections ?? [
+        {
+          id: "all",
+          title: undefined,
+          intro: undefined,
+          questionIds: block.questions.map((q) => q.id),
+        },
+      ];
       return [
         ...paragraph(reading(block.prompt)),
-        ...block.questions.flatMap(
-          (question): ReadonlyArray<Piece> => [
-            { kind: "heading", level: 3, text: reading(question.prompt) },
-            {
-              kind: "list",
-              items: question.options.map((option) =>
-                option.description === undefined
-                  ? reading(option.label)
-                  : `${reading(option.label)} — ${reading(option.description)}`,
-              ),
-            },
+        ...groups.flatMap(
+          (group): ReadonlyArray<Piece> => [
+            ...(group.title === undefined
+              ? []
+              : [{ kind: "heading", level: 2, text: reading(group.title) } as const]),
+            ...(group.intro === undefined ? [] : paragraph(reading(group.intro))),
+            ...group.questionIds.flatMap((questionId) => {
+              const question = block.questions.find((candidate) => candidate.id === questionId);
+              return question === undefined ? [] : questionPieces(question);
+            }),
           ],
         ),
       ];
+    }
     default: {
       const unhandled: never = block;
       return unhandled;

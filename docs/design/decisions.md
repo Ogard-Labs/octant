@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Design system](#design-system)                                                       | 11        | 10      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 14      | 2            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
-| [Canvas](#canvas)                                                                     | 11        | 7       | 4            | 0                   |
+| [Canvas](#canvas)                                                                     | 12        | 8       | 4            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 3       | 3            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 5       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **250**   | **162** | **83**       | **5**               |
+| **All areas**                                                                         | **251**   | **163** | **83**       | **5**               |
 
 ## Principles and hard lines
 
@@ -2641,13 +2641,28 @@ Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.
 
 A `choice` block asks the person a question inside a Canvas; their answer goes to the Canvas's own thread as their own ordinary message.
 
-- The block takes the inline questionnaire's question shape and bounds (one to four questions), carries no answer, and is decoded strictly on the host.
+- The block takes the inline questionnaire's per-question shape and bounds (a prompt, single or multiple selection, one to eight options), carries no answer, and is decoded strictly on the host. It has no limit on how many questions it holds: a Canvas is a page, and a long decision list is its case. Only the inline `ask-user` questionnaire keeps its four-question ceiling, and the two have separate schemas.
+- Agents are told to use a choice block whenever they need answers to more than four questions, and `ask-user` says so too.
 - Choosing edits a local draft; only an explicit Send enqueues one message on the owning thread through its message queue from the person's window, so it runs or waits like a composer send under the thread's existing authority. It is never a host-initiated turn or an approval.
 - The message is host-framed text naming the Canvas, the block, and the chosen labels or written answer.
 - Where no thread can take the answer (no message queue in the window, a paired client, no host scope for the Canvas, an older version, the thread's own inline view, a shared snapshot or public share page, an export) the block reads only with a reason. A share never offers sending.
 - HTML design frames gain no submission ability.
 
 Status: Built. Since: 2026-11-11. Detail: [Canvas: Choice block](canvas.md#choice-block).
+
+### Decision forms in a Canvas
+
+A `choice` block is also how an agent asks for many decisions at once: no question limit, sections, a note on each question, answers that save on the Canvas as they are made, a progress count, an action that accepts the agent's recommendations, and a `read` the agent uses to get the answers.
+
+- The Canvas choice block has no limit on how many questions it holds, and its answer has no count or size ceiling; only the inline `ask-user` questionnaire keeps four questions. The two use separate schemas.
+- Agents are told to use a choice block for more than four decisions (the block's `describe` text, the Canvas tool description, and `ask-user`).
+- Sections, per-question notes, and `allowNote` arrive with Canvas schema version 29, and the form changes no document shape for a block that carries none of them.
+- Answers are journaled facts of a `canvas-choice-answers` aggregate per Canvas, not document versions. The host stamps the `local-user` author; no agent operation writes an answer; a paired client reads and cannot write. A question an agent revised keeps its answer only when its fingerprint is unchanged.
+- Each pick saves as made; Send answers is the explicit act that wakes the agent, through the thread's message queue under its existing authority, and is never an approval.
+- _Accept every recommendation not yet answered_ answers only the questions with an unambiguous recommendation, never replaces an answer, and marks what it made.
+- The owning thread's `read` returns the answers (a question reworded after it was answered reads `stale`); shares, public links, exports, and artifact sync do not carry answers or notes.
+
+Status: Built. Since: 2026-11-12. Live checks owed: rendered QA of a 24-question form and a real-provider smoke of an agent building and reading one. Detail: [Canvas: Decision forms](canvas.md#decision-forms).
 
 ### Canvas shares and exports
 

@@ -17,6 +17,9 @@ import {
   CanvasExportPrepareResult,
   type CanvasHtmlFileRequest,
   CanvasHtmlFileResult,
+  CanvasChoiceAnswersOutcome,
+  CanvasChoiceAnswersReviseResult,
+  type CanvasChoiceAnswersReviseCommand,
   type CanvasCommentCommand,
   CanvasCommentCommandResult,
   CanvasCommentsOutcome,
@@ -126,6 +129,14 @@ export interface CanvasClient {
   /** Comments on a Canvas and the commands that change them; host-journaled. */
   comments?(canvasId: CanvasId): Promise<CanvasCommentsOutcome>;
   comment?(command: CanvasCommentCommand): Promise<CanvasCommentCommandResult>;
+  /**
+   * A person's saved answers to a Canvas decision form, and the write that
+   * changes them. Optional: a host without the routes leaves forms unanswerable.
+   */
+  choiceAnswers?(canvasId: CanvasId): Promise<CanvasChoiceAnswersOutcome>;
+  reviseChoiceAnswers?(
+    command: CanvasChoiceAnswersReviseCommand,
+  ): Promise<CanvasChoiceAnswersReviseResult>;
   refresh?(request: CanvasRefreshRequest, signal?: AbortSignal): Promise<CanvasRefreshResult>;
   cancelRefresh?(request: CanvasRefreshCancelRequest): Promise<CanvasRefreshResult>;
   executeAction?(request: CanvasActionRequest, signal?: AbortSignal): Promise<CanvasActionResult>;
@@ -350,6 +361,28 @@ export function createCanvasClient(
           body: JSON.stringify(body),
         },
         decodeHostAnswer(CanvasCommentCommandResult),
+      );
+    },
+    choiceAnswers(canvasId) {
+      const url = new URL("/api/canvas/choice-answers", options.baseUrl);
+      url.searchParams.set("canvasId", String(canvasId));
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(CanvasChoiceAnswersOutcome),
+      );
+    },
+    reviseChoiceAnswers(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/choice-answers-revise", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasChoiceAnswersReviseResult),
       );
     },
     reviseDiagramLayout(body) {
