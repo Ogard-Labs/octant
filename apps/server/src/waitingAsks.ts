@@ -111,16 +111,34 @@ function toolApprovalWords(approval: ExtensionToolApproval): AskWords {
   };
 }
 
+/**
+ * A Browser ask is never answered from a row. Its card in the thread words
+ * what the answer authorizes (which account a profile page acts as, that
+ * uploaded files leave the computer, what a script may reach, who is asking),
+ * and a row that restated that in words of its own could say less than the
+ * card. The row names the site, the profile and the asker, and opens the
+ * thread.
+ */
 function browserApprovalWords(approval: BrowserToolApproval): AskWords {
   const base = {
     askId: String(approval.approvalId),
     threadId: String(approval.threadId),
     requestedAt: approval.requestedAt,
   };
+  // A page in a profile acts as the person's account there, so the row always
+  // says which profile. Only an account profile carries a label of its own.
+  const profile =
+    approval.profile === undefined
+      ? undefined
+      : approval.profile.kind === "personal"
+        ? "Personal"
+        : approval.profile.kind === "project"
+          ? "Project"
+          : (approval.profileLabel ?? "Account");
   const where =
-    approval.profileLabel === undefined
+    profile === undefined
       ? approval.origin
-      : `${approval.origin} in the ${approval.profileLabel} profile`;
+      : `${approval.origin} in the ${profile} profile, signed in as you`;
   const extensions =
     approval.extensionCount === undefined
       ? undefined
@@ -141,7 +159,7 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
       kind: "browser-approval",
       text: `Upload ${String(files.length)} ${files.length === 1 ? "file" : "files"} to ${where}?`,
       detail: lines(...files.map((file) => `${file.name} (${bytes(file.sizeBytes)})`), extensions),
-      wholeAsk: true,
+      wholeAsk: false,
     };
   }
   if (approval.download !== undefined) {
@@ -155,7 +173,7 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
         source === undefined ? undefined : `Came through ${source.origins.join(", then ")}`,
         extensions,
       ),
-      wholeAsk: true,
+      wholeAsk: false,
     };
   }
   if (approval.script !== undefined) {
@@ -164,15 +182,30 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
       kind: "browser-approval",
       text: `Run a script on ${where}?`,
       detail: lines(approval.script.source, extensions),
-      wholeAsk: true,
+      wholeAsk: false,
+    };
+  }
+  // In Code the thread's own agent asks for a site through its turn's
+  // approval, so a site ask held here came from a program in one of the
+  // thread's terminals. Who is asking is part of what the person approves.
+  if (approval.mode === "code") {
+    return {
+      ...base,
+      kind: "browser-approval",
+      text: `A program in a terminal, not this thread's agent, asks to open ${where} in the Browser`,
+      ...(extensions === undefined ? {} : { detail: extensions }),
+      wholeAsk: false,
     };
   }
   return {
     ...base,
     kind: "browser-approval",
-    text: `Let the agent use ${where} in the Browser?`,
+    text:
+      profile === undefined
+        ? `Let the agent use ${where} in the Browser?`
+        : `Let the agent use ${where}?`,
     ...(extensions === undefined ? {} : { detail: extensions }),
-    wholeAsk: true,
+    wholeAsk: false,
   };
 }
 

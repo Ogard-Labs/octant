@@ -111,13 +111,13 @@ describe("waiting asks", () => {
         kind: "browser-approval",
         text: "Let the agent use https://example.com in the Browser?",
         detail: undefined,
-        inPlace: true,
+        inPlace: undefined,
       },
       {
         kind: "browser-approval",
         text: "Upload 1 file to https://example.com?",
         detail: "notes.txt (5 bytes)",
-        inPlace: true,
+        inPlace: undefined,
       },
       {
         kind: "browser-sign-in",
@@ -127,6 +127,55 @@ describe("waiting asks", () => {
       },
     ]);
     expect(asks[0]).not.toHaveProperty("projectId");
+  });
+
+  it("names the profile a signed-in page lives in and a terminal as the asker, and answers neither from the list", () => {
+    const codeThread = "00000000-0000-4000-8000-000000000a05";
+    const read = (threadId: string) =>
+      threadId === codeThread
+        ? ({ mode: "code", title: "Fix the parser", projectId } as const)
+        : readThread(threadId);
+    const browser = (overrides: Record<string, unknown>) =>
+      decodeBrowserToolApproval({
+        approvalId: "00000000-0000-4000-8000-000000000c11",
+        threadId: workThread,
+        mode: "work",
+        origin: "https://example.com",
+        requestedAt: "2026-11-13T08:01:00.000Z",
+        ...overrides,
+      });
+    const asks = waitingAsksFrom(
+      {
+        ...none,
+        browserApprovals: [
+          browser({ profile: { kind: "personal" } }),
+          browser({
+            approvalId: "00000000-0000-4000-8000-000000000c12",
+            profile: { kind: "project", projectId },
+          }),
+          browser({
+            approvalId: "00000000-0000-4000-8000-000000000c13",
+            threadId: codeThread,
+            mode: "code",
+          }),
+        ],
+      },
+      read,
+    );
+    expect(asks.map(({ text, inPlace }) => ({ text, inPlace }))).toEqual([
+      {
+        text: "Let the agent use https://example.com in the Personal profile, signed in as you?",
+        inPlace: undefined,
+      },
+      {
+        text: "Let the agent use https://example.com in the Project profile, signed in as you?",
+        inPlace: undefined,
+      },
+      {
+        text: "A program in a terminal, not this thread's agent, asks to open https://example.com in the Browser",
+        inPlace: undefined,
+      },
+    ]);
   });
 
   it("lists a memory proposal with the words it would keep, and a routine proposal by name", () => {

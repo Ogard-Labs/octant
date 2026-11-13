@@ -29,7 +29,6 @@ const ANSWER_LABELS: Readonly<
   Partial<Record<WaitingAsk["kind"], { readonly approve: string; readonly decline: string }>>
 > = {
   "tool-approval": { approve: "Approve", decline: "Deny" },
-  "browser-approval": { approve: "Approve", decline: "Deny" },
   "memory-proposal": { approve: "Confirm", decline: "Decline" },
 };
 

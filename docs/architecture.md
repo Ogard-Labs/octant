@@ -12845,15 +12845,22 @@ approval-gated` command that undoes it. The terminal shows no one-time
   card shows (a tool's input, the words a memory entry would hold, an
   upload's files). The host sets `inPlace` only when that line and detail
   are everything the ask's card shows and the card's answer is a plain
-  approve or decline: a tool approval, a Browser site, upload, download or
-  script approval, and a memory proposal, each only while nothing was cut
-  and, for a tool approval and a memory proposal, while the thread has read
-  no outside content (the card names those sources). A list offers the two
-  plain answers for such an entry and sends them through the ask's own
-  route (`/api/extensions/tool-approvals`, `/api/browser/approvals`,
+  approve or decline: a tool approval and a memory proposal, each only
+  while nothing was cut and while the thread has read no outside content
+  (the card names those sources). A list offers the two plain answers for
+  such an entry and sends them through the ask's own route
+  (`/api/extensions/tool-approvals`,
   `/api/projects/memory/proposals/decide`), once and never remembered;
-  every other entry (a routine proposal, an image offer, a sign-in card, an
-  ask too long for a row) opens its thread, whose card decides it. Words
+  every other entry (a Browser approval, a routine proposal, an image
+  offer, a sign-in card, an ask too long for a row) opens its thread, whose
+  card decides it. A Browser approval is never `inPlace`: its card words
+  what the answer authorizes (the account a profile page acts as, that
+  uploaded files leave the computer, what a script may reach), and the row
+  does not restate that. Its row names the site, the profile when the page
+  is in one (Personal, Project, or an account profile's own name) with the
+  words "signed in as you", and the asker: a site ask held for a Code
+  thread came from a program in one of its terminals, not from the thread's
+  agent, and the row says so. Words
   are never cut to fit an answer: a row either holds the whole ask or sends
   the person to the card. `asks` is its own optional field rather than more
   members of `requests`, so a client built before it still decodes the list

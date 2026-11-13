@@ -9,10 +9,8 @@ import {
   decodeWorkTurnRequestId,
   type OctantMode,
 } from "@octant/contracts";
-import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
-import { decodeToolApprovalId } from "@octant/contracts";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import { decodeProjectMemoryProposalId } from "@octant/contracts/projects";
 import { providerAnswerOutcome } from "../code/codeControllerState";
@@ -197,7 +195,6 @@ export type WaitingAskAnswer = "approve" | "decline";
  */
 export interface WaitingAskAnswerClients {
   readonly extensionClient?: Pick<ExtensionClient, "decideToolApproval"> | undefined;
-  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "decideApproval"> | undefined;
   readonly projectClient?: Pick<ProjectClient, "decideMemoryProposal"> | undefined;
 }
 
@@ -210,8 +207,6 @@ export function canAnswerWaitingAsk(
   switch (ask.kind) {
     case "tool-approval":
       return clients.extensionClient !== undefined;
-    case "browser-approval":
-      return clients.browserAutomationClient?.decideApproval !== undefined;
     case "memory-proposal":
       return clients.projectClient !== undefined;
     default:
@@ -236,13 +231,6 @@ export async function answerWaitingAsk(
       case "tool-approval": {
         const accepted = await clients.extensionClient?.decideToolApproval({
           approvalId: ask.askId,
-          decision,
-        });
-        return accepted === true ? { status: "answered" } : NOT_DELIVERED;
-      }
-      case "browser-approval": {
-        const accepted = await clients.browserAutomationClient?.decideApproval?.({
-          approvalId: decodeToolApprovalId(ask.askId),
           decision,
         });
         return accepted === true ? { status: "answered" } : NOT_DELIVERED;

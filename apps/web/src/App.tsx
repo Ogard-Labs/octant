@@ -5469,10 +5469,9 @@ function LaunchedShell(
   const needsYouAskClients = useMemo(
     () => ({
       extensionClient,
-      browserAutomationClient,
       projectClient: needsYouProjectClient,
     }),
-    [extensionClient, browserAutomationClient, needsYouProjectClient],
+    [extensionClient, needsYouProjectClient],
   );
   const homeStartHub = hubAdministrationOf(props.hostBridge);
   const homeStart = useHomeStart({

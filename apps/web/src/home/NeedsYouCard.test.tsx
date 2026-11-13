@@ -785,25 +785,25 @@ describe("the Needs you card", () => {
 
   it("says so on the row when an ask's answer is refused, and offers no answer without its client", async () => {
     const ask = {
-      kind: "browser-approval",
+      kind: "tool-approval",
       askId: "0a000000-0000-4000-8000-000000000001",
       mode: "code",
       projectId: "project-code",
       threadId: "code-thread",
       threadTitle: "Fix the flaky build",
       requestedAt: at(2),
-      text: "Let the agent use https://example.com in the Browser?",
+      text: "Run search_issues from Linear?",
       inPlace: true,
     } as unknown as WaitingAsk;
     const client: PendingRequestClient = {
       list: vi.fn(async () => ({ requests: [], truncated: false, asks: [ask] })),
     };
-    const decideApproval = vi.fn(async () => false);
+    const decideToolApproval = vi.fn(async () => false);
     const { unmount } = renderCard(
       createNeedsYouCard(
         source({
           pendingRequestClient: client,
-          askClients: { browserAutomationClient: { decideApproval } },
+          askClients: { extensionClient: { decideToolApproval } },
         }),
       ),
     );
@@ -811,7 +811,7 @@ describe("the Needs you card", () => {
       name: "Fix the flaky build needs your approval",
     });
     await userEvent.click(within(row).getByRole("button", { name: "Deny" }));
-    expect(decideApproval).toHaveBeenCalledWith({
+    expect(decideToolApproval).toHaveBeenCalledWith({
       approvalId: "0a000000-0000-4000-8000-000000000001",
       decision: "denied",
     });
@@ -826,6 +826,38 @@ describe("the Needs you card", () => {
     });
     expect(within(plain).queryByRole("button", { name: "Approve" })).toBeNull();
     expect(within(plain).getByRole("button", { name: "Open thread" })).toBeInTheDocument();
+  });
+
+  it("never answers a Browser ask from the row, even one a host marks answerable, and keeps who is asking", async () => {
+    const ask = {
+      kind: "browser-approval",
+      askId: "0a000000-0000-4000-8000-000000000002",
+      mode: "code",
+      projectId: "project-code",
+      threadId: "code-thread",
+      threadTitle: "Fix the flaky build",
+      requestedAt: at(2),
+      text: "A program in a terminal, not this thread's agent, asks to open https://example.com in the Browser",
+      inPlace: true,
+    } as unknown as WaitingAsk;
+    const client: PendingRequestClient = {
+      list: vi.fn(async () => ({ requests: [], truncated: false, asks: [ask] })),
+    };
+    renderCard(
+      createNeedsYouCard(
+        source({
+          pendingRequestClient: client,
+          askClients: { extensionClient: { decideToolApproval: vi.fn() } },
+        }),
+      ),
+    );
+    const row = await screen.findByRole("group", {
+      name: "Fix the flaky build needs your approval",
+    });
+    expect(within(row).getByText(/A program in a terminal, not this thread's agent/)).toBeVisible();
+    expect(within(row).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Deny" })).toBeNull();
+    expect(within(row).getByRole("button", { name: "Open thread" })).toBeInTheDocument();
   });
 
   it("is on by default and drops out of the grid when empty", () => {
