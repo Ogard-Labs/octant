@@ -479,10 +479,10 @@ export function useChatController(options: ChatControllerOptions) {
 
   const flushReplyBeat = useCallback(
     (request: number) => {
-      if (!replyBeatPending.current) return;
+      if (request !== threadGeneration.current || !replyBeatPending.current) return;
       cancelReplyBeat();
       const view = activeViewRef.current;
-      if (!mounted.current || request !== threadGeneration.current || view === undefined) {
+      if (!mounted.current || view === undefined) {
         return;
       }
       recordSequence(view.thread.id, view.lastSequence);
