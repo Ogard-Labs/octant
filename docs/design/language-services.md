@@ -67,7 +67,9 @@ behind its own approval and confinement rules.
   definition in an unopened file.
 - **External editor.** `apps/server/src/codeExternalEditorRoutes.ts` hands one
   file to the person's editor after `isCodeExternalEditorTargetCurrent` checks
-  the thread, checkout and file reference. A paired device cannot do this
+  the thread, checkout and file reference. A paired device may ask for it too,
+  and the editor opens on the host computer (maintainer decision, 2026-11-12).
+  Not built yet: today a paired device cannot do this
   (`code.open-external-editor` is local-host only in
   `packages/domain/src/remoteAccessPolicy.ts`).
 - **Confined children.** Terminals (`apps/server/src/code/terminalProcessPort.ts`),
@@ -251,10 +253,14 @@ restrictive one was taken.
   `plan-read-only`, `local-host-required`, `approval-required`. The last three
   apply only to `repo-tooling`. A `static` server may start when a paired
   device's authorized read asks for one, because starting it grants nothing
-  beyond that read. Starting `repo-tooling` from a paired device is refused even
-  with an approval on record, and there is no remote action for it, so the
-  remote gate rejects the request too. Reason: the approval is the person's
-  act at the machine, and D4 keeps running repository tooling there.
+  beyond that read. A paired device starts and approves `repo-tooling` as a
+  local window does (D4), and at Full access a `repo-tooling` start needs no
+  approval, read from the level the turn runs at and never only the thread's
+  stored level (maintainer decision, 2026-11-12; [the Full access
+  rule](../architecture.md#security-and-authority)). Not built yet: today the
+  approval is asked at every level, and starting `repo-tooling` from a paired
+  device is refused (`local-host-required`) even with an approval on record;
+  there is no remote action for it, so the remote gate rejects the request too.
 - **Read contracts** (`@octant/contracts/code-language`). A read names a thread,
   checkout, and file reference, never a path. Diagnostics and definitions use
   zero-based lines and UTF-16 character offsets. A result is diagnostics (at
@@ -625,10 +631,15 @@ classes.
   the path and picks the server from its own table, as `open` does, because a
   server waiting for its approval never opened the document. A server that
   is `static` answers `not-required`.
-- **Who approves.** Only the person at a local window. A paired device is
-  refused before anything is read (`local-host-required`); the route has no
-  remote action, so the remote gate denies it, and the route answers 403 to a
-  device that reached it anyway. Every check a read makes runs next, then the
+- **Who approves.** Only the person, at a local window or a paired device
+  (maintainer decision, 2026-11-12); no agent does. At Full access nothing is
+  asked: the server starts under the level the turn runs at, never only the
+  thread's stored level, as a command there runs unasked ([the Full access
+  rule](../architecture.md#security-and-authority)). Not built yet: today the
+  approval is asked at every level, and a paired device is refused before
+  anything is read (`local-host-required`); the route has no remote action, so
+  the remote gate denies it, and the route answers 403 to a device that reached
+  it anyway. Every check a read makes runs next, then the
   launch decision with the approval granted, so Plan refuses
   (`plan-read-only`) and nothing is recorded for a server the thread could
   not start.
@@ -648,8 +659,9 @@ classes.
   event, which runs the stop check) and the next start asks again. Reason:
   that is the one revocation a crash between two appends cannot lose, and it
   is how a person takes an approval back: switch the server off in Settings.
-- **Decided on every request.** A paired device and a Plan thread are refused
-  a `repo-tooling` server even while it runs for another thread, because the
+- **Decided on every request.** A Plan thread is refused a `repo-tooling` server
+  even while it runs for another thread, and today a paired device is too (not
+  built yet: a paired device is decided as a local window is), because the
   document a caller opens is what the server then runs the repository's
   tooling on. A running server stops when no approval covers its current
   package state, and a restart after a crash, which no request decided, starts
@@ -747,8 +759,9 @@ classes.
   window whose Project binding holds the thread (a window-held service, judged
   on the binding and liveness at call time like a terminal) or a paired device
   with Code reach under a new remote-approvable `code.language.read` action.
-  Starting a `repo-tooling` server or a debug session is local-host only, like
-  `terminal.write`.
+  Starting a `repo-tooling` server or a debug session is open to a paired device
+  too, like `terminal.write` (maintainer decision, 2026-11-12; not built yet:
+  today both are local-host only).
 - **The repository never picks what runs.** The executable, arguments,
   environment, and class come only from the enabled component. Repository files
   are data the server parses inside confinement: compiler configuration and its
@@ -885,13 +898,18 @@ design left a choice open.
   it stands when the call runs (the standing authority other Project-scoped
   app-managed tools use). A refused read starts nothing.
 - **Starts.** The launch decision is asked on every read as a request the
-  person at the machine did not make, as a paired device's is, so an agent can
-  start a `static` server and never starts a `repo-tooling` one
-  (`local-host-required`, in every posture). Its code tool may read through a
+  person did not make, so below Full access an agent can start a `static` server
+  and never starts a `repo-tooling` one (`local-host-required`). At Full access,
+  read from the level the turn runs at and never only the thread's stored level,
+  an agent's read starts a `repo-tooling` server with no approval, since its
+  shell could run the same tooling unasked there ([the Full access
+  rule](../architecture.md#security-and-authority); maintainer decision,
+  2026-11-12; not built yet: today it never starts one in any posture). Its code
+  tool may read through a
   `repo-tooling` server that is already approved and running, which starts
   nothing (maintainer request, 2026-11-12). Not built yet: today that read is
-  refused as well. Reason: starting repository tooling stays the person's act
-  at the machine (D4), and an agent's call is not that act. An agent's read
+  refused as well. Reason, below Full access: starting repository tooling stays
+  the person's act (D4), and an agent's call is not that act. An agent's read
   never resets the crash budget either; reopening the file in the editor stays
   the person's retry.
 - **Answers.** Results keep the editor's bounds, and a definition or
@@ -1014,7 +1032,8 @@ childSessions?, childAnnouncement? }`, present exactly when the kind is
   debug port, and whether it also debugs the program's child processes and
   how it announces one, and says that the adapter runs programs from the checkout, can
   write the checkout, reaches only the hosts the thread's network rules allow,
-  and never runs in Plan, for a paired device, or for an agent.
+  and never runs in Plan (not built yet: today the copy also says never for a
+  paired device or for an agent).
 - **Verified at every start.** As slice 5: the stored version verifies against
   its digest before the binary path is resolved, and a changed binary does not
   run.
@@ -1086,8 +1105,9 @@ format nobody has).
 
 ### Approval and starting
 
-- **Confirming is the shell-command approval.** The person at a local window
-  confirms a configuration on a card that shows the adapter, the program, its
+- **Confirming is the shell-command approval.** The person, at a local window or
+  (not built yet) a paired device, confirms a configuration on a card that shows
+  the adapter, the program, its
   arguments, its working folder, each environment entry, and, for an imported
   one, the ignored fields. Confirming appends
   `code.debug-configuration-approved@1` on the Project's
@@ -1096,7 +1116,8 @@ format nobody has).
   and one adapter package state (extension, component, package digest,
   lifecycle version), as slice 6's approval does. One that cannot be appended
   is not in force.
-- **Starting.** A person starts a session at a local window, and an agent may
+- **Starting.** A person starts a session at a local window or a paired device,
+  and an agent may
   start one under [Debugger authority](#debugger-authority). Below Full
   access a start succeeds only while an approval covers the configuration's
   current digest and the adapter's current package state. Any edit of the
@@ -1264,10 +1285,11 @@ frame ends the session. Each request has a 10-second deadline and reports
 
 ### Debugger authority
 
-- **The person at a local window.** A person starts, controls (breakpoints,
-  stepping, `evaluate`), and stops a session from a local window whose
-  Project binding holds the thread, checked on every request as a terminal's
-  input is. Another local window holding the thread may control the session.
+- **The person.** A person starts, controls (breakpoints, stepping, `evaluate`),
+  and stops a session from a local window whose Project binding holds the
+  thread, or from a paired device that reaches it (DB7), checked on every
+  request as a terminal's input is. Another local window or paired device
+  holding the thread may control the session.
 - **Agents.** An agent in the thread may start, control, and read that
   thread's session: unasked at Full access, approval-gated per configuration
   below it, and refused in Plan
@@ -1277,20 +1299,24 @@ frame ends the session. Each request has a 10-second deadline and reports
   nothing a session shows enters a prompt.
 - **Code only, macOS and Linux.** As the companion.
 
-**Decision DB7: paired devices neither
-start, control, nor observe.** The debug routes have no remote action, so the
-remote gate denies them and the routes answer 403 to a device that reached them
-anyway. Recommended because stepping and `evaluate` run the program on the
-host, which D4 keeps with the person at the machine, and a stopped program's
-variables often hold secrets, which a paired device should not read through a
-new surface in the first slices. Rejected: remote observe now (a later,
-remote-approvable `code.debug.observe` read of the stopped state, without
-`evaluate`, can be proposed once the local panel ships); remote control.
+**Decision DB7: paired devices start, control, and observe as a local window
+does** (maintainer decision, 2026-11-12, which replaces the first choice, that
+they do none of the three). An authenticated paired device is the person, and
+stepping and `evaluate` run on the host under the thread's confinement whoever
+asks. Variable values stay unjournaled and unexported and reach the device only
+over its authenticated session. Not built yet: today the debug routes have no
+remote action, so the remote gate denies them and the routes answer 403 to a
+device that reached them anyway. Rejected: remote observe only, without
+`evaluate`; keeping debugging with the person at the machine, the earlier
+choice, made because a stopped program's variables often hold secrets.
 
-**Decision DB8: agent debug tools follow the thread's level.** An agent may
-start, control, and read a debug session: unasked at Full access,
-approval-gated per configuration below it, and refused in Plan (maintainer
-request, 2026-11-12). Recommended because at Full access the same agent
+**Decision DB8: agent debug tools follow the thread's level.** An agent
+starts, controls, reads, and stops a debug session through a plugin-shaped
+agent tool, built now: unasked at Full access, approval-gated per
+configuration below it, and refused in Plan (maintainer decision, 2026-11-12).
+A paired device drives a session as a local window does (DB7); the delivery
+notes and evidence below that still refuse one (`local-host-required`, `403`)
+record what is built today. Recommended because at Full access the same agent
 already runs the program from an unwrapped shell and reads what it prints, so
 refusing the debugger there protects nothing. Rejected: no agent debug tools,
 the earlier rule; a read-only agent tool for the stopped state only. Not built
@@ -1373,8 +1399,9 @@ the addendum left a choice open.
   `GH_ENTERPRISE_TOKEN`, and `GITHUB_ENTERPRISE_TOKEN`).
 - **Start decision.** `decideDebugSessionStart` refuses a thread that is not
   a Code thread as `mode-prohibited`, after `unsupported-platform` and before
-  `plan-read-only`, because the kind is Code only. A start from anything but a
-  local window, a paired device or an agent, is `local-host-required`. The
+  `plan-read-only`, because the kind is Code only. As built today, a start from
+  anything but a local window, a paired device or an agent, is
+  `local-host-required` (DB7 and DB8 admit both and are not built yet). The
   policy decides coverage itself: an approval covers a start only for the
   same configuration digest, extension, component, package digest, and
   lifecycle version, in its checkout or its Project. The launch shape names
@@ -1420,9 +1447,10 @@ the addendum left a choice open.
 - **Refusal order.** The read-side checks, then `no-debug-adapter` (a
   configuration naming an adapter that is not effective, reading the same as
   none so a refusal never says which disabled adapters exist), then the
-  start decision, then `confinement-unavailable`. Listing configurations,
-  confirming, and every request on a session refuse anything but a local
-  window first (`local-host-required`), before reading anything; a start
+  start decision, then `confinement-unavailable`. As built today (DB7 is not
+  built yet), listing configurations, confirming, and every request on a session
+  refuse anything but a local window first (`local-host-required`), before
+  reading anything; a start
   follows the decision's order. The routes answer `403` to a paired device
   before reading its body, and the remote gate classifies every path under
   `/api/code/debug/` as having no action, whatever its method.
@@ -1523,7 +1551,8 @@ the addendum left a choice open.
   thread and checkout the dock follows and calls the four local-window
   routes through `@octant/client-runtime/code-debug-client`; it decides no
   refusal itself. An answer of `403`, which the remote gate and the routes
-  give a paired device, shows that debugging stays on this computer and
+  give a paired device today (DB7 is not built yet), shows that debugging stays
+  on this computer and
   offers nothing to start or confirm.
 - **Breakpoints.** A line breakpoint is set from the editor's glyph gutter
   or with F9 on the cursor's line, so the pointer is never the only way.
@@ -1695,8 +1724,9 @@ The rule:
   children first; a child's end never ends the parent. The parent's
   `code.debug-session-ended@1` record adds how many children were attached,
   as a count only.
-- **Authority and data.** As the parent: a local window only, no paired
-  device, no agent, and nothing from a child journaled or exported. The panel
+- **Authority and data.** As the parent: today a local window only, no paired
+  device and no agent (DB7 and DB8 are not built yet), and nothing from a child
+  journaled or exported. The panel
   lists children under the session; the window's breakpoints apply to the
   parent and every child.
 
@@ -1937,7 +1967,10 @@ alternatives considered and the reason for the choice follow it.
    installed TypeScript runs a repository-supplied binary and so is
    `repo-tooling`; it is used only as the person's explicit choice, a
    per-Project setting "Use the Project's own toolchain" (maintainer request,
-   2026-11-12). Not built yet: today only the bundled binary is used. Rejected: a third-party language-server dependency, which
+   2026-11-12), which a local window or a paired device switches (maintainer
+   decision, 2026-11-12). Not built yet: today only the bundled binary is used.
+   Rejected: a third-party language-server
+   dependency, which
    adds a dependency for nothing the bundled binary lacks.
 
 2. **D2. Bundled server on by default.** The bundled server is on for Code,
@@ -1950,8 +1983,11 @@ alternatives considered and the reason for the choice follow it.
    `repo-tooling` servers are refused there. Rejected: refusing every server in
    Plan.
 4. **D4. Paired devices.** Paired devices may read (`code.language.read`) for
-   threads they can already reach; starting `repo-tooling` servers and debug
-   sessions stays local-host only. Rejected: local windows only.
+   threads they can already reach, and start and approve `repo-tooling` servers
+   and debug sessions as a local window does (maintainer decision, 2026-11-12,
+   which replaces the first choice that kept those local-host only; not built
+   yet: today they are refused `local-host-required`). Rejected: local windows
+   only.
 5. **D5. Agent access** (slice 7). Agents get read-only app-managed tools in
    the closed catalog, available in Plan and provider-neutral, after the editor
    slices ship. Rejected: never, with agents running checks through their own
