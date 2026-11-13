@@ -1461,7 +1461,9 @@ starts a thread. The listing carries no filesystem path; an artifact's kind
 is read from its blocks rather than declared; a preview is drawn once by the
 host as a self-contained SVG and is absent when it could not be drawn;
 opening an entry opens the same document by `canvasId`; and the listing is
-bounded and says when it is cut.
+bounded and says when it is cut. The dock's **Artifacts** tool reads the
+same listing asked for the thread's Project, and opens an entry in the dock
+beside the thread rather than in a tab.
 
 The page opens grouped by Project, because that is how a person comes back to
 their work; **All** stays the flat reading, **Shared** the live shares, and

@@ -31,6 +31,7 @@ export interface RightUtilityDockProps {
   readonly desktop?: ReactNode;
   readonly debug?: ReactNode;
   readonly vitals?: ReactNode;
+  readonly artifacts?: ReactNode;
   readonly isNarrow: boolean;
   readonly onClose: () => void;
   readonly onCloseTab: (tabId: string) => void;
@@ -112,6 +113,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.desktop === undefined ? {} : { desktop: props.desktop })}
       {...(props.debug === undefined ? {} : { debug: props.debug })}
       {...(props.vitals === undefined ? {} : { vitals: props.vitals })}
+      {...(props.artifacts === undefined ? {} : { artifacts: props.artifacts })}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       onSelectSurface={props.onSelectSurface}

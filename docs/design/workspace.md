@@ -2301,7 +2301,8 @@ exactly Review, Terminal, Browser, Files and Side chat. The dock can host
 Review, Pull requests (open rows for a Code thread's Project), Files, Document
 (only once a turn has written one), Browser, Terminal, Canvas, Plan (only for a
 real plan artifact), Delivery (only for a configured target), Agents (when
-children exist or explicitly invoked), Simulator, and Side chat. A Markdown or
+children exist or explicitly invoked), Artifacts (a Work or Code thread in a
+Project on this host), Simulator, and Side chat. A Markdown or
 text file a Code turn creates or rewrites, and a Canvas a Work or Code turn
 authors, open in the dock beside the transcript once, the first time they appear: the
 offer never moves focus from the composer, a rewrite never reopens a tab, and a

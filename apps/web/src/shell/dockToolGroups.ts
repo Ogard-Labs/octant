@@ -15,7 +15,17 @@ const TOOL_GROUPS: ReadonlyArray<{
   {
     label: "Thread tools",
     columns: "two",
-    ids: ["environment", "side-chat", "plan", "delivery", "agents", "document", "canvas", "review"],
+    ids: [
+      "environment",
+      "side-chat",
+      "plan",
+      "delivery",
+      "agents",
+      "document",
+      "canvas",
+      "artifacts",
+      "review",
+    ],
   },
   {
     label: "Workspace",
