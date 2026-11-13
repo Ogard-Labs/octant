@@ -9,8 +9,6 @@ import {
   type WindowId,
 } from "@octant/contracts";
 
-const DEFAULT_TTL_MS = 10 * 60_000;
-
 export interface ImageGenerationChoice {
   readonly profileInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
@@ -25,7 +23,6 @@ export type ImageGenerationOfferOutcome =
   | { readonly status: "agent-draws" }
   | { readonly status: "save" }
   | { readonly status: "cancelled" }
-  | { readonly status: "expired" }
   | { readonly status: "too-many-waiting" };
 
 type ThreadScope = Pick<ImageGenerationOffer, "threadKind" | "scopeId">;
@@ -40,9 +37,13 @@ export type ImageGenerationOfferRequest = ImageGenerationOffer extends infer Off
 export interface ImageGenerationOfferServiceOptions {
   readonly uuid: () => string;
   readonly now: () => number;
-  readonly ttlMs?: number;
   /** The waiting set changed. Wired at composition to the change feed. */
   readonly onChanged?: () => void;
+  /**
+   * An ask began to wait. Wired at composition to the paired phones'
+   * notifications; it names the thread and the ask and nothing of its content.
+   */
+  readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
 }
 
 interface PendingOffer {
@@ -56,7 +57,8 @@ interface PendingOffer {
  * generated image it asked to make, held until they
  * answer, as routine proposals are: visible only to the window whose turn
  * asked, settled by exactly one answer, and given up when the turn stops, the
- * window goes away, or ten minutes pass.
+ * thread is archived, or the window goes away. An offer never lapses by
+ * itself, so the cap on how many wait is the only bound on what is held.
  *
  * "Don't ask again" from a thread outside a Project is remembered here, in
  * memory, together with the model the person chose; a host restart forgets
@@ -66,12 +68,10 @@ interface PendingOffer {
 export class ImageGenerationOfferService {
   readonly #pending = new Map<string, PendingOffer>();
   readonly #remembered = new Map<string, ImageGenerationChoice>();
-  readonly #ttlMs: number;
   readonly #options: ImageGenerationOfferServiceOptions;
 
   constructor(options: ImageGenerationOfferServiceOptions) {
     this.#options = options;
-    this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, DEFAULT_TTL_MS));
   }
 
   offer(input: {
@@ -92,19 +92,17 @@ export class ImageGenerationOfferService {
     const signal = input.signal;
     return new Promise((resolve) => {
       const onAbort = () => settle({ status: "cancelled" });
-      const timer = setTimeout(() => settle({ status: "expired" }), this.#ttlMs);
-      timer.unref?.();
       let settled = false;
       const settle = (outcome: ImageGenerationOfferOutcome) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
         if (this.#pending.delete(key)) this.#options.onChanged?.();
         resolve(outcome);
       };
       this.#pending.set(key, { view, windowId: input.windowId, settle });
       this.#options.onChanged?.();
+      this.#options.onAsked?.({ threadId: String(view.scopeId), askId: key });
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
@@ -118,6 +116,13 @@ export class ImageGenerationOfferService {
           pending.view.threadKind === scope.threadKind &&
           String(pending.view.scopeId) === String(scope.scopeId),
       )
+      .map((pending) => pending.view);
+  }
+
+  /** Every offer this window may answer, across its threads, oldest first. */
+  listForWindow(windowId: WindowId): ReadonlyArray<ImageGenerationOffer> {
+    return [...this.#pending.values()]
+      .filter((pending) => String(pending.windowId) === String(windowId))
       .map((pending) => pending.view);
   }
 
@@ -166,6 +171,13 @@ export class ImageGenerationOfferService {
   revokeWindow(windowId: WindowId): void {
     for (const pending of this.#pending.values()) {
       if (String(pending.windowId) === String(windowId)) pending.settle({ status: "cancelled" });
+    }
+  }
+
+  /** Gives up what a thread still waits on, when it is archived or deleted. */
+  withdrawThread(threadId: string): void {
+    for (const pending of this.#pending.values()) {
+      if (String(pending.view.scopeId) === threadId) pending.settle({ status: "cancelled" });
     }
   }
 

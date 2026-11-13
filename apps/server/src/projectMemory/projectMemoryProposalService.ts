@@ -13,11 +13,11 @@ import {
 } from "@octant/contracts";
 import type { AgentMemoryCommand } from "../projectService";
 
-const DEFAULT_TTL_MS = 10 * 60_000;
-
 /**
  * Host-wide cap on waiting memory proposals, as the tool-approval services cap
- * theirs. One past it is refused at once and never shown.
+ * theirs. A proposal waits until it is answered or withdrawn, never for a
+ * fixed time, so the cap is the only bound on how many are held. One past it
+ * is refused at once and never shown.
  */
 export const MAX_PENDING_PROJECT_MEMORY_PROPOSALS = 32;
 
@@ -25,7 +25,6 @@ export const MAX_PENDING_PROJECT_MEMORY_PROPOSALS = 32;
 export type ProjectMemoryProposalOutcome =
   | { readonly status: "confirmed"; readonly result: MemoryCommandResult }
   | { readonly status: "declined" }
-  | { readonly status: "expired" }
   | { readonly status: "cancelled" }
   /** The person confirmed, and the memory command refused it; nothing changed. */
   | { readonly status: "not-applied"; readonly message: string }
@@ -34,7 +33,6 @@ export type ProjectMemoryProposalOutcome =
 export interface ProjectMemoryProposalServiceOptions {
   readonly uuid: () => string;
   readonly now: () => number;
-  readonly ttlMs?: number;
   /**
    * Applies a confirmed change through Project memory's own command path,
    * which keeps its archived-Project, mode, and version checks. A rejection
@@ -47,6 +45,11 @@ export interface ProjectMemoryProposalServiceOptions {
   ) => Promise<MemoryCommandResult>;
   /** The waiting set changed. Wired at composition to the change feed. */
   readonly onChanged?: () => void;
+  /**
+   * An ask began to wait. Wired at composition to the paired phones'
+   * notifications; it names the thread and the ask and nothing of its content.
+   */
+  readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
 }
 
 interface PendingProposal {
@@ -62,17 +65,17 @@ interface PendingProposal {
  * every write the thread's level and the Project's setting do not accept
  * waits here, and no answer is ever remembered for a later one. A proposal is visible only
  * to the window whose turn raised it, until that window confirms or declines
- * it, the turn stops, the window goes away, or ten minutes pass. Only a
- * confirm writes, as that person, through the ordinary memory command path.
+ * it, the turn stops, the thread is archived, or the window goes away. It
+ * never lapses by itself: a lapse would tell the agent the person refused a
+ * change they never saw. Only a confirm writes, as that person, through the
+ * ordinary memory command path.
  */
 export class ProjectMemoryProposalService {
   readonly #pending = new Map<string, PendingProposal>();
-  readonly #ttlMs: number;
   readonly #options: ProjectMemoryProposalServiceOptions;
 
   constructor(options: ProjectMemoryProposalServiceOptions) {
     this.#options = options;
-    this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, DEFAULT_TTL_MS));
   }
 
   propose(input: {
@@ -93,19 +96,17 @@ export class ProjectMemoryProposalService {
     const key = String(view.proposalId);
     return new Promise((resolve) => {
       const onAbort = () => settle({ status: "cancelled" });
-      const timer = setTimeout(() => settle({ status: "expired" }), this.#ttlMs);
-      timer.unref?.();
       let settled = false;
       const settle = (outcome: ProjectMemoryProposalOutcome) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
         if (this.#pending.delete(key)) this.#options.onChanged?.();
         resolve(outcome);
       };
       this.#pending.set(key, { view, windowId: input.windowId, settle });
       this.#options.onChanged?.();
+      this.#options.onAsked?.({ threadId: view.threadId, askId: key });
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
@@ -166,6 +167,13 @@ export class ProjectMemoryProposalService {
   revokeWindow(windowId: WindowId): void {
     for (const pending of this.#pending.values()) {
       if (String(pending.windowId) === String(windowId)) pending.settle({ status: "cancelled" });
+    }
+  }
+
+  /** Gives up what a thread still waits on, when it is archived or deleted. */
+  withdrawThread(threadId: string): void {
+    for (const pending of this.#pending.values()) {
+      if (String(pending.view.threadId) === threadId) pending.settle({ status: "cancelled" });
     }
   }
 

@@ -65,6 +65,8 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
     | "imageGenerationOffers"
     | "isPairedDeviceScope"
     | "machineChangeFeed"
+    | "onThreadArchived"
+    | "onWaitingAsk"
     | "onWindowRevoked"
     | "windowAuthorityStore"
   > &
@@ -88,6 +90,8 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     isPairedDeviceScope,
     machineChangeFeed,
     offeredDesktopProviders,
+    onThreadArchived,
+    onWaitingAsk,
     onWindowRevoked,
     options,
     persistence,
@@ -407,8 +411,10 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       uuid: randomUUID,
       now: Date.now,
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+      onAsked: onWaitingAsk,
     });
     onWindowRevoked((windowId) => projectMemoryAccess.proposals.revokeWindow(windowId));
+    onThreadArchived((threadId) => projectMemoryAccess.proposals.withdrawThread(threadId));
     // "Don't ask again" on the image card. The host journals it on the
     // thread's Project as itself: the answer route has already checked that
     // the answering window may open the thread that asked.

@@ -250,9 +250,9 @@ the page, the workspace, or the person is reached.
   tool's bounded model bindings; they are not persistent page history.
 - Session deadlines follow [Page lifetime](#page-lifetime): the agent tool
   opens a page with a ten-minute idle interval, which admitted agent activity
-  renews. A handoff
-  or take-over keeps it for eleven minutes from the hold, take-over input
-  renews that retention, and release keeps it for two minutes, always using
+  renews. A sign-in hand-off keeps it for as long as its card waits. A
+  take-over keeps it for eleven minutes from the hold, take-over input
+  renews that retention, and release of either keeps it for two minutes, always using
   the later of that retention and the ordinary idle deadline.
 
 ## Actions
@@ -872,8 +872,28 @@ made active.
   a hung call, queued call, late answer or late input cannot extend or revive
   it. A timer that was already queued checks the latest deadline before expiry,
   and cannot restart a stopped context's scheduling.
-- **Handoffs have their existing phase bounds.** A sign-in card waits at most
-  ten minutes; its page is retained for eleven minutes from the hold. Take-over
+- **A waiting question keeps its page.** An upload, download, script or
+  site question about an open page has no expiry (maintainer decision,
+  2026-11-13), and its page has no idle deadline while the question waits, so
+  a later answer still finds the page. When the question ends, by an answer, the call or turn stopping,
+  the thread's archive, the window's revocation or the host stopping, the
+  page returns to a finite deadline (two minutes of grace, or its ordinary
+  idle deadline if later). The staged upload copies and the held download
+  file are deleted on any outcome but approval. Every question about an open
+  page, its site approval, a script, a sign-in, an upload or a download, also
+  ends when its page closes or is stopped, in Work, Code and a terminal's
+  Browser grant alike, so the turn goes on and a question that waits holds
+  nothing after it is withdrawn. The first navigate's site approval has no
+  page yet, so only its call or turn ends it.
+- **Handoffs have their own phase bounds.** A sign-in card has no expiry
+  ([Asking the person to sign in](#asking-the-person-to-sign-in)), and its page
+  has no deadline and holds no expiry timer while the card waits: the card is
+  the wait, and a page that closed under it would leave the person a card
+  with nothing to sign in to. The card ends, and the page returns to a finite
+  deadline, when the person answers, the turn stops, the thread is archived,
+  the window's authority is revoked, the page is closed or stopped, or the
+  host stops. A take-over's page is
+  retained for eleven minutes from the hold, and take-over
   input renews that eleven-minute hold, with the existing one-minute scheduling
   throttle. Answering the card or handing back replaces the hold with two
   minutes of grace, taking the later of that grace and the ordinary idle
@@ -907,8 +927,10 @@ needed.
   thread; both are the same host approval, never remembered, and it waits until
   the person answers it, as every ask does under
   [Unattended work](../architecture.md#security-and-authority) (maintainer
-  request, 2026-11-12). Not built yet: today it expires after 10 minutes with
-  `browser-sign-in-expired`.
+  request, 2026-11-12; built). It is cancelled, never answered for the person,
+  when the turn stops, the thread is archived, the window's authority is
+  revoked, or the host stops. Not built yet: the pending-requests read (Needs
+  you) does not list it; it waits as the card in its thread.
 - The page is marked as waiting for the person. Every window showing the thread
   brings its Browser forward once, through the thread's activity preview, and
   the agent tool holds every other agent Browser call on the page until the
@@ -917,7 +939,7 @@ needed.
   already waiting on an approval when the hand-off began does not act either.
   One hand-off at a time per page.
 - The page outlives the hand-off under the finite phase windows described in
-  [Page lifetime](#page-lifetime): eleven minutes from the hold, then the later
+  [Page lifetime](#page-lifetime): for as long as the card waits, then the later
   of its ordinary idle deadline and two minutes after the card is answered so
   the agent can read it.
 - The person signs in manually or explicitly approves a selected 1Password
@@ -929,9 +951,9 @@ needed.
 - On **Continue** the agent gets a fresh snapshot of whatever page the person
   left. If that site is unapproved, the refusal says plainly that the person
   left the page on an unapproved site after Continue; it reads nothing there
-  and does not widen the original origin approval. **Cancel**, the card expiring, or the turn stopping ends the hand-off with
-  `browser-sign-in-denied`, `-expired`, or `-cancelled`, and the page is the
-  agent's again.
+  and does not widen the original origin approval. **Cancel** ends the hand-off with `browser-sign-in-denied`, and the turn
+  stopping, the thread's archive, or the window's revocation with
+  `browser-sign-in-cancelled`, and the page is the agent's again.
 - Refused before anyone is asked on a routine's or a subagent's turn and for a
   CLI in a thread terminal (`sign-in-needs-a-person`): nobody there can sign
   in. A paired device's turn is offered the sign-in, and the person signs in

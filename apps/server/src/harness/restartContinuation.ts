@@ -3,6 +3,7 @@ import {
   decodeThreadMessageQueueCommand,
   decodeThreadMessageQueueScope,
   type OctantMode,
+  type ThreadMessageQueueSnapshot,
   type WindowId,
 } from "@octant/contracts";
 import type { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
@@ -53,7 +54,11 @@ export async function releaseQueueBehindRestartContinuation(
   );
 }
 
-/** Use the existing durable queue receipt, not a window-local flag, to deduplicate recovery. */
+/**
+ * Use the existing durable queue receipt, not a window-local flag, to deduplicate recovery.
+ * Messages already queued need no review: the continuation goes ahead of them
+ * and they stay queued. A queue the person paused stays paused.
+ */
 export async function queueRestartContinuation(
   queue: Pick<ThreadMessageQueueService, "read" | "execute">,
   input: {
@@ -66,13 +71,9 @@ export async function queueRestartContinuation(
   const messageId = restartContinuationId(input.recoveryIdentity);
   const scope = decodeThreadMessageQueueScope({ mode: input.mode, threadId: input.threadId });
   const refused = (message: string) => ({ kind: "refused" as const, message });
+  const changed = () => refused("The message queue changed. Review it and try again.");
   const read = await queue.read(input.windowId, scope);
   if (read.status !== "ready") return refused(`Cannot continue this thread: ${read.reason}.`);
-  if (read.snapshot.items.some((item) => String(item.messageId) !== messageId)) {
-    return refused(
-      "This thread already has queued messages. Review and remove them from the queue before resuming this interrupted turn.",
-    );
-  }
   const enqueued = await queue.execute(
     input.windowId,
     decodeThreadMessageQueueCommand({
@@ -86,22 +87,39 @@ export async function queueRestartContinuation(
   );
   if (enqueued.status === "refused")
     return refused(`Could not queue the continuation: ${enqueued.reason}.`);
-  if (enqueued.status === "conflict")
-    return refused("The message queue changed. Review it and try again.");
-  // A concurrent enqueue must not let this button unpause unrelated work.
-  if (enqueued.snapshot.items.some((item) => String(item.messageId) !== messageId)) {
+  if (enqueued.status === "conflict") return changed();
+  let snapshot = enqueued.snapshot;
+  const ahead = continuationFirst(snapshot, messageId);
+  if (ahead !== undefined) {
+    const reordered = await queue.execute(
+      input.windowId,
+      decodeThreadMessageQueueCommand({
+        kind: "reorder",
+        scope,
+        requestId: randomUUID(),
+        expectedVersion: snapshot.version,
+        messageIds: ahead,
+      }),
+    );
+    if (reordered.status === "refused")
+      return refused(`The continuation is queued but could not go first: ${reordered.reason}.`);
+    if (reordered.status === "conflict") return changed();
+    snapshot = reordered.snapshot;
+  }
+  // The person's own pause covers what they queued; this button does not undo it.
+  if (snapshot.paused && snapshot.items.some((item) => String(item.messageId) !== messageId)) {
     return refused(
-      "The continuation is queued. Review and remove the other queued messages before resuming this interrupted turn.",
+      "The continuation is queued ahead of your paused messages. Resume the queue to continue.",
     );
   }
-  if (enqueued.snapshot.paused || enqueued.snapshot.holdReason !== undefined) {
+  if (snapshot.paused || snapshot.holdReason !== undefined) {
     const resumed = await queue.execute(
       input.windowId,
       decodeThreadMessageQueueCommand({
         kind: "resume",
         scope,
         requestId: randomUUID(),
-        expectedVersion: enqueued.snapshot.version,
+        expectedVersion: snapshot.version,
       }),
     );
     if (resumed.status === "refused")
@@ -110,4 +128,25 @@ export async function queueRestartContinuation(
       return refused("The continuation is queued. Review the queue before resuming.");
   }
   return { kind: "queued" };
+}
+
+/**
+ * The order that puts a still-queued continuation ahead of every other queued
+ * message, or nothing when it is already there. A message being delivered or
+ * already accepted keeps its place: the queue refuses to move it.
+ */
+function continuationFirst(
+  snapshot: ThreadMessageQueueSnapshot,
+  messageId: string,
+): ReadonlyArray<string> | undefined {
+  const continuation = snapshot.items.find((item) => String(item.messageId) === messageId);
+  if (continuation?.status !== "queued") return undefined;
+  const settled = snapshot.items.filter((item) => item.status !== "queued");
+  const waiting = snapshot.items.filter(
+    (item) => item.status === "queued" && item !== continuation,
+  );
+  const order = [...settled, continuation, ...waiting].map((item) => String(item.messageId));
+  return order.every((id, index) => id === String(snapshot.items[index]?.messageId))
+    ? undefined
+    : order;
 }

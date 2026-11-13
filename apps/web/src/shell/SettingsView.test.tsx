@@ -744,6 +744,42 @@ describe("SettingsView", () => {
     await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
   });
 
+  it("cuts a silent turn off after 30 minutes by default and saves the limit or Off the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings({
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "providers" },
+    });
+    const limit = await screen.findByRole("combobox", { name: "Stalled-turn limit" });
+    expect(limit).toHaveTextContent("30 minutes");
+    await user.click(limit);
+    await user.click(await screen.findByRole("option", { name: "2 hours" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ stalledTurnLimitMinutes: 120 });
+    await user.click(limit);
+    await user.click(await screen.findByRole("option", { name: "Off" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ stalledTurnLimitMinutes: null });
+  });
+
+  it("pauses the stalled-turn limit for a tool call for 2 hours at most by default and saves the pause or Off the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings({
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "providers" },
+    });
+    const pause = await screen.findByRole("combobox", { name: "Tool-call pause limit" });
+    expect(pause).toHaveTextContent("2 hours");
+    await user.click(pause);
+    await user.click(await screen.findByRole("option", { name: "8 hours" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerToolCallPauseLimitMinutes: 480 });
+    await user.click(pause);
+    await user.click(await screen.findByRole("option", { name: "Off" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({
+      providerToolCallPauseLimitMinutes: null,
+    });
+  });
+
   it("lists the provider catalog on Providers & Models and opens a driver's setup without another scan", async () => {
     const providerController = providerControllerFixture();
     const discoveryController = discoveryControllerFixture();

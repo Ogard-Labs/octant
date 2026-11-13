@@ -58,6 +58,7 @@ import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import { BrowserCaptureService } from "../browser/browserCaptureService";
 import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
+import { threadsArchivedBy } from "../threadArchiveWatch";
 import type { ServerStart } from "./serverShape";
 import type { FoundationsWiring } from "./foundations";
 import { ToolEffectLedger } from "../toolEffects/toolEffectLedger";
@@ -154,8 +155,16 @@ export function wireAuthority(deps: AuthorityDependencies) {
     isHostScope: isRoutineHostScope,
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
   });
+  // The asks these services hold are not journaled when raised, so each says
+  // so here and the paired phones' notifications, wired later, listen.
+  const waitingAskAnnouncement: {
+    notify?: (ask: { readonly threadId: string; readonly askId: string }) => void;
+  } = {};
+  const onWaitingAsk = (ask: { readonly threadId: string; readonly askId: string }): void =>
+    waitingAskAnnouncement.notify?.(ask);
   const extensionToolApprovalService = new ExtensionToolApprovalService({
     uuid: randomUUID,
+    onAsked: onWaitingAsk,
     now: processAuthorityTime,
     isPairedDeviceScope,
     // The thread must still be active and in the Project the prompt
@@ -205,6 +214,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // whose turn raised them. A prompt like the tool approvals above, so it
   // rides the same change topic.
   const routineProposalService = new RoutineProposalService({
+    onAsked: onWaitingAsk,
     uuid: randomUUID,
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
@@ -213,9 +223,32 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // card in the thread. A prompt like the routine proposals above, so it
   // rides the same change topic.
   const imageGenerationOffers = new ImageGenerationOfferService({
+    onAsked: onWaitingAsk,
     uuid: randomUUID,
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+  });
+  // An ask waits with no expiry, so a thread archived while its turn is
+  // still parked on one must give it up here. Later areas register the asks
+  // they hold, as they register window revocations below.
+  const threadArchivals: Array<(threadId: string) => void> = [
+    (id) => extensionToolApprovalService.withdrawThread(id),
+    (id) => routineProposalService.withdrawThread(id),
+    (id) => imageGenerationOffers.withdrawThread(id),
+  ];
+  const onThreadArchived = (withdraw: (threadId: string) => void): void => {
+    threadArchivals.push(withdraw);
+  };
+  const unsubscribeThreadArchivals = persistence.journal.subscribeCommitted((append) => {
+    for (const threadId of threadsArchivedBy(append)) {
+      for (const withdraw of threadArchivals) {
+        try {
+          withdraw(threadId);
+        } catch {
+          // One area that cannot give up its asks does not keep the others'.
+        }
+      }
+    }
   });
   // One Automation event store for the host: the Automation area writes
   // definitions and runs through it, and a Work or Code run's own turn
@@ -371,6 +404,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
         : undefined;
     },
     processAuthorityNow,
+    onThreadArchived,
+    onWaitingAsk,
+    waitingAskAnnouncement,
     processAuthorityTime,
     onWindowRevoked,
     personMemory,
@@ -379,6 +415,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     protectedFilesRoutes,
     simulatorInputGrants,
     unsubscribeMachineChanges,
+    unsubscribeThreadArchivals,
     windowAuthorityStore,
   };
 }

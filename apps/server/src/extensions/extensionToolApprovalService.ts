@@ -6,12 +6,11 @@ import {
   type ExtensionToolApprovalDecision,
 } from "@octant/contracts/extension-rpc";
 
-const DEFAULT_APPROVAL_TTL_MS = 5 * 60_000;
-
 /**
  * Waiting MCP tool prompts. Each one keeps the call's input text until it is
- * answered, aborted, or times out, so a turn that calls tools in a loop would
- * otherwise stack them without bound. The cap is host-wide: every thread and
+ * answered or withdrawn (its turn stops, its thread is archived, its window
+ * goes away) and never lapses by itself, so this cap is the only bound on a
+ * turn that calls tools in a loop. The cap is host-wide: every thread and
  * window shares this one waiting set, as the browser tool-approval service's
  * cap of 32 already does, so one busy thread can use slots another thread
  * would otherwise get. A call past it is denied at once and is not stored.
@@ -35,24 +34,20 @@ export interface ExtensionToolApprovalAnswerer {
 interface PendingApproval {
   readonly view: ExtensionToolApproval;
   readonly windowId: WindowId;
-  readonly expiresAt: number;
   readonly remember?: (scope: "tool" | "server", actor?: EventActor) => boolean;
   readonly approvedBy?: (actor: EventActor | undefined) => void;
   readonly resolve: (approved: boolean) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
   readonly signal?: AbortSignal;
   readonly onAbort?: () => void;
 }
 
 export class ExtensionToolApprovalService {
   readonly #pending = new Map<string, PendingApproval>();
-  readonly #ttlMs: number;
 
   constructor(
     private readonly options: {
       readonly uuid: () => string;
       readonly now: () => number;
-      readonly ttlMs?: number;
       /**
        * Whether a requesting scope is the host acting on its own (a routine,
        * a usage-limit resume). Nobody sits at that scope, so its approvals go
@@ -85,14 +80,17 @@ export class ExtensionToolApprovalService {
       ) => boolean;
       /**
        * The waiting set changed: a prompt became listable or left the list
-       * for an answer, a cancel, an expiry, or a revocation. Wired only at
+       * for an answer, a cancel, or a revocation. Wired only at
        * composition so the service stays free of the change feed.
        */
       readonly onChanged?: () => void;
+      /**
+       * An ask began to wait. Wired at composition to the paired phones'
+       * notifications; it names the thread and the ask and nothing of its content.
+       */
+      readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
     },
-  ) {
-    this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_APPROVAL_TTL_MS, 10 * 60_000));
-  }
+  ) {}
 
   request(input: {
     readonly windowId: WindowId;
@@ -124,7 +122,6 @@ export class ExtensionToolApprovalService {
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
-    this.#expire();
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve(false);
     const approvalId = this.options.uuid();
     const requestedAt = this.options.now();
@@ -150,34 +147,29 @@ export class ExtensionToolApprovalService {
         if (current === undefined) return;
         this.#pending.delete(approvalId);
         this.options.onChanged?.();
-        clearTimeout(current.timer);
         if (current.signal !== undefined && current.onAbort !== undefined) {
           current.signal.removeEventListener("abort", current.onAbort);
         }
         resolve(approved);
       };
-      const timer = setTimeout(() => settle(false), this.#ttlMs);
-      timer.unref?.();
       const onAbort = input.signal === undefined ? undefined : () => settle(false);
       this.#pending.set(approvalId, {
         view,
         windowId: input.windowId,
-        expiresAt: requestedAt + this.#ttlMs,
         ...(input.remember === undefined ? {} : { remember: input.remember }),
         ...(input.approvedBy === undefined ? {} : { approvedBy: input.approvedBy }),
         resolve: settle,
-        timer,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(onAbort === undefined ? {} : { onAbort }),
       });
       this.options.onChanged?.();
+      this.options.onAsked?.({ threadId: input.threadId, askId: approvalId });
       input.signal?.addEventListener("abort", onAbort!, { once: true });
       if (input.signal?.aborted) settle(false);
     });
   }
 
   list(answerer: ExtensionToolApprovalAnswerer): ReadonlyArray<ExtensionToolApproval> {
-    this.#expire();
     return [...this.#pending.values()]
       .filter((pending) => this.#answerableBy(pending, answerer))
       .map((pending) => pending.view);
@@ -187,7 +179,6 @@ export class ExtensionToolApprovalService {
     answerer: ExtensionToolApprovalAnswerer,
     decision: ExtensionToolApprovalDecision,
   ): boolean {
-    this.#expire();
     const pending = this.#pending.get(decision.approvalId);
     if (pending === undefined || !this.#answerableBy(pending, answerer)) return false;
     if (decision.remember === true) {
@@ -252,17 +243,10 @@ export class ExtensionToolApprovalService {
     }
   }
 
-  /**
-   * Denies every prompt whose time is up by the clock, the way the browser
-   * tool-approval service does. The timer alone is not enough: it fires late
-   * behind a busy event loop or across a machine's sleep, and until it fires
-   * an overdue prompt would still be listed, could still be approved, and
-   * would hold a waiting slot.
-   */
-  #expire(): void {
-    const now = this.options.now();
+  /** Denies what a thread still waits on, when it is archived or deleted. */
+  withdrawThread(threadId: string): void {
     for (const pending of this.#pending.values()) {
-      if (pending.expiresAt <= now) pending.resolve(false);
+      if (pending.view.threadId === threadId) pending.resolve(false);
     }
   }
 }

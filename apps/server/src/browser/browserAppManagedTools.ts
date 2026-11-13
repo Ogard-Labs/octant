@@ -25,6 +25,7 @@ import {
   landHeldDownloads,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
+  askWhilePageLives,
   handBrowserToPerson,
   heldForPersonAnswer,
   heldWhileQueued,
@@ -151,6 +152,7 @@ export interface BrowserAppManagedToolsOptions {
           readonly source?: BrowserDownloadSource;
         },
         origin: string,
+        signal: AbortSignal,
       ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
     }) => Promise<
       | {
@@ -173,6 +175,15 @@ export interface BrowserAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => (() => void) | undefined;
+    /** Keeps the page while an upload question about it waits; see the service. */
+    /**
+     * Keeps the page while a question about it waits, and gives the page's
+     * own lifetime: closing or stopping the page withdraws the question.
+     */
+    readonly holdForAsk?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => { readonly release: () => void; readonly signal?: AbortSignal };
   };
   /**
    * Lent only to a Work thread's own tool: the bounded script runner, and the
@@ -267,6 +278,8 @@ export function createBrowserAppManagedTools(
   ): Promise<BrowserToolAnswer> => {
     const authority = options.resolveAuthority(options.threadId, options.mode);
     if (authority === undefined) return failure("browser-authority-unavailable");
+    // Every question about the open page is withdrawn when that page ends.
+    const pageHold = () => options.browser.holdForAsk?.(options.windowId, options.threadId);
     if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
       return failure("browser-authority-stale");
     }
@@ -464,14 +477,22 @@ export function createBrowserAppManagedTools(
     const needsNoSiteApproval = fullAccess && profile === undefined;
     if ((existing === undefined || !contextApproved) && !remembered && !needsNoSiteApproval) {
       if (options.approvals === undefined) return failure("browser-approval-required");
-      const outcome = await options.approvals.request({
-        windowId: options.windowId,
-        threadId: String(options.threadId),
-        authority,
-        origin,
-        ...(profile === undefined ? {} : { profile }),
-        ...(signal === undefined ? {} : { signal }),
-      });
+      const approvals = options.approvals;
+      // The first navigate's question has no page yet, so only the call's
+      // signal withdraws it.
+      const outcome = await askWhilePageLives(
+        existing === undefined ? undefined : pageHold,
+        signal,
+        (askSignal) =>
+          approvals.request({
+            windowId: options.windowId,
+            threadId: String(options.threadId),
+            authority,
+            origin,
+            ...(profile === undefined ? {} : { profile }),
+            ...(askSignal === undefined ? {} : { signal: askSignal }),
+          }),
+      );
       if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
       if (signal?.aborted) return failure("tool-interrupted");
       const refreshed = options.resolveAuthority(options.threadId, options.mode);
@@ -524,14 +545,17 @@ export function createBrowserAppManagedTools(
       sameToolActionAuthority(binding.authority, authority);
     if (!bindingMatches && existing !== undefined) {
       if (options.approvals === undefined) return failure("browser-approval-required");
-      const outcome = await options.approvals.request({
-        windowId: options.windowId,
-        threadId: String(options.threadId),
-        authority,
-        origin,
-        ...(profile === undefined ? {} : { profile }),
-        ...(signal === undefined ? {} : { signal }),
-      });
+      const approvals = options.approvals;
+      const outcome = await askWhilePageLives(pageHold, signal, (askSignal) =>
+        approvals.request({
+          windowId: options.windowId,
+          threadId: String(options.threadId),
+          authority,
+          origin,
+          ...(profile === undefined ? {} : { profile }),
+          ...(askSignal === undefined ? {} : { signal: askSignal }),
+        }),
+      );
       if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
       if (signal?.aborted) return failure("tool-interrupted");
       const refreshed = options.resolveAuthority(options.threadId, options.mode);
@@ -551,15 +575,17 @@ export function createBrowserAppManagedTools(
         hold: () =>
           options.browser.holdForPerson?.(options.windowId, options.threadId) ?? (() => undefined),
         ask: () =>
-          approvals.request({
-            windowId: options.windowId,
-            threadId: String(options.threadId),
-            authority,
-            origin,
-            ...(profile === undefined ? {} : { profile }),
-            signIn: input.reason === undefined ? {} : { reason: input.reason },
-            ...(signal === undefined ? {} : { signal }),
-          }),
+          askWhilePageLives(pageHold, signal, (askSignal) =>
+            approvals.request({
+              windowId: options.windowId,
+              threadId: String(options.threadId),
+              authority,
+              origin,
+              ...(profile === undefined ? {} : { profile }),
+              signIn: input.reason === undefined ? {} : { reason: input.reason },
+              ...(askSignal === undefined ? {} : { signal: askSignal }),
+            }),
+          ),
         snapshotAfter: () => runOne({ operation: "snapshot" }, signal, true),
       });
     }
@@ -606,7 +632,7 @@ export function createBrowserAppManagedTools(
               destination: permission.destination,
               finalAdmission: permission.reserve,
             }),
-        ask: async (facts, pageOrigin) =>
+        ask: async (facts, pageOrigin, pageSignal) =>
           savesUnasked
             ? "approved"
             : permission === undefined
@@ -619,7 +645,8 @@ export function createBrowserAppManagedTools(
                   profile,
                   workspaceRoot: options.uploadRoot?.(),
                   file: facts,
-                  signal,
+                  // The page's own end withdraws the question with the call's.
+                  signal: pageSignal,
                 })
               : permission.inspect(facts, pageOrigin),
       });
@@ -664,21 +691,25 @@ export function createBrowserAppManagedTools(
         ...(permission !== undefined || options.uploadFileCountLimit === undefined
           ? {}
           : { maxFiles: options.uploadFileCountLimit() }),
-        ask: (files) =>
-          permission?.approve(files) ??
-          (uploadsUnasked
-            ? Promise.resolve("approved" as const)
-            : askBrowserTransfer(approvals, {
-                direction: "upload",
-                windowId: options.windowId,
-                threadId: String(options.threadId),
-                authority,
-                origin,
-                profile,
-                workspaceRoot: options.uploadRoot?.(),
-                files,
-                signal,
-              })),
+        ask: async (files) => {
+          if (permission !== undefined) return permission.approve(files);
+          if (uploadsUnasked) return "approved" as const;
+          // Withdrawn with its page, as a download question is; otherwise
+          // the turn stays parked and the admitted copies are kept.
+          return askWhilePageLives(pageHold, signal, (askSignal) =>
+            askBrowserTransfer(approvals, {
+              direction: "upload",
+              windowId: options.windowId,
+              threadId: String(options.threadId),
+              authority,
+              origin,
+              profile,
+              workspaceRoot: options.uploadRoot?.(),
+              files,
+              signal: askSignal,
+            }),
+          );
+        },
       });
       if (admitted.status === "refused") return failure(admitted.reason);
       uploadFiles = admitted.paths;

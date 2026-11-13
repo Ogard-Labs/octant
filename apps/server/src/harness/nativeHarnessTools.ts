@@ -201,9 +201,7 @@ export interface NativeHarnessToolPorts {
     readonly arguments?: unknown;
     readonly command?: string | undefined;
     readonly signal?: AbortSignal;
-  }) => Promise<
-    "approved" | "denied" | "shield-denied" | "expired" | "cancelled" | "too-many-waiting"
-  >;
+  }) => Promise<"approved" | "denied" | "shield-denied" | "cancelled" | "too-many-waiting">;
   /** The thread's goal, when the host can reach it. */
   readonly goal?: NativeHarnessGoalPort;
   /** The skills effective for the thread, when the host can resolve them. */
@@ -220,7 +218,6 @@ export interface NativeHarnessToolPorts {
     readonly signal?: AbortSignal;
   }) => Promise<
     | { readonly status: "answered"; readonly answer: string }
-    | { readonly status: "expired" }
     | { readonly status: "cancelled" }
     | { readonly status: "too-many-waiting" }
   >;
@@ -606,12 +603,7 @@ async function execute(
           "Too many questions are already waiting for a person, so this one was not asked. Continue with your best judgment and say what you assumed.",
         );
       }
-      return refused(
-        outcome.status === "expired" ? "question-expired" : "question-cancelled",
-        outcome.status === "expired"
-          ? "The person did not answer in time. Continue with your best judgment and say what you assumed."
-          : "The turn was cancelled while waiting for an answer.",
-      );
+      return refused("question-cancelled", "The turn was cancelled while waiting for an answer.");
     }
     case "goal": {
       const input = args as NativeHarnessGoalArguments;

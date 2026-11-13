@@ -592,8 +592,6 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: {
       read: (threadId) => {
-        nativeHarnessApprovals.expireOverdue();
-        nativeHarnessQuestions.expireOverdue();
         const read = nativeHarnessSessions.read(threadId);
         const view = read === undefined ? undefined : withSteerable(read, leadDeliversSteering);
         const suggestions = threadFollowUpSuggestions.read(threadId);

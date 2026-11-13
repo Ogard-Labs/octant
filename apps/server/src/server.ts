@@ -270,6 +270,9 @@ export function startOctantServer(
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
+      onThreadArchived,
+      onWaitingAsk,
+      waitingAskAnnouncement,
       onWindowRevoked,
       personMemory,
       personMemoryAccess,
@@ -281,6 +284,7 @@ export function startOctantServer(
       imageGenerationOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
+      unsubscribeThreadArchivals,
       windowAuthorityStore,
     } = wireAuthority({
       browserAuthority,
@@ -303,6 +307,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunRequestOwner,
       agentRunPersistence,
+      onThreadArchived,
       persistence,
       workThreadProjection,
     });
@@ -483,6 +488,8 @@ export function startOctantServer(
       imageGenerationOffers,
       isPairedDeviceScope,
       machineChangeFeed,
+      onThreadArchived,
+      onWaitingAsk,
       onWindowRevoked,
       serverProjectStore,
       bindingReceiptStore,
@@ -680,6 +687,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      isPairedDeviceScope,
       projectMemoryAccess,
       threadMoveHolds,
       serverConnection,
@@ -802,6 +810,8 @@ export function startOctantServer(
       agentRunInteractions,
       codeSessionAuthority,
       machineChangeFeed,
+      onThreadArchived,
+      onWaitingAsk,
       onWindowRevoked,
       browserCaptures,
       codeEvidence,
@@ -845,6 +855,7 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       threadMoveHolds,
+      onThreadArchived,
       codeSessionConversation,
       worktreePreparation,
       conversationInputTransfer,
@@ -1090,6 +1101,8 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      codeProjectAccess,
+      isPairedDeviceScope,
       threadMoveHolds,
       conversationInputTransfer,
       codeBoardEventStore,
@@ -1386,6 +1399,7 @@ export function startOctantServer(
       pushNotificationTokenStore,
       workThreadProjection,
     });
+    waitingAskAnnouncement.notify = (ask) => threadNotifications.notifyWaitingAsk(ask);
     const {
       designSystemRoutes,
       fleetActivityRoutes,
@@ -1396,6 +1410,12 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      agentRunInteractions,
+      browserToolApprovalService,
+      extensionToolApprovalService,
+      imageGenerationOffers,
+      projectMemoryAccess,
+      routineProposalService,
       decisionReviewModelPort,
       isProjectPolicyTargetAllowed,
       observeWorkThreadRuntime,
@@ -2224,6 +2244,7 @@ export function startOctantServer(
           }
           try {
             unsubscribeMachineChanges();
+            unsubscribeThreadArchivals();
             machineChangeFeed.close();
             workTurnService.closeLiveUpdates();
           } catch (error) {

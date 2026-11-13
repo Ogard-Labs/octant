@@ -531,6 +531,36 @@ export const CompletedThreadArchiveAfterDays = Schema.Int.pipe(
 );
 export type CompletedThreadArchiveAfterDays = typeof CompletedThreadArchiveAfterDays.Type;
 export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchiveAfterDays = 7;
+
+/**
+ * How long a turn may go without a provider event before the host cuts it
+ * off. The floor keeps a slow first token or a long silent tool-call write
+ * from ending a healthy turn; the ceiling is one working day.
+ */
+export const MIN_STALLED_TURN_LIMIT_MINUTES = 5;
+export const MAX_STALLED_TURN_LIMIT_MINUTES = 480;
+export const StalledTurnLimitMinutes = Schema.Int.pipe(
+  Schema.between(MIN_STALLED_TURN_LIMIT_MINUTES, MAX_STALLED_TURN_LIMIT_MINUTES),
+);
+export type StalledTurnLimitMinutes = typeof StalledTurnLimitMinutes.Type;
+export const DEFAULT_STALLED_TURN_LIMIT_MINUTES: StalledTurnLimitMinutes = 30;
+
+/**
+ * The longest one provider tool call may pause the stalled-turn clock. A
+ * runtime that reports a start and never the finish would otherwise hold its
+ * turn open until the person stops it. The floor matches the stalled-turn
+ * limit's; the ceiling is one day, past which Off is the honest choice.
+ */
+export const MIN_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES = 5;
+export const MAX_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES = 1440;
+export const ProviderToolCallPauseLimitMinutes = Schema.Int.pipe(
+  Schema.between(
+    MIN_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
+    MAX_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
+  ),
+);
+export type ProviderToolCallPauseLimitMinutes = typeof ProviderToolCallPauseLimitMinutes.Type;
+export const DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES: ProviderToolCallPauseLimitMinutes = 120;
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 
 /**
@@ -794,6 +824,24 @@ export const ShellSettings = Schema.Struct({
   autoCompactLimitPercent: Schema.optionalWith(Schema.NullOr(AutoCompactLimitPercent), {
     default: () => null,
   }),
+  /**
+   * Cut a Chat, Work or Code turn off once its provider has sent no event for
+   * this many minutes. `null` means never: only the person stops such a turn.
+   * A store persisted before the setting existed decodes to the default.
+   */
+  stalledTurnLimitMinutes: Schema.optionalWith(Schema.NullOr(StalledTurnLimitMinutes), {
+    default: () => DEFAULT_STALLED_TURN_LIMIT_MINUTES,
+  }),
+  /**
+   * The longest a provider tool call that has reported a start and no finish
+   * pauses the stalled-turn clock, in minutes. `null` means no bound: such a
+   * call pauses the clock until it finishes or the person stops the turn. A
+   * store persisted before the setting existed decodes to the default.
+   */
+  providerToolCallPauseLimitMinutes: Schema.optionalWith(
+    Schema.NullOr(ProviderToolCallPauseLimitMinutes),
+    { default: () => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES },
+  ),
   /**
    * The release ring to follow, once someone has chosen one.
    *

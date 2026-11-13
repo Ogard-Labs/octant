@@ -100,6 +100,8 @@ const settings = {
   autoCompactRuntimeWindowPercent: null,
   autoCompactIdleMinutes: null,
   autoCompactLimitPercent: null,
+  stalledTurnLimitMinutes: 30,
+  providerToolCallPauseLimitMinutes: 120,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },
@@ -346,6 +348,31 @@ describe("shell bootstrap contracts", () => {
       false,
     );
     expect(() => decodeShellSettings({ ...settings, showThreadStats: "off" })).toThrow();
+  });
+
+  it("reads a store from before the stalled-turn limit at thirty minutes, and keeps Off and a bounded choice", () => {
+    const { stalledTurnLimitMinutes: _omitted, ...withoutLimit } = settings;
+    expect(decodeShellSettings(withoutLimit).stalledTurnLimitMinutes).toBe(30);
+    expect(
+      decodeShellSettings({ ...settings, stalledTurnLimitMinutes: null }).stalledTurnLimitMinutes,
+    ).toBeNull();
+    expect(
+      decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 120 }).stalledTurnLimitMinutes,
+    ).toBe(120);
+    expect(() => decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 4 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 481 })).toThrow();
+  });
+
+  it("reads a store from before the longest tool-call pause at two hours, and keeps Off and a bounded choice", () => {
+    const { providerToolCallPauseLimitMinutes: _omitted, ...withoutLimit } = settings;
+    expect(decodeShellSettings(withoutLimit).providerToolCallPauseLimitMinutes).toBe(120);
+    const decode = (providerToolCallPauseLimitMinutes: number | null) =>
+      decodeShellSettings({ ...settings, providerToolCallPauseLimitMinutes })
+        .providerToolCallPauseLimitMinutes;
+    expect(decode(null)).toBeNull();
+    expect(decode(480)).toBe(480);
+    expect(() => decode(4)).toThrow();
+    expect(() => decode(1441)).toThrow();
   });
 
   it("decodes a store from before the start-screen cards to the registry defaults", () => {

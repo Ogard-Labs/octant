@@ -9,7 +9,10 @@ import {
   decodeWorkTurnRequestId,
   type OctantMode,
 } from "@octant/contracts";
-import type { PendingRequest } from "@octant/contracts/pending-requests";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
+import { decodeProjectMemoryProposalId } from "@octant/contracts/projects";
 import { providerAnswerOutcome } from "../code/codeControllerState";
 
 /** Rows the Needs you card lists before it says "+N more". */
@@ -168,6 +171,91 @@ function answerHandle(request: PendingRequest): string {
   }
   const { answer } = request;
   return String("approvalId" in answer ? answer.approvalId : answer.requestId);
+}
+
+/** One ask's identity across reads. */
+export function waitingAskKey(ask: WaitingAsk): string {
+  return `ask:${ask.kind}:${ask.askId}`;
+}
+
+export function waitingAsksForModes(
+  asks: ReadonlyArray<WaitingAsk>,
+  modes: ReadonlyArray<OctantMode>,
+): ReadonlyArray<WaitingAsk> {
+  return asks.filter((ask) => modes.includes(ask.mode));
+}
+
+/** The two plain answers a list offers for an ask whose row carries all of it. */
+export type WaitingAskAnswer = "approve" | "decline";
+
+/**
+ * The clients each ask's own card already answers through; a list adds no
+ * route. Each is optional: a surface without one offers no answer for that
+ * kind and opens the thread instead.
+ */
+export interface WaitingAskAnswerClients {
+  readonly extensionClient?: Pick<ExtensionClient, "decideToolApproval"> | undefined;
+  readonly projectClient?: Pick<ProjectClient, "decideMemoryProposal"> | undefined;
+}
+
+/** Whether this surface can deliver a plain answer for the ask from where it is listed. */
+export function canAnswerWaitingAsk(
+  clients: WaitingAskAnswerClients | undefined,
+  ask: WaitingAsk,
+): boolean {
+  if (ask.inPlace !== true || clients === undefined) return false;
+  switch (ask.kind) {
+    case "tool-approval":
+      return clients.extensionClient !== undefined;
+    case "memory-proposal":
+      return clients.projectClient !== undefined;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Sends a plain answer through the ask's own decide route, once and never
+ * remembered: "always allow" stays on the card in the thread. The host checks
+ * who may answer; a refusal comes back as the row's one quiet line.
+ */
+export async function answerWaitingAsk(
+  clients: WaitingAskAnswerClients,
+  ask: WaitingAsk,
+  answer: WaitingAskAnswer,
+): Promise<PendingRequestAnswerResult> {
+  if (!canAnswerWaitingAsk(clients, ask)) return NOT_DELIVERED;
+  const decision = answer === "approve" ? "approved" : "denied";
+  try {
+    switch (ask.kind) {
+      case "tool-approval": {
+        const accepted = await clients.extensionClient?.decideToolApproval({
+          approvalId: ask.askId,
+          decision,
+        });
+        return accepted === true ? { status: "answered" } : NOT_DELIVERED;
+      }
+      case "memory-proposal": {
+        const result = await clients.projectClient?.decideMemoryProposal({
+          proposalId: decodeProjectMemoryProposalId(ask.askId),
+          decision: answer === "approve" ? "confirm" : "decline",
+        });
+        if (
+          result?.kind === "project-memory-proposal-confirmed" ||
+          result?.kind === "project-memory-proposal-declined"
+        ) {
+          return { status: "answered" };
+        }
+        return result?.kind === "project-memory-proposal-not-applied"
+          ? { status: "refused", message: result.message }
+          : NOT_DELIVERED;
+      }
+      default:
+        return NOT_DELIVERED;
+    }
+  } catch {
+    return NOT_DELIVERED;
+  }
 }
 
 /** A start screen speaks for some modes: Work's lists Chat and Work, Code's lists Code. */

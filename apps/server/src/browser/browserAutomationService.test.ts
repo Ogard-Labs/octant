@@ -1771,6 +1771,71 @@ describe("BrowserAutomationService", () => {
       },
     );
 
+    it("keeps the page while a download question waits a day, and releases the held file when the page closes under it", async () => {
+      const fixture = harness({
+        agentDownloadsEnabled: true,
+        claimDownload: vi.fn(async () => "/private/held-fixture"),
+        discardDownload: vi.fn(async () => undefined),
+        observed: {
+          downloads: [
+            {
+              state: "held",
+              downloadId: "d1",
+              name: "report.txt",
+              sizeBytes: 4,
+              mediaType: "text/plain",
+            },
+          ],
+        },
+      });
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await fixture.service.act({
+        windowId,
+        request: click(),
+        capturedBy: "agent",
+        holdDownloads: true,
+      });
+      const facts = { name: "report.txt", sizeBytes: 4, mediaType: "text/plain" };
+      let asked: (() => void) | undefined;
+      const waiting = new Promise<void>((resolve) => (asked = resolve));
+      const save = vi
+        .spyOn(downloadSave, "saveBrowserDownload")
+        .mockImplementationOnce(async (input) => {
+          const answer = await input.ask(facts);
+          return {
+            status: "refused",
+            error: `browser-download-${answer}`,
+            reason: answer === "approved" ? "unavailable" : answer,
+            facts,
+          };
+        });
+      try {
+        const saving = fixture.service.saveDownload({
+          windowId,
+          threadId: threadOne,
+          downloadId: "d1",
+          workspaceRoot: "/workspace",
+          // The question ends only when the page it is about goes away.
+          ask: (_facts, _origin, pageSignal) =>
+            new Promise((resolve) => {
+              pageSignal?.addEventListener("abort", () => resolve("cancelled"), { once: true });
+              asked?.();
+            }),
+        });
+        await waiting;
+        fixture.advance(24 * 60 * 60_000);
+        fixture.expire();
+        expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+        expect(fixture.runtime.discardDownload).not.toHaveBeenCalled();
+        await fixture.service.releaseThread(windowId, threadOne);
+        expect(await saving).toEqual({ status: "refused", error: "browser-download-cancelled" });
+        expect(fixture.runtime.discardDownload).toHaveBeenCalledWith(contextOne, "d1");
+      } finally {
+        save.mockRestore();
+        await fixture.service.close();
+      }
+    });
+
     it("reports what the runtime holds, journals a stopped file, and saves only an id it reported", async () => {
       const refused = vi.fn();
       const { service } = harness({
@@ -1822,14 +1887,16 @@ describe("BrowserAutomationService", () => {
     });
   });
 
-  it("keeps a page open while the person signs in past its session limit, one hand-off at a time", async () => {
+  it("keeps a page open for as long as its sign-in card waits, one hand-off at a time", async () => {
     const fixture = harness();
     await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
     const release = fixture.service.holdForPerson(windowId, threadOne);
     expect(release).toBeDefined();
     expect(fixture.service.holdForPerson(windowId, threadOne)).toBeUndefined();
     expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("sign-in");
-    fixture.advance(400_000);
+    // The card has no expiry, so the page it asks the person to use has none
+    // either while the card waits.
+    fixture.advance(24 * 60 * 60_000);
     fixture.expire();
     expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
     release?.();
@@ -4025,7 +4092,11 @@ it("carries the held download's source receipt to its per-file review without su
         ask,
       }),
     ).toMatchObject({ status: "refused", error: "browser-download-denied" });
-    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ source }), "https://example.com");
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({ source }),
+      "https://example.com",
+      expect.any(AbortSignal),
+    );
   } finally {
     await f.service.close();
     await rm(heldFolder, { recursive: true, force: true });

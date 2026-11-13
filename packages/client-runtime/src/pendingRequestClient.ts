@@ -8,10 +8,12 @@ export interface PendingRequestClientOptions {
 }
 
 /**
- * Reads every approval and question this window can answer, across modes and
- * Projects. Answers go through each mode's own client; this client lists requests and changes question attention preferences.
- * Local windows only: the host refuses a paired device, so the client refuses
- * a non-loopback host before asking.
+ * Reads every approval, question and other waiting ask this window or paired
+ * device can answer, across modes and Projects. Answers go through each
+ * mode's or ask's own client; this client lists them and, at a local window,
+ * changes question attention preferences. A paired device reads the same list
+ * under its own scope and has no `defer`: the host keeps deferral with a
+ * local window.
  */
 export interface PendingRequestClient {
   defer?(change: PendingQuestionDeferral): Promise<boolean>;
@@ -31,19 +33,20 @@ export class PendingRequestClientFailure extends Error {
 export function createPendingRequestClient(
   options: PendingRequestClientOptions,
 ): PendingRequestClient {
-  const url = loopbackUrl(options.baseUrl);
+  const { url, local } = hostUrl(options.baseUrl);
+  const defer = async (change: PendingQuestionDeferral): Promise<boolean> => {
+    const response = await options.fetch(`${url}/defer`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": options.windowCapability,
+      },
+      body: JSON.stringify(change),
+    });
+    return response.ok;
+  };
   return {
-    async defer(change) {
-      const response = await options.fetch(`${url}/defer`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-octant-window-capability": options.windowCapability,
-        },
-        body: JSON.stringify(change),
-      });
-      return response.ok;
-    },
+    ...(local ? { defer } : {}),
     async list(signal) {
       let response: Response;
       try {
@@ -82,19 +85,23 @@ export function createPendingRequestClient(
   };
 }
 
-function loopbackUrl(baseUrl: string): string {
+function hostUrl(baseUrl: string): { readonly url: string; readonly local: boolean } {
   try {
     const url = new URL(baseUrl);
-    if (
-      url.protocol === "http:" &&
-      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
-    ) {
-      return new URL("/api/pending-requests", url).toString();
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return {
+        url: new URL("/api/pending-requests", url).toString(),
+        local:
+          url.protocol === "http:" &&
+          (url.hostname === "127.0.0.1" ||
+            url.hostname === "localhost" ||
+            url.hostname === "[::1]"),
+      };
     }
   } catch {
     // Fall through to the refusal below.
   }
-  throw unavailable("Pending requests are read from a local Octant host only.");
+  throw unavailable("Pending requests are read from an Octant host.");
 }
 
 function unavailable(message: string): PendingRequestClientFailure {

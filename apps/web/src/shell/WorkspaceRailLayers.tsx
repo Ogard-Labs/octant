@@ -132,7 +132,7 @@ export interface WorkspaceRailLayersProps {
   readonly providerLabels?: ReadonlyMap<string, string>;
   /** Driver kinds by provider instance id; the boards draw the provider mark from them. */
   readonly providerKinds?: ReadonlyMap<string, string>;
-  /** Lets a waiting Board card answer its thread's question; absent in a remote window. */
+  /** Lets a waiting Board card answer its thread's question; absent without a reader. */
   readonly boardPendingRequests?: BoardPendingRequestSource;
   readonly archiveOpen?: boolean;
   readonly archiveChatClient?: ChatClient;
@@ -177,7 +177,7 @@ export interface WorkspaceRailLayersProps {
   readonly inboxOpen: boolean;
   readonly onCloseInbox: () => void;
   readonly inboxAttentionItems: ReadonlyArray<InboxAttentionItem>;
-  /** Decisions finished turns asked, answered in the Inbox; absent in a remote window. */
+  /** Decisions finished turns asked, answered in the Inbox; absent without a reader. */
   readonly inboxDecisions?: InboxDecisionSource;
   readonly onOpenInboxThread: (signal: ThreadAttentionSignal) => void;
   /** The Review page, where finished threads are triaged with single keys. */
