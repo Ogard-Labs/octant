@@ -1289,11 +1289,17 @@ outside an accessibility fallback, any `font-weight` heavier than 600 outside
 the title roles (see [Scale](#scale)), and any paint
 (colour, background, border, radius, shadow, outline) that a feature rule puts
 on a class handed to an Octant primitive (place or size a shared control,
-never repaint it; pick a recipe variant instead), a `border-radius` that is not
-a radius token, `0`, `50%` or a 1–4px mark (also as an arbitrary `rounded-[…]`
-class or an inline `borderRadius`), and a fixed `h-[…]` or `size-[…]` in the shared
-recipes under `apps/web/src/ui/base` and `ui/shadcn` that is not 20, 24, 28 or 32px
-at the 13px root ratchet against
+never repaint it; pick a recipe variant instead), a corner that is not a radius token, `0`, `50%` or a 1–4px mark (each part of the
+value must be one of those alone: a token with a fallback, beside a literal, or
+plus a length is refused; only `calc(token - Npx)`, optionally under
+`max(1–4px, …)`, may derive a part inside a control), read in
+stylesheets, in arbitrary `rounded-[…]` classes, and in inline `borderRadius`, its
+longhand and logical forms, `el.style` assignments and `setProperty` (a
+conditional or template is judged by the literals it spells out), and a fixed
+`h-[…]` or `size-[…]` in the shared recipes under `apps/web/src/ui/base` and
+`ui/shadcn`, subfolders included, that is not 20, 24, 28 or 32px at the 13px
+root (`min-h` and `max-h` are not read: a field's minimum and a popup's maximum
+are not control heights) ratchet against
 `scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
 re-record the lower count with `--write-baseline` so the baseline never
 overstates.

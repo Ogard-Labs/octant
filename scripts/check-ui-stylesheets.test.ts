@@ -549,6 +549,82 @@ describe("UI stylesheet check", () => {
     ]);
   });
 
+  it("refuses a corner that only mentions a radius token among other parts", () => {
+    const refused = [
+      "var(--oct-radius-sm, 8px)",
+      "8px var(--oct-radius-sm)",
+      "calc(var(--oct-radius-sm) + 20px)",
+      "calc(8px - var(--oct-radius-sm))",
+      "max(8px, calc(var(--oct-radius-sm) - 2px))",
+    ];
+    const findings = findStylesheetFindings({
+      [CSS]: refused.map((value, index) => `.a${index} { border-radius: ${value}; }`).join("\n"),
+    });
+    expect(findings.map((finding) => finding.line)).toEqual([1, 2, 3, 4, 5]);
+    expect(
+      findStylesheetFindings({
+        [CSS]: ".a { border-radius: calc(var(--oct-radius-md) - 8px) var(--oct-radius-sm) / 0; }",
+      }),
+    ).toEqual([]);
+  });
+
+  it("refuses an arbitrary rounded class or inline corner that mixes in a literal", () => {
+    const findings = findComponentScaleFindings({
+      "apps/web/src/feature/Card.tsx": [
+        'const a = "rounded-[8px_var(--oct-radius-sm)]";',
+        'const b = "rounded-[var(--oct-radius-sm,8px)]";',
+        'const c = "rounded-[calc(var(--oct-radius-sm)+20px)]";',
+        'const d = { borderRadius: "8px var(--oct-radius-sm)" };',
+        'const e = { borderRadius: "var(--oct-radius-sm, 8px)" };',
+        'const f = { "borderRadius": 12 };',
+        'const g = "rounded-[var(--oct-radius-sm)] rounded-[--oct-radius-md] rounded-(--oct-radius-md)";',
+        'const h = { borderRadius: "var(--oct-radius-sm)" };',
+      ].join("\n"),
+    });
+    expect(findings.map((finding) => finding.line)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("reads every longhand and logical corner in an inline style", () => {
+    const findings = findComponentScaleFindings({
+      "apps/web/src/feature/Card.tsx": [
+        "const a = { borderTopLeftRadius: 10 };",
+        'const b = { borderTopRightRadius: "9px" };',
+        "const c = { borderBottomLeftRadius: 10, borderBottomRightRadius: 3 };",
+        "const d = { borderStartStartRadius: 7, borderEndEndRadius: 7 };",
+        'const e = { "border-start-end-radius": "7px" };',
+        "const f = { borderStartEndRadius: 0, borderEndStartRadius: 4 };",
+      ].join("\n"),
+    });
+    expect(findings.map((finding) => finding.line)).toEqual([1, 2, 3, 4, 4, 5]);
+  });
+
+  it("flags a literal off-token corner inside a conditional, a template or a style assignment", () => {
+    const findings = findComponentScaleFindings({
+      "apps/web/src/feature/Card.tsx": [
+        'const a = { borderRadius: open ? 10 : "var(--oct-radius-sm)" };',
+        "const b = { borderRadius: `8px ${inner}` };",
+        "const c = { borderRadius: `var(--oct-radius-${name})` };",
+        "const d = { borderRadius: size > 10 ? 4 : 0, color: red };",
+        "node.style.borderRadius = round ? '50%' : '9px';",
+        'node.style.setProperty("border-top-left-radius", "11px");',
+        "const e = { borderRadius: value };",
+        "const f = style.borderTopLeftRadius;",
+      ].join("\n"),
+    });
+    expect(findings.map((finding) => finding.line)).toEqual([1, 2, 5, 6]);
+  });
+
+  it("reads recipes in subfolders of the shared recipe folders", () => {
+    const findings = findComponentScaleFindings({
+      "apps/web/src/ui/base/menu/OctantMenuItem.tsx": 'x = "h-[30px]";',
+      "apps/web/src/ui/shadcn/field/input.tsx": 'x = "size-[1.15rem]";',
+    });
+    expect(findings.map((finding) => finding.rule)).toEqual([
+      "control-height-scale",
+      "control-height-scale",
+    ]);
+  });
+
   it("flags a recipe height off the 20, 24, 28, 32 scale and only in the shared recipes", () => {
     const recipe = [
       'const ok = "h-[round(2.154rem,2px)] size-[round(down,1.538rem,2px)] h-[28px] h-(--oct-space-5)";',

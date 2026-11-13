@@ -70,20 +70,53 @@ const SPACING_PROPERTY =
 const SPACING_LITERAL = /(?<![\w.-])(\d*\.?\d+)px\b/g;
 
 // A corner is a radius token, `0`, `50%`, or the 1-4px of a chart bar, mark or
-// status dot (DESIGN.md, "Spacing, shapes, and depth"). A value that reads a
-// radius token is derived from it (`max(2px, calc(var(--oct-radius-sm) - 2px))`
-// is a part inside a control), so only a value with no token is read literally.
+// status dot (DESIGN.md, "Spacing, shapes, and depth"). Every component of the
+// value must be one of those on its own: a token with a fallback, a token next
+// to a literal, or a token plus a length is a literal corner in disguise. The
+// one derived form is a part inside a control, the control radius less the
+// padding between them, never below 2px: `calc(token - Npx)`, optionally
+// floored with `max(1-4px, …)`. Existing code spells it that way.
 const RADIUS_PROPERTY =
   /^border(?:-(?:top|bottom)-(?:left|right)|-(?:start|end)-(?:start|end))?-radius$/;
-const RADIUS_TOKEN = /var\(\s*--(?:oct-)?radius(?:-[a-z0-9]+)*\s*[,)]/;
+const RADIUS_TOKEN_VAR = String.raw`var\(\s*--(?:oct-)?radius(?:-[a-z0-9]+)*\s*\)`;
+const RADIUS_TOKEN = new RegExp(`^${RADIUS_TOKEN_VAR}$`);
+const RADIUS_INSET = new RegExp(String.raw`^calc\(\s*${RADIUS_TOKEN_VAR}\s+-\s+\d*\.?\d+px\s*\)$`);
+const RADIUS_FLOORED_INSET = new RegExp(String.raw`^max\(\s*[1-4]px\s*,\s*(calc\(.*\))\s*\)$`);
 const RADIUS_KEYWORD = /^(?:0|0px|50%|inherit|initial|unset|revert|revert-layer)$/;
 const RADIUS_MARK_PX = /^[1-4]px$/;
 
+/** Split on whitespace and `/` that sit outside any parentheses. */
+function topLevelParts(value: string): ReadonlyArray<string> {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of value) {
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+    if (depth === 0 && (char === "/" || /\s/.test(char))) {
+      if (current !== "") parts.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  if (current !== "") parts.push(current);
+  return parts;
+}
+
+function radiusPartOnScale(part: string): boolean {
+  if (RADIUS_KEYWORD.test(part) || RADIUS_MARK_PX.test(part) || RADIUS_TOKEN.test(part)) {
+    return true;
+  }
+  if (RADIUS_INSET.test(part)) return true;
+  const floored = RADIUS_FLOORED_INSET.exec(part);
+  return floored !== null && RADIUS_INSET.test(floored[1] ?? "");
+}
+
 function radiusOnScale(value: string): boolean {
   const bare = value.replace(IMPORTANT_ANNOTATION, "").trim().toLowerCase();
-  if (RADIUS_TOKEN.test(bare)) return true;
-  const parts = bare.split(/[\s/]+/).filter(Boolean);
-  return parts.length > 0 && parts.every((p) => RADIUS_KEYWORD.test(p) || RADIUS_MARK_PX.test(p));
+  const parts = topLevelParts(bare);
+  return parts.length > 0 && parts.every(radiusPartOnScale);
 }
 
 // Recipe controls take their height in rem so they grow with the interface
@@ -91,10 +124,87 @@ function radiusOnScale(value: string): boolean {
 // and 32px; a recipe asking for another height is off the control scale.
 const CONTROL_HEIGHT_PX = [20, 24, 28, 32];
 const ROOT_PX = 13;
-const RECIPE_SOURCE = /(?:^|\/)ui\/(?:base|shadcn)\/[^/]+\.tsx$/;
+const RECIPE_SOURCE = /(?:^|\/)ui\/(?:base|shadcn)\/(?:.+\/)?[^/]+\.tsx$/;
 const FIXED_SIZE_UTILITY = /(?<![\w-])(?:h|size)-\[([^\]\s]+)\]/g;
-const ARBITRARY_RADIUS_UTILITY = /(?<![\w-])rounded(?:-[a-z]{1,2})?-\[([^\]\s]+)\]/g;
-const INLINE_RADIUS = /\bborderRadius:\s*(?:(\d+)\b|(["'`])([^"'`$]*)\2)/g;
+// `rounded-[…]` and `rounded-(--token)`; Tailwind writes a space as `_`, and a
+// bare `--token` inside brackets is a variable read, so `rounded-[--oct-radius-sm]`
+// and `rounded-(--oct-radius-sm)` are the same corner.
+const ARBITRARY_RADIUS_UTILITY =
+  /(?<![\w-])rounded(?:-(?:[a-z]{1,2}))?-(?:\[([^\]\s]+)\]|\((--[^)\s]+)\))/g;
+// Every inline spelling of a corner: camelCase or quoted kebab keys, and an
+// `el.style.x =` or `style.setProperty("x", …)` assignment.
+const RADIUS_CAMEL = String.raw`border(?:(?:Top|Bottom)(?:Left|Right)|(?:Start|End)(?:Start|End))?Radius`;
+const RADIUS_KEBAB = String.raw`border(?:-(?:top|bottom)-(?:left|right)|-(?:start|end)-(?:start|end))?-radius`;
+const INLINE_RADIUS_SITE = new RegExp(
+  [
+    String.raw`(?<![\w$.])["']?${RADIUS_CAMEL}["']?\s*:`,
+    String.raw`(?<![\w$.])["']${RADIUS_KEBAB}["']\s*:`,
+    String.raw`\.style\s*(?:\.${RADIUS_CAMEL}|\[\s*["'](?:${RADIUS_CAMEL}|${RADIUS_KEBAB})["']\s*\])\s*=(?!=)`,
+    String.raw`\.setProperty\(\s*["']${RADIUS_KEBAB}["']\s*,`,
+  ].join("|"),
+  "g",
+);
+
+/** The source text of the expression that starts at `from`, up to the `,`, `;`,
+ * `}` or `)` that ends it at the same nesting level. */
+function expressionAt(source: string, from: number): string {
+  let depth = 0;
+  let quote = "";
+  for (let index = from; index < source.length; index += 1) {
+    const char = source.charAt(index);
+    if (quote !== "") {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") quote = char;
+    else if (char === "(" || char === "[" || char === "{") depth += 1;
+    else if (char === ")" || char === "]" || char === "}") {
+      if (depth === 0) return source.slice(from, index);
+      depth -= 1;
+    } else if (depth === 0 && (char === "," || char === ";")) return source.slice(from, index);
+  }
+  return source.slice(from);
+}
+
+const WHOLE_STRING = /^\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1\s*$/;
+const WHOLE_NUMBER = /^\s*(\d*\.?\d+)\s*$/;
+const QUOTED_LITERAL = /(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
+// A number that is a result of the expression, not an operand of a comparison.
+const RESULT_NUMBER = /(?:^|[?:]|\?\?|\|\||&&)\s*(\d*\.?\d+)(?![\w.%])/g;
+
+/** Judge an inline corner expression. A plain literal is judged in full. A
+ * conditional or a template can only be judged by the literals it spells out:
+ * an off-scale px string or a numeric result. A value read from a variable
+ * has no literal to judge and passes. */
+function inlineRadiusOffScale(expression: string): string | null {
+  const whole = WHOLE_STRING.exec(expression);
+  if (whole !== null && !(whole[1] === "`" && (whole[2] ?? "").includes("${"))) {
+    const text = whole[2] ?? "";
+    return radiusOnScale(text) ? null : text;
+  }
+  const bareNumber = WHOLE_NUMBER.exec(expression);
+  if (bareNumber !== null) {
+    const text = `${bareNumber[1]}px`;
+    return radiusOnScale(text) ? null : text;
+  }
+  for (const literal of expression.matchAll(QUOTED_LITERAL)) {
+    const text = (literal[2] ?? "").replace(/\$\{[^}]*\}/g, "x");
+    const hasPlaceholder = text !== (literal[2] ?? "");
+    if (!hasPlaceholder) {
+      if (!radiusOnScale(text)) return text;
+      continue;
+    }
+    for (const length of text.matchAll(/(?<![\w.-])(\d*\.?\d+)px\b/g)) {
+      if (!radiusOnScale(length[0])) return length[0];
+    }
+  }
+  for (const result of expression.replace(QUOTED_LITERAL, '""').matchAll(RESULT_NUMBER)) {
+    const text = `${result[1]}px`;
+    if (!radiusOnScale(text)) return text;
+  }
+  return null;
+}
 
 function controlHeightOnScale(value: string): boolean {
   const inner = /^round\((?:(?:up|down|nearest|to-zero),)?([^,]+),[^)]*\)$/.exec(value);
@@ -500,14 +610,18 @@ export function findComponentScaleFindings(
       }
     }
     for (const match of source.matchAll(ARBITRARY_RADIUS_UTILITY)) {
-      if (!radiusOnScale((match[1] ?? "").replace(/_/g, " "))) {
+      const value =
+        match[2] !== undefined
+          ? `var(${match[2]})`
+          : (match[1] ?? "").replace(/^(--[a-z0-9-]+)$/, "var($1)").replace(/_/g, " ");
+      if (!radiusOnScale(value)) {
         push("radius-token", match.index, `${match[0]} is not a radius token`);
       }
     }
-    for (const match of source.matchAll(INLINE_RADIUS)) {
-      const value = match[1] === undefined ? (match[3] ?? "") : `${match[1]}px`;
-      if (!radiusOnScale(value)) {
-        push("radius-token", match.index, `borderRadius ${value} is not a radius token`);
+    for (const match of source.matchAll(INLINE_RADIUS_SITE)) {
+      const offScale = inlineRadiusOffScale(expressionAt(source, match.index + match[0].length));
+      if (offScale !== null) {
+        push("radius-token", match.index, `corner ${offScale} is not a radius token`);
       }
     }
   }
