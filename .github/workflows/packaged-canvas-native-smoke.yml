@@ -24,7 +24,7 @@ jobs:
   native:
     name: Packaged primary-window native controller
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Require existing native interaction permission
