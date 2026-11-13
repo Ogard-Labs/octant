@@ -714,7 +714,7 @@
 }
 
 .child-result__title {
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .child-result__attribution,

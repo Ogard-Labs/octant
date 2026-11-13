@@ -512,7 +512,7 @@ export interface Group {
 
 /** Names the app uses for its own chrome, not for a site or another app. */
 export const NOT_EXPORTED: RegExp =
-  /^--(?:octant-space-|octant-sidebar-translucent|octant-wide-|octant-context-)/;
+  /^--(?:octant-sidebar-translucent|octant-wide-|octant-context-)/;
 
 /**
  * Group membership is the only judgement this file holds: which of the app's

@@ -157,8 +157,7 @@ nothing essential sits under 12px at the default. The roles live in
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text and every name in navigation (thread titles, sidebar and
-Settings rail rows, the account's name), 500 (`--oct-weight-medium`,
-`--oct-weight-display`) for labels, controls, a setting's row and a menu's
+Settings rail rows, the account's name), 500 (`--oct-weight-medium`) for labels, controls, a setting's row and a menu's
 options, 600 (`--oct-weight-strong`) for emphasis (section labels, card titles,
 `strong`, the app's name, a destination's page title), and 700
 (`--oct-weight-title`) only for the large title. A count beside a label is Meta
@@ -3512,8 +3511,8 @@ interfaces. Revealing them must not move the transcript.
 
 ## Motion and interaction
 
-Functional feedback uses 120–160ms transitions; the base system duration is
-200ms. Use standard easing and no decorative entrance animation. There is no
+Functional feedback uses 150ms (`--oct-motion-fast`) and geometry 200ms
+(`--oct-motion-base`); an overlay leaves in 100ms (`--oct-dur-fast`). One value with one meaning has one token: a duration, a weight or a space is never defined twice under two names. Use standard easing and no decorative entrance animation. There is no
 ambient motion behind the work by default; an animated built-in picture, the
 Pulsing characters, Dithered pixels, and Flowing grounds, and a printed picture
 set to Wave are the moving grounds a person may choose, and reduced motion holds
@@ -3526,7 +3525,7 @@ animations without removing state information.
 way, declared once (`components.css`, Overlay motion): a menu, a context
 menu, a select or combobox list, a popover, a tooltip, a hover card, a dialog,
 Settings' sheet, and the scrim under a dialog or a sheet. It fades in over
-150ms (`--oct-dur-base`, `--oct-ease-motion`) and out over 100ms
+150ms (`--oct-motion-fast`, `--oct-ease-motion`) and out over 100ms
 (`--oct-dur-fast`, `--oct-ease-color`): nobody waits for a thing to leave. A
 popup settles from 98% at the point it is anchored to and a dialog from 98%
 about its centre; the sheet rises 8px instead, since a surface that size reads

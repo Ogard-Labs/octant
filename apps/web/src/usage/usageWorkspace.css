@@ -50,7 +50,7 @@
   margin: 0;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .usage-workspace__totals {
@@ -135,7 +135,7 @@
 
 .usage-workspace__coverage-count {
   font-variant-numeric: tabular-nums;
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .usage-workspace__hosts li {
@@ -153,7 +153,7 @@
 }
 
 .usage-workspace__host-id {
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .usage-workspace__excluded {
@@ -194,7 +194,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-2);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .usage-workspace__sources dd {

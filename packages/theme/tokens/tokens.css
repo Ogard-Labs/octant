@@ -155,7 +155,6 @@
   --octant-terminal-font-size: 12px;
   --octant-ui-font-size: 13px;
   /* ── Type: weights ── */
-  --oct-weight-display: 500;
   --oct-weight-medium: 500;
   --oct-weight-regular: 400;
   --oct-weight-strong: 600;
@@ -197,7 +196,7 @@
   --oct-role-row-detail-size: var(--oct-text-detail);
   --oct-role-row-label-leading: var(--oct-leading-label);
   --oct-role-row-label-size: var(--oct-text-sm);
-  --oct-role-row-label-weight: var(--oct-weight-display);
+  --oct-role-row-label-weight: var(--oct-weight-medium);
   --oct-role-section-label-family: var(--oct-font-display);
   --oct-role-section-label-leading: var(--oct-leading-snug);
   --oct-role-section-label-size: var(--oct-text-sm);
@@ -329,9 +328,7 @@
   --octant-glass-saturate: 150%;
   --octant-scrim: #000000;
   /* ── Motion: durations and easings ── */
-  --oct-dur-base: 0.15s;
   --oct-dur-fast: 0.1s;
-  --oct-dur-slow: 0.2s;
   --oct-ease-color: cubic-bezier(0.4, 0, 0.2, 1);
   --oct-ease-motion: cubic-bezier(0.22, 1, 0.36, 1);
   --oct-ease-standard: ease;
