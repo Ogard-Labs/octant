@@ -454,6 +454,11 @@ html:not([data-octant-reduced-transparency="true"])
   padding: 2px var(--oct-space-2) var(--oct-space-3);
 }
 
+.code-file-explorer__virtual {
+  position: relative;
+  min-width: 0;
+}
+
 .code-file-explorer__entry {
   position: relative;
   display: flex;

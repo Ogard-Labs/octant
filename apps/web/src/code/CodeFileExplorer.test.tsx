@@ -90,16 +90,52 @@ describe("CodeFileExplorer", () => {
     expect(unavailable).toBeDisabled();
   });
 
-  it("caps oversized projections and reports that the visible tree is incomplete", () => {
+  it("caps oversized projections and reports that the visible tree is incomplete", async () => {
+    const user = userEvent.setup();
     const many = Array.from({ length: MAX_CODE_FILE_EXPLORER_ENTRIES + 1 }, (_, index) =>
       file(`generated/file-${String(index).padStart(4, "0")}.txt`),
     );
-    render(<CodeFileExplorer entries={many} onOpenFile={vi.fn()} />);
+    await withTreeViewportHeight(280, async () => {
+      render(<CodeFileExplorer entries={many} onOpenFile={vi.fn()} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      `Showing the first ${MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString()}`,
+      expect(screen.getByRole("status")).toHaveTextContent(
+        `Showing the first ${MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString()}`,
+      );
+      const renderedRows = screen.getAllByRole("treeitem");
+      expect(renderedRows.length).toBeGreaterThan(0);
+      expect(renderedRows.length).toBeLessThan(50);
+
+      renderedRows[0]?.focus();
+      await user.keyboard("{End}");
+      expect(screen.getByRole("treeitem", { name: /file-0999\.txt/ })).toHaveFocus();
+      expect(screen.queryByRole("treeitem", { name: /file-1000\.txt/ })).not.toBeInTheDocument();
+    });
+  });
+
+  it("virtualizes large trees to bounded DOM rows and navigates across offscreen rows", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 500 }, (_, index) =>
+      file(`src/module-${String(index).padStart(3, "0")}.ts`),
     );
-    expect(screen.getAllByRole("treeitem")).toHaveLength(MAX_CODE_FILE_EXPLORER_ENTRIES);
+    await withTreeViewportHeight(280, async () => {
+      render(<CodeFileExplorer entries={many} onOpenFile={vi.fn()} />);
+
+      const initialRows = screen.getAllByRole("treeitem");
+      expect(initialRows.length).toBeGreaterThan(0);
+      expect(initialRows.length).toBeLessThan(50);
+      expect(screen.queryByRole("treeitem", { name: /module-499\.ts/ })).not.toBeInTheDocument();
+
+      initialRows[0]?.focus();
+      await user.keyboard("{End}");
+      expect(screen.getByRole("treeitem", { name: /module-499\.ts/ })).toHaveFocus();
+      expect(screen.getAllByRole("treeitem").length).toBeLessThan(50);
+
+      const tree = screen.getByRole("tree");
+      expect(tree.firstElementChild).toHaveStyle({ height: `${String(500 * 28)}px` });
+      tree.scrollTop = 500 * 28 - 280;
+      fireEvent.scroll(tree);
+      expect(screen.queryByRole("treeitem", { name: /module-000\.ts/ })).not.toBeInTheDocument();
+    });
   });
 
   it("searches the complete authoritative projection before capping visible matches", async () => {
@@ -370,6 +406,43 @@ function unavailable(path: string): Extract<CodeFileExplorerEntry, { readonly ki
     path: path as never,
     availability: { status: "unavailable", reason: "The file no longer exists." },
   };
+}
+
+async function withTreeViewportHeight(height: number, run: () => Promise<void>): Promise<void> {
+  const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+  const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get() {
+      if (this instanceof HTMLElement && this.classList.contains("code-file-explorer__tree")) {
+        return height;
+      }
+      return offsetHeight?.get?.call(this) ?? 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get() {
+      if (this instanceof HTMLElement && this.classList.contains("code-file-explorer__tree")) {
+        return height;
+      }
+      return clientHeight?.get?.call(this) ?? 0;
+    },
+  });
+  try {
+    await run();
+  } finally {
+    if (offsetHeight === undefined) {
+      Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+    } else {
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+    }
+    if (clientHeight === undefined) {
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    } else {
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeight);
+    }
+  }
 }
 
 function ruleBody(css: string, selector: string): string {
