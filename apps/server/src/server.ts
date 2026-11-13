@@ -818,6 +818,8 @@ export function startOctantServer(
       codeService,
       codeTurnDecisions,
       contributeCodeTools,
+      coordinatorService,
+      coordinatorWakes,
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
@@ -1149,6 +1151,8 @@ export function startOctantServer(
       shieldServerStore,
     });
     const { restartRecovery } = yield* wireContinuation({
+      coordinatorService,
+      coordinatorWakes,
       agentRunOrchestration,
       agentRunParentAuthority,
       agentRunPersistence,

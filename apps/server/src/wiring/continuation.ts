@@ -54,6 +54,7 @@ import { AgentRunProviderSlotScheduler } from "../agentRun/agentRunProviderSlotS
 import { AgentResultDeliveryService } from "../agentRun/agentResultDeliveryService";
 import { recordAgentRunResultIngestion } from "../agentRun/agentRunDelegation";
 import { continueAgentRunsCutOffByRestart } from "../agentRun/agentRunRestartContinuation";
+import { continueCoordinatorWakesAfterRestart } from "../coordinator/coordinatorWakeRestartContinuation";
 import {
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
@@ -78,7 +79,10 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
     "agentRunOrchestration" | "capacityScheduler" | "externalContentIngestionStore"
   > &
   Pick<WorkspaceWiring, "contextHarness"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
+  Pick<
+    CodeRuntimeWiring,
+    "codeOperationRuntime" | "coordinatorService" | "coordinatorWakes" | "routeCodeService"
+  > &
   Pick<ChatWiring, "chatAttemptsCutOffByRestart" | "chatService"> &
   Pick<HarnessWiring, "liftRestartRecovery"> &
   Pick<WorkWiring, "goalLoopService" | "threadMessageQueue" | "workTurnService"> &
@@ -296,12 +300,15 @@ function startRestartContinuation(
   // Read and removed on every start, whether or not anything was cut off, so
   // a quit with nothing running holds nothing after a later crash.
   const quitByPerson = consumePersonQuit(deps.persistence.dataDirectory);
+  // Read before anything this start wakes can append a newer frame.
+  const openWakes = deps.coordinatorWakes.open();
   if (
     deps.persistence.codeTurnsCutOffByRestart.length === 0 &&
     deps.chatAttemptsCutOffByRestart.length === 0 &&
     deps.workTurnsCutOffByRestart.length === 0 &&
     deps.goalLoopService.runningLoopThreads().length === 0 &&
-    deps.agentRunsCutOffByRestart.length === 0
+    deps.agentRunsCutOffByRestart.length === 0 &&
+    openWakes.length === 0
   )
     return () => undefined;
   let summary: HostRestartRecovery | undefined;
@@ -355,11 +362,37 @@ function startRestartContinuation(
     // After the threads, so a parent thread's own continuation is admitted
     // before its children resume under its live authority.
     const agentRuns = await settled(continueAgentRuns(deps, quitByPerson), "Subagent");
+    // After Code, so a wake never starts beside its thread's own continuation
+    // and waits with a thread Code recovery held.
+    const wakes = await settled(
+      continueCoordinatorWakesAfterRestart({
+        quitByPerson,
+        open: openWakes,
+        enabled: () => deps.persistence.readCodeSettings()?.settings.restartContinuation !== false,
+        optedOut: (threadId) => {
+          try {
+            return (
+              deps.persistence.readCodeThread(decodeCodeThreadId(threadId))
+                ?.restartContinuationOff === true
+            );
+          } catch {
+            return false;
+          }
+        },
+        heldByCode: new Set(
+          (code?.held ?? []).filter((entry) => entry.mode === "code").map((e) => e.threadId),
+        ),
+        attempts: createCodeRestartContinuationAttempts(deps.persistence.connection),
+        coordinator: deps.coordinatorService,
+      }),
+      "Coordinator wake",
+    );
     summary = mergeRestartRecoveries(decodeUtcTimestamp(new Date().toISOString()), [
       code,
       chat,
       work,
       agentRuns,
+      wakes,
     ]);
   })();
   return () => summary;

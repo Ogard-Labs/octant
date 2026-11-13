@@ -5162,9 +5162,9 @@ or .zip>` write the same files, built by one host command
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
   threads that window can open. Chat and Work turns are continued by the same
-  rule (Chat and Work restart recovery, below), and so are Work goal loops
-  and subagent runs (subagent restart recovery, below); coordinator wakes are
-  not continued yet.
+  rule (Chat and Work restart recovery, below), and so are Work goal loops,
+  subagent runs (subagent restart recovery, below) and pending coordinator
+  wakes (coordinator wake restart recovery, below).
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5332,6 +5332,25 @@ ls-remote` against the thread's remote and the GitHub reads they already
   only while the run's latest journaled start is that resume, so a person's
   later start begins a fresh count. The restart notice names each continued or
   held run under its parent thread.
+
+  Coordinator wake restart recovery starts the wakes the previous host decided
+  but never started a turn for. Each wake is journaled on the woken thread's
+  `coordinator-wake` aggregate when it is decided (its id, cause, sender, hop,
+  and for a state notice only the worker change it was decided on) and again
+  when its turn starts or it is dropped or held, so a wake with no second frame
+  is open; purging the thread takes its wakes. The other pending notices stay
+  in memory, since the woken turn's roster reads every worker's state again.
+  It runs after Code restart recovery. Each thread's newest open wake is
+  started once, as the host, through the ordinary wake turn: the recipient's
+  switches and idleness are read as they are now, and the hourly bound charged
+  when the wake was decided is not charged again. A thread that is not idle
+  already has a turn (a person's or its own restart continuation), so its wake
+  is dropped rather than run beside it. A wake is held (journaled `held`, so no
+  later start runs it, and the thread's next turn is a person's) when Settings
+  › Code › Continue after restart or the thread's switch is off, a person quit
+  Octant, Code restart recovery held the same thread, or its own start was cut
+  off by a restart twice (the crash-loop count sits in the thread store under
+  the wake's own key).
 
   A person who quits Octant while turns run chose to stop them, so the next
   start holds those threads instead of continuing them (maintainers decided on
