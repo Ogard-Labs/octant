@@ -1114,6 +1114,54 @@ describe("canvas export service", () => {
     connection.close();
   });
 
+  it("dismisses an unconfirmed export only for a local window, and it stays dismissed after a restart", async () => {
+    const { calls, service, eventStore, restart, connection } = harness();
+    const prepared = await service.prepare(prepareRequest(), true);
+    if (prepared.kind !== "approval") throw new Error("expected an approval card");
+    const lost = vi.spyOn(eventStore, "append").mockImplementation(() => {
+      throw new Error("host stopped");
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+    lost.mockRestore();
+    logged.mockRestore();
+    const next = restart();
+    next.settleUnconfirmed(localActor);
+    const notice = next.offers(canvasId)?.unconfirmed?.[0];
+    if (notice === undefined) throw new Error("expected an unconfirmed notice");
+
+    const fromDevice = next.dismissUnconfirmed({
+      canvasId,
+      exportId: notice.exportId,
+      permitted: true,
+      actor: remoteActor,
+    });
+    expect(fromDevice).toMatchObject({ kind: "refused", code: "unauthorized" });
+    expect(next.offers(canvasId)?.unconfirmed).toHaveLength(1);
+
+    expect(
+      next.dismissUnconfirmed({
+        canvasId,
+        exportId: notice.exportId,
+        permitted: true,
+        actor: localActor,
+      }),
+    ).toEqual({ kind: "dismissed", exportId: notice.exportId });
+    expect(next.offers(canvasId)?.unconfirmed).toEqual([]);
+
+    const later = restart();
+    later.settleUnconfirmed(localActor);
+    expect(later.offers(canvasId)?.unconfirmed).toEqual([]);
+    expect(calls).toHaveLength(1);
+    connection.close();
+  });
+
   it("reports a delivered export the journal could not record instead of failing it", async () => {
     const { calls, service, eventStore, connection } = harness();
     const prepared = await service.prepare(prepareRequest(), true);

@@ -1,13 +1,16 @@
 import {
   AggregateId,
   CanvasExportIntentRecorded,
+  CanvasExportNoticeDismissed,
   CanvasExportRecorded,
   CorrelationId,
   EventActor,
   EventId,
   decodeCanvasExportIntentRecorded,
+  decodeCanvasExportNoticeDismissed,
   decodeCanvasExportRecorded,
   type CanvasExportIntentRecorded as CanvasExportIntent,
+  type CanvasExportNoticeDismissed as CanvasExportDismissal,
   type CanvasExportRecorded as CanvasExportRecord,
   type EventEnvelope,
   type UtcTimestamp,
@@ -21,6 +24,7 @@ import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/jour
 export const CANVAS_EXPORT_AGGREGATE_TYPE = "canvas-export";
 export const CANVAS_EXPORT_RECORDED = "canvas.export@1";
 export const CANVAS_EXPORT_INTENT_RECORDED = "canvas.export-intent@1";
+export const CANVAS_EXPORT_NOTICE_DISMISSED = "canvas.export-notice-dismissed@1";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -31,7 +35,8 @@ const decodeEventId = Schema.decodeUnknownSync(EventId);
 export function registerCanvasExportEvents(registry: EventRegistry): EventRegistry {
   return registry
     .register(CANVAS_EXPORT_RECORDED, 1, CanvasExportRecorded)
-    .register(CANVAS_EXPORT_INTENT_RECORDED, 1, CanvasExportIntentRecorded);
+    .register(CANVAS_EXPORT_INTENT_RECORDED, 1, CanvasExportIntentRecorded)
+    .register(CANVAS_EXPORT_NOTICE_DISMISSED, 1, CanvasExportNoticeDismissed);
 }
 
 export class CanvasExportEventStoreError extends Error {
@@ -53,7 +58,8 @@ export interface CanvasExportEventStoreOptions {
 
 /**
  * One export is one `canvas-export` aggregate: its intent at version 1,
- * journaled before the destination is called, then its outcome at version 2.
+ * journaled before the destination is called, then its outcome at version 2,
+ * and, for an unconfirmed export the person dismissed, that dismissal at 3.
  * Exports journaled before intents existed hold only the outcome at version 1.
  * Replay rebuilds both from the journal alone, in commit order.
  * The actor is supplied per append, derived from the authenticated transport
@@ -88,11 +94,28 @@ export class CanvasExportEventStore {
     return this.#appendAt(payload.exportId, 1, CANVAS_EXPORT_RECORDED, payload, input);
   }
 
+  /**
+   * Journal the person's dismissal of a settled unconfirmed export. Expecting
+   * version 2 refuses an export whose outcome was never journaled, and a
+   * second dismissal of the same export.
+   */
+  appendNoticeDismissed(input: {
+    readonly dismissal: CanvasExportDismissal;
+    readonly occurredAt: UtcTimestamp;
+    readonly actor: typeof EventActor.Type;
+  }): EventEnvelope {
+    const payload = decodeCanvasExportNoticeDismissed(input.dismissal);
+    return this.#appendAt(payload.exportId, 2, CANVAS_EXPORT_NOTICE_DISMISSED, payload, input);
+  }
+
   #appendAt(
     exportId: string,
-    expectedVersion: 0 | 1,
-    eventName: typeof CANVAS_EXPORT_RECORDED | typeof CANVAS_EXPORT_INTENT_RECORDED,
-    payload: CanvasExportRecord | CanvasExportIntent,
+    expectedVersion: 0 | 1 | 2,
+    eventName:
+      | typeof CANVAS_EXPORT_RECORDED
+      | typeof CANVAS_EXPORT_INTENT_RECORDED
+      | typeof CANVAS_EXPORT_NOTICE_DISMISSED,
+    payload: CanvasExportRecord | CanvasExportIntent | CanvasExportDismissal,
     input: { readonly occurredAt: UtcTimestamp; readonly actor: typeof EventActor.Type },
   ): EventEnvelope {
     let actor: typeof EventActor.Type;
@@ -159,7 +182,9 @@ export class CanvasExportEventStore {
   replayAll(): {
     readonly records: ReadonlyArray<CanvasExportRecord>;
     readonly unsettled: ReadonlyArray<CanvasExportIntent>;
+    readonly dismissed: ReadonlySet<string>;
   } {
+    const dismissed = new Set<string>();
     const records: CanvasExportRecord[] = [];
     const intents = new Map<string, CanvasExportIntent>();
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
@@ -173,12 +198,14 @@ export class CanvasExportEventStore {
           const record = decodeCanvasExportRecorded(envelope.payload);
           intents.delete(String(record.exportId));
           records.push(record);
+        } else if (envelope.eventName === CANVAS_EXPORT_NOTICE_DISMISSED) {
+          dismissed.add(String(decodeCanvasExportNoticeDismissed(envelope.payload).exportId));
         }
       } catch {
         // The journal remains authoritative; a frame that no longer decodes
         // is not rewritten into a different export.
       }
     }
-    return { records, unsettled: [...intents.values()] };
+    return { records, unsettled: [...intents.values()], dismissed };
   }
 }

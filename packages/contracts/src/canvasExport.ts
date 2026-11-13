@@ -775,6 +775,37 @@ export const CanvasExportDecideResult = Schema.Union(
 );
 export type CanvasExportDecideResult = typeof CanvasExportDecideResult.Type;
 
+/**
+ * The person's own answer to an unconfirmed-export notice: they checked the
+ * destination and want the notice gone without exporting again. Journaled,
+ * and accepted only from a window on this computer.
+ */
+export const CanvasExportNoticeDismissRequest = Schema.Struct({
+  schemaVersion: CanvasExportSchemaVersion,
+  kind: Schema.Literal("canvas-export-notice-dismiss"),
+  canvasId: CanvasId,
+  exportId: CanvasExportRecordId,
+}).annotations(strict);
+export type CanvasExportNoticeDismissRequest = typeof CanvasExportNoticeDismissRequest.Type;
+
+export const CanvasExportNoticeDismissResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("dismissed"),
+    exportId: CanvasExportRecordId,
+  }).annotations(strict),
+  CanvasExportRefusal,
+);
+export type CanvasExportNoticeDismissResult = typeof CanvasExportNoticeDismissResult.Type;
+
+/** The journal frame for a dismissal: the export's third and last event. */
+export const CanvasExportNoticeDismissed = Schema.Struct({
+  schemaVersion: CanvasExportSchemaVersion,
+  kind: Schema.Literal("canvas-export-notice-dismissed"),
+  exportId: CanvasExportRecordId,
+  canvasId: CanvasId,
+}).annotations(strict);
+export type CanvasExportNoticeDismissed = typeof CanvasExportNoticeDismissed.Type;
+
 export const decodeCanvasExportContribution = Schema.decodeUnknownSync(CanvasExportContribution);
 export const decodeCanvasExportTargetOffer = Schema.decodeUnknownSync(CanvasExportTargetOffer);
 export const decodeCanvasExportOfferList = Schema.decodeUnknownSync(CanvasExportOfferList);
@@ -797,3 +828,12 @@ export const decodeCanvasExportIntentRecorded = Schema.decodeUnknownSync(
 export const decodeCanvasExportPayloadDigest = Schema.decodeUnknownSync(CanvasExportPayloadDigest);
 export const decodeCanvasHtmlFileRequest = Schema.decodeUnknownSync(CanvasHtmlFileRequest);
 export const decodeCanvasHtmlFileResult = Schema.decodeUnknownSync(CanvasHtmlFileResult);
+export const decodeCanvasExportNoticeDismissRequest = Schema.decodeUnknownSync(
+  CanvasExportNoticeDismissRequest,
+);
+export const decodeCanvasExportNoticeDismissResult = Schema.decodeUnknownSync(
+  CanvasExportNoticeDismissResult,
+);
+export const decodeCanvasExportNoticeDismissed = Schema.decodeUnknownSync(
+  CanvasExportNoticeDismissed,
+);

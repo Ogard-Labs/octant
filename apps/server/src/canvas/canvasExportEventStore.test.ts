@@ -114,6 +114,6 @@ describe("canvas export journal", () => {
     const replayed = store(reopened, () => "66666666-6666-4666-8666-666666666666").replayAll();
     reopened.close();
 
-    expect(replayed).toEqual({ records: [], unsettled: [intent] });
+    expect(replayed).toEqual({ records: [], unsettled: [intent], dismissed: new Set() });
   });
 });

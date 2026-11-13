@@ -32,6 +32,7 @@ import {
   type CanvasExportOfferList,
   type CanvasExportPictureFormat,
   type CanvasExportRecorded,
+  type CanvasExportNoticeDismissResult,
   type CanvasExportUnconfirmedNotice,
   type CanvasExportPrepareRequest,
   type CanvasExportPrepareResult,
@@ -203,7 +204,7 @@ export class CanvasExportService {
    * showing the notice until a later export to that destination is recorded.
    */
   settleUnconfirmed(actor: EventActor): void {
-    const { records, unsettled } = this.#eventStore.replayAll();
+    const { records, unsettled, dismissed } = this.#eventStore.replayAll();
     const settled: CanvasExportRecorded[] = [...records];
     for (const intent of unsettled) {
       const record = decodeCanvasExportRecorded({
@@ -223,7 +224,52 @@ export class CanvasExportService {
       // next start settles again, and the person must not read silence.
       settled.push(record);
     }
-    for (const record of settled) this.#noteRecorded(record);
+    for (const record of settled) {
+      if (!dismissed.has(String(record.exportId))) this.#noteRecorded(record);
+    }
+  }
+
+  /**
+   * The person checked the destination and wants the notice gone without
+   * exporting again. Only a window on this computer may dismiss it: a paired
+   * device cannot quietly clear the host's record of an uncertain publish.
+   */
+  dismissUnconfirmed(input: {
+    readonly canvasId: CanvasId;
+    readonly exportId: CanvasExportRecordId;
+    readonly permitted: boolean;
+    readonly actor: EventActor;
+  }): CanvasExportNoticeDismissResult {
+    if (!input.permitted || input.actor.kind !== "local-user") {
+      return refused(
+        "unauthorized",
+        "An unconfirmed export can be dismissed only from a window on this computer.",
+      );
+    }
+    const key = String(input.canvasId);
+    const notices = this.#unconfirmed.get(key) ?? [];
+    const notice = notices.find((record) => String(record.exportId) === String(input.exportId));
+    if (notice === undefined) {
+      return refused("unavailable", "That export has no unconfirmed notice on this Canvas.");
+    }
+    try {
+      this.#eventStore.appendNoticeDismissed({
+        dismissal: {
+          schemaVersion: 1,
+          kind: "canvas-export-notice-dismissed",
+          exportId: notice.exportId,
+          canvasId: notice.canvasId,
+        },
+        occurredAt: this.#clock(),
+        actor: input.actor,
+      });
+    } catch {
+      return refused("unavailable", "This host could not record the dismissal; the notice stays.");
+    }
+    const kept = notices.filter((record) => record !== notice);
+    if (kept.length === 0) this.#unconfirmed.delete(key);
+    else this.#unconfirmed.set(key, kept);
+    return { kind: "dismissed", exportId: notice.exportId };
   }
 
   /** A recorded export retires earlier notices for its Canvas and destination. */

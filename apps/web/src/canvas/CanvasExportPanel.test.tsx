@@ -158,6 +158,44 @@ describe("CanvasExportPanel", () => {
     );
   });
 
+  it("dismisses an unconfirmed notice through the host without exporting again", async () => {
+    type Notice = NonNullable<CanvasExportOfferList["unconfirmed"]>[number];
+    const user = userEvent.setup();
+    const exportId = "33333333-3333-4333-8333-333333333333" as Notice["exportId"];
+    const onDismissNotice = vi.fn(async () => ({ kind: "dismissed" as const, exportId }));
+    const onDecide = vi.fn();
+    render(
+      <CanvasExportPanel
+        offers={{
+          ...offers(),
+          unconfirmed: [
+            {
+              exportId,
+              targetId: "reading-copy" as Notice["targetId"],
+              destinationLabel: "Reading copy",
+              format: "markdown",
+              sequence: 1,
+            },
+          ],
+        }}
+        onDecide={onDecide}
+        onDismissNotice={onDismissNotice}
+        onPrepare={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(onDismissNotice).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      kind: "canvas-export-notice-dismiss",
+      canvasId,
+      exportId,
+    });
+    expect(screen.queryByTestId("canvas-export-unconfirmed")).toBeNull();
+    expect(onDecide).not.toHaveBeenCalled();
+  });
+
   it("names the file the export will write, and says when it replaces one", async () => {
     const user = userEvent.setup();
     const onPrepare = vi.fn(async () => ({

@@ -6,6 +6,8 @@ import {
   type CanvasExportDecideResult,
   type CanvasExportRecorded,
   type CanvasExportFormat,
+  type CanvasExportNoticeDismissRequest,
+  type CanvasExportNoticeDismissResult,
   type CanvasExportOfferList,
   type CanvasExportPrepareRequest,
   type CanvasExportPrepareResult,
@@ -30,6 +32,10 @@ export interface CanvasExportPanelProps {
   readonly offers: CanvasExportOfferList;
   readonly onPrepare: (request: CanvasExportPrepareRequest) => Promise<CanvasExportPrepareResult>;
   readonly onDecide: (request: CanvasExportDecideRequest) => Promise<CanvasExportDecideResult>;
+  /** Clears an unconfirmed-export notice without exporting again. Absent hides the action. */
+  readonly onDismissNotice?: (
+    request: CanvasExportNoticeDismissRequest,
+  ) => Promise<CanvasExportNoticeDismissResult>;
   /** The folder this Canvas exports to. Absent on a host without that surface. */
   readonly folder?: CanvasExportFolderState;
   /** Called after a folder was chosen, so the offers are read again. */
@@ -109,6 +115,31 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
   // time a card is prepared; "never" is only ever picked, never a default.
   const [linkExpiry, setLinkExpiry] = useState("");
   const [linkPassword, setLinkPassword] = useState("");
+  // Notices the host confirmed dismissed in this panel; the next offers read
+  // no longer lists them.
+  const [dismissed, setDismissed] = useState<ReadonlyArray<string>>([]);
+  const notices = (props.offers.unconfirmed ?? []).filter(
+    (notice) => !dismissed.includes(String(notice.exportId)),
+  );
+
+  async function dismissNotice(exportId: CanvasExportNoticeDismissRequest["exportId"]) {
+    if (props.onDismissNotice === undefined) return;
+    try {
+      const result = await props.onDismissNotice({
+        schemaVersion: 1,
+        kind: "canvas-export-notice-dismiss",
+        canvasId: props.offers.canvasId,
+        exportId,
+      });
+      if (result.kind === "dismissed") {
+        setDismissed((current) => [...current, String(result.exportId)]);
+        return;
+      }
+      setMessage(result.message);
+    } catch {
+      setMessage("The notice could not be dismissed.");
+    }
+  }
 
   const chosenFormat = formats.includes(format) ? format : formats[0];
   const folder = props.folder;
@@ -230,12 +261,22 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
           </OctantButton>
         </div>
       )}
-      {props.offers.unconfirmed !== undefined && props.offers.unconfirmed.length > 0 ? (
+      {notices.length > 0 ? (
         <ul className="canvas-export__statuses" data-testid="canvas-export-unconfirmed">
-          {props.offers.unconfirmed.map((notice) => (
+          {notices.map((notice) => (
             <li key={String(notice.exportId)}>
               Export to {notice.destinationLabel} not confirmed. Octant stopped before it finished;
               check {notice.destinationLabel} before exporting again.
+              {props.onDismissNotice === undefined ? null : (
+                <OctantButton
+                  onClick={() => void dismissNotice(notice.exportId)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Dismiss
+                </OctantButton>
+              )}
             </li>
           ))}
         </ul>

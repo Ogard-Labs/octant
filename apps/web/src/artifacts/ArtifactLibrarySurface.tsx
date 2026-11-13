@@ -246,6 +246,9 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
                 folder={exportFolder}
                 offers={exportOffers}
                 onDecide={exportClient.decideExport}
+                {...(exportClient.dismissExportNotice === undefined
+                  ? {}
+                  : { onDismissNotice: exportClient.dismissExportNotice })}
                 onExportFolderChosen={() => {
                   if (exportEntry !== undefined) void openExport(exportEntry);
                 }}
