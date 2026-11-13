@@ -17,20 +17,33 @@ import {
 export const COORDINATOR_WORKER_LEVELS: ReadonlyArray<{
   readonly id: string;
   readonly label: string;
+  /** The same choice under a "Workers start at" heading, short enough for a submenu at phone width. */
+  readonly menuLabel: string;
   readonly level?: CoordinatorWorkerLevel;
 }> = [
-  { id: "", label: "Workers start at this thread's level or lower" },
+  {
+    id: "",
+    label: "Workers start at this thread's level or lower",
+    menuLabel: "This thread's level or lower",
+  },
   {
     id: "approval-gated",
     label: "Workers always start at Ask for approvals",
+    menuLabel: "Ask for approvals",
     level: "approval-gated",
   },
   {
     id: "auto-accept-edits",
     label: "Workers always start at Auto-accept edits",
+    menuLabel: "Auto-accept edits",
     level: "auto-accept-edits",
   },
-  { id: "full-access", label: "Workers always start at Full access", level: "full-access" },
+  {
+    id: "full-access",
+    label: "Workers always start at Full access",
+    menuLabel: "Full access",
+    level: "full-access",
+  },
 ];
 
 /** A coordinator's three bounds, with the default and the most a person may set. */

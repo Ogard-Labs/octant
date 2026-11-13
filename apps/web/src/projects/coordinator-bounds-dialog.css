@@ -1,5 +1,7 @@
-/* A running coordinator's three limits: one row each, so the steppers wrap
-   under their labels on a phone rather than pushing the dialog wider. */
+/* A running coordinator's three limits: one row each. The label takes the
+   flexible column and wraps, so every stepper keeps its own line at the right
+   edge; letting the stepper wrap instead dropped only the longest row's
+   stepper under its label at 420px and the rows stopped lining up. */
 .coordinator-bounds-dialog {
   display: flex;
   flex-direction: column;
@@ -18,11 +20,16 @@
 }
 
 .coordinator-bounds-dialog__row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: var(--oct-space-2);
+}
+
+/* Outside Settings the stepper has no column width to follow; this is the
+   width of three digits between its two buttons. */
+.coordinator-bounds-dialog__row > .octant-number-stepper {
+  width: calc(var(--oct-space-6) * 4);
 }
 
 .coordinator-bounds-dialog__actions {

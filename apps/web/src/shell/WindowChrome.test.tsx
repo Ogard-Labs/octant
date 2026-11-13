@@ -780,7 +780,10 @@ describe("WindowChrome", () => {
     );
     expect(cssRule(".project-threads")).toContain("padding-left: 0;");
     expect(cssRule(".thread-row-info-card__header")).toContain("justify-content: space-between;");
-    expect(cssRule(".thread-row-context-menu")).toContain("width: min(248px, calc(100vw - 24px));");
+    expect(cssRule(".thread-row-context-menu")).toContain("width: max-content;");
+    expect(cssRule(".thread-row-context-menu")).toContain(
+      "max-width: min(320px, var(--available-width, 100vw), calc(100vw - 24px));",
+    );
   });
 
   it("keeps a thread row's room and fork mark right on touch and in a narrow window", () => {

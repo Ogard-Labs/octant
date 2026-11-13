@@ -33,6 +33,7 @@ import {
   OctantContextMenuContent,
   OctantContextMenuGroup,
   OctantContextMenuItem,
+  OctantContextMenuLabel,
   OctantContextMenuSeparator,
   OctantContextMenuSub,
   OctantContextMenuSubContent,
@@ -144,6 +145,8 @@ export interface ThreadRowActions {
   readonly onEditCoordinatorBounds?: (threadId: string) => void;
   /** The thread's Wake when a message arrives switch, in Code and Work. Absent in Chat. */
   readonly onSetMessageWake?: (threadId: string, wake: boolean) => void;
+  /** Whether this row's kind has the message wake, in a list that mixes kinds. */
+  readonly canSetMessageWake?: (threadId: string) => boolean;
   /** A worker's Wake for coordinator switch, offered only on a worker. */
   readonly onSetCoordinatorWake?: (threadId: string, wake: boolean) => void;
   /** The thread's Continue after restart switch, in every mode. */
@@ -500,7 +503,7 @@ export type ThreadCoordinatorActions = Pick<
  */
 function coordinatorMenuChoices(
   thread: ChatThreadNavigationItem,
-  actions: ThreadCoordinatorActions,
+  actions: ThreadCoordinatorActions & Pick<ThreadRowActions, "canSetMessageWake">,
 ) {
   const worker = thread.coordinatorThreadId !== undefined;
   return {
@@ -511,7 +514,10 @@ function coordinatorMenuChoices(
       thread.coordinator === true && thread.planner !== true
         ? actions.onEditCoordinatorBounds
         : undefined,
-    messageWake: actions.onSetMessageWake,
+    messageWake:
+      actions.canSetMessageWake?.(thread.navigationId ?? thread.threadId) === false
+        ? undefined
+        : actions.onSetMessageWake,
     coordinatorWake: worker ? actions.onSetCoordinatorWake : undefined,
     restartContinuation: actions.onSetRestartContinuation,
   };
@@ -519,7 +525,7 @@ function coordinatorMenuChoices(
 
 export function threadCoordinatorMenuOffers(
   thread: ChatThreadNavigationItem,
-  actions: ThreadCoordinatorActions,
+  actions: ThreadCoordinatorActions & Pick<ThreadRowActions, "canSetMessageWake">,
 ): boolean {
   const choices = coordinatorMenuChoices(thread, actions);
   return (
@@ -533,7 +539,7 @@ export function threadCoordinatorMenuOffers(
 
 export function ThreadCoordinatorMenuItems(props: {
   readonly thread: ChatThreadNavigationItem;
-  readonly actions: ThreadCoordinatorActions;
+  readonly actions: ThreadCoordinatorActions & Pick<ThreadRowActions, "canSetMessageWake">;
 }) {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
   const { role, bounds, messageWake, coordinatorWake, restartContinuation } =
@@ -560,17 +566,22 @@ export function ThreadCoordinatorMenuItems(props: {
           >
             <MenuContent icon={Network}>Make coordinator</MenuContent>
           </OctantContextMenuSubTrigger>
+          {/* The full sentences overran a submenu at 420px, so the shared
+              start of each choice is the group's heading. */}
           <OctantContextMenuSubContent className="thread-row-context-menu">
-            {COORDINATOR_WORKER_LEVELS.map((choice) => (
-              <OctantContextMenuItem
-                className="thread-row-context-menu__item"
-                key={choice.id}
-                label={choice.label}
-                onClick={() => role(threadId, true, choice.level)}
-              >
-                <span className="thread-row-context-menu__item-label">{choice.label}</span>
-              </OctantContextMenuItem>
-            ))}
+            <OctantContextMenuGroup>
+              <OctantContextMenuLabel>Workers start at</OctantContextMenuLabel>
+              {COORDINATOR_WORKER_LEVELS.map((choice) => (
+                <OctantContextMenuItem
+                  className="thread-row-context-menu__item"
+                  key={choice.id}
+                  label={choice.label}
+                  onClick={() => role(threadId, true, choice.level)}
+                >
+                  <span className="thread-row-context-menu__item-label">{choice.menuLabel}</span>
+                </OctantContextMenuItem>
+              ))}
+            </OctantContextMenuGroup>
           </OctantContextMenuSubContent>
         </OctantContextMenuSub>
       )}

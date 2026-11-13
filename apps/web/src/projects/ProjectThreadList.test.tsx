@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarRowPropertyVisibility } from "@octant/contracts/shell";
 import { ProjectThreadList, ProjectThreadRows } from "./ProjectThreadList";
+import { mergeThreadRowActions } from "./mergeThreadRowActions";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarRowPropertiesContext } from "../shell/sidebarRowProperties";
 
@@ -1365,16 +1366,14 @@ describe("coordinator threads in a thread row's menu", () => {
     await userEvent.hover(await screen.findByRole("menuitem", { name: "Make coordinator" }));
     await userEvent.click(
       await screen.findByRole("menuitem", {
-        name: "Workers start at this thread's level or lower",
+        name: "This thread's level or lower",
       }),
     );
     expect(onSetCoordinator).toHaveBeenCalledWith("thread-one", true, undefined);
 
     await openMenu(/Controller foundation/);
     await userEvent.hover(await screen.findByRole("menuitem", { name: "Make coordinator" }));
-    await userEvent.click(
-      await screen.findByRole("menuitem", { name: "Workers always start at Full access" }),
-    );
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Full access" }));
     expect(onSetCoordinator).toHaveBeenLastCalledWith("thread-one", true, "full-access");
 
     rerender(
@@ -1441,6 +1440,32 @@ describe("coordinator threads in a thread row's menu", () => {
     expect(on).toHaveAttribute("aria-checked", "true");
     await userEvent.click(on);
     expect(onSetMessageWake).toHaveBeenLastCalledWith("thread-one", false);
+  });
+
+  it("offers Wake when a message arrives on a Work row of a list that mixes Chat and Work, and not on its Chat rows", async () => {
+    const chat = { onSetRestartContinuation: vi.fn() };
+    const work = { onSetMessageWake: vi.fn(), onSetRestartContinuation: vi.fn() };
+    render(
+      <ProjectThreadRows
+        actions={mergeThreadRowActions((id) => id === "chat-one", chat, work)}
+        onSelectThread={vi.fn()}
+        threads={[
+          { ...thread, threadId: "work-one", title: "Work brief" },
+          { ...thread, threadId: "chat-one", title: "Chat question" },
+        ]}
+      />,
+    );
+    await openMenu(/Work brief/);
+    await userEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" }),
+    );
+    expect(work.onSetMessageWake).toHaveBeenCalledExactlyOnceWith("work-one", true);
+
+    await openMenu(/Chat question/);
+    await screen.findByRole("menuitemcheckbox", { name: "Continue after restart" });
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Wake when a message arrives" }),
+    ).toBeNull();
   });
 
   it("offers a worker Wake for coordinator in place of the coordinator role", async () => {

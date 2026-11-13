@@ -1243,13 +1243,15 @@ describe("SettingsView", () => {
     for (const selector of [
       "\\.settings-view__select",
       "\\.settings-font-picker",
-      "\\.octant-number-stepper",
+      "\\.setrow-control > \\.octant-number-stepper",
     ]) {
       expect(styles).toMatch(
         new RegExp(`${selector}[^{}]*\\{[^}]*width:\\s*var\\(--oct-settings-control`),
       );
     }
-    expect(styles).toMatch(
+    // The stepper's own rules load with the app, outside the lazy Settings sheet.
+    const components = readFileSync(resolve(process.cwd(), "src/styles/components.css"), "utf8");
+    expect(components).toMatch(
       /\.octant-number-stepper \{[^}]*grid-template-columns:\s*30px minmax\(0, 1fr\) auto 30px;/,
     );
   });
