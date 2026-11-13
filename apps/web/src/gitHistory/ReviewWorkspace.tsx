@@ -4,6 +4,7 @@ import type { DockReviewToolProps } from "../shell/DockReviewTool";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { LocalCommitsPanel } from "./LocalCommitsPanel";
 import { SavedAgentReview, type AgentResultReviewRequest } from "./SavedAgentReview";
+import { useDockBarControls } from "../shell/dockBarControls";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ShellState } from "../shell/ShellState";
 import "./git-history.css";
@@ -60,26 +61,45 @@ function BoundReview(props: DockReviewToolProps) {
           }),
     [props.serverUrl, props.windowCapability],
   );
+  const select = (selected: string) => {
+    setView(selected);
+    if (selected === "history") setOpenedHistory(true);
+    if (selected === "local") setOpenedLocal(true);
+  };
+  // In a tile the three views are the bar's own controls beside the name; the
+  // toolbar row is only drawn where no tile took them (the bottom panel).
+  const hosted = useDockBarControls([
+    {
+      kind: "choice",
+      id: "view",
+      label: "Review view",
+      options: [
+        { id: "changes", label: "Working tree" },
+        { id: "local", label: "Local commits" },
+        { id: "history", label: "History" },
+      ],
+      value: view,
+      onChange: select,
+    },
+  ]);
   return (
     <div className="git-history">
-      <div className="git-history__toolbar">
-        <OctantToggleGroup
-          aria-label="Review view"
-          value={[view]}
-          onValueChange={(values) => {
-            const selected = values[0];
-            if (selected) {
-              setView(selected);
-              if (selected === "history") setOpenedHistory(true);
-              if (selected === "local") setOpenedLocal(true);
-            }
-          }}
-        >
-          <OctantToggleGroupItem value="changes">Working tree</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="local">Local commits</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="history">History</OctantToggleGroupItem>
-        </OctantToggleGroup>
-      </div>
+      {hosted !== undefined ? null : (
+        <div className="git-history__toolbar">
+          <OctantToggleGroup
+            aria-label="Review view"
+            value={[view]}
+            onValueChange={(values) => {
+              const selected = values[0];
+              if (selected) select(selected);
+            }}
+          >
+            <OctantToggleGroupItem value="changes">Working tree</OctantToggleGroupItem>
+            <OctantToggleGroupItem value="local">Local commits</OctantToggleGroupItem>
+            <OctantToggleGroupItem value="history">History</OctantToggleGroupItem>
+          </OctantToggleGroup>
+        </div>
+      )}
       <div className="git-history__list git-history__list--changes" hidden={view !== "changes"}>
         <Suspense fallback={<ShellState state="loading" title="Loading changes" />}>
           <WorkingTree {...props} />

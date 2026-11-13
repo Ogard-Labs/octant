@@ -419,8 +419,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   read, review dialog, and one-decision-at-a-time guard. The review starts on
   the requested provider, model, and level and offers no mode above that level.
   A paired browser's Code workspace and the phone's Code thread screen show the
-  same cards read-only, with "Approve at a window on this computer" and no
-  decision.
+  same cards and decide them as a window does (maintainer decision, 2026-11-12;
+  not built yet: today they are read-only there, with "Approve at a window on
+  this computer" and no decision).
 - **Owner devices.** The owner access recovery screen (phone, and a browser's
   owner section) shows a chosen Code thread's **Wake when a message arrives**
   and, on a worker, **Wake for coordinator**, each change under its own fresh
@@ -574,10 +575,13 @@ Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
 shell reads the title from the navigation rows instead, and a rename made in
 any window reaches every open pane. A thread pane's title row is its
-drag handle: an environment mark (a small neutral tile holding a laptop glyph
+drag handle. Its text starts on the left edge of the thread's text column
+below (see Alignment in the design system), so the title reads one line down
+into the transcript: a breadcrumb (the Project in meta text, a slash, and the
+title), then the environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
-it runs on another host), then a breadcrumb: the Project in meta text, a slash,
-and the title. The Project keeps its width (capped at a fixed character count,
+it runs on another host) and the pull-request chip. With content tabs open the
+mark leads the tabs as before. The Project keeps its width (capped at a fixed character count,
 not a share of the header) and the title truncates first (it shrinks much
 faster, with no fixed floor so a narrow pane keeps its status chip); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
@@ -881,8 +885,10 @@ Each tile resolves its own availability against the active pane, and the dock
 still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
-has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
-with an Arrange menu (Move left, right, up and down where the caps allow, Show
+has one. Each tile has one bar, 32px: the tool's name (the Browser's bar is its page row),
+then the tool's own controls (navigation as words, actions as icons, status as
+text; they fold into a named view menu and then a More menu before the name is
+cut), with an Arrange menu (Move left, right, up and down where the caps allow, Show
 alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
 trailing edge; a tool that is open but not shown is marked on its button in the title band's
 tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
@@ -1014,8 +1020,9 @@ controls: the pull request's labels (a button removes one) and the
 repository's other labels (a button adds one; no free-text label), a comment
 box, a reply box on each open review thread, and Close or Reopen pull request.
 A comment or reply says it posts under the person's name; a refusal is one
-alert line under the section, and a paired device is told only the desktop
-window can do it. Rules and limits are owned by
+alert line under the section, and, until a paired device uses the same controls
+(not built yet), it is told only the desktop window can do it. Rules and limits
+are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps

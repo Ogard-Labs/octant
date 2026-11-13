@@ -421,10 +421,15 @@
   height: 100%;
 }
 
+/* The path is content, so it keeps the one secondary row: 32px on the bar's
+   insets and hairline. */
 .dock-document-tool__path {
+  display: flex;
+  height: 32px;
+  align-items: center;
   margin: 0;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border);
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
   overflow: hidden;
 }
 
@@ -517,6 +522,31 @@
   padding: 4px var(--oct-space-3) var(--oct-rail-pad-end);
   background: transparent;
   border-bottom: 1px solid var(--oct-border);
+}
+
+/* A tool whose controls stand in the tile's bar keeps no header of its own. A
+   field that is content (Files' filter) keeps one row under the bar: 32px, the
+   bar's insets and hairline, so the two read as one header. */
+/* The tree's first glyph stands on the bar's 12px: the row box keeps its 8px
+   inset from the tile and the glyph sits 4px into it. */
+.right-utility-dock__tool .code-file-explorer[data-bar-hosted="true"] {
+  --oct-file-inset: 4px;
+}
+
+.right-utility-dock__tool [data-bar-hosted="true"] > .code-file-explorer__head {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+}
+
+.right-utility-dock__tool
+  [data-bar-hosted="true"]
+  > .code-file-explorer__head
+  .code-file-explorer__search
+  input {
+  height: 24px;
 }
 
 /* The Browser's row takes the tile bar's insets, not the rail's: its first
@@ -647,6 +677,28 @@
   padding: var(--oct-space-2) var(--oct-space-3) 0;
 }
 
+/* Hosted, the header is the one 32px row on the bar's insets and hairline: it
+   says what the chat is about, and the thread menu stands in it as a 24px
+   control at the bar's 8px end inset. */
+.right-utility-dock__tool .side-chat[data-bar-hosted="true"] .side-chat__header {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 calc(var(--oct-space-2) + 24px + var(--oct-space-1)) 0 var(--oct-space-3);
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+}
+
+.right-utility-dock__tool
+  .side-chat[data-bar-hosted="true"]
+  .chat-workspace__thread-actions
+  > .shell-icon-button {
+  top: var(--oct-space-1);
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+}
+
 /* The side conversation's own thread menu joins the Side Chat rail at its
    trailing edge. Left in the embedded chat's header, it sat alone on a row of
    its own between the notice and the conversation. Only the trigger moves:
@@ -749,6 +801,15 @@
   padding: 4px var(--oct-space-2) var(--oct-rail-pad-end) 8px;
   background: transparent;
   border-bottom: 0;
+}
+
+/* The shown tool's controls, between the tabs and Hide. */
+.bottom-utility-panel__controls {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  padding-inline: var(--oct-space-2);
 }
 
 .bottom-utility-panel__tabs {
@@ -941,6 +1002,237 @@
   flex: 1 1 auto;
   padding: 0;
   border: 0;
+}
+
+/* The tool's own controls, between its name and the tile's Arrange and Close:
+   navigation and status lead, actions trail, 24px controls 4px apart, never a
+   second row. The controls fold before the name is cut (DockBarRow). */
+.dock-tile__bar {
+  position: relative;
+}
+
+/* The name gives way last: the status text beside it shrinks ten times as fast. */
+.dock-tile__bar[data-has-controls="true"] > .dock-tile__lead {
+  flex: 0 0.1 auto;
+}
+
+.dock-tile__tool-controls {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-tile__tool-lead,
+.dock-tile__tool-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-tile__tool-actions {
+  flex: none;
+  margin-inline-start: auto;
+}
+
+/* A cue is never cut: no cap, no ellipsis, no shrinking. The bar measures it at
+   its full width, and where it cannot fit it moves to the row and wraps. */
+.dock-tile__tool-cue {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.dock-tile__tool-text {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+  max-width: 16em;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A tool shown alone has no tile bar; its controls stand in one row of the
+   bar's height, insets and hairline, holding only them. */
+.dock-tile__row {
+  position: relative;
+  display: flex;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+}
+
+/* Navigation keeps its words: a small tray of segments, the tray 28px and each
+   segment 24px, centred in the bar's 32px (2px above and below). */
+.dock-bar-switch {
+  display: inline-flex;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  padding: 2px;
+  gap: 0;
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-well);
+  box-shadow: var(--octant-shadow-well);
+}
+
+.dock-bar-switch__option {
+  display: inline-flex;
+  height: 24px;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 var(--oct-space-2);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+}
+
+.dock-bar-switch__option[data-pressed] {
+  background: var(--octant-control);
+  box-shadow: var(--octant-shadow-control);
+  color: var(--oct-fg);
+}
+
+/* The switch folded: the current view's name with a menu of the views. */
+.dock-bar-named {
+  display: inline-flex;
+  height: 24px;
+  max-width: 16em;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+}
+
+/* A long name (a device the person named) stops at the cap with an ellipsis;
+   its full name is the tooltip. */
+.dock-bar-named__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-bar-named:hover,
+.dock-bar-named[aria-expanded="true"] {
+  background: var(--octant-control);
+}
+
+/* A state that must read at a glance stays in words (View only). */
+.dock-bar-chip {
+  display: inline-flex;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  padding: 0 var(--oct-space-2);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-control);
+  box-shadow: var(--octant-shadow-control);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+}
+
+.dock-tile__tool-node {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
+/* The control as drawn, at its natural width wherever it stands: the bar
+   measures this box, so a tag or a count that grows it is seen. */
+.dock-tile__tool-node-body {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* What must stay readable or whole (a billed desktop's provider and place, a
+   control the tool draws itself) stands after the tool's words. When the bar
+   cannot hold it beside the name it moves, without being drawn again, to the
+   one secondary row under the bar: 32px on the bar's insets and hairline, in
+   the same toolbar. In the bottom panel it scrolls within its own box. */
+.dock-tile__tool-cues {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-tile__bar[data-fold="row"],
+.dock-tile__row[data-fold="row"] {
+  margin-bottom: var(--dock-cues-height, 32px);
+}
+
+/* The row wraps when its contents are wider than the bar: every cue stays whole,
+   on as many 32px lines as it takes, and the bar reserves the height it has
+   (--dock-cues-height, read from the row). Nothing in it shrinks. */
+:is(.dock-tile__bar, .dock-tile__row)[data-fold="row"] .dock-tile__tool-cues {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  flex-wrap: wrap;
+  min-height: 32px;
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+}
+
+:is(.dock-tile__bar, .dock-tile__row)[data-fold="row"] .dock-tile__tool-cues > * {
+  min-height: 32px;
+  max-width: 100%;
+  align-items: center;
+  flex: none;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* No second row in the bottom panel: the cues scroll in their own box, which a
+   keyboard can focus and scroll, and Hide stays beside it. */
+.bottom-utility-panel__controls .dock-tile__tool-cues {
+  overflow-x: auto;
+}
+
+.bottom-utility-panel__controls .dock-tile__tool-cues > * {
+  flex: none;
+}
+
+/* The words laid out unseen, so the bar knows how much room they need. */
+.dock-bar-rulers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  gap: var(--oct-space-2);
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* A tile's menu is open: the control is pressed into the bar, as the band's

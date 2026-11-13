@@ -189,8 +189,8 @@ may do what a local window may on every forwarded route, with extension trust,
 credential write, Project binding, device approval and Full access included. The
 threat that follows is stated plainly. **A stolen or compromised paired device
 holds the person's full authority on that host**, up to Full access with no
-sandbox, storing, replacing or removing a provider key, and approving further
-devices, until its session ends or the device is revoked. What stands in front
+sandbox, storing, replacing or removing a provider key, the use of every
+credential the broker holds, and approving further devices, until its session ends or the device is revoked. What stands in front
 of it is the authentication of the device and no longer a list of actions: the
 device key, the pinned host identity over TLS, pairing approved only by a party
 the host already trusts, pairing and sign-in rate limits, session idle and
@@ -208,9 +208,8 @@ agent-grant principal passing as a person-paired device, a device laundering its
 principal into a local window, and identity supplied in a payload. For those
 sessions the closed action sets in the table below still hold. Not built yet:
 the journal does not name the device for every change (a Code operation's own
-events are journaled as the system, Browser automation changes name a fixed
-actor, and a provider sign-in the host completes after a restart, a device-code
-sign-in and a cloud sign-in are not attributed to the device;
+events are journaled as the system, and cancelling a connector sign-in that is
+still waiting names no device;
 [Architecture: Remote clients](../architecture.md#security-and-authority)).
 What the private listener forwards to no device (the listener's own controls,
 the desktop bridge, shell settings, secret stores, the whole host's export)

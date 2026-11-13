@@ -145,16 +145,19 @@ a sent message ([Architecture: modes](../architecture.md#modes-chat-work-and-cod
   `preview-code-rewind`, and `rewind-code-thread` to `/api/code/commands`. The
   remote route classifier already forwards these prefixes to a paired device.
 - **What the host does with a paired device.** A Code operation from a paired
-  device is gated as an agent's. A fork and a conversation-only rewind are
-  allowed. The files part of a rewind is the in-place restore: under Ask first
-  and Auto-accept edits the host asks an approval, approvals are taken only at
-  a window on the computer, and `/api/desktop/*` is local-only, so a phone's
-  restore there could only wait; under Full access the host asks nothing and
-  allows it. The phone changes none of this.
-- **What the phone offers.** Files only for a Full access Code thread whose
-  preview reports files that can come back, with the same list of paths and
-  the same single confirmation. For every other Code thread, and for Chat and
-  Work (which keep no files), the sheet offers the conversation only and says
+  device is the person's, as a local window's is (maintainer decision, 2026-11-12):
+  a fork, a conversation-only rewind, and a rewind that puts files back are
+  all allowed, and the phone answers the in-place restore approval the host
+  asks under Ask first and Auto-accept edits. Not built yet: today the
+  operation is gated as an agent's, approvals are taken only at a window on
+  the computer, and `/api/desktop/*` is local-only, so a phone's restore
+  there could only wait; under Full access the host asks nothing and allows
+  it.
+- **What the phone offers.** Files for every Code thread whose preview reports
+  files that can come back, with the same list of paths and the same single
+  confirmation; Chat and Work keep no files, and the sheet says so. Not built
+  yet: today files are offered only for a Full access Code thread, and every
+  other Code thread offers the conversation only and says
   why in plain words. The host's own refusal, such as a stale version or a
   writing turn in another thread on the checkout, is shown as it is.
 - **While a turn runs.** The actions are not drawn while a turn starts, runs,
@@ -566,8 +569,9 @@ platform-failed` otherwise, and `503 unavailable` without that platform's
   `gateway-mismatch` for a capability another gateway issued, which the person
   fixes by pointing the setting back or the phone registering again,
   `gateway-refused`, `gateway-rate-limited`, `gateway-malformed`,
-  `gateway-unreachable`, or `gateway-failed`. Only a window on the computer can
-  change the setting; a paired device reads it and is refused a change.
+  `gateway-unreachable`, or `gateway-failed`. A window on the computer or a
+  paired device changes the setting (maintainer decision, 2026-11-12; not built
+  yet: today a paired device reads it and is refused a change).
 
 #### Building the phone app yourself
 
@@ -608,7 +612,8 @@ that reaches it.
   listener it already uses, and only while the switch is on; with it off, both
   answer `503 unavailable`. A spoke that ticked Push hands the hub its sealed,
   spoke-signed requests as before, and the hub delivers them itself instead of
-  forwarding to a gateway. Only a window on the hub changes any of this; a
+  forwarding to a gateway. A window on the hub or a device paired to it changes this (maintainer
+  decision, 2026-11-12; not built yet: today only a window on the hub); a
   peer, guest, agent, or routine cannot.
 - **What reaches Apple and Google.** Exactly the payloads under [Gateway
   rules](#gateway-rules). APNs uses `alert` push type with `mutable-content` and
@@ -802,7 +807,8 @@ that reaches it.
   `settings.read-non-secret`) and `POST /api/speech/transcriptions`
   (`speech.transcribe`, remote-approvable), the latter only as
   `multipart/form-data` within the listener's 1 MiB body budget.
-  `/api/speech/synthesis` is classified `speech.synthesize`, local-host
+  `/api/speech/synthesis` plays on the computer's own speaker, so it is not
+  offered to a phone; today it is classified `speech.synthesize`, local-host
   required, and is not forwarded; the route itself also refuses it to a paired
   device (403), and the status a paired device reads reports synthesis
   `unavailable` ("Read-aloud is available only on the computer itself.")
