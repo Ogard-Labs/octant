@@ -145,13 +145,20 @@ const menu = {
   y: 60,
   items: [{ kind: "item", id: "0", label: "Synthetic choice", enabled: true }],
 };
+// The client keeps its windows, handlers and badge counts inside each
+// `runNightlyClient` call, so one evaluated module serves every test. It is
+// imported in `beforeAll` rather than statically because the Electron mock
+// reads `fixture`, which a hoisted import would evaluate too early.
+let runNightlyClient: typeof import("./nightlyClient").runNightlyClient;
+// A start still running when its test is abandoned, so `afterEach` can let it
+// finish and destroy its window before the next test reads the shared fixture.
+let starting: Promise<unknown> = Promise.resolve();
 async function open(
   platform: NodeJS.Platform = process.platform,
   launchLinks: NightlyLaunchLinks = createNightlyLaunchLinks("octant-nightly"),
 ) {
   Object.defineProperty(process, "platform", { value: platform });
-  const { runNightlyClient } = await import("./nightlyClient");
-  const result = await runNightlyClient(
+  const started = runNightlyClient(
     desktopIdentity("nightly"),
     {
       listenWindows: async () => ({ kind: "started" }),
@@ -173,6 +180,8 @@ async function open(
     },
     launchLinks,
   );
+  starting = started.catch(() => {});
+  const result = await started;
   expect(result).toEqual({ kind: "started" });
   const window = fixture.windows[0],
     handler = fixture.handlers.get(DESKTOP_IPC_CHANNELS.nativeMenu);
@@ -181,13 +190,15 @@ async function open(
   const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
   return { window, event, invoke: (target: unknown = event) => handler(target, menu) };
 }
-// The client's module graph is large; transforming it once up front keeps the
-// first test inside its time limit when the whole suite runs in parallel.
+// The client's module graph is large, so it is evaluated once, outside any
+// test's time limit. Evaluating it again for every test took about 0.7 s per
+// test on an idle machine and 2.3 to 4.5 s with the processors oversubscribed,
+// and a hosted macOS runner that reported 234 s of import time timed a test
+// out at the 5 s limit.
 beforeAll(async () => {
-  await import("./nightlyClient");
+  ({ runNightlyClient } = await import("./nightlyClient"));
 }, 60_000);
 beforeEach(() => {
-  vi.resetModules();
   fixture.handlers.clear();
   fixture.windows.length = 0;
   fixture.app.removeAllListeners();
@@ -200,8 +211,12 @@ beforeEach(() => {
   fixture.app.dock.setBadge.mockClear();
 });
 const platform = process.platform;
-afterEach(() => {
+afterEach(async () => {
   Object.defineProperty(process, "platform", { value: platform });
+  // A test that timed out in the middle of a start once left that start to
+  // open its window during the next test, which then read the stale window as
+  // its own: closing it left the Dock badge at "3" instead of "".
+  await starting;
   for (const window of fixture.windows) window.destroy();
   fixture.app.removeAllListeners();
 });
@@ -359,7 +374,6 @@ it("registers no Linux window while its renderers would run without Chromium's s
   fixture.app.commandLine.hasSwitch.mockImplementation((name) => name === "no-sandbox");
   const openWindow = vi.fn();
   try {
-    const { runNightlyClient } = await import("./nightlyClient");
     const result = await runNightlyClient(
       desktopIdentity("nightly"),
       {

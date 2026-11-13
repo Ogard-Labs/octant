@@ -95,7 +95,10 @@ Trust the test certificate only in that Simulator; never disable TLS verificatio
    host's thread API. A deterministic local provider is sufficient to isolate
    transport and journal behavior; real-provider behavior remains a separate check.
 4. Verify NDJSON event replay, terminate/relaunch, and resume with the saved
-   device key. Confirm host-only routes are refused to the remote principal.
+   device key. Confirm the routes this build still keeps host-only are refused
+   to the remote principal (the rule is that a paired device may do what a local
+   window may; [Remote clients](architecture.md#security-and-authority) lists
+   what is not built yet).
 5. Revoke that test device on the host and verify that resumption is refused.
 6. Test background/foreground and network loss through the ordinary app UI;
    native transport probes do not replace vault or device UX acceptance.
@@ -162,7 +165,10 @@ physical Android phone, plus the Android items at its end.
   photo library and confirm the permission text names both camera uses.
   Confirm the photo the host stored carries no location or camera model, and
   that a thread whose model takes no images offers no camera.
-- Confirm local-host-required actions remain unavailable on the phone.
+- Confirm the actions this build still keeps to the host are unavailable on the
+  phone, and that each action already opened to a paired device works there. The
+  local-host-required class is removed (maintainer decision, 2026-11-12) and is
+  built in steps, so check the build's notes for which is which.
 - Dictation: with no transcription endpoint in the host's Settings › Voice,
   confirm no microphone shows; set one, return to the app, and confirm it
   does. Grant and then deny the microphone. Dictate a short clip and confirm

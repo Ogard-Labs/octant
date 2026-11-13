@@ -419,8 +419,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   read, review dialog, and one-decision-at-a-time guard. The review starts on
   the requested provider, model, and level and offers no mode above that level.
   A paired browser's Code workspace and the phone's Code thread screen show the
-  same cards read-only, with "Approve at a window on this computer" and no
-  decision.
+  same cards and decide them as a window does (maintainer decision, 2026-11-12;
+  not built yet: today they are read-only there, with "Approve at a window on
+  this computer" and no decision).
 - **Owner devices.** The owner access recovery screen (phone, and a browser's
   owner section) shows a chosen Code thread's **Wake when a message arrives**
   and, on a worker, **Wake for coordinator**, each change under its own fresh
@@ -1016,8 +1017,9 @@ controls: the pull request's labels (a button removes one) and the
 repository's other labels (a button adds one; no free-text label), a comment
 box, a reply box on each open review thread, and Close or Reopen pull request.
 A comment or reply says it posts under the person's name; a refusal is one
-alert line under the section, and a paired device is told only the desktop
-window can do it. Rules and limits are owned by
+alert line under the section, and, until a paired device uses the same controls
+(not built yet), it is told only the desktop window can do it. Rules and limits
+are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
@@ -1894,6 +1896,8 @@ kinds, labelling the leftover; it adds no authority of its own.
 An agent can ask for related decisions through the app-owned `ask-user` tool
 in Chat, Work, and Code. A questionnaire belongs in its originating thread,
 with one compact card containing up to four questions. It creates no Canvas.
+More than four decisions belong in a Canvas [choice block](canvas.md#choice-block),
+which has no question limit; the tool's description tells agents so.
 Each question offers one choice or several choices, optional descriptions,
 and an optional written alternative. Recommendations are labelled and never
 preselected. A person can add a comment alongside their choices by default.

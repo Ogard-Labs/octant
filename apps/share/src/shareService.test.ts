@@ -168,6 +168,37 @@ describe("share service", () => {
     );
   });
 
+  test("shows a decision form's sections above their questions, still with no control", async () => {
+    start();
+    const created = await create(
+      createBody([
+        {
+          blockId: "decisions",
+          schemaVersion: 29,
+          kind: "choice",
+          prompt: "Decisions",
+          questions: [
+            {
+              id: "who",
+              prompt: "Who may set it?",
+              selection: "single",
+              options: [{ id: "any", label: "Any device" }],
+            },
+          ],
+          sections: [
+            { id: "access", title: "Full access", intro: "Who and how far", questionIds: ["who"] },
+          ],
+        },
+      ]),
+    );
+    const page = await (await fetch(created.url)).text();
+    const block = page.slice(page.indexOf('<section class="block block-choice"'));
+    const html = block.slice(0, block.indexOf("</section>"));
+    expect(html.indexOf("Full access")).toBeLessThan(html.indexOf("Who may set it?"));
+    expect(html).toContain("Who and how far");
+    expect(html).not.toMatch(/<(form|button|input|textarea)\b/i);
+  });
+
   test("durably cancels its exact owned id before a slow create completes and refuses replay", async () => {
     start();
     const ownerSecret = "k".repeat(43);
