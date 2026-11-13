@@ -699,10 +699,28 @@ the program run in one capsule confined as a terminal, on the session's own
 `proxied` egress under the thread's rules below Full access, and the session
 ends at once when the thread, its posture, its checkout, the confirmation, or
 the Project goes. An agent starts, controls, reads and stops a debug session
-through a plugin-shaped agent tool: unasked at Full access, approval-gated per
-configuration below it, and refused in Plan; a device the host's own person paired drives a session as a local window does (maintainer decision, 2026-11-12; built on the server). The host's start
-decision follows the agent rule and skips the confirmation at Full access. Not
-built yet: no agent tool reaches a session. Nothing a session
+through one plugin-shaped app-managed tool, `octant_debug` (`code-debug` and
+`code-debug-evaluate` in the closed catalog): unasked at Full access,
+approval-gated below it, and refused in Plan (maintainer decision,
+2026-11-12). Below Full access the gate is one answer in the thread per
+session, on a card that shows the configuration (program, arguments, working
+directory, and the names of its environment variables, never their values),
+so no confirmation on record is needed first, and that answer covers every
+expression the agent evaluates in the session, after the thread has read
+outside content too (maintainer decision, 2026-11-13). The tool starts only a
+configuration the Project already holds, is offered only outside Plan where a
+debug adapter is effective, and returns bounded, redacted results marked as
+outside content
+([Agent debug tool rules](design/language-services.md#agent-debug-tool-rules)).
+The agent may also attach to a process that already runs, by process id or
+by loopback port, at Full access only: an attached process cannot be put in
+the session's capsule, so below Full access attach is refused, not asked
+(maintainer decision, 2026-11-13; not built yet: today the tool offers no
+attach;
+[Attach to a running process](design/language-services.md#attach-to-a-running-process)).
+A device the host's own person paired drives a session as a local window does,
+and every other device session stays refused (maintainer decisions, 2026-11-12
+and 2026-11-13; built on the server). Nothing a session
 shows is journaled. The Code dock's Run and debug tool calls them: it lists
 and confirms configurations, starts a session with the window's gutter
 breakpoints (configuration saved locally per endpoint/window/thread/checkout,

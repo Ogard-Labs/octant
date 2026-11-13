@@ -9,6 +9,7 @@ import type {
   ToolNetworkEgressPolicy,
 } from "@octant/contracts";
 import {
+  CODE_DEBUG_TOOL_NAME,
   CODE_LANGUAGE_TOOL_NAME,
   lookupClosedToolCatalogEntry,
   nativeHarnessToolCapabilityId,
@@ -305,6 +306,9 @@ function profileToolIdForCapability(capabilityId: string): string {
   if (capabilityId === "browser-automation") return "octant_browser";
   if (capabilityId === "computer-use") return "octant_computer";
   if (capabilityId === "code-language") return CODE_LANGUAGE_TOOL_NAME;
+  if (capabilityId === "code-debug" || capabilityId === "code-debug-evaluate") {
+    return CODE_DEBUG_TOOL_NAME;
+  }
   return nativeHarnessToolNameForCapability(capabilityId) ?? capabilityId;
 }
 

@@ -231,6 +231,34 @@ function sent(session: ReturnType<typeof fakeHost>["session"], kind: string) {
 }
 
 describe("Run and debug panel", () => {
+  it("shows a session this window did not start, such as the thread's agent's, and stops it", async () => {
+    const store = new CodeDebugWindowState();
+    const { client, session } = fakeHost();
+    // The host lists the session only while it runs.
+    vi.mocked(client.configurations).mockImplementation(async () =>
+      sent(session, "stop").length > 0
+        ? listed(true)
+        : {
+            ...listed(true),
+            session: { sessionId: decodeCodeDebugSessionId(sessionId), name: "Run the fixture" },
+          },
+    );
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        threadId={threadId}
+        store={store}
+        client={client}
+        pollMs={fast}
+      />,
+    );
+    await screen.findByText("Paused · breakpoint");
+    expect(client.start).not.toHaveBeenCalled();
+    expect(store.read(key).session?.name).toBe("Run the fixture");
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(sent(session, "stop")).toHaveLength(1));
+  });
+
   it("does not send a clean pane's new breakpoint while another editor owns a dirty draft", async () => {
     const values = new Map<string, string>();
     const storage = {

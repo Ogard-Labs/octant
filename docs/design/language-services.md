@@ -104,6 +104,13 @@ behind its own approval and confinement rules.
   local-only routes are `POST /api/code/debug/configurations`, `/approvals`,
   `/start`, and `/session`. The rules are under
   [Debugger session rules](#debugger-session-rules).
+- **Agent debug tool.** `packages/contracts/src/codeDebug.ts` holds the
+  `octant_debug` definition, its argument schemas, and its bounds;
+  `packages/contracts/src/toolCatalog.ts` the `code-debug` and
+  `code-debug-evaluate` entries; and
+  `apps/server/src/code/codeDebugAgentTools.ts` the tool, contributed to a
+  Code turn as the language tool is. The rules are under
+  [Agent debug tool rules](#agent-debug-tool-rules).
 - **Language seam (slice 1).** `packages/contracts/src/extensions.ts` declares
   the `language-server` kind and its `languageServer` declaration;
   `packages/plugin-host/src/activation.ts` admits it in Code only;
@@ -1157,10 +1164,13 @@ format nobody has).
   launches an unconfirmed configuration at Full access, for a person at a
   local window and for an agent, and a session there keeps running with no
   approval on record until the thread leaves Full access, which ends it as
-  `network-changed`. Not built yet: the Run and debug panel still offers
-  Start only on a confirmed configuration, so a person at Full access
-  confirms once before starting from it, and no agent tool calls the
-  decision, so no agent starts a session.
+  `network-changed`. An agent starts through `octant_debug`, and below
+  Full access its start needs no approval on record: the person's answer to
+  that session's ask, on a card that shows the configuration, stands in for
+  one for that session only (maintainer decision, 2026-11-13;
+  [Agent debug tool rules](#agent-debug-tool-rules)). Not built yet: the Run
+  and debug panel still offers Start only on a confirmed configuration, so a
+  person at Full access confirms once before starting from it.
 - **Launch decision.** A pure `decideDebugSessionStart` takes the host
   platform, the thread's mode and posture, who caused the start, the approval,
   and whether the configuration's paths still resolve. It returns a launch
@@ -1216,9 +1226,11 @@ second capsule (the adapter would choose the argv, environment, and folder of a
 process the host launches); an adapter reached as a TCP debug server (a
 listener another local process could reach); `attach` to a process by id or
 address (the process sits outside the session's confinement, and attaching
-reads its memory). A later slice may add `attach` to a process the session
-itself started, with its own decision; [DB9](#child-processes) does so for a
-program's child processes.
+reads its memory). [DB9](#child-processes) adds `attach` for a program's
+child processes, which stay inside the capsule. Attach to a process that
+already runs is decided for the agent's tool at Full access only, outside the
+capsule, and not built
+([Attach to a running process](#attach-to-a-running-process)).
 
 ### Session network
 
@@ -1326,16 +1338,28 @@ frame ends the session. Each request has a 10-second deadline and reports
   Another local window, or such a device, holding the thread may control the
   session.
 - **Agents.** An agent in the thread may start, control, and read that
-  thread's session: unasked at Full access, approval-gated per configuration
-  below it, and refused in Plan
+  thread's session through one tool, `octant_debug`: unasked at Full access,
+  approval-gated below it, and refused in Plan
   ([the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12). A routine's turn is an agent's and
-  follows its thread's level the same way. Built: the start decision accepts
-  an agent as the starter under exactly these rules. Not built yet: there is
-  no agent debug tool, and listing configurations, confirming, and every
-  request on a session still refuse anything but a local window, so today no
-  provider, tool call, subagent, routine, or hook can start, control, or read
-  a session, and nothing a session shows enters a prompt.
+  maintainer decision, 2026-11-12). Below Full access the gate is one ask
+  per session (maintainer decision, 2026-11-13). The person is asked in the
+  thread before the session starts, on a card that shows the configuration:
+  its program, arguments, working directory, and the names of its
+  environment variables, never their values. That answer is the only
+  confirmation the agent's start needs, so a configuration nobody confirmed
+  in the Run and debug panel starts on it, and it covers controlling,
+  reading, and stopping that session and every expression evaluated in it,
+  after the thread has read outside content too. Nothing more is asked while
+  the session runs. The person's own Start in the panel is unchanged and
+  still needs its confirmation below Full access. A routine's turn is an
+  agent's and follows its thread's level the same way. The level is the one
+  the turn runs at. An agent never confirms a configuration, so its answer
+  records no approval and the next session asks again, and it never starts a
+  configuration the Project does not already hold. What
+  a session shows enters a prompt only as that tool's bounded, redacted
+  result, marked as outside content. No subagent, hook, or other tool
+  reaches a session. Built
+  ([Agent debug tool rules](#agent-debug-tool-rules)).
 - **Code only, macOS and Linux.** As the companion.
 
 **Decision DB7: a device the host's own person paired debugs as a local
@@ -1356,18 +1380,31 @@ restricted device (a `code.debug.observe` read of the stopped state without
 `evaluate` can still be proposed). Not built yet: the Run and debug panel is
 not checked on a paired browser.
 
-**Decision DB8: agent debug tools follow the thread's level.** An agent
-starts, controls, reads, and stops a debug session through a plugin-shaped
-agent tool, built now: unasked at Full access, approval-gated per
-configuration below it, and refused in Plan (maintainer decision, 2026-11-12).
-A paired device drives a session as a local window does (DB7); the delivery
-notes and evidence below that still refuse one (`local-host-required`, `403`)
-record what is built today. Recommended because at Full access the same agent
+**Decision DB8: the agent debug tool follows the thread's level.** An agent
+starts, controls, reads, and stops a debug session through the plugin-shaped
+`octant_debug` tool: unasked at Full access, approval-gated below it (one
+answer in the thread per session, on a card that shows the configuration;
+maintainer decision, 2026-11-13, which replaces a confirmed configuration
+followed by that answer), and refused in Plan (maintainer decision,
+2026-11-12). A paired
+device drives a session as a local window does (DB7); the delivery notes and
+evidence below that still refuse one (`local-host-required`, `403`) record
+what is built today. Recommended because at Full access the same agent
 already runs the program from an unwrapped shell and reads what it prints, so
 refusing the debugger there protects nothing. Rejected: no agent debug tools,
-the earlier rule; a read-only agent tool for the stopped state only. Not built
-yet: today there are no agent debug tools; only the start decision follows
-this rule.
+the earlier rule; a read-only agent tool for the stopped state only; a start
+that takes a command line or a configuration the agent wrote (the agent
+would choose the program, where today it only picks one the Project holds);
+an ask at every step (the session's program is what the answer named, and a
+prompt per step trains people to click through); a confirmation in the Run
+and debug panel before the ask, the first build (the person was shown the
+same program twice, in two places, and the second showed less than the
+first); asking afresh for each expression once the thread has read outside
+content, the first build (every read of a session marks the thread, so it
+asked at nearly every expression, for code that runs in the program the
+answer named and inside the same capsule). Built. Attach to a running
+process is decided and not built
+([Attach to a running process](#attach-to-a-running-process)).
 
 ### Debugger data and privacy
 
@@ -1381,7 +1418,9 @@ this rule.
   the arguments and environment values are kept in this Project's record), and
   session lifecycle as `code.debug-session-started@1` and
   `code.debug-session-ended@1` on a `code-debug-session` aggregate, naming the
-  Project, thread, configuration digest, and end reason. A thread purge removes
+  Project, thread, configuration digest, and end reason. A start or a Stop
+  the thread's agent caused through its tool names that agent as its actor,
+  not the person. A thread purge removes
   the session records; a Project erase removes those, the approvals, and the
   egress records, and ends running sessions at once.
 - **Breakpoint configuration** is saved only in this device's renderer storage,
@@ -1492,7 +1531,7 @@ the addendum left a choice open.
 - **Refusal order.** The read-side checks, then `no-debug-adapter` (a
   configuration naming an adapter that is not effective, reading the same as
   none so a refusal never says which disabled adapters exist), then the
-  start decision, then `confinement-unavailable`. As built today, listing configurations, confirming, and every request on a session refuse anything but a local window or a device the host's own person paired (DB7) first (`local-host-required`), before
+  start decision, then `confinement-unavailable`. As built today, listing configurations, confirming, and every request on a session refuse anything but a local window, a device the host's own person paired (DB7), or, except confirming, the thread's agent through its tool first (`local-host-required`), before
   reading anything; a start
   follows the decision's order. The routes answer `403` to a paired device
   before reading its body, and the remote gate classifies every path under
@@ -1589,6 +1628,158 @@ the addendum left a choice open.
   so its packets stay version 2. A purged thread's or erased Project's
   sessions are no longer counted, since their records are gone.
 
+### Agent debug tool rules
+
+- **Tool.** One app-managed tool, `octant_debug`, with a closed `operation`:
+  `configurations`, `start`, `breakpoints`, `continue`, `step-over`,
+  `step-in`, `step-out`, `pause`, `state`, `threads`, `stack`, `scopes`,
+  `variables`, `evaluate`, and `stop`. Its input is decoded against a strict
+  schema, at most 16 KiB; an unknown operation or argument is refused before
+  anything is read or asked. It offers no `attach` yet
+  ([Attach to a running process](#attach-to-a-running-process)), no source
+  fetch, no memory view, and no exception-filter change. It acts on the
+  thread's one session and never names a session id.
+- **Where it is offered.** On a Code turn whose provider carries Octant's
+  tools, outside Plan, on a macOS or Linux host where at least one
+  `debug-adapter` is effective in Code, and where the thread's profile does
+  not leave `octant_debug` out. Otherwise it is absent, not shown disabled.
+  It is built as the language tool is: contributed to the turn's tool set,
+  reaching the session host only through the calls the window's routes make.
+- **What it starts.** `configurations` lists what this turn may start, at
+  most 32, each with its digest, name, program, arguments, folder, and the
+  names (never the values) of its environment entries, and names the running
+  session. The listing is redacted as tool output is, so a key typed as an
+  argument does not reach the provider. The listing also keeps to the
+  48 KiB list budget: each entry's arguments are kept to a quarter of it
+  (marked `argsCut` when shortened), an entry that still does not fit is
+  skipped and later ones are still listed, and `truncated` with the number
+  `omitted` reports what was left out, so every entry shown carries its
+  digest.
+  `start` takes one of those digests and optional breakpoints (at
+  most 16 files of 64 lines). At every level outside Plan the list holds
+  the configurations an approval covers as they stand and the readable
+  proposals of the repository's launch file, each marked `confirmed` or
+  `launch-file` (maintainer decision, 2026-11-13: below Full access the
+  start's card shows the person what would run, so a proposal needs no
+  confirmation first). A digest not on the list is `unknown-configuration`.
+  The agent never supplies a program, an argument, or an environment entry.
+- **Authority.** Each call is authorized at the tool-call choke point under
+  the posture the turn runs at, then by the session host as a window's
+  request is, with the agent as the starter. The catalog entries are
+  `code-debug` (every operation but `evaluate`) and `code-debug-evaluate`,
+  both `shell-commands`, so Plan refuses every operation, the listing
+  included. At Full access nothing asks. Below it:
+  - `start` asks the person in the thread, once. The card names the
+    configuration and shows its program, its arguments (redacted as the
+    listing is, so a key typed as an argument is not shown), its working
+    directory, the names of its environment variables and never their
+    values, and whether a person confirmed it or it comes from the
+    repository's launch file. Each part is bounded (256 characters for a
+    path, 512 for the arguments, 384 for the names) and marked when cut, so
+    what runs is never pushed off a card. A denied, expired, or abandoned
+    ask launches nothing.
+  - That answer is the start's only gate (maintainer decision, 2026-11-13):
+    the session host starts an agent's session below Full access on it with
+    no approval on record (`answeredInThread` in the start decision, which
+    only the agent's tool sets and only an agent's start reads), records no
+    approval, and keeps the session running without one. It still ends the
+    session for every other reason, a change to the adapter's package
+    included.
+  - The answer covers that session: every later operation on it runs
+    without asking, in later turns too, until it ends. The host holds the
+    answer in memory only.
+  - A session nobody answered for (one the person started, or one a Full
+    access turn started unasked) is asked for once, before the first
+    operation on it from a turn below Full access.
+  - `evaluate` is covered by the session's answer, after the thread has
+    read outside content too (maintainer decision, 2026-11-13). Its catalog
+    entry no longer asks afresh under a mark. The expression runs in the
+    program the answer named, inside that session's capsule and on its
+    network, so it reaches nothing the answered session does not.
+  - `configurations` runs nothing and asks nothing.
+    A turn narrowed below its thread's level asks and lists as the narrower
+    level does. The session's network follows the thread's level, as for a
+    person's Start.
+- **Limits.** One session per thread and four per host, as for a person. A
+  `start` on a thread that holds a session is `thread-has-session`, unasked.
+- **After it ends.** Once the session is gone, `state` answers how the
+  thread's last session ended: its end reason and, when the program exited,
+  its exit code, and nothing the program held or printed. It answers a turn
+  at Full access, and below it only for a session the person answered for;
+  otherwise, and for every other operation, the answer is `no-session`. The
+  host remembers the last 64 endings in memory, and a new session on the
+  thread replaces the answer.
+- **Waiting.** `start`, `continue`, the steps, and `pause` answer the
+  session's state once the program stops or ends, or after five seconds as
+  it stands. `state` takes `waitSeconds`, at most 30.
+- **Bounds.** Tighter than the panel's, so a result fits a turn's result
+  budget: 50 threads, 20 frames, 20 scopes, 50 variables a call (a `next`
+  index continues the list), one level a call (a nested value is a
+  reference for another `variables` call), values cut at 1,024 characters
+  with `truncated`, 64 output entries a call each cut at 2,048 characters,
+  and 48 KiB for any one list.
+- **What it returns.** Every result that carries what the program holds or
+  printed (state and output, threads, stack, scopes, variables, an
+  expression's value, an adapter's own error text) is redacted as tool
+  output is (known key formats and every value the credential broker handed
+  out) before any bound cuts it, so a cut cannot split a key out of the
+  shape the redactor recognizes, journaled as outside content by its digest only, and passed by
+  Octant Shield's Watcher; one that cannot be journaled is withheld. Frames
+  outside the checkout carry a label and no path.
+- **The person sees it.** The session is the thread's own. The Run and debug
+  panel lists it and can stop it, and it ends for every reason a person's
+  session does.
+
+### Attach to a running process
+
+Decided (maintainer decision, 2026-11-13) and not built yet: today the tool
+offers no `attach`, and the rules below are the design.
+
+- **Operation.** `attach` takes a process id, or a loopback port for an
+  adapter whose package declares that it attaches by port. The adapter's
+  package document gains an attach body beside its `launch` body, shown in
+  the package review; an adapter that declares none is never used to attach.
+- **What confinement means for attach.** A launch is confined by
+  containment: the adapter starts the program as its own child inside one
+  capsule, so the program never runs anywhere else. A process that already
+  runs was not started there, and nothing puts it there afterwards. On Linux
+  the capsule has its own process and network namespaces, so an adapter
+  inside it can neither see the host's process ids nor reach the host's
+  loopback. On macOS attaching needs the target's task port, which no
+  Seatbelt profile Octant writes grants. An adapter that attaches therefore
+  runs outside the capsule, with the reach of the thread's unwrapped shell,
+  and reads the target's memory. Attach cannot be confined the way launch
+  is, on either platform.
+- **Levels.** At Full access attach runs unasked, as every other operation
+  does there: the same agent already holds an unwrapped shell that could
+  attach a debugger itself. Below Full access attach is refused
+  (`full-access-required`), not asked. Plan refuses it. The decision allowed
+  either an ask whose card says the session is unconfined or a refusal, and
+  asked for the safer; the refusal is the safer. Below Full access
+  everything else the agent starts stays in a capsule, and one click on a
+  card would hand a thread that may have read outside content the only
+  unconfined program it has, with another process's memory in reach. A card
+  cannot make that safe; it can only say so.
+- **What is never attached, at any level.** Octant's own processes (the
+  server, the desktop app, their children, provider runtimes, the credential
+  broker, and another session's capsule); a process of another user; and a
+  process outside what a launch could have started: its program must be a
+  file in the thread's checkout or extra folders with links followed, as a
+  configuration's program must. A port is attached only on loopback, only
+  when the process listening on it passes the same checks, and never when
+  it is a port Octant itself listens on.
+- **Everything else is a session's.** One session per thread, the journaled
+  start (naming the process id and the program, with the agent as the
+  actor) and end, the bounds, redaction, the outside-content mark, the Run
+  and debug panel's listing and Stop, and every reason a session ends. Stop
+  detaches and leaves the process running.
+- **Why it is not built with the one ask.** It needs three things the one
+  ask does not: the attach body in the public package document, which is a
+  seam change of its own; a launch of the adapter outside the capsule, with
+  its own receipt and reaping; and the process checks measured on real
+  hosts (Linux hosts with `ptrace_scope` 1 refuse an attach to a process
+  that is not a descendant, and macOS needs the debugger entitlement).
+
 ### Debugger panel rules
 
 Sub-slice 8c settled these details, taking the more restrictive option where
@@ -1597,7 +1788,10 @@ the addendum left a choice open.
 - **Where it lives.** Run and debug is a Code dock tool. It reads the
   thread and checkout the dock follows and calls the four local-window
   routes through `@octant/client-runtime/code-debug-client`; it decides no
-  refusal itself. An answer of `403`, which the remote gate and the routes
+  refusal itself. The listing names the thread's running session, so a
+  session this window did not start (the thread's agent's, or another
+  window's) is shown, and can be stopped, when the panel opens or is
+  refreshed; the panel does not poll for one. An answer of `403`, which the remote gate and the routes
   give a device session the host's own person did not pair, shows that
   debugging stays on this computer and offers nothing to start or confirm.
 - **Breakpoints.** A line breakpoint is set from the editor's glyph gutter

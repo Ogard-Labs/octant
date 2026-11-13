@@ -63,6 +63,12 @@ export interface DebugSessionStartRequest {
   /** Every configuration approval the thread's Project holds. */
   readonly approvals: ReadonlyArray<DebugConfigurationApproval>;
   /**
+   * Whether the person answered the agent's ask for this start in the thread,
+   * on a card that showed this configuration. It stands in for a recorded
+   * confirmation for that one session and for an agent's start only.
+   */
+  readonly answeredInThread: boolean;
+  /**
    * Whether the configuration's program (a regular file) and folder still
    * resolve inside the checkout with symlinks followed, checked by the host
    * at this start.
@@ -135,9 +141,12 @@ export function decideDebugSessionStart(
   }
   // At Full access the same thread already runs the program from an unwrapped
   // shell, so a confirmation there protects nothing. Below it a configuration
-  // runs only once a person confirmed it, for a person and an agent alike.
+  // runs only once a person saw it and agreed: confirmed on record, or, for
+  // an agent's start, answered in the thread for this one session. Asking for
+  // both showed the person the same program twice.
   if (
     request.posture !== "full-access" &&
+    !(request.startedBy === "agent" && request.answeredInThread) &&
     !request.approvals.some((approval) => approvalCovers(approval, request))
   ) {
     return { status: "refused", reason: "approval-required" };

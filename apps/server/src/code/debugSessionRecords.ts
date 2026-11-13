@@ -54,6 +54,20 @@ export interface DebugSessionRecordsOptions {
   readonly clock: () => string;
 }
 
+/** The provider driving the thread whose agent acted. */
+export interface DebugSessionAgent {
+  readonly providerInstanceId: string;
+}
+
+function agentActor(agent: DebugSessionAgent, threadId: string): EventActorValue {
+  return decodeActor({
+    kind: "agent",
+    actorId: agent.providerInstanceId,
+    providerInstanceId: agent.providerInstanceId,
+    threadId,
+  });
+}
+
 export class DebugSessionRecords {
   readonly #journal: DebugSessionRecordsOptions["journal"];
   readonly #personActor: EventActorValue;
@@ -69,16 +83,26 @@ export class DebugSessionRecords {
     this.#clock = options.clock;
   }
 
-  started(payload: CodeDebugSessionStarted): "recorded" | "not-recorded" {
+  /** `agent` names the thread's agent when its tool, not the person, started the session. */
+  started(
+    payload: CodeDebugSessionStarted,
+    agent?: DebugSessionAgent,
+  ): "recorded" | "not-recorded" {
     return this.#append(payload.sessionId, 0, CODE_DEBUG_EVENT_NAMES.sessionStarted, payload, {
-      actor: this.#personActor,
+      actor: agent === undefined ? this.#personActor : agentActor(agent, payload.threadId),
       decode: decodeCodeDebugSessionStarted,
     });
   }
 
-  ended(payload: CodeDebugSessionEnded): "recorded" | "not-recorded" {
+  /** `agent` names the thread's agent when its tool, not the person, stopped the session. */
+  ended(payload: CodeDebugSessionEnded, agent?: DebugSessionAgent): "recorded" | "not-recorded" {
     return this.#append(payload.sessionId, 1, CODE_DEBUG_EVENT_NAMES.sessionEnded, payload, {
-      actor: payload.endReason === "stopped" ? this.#personActor : this.#hostActor,
+      actor:
+        payload.endReason !== "stopped"
+          ? this.#hostActor
+          : agent === undefined
+            ? this.#personActor
+            : agentActor(agent, payload.threadId),
       decode: decodeCodeDebugSessionEnded,
     });
   }
