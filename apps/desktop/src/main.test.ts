@@ -42,6 +42,7 @@ import {
   createProjectWindowAuthorityRefresh,
   createTrustedRendererRequestRegistry,
   decorateTrustedRendererHeaders,
+  preconnectRendererOrigins,
   prepareDevelopmentRendererUrl,
   preparePackagedRendererQuery,
   createDesktopWindowContextRegistry,
@@ -133,6 +134,48 @@ describe("packaged desktop host capabilities", () => {
 });
 
 describe("development renderer startup", () => {
+  it("warms the host and development origins without opening duplicate sockets", () => {
+    const preconnect = vi.fn();
+    preconnectRendererOrigins(
+      { preconnect },
+      {
+        serverUrl: "http://127.0.0.1:13773/api/shell/bootstrap",
+        developmentUrl: "http://localhost:5173/?serverUrl=http://127.0.0.1:13773",
+      },
+    );
+
+    expect(preconnect.mock.calls).toEqual([
+      [{ url: "http://127.0.0.1:13773", numSockets: 2 }],
+      [{ url: "http://localhost:5173", numSockets: 1 }],
+    ]);
+
+    preconnectRendererOrigins(
+      { preconnect },
+      {
+        serverUrl: "http://127.0.0.1:13773",
+        developmentUrl: "http://127.0.0.1:13773/dev",
+      },
+    );
+    expect(preconnect).toHaveBeenLastCalledWith({
+      url: "http://127.0.0.1:13773",
+      numSockets: 2,
+    });
+    expect(preconnect).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps connection warming best-effort", () => {
+    expect(() =>
+      preconnectRendererOrigins(
+        {
+          preconnect: () => {
+            throw new Error("network service unavailable");
+          },
+        },
+        { serverUrl: "http://127.0.0.1:13773", developmentUrl: "not a URL" },
+      ),
+    ).not.toThrow();
+  });
+
   it("carries the window, server, and development authority parameters to Vite", () => {
     const url = new URL(
       prepareDevelopmentRendererUrl(

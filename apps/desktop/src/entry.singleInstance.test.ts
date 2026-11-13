@@ -27,10 +27,6 @@ vi.mock("./nightlyTestData", async (original) => ({
   ...(await original<typeof import("./nightlyTestData")>()),
   resolveStartupHostRole: () => ({ kind: "octant-client" }),
 }));
-vi.mock("./canvasPrototypeHost", () => ({
-  CANVAS_PROTOTYPE_HOST_SWITCH: "--octant-canvas-prototype-host",
-  runCanvasPrototypeHost: vi.fn(),
-}));
 vi.mock("./desktopPeerStatus", () => ({
   loadDesktopPeerStatus: fixture.status,
   ensureNightlyHostReady: fixture.status,
@@ -41,7 +37,10 @@ vi.mock("./desktopLaunch", async (original) => ({
   ...(await original<typeof import("./desktopLaunch")>()),
   resolvePackagedDesktopLaunch: () => ({ kind: "desktop" }),
 }));
-vi.mock("./nightlyClient", () => ({ runNightlyClient: fixture.client }));
+vi.mock("./desktopRuntimeLoader", async (original) => ({
+  ...(await original<typeof import("./desktopRuntimeLoader")>()),
+  loadNightlyClientRuntime: async () => ({ runNightlyClient: fixture.client }),
+}));
 
 it("leaves a second Nightly client to the running one instead of opening beside it", async () => {
   await import("./entry");

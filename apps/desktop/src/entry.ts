@@ -1,4 +1,9 @@
-import { CANVAS_PROTOTYPE_HOST_SWITCH, runCanvasPrototypeHost } from "./canvasPrototypeHost";
+import { CANVAS_PROTOTYPE_HOST_SWITCH } from "./canvasPrototypeProtocol";
+import {
+  loadCanvasPrototypeHostRuntime,
+  loadNightlyClientRuntime,
+  loadTerminalLauncherRuntime,
+} from "./desktopRuntimeLoader";
 import { app } from "electron";
 import { writeDiagnostic } from "./diagnosticLog";
 import { showStartupFailureAndQuit } from "./startupFailureElectron";
@@ -8,10 +13,12 @@ import {
   desktopIdentity,
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
-  createWindowsDesktopLauncher,
+} from "@octant/host-runtime/desktop-identity";
+import { createWindowsDesktopLauncher } from "@octant/host-runtime/windows-desktop-launcher";
+import {
   loadWindowsHostProfileNative,
   resolveWindowsHostProfile,
-} from "@octant/host-runtime";
+} from "@octant/host-runtime/windows-host-profile";
 import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import {
   closeDesktopPeerStatus,
@@ -63,9 +70,9 @@ if (
     process.stderr.write(`${role.message}\n`);
     app.exit(1);
   } else if (role.kind === "canvas") {
-    void runCanvasPrototypeHost();
+    void runCanvasPrototypeHostRuntime();
   } else if (role.kind === "terminal") {
-    const { runTerminalLauncher } = await import("@octant/cli/terminal-launcher");
+    const { runTerminalLauncher } = await loadTerminalLauncherRuntime();
     const code = await runTerminalLauncher(role.args, {
       environment: process.env,
       input: process.stdin,
@@ -95,12 +102,17 @@ if (
     await launchDesktop();
   }
 } else if (process.argv.includes(CANVAS_PROTOTYPE_HOST_SWITCH)) {
-  void runCanvasPrototypeHost();
+  void runCanvasPrototypeHostRuntime();
 } else {
   await launchDesktop();
 }
 
 class NightlyTestHostFailure extends Error {}
+
+async function runCanvasPrototypeHostRuntime(): Promise<void> {
+  const { runCanvasPrototypeHost } = await loadCanvasPrototypeHostRuntime();
+  await runCanvasPrototypeHost();
+}
 
 async function launchDesktop(): Promise<void> {
   if (identity.flavor === "nightly") {
@@ -193,7 +205,7 @@ async function launchDesktop(): Promise<void> {
       return closed.kind === "closed" ? status : { kind: "refused", reason: closed.reason };
     },
     async () => {
-      const { runNightlyClient } = await import("./nightlyClient");
+      const { runNightlyClient } = await loadNightlyClientRuntime();
       return runNightlyClient(identity, native, launchLinks);
     },
   );

@@ -15,6 +15,40 @@ export interface TrustedRendererRequestContext {
   readonly developmentOrigin?: string;
 }
 
+export interface RendererPreconnectSession {
+  readonly preconnect: (options: { readonly url: string; readonly numSockets: number }) => void;
+}
+
+/**
+ * Starts Chromium's loopback handshakes while native window state and authority
+ * are prepared. This is best-effort: connection warming must never become a
+ * new reason the desktop cannot open.
+ */
+export function preconnectRendererOrigins(
+  rendererSession: RendererPreconnectSession,
+  options: { readonly serverUrl: string; readonly developmentUrl?: string },
+): void {
+  const origins = new Map<string, number>();
+  const add = (value: string, sockets: number): void => {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return;
+      origins.set(url.origin, Math.max(origins.get(url.origin) ?? 0, sockets));
+    } catch {
+      // A malformed development override is handled by the later navigation.
+    }
+  };
+  add(options.serverUrl, 2);
+  if (options.developmentUrl !== undefined) add(options.developmentUrl, 1);
+  for (const [url, numSockets] of origins) {
+    try {
+      rendererSession.preconnect({ url, numSockets });
+    } catch {
+      // Chromium may reject warming while its network service is recovering.
+    }
+  }
+}
+
 export function decorateTrustedRendererHeaders(input: {
   readonly requestHeaders: Readonly<Record<string, string>>;
   readonly requestUrl: string;

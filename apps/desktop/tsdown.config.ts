@@ -27,6 +27,24 @@ export default defineConfig([
   {
     ...shared,
     clean: false,
+    entry: ["src/canvasPrototypeHost.ts"],
+    format: ["esm"],
+  },
+  {
+    ...shared,
+    clean: false,
+    entry: ["src/nightlyClient.ts"],
+    format: ["esm"],
+  },
+  {
+    ...shared,
+    clean: false,
+    entry: ["src/terminalLauncherRuntime.ts"],
+    format: ["esm"],
+  },
+  {
+    ...shared,
+    clean: false,
     entry: ["src/preload.ts"],
     format: [DESKTOP_PRELOAD_FORMAT],
   },

@@ -389,6 +389,17 @@ workbench input.
 It starts the prototype host, a second process of its own executable with no
 network route and no resolver, where running Canvas prototypes are drawn
 (see [Canvas documents, designs, and prototypes](#canvas-documents-designs-and-prototypes)).
+
+The packaged desktop has a fixed, one-file launch bootstrap that imports only
+launch-role admission. The host-owning main, Canvas prototype host, terminal
+launcher, and Nightly client are separate fixed one-file runtimes and load only
+after that role is selected; Stable does not ship the Nightly client, and
+packaging refuses undeclared desktop JavaScript chunks. After host admission,
+Electron preconnects the renderer's loopback origin before constructing its
+`BrowserWindow`. Menu-bar activity and fleet refresh then run beside window
+preparation instead of delaying first paint; host readiness, bridge projection,
+and window-authority registration remain required before renderer navigation.
+
 One desktop-owned launch keeps a fixed inventory of the server child, native
 brokers, constructed services, and managed-tool service as each is acquired.
 Until the Computer or Simulator broker returns, the launch owns cleanup of

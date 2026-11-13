@@ -4,16 +4,16 @@ import { isAbsolute, join, resolve } from "node:path";
 import {
   DEFAULT_FOLDER_ENVIRONMENT,
   DESKTOP_DATA_CHOICE_FILE,
-  decodeOwnerReceipt,
   KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   desktopDataDirectoriesOverlap,
   encodeDesktopDataChoice,
-  readStoredDesktopDataChoice,
   resolveDesktopHostRole,
   type DesktopDataChoice,
   type DesktopHostRole,
   type DesktopIdentity,
-} from "@octant/host-runtime";
+} from "@octant/host-runtime/desktop-identity";
+import { readStoredDesktopDataChoice } from "@octant/host-runtime/desktop-data-choice";
+import { decodeOwnerReceipt } from "@octant/host-runtime/owner-receipt";
 import type { NightlyDataState } from "@octant/contracts/app-updates";
 import type { KeychainServiceFamily } from "./keychainCredentialStore";
 

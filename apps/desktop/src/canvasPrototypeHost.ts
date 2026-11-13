@@ -18,6 +18,7 @@ import {
 } from "@octant/domain/canvas-network-policy";
 import { canvasPrototypeRelayRequest } from "./canvasPrototypeNetwork";
 import { CANVAS_PROTOTYPE_PRELOAD_FILENAME } from "./runtimePaths";
+export { CANVAS_PROTOTYPE_HOST_SWITCH } from "./canvasPrototypeProtocol";
 
 /**
  * The prototype host: the process a running Canvas prototype is drawn in on
@@ -43,9 +44,6 @@ import { CANVAS_PROTOTYPE_PRELOAD_FILENAME } from "./runtimePaths";
  * the question to the app, which asks the host's proxy. Nothing here connects
  * anywhere, with the switch on or off (see `canvasPrototypeNetwork.ts`).
  */
-
-/** The argument the desktop executable is started with to run as the prototype host. */
-export const CANVAS_PROTOTYPE_HOST_SWITCH = "--octant-canvas-prototype-host";
 
 /**
  * No route out, for everything in this process. The same switches as the
