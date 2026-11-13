@@ -1038,6 +1038,7 @@ describe("octant_browser profile argument", () => {
       readonly fullAccess?: boolean;
       readonly plan?: boolean;
       readonly uploadRoot?: string;
+      readonly page?: AbortSignal;
       readonly rememberedTransfers?: ReadonlyArray<{
         readonly direction: string;
         readonly origin: string;
@@ -1051,6 +1052,7 @@ describe("octant_browser profile argument", () => {
         fullAccessAgent?: true;
       }) => activeContext(input.policy.profile),
     );
+    const page = options.page;
     const releaseThread = vi.fn(async () => snapshot());
     const act = vi.fn(
       async (_input: { readonly holdDownloads?: boolean; readonly fullAccess?: true }) =>
@@ -1096,6 +1098,9 @@ describe("octant_browser profile argument", () => {
         act: act as never,
         releaseThread,
         saveDownload: saveDownload as never,
+        ...(page === undefined
+          ? {}
+          : { holdForAsk: () => ({ release: () => undefined, signal: page }) }),
       },
       approvals: {
         request,
@@ -1207,6 +1212,31 @@ describe("octant_browser profile argument", () => {
           upload: [expect.objectContaining({ name: "report.txt", sizeBytes: 6 })],
         }),
       );
+      expect(act).not.toHaveBeenCalled();
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("withdraws an upload question when its page closes, and sends nothing", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const page = new AbortController();
+      const { run, act, request } = fixture({
+        uploadRoot: workspace,
+        inspect: openPage(),
+        modelBindings: boundPage(),
+        page: page.signal,
+      });
+      request.mockImplementationOnce(async (input: unknown) => {
+        page.abort();
+        const signal = (input as { readonly signal?: AbortSignal }).signal;
+        return (signal?.aborted === true ? "cancelled" : "approved") as never;
+      });
+
+      expect(await run({ operation: "upload", ref: "e1", files: ["report.txt"] })).toMatchObject({
+        isError: true,
+      });
       expect(act).not.toHaveBeenCalled();
     } finally {
       await rm(folder, { recursive: true, force: true });

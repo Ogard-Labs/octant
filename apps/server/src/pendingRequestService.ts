@@ -52,7 +52,7 @@ export interface PendingRequestSources {
    * answering stays on the harness session route, in the thread's own approval
    * card or its Agents tab.
    */
-  readonly children: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
+  readonly children: (reader: PendingRequestReader) => Promise<ReadonlyArray<PendingRequest>>;
   /**
    * Every other ask waiting on the person that this reader could answer: MCP
    * tool approvals, Project memory and routine proposals, image offers, and
@@ -119,7 +119,7 @@ export class PendingRequestService {
     const [work, code, children] = await Promise.all([
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),
-      this.#sources.children(windowId),
+      this.#sources.children({ kind: readerKind, scopeId: windowId }),
     ]);
     const chat = modes.includes("chat") ? this.#sources.chat() : [];
     const oldestFirst = [

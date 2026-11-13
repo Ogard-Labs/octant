@@ -8,6 +8,9 @@ import {
   decodeWindowId,
   decodeWorkThreadId,
   type WindowId,
+  type AgentRun,
+  type AgentRunId,
+  type PendingRequest,
 } from "@octant/contracts";
 import { createWorkOverviewRouteHandler } from "../workOverviewRoutes";
 import { createDesignSystemRouteHandler } from "../designSystemRoutes";
@@ -34,7 +37,7 @@ import {
   windowsBoundToAProject,
 } from "../fleetActivityService";
 import { createPendingRequestRouteHandler } from "../pendingRequestRoutes";
-import { PendingRequestService } from "../pendingRequestService";
+import { PendingRequestService, type PendingRequestReader } from "../pendingRequestService";
 import { waitingAsksFrom, type WaitingAskThread } from "../waitingAsks";
 import type { BrowserWiring } from "./browser";
 import { createWorkThreadRouteHandler } from "../workThreadRoutes";
@@ -105,7 +108,10 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
   > &
   Pick<
     HarnessStateWiring,
-    "nativeHarnessApprovals" | "nativeHarnessQuestions" | "nativeHarnessSessions"
+    | "agentRunInteractions"
+    | "nativeHarnessApprovals"
+    | "nativeHarnessQuestions"
+    | "nativeHarnessSessions"
   > &
   Pick<ChatWiring, "chatService"> &
   Pick<
@@ -120,6 +126,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
 
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const {
+    agentRunInteractions,
     agentRunPersistence,
     decisionReviewModelPort,
     isProjectPolicyTargetAllowed,
@@ -247,23 +254,42 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
   // Rows that find a request a thread's agent or subagent is waiting on: the
   // answer stays on the harness session route, which checks the window and
   // the principal, so these rows carry no way to answer.
+  const childRunReads = {
+    approvals: nativeHarnessApprovals,
+    questions: nativeHarnessQuestions,
+    readSession: (threadId: string) => nativeHarnessSessions.read(threadId),
+    getRun: (id: AgentRunId) => agentRunPersistence.getById(id),
+    parentThreadTitle: (run: AgentRun) =>
+      resolveAgentRunParentThreadTitle({
+        persistence,
+        workThreadProjection,
+        parentThreadId: run.parentThreadId,
+        mode: run.routingReceipt.mode,
+      }),
+  };
+  // A paired device lists only the subagent requests it may answer from the
+  // harness session route, by that route's own device-ownership rule; it has
+  // no window workspace, and it cannot answer a lead's own ask from there.
+  const childPendingForReader = async (
+    reader: PendingRequestReader,
+  ): Promise<ReadonlyArray<PendingRequest>> =>
+    reader.kind === "local-window"
+      ? childPendingForWindow(reader.scopeId)
+      : listChildPendingRequests(
+          {
+            ...childRunReads,
+            authorizeThread: () => false,
+            mayAnswerFromDevice: agentRunInteractions.mayAnswerFromDevice,
+          },
+          { kind: "remote-device", deviceId: String(reader.scopeId) },
+        );
   const childPendingForWindow = async (windowId: WindowId) => [
     ...(await listChildPendingRequests(
       {
-        approvals: nativeHarnessApprovals,
-        questions: nativeHarnessQuestions,
-        readSession: (threadId) => nativeHarnessSessions.read(threadId),
-        getRun: (id) => agentRunPersistence.getById(id),
-        parentThreadTitle: (run) =>
-          resolveAgentRunParentThreadTitle({
-            persistence,
-            workThreadProjection,
-            parentThreadId: run.parentThreadId,
-            mode: run.routingReceipt.mode,
-          }),
+        ...childRunReads,
         authorizeThread: windowMayOpenWorkOrCodeThread,
       },
-      String(windowId),
+      { kind: "local-window", windowId: String(windowId) },
     )),
     ...(await listLeadApprovalRequests(
       {
@@ -379,7 +405,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
       ...(await codeTurnDecisions.listForWindow(windowId)),
     ],
     chat: () => chatService.listPendingQuestions(),
-    children: childPendingForWindow,
+    children: childPendingForReader,
     // Each list is the holding service's own for this reader, so who may
     // answer an ask is decided where it always was.
     asks: (reader) =>

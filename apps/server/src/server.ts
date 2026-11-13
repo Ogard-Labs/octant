@@ -1406,6 +1406,7 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      agentRunInteractions,
       browserToolApprovalService,
       extensionToolApprovalService,
       imageGenerationOffers,

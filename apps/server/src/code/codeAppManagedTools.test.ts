@@ -1855,6 +1855,7 @@ describe("Code app-managed tools", () => {
     async function uploadTools(
       executionPolicy: "full-access" | "approval-gated",
       remembered = false,
+      page?: AbortSignal,
     ) {
       const folder = await realpath(await mkdtemp(join(tmpdir(), "octant-code-upload-")));
       const workspace = join(folder, "workspace");
@@ -1891,6 +1892,9 @@ describe("Code app-managed tools", () => {
           create: vi.fn(),
           act: act as never,
           releaseThread: vi.fn(),
+          ...(page === undefined
+            ? {}
+            : { holdForAsk: () => ({ release: () => undefined, signal: page }) }),
         },
       });
       const upload = (files: ReadonlyArray<string>) =>
@@ -1900,6 +1904,26 @@ describe("Code app-managed tools", () => {
         });
       return { folder, workspace, act, request, upload, isTransferRemembered };
     }
+
+    it("withdraws an upload question when its page closes, and sends nothing", async () => {
+      const page = new AbortController();
+      const { folder, act, request, upload } = await uploadTools(
+        "approval-gated",
+        false,
+        page.signal,
+      );
+      try {
+        request.mockImplementationOnce(async (input: unknown) => {
+          page.abort();
+          const signal = (input as { readonly signal?: AbortSignal }).signal;
+          return (signal?.aborted === true ? "cancelled" : "approved") as never;
+        });
+        expect(await upload(["report.txt"])).toMatchObject({ isError: true });
+        expect(act).not.toHaveBeenCalled();
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
 
     it("uploads below Full access without asking once the person answered Always allow for the site and checkout", async () => {
       const { folder, workspace, act, request, upload, isTransferRemembered } = await uploadTools(

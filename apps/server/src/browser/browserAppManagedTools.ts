@@ -172,7 +172,14 @@ export interface BrowserAppManagedToolsOptions {
       threadId: BrowserThreadId,
     ) => (() => void) | undefined;
     /** Keeps the page while an upload question about it waits; see the service. */
-    readonly holdForAsk?: (windowId: WindowId, threadId: BrowserThreadId) => () => void;
+    /**
+     * Keeps the page while a question about it waits, and gives the page's
+     * own lifetime: closing or stopping the page withdraws the question.
+     */
+    readonly holdForAsk?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => { readonly release: () => void; readonly signal?: AbortSignal };
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
     Partial<
@@ -618,7 +625,17 @@ export function createBrowserAppManagedTools(
         ask: async (files) => {
           if (permission !== undefined) return permission.approve(files);
           if (uploadsUnasked) return "approved" as const;
-          const release = options.browser.holdForAsk?.(options.windowId, options.threadId);
+          const hold = options.browser.holdForAsk?.(options.windowId, options.threadId);
+          // The question has no expiry, so the page's end must withdraw it,
+          // as a download question's does; otherwise the turn stays parked
+          // and the admitted copies are kept.
+          const pageSignal = hold?.signal;
+          const askSignal =
+            pageSignal === undefined
+              ? signal
+              : signal === undefined
+                ? pageSignal
+                : AbortSignal.any([signal, pageSignal]);
           try {
             return await askBrowserTransfer(approvals, {
               direction: "upload",
@@ -629,10 +646,10 @@ export function createBrowserAppManagedTools(
               profile,
               workspaceRoot: options.uploadRoot?.(),
               files,
-              signal,
+              signal: askSignal,
             });
           } finally {
-            release?.();
+            hold?.release();
           }
         },
       });

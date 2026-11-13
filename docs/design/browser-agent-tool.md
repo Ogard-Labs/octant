@@ -851,8 +851,9 @@ made active.
   the thread's archive, the window's revocation or the host stopping, the
   page returns to a finite deadline (two minutes of grace, or its ordinary
   idle deadline if later). The staged upload copies and the held download
-  file are deleted on any outcome but approval, and a download question also
-  ends when its page closes, so a question that waits holds nothing after it
+  file are deleted on any outcome but approval, and an upload or download
+  question also ends when its page closes or is stopped, in Work and Code
+  alike, so a question that waits holds nothing after it
   is withdrawn. A site approval holds no page and needs none.
 - **Handoffs have their own phase bounds.** A sign-in card has no expiry
   ([Asking the person to sign in](#asking-the-person-to-sign-in)), and its page

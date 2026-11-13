@@ -187,7 +187,7 @@ describe("pending request route", () => {
     ]);
     expect(body.requests[0]).not.toHaveProperty("answer");
     expect(body.requests[0]).not.toHaveProperty("options");
-    expect(sources.children).toHaveBeenCalledWith(windowId);
+    expect(sources.children).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
   });
 
   it("lists the agent's own approval beside the requests it works under, without a way to answer it, and not for a mode that is switched off", async () => {
@@ -253,6 +253,7 @@ describe("pending request route", () => {
     expect(sources.work).toHaveBeenCalledWith(deviceScope);
     expect(sources.code).toHaveBeenCalledWith(deviceScope);
     expect(sources.asks).toHaveBeenCalledWith({ kind: "remote-device", scopeId: deviceScope });
+    expect(sources.children).toHaveBeenCalledWith({ kind: "remote-device", scopeId: deviceScope });
   });
 
   it("lists every other waiting ask oldest first, and none from a mode that is off", async () => {

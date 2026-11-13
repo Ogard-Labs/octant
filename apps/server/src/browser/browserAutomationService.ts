@@ -3080,13 +3080,18 @@ export class BrowserAutomationService {
    * under it at its idle deadline would turn the person's later answer into a
    * failure. The release, which every way the question ends reaches, puts the
    * page back on a finite deadline. It grants nothing and marks nothing as the
-   * person's: agent calls on the page are admitted as before.
+   * person's: agent calls on the page are admitted as before. The signal is
+   * the page's lifetime: it ends when the page closes or is stopped, and the
+   * caller withdraws its question with it.
    */
-  holdForAsk(windowId: WindowId, threadId: BrowserThreadId): () => void {
+  holdForAsk(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+  ): { readonly release: () => void; readonly signal?: AbortSignal } {
     const owned = this.#current(windowId, threadId);
     return owned === undefined || owned.record.state !== "active"
-      ? () => undefined
-      : this.#holdForAsk(owned);
+      ? { release: () => undefined }
+      : { release: this.#holdForAsk(owned), signal: owned.abort.signal };
   }
 
   #holdForAsk(owned: OwnedContext): () => void {

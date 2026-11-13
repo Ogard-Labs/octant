@@ -208,9 +208,30 @@ function fixture() {
           return overrides.authorize ?? true;
         },
       },
-      windowId,
+      { kind: "local-window", windowId },
     );
-  return { approvals, questions, sessions, askApproval, askQuestion, list };
+  const listForDevice = (
+    mayAnswer: (input: {
+      readonly runId: string;
+      readonly parentThreadId: string;
+      readonly deviceId: string;
+    }) => boolean,
+  ) =>
+    listChildPendingRequests(
+      {
+        approvals,
+        questions,
+        readSession: (threadId) => sessions.read(threadId),
+        getRun: () => childRun,
+        parentThreadTitle: () => "Quarterly report",
+        authorizeThread: () => {
+          throw new Error("a paired device has no window workspace to check");
+        },
+        mayAnswerFromDevice: mayAnswer,
+      },
+      { kind: "remote-device", deviceId: "phone-a" },
+    );
+  return { approvals, questions, sessions, askApproval, askQuestion, list, listForDevice };
 }
 
 describe("subagent pending requests", () => {
@@ -294,7 +315,7 @@ describe("subagent pending requests", () => {
           parentThreadTitle: () => "Quarterly report",
           authorizeThread: () => true,
         },
-        windowId,
+        { kind: "local-window", windowId },
       ),
     ).toEqual([]);
   });
@@ -304,6 +325,24 @@ describe("subagent pending requests", () => {
     void askApproval({ child: true });
     void askQuestion();
     expect(await list({ authorize: false })).toEqual([]);
+  });
+
+  it("lists for a paired device the subagent requests that device may answer, and no others", async () => {
+    const { askApproval, askQuestion, listForDevice } = fixture();
+    void askApproval({ child: true });
+    void askQuestion();
+    const asked: Array<unknown> = [];
+    const mine = await listForDevice((input) => {
+      asked.push(input);
+      return input.deviceId === "phone-a";
+    });
+    expect(mine.map((request) => request.kind)).toEqual(["child-approval", "child-question"]);
+    expect(asked).toContainEqual({
+      runId: childRunId,
+      parentThreadId: parentThread,
+      deviceId: "phone-a",
+    });
+    expect(await listForDevice(() => false)).toEqual([]);
   });
 
   it("keeps Chat subagents outside the Work and Code pending-request projection", async () => {

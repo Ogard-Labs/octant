@@ -593,7 +593,14 @@ export interface CodeAppManagedToolsOptions {
       threadId: BrowserThreadId,
     ) => (() => void) | undefined;
     /** Keeps the page while an upload question about it waits; see the service. */
-    readonly holdForAsk?: (windowId: WindowId, threadId: BrowserThreadId) => () => void;
+    /**
+     * Keeps the page while a question about it waits, and gives the page's
+     * own lifetime: closing or stopping the page withdraws the question.
+     */
+    readonly holdForAsk?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => { readonly release: () => void; readonly signal?: AbortSignal };
   };
   /** The Project's flows and the recorder of this host; absent, flows are unavailable. */
   readonly browserFlows?: BrowserFlowToolPort;
@@ -1729,7 +1736,17 @@ async function browserToolOne(
       ask: async (files) => {
         if (upload === undefined) return "denied";
         if (uploadsUnasked) return "approved";
-        const release = options.browser?.holdForAsk?.(options.windowId, threadId);
+        const hold = options.browser?.holdForAsk?.(options.windowId, threadId);
+        // The question has no expiry, so the page's end must withdraw it,
+        // as a download question's does; otherwise the turn stays parked
+        // and the admitted copies are kept.
+        const pageSignal = hold?.signal;
+        const askSignal =
+          pageSignal === undefined
+            ? signal
+            : signal === undefined
+              ? pageSignal
+              : AbortSignal.any([signal, pageSignal]);
         try {
           return await askBrowserTransfer(upload.approvals, {
             direction: "upload",
@@ -1740,10 +1757,10 @@ async function browserToolOne(
             profile,
             workspaceRoot: upload.root,
             files,
-            signal,
+            signal: askSignal,
           });
         } finally {
-          release?.();
+          hold?.release();
         }
       },
     });

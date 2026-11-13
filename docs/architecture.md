@@ -12727,8 +12727,9 @@ mechanisms are:
     its call or turn stopping, its thread's archive, its window's revocation
     where a window owns it, or the host stopping. What an ask holds is
     released by every one of those ends: an upload's staged copies and a
-    download's held file are deleted on any outcome but approval, a download
-    question also ends when its page closes, and a page lives, without an
+    download's held file are deleted on any outcome but approval, an upload
+    or download question also ends when its page closes or is stopped, and a
+    page lives, without an
     idle deadline, for as long as an upload or download question about it
     waits. The pending-requests read (Needs you) lists every one of these
     asks, and each new one is told to the paired phones
@@ -13300,7 +13301,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   forwards `GET /api/pending-requests` as an overview read, and the route
   lists under the device's own scope, so every source answers what that
   device's own answer commands and ask routes would admit (an MCP prompt its
-  own turn raised, never a local window's or the host's). Deferral
+  own turn raised, never a local window's or the host's). A waiting
+  subagent's row is listed to a device only when the harness session route
+  would let that device answer it (the run its own turn started, under a
+  parent it still owns), never by a window's Project binding, which a device
+  scope does not have. Deferral
   (`POST /api/pending-requests/defer`) stays with a local window and is not
   forwarded. Each new waiting ask is told to the paired phones through the
   existing sealed push path, as an approval-needed notification naming the
