@@ -132,6 +132,32 @@ describe("CanvasExportPanel", () => {
     );
   });
 
+  it("says an export a restart cut off was not confirmed and asks the person to check", () => {
+    type Notice = NonNullable<CanvasExportOfferList["unconfirmed"]>[number];
+    render(
+      <CanvasExportPanel
+        offers={{
+          ...offers(),
+          unconfirmed: [
+            {
+              exportId: "33333333-3333-4333-8333-333333333333" as Notice["exportId"],
+              targetId: "reading-copy" as Notice["targetId"],
+              destinationLabel: "Reading copy",
+              format: "markdown",
+              sequence: 1,
+            },
+          ],
+        }}
+        onDecide={vi.fn()}
+        onPrepare={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("canvas-export-unconfirmed")).toHaveTextContent(
+      "Export to Reading copy not confirmed.",
+    );
+  });
+
   it("names the file the export will write, and says when it replaces one", async () => {
     const user = userEvent.setup();
     const onPrepare = vi.fn(async () => ({

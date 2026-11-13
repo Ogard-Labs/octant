@@ -228,19 +228,23 @@ function harness(
     clock: () => now,
   });
   const eventStore = new CanvasExportEventStore({ journal, uuid: nextId });
-  const service = new CanvasExportService({
-    load: () => options?.doc ?? document(),
-    targets: held,
-    eventStore,
-    uuid: nextId,
-    clock: () => decodeUtcTimestamp(new Date(clockMs).toISOString()),
-    ...(options?.renderer === undefined ? {} : { renderer: options.renderer }),
-  });
+  const makeService = () =>
+    new CanvasExportService({
+      load: () => options?.doc ?? document(),
+      targets: held,
+      eventStore,
+      uuid: nextId,
+      clock: () => decodeUtcTimestamp(new Date(clockMs).toISOString()),
+      ...(options?.renderer === undefined ? {} : { renderer: options.renderer }),
+    });
+  const service = makeService();
   const envelopes = (): ReadonlyArray<EventEnvelope> =>
     journal.replay(decodeReplayCursor({ afterSequence: 0, limit: 100 }));
   return {
     calls,
     service,
+    /** A fresh service over the same journal, as the next start would build. */
+    restart: makeService,
     eventStore,
     envelopes,
     connection,
@@ -1004,6 +1008,109 @@ describe("canvas export service", () => {
     expect(second).toMatchObject({ kind: "refused", code: "approval-required" });
     expect(calls).toHaveLength(1);
     expect(eventStore.replay()).toHaveLength(1);
+    connection.close();
+  });
+
+  it("journals the export's intent before the destination is called", async () => {
+    const calls: CanvasExportRenderedOutput[] = [];
+    let journaledAtCall: ReadonlyArray<string> = [];
+    const plain = binding("reading-copy", calls);
+    const watching: CanvasExportTargetBinding = {
+      ...plain,
+      target: {
+        ...plain.target,
+        exportDocument: async (output, destination) => {
+          journaledAtCall = envelopesRef().map((envelope) => envelope.eventName);
+          return plain.target.exportDocument(output, destination);
+        },
+      },
+    };
+    const { service, envelopes, connection } = harness(() => [watching]);
+    const envelopesRef = envelopes;
+    const prepared = await service.prepare(prepareRequest(), true);
+    if (prepared.kind !== "approval") throw new Error("expected an approval card");
+
+    await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(journaledAtCall).toEqual(["canvas.export-intent@1"]);
+    expect(envelopes().map((envelope) => envelope.eventName)).toEqual([
+      "canvas.export-intent@1",
+      "canvas.export@1",
+    ]);
+    connection.close();
+  });
+
+  it("sends nothing when the host cannot record the export's intent", async () => {
+    const { calls, service, eventStore, connection } = harness();
+    const prepared = await service.prepare(prepareRequest(), true);
+    if (prepared.kind !== "approval") throw new Error("expected an approval card");
+    vi.spyOn(eventStore, "recordIntent").mockImplementation(() => {
+      throw new Error("journal unavailable");
+    });
+
+    const result = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(calls).toHaveLength(0);
+    expect(result).toMatchObject({ kind: "refused", code: "unavailable" });
+    connection.close();
+  });
+
+  it("settles an export a restart cut off as not confirmed, shows it, and never sends it again", async () => {
+    const { calls, service, eventStore, restart, connection } = harness();
+    const prepared = await service.prepare(prepareRequest(), true);
+    if (prepared.kind !== "approval") throw new Error("expected an approval card");
+    // The destination was called, then the host stopped before the outcome
+    // reached the journal: only the intent survives.
+    const lost = vi.spyOn(eventStore, "append").mockImplementation(() => {
+      throw new Error("host stopped");
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+    lost.mockRestore();
+    logged.mockRestore();
+    expect(calls).toHaveLength(1);
+
+    const next = restart();
+    next.settleUnconfirmed(localActor);
+    restart().settleUnconfirmed(localActor);
+
+    expect(calls).toHaveLength(1);
+    const records = eventStore.replay();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.outcome.kind).toBe("unconfirmed");
+    expect(next.offers(canvasId)?.unconfirmed).toEqual([
+      expect.objectContaining({ targetId: "reading-copy", destinationLabel: "Reading copy" }),
+    ]);
+
+    const again = await next.prepare(prepareRequest(), true);
+    if (again.kind !== "approval") throw new Error("expected an approval card");
+    await next.decide({
+      canvasId,
+      approvalId: again.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+    expect(calls).toHaveLength(2);
+    expect(next.offers(canvasId)?.unconfirmed).toEqual([]);
     connection.close();
   });
 

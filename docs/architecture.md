@@ -10809,10 +10809,20 @@ thirty-second export deadline apply; termination and revocation stop the owned
 process and abort its requests. Failure after possible external effects requires
 checking the destination before retrying; the host never retries automatically.
 
-Each completed export is a `canvas.export@1` journal event and is rebuilt by
-replay. When the destination was called but the journal could not take the
-record, the answer is `unrecorded` and carries the destination's outcome; it is
-never reported as a failed export. A target that passed activation is still reported honestly as
+Each approved export journals its intent (`canvas.export-intent@1`) before the
+destination is called, and its outcome (`canvas.export@1`) after; both are
+rebuilt by replay. When the intent cannot be journaled, nothing is sent and the
+answer is an `unavailable` refusal. When the destination was called but the
+journal could not take the outcome, the answer is `unrecorded` and carries the
+destination's outcome; it is never reported as a failed export. At startup,
+before any export is decided, the host settles every intent with no outcome as
+`unconfirmed`: a restart cut it off mid-delivery, the host cannot read an
+arbitrary destination back to learn whether it published, so it records
+neither success nor failure and never delivers it again. The Canvas's export
+offers list those exports, newest first and at most eight, and the export panel
+says each was not confirmed and asks the person to check the destination before
+exporting again; a later recorded export to the same destination retires the
+notice. Exports journaled before intents existed replay as they were. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`. A local target may describe the exact
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without

@@ -1633,6 +1633,7 @@ A Canvas export reaches a destination only after the person approves a card show
 - A call without confirmation never overwrites an existing file; it writes a numbered copy beside it.
 - The rendered document passes a secret-and-path filter, and one that fails is refused rather than published.
 - Saving or copying the HTML file is not a destination: it needs no approval and journals nothing, and the file loads nothing.
+- An approved export journals its intent before the destination is called; an intent that cannot be journaled sends nothing. Startup settles an intent with no recorded outcome as unconfirmed, never as delivered or failed, and never sends it again; the Canvas's export panel says the export was not confirmed until a later recorded export to that destination retires the notice.
 
 - Local destination packages declare one module and exact HTTPS origins. Examples bundle the public SDK with their entry; workers resolve no SDK from the host checkout and inherit no host endpoint configuration or keys. A supervised worker runs the portable protocol; only an approved export gets bounded mediated network requests. Description is offline and bounded; changed activation or package identity invalidates approval. Linux and Windows execution stays unavailable pending verified native confinement.
 

@@ -1,10 +1,13 @@
 import {
   AggregateId,
+  CanvasExportIntentRecorded,
   CanvasExportRecorded,
   CorrelationId,
   EventActor,
   EventId,
+  decodeCanvasExportIntentRecorded,
   decodeCanvasExportRecorded,
+  type CanvasExportIntentRecorded as CanvasExportIntent,
   type CanvasExportRecorded as CanvasExportRecord,
   type EventEnvelope,
   type UtcTimestamp,
@@ -17,6 +20,7 @@ import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/jour
 
 export const CANVAS_EXPORT_AGGREGATE_TYPE = "canvas-export";
 export const CANVAS_EXPORT_RECORDED = "canvas.export@1";
+export const CANVAS_EXPORT_INTENT_RECORDED = "canvas.export-intent@1";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -25,7 +29,9 @@ const decodeEventId = Schema.decodeUnknownSync(EventId);
 
 /** Register the Canvas export journal frame so it can be appended and replayed. */
 export function registerCanvasExportEvents(registry: EventRegistry): EventRegistry {
-  return registry.register(CANVAS_EXPORT_RECORDED, 1, CanvasExportRecorded);
+  return registry
+    .register(CANVAS_EXPORT_RECORDED, 1, CanvasExportRecorded)
+    .register(CANVAS_EXPORT_INTENT_RECORDED, 1, CanvasExportIntentRecorded);
 }
 
 export class CanvasExportEventStoreError extends Error {
@@ -46,8 +52,10 @@ export interface CanvasExportEventStoreOptions {
 }
 
 /**
- * One completed export is one `canvas-export` aggregate at version 1.
- * Replay rebuilds the records from the journal alone, in commit order.
+ * One export is one `canvas-export` aggregate: its intent at version 1,
+ * journaled before the destination is called, then its outcome at version 2.
+ * Exports journaled before intents existed hold only the outcome at version 1.
+ * Replay rebuilds both from the journal alone, in commit order.
  * The actor is supplied per append, derived from the authenticated transport
  * principal, so a remote approval never replays as a local one.
  */
@@ -60,30 +68,51 @@ export class CanvasExportEventStore {
     this.#uuid = options.uuid;
   }
 
+  /** Journal the approved export before its destination is called. */
+  recordIntent(input: {
+    readonly intent: CanvasExportIntent;
+    readonly occurredAt: UtcTimestamp;
+    readonly actor: typeof EventActor.Type;
+  }): EventEnvelope {
+    const payload = decodeCanvasExportIntentRecorded(input.intent);
+    return this.#appendAt(payload.exportId, 0, CANVAS_EXPORT_INTENT_RECORDED, payload, input);
+  }
+
+  /** Journal the outcome of an export whose intent is already recorded. */
   append(input: {
     readonly record: CanvasExportRecord;
     readonly occurredAt: UtcTimestamp;
     readonly actor: typeof EventActor.Type;
   }): EventEnvelope {
     const payload = decodeCanvasExportRecorded(input.record);
+    return this.#appendAt(payload.exportId, 1, CANVAS_EXPORT_RECORDED, payload, input);
+  }
+
+  #appendAt(
+    exportId: string,
+    expectedVersion: 0 | 1,
+    eventName: typeof CANVAS_EXPORT_RECORDED | typeof CANVAS_EXPORT_INTENT_RECORDED,
+    payload: CanvasExportRecord | CanvasExportIntent,
+    input: { readonly occurredAt: UtcTimestamp; readonly actor: typeof EventActor.Type },
+  ): EventEnvelope {
     let actor: typeof EventActor.Type;
     try {
       actor = decodeActor(input.actor);
     } catch {
       throw new CanvasExportEventStoreError("invalid", "Canvas export event actor is invalid.");
     }
-    const aggregateId = decodeAggregateId(payload.exportId);
+    const aggregateId = decodeAggregateId(exportId);
     const eventId = decodeEventId(this.#uuid());
     const correlationId = decodeCorrelationId(this.#uuid());
     let committed;
     try {
       committed = this.#journal.append({
         aggregate: { aggregateType: CANVAS_EXPORT_AGGREGATE_TYPE, aggregateId },
-        expectedVersion: 0,
+        expectedVersion,
         events: [
           {
             eventId,
-            eventName: CANVAS_EXPORT_RECORDED,
+            eventName,
             eventVersion: 1,
             correlationId,
             actor,
@@ -106,8 +135,8 @@ export class CanvasExportEventStore {
       envelope === undefined ||
       envelope.aggregateType !== CANVAS_EXPORT_AGGREGATE_TYPE ||
       envelope.aggregateId !== aggregateId ||
-      envelope.aggregateVersion !== 1 ||
-      envelope.eventName !== CANVAS_EXPORT_RECORDED
+      envelope.aggregateVersion !== expectedVersion + 1 ||
+      envelope.eventName !== eventName
     ) {
       throw new CanvasExportEventStoreError(
         "journal-mismatch",
@@ -117,23 +146,39 @@ export class CanvasExportEventStore {
     return envelope;
   }
 
-  /**
-   * Rebuild completed exports from the journal. An undecodable frame is skipped
-   * rather than repaired into an export that was never admitted.
-   */
+  /** Rebuild completed exports from the journal, in commit order. */
   replay(): ReadonlyArray<CanvasExportRecord> {
+    return this.replayAll().records;
+  }
+
+  /**
+   * Rebuild completed exports and the intents that never reached an outcome.
+   * An undecodable frame is skipped rather than repaired into an export that
+   * was never admitted.
+   */
+  replayAll(): {
+    readonly records: ReadonlyArray<CanvasExportRecord>;
+    readonly unsettled: ReadonlyArray<CanvasExportIntent>;
+  } {
     const records: CanvasExportRecord[] = [];
+    const intents = new Map<string, CanvasExportIntent>();
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
       CANVAS_EXPORT_AGGREGATE_TYPE,
     ])) {
-      if (envelope.eventName !== CANVAS_EXPORT_RECORDED) continue;
       try {
-        records.push(decodeCanvasExportRecorded(envelope.payload));
+        if (envelope.eventName === CANVAS_EXPORT_INTENT_RECORDED) {
+          const intent = decodeCanvasExportIntentRecorded(envelope.payload);
+          intents.set(String(intent.exportId), intent);
+        } else if (envelope.eventName === CANVAS_EXPORT_RECORDED) {
+          const record = decodeCanvasExportRecorded(envelope.payload);
+          intents.delete(String(record.exportId));
+          records.push(record);
+        }
       } catch {
         // The journal remains authoritative; a frame that no longer decodes
         // is not rewritten into a different export.
       }
     }
-    return records;
+    return { records, unsettled: [...intents.values()] };
   }
 }

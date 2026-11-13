@@ -4,7 +4,7 @@ import {
   type CanvasExportApprovalCard,
   type CanvasExportDecideRequest,
   type CanvasExportDecideResult,
-  type CanvasExportDelivery,
+  type CanvasExportRecorded,
   type CanvasExportFormat,
   type CanvasExportOfferList,
   type CanvasExportPrepareRequest,
@@ -230,6 +230,16 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
           </OctantButton>
         </div>
       )}
+      {props.offers.unconfirmed !== undefined && props.offers.unconfirmed.length > 0 ? (
+        <ul className="canvas-export__statuses" data-testid="canvas-export-unconfirmed">
+          {props.offers.unconfirmed.map((notice) => (
+            <li key={String(notice.exportId)}>
+              Export to {notice.destinationLabel} not confirmed. Octant stopped before it finished;
+              check {notice.destinationLabel} before exporting again.
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {props.offers.targets.length === 0 ? (
         <p className="canvas-export__note" data-testid="canvas-export-empty">
           No export destination is installed yet.
@@ -469,8 +479,8 @@ function destinationLabel(target: CanvasExportTargetOffer): string {
   return `${target.label} — ${STATUS_LABEL[target.status]}`;
 }
 
-function receiptText(outcome: CanvasExportDelivery): string {
-  if (outcome.kind === "refused") return outcome.message;
+function receiptText(outcome: CanvasExportRecorded["outcome"]): string {
+  if (outcome.kind === "refused" || outcome.kind === "unconfirmed") return outcome.message;
   const receipt = outcome.receipt;
   if (receipt.kind === "link") return `Exported. ${receipt.href}`;
   if (receipt.kind === "path") return `Exported. ${receipt.path}`;

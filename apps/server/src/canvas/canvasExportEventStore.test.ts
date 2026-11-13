@@ -76,10 +76,17 @@ describe("canvas export journal", () => {
     const path = join(directory, "events.sqlite3");
     const first = openConnection(path);
     let n = 0;
-    store(first, () => {
+    const writer = store(first, () => {
       n += 1;
       return `55555555-5555-4555-8555-${n.toString(16).padStart(12, "0")}`;
-    }).append({ record: record(), occurredAt: decodeUtcTimestamp(now), actor: localActor });
+    });
+    const { outcome: _outcome, ...fields } = record();
+    writer.recordIntent({
+      intent: { ...fields, kind: "canvas-export-intent" },
+      occurredAt: decodeUtcTimestamp(now),
+      actor: localActor,
+    });
+    writer.append({ record: record(), occurredAt: decodeUtcTimestamp(now), actor: localActor });
     first.close();
 
     const reopened = openConnection(path);
@@ -87,5 +94,26 @@ describe("canvas export journal", () => {
     reopened.close();
 
     expect(replayed).toEqual([record()]);
+  });
+
+  it("replays an intent with no outcome as unsettled after the journal is reopened", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-canvas-export-"));
+    directories.push(directory);
+    const path = join(directory, "events.sqlite3");
+    const first = openConnection(path);
+    let n = 0;
+    const { outcome: _outcome, ...fields } = record();
+    const intent = { ...fields, kind: "canvas-export-intent" as const };
+    store(first, () => {
+      n += 1;
+      return `55555555-5555-4555-8555-${n.toString(16).padStart(12, "0")}`;
+    }).recordIntent({ intent, occurredAt: decodeUtcTimestamp(now), actor: localActor });
+    first.close();
+
+    const reopened = openConnection(path);
+    const replayed = store(reopened, () => "66666666-6666-4666-8666-666666666666").replayAll();
+    reopened.close();
+
+    expect(replayed).toEqual({ records: [], unsettled: [intent] });
   });
 });
