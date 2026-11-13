@@ -2,7 +2,7 @@
 
 This is the current specification for the Settings pages that list bundled
 provider drivers and the model endpoints Octant calls itself.
-[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the Settings kit these pages
+[DESIGN.md](../../DESIGN.md#settings-layout) owns the Settings kit these pages
 are built from and the provider card on Providers & Models;
 [architecture](../architecture.md#providers) owns provider authority and
 credential boundaries. Update this specification with an approved change,

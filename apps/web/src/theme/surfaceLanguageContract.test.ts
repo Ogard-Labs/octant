@@ -11,7 +11,7 @@ function read(relative: string): string {
 }
 
 /**
- * DESIGN.md "Language" is the part of the system that leaves the renderer.
+ * DESIGN.md "Voice" and "Face" are the part of the system that leaves the renderer.
  * These checks keep the renderer honest about it: one face, one set of type
  * roles, and no uppercase kickers creeping back into headings.
  */

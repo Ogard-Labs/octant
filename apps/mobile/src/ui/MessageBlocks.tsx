@@ -118,7 +118,7 @@ function BlockView(props: {
         <Text
           style={[
             styles.heading,
-            // Headings inside a reply are labels, not page titles (DESIGN.md › Transcript).
+            // Headings inside a reply are labels, not page titles (docs/design/thread-view.md › Transcript).
             { fontSize: block.level === 1 ? 17 : 15 },
           ]}
         >

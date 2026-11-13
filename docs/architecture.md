@@ -6882,7 +6882,7 @@ occupancy precedes it) the window holds what the parts add up to, so the parts
 and the remainder always sum to the figure shown. The latest breakdown that was
 reported stands while a later turn is still running. Each category has one tone
 in the popover's bar and key and on the inspector's entries; Free space and
-Reserved have none ([DESIGN.md](../DESIGN.md), the context meter under "Shell and layout").
+Reserved have none ([context meter](design/thread-view.md#context-meter)).
 
 One operation contributes one request; a later report replaces its
 previous totals. Code conversation usage also preserves optional cache-read and cache-write

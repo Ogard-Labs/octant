@@ -461,7 +461,7 @@ describe("WindowChrome", () => {
     const sectionLabel = cssRule(".project-section > .sidebar-section");
     expect(sectionLabel).toContain("font-family: var(--oct-font-display);");
     // Sentence case: the section label reads "Projects", not a spaced-out
-    // "PROJECTS" kicker (DESIGN.md "Language").
+    // "PROJECTS" kicker (DESIGN.md "Voice").
     expect(sectionLabel).toContain("letter-spacing: 0;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");

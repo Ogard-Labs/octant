@@ -105,7 +105,7 @@
   --octant-divider-strong: #8a8a8a;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
-  /* One material, five levels (see DESIGN.md, "Shapes and depth"). Every
+  /* One material, five levels (see DESIGN.md, "Depth and material"). Every
      surface takes a fill one step lighter than what it sits on, a rim that is
      brighter along its top edge (an inset line, then an inset ring), and a
      shadow that seats it. On a near-black page a shadow cannot show, so the

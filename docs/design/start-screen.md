@@ -4,7 +4,7 @@ This is the detailed specification for what a Chat, Work, or Code start screen
 shows around its composer: the card area and Code's agent home. The rule set a
 contributor needs first is in
 [Workspace: start-screen cards](workspace.md#start-screen-cards); the question
-and the composer are in [DESIGN.md](../../DESIGN.md#welcome-and-composer).
+and the composer are in [DESIGN.md](../../DESIGN.md#composer-row).
 Update this specification with an approved change, following the
 [design workflow](README.md#changing-the-design).
 
@@ -485,6 +485,172 @@ no note here); running one sends those words as the thread's next turn, the
 same send the card makes. The palette reads the list each time it opens and never on a
 timer. With nothing waiting, or at a remote window, the group is absent, and the
 composer `/` list never carries it.
+
+## Welcome screen
+
+Chat, Work, and Code open on the same screen: one question in the middle of
+the page and one raised composer docked at its foot, where it stays once the
+thread starts, so the first message is typed where every later one is. Above
+the question sits the Octant aperture mark (`icons.svg#aperture`) at 22px,
+drawn in the primary ink and set 2px closer to the question than the
+heading's usual gap. The hero asks "What are we building today?" (the hero
+role: regular weight, -0.012em tracking, the primary ink in every style and
+never the accent). The approved size is 24px on a 30px line; the type scale
+has no 24px step and `ui:check` refuses a raw size, so the nearest token,
+`--oct-text-2xl` (26px), carries it on the 30px line, and phone width uses 20px.
+One quiet line under it, at the detail step in muted ink, says
+"Pick a project, or just start typing". The start screen names no time of day
+and counts nothing: what is running and what waits for review live in the
+sidebar. Once a Code start screen has a Project chosen, its quick tools are
+the Project's own Terminal and Browser (a server Project's Terminal only) as plain rows in the right dock's body,
+above one muted line, "Other tools open once the task starts". They live only
+in the dock: a column beside the start screen squeezed the composer off centre
+and contradicted the dock, so with the dock closed the start screen stands
+alone. Each opens in the dock without starting a thread, the same window-local
+Project terminal and browser Zen uses, which no agent can see or reach;
+"Quick tools" returns to the list, and closing the terminal (or leaving the
+start screen) stops its shell, since nothing else could reopen it. The
+composer never remounts when the Project is chosen, so the draft stays. Send
+on a Code start screen with no Project chosen stays live and answers with one
+card directly above the box, "Choose a Project first. A Code task works in a
+folder.", rather than greying out with no reason. Every
+start screen's composer asks "Ask anything…", and the message field keeps its
+accessible name.
+
+The question belongs to a new task only. When the same composer serves a
+decision, such as reviewing a planner's proposal, the caller replaces the mark,
+question, and quiet line with a heading that names the decision ("Review the
+planner's proposal") and the proposal's title, set at the dialog's top-left with
+the fixed proposal text directly under them in the composer. Rendered review
+showed the question above a fixed proposal read as an invitation to write a
+different task.
+
+**New task**, in every mode, is the question and the composer and nothing
+else; Chat and Work add one row of outline starter chips only before the
+mode's first thread. **Code Home** is where Code lands with nothing chosen:
+the same question and composer, then Code's prompt suggestions, the card area
+(a **Customize** control and the cards, on by default), and Code's agent home
+(Up next and Continue). There the page scrolls and the composer sits under
+the question. The cards appear on no other start screen. Neither screen has
+tabs or action tiles: adding a folder lives in the composer's Project picker. Their anatomy is in
+[Start screen: presentation](#presentation); their
+behavior is in [Workspace](workspace.md#start-screen-cards).
+
+Chat, Work, and Code welcome composers share the composer's box (`--oct-radius-md`,
+`--octant-shadow-md`) and one first-read hierarchy: one question, then the
+composer. Starter actions appear only when recent work does not already give
+the person a next step. In light the card is workspace white on the
+`--octant-app-background` well, not the grey floating fill — that fill reads
+as a sunken field. Code welcome keeps one stable question while Project and
+Environment sit on the context row above the composer
+(`.composer-tray--start`, rendered before the card inside `.composer-stack`),
+on the page ground with no band chrome. The base-branch chip joins that row
+once a Project is chosen. Environment is the
+create-facing presentation of Octant's authoritative host federation: its
+dropdown selects This computer, devbox, or another healthy capable host without
+creating a second environment model. Every create composer shows Environment
+only when more than one host is known. With one host there is nothing to
+choose, so no Environment control or label appears. With several, an existing
+Project's fixed host reads as a label instead of a dropdown. Workspace remains on that rear card after the three primary choices;
+nothing about delivery is asked up front (see [Voice](../../DESIGN.md#voice)). The Project
+control is one menu: saved Projects to search, then New Project from folder
+and New Project from GitHub repository. Choosing GitHub swaps the menu's body
+for the managed-clone flow in place, so there is no second repository control
+beside the Project. Access is
+a titled menu in the row under the prompt card, and carries the
+"Remember for this Project" switch.
+
+The Code start screen's agent home (suggested prompts, Up next, Start something
+new, and Continue) is laid out in
+[Start screen: Code agent home](#code-agent-home). The start screen has no image-generation control: a job needs a thread to
+land in, and the Image generator surface serves everything else. Attaching an
+image is a composer affordance and is available here.
+
+## Usage-limit warning
+
+**Usage-limit warning.** On a start screen, when the chosen account has a window
+that is spent or at 80% used (the same levels the meters colour), a warning
+callout takes the full row above the context chips, in the row above the
+card: which account, that it has
+reached or is close to its usage limit, and the reset time the provider gave.
+For each other ready account that has room (an observed window below the near
+level; an account with no observed window is never offered as having room) up to
+three `Use <account>` buttons follow, each choosing that account and its model
+(the current model when it lists it) exactly as the model menu would. Nothing
+switches on its own and the warning never blocks sending: the provider's own
+limit decides whether a turn runs. The model menu's rail lists accounts with
+room first and the ones at their limit last, in the person's own order within
+each, and marks a limited account with the danger dot and "Usage limit reached"
+(a near one with the warning dot and "Near usage limit"); a readiness problem
+takes the dot first.
+
+## First run
+
+First-run setup asks only what a first task needs — a usable provider, a
+Project folder, a model, and the
+[mode](../architecture.md#security-and-authority) new threads start in
+(Auto pre-selected and marked Recommended, then Ask first, Accept edits, Plan,
+and Full access, in that order; Full access reads "No sandbox, no prompts"
+and is never pre-selected; Auto uses the provider's own reviewer or
+[Octant Shield](../architecture.md#octant-shield), so it is listed for every
+runtime, and where no reviewer can run the picker shows it unavailable with
+the reason; the pick becomes the default for every new Work and Code thread
+until changed in Settings › Work or Settings › Code, or for one Project) — and ends in one primary action, Start a task,
+that opens the new-task composer in that Project. Setup also asks once whether
+Octant may check for updates, and does not ask again whatever the answer
+(maintainer request, 2026-11-12). The question is an Updates card on the
+readiness view with one switch, Check for updates automatically, off until the
+person turns it on; it is shown only in the desktop app, which is the only
+window that updates anything, and the answer is the Automatic update checks
+setting. Every step is optional from
+the first one. Opening setup focuses the current step's heading so a long
+provider list does not scroll past its introduction; Tab then reaches the
+step's controls. Skipping preserves settled answers, waits for pending writes,
+grants no authority, and creates no thread: provider, Project, model, and
+permission readiness are checked again when work is requested. After Skip, or
+in a later session with no ready instance, the New task composer in Work and
+Code shows a primary **Set up a provider** action that opens Providers &
+Models and returns to the same draft. The action leaves once any instance is
+ready; the model picker takes its place. Profile,
+appearance, the mode switches, and Navigator are not first-run steps: Profile
+lives in Settings › General, Appearance in Settings › Look & feel, and
+Navigator's models in a section of Settings › Octant Harness. No display name is inferred from the OS account. Continue retains
+compact recent-task rows and their status and Git cues.
+Empty Code entry offers folder setup and a direct route to Code settings; opening
+that setting never turns on projectless threads.
+A Work or Code pane with no thread and no Project asks one centred question
+("Pick a folder to work in"), says in one sentence what choosing a folder
+means, and offers Choose a folder… as the primary action with starting
+without one beside it; once a Project exists the new task leads instead.
+
+First run is a four-step wizard with a progress rail: Providers, Project, Model,
+and Mode, in that order, followed by an uncounted readiness view titled Your first
+task. Each step is pending, current, or completed: the current step is a filled
+card, completed steps show a check, and pending steps show their number. The
+Project step chooses the first task's mode (Work or Code; Code alone when Work
+is off; Chat Projects have no folder and are not offered) and its folder with
+`OctantToggleGroup`; Choose a folder… opens the same Project create surface as
+the empty Work and Code pages, so making the folder a Git repository stays an
+explicit choice there, and a folder created that way becomes the first task's
+Project. The Model step writes to what a new task in that mode already starts
+from: Work's default model in Work settings, and the composer's remembered
+model for Code. The readiness view reports provider, Project, and model
+separately; a missing fact opens its exact setup surface, and Start a task
+appears only when all three hold. Its heading reads Ready to start only then and
+otherwise names what is missing (Needs a provider and a model). Answers still write through to the settings
+that own them. First run records its outcome only after every answer has landed. When
+the host refused an answer, the first press of Skip setup or the primary action
+says so in a warning notice and records nothing; the next press goes on without
+that answer, so a refusing host can never leave the dialog impossible to leave.
+A refused outcome is reported the same way and the dialog stays open.
+The readiness view also offers an optional Explore capabilities card for Browser,
+Computer use, helper agents and person memory. It reports current host settings,
+uses labelled static examples and links to existing Settings controls. Computer use
+shares the guided permission setup and working test from Settings, with saved
+progress across relaunch. Setup is optional and never grants an agent app access. Dismissing
+it changes no setting or readiness answer. It adds no step or progress count.
+[Start screen](#optional-capability-card-in-your-first-task)
+owns its behavior.
 
 ## Verification
 
