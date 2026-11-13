@@ -213,6 +213,7 @@ function answerProduct(
                 inputJson: '{"q":"plan"}',
                 requestedAt: now,
                 rememberable: true,
+                answerCovers: "server",
               },
             ],
       );
@@ -722,7 +723,7 @@ describe("RemoteShellView", () => {
     }
   });
 
-  it("shows a waiting tool prompt to the host's own person, who may always allow the tool in its Project", async () => {
+  it("shows a waiting tool prompt to the host's own person, who may allow only this tool", async () => {
     const user = userEvent.setup();
     const seen: ProductRequest[] = [];
     const { bridge } = await readyBridge(seen, false, true, true);
@@ -730,8 +731,10 @@ describe("RemoteShellView", () => {
 
     const list = await screen.findByRole("navigation", { name: "Chat thread list" });
     await user.click(await within(list).findByRole("button", { name: "Planning from the phone" }));
-    expect(await screen.findByRole("button", { name: "Approve once" })).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Always allow in this Project" }));
+    expect(
+      await screen.findByRole("button", { name: "Allow all tools of this server" }),
+    ).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Allow only this tool" }));
 
     await waitFor(() =>
       expect(
@@ -754,9 +757,11 @@ describe("RemoteShellView", () => {
 
     const list = await screen.findByRole("navigation", { name: "Chat thread list" });
     await user.click(await within(list).findByRole("button", { name: "Planning from the phone" }));
-    expect(await screen.findByRole("button", { name: "Approve once" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Allow all tools of this server" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Always allow in this Project" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Allow only this tool" })).toBeNull();
   });
 
   it("starts a Work thread in a Project from a browser the host's own person paired", async () => {
