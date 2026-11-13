@@ -58,9 +58,13 @@ read-only gate is a maintainer live check.
   since the board leaves coordinators out, that read no longer lists the
   planner's own card.
 - **Code only.** A Work thread may message a sibling (maintainer request,
-  2026-11-12), and a Work turn carries the messages left for it, but no message
-  wakes a Work thread, so a Work coordinator could start workers and never
-  hear back while idle. Work coordinators are not in this design.
+  2026-11-12), a Work turn carries the messages left for it, and a message
+  wakes an idle Work thread whose **Wake when a message arrives** switch is
+  on, under the same bounds as Code (maintainer decision, 2026-11-13;
+  [Architecture: modes](../architecture.md#modes-chat-work-and-code)). That
+  removes what kept a Work coordinator from hearing back while idle. The
+  role itself (`start`, the roster, the read-only gate, state notices) is
+  still Code's: Work coordinators are not built.
 
 Rationale: a role on an existing thread, rather than a fourth thread kind, keeps
 the mode's authority and the thread's posture exactly as they were, which
@@ -140,8 +144,10 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   only on the command that makes the thread a coordinator, journals it on the
   thread (`coordinatorWorkerLevel`), refuses a later change to it, and drops
   it at **Stop coordinating**. With a fixed level a level named in the call
-  is not read, and a proposal carries the fixed level. A thread made a
-  coordinator with **Make coordinator** has no fixed level. After creation
+  is not read, and a proposal carries the fixed level. **Make coordinator**
+  offers the same choice in a submenu (this thread's level or lower, or
+  always one named level), sent on the same command (maintainer decision,
+  2026-11-13). After creation
   the worker's level is the person's to change, as on any thread.
 - **Lineage.** A worker belongs to the coordinator that started it. The host
   records that on the worker at creation and never changes it. When the
@@ -216,9 +222,12 @@ approval flow with one switch.
   returns to its default, and they are journaled on the coordinator's own
   record (`coordinatorBounds`) and dropped at **Stop coordinating**. A
   coordinator journaled before the bounds existed has none stored and takes the
-  defaults. The New coordinator draft sets them; a control that changes them on
-  an existing coordinator is not built yet, so today the command is the only
-  way. The host records each call in its own store, beside the
+  defaults. The New coordinator draft sets them, and **Coordinator limits…**
+  in a coordinator's row menu and pane header menu opens the three numbers
+  for a running coordinator and saves them with that command (maintainer
+  decision, 2026-11-13); a bound left at its default is not sent. The
+  designated planner holds no bounds of its own and is not offered the item.
+  The host records each call in its own store, beside the
   wake turns and each thread's latest host turn with its hop, so the count holds
   across a restart; it never reads fewer than the workers the coordinator's
   lineage shows created in that hour, so starts made before the record existed

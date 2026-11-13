@@ -4221,8 +4221,21 @@ it creates a worker thread, under the rules in
   frames the body as data in the turn's required context, and journals
   `delivered` only once the provider has been sent that context, so a turn
   that never reaches a provider leaves the message for the next one. A Work
-  thread has no **Wake when a message arrives** switch, so a message never
-  starts a Work turn; it waits for the thread's next turn. The host refuses a
+  thread has the **Wake when a message arrives** switch a Code thread has
+  (maintainer decision, 2026-11-13): off by default, set by a person from the
+  thread's row menu at a local window (command
+  `set-work-thread-message-wake`, journaled as the thread's own
+  `work.thread-updated@1`; a paired device is refused today, as for Code's
+  switch). With it on, a message for an idle Work thread starts one host turn
+  to carry it, under the same decision and the same bounds as Code (30 wake
+  turns a thread in any hour, 10 rounds by hop count), counted in the same
+  host store so a restart keeps them. Idle means an active thread that is not
+  completed and has no turn accepted, running, or waiting on a person. The
+  turn is started by the host as itself through ordinary Work admission, at
+  the thread's own level, so capacity, spend ceilings and usage limits apply
+  and every approval waits for a person; its prompt is a host sentence naming
+  the sender. Built by `WorkMessageWake`, which watches committed
+  `agent.message-sent@1` events. The host refuses a
   message between a Work and a Code thread as unreachable at admission and
   again at delivery, whatever Project their records name.
 
@@ -4539,18 +4552,48 @@ own snapshot of the file it sent; today only a Claude artifact), which Code's
 `tool-activity` and its conversation steps carry too and the transcript shows
 as a link card beside the drawn snapshot. A call's input and output are kept
 apart from the step, as [Tool-call records](#tool-call-records) describes. A
-turn keeps at most 512 steps
-by default, a number the person can change (maintainer request, 2026-11-12;
-not built yet: today a constant 64, kept until a step is journaled and
-streamed as a change, because each tool event now restates the whole list
-and those bytes grow with the square of the limit), in arrival
-order and sets a truncated flag when it called more. Chat carries them as
-`ChatAttempt.toolSteps` on `chat.attempt-updated@1`; Work carries them as
-`WorkTurnState.toolSteps` journaled with the settled `work.turn-updated@1`,
-with a live `turn-tools` stream frame while the turn runs. That frame restates
-every step at each change, so it carries a published page's link but not its
-snapshot (up to 256 KiB, resent once per later tool event); the snapshot
-arrives with the settled turn. They live on the
+turn keeps its steps in arrival order up to the tool-step limit and sets a
+truncated flag when it called more; the calls past the limit still run and
+have no row.
+
+- **The tool-step limit is a setting** (maintainer decision, 2026-11-13).
+  Settings › Permissions › Tool steps holds two numbers: **Tool steps kept
+  per turn** (`toolStepsPerTurn`, 1 to 4,096, default 64) for a turn below
+  Full access, and **Tool steps kept per turn at Full access**
+  (`fullAccessToolStepsPerTurn`, 0 to 4,096, default 0). At Full access 0 is
+  off: every call is kept, and the spend ceiling is what bounds the turn; a
+  person may set a number there too. The level read is the level the turn
+  runs at, so a Work turn a caller's ceiling holds below a Full access
+  thread's level keeps the lower level's limit. Chat has no Full access. The
+  host reads the setting when a turn starts. Spend ceilings and every other
+  hard line are unchanged. Rationale: a count of rows protects nothing a
+  person cannot get back, so it is a default; the bytes it used to cost are
+  gone with the next rule. One separate fixed bound remains: a Work turn
+  stops after 4,096 discrete runtime events, which a turn of well over a
+  thousand tool calls reaches whatever this setting says.
+- **A step is journaled and streamed as a change.** Chat journals each tool
+  event as `chat.attempt-tool-step@1`, carrying the one step that changed
+  (none when the list only became truncated) and the attempt's `updatedAt`;
+  the projection puts it on the attempt by its tool call id, and every whole
+  `chat.attempt-updated@1` journaled afterwards carries the list. The frame
+  goes to a subscriber that asks with `toolSteps=1`; any other subscriber
+  receives the whole attempt read back from the projection, as for an
+  appended delta. Work journals the list once, with the settled
+  `work.turn-updated@1`, and its live feed sends a `turn-tool-step` frame for
+  the one step that changed; a view that joins late or falls behind reads the
+  whole list from the transcript snapshot. The `turn-tools` frame, which
+  restated the list, is no longer sent and stays in the contract so a client
+  still reads a host that sends it. A live frame carries a published page's
+  link but not its snapshot (up to 256 KiB); the snapshot arrives with the
+  settled turn. A settled Work turn too heavy for one stream frame (160 KiB,
+  which thousands of steps reach) is replaced on the wire by
+  `snapshot-required`, so the view reads the transcript instead of refusing
+  the same frame at every reconnect. Rationale: each tool event used to
+  restate the whole list, in Chat's journal and in Work's live frame, so the
+  bytes grew with the square of the limit.
+
+Chat carries the steps as `ChatAttempt.toolSteps`; Work carries them as
+`WorkTurnState.toolSteps`. They live on the
 attempt or turn record, so they are thread content and purging the thread
 removes them with it. Both fields are optional, so a turn saved before they existed
 still decodes, and the group draws nothing for a turn that called no tool. This
@@ -4575,7 +4618,8 @@ an agent ran and got back (maintainer request, 2026-11-12).
 - **Bounds.** At most 16 KiB of input and 64 KiB of output a call, each cut at
   a character boundary and marked `truncated` when the call's text was longer,
   whether the store or the adapter cut it. A turn keeps records for no more
-  calls than it keeps steps. A thread's records hold at most 16 MiB together;
+  calls than it keeps steps, so none is limited by count at Full access
+  unless a person set a number there. A thread's records hold at most 16 MiB together;
   past that the thread's oldest records are dropped, so the newest calls stay
   inspectable. The bounds are fixed: they size stored data.
 - **What is recorded.** A tool Octant runs for a turn (an app-managed tool
@@ -4614,9 +4658,13 @@ an agent ran and got back (maintainer request, 2026-11-12).
   device reads and exports them (maintainer decision, 2026-11-12). Not built
   yet: today only a local window may read or export them; a paired device is
   refused and its export leaves them out, because what a tool was given and
-  returned is wider than the step a transcript shows it. Also not built yet: a call with no tool row (an Octant
-  Harness turn's calls, which announce no start) has its record kept and
-  exported but no row to open it from.
+  returned is wider than the step a transcript shows it. An Octant Harness
+  turn's runtime announces no tool call of its own, so the host gives each of
+  its calls a row when it takes the request: started while the tool runs,
+  then completed or failed, keyed by the request id its record is kept under,
+  so the row opens the record like any other (maintainer decision,
+  2026-11-13). A runtime that announces its own calls gets no second row for
+  a tool Octant ran for it.
 
 ### Web search
 
@@ -7491,7 +7539,8 @@ carrying only the reference it appended and the attempt's `updatedAt`, so
 journal bytes per reply are linear in its length. Deltas inside a short burst
 share one journal commit, folded ahead of any full attempt update in the same
 transaction, so the store fsyncs per burst rather than per token and stays on
-`synchronous = FULL`. The appended frame goes only
+`synchronous = FULL`. A tool event journals `chat.attempt-tool-step@1` the same way
+([Tool calls in Chat and Work](#tool-calls-in-chat-and-work)). The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the
 projection, which folds the references streamed so far onto the attempt. An opt-in
