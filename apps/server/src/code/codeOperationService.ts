@@ -1271,8 +1271,14 @@ export interface CodeOperationServiceOptions {
    */
   readonly unconfirmedSteps?: {
     readonly list: (threadId: CodeThread["id"]) => ReadonlyArray<CodeRuntimeWork>;
-    /** `interrupted`: the person stopped waiting without saying how it ended. */
-    readonly settle: (work: CodeRuntimeWork, state: "completed" | "failed" | "interrupted") => void;
+    /**
+     * `interrupted`: the person stopped waiting without saying how it ended.
+     * Answers whether the settled record reached the journal.
+     */
+    readonly settle: (
+      work: CodeRuntimeWork,
+      state: "completed" | "failed" | "interrupted",
+    ) => "settled" | "not-recorded";
     /**
      * Record on a running step's work what it will be settled by, before the
      * step reaches the remote: a comment's pull request and prior matches.
@@ -3473,7 +3479,7 @@ export class CodeOperationService {
         "stale",
         "This step is no longer waiting to be confirmed.",
       );
-    steps.settle(
+    const settled = steps.settle(
       work,
       command.outcome === "happened"
         ? "completed"
@@ -3481,6 +3487,14 @@ export class CodeOperationService {
           ? "failed"
           : "interrupted",
     );
+    // Nothing is journaled for an answer the record never took: a retry with
+    // the same id must try again, not replay a success the board never saw.
+    if (settled !== "settled")
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Octant could not record your answer. Try again.",
+      );
     const result = decodeCodeOperationResult({
       kind: "operation-accepted",
       operationId: command.operationId,
