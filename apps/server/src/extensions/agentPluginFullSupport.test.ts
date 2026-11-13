@@ -790,6 +790,15 @@ describe("Agent Plugin MCP session manager", () => {
   });
 
   it("omits MCP tools whose names repeat or whose input schemas are invalid or unsafe", async () => {
+    const branchingDefinitions: Record<string, unknown> = { leaf: { type: "null" } };
+    let branchingReference = "#/$defs/leaf";
+    for (let index = 0; index < 10; index += 1) {
+      const name = `branch-${index}`;
+      branchingDefinitions[name] = {
+        anyOf: [{ $ref: branchingReference }, { $ref: branchingReference }],
+      };
+      branchingReference = `#/$defs/${name}`;
+    }
     const manager = new AgentPluginMcpSessionManager({
       store: {
         contentRoot: () => "/tmp/plugin",
@@ -856,6 +865,23 @@ describe("Agent Plugin MCP session manager", () => {
                                 hidden: {
                                   regex: { type: "string", pattern: "^(a+)+$" },
                                 },
+                              },
+                            },
+                            {
+                              name: "recursive-branching-ref",
+                              inputSchema: {
+                                type: "object",
+                                properties: {
+                                  next: { anyOf: [{ $ref: "#" }, { $ref: "#" }] },
+                                },
+                                required: ["next"],
+                              },
+                            },
+                            {
+                              name: "expanding-reference-graph",
+                              inputSchema: {
+                                $ref: branchingReference,
+                                $defs: branchingDefinitions,
                               },
                             },
                             {

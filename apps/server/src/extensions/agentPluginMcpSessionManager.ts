@@ -1086,10 +1086,12 @@ function duplicatedMcpToolNames(tools: ReadonlyArray<McpToolDefinition>): Readon
   return duplicates;
 }
 
+const MAX_MCP_SCHEMA_EVALUATION_NODES = 1_024;
+
 /**
- * JavaScript regular expressions can exhibit catastrophic backtracking. MCP
- * schemas are server-controlled and Ajv evaluates them synchronously on the
- * control-plane event loop, so regex-bearing schemas are not safe to execute.
+ * MCP schemas are server-controlled and Ajv evaluates them synchronously on
+ * the control-plane event loop. Reject regex-bearing schemas, reference cycles,
+ * and reference graphs that can expand into excessive synchronous work.
  */
 function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
   const visited = new Set<unknown>();
@@ -1105,9 +1107,14 @@ function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
     ) {
       return true;
     }
-    for (const keyword of ["$ref", "$dynamicRef", "$recursiveRef"] as const) {
-      if (typeof record[keyword] !== "string") continue;
-      const referenced = localJsonPointerTarget(schema, record[keyword]);
+    if (
+      Object.prototype.hasOwnProperty.call(record, "$dynamicRef") ||
+      Object.prototype.hasOwnProperty.call(record, "$recursiveRef")
+    ) {
+      return true;
+    }
+    if (typeof record.$ref === "string") {
+      const referenced = localJsonPointerTarget(schema, record.$ref);
       // Ajv can resolve more reference forms than this bounded inspector. Omit
       // those tools instead of compiling a schema whose regex use is unknown.
       if (referenced === undefined || visit(referenced)) return true;
@@ -1150,6 +1157,73 @@ function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
       }
     }
     return false;
+  };
+  return visit(schema) || mcpInputSchemaEvaluationIsUnsafe(schema);
+}
+
+/**
+ * Bound the maximum schema graph Ajv may synchronously explore for one input
+ * node. This deliberately expands repeated local references instead of
+ * deduplicating them: two branches that point at the same schema are two units
+ * of validation work. An active reference is a cycle whose work can grow with
+ * attacker-controlled input depth, so it is never admitted.
+ */
+function mcpInputSchemaEvaluationIsUnsafe(schema: unknown): boolean {
+  let remainingNodes = MAX_MCP_SCHEMA_EVALUATION_NODES;
+  const active = new Set<unknown>();
+  const visit = (candidate: unknown): boolean => {
+    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return false;
+    }
+    if (active.has(candidate) || --remainingNodes < 0) return true;
+    active.add(candidate);
+    try {
+      const record = candidate as Readonly<Record<string, unknown>>;
+      if (
+        Object.prototype.hasOwnProperty.call(record, "$dynamicRef") ||
+        Object.prototype.hasOwnProperty.call(record, "$recursiveRef")
+      ) {
+        return true;
+      }
+      if (typeof record.$ref === "string") {
+        const referenced = localJsonPointerTarget(schema, record.$ref);
+        if (referenced === undefined || visit(referenced)) return true;
+      }
+      for (const keyword of [
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+      ] as const) {
+        if (visit(record[keyword])) return true;
+      }
+      for (const keyword of ["allOf", "anyOf", "oneOf", "prefixItems"] as const) {
+        const nested = record[keyword];
+        if (Array.isArray(nested) && nested.some(visit)) return true;
+      }
+      for (const keyword of ["dependencies", "dependentSchemas", "properties"] as const) {
+        const nested = record[keyword];
+        if (
+          nested !== null &&
+          typeof nested === "object" &&
+          !Array.isArray(nested) &&
+          Object.values(nested).some(visit)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    } finally {
+      active.delete(candidate);
+    }
   };
   return visit(schema);
 }

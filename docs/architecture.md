@@ -11461,10 +11461,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   receives `call` and shows Allow and Deny. The payloads hold
   identifiers and digests, never a call's arguments or result. The host
   compiles that same bounded input schema when the tool is listed; an invalid
-  schema or duplicated tool name omits the affected tool. Each call's JSON must
-  satisfy it before an approval is requested, a remembered grant is consulted,
-  credentials are resolved, or the server receives the call. Validation never
-  coerces or rewrites arguments.
+  schema, a schema unsafe for bounded synchronous validation, or a duplicated
+  tool name omits the affected tool. Each call's JSON must satisfy it before an
+  approval is requested, a remembered grant is consulted, credentials are
+  resolved, or the server receives the call. Validation never coerces or
+  rewrites arguments.
   - A grant grows only through that answer from a person, at a local window or a device the host's own person paired (maintainer decision, 2026-11-12). No route, command,
     manifest field, structured reference, tool call, model output, or
     host-owned turn (a routine, a goal loop, a usage-limit resume, a child-run
