@@ -55,7 +55,7 @@ describe("Project icon", () => {
 
   it("cancels pending requests and does not retain an icon that arrives after disposal", async () => {
     const body = Promise.withResolvers<Blob>();
-    const fetcher = vi.fn<typeof fetch>(async () => new Response(new Blob(["icon"])));
+    const fetcher = vi.fn<typeof fetch>();
     const response = new Response();
     vi.spyOn(response, "blob").mockReturnValue(body.promise);
     fetcher.mockResolvedValue(response);
@@ -81,9 +81,11 @@ describe("Project icon", () => {
     let created = 0;
     URL.createObjectURL = vi.fn(() => `blob:icon-${++created}`);
     URL.revokeObjectURL = vi.fn();
+    // Node 22's Response expects a Blob with stream(), which jsdom does not
+    // provide. Let the native Response produce its own blob from wire bytes.
     const fetcher = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => new Response(new Blob(["icon"])));
+      .mockImplementation(async () => new Response("icon"));
     const tree = (capability: string) => (
       <StrictMode>
         <ProjectIconProvider serverUrl="http://127.0.0.1:1" windowCapability={capability}>
