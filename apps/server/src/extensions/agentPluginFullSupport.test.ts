@@ -886,6 +886,23 @@ describe("Agent Plugin MCP session manager", () => {
                               },
                             },
                             {
+                              name: "nested-schema-id",
+                              inputSchema: {
+                                type: "object",
+                                hidden: { check: { type: "string" } },
+                                properties: {
+                                  value: {
+                                    $id: "nested",
+                                    type: "object",
+                                    hidden: {
+                                      check: { type: "string", pattern: "^(a+)+$" },
+                                    },
+                                    properties: { next: { $ref: "#/hidden/check" } },
+                                  },
+                                },
+                              },
+                            },
+                            {
                               name: "expanding-reference-graph",
                               inputSchema: {
                                 $ref: branchingReference,

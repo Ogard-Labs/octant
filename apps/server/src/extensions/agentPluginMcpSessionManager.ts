@@ -1090,8 +1090,9 @@ const MAX_MCP_SCHEMA_EVALUATION_NODES = 1_024;
 
 /**
  * MCP schemas are server-controlled and Ajv evaluates them synchronously on
- * the control-plane event loop. Reject regex-bearing schemas, reference cycles,
- * and reference graphs that can expand into excessive synchronous work.
+ * the control-plane event loop. Reject asynchronous or regex-bearing schemas,
+ * nested reference resources, reference cycles, and graphs that can expand
+ * into excessive synchronous work.
  */
 function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
   const visited = new Set<unknown>();
@@ -1110,7 +1111,8 @@ function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
     if (
       Object.prototype.hasOwnProperty.call(record, "$async") ||
       Object.prototype.hasOwnProperty.call(record, "$dynamicRef") ||
-      Object.prototype.hasOwnProperty.call(record, "$recursiveRef")
+      Object.prototype.hasOwnProperty.call(record, "$recursiveRef") ||
+      (candidate !== schema && Object.prototype.hasOwnProperty.call(record, "$id"))
     ) {
       return true;
     }
