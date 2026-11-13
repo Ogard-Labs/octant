@@ -119,6 +119,7 @@ const PRODUCT_PROBES = [
     method: "GET",
   },
   { path: "/api/thread-message-queue/commands", method: "POST" },
+  { path: "/api/pending-requests", method: "GET" },
 ] as const;
 
 export interface ForwardListClassifierMismatch {

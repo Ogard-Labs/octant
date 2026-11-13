@@ -556,6 +556,7 @@ export interface CodeAppManagedToolsOptions {
           readonly source?: BrowserDownloadSource;
         },
         origin: string,
+        signal: AbortSignal,
       ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
     }) => Promise<
       | {
@@ -577,6 +578,8 @@ export interface CodeAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => (() => void) | undefined;
+    /** Keeps the page while an upload question about it waits; see the service. */
+    readonly holdForAsk?: (windowId: WindowId, threadId: BrowserThreadId) => () => void;
   };
   /** The Project's flows and the recorder of this host; absent, flows are unavailable. */
   readonly browserFlows?: BrowserFlowToolPort;
@@ -1654,13 +1657,14 @@ async function browserToolOne(
       downloadId: input.downloadId,
       workspaceRoot: download.root,
       ...(signal === undefined ? {} : { signal }),
-      ask: (facts, pageOrigin) => {
+      ask: (facts, pageOrigin, pageSignal) => {
         const question = browserDownloadQuestion(pageOrigin, facts);
         // Code journals bounded approval summaries. Refuse before that layer
-        // could truncate the source chain and hide its final origin.
+        // could truncate the source chain and hide its final origin. The
+        // page's own end withdraws the question with the call's.
         return Buffer.byteLength(question, "utf8") > MAX_CODE_OPERATION_SUMMARY_BYTES
           ? Promise.resolve("cancelled" as const)
-          : download.request(question, signal);
+          : download.request(question, pageSignal);
       },
     });
     return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
@@ -1674,10 +1678,15 @@ async function browserToolOne(
     const admitted = await admitBrowserUpload({
       workspaceRoot: upload?.root,
       files: input.files,
-      ask: (files) =>
-        upload === undefined
-          ? Promise.resolve("denied")
-          : upload.request(browserUploadSummary(origin, files), signal),
+      ask: async (files) => {
+        if (upload === undefined) return "denied";
+        const release = options.browser?.holdForAsk?.(options.windowId, threadId);
+        try {
+          return await upload.request(browserUploadSummary(origin, files), signal);
+        } finally {
+          release?.();
+        }
+      },
     });
     if (admitted.status === "refused") return failure(admitted.reason);
     uploadFiles = admitted.paths;

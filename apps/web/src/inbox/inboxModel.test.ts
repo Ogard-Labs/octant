@@ -168,6 +168,32 @@ describe("inbox filters", () => {
     });
   });
 
+  it("lists an ask a host service holds under All and Stuck, in its Project, by when it was asked", () => {
+    const [ask] = inboxWaitingItems([], [], NOW, [
+      {
+        kind: "tool-approval",
+        askId: "0a000000-0000-4000-8000-000000000001",
+        mode: "work",
+        projectId: "0a000000-0000-4000-8000-000000000002",
+        threadId: "0a000000-0000-4000-8000-000000000003",
+        threadTitle: "Quarterly notes",
+        requestedAt: "2026-10-06T08:00:00.000Z",
+        text: "Run search_issues from Linear?",
+      } as never,
+    ]);
+    expect(ask).toMatchObject({
+      kind: "ask",
+      projectKey: "0a000000-0000-4000-8000-000000000002",
+      urgent: false,
+      deferred: false,
+      since: Date.parse("2026-10-06T08:00:00.000Z"),
+    });
+    const matching = (["all", "urgent", "decide", "stuck", "finished"] as const).filter(
+      (filter) => ask !== undefined && matchesInboxFilter(ask, filter),
+    );
+    expect(matching).toEqual(["all", "stuck"]);
+  });
+
   it("leaves a due follow-up to All only", () => {
     const followUp = waiting.find(
       (item) => item.kind === "attention" && item.item.signal.reason === "follow-up-due",

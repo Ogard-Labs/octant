@@ -1543,8 +1543,11 @@ describe("Code app-managed tools", () => {
           readonly ask: (
             facts: { name: string; sizeBytes: number; mediaType: string },
             origin: string,
+            signal: AbortSignal,
           ) => Promise<unknown>;
+          readonly signal?: AbortSignal;
         }) => {
+          // The service hands the question the page's signal joined with the call's.
           const answer = await input.ask(
             {
               name: "report.pdf",
@@ -1553,6 +1556,7 @@ describe("Code app-managed tools", () => {
               ...(options.source === undefined ? {} : { source: options.source }),
             },
             "https://example.com",
+            input.signal ?? new AbortController().signal,
           );
           if (answer !== "approved")
             return { status: "refused" as const, error: "browser-download-cancelled" };
@@ -1609,7 +1613,7 @@ describe("Code app-managed tools", () => {
       );
       expect(request).toHaveBeenCalledWith(
         "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: unverified.",
-        undefined,
+        expect.any(AbortSignal),
       );
     });
 

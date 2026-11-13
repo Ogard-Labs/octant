@@ -84,6 +84,16 @@
   overflow-wrap: anywhere;
 }
 
+/* What an ask's card shows under its one line: a tool's input, the words a
+   memory entry would hold. Kept whole, since the row may be answered from. */
+.pending-request__ask-detail {
+  max-height: 8lh;
+  margin: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .pending-request__why {
   margin: 0;
   overflow-wrap: anywhere;

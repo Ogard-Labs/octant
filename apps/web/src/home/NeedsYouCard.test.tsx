@@ -1,5 +1,9 @@
 import type { PendingRequestClient } from "@octant/client-runtime/pending-request-client";
-import type { PendingRequest, PendingRequestList } from "@octant/contracts/pending-requests";
+import type {
+  PendingRequest,
+  PendingRequestList,
+  WaitingAsk,
+} from "@octant/contracts/pending-requests";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -710,6 +714,118 @@ describe("the Needs you card", () => {
     expect(card.available).toBe(false);
     renderCard(card);
     await waitFor(() => expect(screen.queryByRole("region", { name: "Home cards" })).toBeNull());
+  });
+
+  it("lists a waiting tool approval and a sign-in card, answers the first in place and opens the thread for the second", async () => {
+    const toolAsk = {
+      kind: "tool-approval",
+      askId: "ask-tool",
+      mode: "work",
+      projectId: "project-work",
+      threadId: "work-thread",
+      threadTitle: "Quarterly notes",
+      requestedAt: at(6),
+      text: "Run search_issues from Linear?",
+      detail: '{"query":"renewals"}',
+      inPlace: true,
+    } as unknown as WaitingAsk;
+    const signIn = {
+      kind: "browser-sign-in",
+      askId: "ask-sign-in",
+      mode: "chat",
+      threadId: "chat-thread",
+      threadTitle: "Trip ideas",
+      requestedAt: at(3),
+      text: "Sign in at https://example.com",
+    } as unknown as WaitingAsk;
+    let read = 0;
+    const client: PendingRequestClient = {
+      list: vi.fn(async () => ({
+        requests: [],
+        truncated: false,
+        asks: read++ === 0 ? [toolAsk, signIn] : [signIn],
+      })),
+    };
+    const decideToolApproval = vi.fn(async () => true);
+    const onOpenAsk = vi.fn();
+    renderCard(
+      createNeedsYouCard(
+        source({
+          pendingRequestClient: client,
+          askClients: { extensionClient: { decideToolApproval } },
+          onOpenAsk,
+        }),
+      ),
+    );
+    const card = await findCard();
+    const tool = await within(card).findByRole("group", {
+      name: "Quarterly notes needs your approval",
+    });
+    expect(within(tool).getByText("Run search_issues from Linear?")).toBeInTheDocument();
+    expect(within(tool).getByText('{"query":"renewals"}')).toBeInTheDocument();
+    expect(within(tool).getByText("Finance")).toBeInTheDocument();
+    expect(within(tool).getByText("Waiting 6m")).toBeInTheDocument();
+
+    const signInRow = within(card).getByRole("group", { name: "Trip ideas is waiting for you" });
+    expect(within(signInRow).queryByRole("button", { name: "Approve" })).toBeNull();
+    await userEvent.click(within(signInRow).getByRole("button", { name: "Open thread" }));
+    expect(onOpenAsk).toHaveBeenCalledWith(signIn);
+
+    await userEvent.click(within(tool).getByRole("button", { name: "Approve" }));
+    expect(decideToolApproval).toHaveBeenCalledWith({
+      approvalId: "ask-tool",
+      decision: "approved",
+    });
+    await waitFor(() =>
+      expect(
+        within(card).queryByRole("group", { name: "Quarterly notes needs your approval" }),
+      ).toBeNull(),
+    );
+  });
+
+  it("says so on the row when an ask's answer is refused, and offers no answer without its client", async () => {
+    const ask = {
+      kind: "browser-approval",
+      askId: "0a000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: "project-code",
+      threadId: "code-thread",
+      threadTitle: "Fix the flaky build",
+      requestedAt: at(2),
+      text: "Let the agent use https://example.com in the Browser?",
+      inPlace: true,
+    } as unknown as WaitingAsk;
+    const client: PendingRequestClient = {
+      list: vi.fn(async () => ({ requests: [], truncated: false, asks: [ask] })),
+    };
+    const decideApproval = vi.fn(async () => false);
+    const { unmount } = renderCard(
+      createNeedsYouCard(
+        source({
+          pendingRequestClient: client,
+          askClients: { browserAutomationClient: { decideApproval } },
+        }),
+      ),
+    );
+    const row = await screen.findByRole("group", {
+      name: "Fix the flaky build needs your approval",
+    });
+    await userEvent.click(within(row).getByRole("button", { name: "Deny" }));
+    expect(decideApproval).toHaveBeenCalledWith({
+      approvalId: "0a000000-0000-4000-8000-000000000001",
+      decision: "denied",
+    });
+    expect(await within(row).findByRole("status")).toHaveTextContent(
+      "The answer was not delivered. The request may have changed.",
+    );
+    unmount();
+
+    renderCard(createNeedsYouCard(source({ pendingRequestClient: client })));
+    const plain = await screen.findByRole("group", {
+      name: "Fix the flaky build needs your approval",
+    });
+    expect(within(plain).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(within(plain).getByRole("button", { name: "Open thread" })).toBeInTheDocument();
   });
 
   it("is on by default and drops out of the grid when empty", () => {

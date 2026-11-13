@@ -121,7 +121,6 @@ describe("BrowserToolApprovalService", () => {
       const service = new BrowserToolApprovalService({
         uuid: () => crypto.randomUUID(),
         now: Date.now,
-        ttlMs: 1_000,
         authorityIsCurrent: () => true,
         onChanged: () => lists.push(service.list(windowId).length),
       });
@@ -150,8 +149,10 @@ describe("BrowserToolApprovalService", () => {
       expect(lists).toEqual([1, 0, 1, 0]);
 
       const third = ask("https://three.example");
-      await vi.advanceTimersByTimeAsync(1_000);
-      await expect(third).resolves.toBe("expired");
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(service.list(windowId)).toHaveLength(1);
+      service.withdrawThread(threadId);
+      await expect(third).resolves.toBe("cancelled");
       expect(lists).toEqual([1, 0, 1, 0, 1, 0]);
 
       const fourth = ask("https://four.example");
@@ -223,7 +224,6 @@ describe("BrowserToolApprovalService", () => {
       expect(service.list(windowId)).toEqual([
         expect.objectContaining({ signIn: { reason: "The dashboard needs your account." } }),
       ]);
-      // A site approval has run out long before; the sign-in card has no expiry.
       vi.advanceTimersByTime(24 * 60 * 60_000);
       expect(service.list(windowId)).toHaveLength(1);
       expect(
@@ -396,28 +396,42 @@ describe("BrowserToolApprovalService", () => {
     await expect(pending).resolves.toBe("denied");
   });
 
-  it("expires an approval at decision time even when its timer has not fired", async () => {
+  it("keeps a site, an upload and a download approval waiting a day later and takes the answer then", async () => {
     let now = Date.parse("2026-09-09T10:00:00.000Z");
+    let next = 0;
+    const ids = [
+      "40000000-0000-4000-8000-000000000005",
+      "40000000-0000-4000-8000-000000000006",
+      "40000000-0000-4000-8000-000000000007",
+    ];
     const service = new BrowserToolApprovalService({
-      uuid: () => "40000000-0000-4000-8000-000000000005",
+      uuid: () => ids[next++] ?? crypto.randomUUID(),
       now: () => now,
-      ttlMs: 1_000,
       authorityIsCurrent: () => true,
     });
-    const pending = service.request({
+    const ask = {
       windowId,
       threadId: "50000000-0000-4000-8000-000000000001",
       authority,
       origin: "https://example.com",
-    });
-    now += 1_001;
-    expect(
-      service.decide(windowId, {
-        approvalId: "40000000-0000-4000-8000-000000000005" as never,
-        decision: "approved",
+    };
+    const waiting = [
+      service.request(ask),
+      service.request({ ...ask, upload: [{ name: "notes.txt", sizeBytes: 5 }] }),
+      service.request({
+        ...ask,
+        download: { name: "report.pdf", sizeBytes: 9, mediaType: "application/pdf" },
       }),
-    ).toBe(false);
-    await expect(pending).resolves.toBe("expired");
+    ];
+    await Promise.resolve();
+    now += 24 * 60 * 60_000;
+    expect(service.list(windowId)).toHaveLength(3);
+    for (const approvalId of ids) {
+      expect(
+        service.decide(windowId, { approvalId: approvalId as never, decision: "approved" }),
+      ).toBe(true);
+    }
+    await expect(Promise.all(waiting)).resolves.toEqual(["approved", "approved", "approved"]);
   });
 
   it("remembers an origin only when an approved answer asks to", async () => {

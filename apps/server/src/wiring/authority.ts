@@ -144,8 +144,16 @@ export function wireAuthority(deps: AuthorityDependencies) {
     isHostScope: isRoutineHostScope,
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
   });
+  // The asks these services hold are not journaled when raised, so each says
+  // so here and the paired phones' notifications, wired later, listen.
+  const waitingAskAnnouncement: {
+    notify?: (ask: { readonly threadId: string; readonly askId: string }) => void;
+  } = {};
+  const onWaitingAsk = (ask: { readonly threadId: string; readonly askId: string }): void =>
+    waitingAskAnnouncement.notify?.(ask);
   const extensionToolApprovalService = new ExtensionToolApprovalService({
     uuid: randomUUID,
+    onAsked: onWaitingAsk,
     now: processAuthorityTime,
     isPairedDeviceScope,
     // The thread must still be active and in the Project the prompt
@@ -195,6 +203,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // whose turn raised them. A prompt like the tool approvals above, so it
   // rides the same change topic.
   const routineProposalService = new RoutineProposalService({
+    onAsked: onWaitingAsk,
     uuid: randomUUID,
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
@@ -203,6 +212,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // card in the thread. A prompt like the routine proposals above, so it
   // rides the same change topic.
   const imageGenerationOffers = new ImageGenerationOfferService({
+    onAsked: onWaitingAsk,
     uuid: randomUUID,
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
@@ -368,6 +378,8 @@ export function wireAuthority(deps: AuthorityDependencies) {
     },
     processAuthorityNow,
     onThreadArchived,
+    onWaitingAsk,
+    waitingAskAnnouncement,
     processAuthorityTime,
     onWindowRevoked,
     personMemory,

@@ -230,6 +230,9 @@ export function classifyProductAction(request: Request): string | undefined {
   // never a write. Changing either is the shell route's, which a device never reaches.
   if (path === "/api/conversation-inputs")
     return method === "GET" ? "project.overview.read" : undefined;
+  // Needs you is a read of what waits; every answer is its own route's action.
+  if (path === "/api/pending-requests")
+    return method === "GET" ? "project.overview.read" : undefined;
   // The queue serves all three modes from one path and names the mode in the
   // command, so admission is at the least of their send actions. The queue
   // rechecks the device against the mode's own action before it accepts a

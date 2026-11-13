@@ -268,14 +268,19 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("refuses a paired device the cross-mode pending request read before the route sees it", async () => {
+  it("admits a paired device's Needs you read as an overview read, and keeps deferral with a window", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });
 
+    expect(classifyProductAction(new Request("https://octant.example/api/pending-requests"))).toBe(
+      "project.overview.read",
+    );
     expect(
-      classifyProductAction(new Request("https://octant.example/api/pending-requests")),
+      classifyProductAction(
+        new Request("https://octant.example/api/pending-requests/defer", { method: "POST" }),
+      ),
     ).toBeUndefined();
-    const response = await product(handoff("/api/pending-requests"));
+    const response = await product(handoff("/api/pending-requests/defer", "POST"));
 
     expect(response?.status).toBe(403);
     expect(dispatch).not.toHaveBeenCalled();

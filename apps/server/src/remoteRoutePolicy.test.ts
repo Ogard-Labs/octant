@@ -293,10 +293,12 @@ describe("remote route policy", () => {
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
     }
-    // Every approval and question across the host's Projects is a local-window
-    // read; the remote listener never forwards it.
-    expect((await fixture.route(request("/api/pending-requests"))).status).toBe(404);
+    // The menu bar's roster spans what every local window binds; the remote
+    // listener never forwards it. Deferring a question stays with a window too.
     expect((await fixture.route(request("/api/fleet-activity"))).status).toBe(404);
+    expect(
+      (await fixture.route(request("/api/pending-requests/defer", { method: "POST" }))).status,
+    ).toBe(404);
 
     expect(fixture.webAssets).not.toHaveBeenCalled();
     expect(fixture.preAuth).not.toHaveBeenCalled();
@@ -844,7 +846,7 @@ describe("remote route policy", () => {
     expect(status(inspect("/api/reply-detail/extra", "GET"))).toBe(404);
   });
 
-  it("admits a paired device's message queue read and commands on their exact paths", () => {
+  it("admits a paired device's message queue and Needs you reads and the queue's commands on their exact paths", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>
       routePolicy.inspect(
@@ -873,6 +875,12 @@ describe("remote route policy", () => {
     expect(status(inspect("/api/thread-message-queue/commands", "GET"))).toBe(405);
     expect(status(inspect("/api/thread-message-queue/commands?x=1", "POST"))).not.toBe("allow");
     expect(status(inspect("/api/thread-message-queue/other", "POST"))).toBe(404);
+
+    // Needs you: a paired device reads what waits on the person, as a read
+    // with no parameters. Answers go through each ask's own forwarded route.
+    expect(inspect("/api/pending-requests", "GET")).toMatchObject(allowed);
+    expect(status(inspect("/api/pending-requests", "POST"))).toBe(405);
+    expect(status(inspect("/api/pending-requests?windowId=1", "GET"))).not.toBe("allow");
   });
 
   it("admits a paired device's dictation and voice status, and keeps read-aloud off the listener", () => {

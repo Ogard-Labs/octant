@@ -20,22 +20,31 @@ export interface PendingRequestRouteDependencies {
       change: PendingQuestionDeferral,
       current: () => boolean,
     ) => Promise<boolean>;
-    readonly list: (windowId: WindowId) => Promise<PendingRequestList>;
+    readonly list: (
+      windowId: WindowId,
+      reader?: "local-window" | "remote-device",
+    ) => Promise<PendingRequestList>;
   };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
 
 /**
- * `GET /api/pending-requests`: every approval and question the calling window
- * can answer. Local windows only.
+ * `GET /api/pending-requests`: every approval, question and other waiting ask
+ * the caller can answer. A local window reads its own; a paired device, which
+ * the remote listener forwards here, reads under its own scope, so it is
+ * listed only what its own answer commands and ask routes would admit.
+ * Listing grants nothing: every answer still passes its own route's check.
+ * Deferral stays with a local window.
  */
 export function createPendingRequestRouteHandler(dependencies: PendingRequestRouteDependencies) {
   const read = createLocalWindowReadRoute({
     path: PENDING_REQUESTS_PATH,
     noun: "Pending request",
     plural: "Pending requests",
-    read: async (windowId) => decodePendingRequestList(await dependencies.service.list(windowId)),
+    read: async (windowId, reader) =>
+      decodePendingRequestList(await dependencies.service.list(windowId, reader)),
+    pairedDevices: "admitted",
     decodeFailure: decodePendingRequestFailure,
     windowAuthorityStore: dependencies.windowAuthorityStore,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),

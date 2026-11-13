@@ -128,6 +128,7 @@ export interface BrowserAppManagedToolsOptions {
           readonly source?: BrowserDownloadSource;
         },
         origin: string,
+        signal: AbortSignal,
       ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
     }) => Promise<
       | {
@@ -150,6 +151,8 @@ export interface BrowserAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => (() => void) | undefined;
+    /** Keeps the page while an upload question about it waits; see the service. */
+    readonly holdForAsk?: (windowId: WindowId, threadId: BrowserThreadId) => () => void;
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
     Partial<
@@ -500,7 +503,7 @@ export function createBrowserAppManagedTools(
               destination: permission.destination,
               finalAdmission: permission.reserve,
             }),
-        ask: async (facts, pageOrigin) =>
+        ask: async (facts, pageOrigin, pageSignal) =>
           permission === undefined
             ? (approvals?.request({
                 windowId: options.windowId,
@@ -509,7 +512,8 @@ export function createBrowserAppManagedTools(
                 origin: pageOrigin,
                 ...(profile === undefined ? {} : { profile }),
                 download: facts,
-                ...(signal === undefined ? {} : { signal }),
+                // The page's own end withdraws the question with the call's.
+                signal: pageSignal,
               }) ?? "denied")
             : permission.inspect(facts, pageOrigin),
       });
@@ -543,17 +547,23 @@ export function createBrowserAppManagedTools(
       const admitted = await admitBrowserUpload({
         workspaceRoot: permission?.workspaceRoot ?? options.uploadRoot?.(),
         files: input.files,
-        ask: (files) =>
-          permission?.approve(files) ??
-          approvals.request({
-            windowId: options.windowId,
-            threadId: String(options.threadId),
-            authority,
-            origin,
-            ...(profile === undefined ? {} : { profile }),
-            upload: files,
-            ...(signal === undefined ? {} : { signal }),
-          }),
+        ask: async (files) => {
+          if (permission !== undefined) return permission.approve(files);
+          const release = options.browser.holdForAsk?.(options.windowId, options.threadId);
+          try {
+            return await approvals.request({
+              windowId: options.windowId,
+              threadId: String(options.threadId),
+              authority,
+              origin,
+              ...(profile === undefined ? {} : { profile }),
+              upload: files,
+              ...(signal === undefined ? {} : { signal }),
+            });
+          } finally {
+            release?.();
+          }
+        },
       });
       if (admitted.status === "refused") return failure(admitted.reason);
       uploadFiles = admitted.paths;

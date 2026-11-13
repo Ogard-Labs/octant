@@ -57,6 +57,7 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
     | "isPairedDeviceScope"
     | "machineChangeFeed"
     | "onThreadArchived"
+    | "onWaitingAsk"
     | "onWindowRevoked"
     | "windowAuthorityStore"
   > &
@@ -80,6 +81,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     machineChangeFeed,
     offeredDesktopProviders,
     onThreadArchived,
+    onWaitingAsk,
     onWindowRevoked,
     options,
     persistence,
@@ -394,6 +396,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       uuid: randomUUID,
       now: Date.now,
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+      onAsked: onWaitingAsk,
     });
     onWindowRevoked((windowId) => projectMemoryAccess.proposals.revokeWindow(windowId));
     onThreadArchived((threadId) => projectMemoryAccess.proposals.withdrawThread(threadId));

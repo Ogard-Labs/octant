@@ -1642,8 +1642,10 @@ authoritative.
   Declined and cancelled proposals change nothing
   and tell the agent so; an unanswered proposal waits, with no expiry, as its
   card in the thread until the person answers it, the turn stops, the thread
-  is archived, or the raising window goes away (built). Not built yet: the
-  pending-requests read (Needs you) does not list it. Plan mode refuses every write before asking; a turn
+  is archived, or the raising window goes away (built). The
+  pending-requests read (Needs you) lists it to that window as a waiting ask,
+  answerable from the list when the row holds the whole change (maintainer
+  decision, 2026-11-13). Plan mode refuses every write before asking; a turn
   the host starts with no person behind it (a routine's run, a resumed turn) is
   refused a write that needs a card, because no card can reach the person. A
   paired device's turn is offered the card on that device, as a window's turn is
@@ -3697,7 +3699,8 @@ the thread it came from.
   answerable only by the window or paired device whose turn raised it; with
   no such window open, or once it goes away, the turn stops, or the thread is
   archived, the proposal is withdrawn unanswered. The pending-requests read
-  (Needs you) does not list it (not built yet). The chip's one click confirms and dismissing it declines.
+  (Needs you) lists it to that window as a waiting ask whose row opens the
+  thread (maintainer decision, 2026-11-13). The chip's one click confirms and dismissing it declines.
   Confirm is the `POST /api/automations/proposals/decide` route, under the same transport
   principal and Project check as `commands`. On confirm the host builds the
   definition from the thread's live facts (Project version and binding, the
@@ -6198,7 +6201,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   is not offered the tool). A kept choice the host can no longer run is
   dropped and asked again rather than swapped. An offer waits with no expiry and is given
   up when its turn stops, its thread is archived, or its window goes away; the
-  pending-requests read (Needs you) does not list it (not built yet). Plan refuses the call,
+  pending-requests read (Needs you) lists it to that window as a waiting ask
+  whose row opens the thread, where the person picks the model (maintainer
+  decision, 2026-11-13). Plan refuses the call,
   because a generation calls a paid provider and stores the result.
   After Generate the call waits up to two minutes for the job. A finished job
   answers with each image's attachment id, and the images themselves through
@@ -7034,7 +7039,11 @@ policy, which the host can only narrow.
 _Approvals._ A Code turn parked on an approval or a question is read with the
 same signal the sibling-threads read uses (`turnAwaitsPerson` or a harness
 approval). After 10 minutes parked, the runner interrupts the turn
-(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. A turn that
+(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. This
+park is the one ask that keeps a time limit without guarding a secret: a
+cell measures unattended work, holds a managed worktree and a place in its
+run until it settles, and reports the block as its result (maintainer
+decision, 2026-11-13). A turn that
 ends first while an approval waits (a provider-inactivity timeout, an interrupt)
 settles the same way, with the summary of what was asked, because the runner
 remembers what the turn was last seen waiting on; a turn that ends with no
@@ -10689,10 +10698,15 @@ that is not yet effective for the thread is refused and never reaches the model.
   2026-11-12). Built: an approval has no expiry and holds no timer; it is
   denied only by an answer, its turn stopping, its thread's archive or
   deletion, or its window's authority being revoked, so a prompt whose device
-  is no longer paired waits until one of those. Not built yet: it waits as
-  the prompt in its thread (`/api/extensions/tool-approvals`) and the
-  pending-requests read (Needs you) does not list it; a host-run turn's call
-  is still refused.
+  is no longer paired waits until one of those. It waits as the prompt in
+  its thread (`/api/extensions/tool-approvals`), and the pending-requests
+  read (Needs you) lists it to everyone this paragraph lets answer it: the
+  raising window or device, and, for a prompt a turn raised under the host's
+  own scope (a routine's run, a usage-limit resume) or a paired device's
+  turn, every local window that may drive the thread (maintainer decision,
+  2026-11-13). Each new prompt is also told to the paired phones as an
+  approval-needed notification. Not built yet: a call whose turn carries no
+  scope at all is still refused.
   An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
@@ -12322,14 +12336,28 @@ mechanisms are:
     be archived while its turn is parked on the ask), its window's authority
     being revoked where a window owns it, or the host stopping; the caps on
     how many may wait (32 each) are unchanged and are the only bound on what
-    is held. Not built yet: only harness approvals and questions are listed by
-    the pending-requests read (Needs you), and the others wait as cards in
-    their thread; the limits the owning sections name are still constants; a
-    Browser site approval, a Code thread's own Browser and device approvals,
-    and a benchmark cell's ten-minute park still expire. A one-use credential request keeps its ten-minute expiry:
-    its owning section states it as a bound on how long a request that takes a
-    secret stays usable, and that section, not this one, would have to change
-    first.
+    is held. A Browser site, upload, download and script approval, and a Code
+    thread's own tool asks (a Browser session, a device effect, a terminal
+    command, a pull-request change or watch), wait the same way (maintainer
+    decision, 2026-11-13): none holds a timer, and each ends with an answer,
+    its call or turn stopping, its thread's archive, its window's revocation
+    where a window owns it, or the host stopping. What an ask holds is
+    released by every one of those ends: an upload's staged copies and a
+    download's held file are deleted on any outcome but approval, a download
+    question also ends when its page closes, and a page lives, without an
+    idle deadline, for as long as an upload or download question about it
+    waits. The pending-requests read (Needs you) lists every one of these
+    asks, and each new one is told to the paired phones
+    ([Pending requests across modes](#security-and-authority)). Expiry stays
+    where a live secret or the host's own authority is at stake, each stated
+    by its owner: a pairing ticket, a sign-in or device-code flow, a one-use
+    credential request (ten minutes), and the desktop authority confirmation.
+    A benchmark cell's ten-minute park also stays: the cell is a measurement
+    of unattended work that holds a managed worktree and a place in its run,
+    and `blocked-on-approval` is its result, not a refusal given to the
+    agent in the person's name
+    ([Context and usage accounting](#context-and-usage-accounting), _Approvals_). Not built yet: the limits the owning
+    sections name are still constants.
   - **Opt-in sandbox at Full access.** A Code or Work thread may set
     `fullAccessSandbox`. Prompts stay off exactly as at Full access, and the
     thread keeps the confinement the guarded levels have:
@@ -12797,10 +12825,44 @@ approval-gated` command that undoes it. The terminal shows no one-time
   handle its mode's existing answer command takes; there is no new answer route.
   Only requests a live turn in this host can deliver are listed: a Code or Chat
   request journaled by a turn that died with the process is left out, because
-  answering it settles the turn interrupted. Excluded: Chat approvals (Chat
-  declines every provider approval), hidden Side Chats, Work browser tool approvals
-  (`/api/browser/approvals`), Computer Use approvals, and extension tool
-  approvals. A native-harness question raised on a Code turn is a Code question
+  answering it settles the turn interrupted. Excluded from `requests`: Chat
+  approvals (Chat declines every provider approval), hidden Side Chats, and
+  Computer Use approvals.
+  **Waiting asks.** The same answer carries `asks`: every other ask a host
+  service holds for the person, oldest first (maintainer decision,
+  2026-11-13). These are MCP and connector tool approvals, Project memory
+  proposals, routine proposals and change requests, image generation and
+  save offers, Browser site, upload, download and script approvals
+  (`/api/browser/approvals`), and the Browser sign-in card. Each list is the
+  holding service's own list for the reader, so the rule on who may answer
+  is the one that service already applies and listing adds none: the window
+  or device whose turn raised it, and, for an MCP or Browser ask a turn
+  raised under the host's own scope (a routine's run, a background resume),
+  every local window that may drive the thread. An ask whose thread is not
+  active, or whose mode is off, is left out. An entry names its kind, its
+  id (the one its own decide route takes), mode, Project, thread and title,
+  when it was asked, one line of text, and, when it fits, the detail its
+  card shows (a tool's input, the words a memory entry would hold, an
+  upload's files). The host sets `inPlace` only when that line and detail
+  are everything the ask's card shows and the card's answer is a plain
+  approve or decline: a tool approval, a Browser site, upload, download or
+  script approval, and a memory proposal, each only while nothing was cut
+  and, for a tool approval and a memory proposal, while the thread has read
+  no outside content (the card names those sources). A list offers the two
+  plain answers for such an entry and sends them through the ask's own
+  route (`/api/extensions/tool-approvals`, `/api/browser/approvals`,
+  `/api/projects/memory/proposals/decide`), once and never remembered;
+  every other entry (a routine proposal, an image offer, a sign-in card, an
+  ask too long for a row) opens its thread, whose card decides it. Words
+  are never cut to fit an answer: a row either holds the whole ask or sends
+  the person to the card. `asks` is its own optional field rather than more
+  members of `requests`, so a client built before it still decodes the list
+  and shows no such rows; it is absent when nothing waits. A memory or
+  routine proposal and an image offer are still not raised by a turn the
+  host runs with no person behind it (their owning sections refuse them
+  before asking), so none waits here for such a turn. The desktop menu
+  bar's fleet read lists `requests` only.
+  A native-harness question raised on a Code turn is a Code question
   and is listed. The lead's own native-harness session approval (a request with
   no `source`) is listed as a `lead-approval` row in any mode: the thread, its
   title, Project, the approval's summary (cut and redacted like a child's request
@@ -12843,10 +12905,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
   is a Code approval and is listed with `browserOrigin`, the site it waits to
   open, which a provider's own approval never carries. Text keeps
   each mode's own bounds and sanitization. A paired device reads it as a local
-  window does (maintainer decision, 2026-11-12). Not built yet: today the read
-  is local-window only: its path is outside every prefix the remote listener
-  forwards, the remote action classifier names no action for it, and the
-  route refuses a paired device's principal. Freshness rides the Machine change feed: any harness question,
+  window does (maintainer decision, 2026-11-12). Built: the remote listener
+  forwards `GET /api/pending-requests` as an overview read, and the route
+  lists under the device's own scope, so every source answers what that
+  device's own answer commands and ask routes would admit (an MCP prompt its
+  own turn raised, never a local window's or the host's). Deferral
+  (`POST /api/pending-requests/defer`) stays with a local window and is not
+  forwarded. Each new waiting ask is told to the paired phones through the
+  existing sealed push path, as an approval-needed notification naming the
+  thread under that phone's settings and nothing of the ask; the phone app
+  itself shows the MCP prompt on its thread and has no list of the other
+  asks yet. Freshness rides the Machine change feed: a waiting ask starting or ending publishes `tool-approvals`, any harness question,
   the lead's own or a child's, asked or settled publishes `work-navigation` and
   `code-navigation` (a Chat lead's question is journaled on the attempt), and
   any harness approval, the
@@ -12854,8 +12923,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `work-navigation`, and `code-navigation`,
   a Work request's
   transitions and a Chat attempt's question are journaled, a Code request's ask,
-  answer, and turn end are journaled stream events, and a Code browser-origin
-  approval that expires or is abandoned — which journals nothing — publishes
+  answer, and turn end are journaled stream events, and a Code tool ask that
+  is withdrawn or abandoned — which journals nothing — publishes
   `code-navigation` itself.
 - **Fleet activity.** `GET /api/fleet-activity` returns the threads that need
   the calling window's person and the threads that are running, needs you

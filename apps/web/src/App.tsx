@@ -5457,9 +5457,23 @@ function LaunchedShell(
       ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
       : undefined;
   // What moves the pending-request read: a thread raising or clearing a
-  // question journals on its own mode's navigation topic.
+  // question journals on its own mode's navigation topic, and an ask a host
+  // service holds (a tool approval, a proposal, a Browser ask) moves the
+  // tool-approvals topic when it starts or stops waiting.
   const pendingRequestFeedRevision =
-    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
+    machineChanges.chatNavigation +
+    machineChanges.workNavigation +
+    machineChanges.codeNavigation +
+    machineChanges.toolApprovals;
+  const needsYouProjectClient = projectController.client;
+  const needsYouAskClients = useMemo(
+    () => ({
+      extensionClient,
+      browserAutomationClient,
+      projectClient: needsYouProjectClient,
+    }),
+    [extensionClient, browserAutomationClient, needsYouProjectClient],
+  );
   const homeStartHub = hubAdministrationOf(props.hostBridge);
   const homeStart = useHomeStart({
     ...(homeStartHub === undefined || props.hostBridge === undefined
@@ -5487,6 +5501,7 @@ function LaunchedShell(
     loadHomePullRequests,
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
+    needsYouAskClients,
     now: minuteNow.getTime(),
     openRunningServiceLive,
     pendingRequestClient,
@@ -7867,6 +7882,7 @@ function LaunchedShell(
                     loadAssignedGithubWork={loadAssignedGithubWork}
                     loadAssignedLinearIssues={loadAssignedLinearIssues}
                     navigationRevision={pendingRequestFeedRevision}
+                    needsYouAskClients={needsYouAskClients}
                     now={minuteNow.getTime()}
                     projectNames={workingNowProjectNames}
                     projects={projectController.projects}

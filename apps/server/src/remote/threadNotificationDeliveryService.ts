@@ -3,7 +3,10 @@
 // The host observes thread lifecycle facts as the journal commits them, in
 // every mode: a Chat attempt, a Work turn, or a Code provider turn that
 // completed, failed, or waits on the person; a Work or Code approval request;
-// and an approval or question the harness asked. Each becomes at most one
+// and an approval or question the harness asked. The asks a host service
+// holds in memory (an MCP tool approval, a memory or routine proposal, an
+// image offer, a Browser approval or sign-in card) are not journaled when they
+// are raised, so their services announce them here directly. Each becomes at most one
 // notification per device for its thread, kind, and run, within the device's
 // rate limit, and only for a device that still stands, wants that kind, and
 // could read the thread.
@@ -286,6 +289,19 @@ export class ThreadNotificationDeliveryService {
         .then(() => this.#notify(observed))
         .catch(() => this.#report("Thread notification delivery stopped on an unexpected error."));
     }
+  }
+
+  /**
+   * An ask a host service began to hold for the person: told like a journaled
+   * approval request, once per ask and device, under the phone's Approval
+   * needed setting. The notification names the thread and nothing of the ask.
+   */
+  notifyWaitingAsk(ask: { readonly threadId: string; readonly askId: string }): void {
+    this.#queue = this.#queue
+      .then(() =>
+        this.#notify({ threadId: ask.threadId, kind: "approval-needed", runId: ask.askId }),
+      )
+      .catch(() => this.#report("Thread notification delivery stopped on an unexpected error."));
   }
 
   /**

@@ -11,14 +11,15 @@ import {
   type WindowId,
 } from "@octant/contracts";
 
-const DEFAULT_TTL_MS = 5 * 60_000;
-const MAX_TTL_MS = 10 * 60_000;
+/**
+ * An approval waits until it is answered or withdrawn, never for a fixed
+ * time, so this host-wide cap is the only bound on how many are held.
+ */
 const MAX_PENDING_APPROVALS = 32;
 
 interface BrowserToolApprovalServiceOptions {
   readonly uuid: () => string;
   readonly now: () => number;
-  readonly ttlMs?: number;
   readonly authorityIsCurrent: (
     threadId: string,
     authority: ToolActionAuthority,
@@ -58,21 +59,29 @@ interface BrowserToolApprovalServiceOptions {
   readonly profileLabel?: (profile: StoredBrowserProfile) => Promise<string | undefined>;
   /**
    * The waiting set changed: a prompt became listable or left the list for
-   * a decision, a cancel, an expiry, a close, or a revocation. Wired only at
+   * a decision, a cancel, a close, or a revocation. Wired only at
    * composition so the service stays free of the change feed.
    */
   readonly onChanged?: () => void;
+  /**
+   * An ask began to wait. Wired at composition to the paired phones'
+   * notifications; it names the thread and the ask and nothing of its content.
+   */
+  readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
 }
+
+/**
+ * How an ask ends. None of them is a lapse: an approval that timed out would
+ * tell the agent the person refused something they never saw.
+ */
+export type BrowserToolApprovalOutcome = "approved" | "denied" | "cancelled";
 
 interface PendingApproval {
   readonly view: BrowserToolApproval;
   readonly windowId: WindowId;
   readonly threadId: string;
   readonly authority: ToolActionAuthority;
-  readonly resolve: (decision: "approved" | "denied" | "cancelled" | "expired") => void;
-  /** Absent on a sign-in card, which waits for the person however long that takes. */
-  readonly timer: ReturnType<typeof setTimeout> | undefined;
-  readonly ttlMs: number | undefined;
+  readonly resolve: (decision: BrowserToolApprovalOutcome) => void;
   readonly signal?: AbortSignal;
   readonly onAbort?: () => void;
 }
@@ -80,20 +89,21 @@ interface PendingApproval {
 /**
  * Host-owned, provider-neutral origin approval for managed Browser calls.
  * Pending entries are scoped to the requesting window and exact thread
- * authority; a routine's entries go to the windows that can see its thread. A decision is one-shot; abort, expiry, and window revocation all
- * settle as denial so a late answer cannot resume a browser effect. A sign-in
- * card alone has no expiry: the person is asked to act, and a lapse would
- * report a refusal they never gave. It ends with their answer, its turn, its
- * thread's archive, its window, or the host.
+ * authority; a routine's entries go to the windows that can see its thread. A
+ * decision is one-shot; abort, thread archive, and window revocation all
+ * settle as cancelled so a late answer cannot resume a browser effect. No ask
+ * has an expiry (a site, an upload, a download, a script, a sign-in): each
+ * ends with the person's answer, its turn, its thread's archive, its window,
+ * or the host. An upload's staged copies and a download's held file are
+ * released by the caller on any outcome but approval, so a withdrawn ask
+ * leaves nothing behind.
  */
 export class BrowserToolApprovalService {
   readonly #pending = new Map<string, PendingApproval>();
-  readonly #ttlMs: number;
   readonly #options: BrowserToolApprovalServiceOptions;
 
   constructor(options: BrowserToolApprovalServiceOptions) {
     this.#options = options;
-    this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, MAX_TTL_MS));
   }
 
   async request(input: {
@@ -116,7 +126,7 @@ export class BrowserToolApprovalService {
     readonly signIn?: { readonly reason?: string };
     readonly script?: { readonly source: string };
     readonly signal?: AbortSignal;
-  }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
+  }): Promise<BrowserToolApprovalOutcome> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve("denied");
     let profileLabel: string | undefined;
@@ -177,20 +187,16 @@ export class BrowserToolApprovalService {
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
-      const settle = (decision: "approved" | "denied" | "cancelled" | "expired") => {
+      const settle = (decision: BrowserToolApprovalOutcome) => {
         const current = this.#pending.get(String(approvalId));
         if (current === undefined) return;
         this.#pending.delete(String(approvalId));
         this.#options.onChanged?.();
-        clearTimeout(current.timer);
         if (current.signal !== undefined && current.onAbort !== undefined) {
           current.signal.removeEventListener("abort", current.onAbort);
         }
         resolve(decision);
       };
-      const ttlMs = input.signIn === undefined ? this.#ttlMs : undefined;
-      const timer = ttlMs === undefined ? undefined : setTimeout(() => settle("expired"), ttlMs);
-      timer?.unref?.();
       const onAbort = input.signal === undefined ? undefined : () => settle("cancelled");
       const pending: PendingApproval = {
         view,
@@ -198,13 +204,12 @@ export class BrowserToolApprovalService {
         threadId: input.threadId,
         authority: input.authority,
         resolve: settle,
-        timer,
-        ttlMs,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(onAbort === undefined ? {} : { onAbort }),
       };
       this.#pending.set(String(approvalId), pending);
       this.#options.onChanged?.();
+      this.#options.onAsked?.({ threadId: input.threadId, askId: String(approvalId) });
       if (input.signal !== undefined && onAbort !== undefined) {
         input.signal.addEventListener("abort", onAbort, { once: true });
       }
@@ -213,14 +218,12 @@ export class BrowserToolApprovalService {
   }
 
   list(windowId: WindowId): ReadonlyArray<BrowserToolApproval> {
-    this.#expire();
     return [...this.#pending.values()]
       .filter((pending) => this.#answerableBy(pending, windowId))
       .map((pending) => pending.view);
   }
 
   decide(windowId: WindowId, decision: BrowserToolApprovalDecision): boolean {
-    this.#expire();
     const pending = this.#pending.get(String(decision.approvalId));
     if (pending === undefined || !this.#answerableBy(pending, windowId)) return false;
     if (!this.#options.authorityIsCurrent(pending.threadId, pending.authority, pending.windowId)) {
@@ -308,17 +311,5 @@ export class BrowserToolApprovalService {
 
   close(): void {
     for (const pending of this.#pending.values()) pending.resolve("cancelled");
-  }
-
-  #expire(): void {
-    const now = this.#options.now();
-    for (const pending of this.#pending.values()) {
-      if (
-        pending.ttlMs !== undefined &&
-        Date.parse(String(pending.view.requestedAt)) + pending.ttlMs <= now
-      ) {
-        pending.resolve("expired");
-      }
-    }
   }
 }

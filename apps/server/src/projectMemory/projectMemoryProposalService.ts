@@ -42,6 +42,11 @@ export interface ProjectMemoryProposalServiceOptions {
   ) => Promise<MemoryCommandResult>;
   /** The waiting set changed. Wired at composition to the change feed. */
   readonly onChanged?: () => void;
+  /**
+   * An ask began to wait. Wired at composition to the paired phones'
+   * notifications; it names the thread and the ask and nothing of its content.
+   */
+  readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
 }
 
 interface PendingProposal {
@@ -97,6 +102,7 @@ export class ProjectMemoryProposalService {
       };
       this.#pending.set(key, { view, windowId: input.windowId, settle });
       this.#options.onChanged?.();
+      this.#options.onAsked?.({ threadId: view.threadId, askId: key });
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   }

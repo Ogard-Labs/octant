@@ -5001,7 +5001,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("says a browser approval is gone when it expires unanswered, which journals nothing", async () => {
+  it("keeps a browser approval waiting a day later and gives it up when its thread is archived, which journals nothing", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const provider = providerConnection(queue);
     const authority = decodeToolActionAuthority({
@@ -5043,7 +5043,7 @@ describe("CodeOperationRuntime", () => {
           queue,
           providerEvent({
             kind: "tool-request",
-            requestId: "browser-expiring",
+            requestId: "browser-waiting",
             toolName: "octant_browser",
             inputJson: '{"operation":"navigate","url":"https://example.com"}',
           }),
@@ -5058,11 +5058,13 @@ describe("CodeOperationRuntime", () => {
       expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([
         { kind: "approval", browserOrigin: "https://example.com" },
       ]);
+      vi.advanceTimersByTime(24 * 60 * 60_000);
       expect(withdrawn).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(10 * 60_000);
+      expect(await fixture.runtime.pendingRequests?.(windowId)).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
+    fixture.runtime.withdrawThreadAsks?.(String(threadId));
     expect(withdrawn).toHaveBeenCalledOnce();
     expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
     fixture.close();

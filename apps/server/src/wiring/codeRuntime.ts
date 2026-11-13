@@ -289,6 +289,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "imageGenerationOffers"
     | "liveTurns"
     | "machineChangeFeed"
+    | "onThreadArchived"
     | "onWindowRevoked"
     | "simulatorInputGrants"
     | "personMemoryAccess"
@@ -452,6 +453,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     onHarnessQuestionSettled,
     onHarnessRecoveryLifted,
     onPullRequestSnapshotRefreshed,
+    onThreadArchived,
     onWindowRevoked,
     nativeHarnessTranscripts,
     options,
@@ -648,6 +650,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       yield* Effect.addFinalizer(() => Effect.sync(unbindTerminalSessions));
       onWindowRevoked((windowId) => grants.revokeWindow(windowId));
       onWindowRevoked((windowId) => codeOperationRuntime?.revokeTerminalStreams(windowId));
+      onThreadArchived((threadId) => codeOperationRuntime?.withdrawThreadAsks?.(threadId));
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
         for (const event of append.events) {
           if (
@@ -1067,6 +1070,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.releaseThread(windowId, threadId),
           holdForPerson: (windowId, threadId) =>
             browserAutomationService.holdForPerson(windowId, threadId),
+          holdForAsk: (windowId, threadId) =>
+            browserAutomationService.holdForAsk(windowId, threadId),
           snapshotRefs: (windowId, threadId) =>
             browserAutomationService.snapshotRefs(windowId, threadId),
         },

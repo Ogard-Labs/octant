@@ -45,6 +45,11 @@ export interface RoutineProposalServiceOptions {
   readonly now: () => number;
   /** The waiting set changed. Wired at composition to the change feed. */
   readonly onChanged?: () => void;
+  /**
+   * An ask began to wait. Wired at composition to the paired phones'
+   * notifications; it names the thread and the ask and nothing of its content.
+   */
+  readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
 }
 
 /**
@@ -158,6 +163,7 @@ export class RoutineProposalService {
       };
       this.#pending.set(key, { view, windowId, settle });
       this.#options.onChanged?.();
+      this.#options.onAsked?.({ threadId: String(view.threadId), askId: key });
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   }

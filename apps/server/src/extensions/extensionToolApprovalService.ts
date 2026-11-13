@@ -77,6 +77,11 @@ export class ExtensionToolApprovalService {
        * composition so the service stays free of the change feed.
        */
       readonly onChanged?: () => void;
+      /**
+       * An ask began to wait. Wired at composition to the paired phones'
+       * notifications; it names the thread and the ask and nothing of its content.
+       */
+      readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
     },
   ) {}
 
@@ -141,6 +146,7 @@ export class ExtensionToolApprovalService {
         ...(onAbort === undefined ? {} : { onAbort }),
       });
       this.options.onChanged?.();
+      this.options.onAsked?.({ threadId: input.threadId, askId: approvalId });
       input.signal?.addEventListener("abort", onAbort!, { once: true });
       if (input.signal?.aborted) settle(false);
     });

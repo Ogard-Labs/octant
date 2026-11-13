@@ -17,15 +17,22 @@ export interface LocalWindowReadRouteOptions<T> {
   readonly noun: string;
   /** The plural that opens an unavailable sentence, such as "Pending requests". */
   readonly plural: string;
-  readonly read: (windowId: WindowId) => Promise<T>;
+  readonly read: (windowId: WindowId, reader: "local-window" | "remote-device") => Promise<T>;
+  /**
+   * Admits a paired device, which then reads under its own scope: the read
+   * must list only what that scope could itself open or answer. Absent, the
+   * read spans what the host's own windows reach and a device is refused.
+   */
+  readonly pairedDevices?: "admitted";
   readonly decodeFailure: (failure: LocalWindowReadFailure) => unknown;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
 
 /**
- * A parameterless GET that only a local window may make. The path sits outside
- * every prefix the remote listener forwards, and a request that still arrives
+ * A parameterless GET that only a local window may make, unless the read
+ * admits paired devices. The path of a local-only read sits outside every
+ * prefix the remote listener forwards, and a request that still arrives
  * carrying a paired device's principal is refused here, because these reads
  * span every Project the host's own windows can reach and a paired device's
  * reach is narrower.
@@ -67,13 +74,18 @@ export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptio
     }
 
     let windowId: WindowId;
+    let reader: "local-window" | "remote-device";
     try {
       const context = authenticateRoutePrincipal({
         request,
         store: options.windowAuthorityStore,
         now: now(),
       });
-      if (context.principal.kind !== "local-window") {
+      reader = context.principal.kind === "local-window" ? "local-window" : "remote-device";
+      if (
+        context.principal.kind !== "local-window" &&
+        !(options.pairedDevices === "admitted" && context.principal.kind === "remote-device")
+      ) {
         return fail(
           { code: "unauthorized", message: `${options.plural} are read at a local window.` },
           403,
@@ -94,7 +106,7 @@ export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptio
 
     let body: T;
     try {
-      body = await options.read(windowId);
+      body = await options.read(windowId, reader);
     } catch {
       return fail(
         { code: "unavailable", message: `${options.plural} are unavailable.` },

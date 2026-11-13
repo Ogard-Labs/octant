@@ -95,6 +95,7 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "browserCaptures"
     | "machineChangeFeed"
     | "onThreadArchived"
+    | "onWaitingAsk"
     | "onWindowRevoked"
     | "processAuthorityTime"
     | "windowAuthorityStore"
@@ -122,6 +123,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     localPluginImportReceipts,
     machineChangeFeed,
     onThreadArchived,
+    onWaitingAsk,
     onWindowRevoked,
     options,
     persistence,
@@ -238,6 +240,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         )?.label;
       },
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+      onAsked: onWaitingAsk,
     });
     onWindowRevoked((windowId) => browserToolApprovalService.revokeWindow(windowId));
     onThreadArchived((threadId) => browserToolApprovalService.withdrawThread(threadId));

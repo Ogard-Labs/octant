@@ -797,6 +797,18 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     maxResponseBytes: 128 * 1_024,
   },
+  // Needs you: a paired device reads what waits on the person. The route
+  // lists under the device's own scope, so it holds only what the device's
+  // own answer commands and ask routes would admit; deferral
+  // (`/api/pending-requests/defer`) is not forwarded.
+  {
+    id: "pending-requests",
+    match: { kind: "exact", path: "/api/pending-requests" },
+    surface: "authenticated-product",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
   // The message queue: a paired device reads a thread's queue and queues a
   // message on a thread it may already send to. The service rechecks the
   // device's pairing, the thread and the mode on every command and again at

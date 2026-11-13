@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import type { PendingQuestionDeferral, WaitingAsk } from "@octant/contracts/pending-requests";
 import {
   decodePendingRequestList,
   MAX_PENDING_REQUESTS,
@@ -10,6 +10,17 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { enabledModes } from "@octant/domain";
+
+/**
+ * Who reads the list: a window of this computer or a paired device, by the
+ * service scope its authenticated principal resolved to. The services that
+ * hold asks decide differently for the two, so the kind travels with the
+ * scope instead of being guessed from it.
+ */
+export interface PendingRequestReader {
+  readonly kind: "local-window" | "remote-device";
+  readonly scopeId: WindowId;
+}
 
 export interface PendingRequestSources {
   readonly deferrals?: {
@@ -42,6 +53,14 @@ export interface PendingRequestSources {
    * card or its Agents tab.
    */
   readonly children: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
+  /**
+   * Every other ask waiting on the person that this reader could answer: MCP
+   * tool approvals, Project memory and routine proposals, image offers, and
+   * Browser approvals and sign-in cards, a host-run turn's among them. Each
+   * comes from its holding service's own list for the reader, and is answered
+   * through that service's own route.
+   */
+  readonly asks?: (reader: PendingRequestReader) => ReadonlyArray<WaitingAsk>;
 }
 
 /**
@@ -85,8 +104,18 @@ export class PendingRequestService {
     return true;
   }
 
-  async list(windowId: WindowId): Promise<PendingRequestList> {
+  async list(
+    windowId: WindowId,
+    readerKind: PendingRequestReader["kind"] = "local-window",
+  ): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
+    const asks = (this.#sources.asks?.({ kind: readerKind, scopeId: windowId }) ?? [])
+      .filter((ask) => modes.includes(ask.mode))
+      .toSorted(
+        (left, right) =>
+          left.requestedAt.localeCompare(right.requestedAt) ||
+          left.askId.localeCompare(right.askId),
+      );
     const [work, code, children] = await Promise.all([
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),
@@ -126,6 +155,8 @@ export class PendingRequestService {
         };
       }),
       truncated: oldestFirst.length > MAX_PENDING_REQUESTS,
+      // Absent when nothing waits, so the list reads as it did before asks.
+      ...(asks.length === 0 ? {} : { asks: asks.slice(0, MAX_PENDING_REQUESTS) }),
     });
   }
 }

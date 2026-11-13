@@ -275,6 +275,11 @@ interface OwnedContext {
    * asked them to sign in, or they took it over.
    */
   waitingForPerson: "sign-in" | "take-over" | undefined;
+  /**
+   * Upload and download questions waiting on the person about this page. A
+   * question has no expiry, so the page it is about has none while one waits.
+   */
+  waitingAsks: number;
   /** Ends a take-over (Hand back). Absent for a sign-in, which only its card ends. */
   releaseTakeOver: (() => void) | undefined;
   ownerController: { readonly name: string; readonly expiresAt: UtcTimestamp } | undefined;
@@ -634,6 +639,7 @@ export class BrowserAutomationService {
       credentialFill: undefined,
       agentActedAt: undefined,
       waitingForPerson: undefined,
+      waitingAsks: 0,
       releaseTakeOver: undefined,
       ownerController: undefined,
       personInputs: 0,
@@ -2060,6 +2066,12 @@ export class BrowserAutomationService {
     readonly ask: (
       facts: BrowserDownloadFacts,
       origin: string,
+      /**
+       * Ends when the page, the caller, or the thread's authority goes away.
+       * The question must stop waiting then: the held file is deleted and no
+       * answer could save it.
+       */
+      signal: AbortSignal,
     ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }): Promise<
     | {
@@ -2126,10 +2138,17 @@ export class BrowserAutomationService {
           : "cancelled",
       claim: () => claim(contextId, downloadId),
       ask: async (facts) => {
-        const answer = await input.ask(
-          { ...facts, ...(held.source === undefined ? {} : { source: held.source }) },
-          context.origin,
-        );
+        const release = this.#holdForAsk(owned);
+        let answer: Awaited<ReturnType<typeof input.ask>>;
+        try {
+          answer = await input.ask(
+            { ...facts, ...(held.source === undefined ? {} : { source: held.source }) },
+            context.origin,
+            signal,
+          );
+        } finally {
+          release();
+        }
         // A question can wait minutes: the page and the thread's authority
         // must still be there when it is answered.
         if (answer === "approved" && !current()) {
@@ -3002,6 +3021,35 @@ export class BrowserAutomationService {
   }
 
   /**
+   * Keeps the thread's page while an upload or download question about it
+   * waits on the person. The question has no expiry, and a page that closed
+   * under it at its idle deadline would turn the person's later answer into a
+   * failure. The release, which every way the question ends reaches, puts the
+   * page back on a finite deadline. It grants nothing and marks nothing as the
+   * person's: agent calls on the page are admitted as before.
+   */
+  holdForAsk(windowId: WindowId, threadId: BrowserThreadId): () => void {
+    const owned = this.#current(windowId, threadId);
+    return owned === undefined || owned.record.state !== "active"
+      ? () => undefined
+      : this.#holdForAsk(owned);
+  }
+
+  #holdForAsk(owned: OwnedContext): () => void {
+    owned.waitingAsks += 1;
+    this.#scheduleExpiry(owned);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      owned.waitingAsks -= 1;
+      if (owned.waitingAsks > 0) return;
+      owned.keptUntil = Math.max(owned.keptUntil ?? 0, this.#now() + AFTER_HAND_OFF_KEEP_MS);
+      if (owned.record.state === "active") this.#scheduleExpiry(owned);
+    };
+  }
+
+  /**
    * The person takes the thread's page: every agent Browser call on it is held
    * (the sign-in hold, under another name) until they hand it back. Taking
    * over adds no authority to anyone: it only keeps the agent out, so it needs
@@ -3359,7 +3407,7 @@ export class BrowserAutomationService {
 
   #scheduleExpiry(owned: OwnedContext): void {
     if (owned.record.state !== "active" && owned.record.state !== "creating") return;
-    if (owned.waitingForPerson === "sign-in") {
+    if (owned.waitingForPerson === "sign-in" || owned.waitingAsks > 0) {
       // Nothing to wait for: the hold's release schedules the next deadline.
       owned.cancelExpiry?.();
       owned.cancelExpiry = undefined;
@@ -3419,7 +3467,7 @@ export class BrowserAutomationService {
   #expired(owned: OwnedContext): boolean {
     // A page handed to the person for a sign-in the agent asked for lives as
     // long as that card waits, and the card has no expiry.
-    if (owned.waitingForPerson === "sign-in") return false;
+    if (owned.waitingForPerson === "sign-in" || owned.waitingAsks > 0) return false;
     return isContextExpired(owned.record, this.#now(), {
       lastActivityAt: owned.lastActivityAt,
       ...(owned.keptUntil === undefined ? {} : { keptUntil: owned.keptUntil }),

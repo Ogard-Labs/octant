@@ -39,6 +39,11 @@ export interface ImageGenerationOfferServiceOptions {
   readonly now: () => number;
   /** The waiting set changed. Wired at composition to the change feed. */
   readonly onChanged?: () => void;
+  /**
+   * An ask began to wait. Wired at composition to the paired phones'
+   * notifications; it names the thread and the ask and nothing of its content.
+   */
+  readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
 }
 
 interface PendingOffer {
@@ -96,6 +101,7 @@ export class ImageGenerationOfferService {
       };
       this.#pending.set(key, { view, windowId: input.windowId, settle });
       this.#options.onChanged?.();
+      this.#options.onAsked?.({ threadId: String(view.scopeId), askId: key });
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
@@ -109,6 +115,13 @@ export class ImageGenerationOfferService {
           pending.view.threadKind === scope.threadKind &&
           String(pending.view.scopeId) === String(scope.scopeId),
       )
+      .map((pending) => pending.view);
+  }
+
+  /** Every offer this window may answer, across its threads, oldest first. */
+  listForWindow(windowId: WindowId): ReadonlyArray<ImageGenerationOffer> {
+    return [...this.#pending.values()]
+      .filter((pending) => String(pending.windowId) === String(windowId))
       .map((pending) => pending.view);
   }
 

@@ -966,6 +966,13 @@ export interface CodeOperationRuntime {
    * could answer through `execute`, under the same scope those answers pass.
    */
   pendingRequests?(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>>;
+  /**
+   * Gives up the app-managed tool asks (a Browser session, a device effect, a
+   * terminal command, a pull-request change) a thread's turn is parked on,
+   * when the thread is archived or deleted. They wait with no expiry, so the
+   * archive is one of the ways they end.
+   */
+  withdrawThreadAsks?(threadId: string): void;
   /** Whether this window's `start-provider-turn` would pass its scope on the thread's checkout. */
   admitsTurn?(windowId: WindowId, thread: Pick<CodeThread, "id" | "checkoutId">): Promise<boolean>;
   /**
@@ -1968,6 +1975,7 @@ export function createCodeOperationRuntime(
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
     withdrawHarnessQuestion: (input) => turns.withdrawHarnessQuestion(input),
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
+    withdrawThreadAsks: (threadId) => turns.withdrawThreadAsks(threadId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
     recordShieldReview: (input) => turns.recordShieldReview(input),
@@ -4586,18 +4594,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
         if (!active.toolApprovals.delete(String(approvalId))) return;
         active.approvalPostures.delete(String(approvalId));
-        clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         active.abort.signal.removeEventListener("abort", abort);
-        // An answer journals its own operation result; expiry and abandonment
-        // journal nothing.
+        // An answer journals its own operation result; abandonment journals
+        // nothing.
         if (outcome === "cancelled" || outcome === "expired") {
           this.#options.onPendingRequestWithdrawn?.();
         }
         resolve(outcome);
       };
+      // No timer: the ask is a question, holding no secret and no native
+      // resource, so it waits until the person answers, the call or the turn
+      // stops, or the thread is archived (`withdrawThreadAsks`).
       const abort = () => finish("cancelled");
-      const timer = setTimeout(() => finish("expired"), 10 * 60_000);
       active.toolApprovals.set(String(approvalId), {
         ...(origin === undefined ? {} : { origin }),
         finish,
@@ -4619,6 +4628,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         finish("cancelled");
       }
     });
+  }
+
+  withdrawThreadAsks(threadId: string): void {
+    for (const active of this.#active.values()) {
+      if (String(active.thread.id) !== threadId) continue;
+      for (const ask of active.toolApprovals.values()) ask.finish("cancelled");
+    }
   }
 
   ownerApprovals(): ReadonlyArray<RuntimeApprovalRecovery> {

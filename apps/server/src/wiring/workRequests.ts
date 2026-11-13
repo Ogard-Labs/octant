@@ -2,6 +2,7 @@ import { pendingQuestionDeferrals } from "../pendingQuestionDeferrals";
 import { randomUUID } from "node:crypto";
 import {
   decodeAgentRunParentThreadId,
+  decodeChatThreadId,
   decodeCodeThreadId,
   decodeProjectId,
   decodeWindowId,
@@ -34,6 +35,8 @@ import {
 } from "../fleetActivityService";
 import { createPendingRequestRouteHandler } from "../pendingRequestRoutes";
 import { PendingRequestService } from "../pendingRequestService";
+import { waitingAsksFrom, type WaitingAskThread } from "../waitingAsks";
+import type { BrowserWiring } from "./browser";
 import { createWorkThreadRouteHandler } from "../workThreadRoutes";
 import { createSidebarBackgroundRouteHandler } from "../theme/sidebarBackgroundRoutes";
 import { SidebarBackgroundStore } from "../theme/backgroundStore";
@@ -77,11 +80,23 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     | "recordUsage"
   >;
 } & Pick<FoundationsWiring, "isProjectPolicyTargetAllowed"> &
-  Pick<AuthorityWiring, "agentRunPersistence" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    | "agentRunPersistence"
+    | "extensionToolApprovalService"
+    | "imageGenerationOffers"
+    | "routineProposalService"
+    | "windowAuthorityStore"
+  > &
+  Pick<BrowserWiring, "browserToolApprovalService"> &
   Pick<WorkRequestStateWiring, "workRequestService"> &
   Pick<
     WorkspaceWiring,
-    "gitObservationPort" | "goalService" | "projectService" | "workProjectStatusReader"
+    | "gitObservationPort"
+    | "goalService"
+    | "projectMemoryAccess"
+    | "projectService"
+    | "workProjectStatusReader"
   > &
   Pick<ProvidersWiring, "providerDataDirectory"> &
   Pick<
@@ -109,6 +124,11 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     decisionReviewModelPort,
     isProjectPolicyTargetAllowed,
     baseRouteCodeService,
+    browserToolApprovalService,
+    extensionToolApprovalService,
+    imageGenerationOffers,
+    projectMemoryAccess,
+    routineProposalService,
     chatService,
     codeOperationRuntime,
     codeTurnDecisions,
@@ -308,6 +328,37 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
       };
     },
   });
+  // An ask's thread as a row names it: active threads only, since an archived
+  // thread's asks are withdrawn and a deleted one has nothing to open.
+  const readWaitingAskThread = (threadId: string): WaitingAskThread | undefined => {
+    const read = <T>(decode: () => T | undefined): T | undefined => {
+      try {
+        return decode();
+      } catch {
+        return undefined;
+      }
+    };
+    const chat = read(() => persistence.readChatThread(decodeChatThreadId(threadId)));
+    if (chat !== undefined) {
+      return chat.lifecycle !== "active"
+        ? undefined
+        : {
+            mode: "chat",
+            title: chat.title,
+            ...(chat.projectId === undefined ? {} : { projectId: String(chat.projectId) }),
+          };
+    }
+    const work = read(() => workThreadProjection.read(decodeWorkThreadId(threadId)));
+    if (work !== undefined) {
+      return work.lifecycle !== "active"
+        ? undefined
+        : { mode: "work", title: work.title, projectId: String(work.projectId) };
+    }
+    const code = read(() => persistence.readCodeThread(decodeCodeThreadId(threadId)));
+    return code === undefined || code.lifecycle !== "active"
+      ? undefined
+      : { mode: "code", title: code.title, projectId: String(code.projectId) };
+  };
   const pendingRequestService = new PendingRequestService({
     reviews: decisionReviews,
     deferrals: pendingQuestionDeferrals(persistence.journal, persistence.connection),
@@ -329,6 +380,19 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     ],
     chat: () => chatService.listPendingQuestions(),
     children: childPendingForWindow,
+    // Each list is the holding service's own for this reader, so who may
+    // answer an ask is decided where it always was.
+    asks: (reader) =>
+      waitingAsksFrom(
+        {
+          toolApprovals: extensionToolApprovalService.list(reader),
+          browserApprovals: browserToolApprovalService.list(reader.scopeId),
+          memoryProposals: projectMemoryAccess.proposals.list(reader.scopeId),
+          routineProposals: routineProposalService.list(reader.scopeId),
+          imageOffers: imageGenerationOffers.listForWindow(reader.scopeId),
+        },
+        readWaitingAskThread,
+      ),
   });
   const pendingRequestRoutes = createPendingRequestRouteHandler({
     service: pendingRequestService,
