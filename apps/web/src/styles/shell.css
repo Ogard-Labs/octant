@@ -451,11 +451,6 @@ html[data-octant-native-host="true"]
   min-height: 0;
   flex: 0 0 auto;
   padding: 0;
-  /* The recipe's transparent 1px border makes the button 34px around its
-     32px face; the margin gives the border back, so the button takes its
-     face's 32px in the column. Switching the border off instead is refused by
-     the UI check (a repaint of the shared button), so this stays. */
-  margin: -1px;
 }
 
 .sidebar-rail__face {

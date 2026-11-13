@@ -1982,9 +1982,8 @@ rule:
   the mode switch in the sidebar's header, the thread-list switch under it and
   the composer's Work and Code switch alike. A tray's inner corner stays the
   tray's corner less its padding, never under 2px. The icon rail's button takes
-  its face's 32px in the column (its transparent 1px border is given back with
-  a 1px margin: switching the border off is a repaint of the shared button that
-  the UI check refuses), and the account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
+  its face's 32px in the column (it is the button's `rail` variant, which draws
+  no border, so no negative margin gives one back), and the account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
 - _The account row's avatar and the Projects toolbar's folder sit on the icon
   column._ The 20px avatar is centred on the centre line of the 16px navigation
   icons (the 12px inset plus half an icon), not left-aligned with them, and the
@@ -2002,15 +2001,16 @@ rule:
 - _One hairline._ A 1px dividing line or a quiet control outline on the title
   band, the thread's disclosures, the sidebar's tiles and the icon rail is
   `--oct-hairline` (10% ink): the environment mark's edge, the divider between
-  a thread's tool rows, the rail's count badge and divider, a count tile's edge,
-  and the rule beside a reasoning block, which is 1px, not a 2px bar. A
+  a thread's tool rows, the rail's count badge and divider, and a count tile's edge. A
   deliberately stronger edge stays: a field's border, a focus edge, a status
   tint, and a Project tile's initial (22%, 40% on hover), which is an
   identity mark rather than a divider.
-- _A slider's track is the stronger hairline_ (`--oct-hairline-strong`, 14% ink),
-  so it shows on a dark card; the control fill it used is the card's own colour
-  there. Measured against the card, the track is 1.5:1 in dark and 1.3:1 in
-  light, and the thumb carries the value.
+- _The rule beside reasoning_ is 1px, not a 2px bar, in `--octant-border-strong`:
+  the hairline measured about 1.2:1 and was too faint to find.
+- _A slider's track is the strong divider role_ (`--octant-divider-strong`), a
+  theme role held to 3:1 against the workspace, so the track is found on a card
+  in dark and in light. The hairline it used was 1.5:1 in dark and 1.3:1 in
+  light. The thumb still carries the value.
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
 their edges and no scrollbar, above a foot (usage, Settings) that stays on

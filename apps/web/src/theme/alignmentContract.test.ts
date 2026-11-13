@@ -66,11 +66,11 @@ describe("the shell's edges and gaps", () => {
   });
 
   it("makes each rail button its 32px face, and centres the first face on the title rail", () => {
-    // The recipe's 1px border is given back with the margin: switching it off
-    // (border-width: 0) is a repaint of the shared button that the UI check
-    // refuses, so the 34px box takes 32px in the column.
-    expect(rule(shell, ".sidebar-rail__button")).toMatch(/margin:\s*-1px;/);
-    expect(rule(usage, ".rail-usage__ring")).toMatch(/margin:\s*-1px;/);
+    // The rail variant of the button draws no border, so the button is its
+    // face and no negative margin gives a border back.
+    expect(rule(shell, ".sidebar-rail__button")).not.toMatch(/margin/);
+    expect(rule(usage, ".rail-usage__ring")).not.toMatch(/margin/);
+    expect(source("ui/shadcn/button.tsx")).toMatch(/rail:\s*"[^"]*border-0/);
     const scroll = rule(shell, ".sidebar-rail__scroll");
     expect(scroll).toMatch(
       /--sidebar-rail-top:\s*calc\(\(var\(--oct-title-rail-h\) - 32px\) \/ 2\)/,
@@ -284,17 +284,23 @@ describe("the shell's edges and gaps", () => {
       /border:\s*1px solid var\(--oct-hairline\)/,
     );
     expect(rule(shell, ".sidebar-rail__divider")).toMatch(/background:\s*var\(--oct-hairline\)/);
-    // A reasoning rule is a hairline, not a 2px quote bar.
-    expect(rule(octant, ".thinking")).toMatch(/border-left:\s*1px solid var\(--oct-hairline\)/);
+  });
+
+  it("draws the rule beside reasoning at 1px in the strong border, which reads where the hairline did not", () => {
+    // A reasoning rule is thin, not a 2px quote bar; the hairline was 1.2:1.
+    expect(rule(octant, ".thinking")).toMatch(
+      /border-left:\s*1px solid var\(--octant-border-strong\)/,
+    );
     expect(rule(components, ".turn-activity__thinking-body")).toMatch(
-      /border-left:\s*1px solid var\(--oct-hairline\)/,
+      /border-left:\s*1px solid var\(--octant-border-strong\)/,
     );
   });
 
-  it("paints a slider's track in the stronger hairline ink, so it shows on a dark card as on a light one", () => {
-    // The control fill is the card's own colour in dark, and the soft ink was
-    // 1.2:1 against it; the stronger hairline is 1.5:1 there.
-    expect(slider).toContain("bg-(--oct-hairline-strong)");
+  it("paints a slider's track in the strong divider role, which holds 3:1 on a card in dark and light", () => {
+    // The control fill is the card's own colour in dark, the soft ink was
+    // 1.2:1 against it and the stronger hairline 1.5:1.
+    expect(slider).toContain("bg-(--octant-divider-strong)");
+    expect(slider).not.toContain("bg-(--oct-hairline-strong)");
     expect(slider).not.toContain("bg-(--oct-fg-soft)");
     expect(slider).not.toContain("bg-secondary");
   });
