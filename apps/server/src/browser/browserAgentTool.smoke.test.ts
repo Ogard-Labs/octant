@@ -142,7 +142,11 @@ const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
 const ELF_BYTES = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0]);
 const PE_BYTES = Buffer.from("MZ\u0090\u0000\u0003\u0000", "latin1");
 const BIG_CHUNKS = 200;
-let bigChunksSent = 0;
+// One count per streamed response. A single shared count made two simultaneous
+// downloads spend one budget of 200 chunks between them (so each had half the
+// time to be stopped) and let the second request reset the first one's count.
+const bigStreams: Array<{ chunks: number }> = [];
+const mostBigChunksSent = () => Math.max(0, ...bigStreams.map((stream) => stream.chunks));
 const attachments: Record<string, { readonly name: string; readonly body: Buffer }> = {
   "/dl/report.pdf": { name: "report.pdf", body: PDF_BYTES },
   "/dl/notes.txt": { name: "notes.txt", body: ELF_BYTES },
@@ -221,18 +225,19 @@ beforeAll(async () => {
     }
     if (path === "/dl/big.bin") {
       // Streams far more than the cap, slowly enough to be stopped in flight.
-      bigChunksSent = 0;
+      const stream = { chunks: 0 };
+      bigStreams.push(stream);
       response.writeHead(200, {
         "content-type": "application/octet-stream",
         "content-disposition": 'attachment; filename="big.bin"',
       });
       const timer = setInterval(() => {
-        if (bigChunksSent >= BIG_CHUNKS) {
+        if (stream.chunks >= BIG_CHUNKS) {
           clearInterval(timer);
           response.end();
           return;
         }
-        bigChunksSent += 1;
+        stream.chunks += 1;
         response.write(Buffer.alloc(1024 * 1024, 65));
       }, 10);
       response.on("close", () => clearInterval(timer));
@@ -1531,13 +1536,14 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
       const tool = agentTool({ uploadRoot: workspace, downloads: true });
       const ref = await openDownloadsPage(tool);
+      bigStreams.length = 0;
       const clicked = await tool.call({ operation: "click", ref: ref(/"Big"/) });
       expect(downloadsOf(clicked)).toEqual([
         { state: "refused", name: "big.bin", reason: "too-large" },
       ]);
       // The page's server was cut off long before it finished sending.
       await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(bigChunksSent).toBeLessThan(BIG_CHUNKS);
+      expect(mostBigChunksSent()).toBeLessThan(BIG_CHUNKS);
       expect(tool.journal.refused).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ name: "big.bin", reason: "too-large" }),
@@ -1556,6 +1562,7 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
           openDownloadsPage(first),
           openDownloadsPage(second),
         ]);
+        bigStreams.length = 0;
         const answers = await Promise.all([
           first.call({ operation: "click", ref: firstRef(/"Big"/) }),
           second.call({ operation: "click", ref: secondRef(/"Big"/) }),
@@ -1565,7 +1572,8 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
             { state: "refused", name: "big.bin", reason: "too-large" },
           ]);
         await new Promise((resolve) => setTimeout(resolve, 300));
-        expect(bigChunksSent).toBeLessThan(BIG_CHUNKS);
+        expect(bigStreams).toHaveLength(2);
+        expect(mostBigChunksSent()).toBeLessThan(BIG_CHUNKS);
         expect(existsSync(join(firstRoot, "downloads"))).toBe(false);
         expect(existsSync(join(secondRoot, "downloads"))).toBe(false);
       } finally {
