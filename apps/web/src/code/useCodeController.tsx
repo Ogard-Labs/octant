@@ -2,9 +2,11 @@ import { createEditorDraftStore } from "../editor/editorDraftStore";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type {
   CodeReviewFindingReference,
+  CoordinatorBounds,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
+  CoordinatorWorkerLevel,
   SideChatDraftReturnReference,
 } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
@@ -121,6 +123,7 @@ import {
   markCodeThreadDone,
   reopenCodeThread,
   setCodeThreadCoordinator,
+  setCodeThreadCoordinatorBounds,
   setCodeThreadCoordinatorWake,
   setCodeThreadMessageWake,
   setCodeThreadRestartContinuation,
@@ -2560,8 +2563,15 @@ export function useCodeController(options: CodeControllerOptions) {
   // local window; the host refuses the rest (a worker, a fifth coordinator)
   // and the refusal comes back in its words, like a rest command's.
   const setThreadCoordinator = useCallback(
-    (threadId: CodeThreadId, coordinator: boolean) =>
-      restCommand(threadId, (thread) => setCodeThreadCoordinator(thread, coordinator)),
+    (threadId: CodeThreadId, coordinator: boolean, workerLevel?: CoordinatorWorkerLevel) =>
+      restCommand(threadId, (thread) =>
+        setCodeThreadCoordinator(thread, coordinator, coordinator ? workerLevel : undefined),
+      ),
+    [restCommand],
+  );
+  const setThreadCoordinatorBounds = useCallback(
+    (threadId: CodeThreadId, bounds: CoordinatorBounds) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinatorBounds(thread, bounds)),
     [restCommand],
   );
   const setThreadMessageWake = useCallback(
@@ -3307,6 +3317,7 @@ export function useCodeController(options: CodeControllerOptions) {
     purgeThreadDraft: composerDraft.purge,
     pinThread,
     setThreadCoordinator,
+    setThreadCoordinatorBounds,
     setThreadCoordinatorWake,
     setThreadMessageWake,
     setThreadRestartContinuation,

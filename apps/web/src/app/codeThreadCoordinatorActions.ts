@@ -13,6 +13,7 @@ export function codeThreadCoordinatorActions(
   actions: Pick<
     ShellActions,
     | "setCodeThreadCoordinator"
+    | "editCodeThreadCoordinatorBounds"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
     | "setCodeThreadRestartContinuation"
@@ -23,10 +24,12 @@ export function codeThreadCoordinatorActions(
     if (outcome.status === "refused") actions.setThreadExportNotice(outcome.message);
   };
   return {
-    onSetCoordinator: (threadId, coordinator) =>
+    onSetCoordinator: (threadId, coordinator, workerLevel) =>
       void actions
-        .setCodeThreadCoordinator(decodeCodeThreadId(threadId), coordinator)
+        .setCodeThreadCoordinator(decodeCodeThreadId(threadId), coordinator, workerLevel)
         .then(noteRefusal),
+    onEditCoordinatorBounds: (threadId) =>
+      actions.editCodeThreadCoordinatorBounds(decodeCodeThreadId(threadId)),
     onSetMessageWake: (threadId, wake) =>
       void actions.setCodeThreadMessageWake(decodeCodeThreadId(threadId), wake).then(noteRefusal),
     onSetCoordinatorWake: (threadId, wake) =>

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ACCESSIBLE_SUMMARY_LIMIT,
   TOOL_SUMMARY_PREVIEW_LIMIT,
@@ -752,5 +752,90 @@ describe("a routine a tool call created", () => {
     expect(within(list).queryByText(/paused/)).toBeNull();
     expect(within(list).getByText(/^Weekdays at 9:00$/)).toBeTruthy();
     expect(within(list).queryByRole("button", { name: "Open" })).toBeNull();
+  });
+});
+
+describe("a tool row's kept input and output", () => {
+  const oneTool: TurnActivity = {
+    reasoning: "",
+    rows: [{ kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "exit 0" }],
+  };
+  const recordedAt = "2026-11-12T12:00:00.000Z" as never;
+
+  it("shows what the call was given and what it returned once its row is opened", async () => {
+    const read = vi.fn(async () => [
+      {
+        toolCallId: "call-1",
+        toolName: "Bash",
+        input: { text: "ls -la", truncated: false },
+        output: { text: "README.md", truncated: true },
+        recordedAt,
+      },
+    ]);
+    render(<TurnActivityRows activity={oneTool} running={false} toolCallRecords={read} />);
+    expect(read).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Bash, done" }));
+
+    expect(await screen.findByText("ls -la")).toBeVisible();
+    expect(screen.getByText("README.md")).toBeVisible();
+    expect(screen.getByText("Input")).toBeVisible();
+    expect(screen.getByText("Output (cut to what is kept)")).toBeVisible();
+    // Reading the records re-renders the rows; that must not read them again.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(read).toHaveBeenCalledOnce();
+  });
+
+  it("says the output was not kept for a call that named a protected file", async () => {
+    render(
+      <TurnActivityRows
+        activity={oneTool}
+        running={false}
+        toolCallRecords={async () => [
+          {
+            toolCallId: "call-1",
+            toolName: "Bash",
+            input: { text: "cat ~/.ssh/id_ed25519", truncated: false },
+            outputWithheld: "protected-path",
+            recordedAt,
+          },
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Bash, done" }));
+    expect(await screen.findByText("cat ~/.ssh/id_ed25519")).toBeVisible();
+    expect(
+      screen.getByText("The output was not kept because the call named a protected file."),
+    ).toBeVisible();
+  });
+
+  it("says nothing was kept for a call with no record, and that the record could not be read when the read fails", async () => {
+    const { unmount } = render(
+      <TurnActivityRows activity={oneTool} running={false} toolCallRecords={async () => []} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Bash, done" }));
+    expect(await screen.findByText("No input or output was kept for this call.")).toBeVisible();
+    unmount();
+
+    render(
+      <TurnActivityRows
+        activity={oneTool}
+        running={false}
+        toolCallRecords={async () => {
+          throw new Error("refused");
+        }}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Bash, done" }));
+    expect(
+      await screen.findByText("The kept input and output could not be read from this window."),
+    ).toBeVisible();
+  });
+
+  it("draws no input or output where the surface keeps no records", async () => {
+    render(<TurnActivityRows activity={oneTool} running={false} />);
+    await userEvent.click(screen.getByRole("button", { name: "Bash, done" }));
+    expect(screen.getByText("exit 0")).toBeVisible();
+    expect(screen.queryByText(/kept/)).toBeNull();
   });
 });

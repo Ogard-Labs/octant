@@ -576,6 +576,38 @@ export function createComputerUseToolService(options: {
   }
 
   /**
+   * An agent's extension of its bound desktop's lease. The lease service
+   * decides whether an agent may extend it at all and whether anyone is
+   * asked; when it asks, the question goes to this turn's thread with the
+   * minutes and the time the desktop would then end.
+   */
+  async function extendLease(
+    owner: ComputerUseOwner,
+    minutes: number,
+    ask: ComputerUseThreadAsk,
+    signal?: AbortSignal,
+  ): Promise<ComputerControlResult> {
+    if (signal?.aborted) return refused("cancelled", "Computer use was cancelled.");
+    if (
+      owner.leaseId === undefined ||
+      options.leases === undefined ||
+      !options.settings().enabled ||
+      !options.ownerIsCurrent(owner) ||
+      owner.executionPolicy === "plan" ||
+      options.authority(owner) === undefined ||
+      !admitted(owner, false)
+    )
+      return refused(
+        "unavailable",
+        "Computer use is unavailable for this task's current authority.",
+      );
+    return options.leases.extend(owner, minutes, async (request) => {
+      const summary = `Keep ${DESKTOP_LABEL} on ${request.provider.displayName.slice(0, 128)} running ${request.byMinutes} more minutes, until ${request.expiresAt}, for "${options.threadTitle(owner).slice(0, 100)}"?`;
+      return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
+    });
+  }
+
+  /**
    * A desktop app is the inbox file of its name, so a file sent under that
    * name may be a different program than the one a person allowed. Every
    * grant for the name on that lease ends, whichever turn or window holds it,
@@ -710,6 +742,12 @@ export function createComputerUseToolService(options: {
                   return authorityChanged()
                     ? Promise.resolve(ownerChangedRefusal)
                     : sendFile(owner, path, ask, signal);
+                },
+                extend: (minutes: number, signal?: AbortSignal) => {
+                  if (needsImageModel) return Promise.resolve(imageModelRefusal);
+                  return authorityChanged()
+                    ? Promise.resolve(ownerChangedRefusal)
+                    : extendLease(owner, minutes, ask, signal);
                 },
               },
             }

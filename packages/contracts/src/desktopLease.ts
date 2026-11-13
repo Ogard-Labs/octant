@@ -534,7 +534,32 @@ export const DESKTOP_SPEND_AGGREGATE_ID = "d5e7d000-0000-4000-8000-000000000001"
 export const DESKTOP_SPEND_EVENT_NAMES = {
   capChanged: "desktop.spend-cap-changed@1",
   billedLeaseRefused: "desktop.billed-lease-refused@1",
+  leaseSettingsChanged: "desktop.lease-settings-changed@1",
 } as const;
+
+/** The most leases a person may let one thread, or the host's own desktops, hold at once. */
+export const DESKTOP_LEASE_COUNT_MAXIMUM = 8;
+const leaseCount = Schema.Int.pipe(Schema.between(1, DESKTOP_LEASE_COUNT_MAXIMUM));
+
+/**
+ * The host-wide lease settings a person at a local window sets: whether a
+ * person confirms each desktop that bills or runs off this machine, and each
+ * file sent to one; how many leases one thread holds; and how many host-local
+ * desktops the host runs at once.
+ */
+export const DesktopLeaseSettings = Schema.Struct({
+  confirmBilledDesktops: Schema.Boolean,
+  leasesPerThread: leaseCount,
+  hostLocalLeasesPerHost: leaseCount,
+}).annotations(strict);
+export type DesktopLeaseSettings = typeof DesktopLeaseSettings.Type;
+
+/** A person at a local window changed the lease settings. The actor on the event is that person. */
+export const DesktopLeaseSettingsChanged = Schema.Struct({
+  previous: DesktopLeaseSettings,
+  settings: DesktopLeaseSettings,
+}).annotations(strict);
+export type DesktopLeaseSettingsChanged = typeof DesktopLeaseSettingsChanged.Type;
 
 /**
  * A person at a local window set or cleared the monthly cap. No cap means no
@@ -710,6 +735,18 @@ export const DesktopPaneRequest = Schema.Union(
     kind: Schema.Literal("set-spend-cap"),
     monthlyCapUsdCents: Schema.optional(usdCents),
   }).annotations(strict),
+  /** The host-wide lease settings, for Settings in a local window. */
+  Schema.Struct({ kind: Schema.Literal("lease-settings") }).annotations(strict),
+  /**
+   * A person at a local window changing the lease settings; a field left out
+   * stays as it is. No agent, paired device, or turn reaches this.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-lease-settings"),
+    confirmBilledDesktops: Schema.optional(Schema.Boolean),
+    leasesPerThread: Schema.optional(leaseCount),
+    hostLocalLeasesPerHost: Schema.optional(leaseCount),
+  }).annotations(strict),
 );
 export type DesktopPaneRequest = typeof DesktopPaneRequest.Type;
 
@@ -726,6 +763,12 @@ export const DesktopPaneStart = Schema.Union(
     placementId: Schema.optional(DesktopPlacementId),
     /** The person's machine the recipe names, for a placement that chooses one. */
     machine: Schema.optional(DesktopMachine),
+    /**
+     * Present when this person must confirm the start in their tab first: a
+     * desktop that bills or runs off this machine, while the person keeps
+     * "Confirm each billed desktop" on.
+     */
+    asks: Schema.optional(Schema.Literal("billed", "off-machine")),
     /** For a billed desktop: what it is estimated at, and this month's spend against the cap. */
     spend: Schema.optional(
       Schema.Struct({
@@ -791,6 +834,10 @@ export const DesktopPaneAnswer = Schema.Union(
   Schema.Struct({ status: Schema.Literal("spend"), summary: DesktopSpendSummary }).annotations(
     strict,
   ),
+  Schema.Struct({
+    status: Schema.Literal("lease-settings"),
+    settings: DesktopLeaseSettings,
+  }).annotations(strict),
   DesktopPaneRefusal,
 );
 export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
@@ -816,6 +863,9 @@ export const decodeDesktopArtifactSent = Schema.decodeUnknownSync(DesktopArtifac
 export const decodeDesktopInputEvent = Schema.decodeUnknownSync(DesktopInputEvent);
 export const decodeDesktopLeaseOperated = Schema.decodeUnknownSync(DesktopLeaseOperated);
 export const decodeDesktopSpendCapChanged = Schema.decodeUnknownSync(DesktopSpendCapChanged);
+export const decodeDesktopLeaseSettingsChanged = Schema.decodeUnknownSync(
+  DesktopLeaseSettingsChanged,
+);
 export const decodeDesktopBilledLeaseRefused = Schema.decodeUnknownSync(DesktopBilledLeaseRefused);
 export const decodeDesktopSpendSummary = Schema.decodeUnknownSync(DesktopSpendSummary);
 export const decodeComputerUseDestinationSelection = Schema.decodeUnknownSync(

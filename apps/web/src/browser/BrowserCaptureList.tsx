@@ -28,6 +28,13 @@ import "./browser-captures.css";
  * so an idle thread re-reads on a slow beat rather than on every frame.
  */
 const CAPTURE_POLL_MS = 5_000;
+/**
+ * How many captures the strip draws before the person asks for the rest. A
+ * thread may keep hundreds, and every tile reads its own picture, so drawing
+ * them all above the composer would read every picture each time the thread
+ * opens. 32 is every capture a thread kept before the number could grow.
+ */
+const CAPTURES_SHOWN_FIRST = 32;
 
 export interface BrowserCaptureListProps {
   readonly client: BrowserAutomationClient;
@@ -49,6 +56,7 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
   const [captures, setCaptures] = useState<ReadonlyArray<BrowserCapture>>([]);
   const [steps, setSteps] = useState<ReadonlyArray<BrowserStep>>([]);
   const [expanded, setExpanded] = useState<BrowserCapture | undefined>(undefined);
+  const [showAll, setShowAll] = useState(false);
   const refused = useRef(false);
   const revision = useThreadActivityRevision("browserCaptures");
 
@@ -58,6 +66,7 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
     setCaptures([]);
     setSteps([]);
     setExpanded(undefined);
+    setShowAll(false);
   }, [props.client, props.threadId]);
 
   const refresh = useCallback(
@@ -129,6 +138,7 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
       />
     );
   if (captures.length === 0) return proof;
+  const shown = showAll ? captures : captures.slice(0, CAPTURES_SHOWN_FIRST);
 
   return (
     <>
@@ -141,7 +151,7 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
       >
         <h3 className="oct-section-label">Browser captures</h3>
         <ul className="browser-captures__list">
-          {captures.map((capture) => (
+          {shown.map((capture) => (
             <li className="browser-capture" key={capture.captureId}>
               <OctantButton
                 aria-label={
@@ -175,6 +185,11 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
             </li>
           ))}
         </ul>
+        {shown.length === captures.length ? null : (
+          <OctantButton onClick={() => setShowAll(true)} size="sm" type="button" variant="ghost">
+            Show all {captures.length} captures
+          </OctantButton>
+        )}
         {expanded === undefined ? null : (
           <BrowserCaptureView capture={expanded} client={props.client} threadId={props.threadId} />
         )}

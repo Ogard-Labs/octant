@@ -10,13 +10,15 @@ import { Clock, Effect } from "effect";
  * Streaming deltas and progress ticks are unbounded by nature (one per token
  * or per tool heartbeat) and must not consume a turn's discrete event budget.
  * Only structural events — tool calls, approvals, file changes, terminal
- * events — count.
+ * events — count. A tool call's content rides beside its start and its
+ * result, which already count, so it does not spend the budget twice.
  */
 export function countsTowardTurnEventBudget(event: Pick<ProviderRuntimeEvent, "kind">): boolean {
   return (
     event.kind !== "text-delta" &&
     event.kind !== "reasoning-delta" &&
     event.kind !== "tool-progress" &&
+    event.kind !== "tool-call-content" &&
     event.kind !== "liveness"
   );
 }

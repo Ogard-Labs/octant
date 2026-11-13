@@ -116,6 +116,12 @@ export const WorkThread = Schema.Struct({
    * itself. Absent, the Work setting decides.
    */
   restartContinuationOff: Schema.optional(Schema.Literal(true)),
+  /**
+   * Set when a person turned on **Wake when a message arrives** for this
+   * thread: a message from a sibling Work thread starts a turn on it while it
+   * is idle, under the wake bounds. Absent, the message waits for its next turn.
+   */
+  messageWake: Schema.optional(Schema.Literal(true)),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -396,6 +402,14 @@ export const SetWorkThreadRestartContinuationCommand = Schema.Struct({
 export type SetWorkThreadRestartContinuationCommand =
   typeof SetWorkThreadRestartContinuationCommand.Type;
 
+/** The thread's Wake when a message arrives switch; only a person at a local window. */
+export const SetWorkThreadMessageWakeCommand = Schema.Struct({
+  kind: Schema.Literal("set-work-thread-message-wake"),
+  ...WorkThreadCommandFields,
+  wake: Schema.Boolean,
+}).annotations(strict);
+export type SetWorkThreadMessageWakeCommand = typeof SetWorkThreadMessageWakeCommand.Type;
+
 export const WorkThreadCommand = Schema.Union(
   CreateWorkThreadCommand,
   ForkWorkThreadCommand,
@@ -416,6 +430,7 @@ export const WorkThreadCommand = Schema.Union(
   ScheduleWorkUsageResumeCommand,
   CancelWorkUsageResumeCommand,
   SetWorkThreadRestartContinuationCommand,
+  SetWorkThreadMessageWakeCommand,
   UpdateWorkSettingsCommand,
 );
 export type WorkThreadCommand = typeof WorkThreadCommand.Type;

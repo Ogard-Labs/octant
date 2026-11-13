@@ -1893,59 +1893,6 @@ textarea.settings-view__text-input {
   margin-top: var(--oct-space-2);
 }
 
-/* The value and its unit share one flexible column so a stepper that spells out
-   `px` is exactly as wide as one that does not. Sized from the two of them, the
-   font-size and line-height steppers in the same group differed by 16px. */
-.octant-number-stepper {
-  display: inline-grid;
-  width: var(--oct-settings-control, auto);
-  grid-template-columns: 30px minmax(0, 1fr) auto 30px;
-  align-items: center;
-  overflow: hidden;
-  background: var(--background);
-  border: 1px solid var(--input);
-  border-radius: var(--radius-md);
-  box-shadow: var(--octant-shadow-xs);
-}
-
-.octant-number-stepper:focus-within {
-  background: var(--octant-control-hover);
-}
-
-/* The stepper's 1px edge is outside these, so its parts are the shared control
-   height less that edge; at a fixed 30px the stepper stood 32px beside 28px
-   fields. */
-.octant-number-stepper__button {
-  width: 30px;
-  height: calc(var(--oct-settings-control-height, 28px) - 2px);
-  min-height: calc(var(--oct-settings-control-height, 28px) - 2px);
-  padding: 0;
-}
-
-.octant-number-stepper__input {
-  width: 100%;
-  height: calc(var(--oct-settings-control-height, 28px) - 2px);
-  padding: 0 2px;
-  min-width: 0;
-  appearance: textfield;
-  background: transparent;
-  color: var(--foreground);
-  font-size: var(--oct-text-sm);
-  text-align: center;
-}
-
-.octant-number-stepper__input::-webkit-inner-spin-button,
-.octant-number-stepper__input::-webkit-outer-spin-button {
-  margin: 0;
-  appearance: none;
-}
-
-.octant-number-stepper__suffix {
-  color: var(--muted-foreground);
-  font-size: var(--oct-text-xs);
-  padding-right: 2px;
-}
-
 /* Rides the `.textarea` recipe. Theme JSON is code, so the face is mono and
    the box keeps a bounded width inside the wide settings pane. */
 .settings-view__textarea {

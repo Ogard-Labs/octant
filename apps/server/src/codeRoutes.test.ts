@@ -337,6 +337,19 @@ describe("Code routes", () => {
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
     const commands = [
       { kind: "set-code-thread-coordinator", threadId, expectedVersion: 1, coordinator: true },
+      {
+        kind: "set-code-thread-coordinator",
+        threadId,
+        expectedVersion: 1,
+        coordinator: true,
+        workerLevel: "full-access",
+      },
+      {
+        kind: "set-code-thread-coordinator-bounds",
+        threadId,
+        expectedVersion: 1,
+        bounds: { wakesPerHour: 600, rounds: 100, startsPerHour: 600 },
+      },
       { kind: "set-code-thread-message-wake", threadId, expectedVersion: 1, wake: true },
       { kind: "set-code-thread-coordinator-wake", threadId, expectedVersion: 1, wake: false },
     ];

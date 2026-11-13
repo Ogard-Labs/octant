@@ -2,11 +2,7 @@ import { Schema } from "effect";
 import { ShieldDecision } from "./shield";
 import { ToolOutsideContentMark } from "./shieldWatcherMark";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
-import {
-  MAX_THREAD_TOOL_STEPS_PER_TURN,
-  MAX_THREAD_TOOL_STEP_SUMMARY_BYTES,
-  ThreadPublishedPage,
-} from "./threadToolSteps";
+import { MAX_THREAD_TOOL_STEP_SUMMARY_BYTES, ThreadPublishedPage } from "./threadToolSteps";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -24,8 +20,9 @@ export type ThreadToolStepState = typeof ThreadToolStepState.Type;
 /**
  * One tool call a Chat or Work turn made: its id, its name, how it stands, and
  * the provider's latest progress or result message. The same fields a Code
- * turn's tool step carries, and nothing more: no tool input and no tool output
- * is captured beyond a page the call published.
+ * turn's tool step carries, and nothing more: the step holds no tool input
+ * and no tool output beyond a page the call published. Those are kept apart
+ * from it, as the call's tool-call record.
  */
 export const ThreadToolStep = Schema.Struct({
   toolCallId: boundedNonEmptyText(255),
@@ -45,10 +42,13 @@ export const ThreadToolStep = Schema.Struct({
 }).annotations(strict);
 export type ThreadToolStep = typeof ThreadToolStep.Type;
 
-/** In arrival order. The first steps are kept when a turn calls more tools than fit. */
-export const ThreadToolStepList = Schema.Array(ThreadToolStep).pipe(
-  Schema.filter((steps) => steps.length <= MAX_THREAD_TOOL_STEPS_PER_TURN),
-);
+/**
+ * In arrival order. The first steps are kept when a turn calls more tools
+ * than its limit, which is a person's setting the host applies as the turn
+ * runs (`threadToolStepLimit`), and off at Full access unless they set one.
+ * The list has no length of its own for that reason.
+ */
+export const ThreadToolStepList = Schema.Array(ThreadToolStep);
 export type ThreadToolStepList = typeof ThreadToolStepList.Type;
 
 export const decodeThreadToolStep = Schema.decodeUnknownSync(ThreadToolStep);

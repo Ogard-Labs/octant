@@ -294,6 +294,48 @@ describe("Work thread routes", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it("refuses a paired device changing Wake when a message arrives for a Work thread", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000040";
+    const command = {
+      kind: "set-work-thread-message-wake",
+      threadId,
+      expectedVersion: 1,
+      wake: true,
+    };
+    const remote = request("/api/work/threads/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(command),
+    });
+    bindPrincipalRouteContext(remote, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "73000000-0000-4000-8000-000000000041" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    const refused = await route(remote);
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    expect(execute).not.toHaveBeenCalled();
+
+    const local = await route(
+      request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      }),
+    );
+    expect(local?.status).toBe(200);
+  });
+
   it("refuses a paired device starting a thread from a terminal session on this host", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-created", thread: thread() }));
     const route = routeFixture({ execute });

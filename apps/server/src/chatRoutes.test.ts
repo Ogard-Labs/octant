@@ -343,6 +343,7 @@ describe("Chat routes", () => {
       contents: false,
       compaction: false,
       appended: false,
+      toolSteps: false,
     });
   });
 
@@ -358,6 +359,7 @@ describe("Chat routes", () => {
       contents: true,
       compaction: false,
       appended: false,
+      toolSteps: false,
     });
 
     const refused = await route(
@@ -374,7 +376,7 @@ describe("Chat routes", () => {
     await collectFrames(
       route(
         request(
-          `/api/chat/threads/${threadId}/events?afterSequence=41&contents=1&compaction=1&appended=1`,
+          `/api/chat/threads/${threadId}/events?afterSequence=41&contents=1&compaction=1&appended=1&toolSteps=1`,
         ),
       ),
     );
@@ -382,9 +384,15 @@ describe("Chat routes", () => {
       contents: true,
       compaction: true,
       appended: true,
+      toolSteps: true,
     });
 
-    for (const query of ["compaction=yes", "compaction=1&compaction=1", "appended=yes"]) {
+    for (const query of [
+      "compaction=yes",
+      "compaction=1&compaction=1",
+      "appended=yes",
+      "toolSteps=yes",
+    ]) {
       const refused = await route(
         request(`/api/chat/threads/${threadId}/events?afterSequence=41&${query}`),
       );
@@ -400,6 +408,7 @@ describe("Chat routes", () => {
       contents: false,
       compaction: false,
       appended: false,
+      toolSteps: false,
     });
   });
 

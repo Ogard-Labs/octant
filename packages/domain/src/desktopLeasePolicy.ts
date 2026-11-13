@@ -4,6 +4,7 @@ import type {
   DesktopLeaseEndReason,
   DesktopLeaseOperation,
   DesktopLeaseOwner,
+  DesktopLeaseSettings,
   DesktopLeaseState,
   DesktopProviderLocality,
   EventActor,
@@ -31,8 +32,25 @@ export function desktopNetworkAllowed(input: {
   return input.locality === "cloud" && !input.placed;
 }
 
-/** A thread holds at most two leases; a host runs at most two host-local ones. */
-export const DESKTOP_LEASE_CAPS = { perThread: 2, hostLocalPerHost: 2 } as const;
+/**
+ * What a host uses until a person changes them: a person confirms each
+ * desktop that bills or runs off this machine, a thread holds at most two
+ * leases, and a host runs at most two host-local ones.
+ */
+export const DESKTOP_LEASE_SETTINGS_DEFAULTS: DesktopLeaseSettings = {
+  confirmBilledDesktops: true,
+  leasesPerThread: 2,
+  hostLocalLeasesPerHost: 2,
+};
+
+/**
+ * Only a person at a local window changes the lease settings. An agent never
+ * does, in any posture, so no turn can stop its own billed desktops asking or
+ * raise how many it holds; a paired device does not either, as with the cap.
+ */
+export function desktopLeaseSettingsChangeAllowed(actor: EventActor["kind"]): boolean {
+  return actor === "local-user";
+}
 
 const TRANSITIONS: Readonly<Record<DesktopLeaseState, ReadonlySet<DesktopLeaseState>>> = {
   requested: new Set(["provisioning", "refused", "failed", "releasing"]),
@@ -67,28 +85,32 @@ export type DesktopLeaseAcquireGate =
   | { readonly kind: "refused"; readonly reason: "plan-mode" }
   /**
    * `in-thread` asks under ordinary posture rules; `billed` and `off-machine`
-   * need a person every time.
+   * need a person every time while they keep the confirmation on.
    */
   | { readonly kind: "ask"; readonly asks: "in-thread" | "billed" | "off-machine" };
 
 /**
- * Plan refuses. A billed provider spends the person's money, which no posture
- * covers, so a person confirms every billed lease even under Full access. A
- * desktop off this machine runs somewhere the person should know of before
- * it starts, and can outlive this host, so a person confirms every one of
- * those too, their own Start included. A person acquiring a host-local
- * desktop has already decided; an agent asks unless the thread runs with
- * Full access.
+ * Plan refuses. A billed provider spends the person's money, and a desktop
+ * off this machine runs somewhere the person should know of before it starts
+ * and can outlive this host, so while the person keeps "Confirm each billed
+ * desktop" on they confirm every one of either, Full access and their own
+ * Start included. With it off, the monthly cap alone bounds the money and
+ * such a lease follows the thread's level as a host-local one does. A person
+ * acquiring a desktop that asks nothing has already decided; an agent asks
+ * unless the thread runs with Full access.
  */
 export function decideDesktopLeaseAcquire(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly billed: boolean;
   readonly locality: DesktopProviderLocality;
   readonly initiator: EventActor["kind"];
+  readonly confirmBilledDesktops: boolean;
 }): DesktopLeaseAcquireGate {
   if (input.executionPolicy === "plan") return { kind: "refused", reason: "plan-mode" };
-  if (input.billed) return { kind: "ask", asks: "billed" };
-  if (input.locality !== "host-local") return { kind: "ask", asks: "off-machine" };
+  if (input.confirmBilledDesktops) {
+    if (input.billed) return { kind: "ask", asks: "billed" };
+    if (input.locality !== "host-local") return { kind: "ask", asks: "off-machine" };
+  }
   if (input.initiator === "local-user" || input.initiator === "remote-device") {
     return { kind: "proceed" };
   }
@@ -110,15 +132,16 @@ export function desktopLeaseFits(input: {
   readonly holdings: ReadonlyArray<DesktopLeaseHolding>;
   readonly owner: DesktopLeaseOwner;
   readonly locality: DesktopProviderLocality;
+  readonly caps: Pick<DesktopLeaseSettings, "leasesPerThread" | "hostLocalLeasesPerHost">;
 }): boolean {
   const live = input.holdings.filter((holding) => desktopLeaseHoldsDesktop(holding.state));
   const threadLeases = live.filter(
     (holding) => String(holding.owner.threadId) === String(input.owner.threadId),
   ).length;
-  if (threadLeases >= DESKTOP_LEASE_CAPS.perThread) return false;
+  if (threadLeases >= input.caps.leasesPerThread) return false;
   if (input.locality !== "host-local") return true;
   const hostLocal = live.filter((holding) => holding.locality === "host-local").length;
-  return hostLocal < DESKTOP_LEASE_CAPS.hostLocalPerHost;
+  return hostLocal < input.caps.hostLocalLeasesPerHost;
 }
 
 /**
@@ -141,24 +164,44 @@ export function desktopLeaseClockEnds(input: {
 
 export type DesktopLeaseExtensionDecision =
   | { readonly kind: "allowed"; readonly expiresAt: number }
-  | { readonly kind: "refused"; readonly reason: "agent-cannot-extend" | "beyond-maximum" };
+  /** An agent's extension below Full access, asked in its thread before the provider is. */
+  | { readonly kind: "ask"; readonly asks: "in-thread"; readonly expiresAt: number }
+  | {
+      readonly kind: "refused";
+      readonly reason: "agent-cannot-extend" | "beyond-maximum" | "plan-mode";
+    };
 
-/** Only a person extends, and never past the recipe maximum. */
+/**
+ * Nobody extends past the recipe maximum. A person extends any lease. An
+ * agent extends only a host-local one, under the rules acquiring one
+ * follows: Plan refuses, Full access proceeds, and anything below asks in
+ * the thread. It never extends a lease that bills or runs off this machine:
+ * more time there is more of the person's money, or more time somewhere the
+ * host may not be able to end.
+ */
 export function decideDesktopLeaseExtension(input: {
   readonly actor: EventActor["kind"];
+  readonly billed: boolean;
+  readonly locality: DesktopProviderLocality;
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly expiresAt: number;
   readonly maximumExpiresAt: number;
   readonly byMinutes: number;
 }): DesktopLeaseExtensionDecision {
-  if (input.actor !== "local-user" && input.actor !== "remote-device") {
-    return { kind: "refused", reason: "agent-cannot-extend" };
+  const person = input.actor === "local-user" || input.actor === "remote-device";
+  if (!person) {
+    if (input.actor !== "agent" || input.billed || input.locality !== "host-local") {
+      return { kind: "refused", reason: "agent-cannot-extend" };
+    }
+    if (input.executionPolicy === "plan") return { kind: "refused", reason: "plan-mode" };
   }
   if (!Number.isSafeInteger(input.byMinutes) || input.byMinutes < 1) {
     return { kind: "refused", reason: "beyond-maximum" };
   }
   const expiresAt = input.expiresAt + input.byMinutes * 60_000;
   if (expiresAt > input.maximumExpiresAt) return { kind: "refused", reason: "beyond-maximum" };
-  return { kind: "allowed", expiresAt };
+  if (person || input.executionPolicy === "full-access") return { kind: "allowed", expiresAt };
+  return { kind: "ask", asks: "in-thread", expiresAt };
 }
 
 /**
@@ -328,19 +371,25 @@ export function decideDesktopArtifactPath(path: string): DesktopArtifactPathDeci
 export type DesktopArtifactTransferGate =
   | { readonly kind: "proceed" }
   | { readonly kind: "refused"; readonly reason: "plan-mode" }
-  /** `in-thread` asks under ordinary posture rules; `off-machine` asks a person every time. */
+  /**
+   * `in-thread` asks under ordinary posture rules; `off-machine` asks a
+   * person every time while they keep the confirmation on.
+   */
   | { readonly kind: "ask"; readonly asks: "in-thread" | "off-machine" };
 
 /**
- * Plan refuses. A transfer to a cloud desktop sends the file off this machine,
- * which no posture covers, so it always asks. A person sending a file to a
- * host-local desktop has already decided. An agent's transfer there does not
- * ask at Full access, whether or not the thread has read outside content: the
- * file goes from the thread's own checkout into a desktop on this machine that
- * the same agent already operates, and its shell could put it there
- * (maintainer decision, 2026-11-13). Below Full access it asks until the
- * person has answered for the thread. Auto-accept-edits covers edits to the
- * checkout, not sending a file out of it, so it asks as approval-gated does.
+ * Plan refuses. A transfer to a cloud desktop sends the file off this
+ * machine, which no posture covers, so it asks a person every time while they
+ * keep "Confirm each billed desktop" on; with it off it follows the thread's
+ * level as a transfer to a host-local desktop does. A person sending a file
+ * to a host-local desktop has already decided. An agent's transfer there
+ * does not ask at Full access, whether or not the thread has read outside
+ * content: the file goes from the thread's own checkout into a desktop on
+ * this machine that the same agent already operates, and its shell could put
+ * it there (maintainer decision, 2026-11-13). Below Full access it asks until
+ * the person has answered for the thread. Auto-accept-edits covers edits to
+ * the checkout, not sending a file out of it, so it asks as approval-gated
+ * does.
  */
 export function decideDesktopArtifactTransfer(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -348,9 +397,12 @@ export function decideDesktopArtifactTransfer(input: {
   readonly initiator: EventActor["kind"];
   /** The person already allowed the agent's transfers for this thread as it stands. */
   readonly answeredForThread: boolean;
+  readonly confirmBilledDesktops: boolean;
 }): DesktopArtifactTransferGate {
   if (input.executionPolicy === "plan") return { kind: "refused", reason: "plan-mode" };
-  if (input.locality !== "host-local") return { kind: "ask", asks: "off-machine" };
+  if (input.confirmBilledDesktops && input.locality !== "host-local") {
+    return { kind: "ask", asks: "off-machine" };
+  }
   if (input.initiator === "local-user" || input.initiator === "remote-device") {
     return { kind: "proceed" };
   }

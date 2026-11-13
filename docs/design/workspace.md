@@ -383,13 +383,20 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 - **Menus.** A Code Project's sidebar menu has **New coordinator**, which
   opens the ordinary Code draft under a "New coordinator" heading and makes the
   thread a coordinator once its creation is confirmed, before the first
-  message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
-  coordinating** on a coordinator (never on a worker), the **Wake when a message
+  message is sent. Under the heading the draft has **Workers start at** (this
+  thread's level or lower, or always at one named level, Full access included)
+  and three number fields for the coordinator's bounds (wakes an hour, rounds,
+  worker starts an hour), each empty for its default
+  ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). A Code thread's row menu has **Make coordinator**, a submenu
+  with the same worker-level choice, or **Stop
+  coordinating** on a coordinator (never on a worker); on a coordinator
+  **Coordinator limits…**, which opens a dialog with the three bounds and
+  Save; the **Wake when a message
   arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
   the **Continue after restart** checkbox, on until a person turns it off for
   that thread ([Architecture: Persistence](../architecture.md#persistence)).
   A Chat or Work thread's row menu carries the same **Continue after restart**
-  checkbox.
+  checkbox, and a Work thread's the **Wake when a message arrives** checkbox.
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.

@@ -2615,6 +2615,31 @@ CREATE INDEX validation_evidence_authority_idx
         ADD COLUMN thread_id TEXT CHECK(thread_id IS NULL OR length(trim(thread_id)) > 0);
     `,
   },
+  {
+    version: 103,
+    name: "create_thread_tool_call_records",
+    // What Chat and Work tool calls were given and returned. A store, not a
+    // projection: no event carries the text, so nothing rebuilds it and a
+    // thread purge removes it for good. `thread_id` puts it in the purge's
+    // sweep of thread-keyed rows.
+    sql: `
+      CREATE TABLE thread_tool_call_record_store (
+        mode TEXT NOT NULL CHECK(mode IN ('chat', 'work')),
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        turn_id TEXT NOT NULL CHECK(length(trim(turn_id)) > 0),
+        tool_call_id TEXT NOT NULL CHECK(length(trim(tool_call_id)) > 0),
+        tool_name TEXT NOT NULL CHECK(length(trim(tool_name)) > 0),
+        input_text TEXT,
+        input_truncated INTEGER NOT NULL CHECK(input_truncated IN (0, 1)),
+        output_text TEXT,
+        output_truncated INTEGER NOT NULL CHECK(output_truncated IN (0, 1)),
+        output_withheld INTEGER NOT NULL CHECK(output_withheld IN (0, 1)),
+        stored_bytes INTEGER NOT NULL CHECK(stored_bytes >= 0),
+        recorded_at TEXT NOT NULL CHECK(length(trim(recorded_at)) > 0),
+        PRIMARY KEY (mode, thread_id, turn_id, tool_call_id)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

@@ -2683,7 +2683,7 @@ Settled managed attempts record active milliseconds and the chosen limit through
 
 A managed child's lifecycle moves from Starting to Running once its workspace
 is verified and its provider session starts, not at completion. One turn,
-from provider acquisition to its terminal event, has a default 120-minute working-time limit, and at Full access the person may choose none (maintainer request, 2026-11-12; not built yet: today the default is 30 minutes and none is not offered). The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
+from provider acquisition to its terminal event, has a default 120-minute working-time limit, and at Full access the person may choose none (maintainer request, 2026-11-12). None is one Helper agents setting (`noWorkingTimeLimitAtFullAccess`): it applies to a child whose thread has Full access when the attempt starts (a Code thread's `executionPolicy` or a Work thread's `access`), never to a child of any other thread, and such an attempt records its working time with no limit. With no limit nothing local ends a child whose provider goes silent after startup: it keeps its capacity slot until it is cancelled or the host restarts, which the setting's description says. The person can choose 1–240 minutes in Helper agents settings before the next attempt; agents cannot change that setting. Retry and Resume each read the current setting and start a fresh timer, never inherit the old attempt's remainder. Provider acquisition and startup each have an independent two-minute readiness bound, so raising the task limit does not enlarge a stuck startup. A turn that reaches its working-time bound
 is recorded as Interrupted and releases its capacity. The bound counts working
 time only: it pauses while the child waits for a person's approval or answer and
 resumes with the remaining time once every pending request is answered, because
@@ -3481,8 +3481,7 @@ are per-coordinator settings with defaults of 30 wakes an hour, 10 rounds and
 60 starts an hour, and the person may fix the workers' level when creating the
 coordinator at a local window or a paired device, Full access included; a mark on the coordinator
 does not lower a fixed level, and the coordinator itself stays read-only
-(maintainer request, 2026-11-12; not built yet: today the bounds are the
-constants 6, 3 and 12 and no level can be fixed). The planner below is now a
+(maintainer request, 2026-11-12). The planner below is now a
 coordinator whose starts always need approval: the designated planner's turns
 take the coordinator's read-only gate and roster, its `start` proposes through
 the planner's proposal path whatever the start setting, and designation also
@@ -3988,9 +3987,16 @@ the thread it came from.
   Complete; `full-access-ineligible` when the Code thread now has Full access;
   `execution-profile-mismatch` when its provider or model changed. A
   follow-up due while a turn is running or being started in the thread runs
-  after that turn instead of being skipped (maintainer request, 2026-11-12;
-  not built yet: today a busy thread refuses as `thread-busy` and the
-  follow-up is skipped, not waited on). A refusal fails the run with its
+  after that turn instead of being skipped (maintainer request, 2026-11-12).
+  Its claimed run waits journaled as `dispatching` with no dispatch intent,
+  so it survives a restart; the scheduler offers it again on every pass,
+  at most 15 seconds apart, and each offer repeats every check above before
+  anything is sent, so a thread archived or marked Done during the wait
+  still refuses. A follow-up archived while it waits ends its run
+  `cancelled`, a paused one keeps waiting, and one still waiting a day past
+  its time fails as `follow-up-missed`. The run's one first-turn request id
+  keeps the turn from being sent twice. (`thread-busy` is no longer
+  recorded; it stays in the contract so older journals decode.) A refusal fails the run with its
   reason in the journal and sends nothing; unlike other routines, a follow-up
   is not left paused, because the once trigger then ends it.
 - **Follow-up missed window.** A follow-up missed while the host was asleep or
@@ -4232,9 +4238,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   confirms a thread exists. Code and Work turns are offered the messaging
   operations and a Project has one mode, so this means Code to Code or Work to
   Work inside one Project (maintainer request, 2026-11-12, for Work). Chat
-  threads and child runs neither send nor receive. Not built yet: today Work
-  turns carry no messages, so a Work thread's `octant_threads`
-  offers no `send` (see the rationale below). A recipient is named by the same
+  threads and child runs neither send nor receive. A recipient is named by the same
   `<thread id>@<project id>` reference `list` returns; one whose Project part
   is not the sender's current Project refuses `unauthorized` in the same
   words, even when its thread part names a thread the sender could reach, and
@@ -4319,8 +4323,8 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     wakes nothing, so two agents answering each other stop waking each other
     after ten rounds and continue only when a person runs a turn. Both numbers
     are settings, per coordinator for a coordinator and its workers
-    (maintainer request, 2026-11-12; not built yet: today they are the
-    constants six wakes an hour and three rounds). The host
+    (maintainer request, 2026-11-12); any other thread takes the defaults.
+    The host
     records wake turns and each thread's latest host turn with its hop in its
     own store, so a restart keeps the hourly count and the hop count
     ([Coordinator threads: Bounds](design/coordinator-threads.md#bounds)).
@@ -4346,7 +4350,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   `receipts` operations for up to 20 durable IDs per call; `send` is always
   named. An acknowledgement is the current
   recipient reporting receipt: the host checks the exact delivered record,
-  current sender and recipient Code authority and same-Project relationship.
+  current sender and recipient authority, their shared mode and same-Project relationship.
   A sender cannot acknowledge its outgoing message or name another recipient;
   the caller thread comes from the running turn. Duplicate acknowledgements
   and replay retain one fact. Neither prompt acceptance nor turn completion
@@ -4358,7 +4362,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   count includes acknowledged messages; acknowledgement is a later receipt,
   not an additive delivery total. The messaging operations remain omitted and
   refused in Plan, on excluded profiles and cancelled turns; managed children,
-  Chat and Work gain no messaging rights. Sending again, including retrying a
+  and Chat gain no messaging rights. Sending again, including retrying a
   send, creates a new durable message; receipt retries use the existing ID.
 - **Expiry.** Each newly admitted message records an explicit deadline 24 hours after admission under the maintainer-approved lifetime policy. The host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. Older records without a deadline retain their existing lifetime; no timestamp is reinterpreted as consent. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
@@ -4389,9 +4393,9 @@ Seeing sibling threads is the read-only companion to messaging, approved by
 the maintainer on 2026-10-13 and extended to Work on 2026-11-05, when the
 maintainer folded messaging and the planner's board into the same tool. The
 `octant_threads` tool lets a Work or Code turn see the other threads of its
-own Project, and a Code turn message one or wait for one to finish. Its
-operations are `help`, `list`, `read`, `wait`, and in Code `send`,
-`acknowledge`, `receipts`, and the planner's `board`. No operation creates,
+own Project, message one, or wait for one to finish. Its
+operations are `help`, `list`, `read`, `wait`, `send`, `acknowledge`,
+`receipts`, and in Code the planner's `board`. No operation creates,
 steers, completes, archives, or stops a thread. The coordinator operation
 `start`, offered only to a coordinator thread, is the one exception:
 it creates a worker thread, under the rules in
@@ -4399,11 +4403,29 @@ it creates a worker thread, under the rules in
 
 - **Rationale for Work.** Work and Code share one authority model, so the
   read-only operations, which change nothing outside the caller's own record,
-  reach Work under the same rules as Code. Messaging does not: a message is
-  carried by the recipient's next turn, and only Code turns assemble that
-  context, so a message to a Work thread would wait unread for good. Until a
-  Work turn carries, frames, and confirms a message, which the rule above now
-  asks for, Work threads neither send nor receive.
+  reach Work under the same rules as Code. Messaging follows the same way: a
+  Work turn carries the messages waiting for its thread as a Code turn does.
+  The host rechecks each one, marks the thread before the text is returned,
+  frames the body as data in the turn's required context, and journals
+  `delivered` only once the provider has been sent that context, so a turn
+  that never reaches a provider leaves the message for the next one. A Work
+  thread has the **Wake when a message arrives** switch a Code thread has
+  (maintainer decision, 2026-11-13): off by default, set by a person from the
+  thread's row menu at a local window (command
+  `set-work-thread-message-wake`, journaled as the thread's own
+  `work.thread-updated@1`; a paired device is refused today, as for Code's
+  switch). With it on, a message for an idle Work thread starts one host turn
+  to carry it, under the same decision and the same bounds as Code (30 wake
+  turns a thread in any hour, 10 rounds by hop count), counted in the same
+  host store so a restart keeps them. Idle means an active thread that is not
+  completed and has no turn accepted, running, or waiting on a person. The
+  turn is started by the host as itself through ordinary Work admission, at
+  the thread's own level, so capacity, spend ceilings and usage limits apply
+  and every approval waits for a person; its prompt is a host sentence naming
+  the sender. Built by `WorkMessageWake`, which watches committed
+  `agent.message-sent@1` events. The host refuses a
+  message between a Work and a Code thread as unreachable at admission and
+  again at delivery, whatever Project their records name.
 
 - **Who may see whom.** The caller is a Work or Code thread's turn; the
   targets are the other threads of the same Project, which are all of its
@@ -4711,28 +4733,134 @@ transcript (see [DESIGN.md](../DESIGN.md) Transcript). Code replays them from
 its journaled `tool-activity` events. Chat and Work record exactly the same
 step per tool call and nothing more: the provider's tool call id, the tool
 name, a state (`started`, `running`, `completed`, `failed`), and an optional
-progress or result message of at most 2048 bytes, redacted before it is kept. A
-setting, on by default, also keeps each call's bounded input and output in
-purgeable storage (maintainer request, 2026-11-12). Not built yet: today no tool
-input and no tool output is captured, except the `published` page a call put
-outside this host (its `https` address and title, and the host's own snapshot
-of the file it sent; today only a Claude artifact), which Code's
+progress or result message of at most 2048 bytes, redacted before it is kept.
+The step carries no tool input and no tool output, except the `published` page
+a call put outside this host (its `https` address and title, and the host's
+own snapshot of the file it sent; today only a Claude artifact), which Code's
 `tool-activity` and its conversation steps carry too and the transcript shows
-as a link card beside the drawn snapshot. A turn keeps at most 512 steps
-by default, a number the person can change (maintainer request, 2026-11-12;
-not built yet: today a constant 64), in arrival
-order and sets a truncated flag when it called more. Chat carries them as
-`ChatAttempt.toolSteps` on `chat.attempt-updated@1`; Work carries them as
-`WorkTurnState.toolSteps` journaled with the settled `work.turn-updated@1`,
-with a live `turn-tools` stream frame while the turn runs. That frame restates
-every step at each change, so it carries a published page's link but not its
-snapshot (up to 256 KiB, resent once per later tool event); the snapshot
-arrives with the settled turn. They live on the
+as a link card beside the drawn snapshot. A call's input and output are kept
+apart from the step, as [Tool-call records](#tool-call-records) describes. A
+turn keeps its steps in arrival order up to the tool-step limit and sets a
+truncated flag when it called more; the calls past the limit still run and
+have no row.
+
+- **The tool-step limit is a setting** (maintainer decision, 2026-11-13).
+  Settings › Permissions › Tool steps holds two numbers: **Tool steps kept
+  per turn** (`toolStepsPerTurn`, 1 to 4,096, default 64) for a turn below
+  Full access, and **Tool steps kept per turn at Full access**
+  (`fullAccessToolStepsPerTurn`, 0 to 4,096, default 0). At Full access 0 is
+  off: every call is kept, and the spend ceiling is what bounds the turn; a
+  person may set a number there too. The level read is the level the turn
+  runs at, so a Work turn a caller's ceiling holds below a Full access
+  thread's level keeps the lower level's limit. Chat has no Full access. The
+  host reads the setting when a turn starts. Spend ceilings and every other
+  hard line are unchanged. Rationale: a count of rows protects nothing a
+  person cannot get back, so it is a default; the bytes it used to cost are
+  gone with the next rule. One bound stays fixed: a Chat or Work turn stops
+  after 4,096 discrete runtime events (streamed text does not count),
+  whatever this setting says, because it guards against a runaway turn
+  (maintainer decision, 2026-11-13). The Full access row in Settings says so.
+- **A step is journaled and streamed as a change.** Chat journals each tool
+  event as `chat.attempt-tool-step@1`, carrying the one step that changed
+  (none when the list only became truncated) and the attempt's `updatedAt`;
+  the projection puts it on the attempt by its tool call id, and every whole
+  `chat.attempt-updated@1` journaled afterwards carries the list. The frame
+  goes to a subscriber that asks with `toolSteps=1`; any other subscriber
+  receives the whole attempt read back from the projection, as for an
+  appended delta. Work journals the list once, with the settled
+  `work.turn-updated@1`, and its live feed sends a `turn-tool-step` frame for
+  the one step that changed; a view that joins late or falls behind reads the
+  whole list from the transcript snapshot. The `turn-tools` frame, which
+  restated the list, is no longer sent and stays in the contract so a client
+  still reads a host that sends it. A live frame carries a published page's
+  link but not its snapshot (up to 256 KiB); the snapshot arrives with the
+  settled turn. A settled Work turn too heavy for one stream frame (160 KiB,
+  which thousands of steps reach) is replaced on the wire by
+  `snapshot-required`, so the view reads the transcript instead of refusing
+  the same frame at every reconnect. Rationale: each tool event used to
+  restate the whole list, in Chat's journal and in Work's live frame, so the
+  bytes grew with the square of the limit.
+
+Chat carries the steps as `ChatAttempt.toolSteps`; Work carries them as
+`WorkTurnState.toolSteps`. They live on the
 attempt or turn record, so they are thread content and purging the thread
 removes them with it. Both fields are optional, so a turn saved before they existed
 still decodes, and the group draws nothing for a turn that called no tool. This
 changes rendering and recording only; Chat's and Work's authority, and Work's
 shell posture, are unchanged.
+
+### Tool-call records
+
+A host setting, on by default (Settings › Permissions › Tool-call records,
+`keepToolCallRecords`), keeps a bounded copy of what each Chat and Work tool
+call was given and what it returned, so a person can inspect afterwards what
+an agent ran and got back (maintainer request, 2026-11-12).
+
+- **Where.** A record is thread content in the host database's
+  `thread_tool_call_record_store`, never the journal: no event carries the
+  text, a rebuild does not touch it, and nothing is added to the journaled
+  step. Rationale: Chat journals a turn's whole step list on every tool event,
+  so text kept on the step would be written again by every later event. A
+  record is found by the mode, the thread, the turn (a Chat attempt id or a
+  Work turn's request id) and the tool call id the step already names, so the
+  journal holds no reference of its own.
+- **Bounds.** At most 16 KiB of input and 64 KiB of output a call, each cut at
+  a character boundary and marked `truncated` when the call's text was longer,
+  whether the store or the adapter cut it. A turn keeps records for no more
+  calls than it keeps steps, so none is limited by count at Full access
+  unless a person set a number there. A thread's records hold at most 16 MiB together;
+  past that the thread's oldest records are dropped, so the newest calls stay
+  inspectable. The bounds are fixed: they size stored data.
+- **What is recorded.** A tool Octant runs for a turn (an app-managed tool
+  request: Octant's own tools on every provider, and every tool of an Octant
+  Harness turn) is recorded by the host from the request and the result it
+  answered with. A runtime's own tool is recorded from `tool-call-content`
+  runtime events, which carry a call's input or output and exist only for
+  this: Chat and Work hand them to the record, and Code, a helper agent's
+  session, and every other consumer drop them before anything could journal
+  them. Claude reports its own tools this way (a file edit or write keeps the
+  path alone, not what was written, and a tool disabled in Plan reports
+  nothing); Octant's own tools reach Claude as `mcp__octant__` calls and are
+  left to the host's record. Not built yet: Codex, ACP, OpenCode and Pi send
+  no `tool-call-content`, so their own tools keep no record.
+- **Secrets.** Runtime events pass the shared driver boundary's redaction and
+  the store redacts again before it writes, so a known key format or a value
+  the credential broker issued is kept only as the redaction mark. A call
+  whose input names a protected secret file (an absolute or home-rooted path
+  on the list in force) keeps its input and not its output, marked
+  `outputWithheld`: redaction recognises key shapes, not every credential a
+  file can hold. Withholding fails closed: an output is kept only when the
+  call's whole input was judged within the life of the call and named no
+  protected file. An input that was cut before it was judged (the Claude
+  adapter cuts each event's text), arrived while recording was off, named
+  more paths than are judged, or never arrived leaves the output withheld.
+  The verdict is held by the turn's recorder, not the stored row, so a row
+  the thread's byte total drops cannot lose it. This changes what is
+  recorded only; the secret guard refuses or allows the call exactly as
+  before.
+- **Data rights.** Deleting a Chat thread and purging any thread remove its
+  records, and a tool event that arrives during or after either keeps
+  nothing. Retention purges through the same thread purge. A thread export a
+  local window asks for, and so Export my data, carries them as
+  `evidence.toolCalls`, each with its turn. Leave no trace governs person
+  memory, which never reads these records; such a thread keeps its records
+  with its transcript until it is deleted or purged. A Chat branch or a Work
+  fork starts with no records of its source's calls. Turning the setting off
+  stops new records at once, a running turn's included, and leaves the ones
+  already kept.
+- **Reading.** The tool row opens to show the call's input and output, read
+  from the host when the row is opened (`POST /api/threads/tool-call-records`,
+  which checks the caller may read the thread). A local window or a paired
+  device reads and exports them (maintainer decision, 2026-11-12). Not built
+  yet: today only a local window may read or export them; a paired device is
+  refused and its export leaves them out, because what a tool was given and
+  returned is wider than the step a transcript shows it. An Octant Harness
+  turn's runtime announces no tool call of its own, so the host gives each of
+  its calls a row when it takes the request: started while the tool runs,
+  then completed or failed, keyed by the request id its record is kept under,
+  so the row opens the record like any other (maintainer decision,
+  2026-11-13). A runtime that announces its own calls gets no second row for
+  a tool Octant ran for it.
 
 ### Web search
 
@@ -5167,8 +5295,8 @@ flowchart LR
   `record`. The bytes live in the host's managed
   attachment store and the journal holds only a reference, the page origin, URL,
   title, content hash, and time. A thread keeps its newest 200 captures by
-  default, a number the person can change (maintainer request, 2026-11-12;
-  not built yet: today a constant 32), and they
+  default, a number the person can change from 1 to 500 in Settings ›
+  Permissions (maintainer request, 2026-11-12), and they
   are erased with the thread. A local window or a paired device that can open the thread reads
   them (maintainer decision, 2026-11-12; not built yet: today a paired device never does). They never reach a Canvas share, replica sync, or
   a diagnostics export. They leave the host only in an export the local owner
@@ -7022,8 +7150,9 @@ and hands the run slot it was about to use to the next waiter. A start refused f
 or authority ends the wait with that reason (`workspace-denied`,
 `authority-drift`) and does not retry. Thirty minutes by default, a setting
 the person can change, is the longest a helper waits (maintainer request,
-2026-11-12; not built yet: today it is a constant five minutes, the idle
-bound of a Chat turn); past it the helper ends Interrupted with
+2026-11-12): Helper agents settings hold it as `providerSlotWaitMinutes`,
+from 1 to 240, and the host reads it at every check, so a change applies to
+helpers already waiting; past it the helper ends Interrupted with
 `capacity-unavailable` and the sentence that names what is full, and Retry
 starts it again once a slot frees. A longer wait would mean a person's
 unanswered question is holding the slot, and the helper should say so rather
@@ -7827,7 +7956,8 @@ carrying only the reference it appended and the attempt's `updatedAt`, so
 journal bytes per reply are linear in its length. Deltas inside a short burst
 share one journal commit, folded ahead of any full attempt update in the same
 transaction, so the store fsyncs per burst rather than per token and stays on
-`synchronous = FULL`. The appended frame goes only
+`synchronous = FULL`. A tool event journals `chat.attempt-tool-step@1` the same way
+([Tool calls in Chat and Work](#tool-calls-in-chat-and-work)). The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the
 projection, which folds the references streamed so far onto the attempt. An opt-in
@@ -11412,10 +11542,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   HTTPS port, which sends nothing outside the hosts the driver declares and
   attaches the person's key from the credential broker's
   `/v1/desktop-provider-credentials/*` namespace itself; a person confirms
-  every desktop off this machine, and every billed desktop while the setting
+  every desktop that bills or runs off this machine while the setting
   "Confirm each billed desktop" is on, which it is by default (maintainer
-  request, 2026-11-12; not built yet: today every billed desktop is confirmed
-  and no setting exists). Billed desktops
+  request, 2026-11-12). Billed desktops
   are off until a person, at a local window or a paired device (not built yet:
   today a local window only), sets a monthly spend cap; each
   billed lease is estimated from the recipe's hourly cost before it starts

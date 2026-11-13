@@ -576,9 +576,9 @@ describe("the public-block visual language", () => {
   });
 
   it("keeps number steppers free of a focus halo", () => {
-    const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const components = readFileSync(join(webRoot, "styles/components.css"), "utf8");
     const focus =
-      settings.match(/\.octant-number-stepper:focus-within\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+      components.match(/\.octant-number-stepper:focus-within\s*\{([\s\S]*?)\}/)?.[1] ?? "";
 
     expect(focus).not.toBe("");
     expect(focus).toMatch(/background:\s*var\(--octant-control-hover\)/);
@@ -1053,7 +1053,9 @@ describe("the public-block visual language", () => {
     );
     expect(heights.length).toBeGreaterThan(0);
     expect(new Set(heights)).toEqual(new Set(["28px"]));
-    expect(settings).toMatch(
+    // The stepper is a primitive, so its rules load with the app.
+    const components = readFileSync(join(webRoot, "styles/components.css"), "utf8");
+    expect(components).toMatch(
       /\.octant-number-stepper__input \{[^}]*height: calc\(var\(--oct-settings-control-height, 28px\) - 2px\);/,
     );
     expect(runtime).toMatch(

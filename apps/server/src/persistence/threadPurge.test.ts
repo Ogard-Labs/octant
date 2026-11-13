@@ -55,6 +55,7 @@ import {
 import { GeneratedImageStore } from "../image/generatedImageStore";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
 import { writeChatContent } from "./chatProjection";
+import { readThreadToolCallRecords, writeThreadToolCallPart } from "./threadToolCallRecordStore";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
@@ -210,6 +211,14 @@ describe("thread purge sweep", () => {
     });
     expect(unexplained.map(formatHit)).toEqual([]);
     expect(readControl(harness.connection)).toBe(controlMarker);
+    // Another thread's tool-call records are not the purged threads' to take.
+    expect(
+      readThreadToolCallRecords(harness.connection, {
+        mode: "chat",
+        threadId: controlThreadId,
+        turnId: toolCallTurnId,
+      }).map((record) => record.output?.text),
+    ).toEqual([controlMarker]);
     expect(sharedWorktreeRemains(harness.directory)).toBe(true);
     // De-linked usage rows keep their aggregates but carry no thread identity.
     expect(usageRowsByThread(harness.connection)).toBe(0);
@@ -1111,6 +1120,7 @@ function seedThreadTraces(harness: Harness, thread: SeededThread): void {
   seedGeneratedImage(harness.directory, thread);
   seedBrowserCapture(harness, thread);
   seedAgentRun(harness, thread);
+  if (thread.mode !== "code") seedToolCallRecord(harness, thread.mode, thread.id, thread.marker);
   seedCheckpoint(harness, thread);
   seedFollowUp(harness, thread);
   seedHarnessSession(harness, thread);
@@ -1579,6 +1589,33 @@ function seedUsage(connection: SqliteConnection, thread: SeededThread): void {
 
 function seedControlThread(harness: Harness): void {
   seedChatProjection(harness, controlThreadId, controlMarker);
+  seedToolCallRecord(harness, "chat", controlThreadId, controlMarker);
+}
+
+const toolCallTurnId = "c3630000-0000-4000-8000-0000000000d1";
+
+/** What a tool call was given and returned is thread content held outside the journal. */
+function seedToolCallRecord(
+  harness: Harness,
+  mode: "chat" | "work",
+  threadId: string,
+  marker: string,
+): void {
+  for (const part of ["input", "output"] as const) {
+    const outcome = writeThreadToolCallPart(harness.connection, {
+      mode,
+      threadId,
+      turnId: toolCallTurnId,
+      callsPerTurn: 64,
+      toolCallId: "call-1",
+      toolName: "Bash",
+      part,
+      text: marker,
+      recordedAt: now,
+      redact: (text) => text,
+    });
+    if (outcome.status !== "kept") throw new Error("the tool-call record was not seeded");
+  }
 }
 
 function insertEvent(

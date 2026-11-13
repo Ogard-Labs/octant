@@ -1,5 +1,6 @@
 import { automationDispatchPromptText } from "./automationFileContext";
 import {
+  decodeAutomationCancelRunRequestId,
   decodeChatThreadId,
   type AutomationBlockReason,
   type AutomationDefinition,
@@ -41,6 +42,7 @@ export interface AutomationDispatchServiceOptions {
     | "appendDispatchIntentRecorded"
     | "appendFirstTurnRuntimeClaimed"
     | "appendFirstTurnAccepted"
+    | "appendRunCancellation"
   >;
   readonly projection: AutomationProjection;
   readonly code: AutomationCodeDispatchPort;
@@ -261,11 +263,22 @@ export class AutomationDispatchService implements AutomationDispatchPort {
    * after that thread passes the follow-up's fire-time checks. A refusal
    * fails the run with its typed reason and the once trigger then ends the
    * routine, so a follow-up never runs twice and never waits paused.
+   *
+   * A busy thread is waited on: the run stays `dispatching` with no intent,
+   * which is journaled, and the scheduler offers it again on every pass and
+   * after a restart. Every check here runs again on each offer, so a thread
+   * archived, or a follow-up cancelled or paused, during the wait is seen
+   * before anything is sent.
    */
   #targetOriginThread(
     definition: AutomationDefinition,
     run: AutomationRun,
   ): AutomationThreadId | undefined {
+    if (definition.lifecycle === "archived") {
+      this.#cancelArchivedFollowUp(run);
+      return undefined;
+    }
+    if (definition.lifecycle === "paused") return undefined;
     const threadId = definition.originThreadId;
     const snapshot = run.definitionSnapshot;
     const decision = decideAutomationFollowUp({
@@ -287,7 +300,36 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       this.#failRun(run, blocked.reason, blocked.message);
       return undefined;
     }
+    if (decision.kind === "waiting") return undefined;
     return this.#recordIntent(definition, run, threadId);
+  }
+
+  /**
+   * Archiving a follow-up is how a person cancels it. Its claimed run has
+   * sent nothing yet, so it ends cancelled, as a run a person cancelled does.
+   * The request id is derived from the run so a repeated offer is one receipt.
+   */
+  #cancelArchivedFollowUp(run: AutomationRun): void {
+    const current = this.#projection.getRun(run.id);
+    if (current === undefined || current.cancellationTombstone !== undefined) return;
+    const now = this.#now();
+    try {
+      this.#store.appendRunCancellation({
+        automationId: current.automationId,
+        runId: current.id,
+        previousLifecycle: current.lifecycle,
+        tombstone: {
+          requestId: decodeAutomationCancelRunRequestId(
+            deterministicAutomationUuid(`automation-follow-up-archived:${String(current.id)}`),
+          ),
+          cancelledAt: now,
+        },
+        expectedVersion: current.version,
+        updatedAt: now,
+      });
+    } catch (error) {
+      if (!isConflict(error)) throw error;
+    }
   }
 
   async #createThread(

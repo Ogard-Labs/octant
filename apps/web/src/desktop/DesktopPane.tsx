@@ -346,12 +346,11 @@ export function DesktopPane(props: {
           onStart={() => {
             // A billed desktop spends the person's money, and one off this
             // computer runs elsewhere and can outlive it, so they confirm
-            // every one here, for the provider, placement, and machine they see.
+            // every one here, for the provider, placement, and machine they
+            // see, until they turn "Confirm each billed desktop" off. The
+            // host says which starts ask, and declines one that skipped it.
             const offered = overview?.start.status === "available" ? overview.start : undefined;
-            if (
-              offered !== undefined &&
-              (offered.provider.billed || offered.provider.locality !== "host-local")
-            ) {
+            if (offered?.asks !== undefined) {
               setConfirmStart({
                 provider: offered.provider,
                 ...(offered.placementId === undefined ? {} : { placementId: offered.placementId }),

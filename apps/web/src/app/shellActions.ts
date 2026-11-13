@@ -149,6 +149,10 @@ export type ShellActions = {
   readonly openCoordinatorDraftInProject: (projectId: ProjectId) => Promise<void>;
   /** Turns a New coordinator draft back into an ordinary one. */
   readonly cancelCoordinatorDraft: () => void;
+  /** The workers' level and bounds a New coordinator draft sets on its thread. */
+  readonly setCoordinatorDraftChoices: (
+    choices: import("../shell/DraftThreadWorkspace").CoordinatorDraftChoices,
+  ) => void;
   readonly openDraftThread: ShellController["openDraftThread"];
   readonly openGithubIssues: () => void;
   readonly openImageLibrary: () => void;
@@ -327,6 +331,10 @@ export type ShellActions = {
     >
   >;
   readonly setCodeThreadCoordinator: CodeController["setThreadCoordinator"];
+  /** Opens the limits of a running coordinator for a person to change. */
+  readonly editCodeThreadCoordinatorBounds: (
+    threadId: Parameters<CodeController["setThreadCoordinator"]>[0],
+  ) => void;
   readonly setCodeThreadCoordinatorWake: CodeController["setThreadCoordinatorWake"];
   readonly setCodeThreadMessageWake: CodeController["setThreadMessageWake"];
   readonly setCodeThreadRestartContinuation: CodeController["setThreadRestartContinuation"];

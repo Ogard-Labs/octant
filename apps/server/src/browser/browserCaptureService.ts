@@ -12,6 +12,7 @@ import {
   decodeEventActor,
   EventId,
   EventName,
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_CAPTURE_BYTES,
   MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_RECORDING_BYTES,
@@ -99,15 +100,28 @@ export interface BrowserCaptureServiceOptions {
   readonly personActor: EventActor;
   readonly uuid: () => string;
   readonly clock: () => string;
+  /**
+   * The person's setting for how many captures a thread keeps, read at each
+   * use. Absent, the default.
+   */
+  readonly capturesPerThread?: () => number;
 }
 
 /**
  * Thread-owned browser captures. The journal decides what exists: each kept
  * capture is one `browser.capture-kept@1` event on the thread's capture
- * aggregate, and the newest `MAX_BROWSER_CAPTURES_PER_THREAD` versions are the
- * captures that survive. Removing the bytes of an older one is cleanup that
- * can be repeated, and `recover` finishes it after a crash.
+ * aggregate, and the newest versions, as many as the person's setting keeps,
+ * are the captures that survive. Removing the bytes of an older one is
+ * cleanup that can be repeated, and `recover` finishes it after a crash.
+ *
+ * The setting can grow, and it grew from 32 to 200 by default. A larger
+ * window reaches back to versions whose bytes were already removed under the
+ * smaller one, so a capture is listed only while the store still holds its
+ * bytes: growing the number never brings back a capture that was dropped.
  */
+/** The most events `Journal.replayAggregate` hands back in one call. */
+const REPLAY_PAGE = 1_000;
+
 export class BrowserCaptureService {
   readonly #store: BrowserCaptureStore;
   readonly #journal: Pick<Journal, "append" | "replayAggregate">;
@@ -115,6 +129,16 @@ export class BrowserCaptureService {
   readonly #personActor: EventActor;
   readonly #uuid: () => string;
   readonly #clock: () => string;
+  readonly #capturesPerThread: () => number;
+  /** The setting when recovery last swept every thread, and at each thread's last drop since. */
+  readonly #keptAtStart: number;
+  readonly #keptAtLastDrop = new Map<string, number>();
+  /**
+   * The highest version a sweep has passed over on each thread. Listing never
+   * reaches below it, so a capture whose bytes could not yet be deleted is not
+   * listed again when the person raises the number, and recovery removes it.
+   */
+  readonly #droppedThrough = new Map<string, number>();
 
   constructor(options: BrowserCaptureServiceOptions) {
     this.#store = options.store;
@@ -123,6 +147,12 @@ export class BrowserCaptureService {
     this.#personActor = options.personActor;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
+    this.#capturesPerThread = () =>
+      Math.min(
+        MAX_BROWSER_CAPTURES_PER_THREAD,
+        Math.max(1, options.capturesPerThread?.() ?? DEFAULT_BROWSER_CAPTURES_PER_THREAD),
+      );
+    this.#keptAtStart = this.#capturesPerThread();
   }
 
   /**
@@ -206,7 +236,11 @@ export class BrowserCaptureService {
     readonly bytes: Uint8Array;
     readonly facts: Omit<BrowserCapture, "captureId" | "threadId" | "hash" | "size" | "mime">;
   }): Promise<void> {
-    if (this.#window(input.threadId).some((capture) => capture.captureId === input.captureId)) {
+    // Asked of the journal, not of the bytes: a capture already journaled
+    // under this id is never journaled a second time.
+    if (
+      this.#journaledWindow(input.threadId).some((capture) => capture.captureId === input.captureId)
+    ) {
       return;
     }
     const { profile: _otherComputers, ...facts } = input.facts;
@@ -291,8 +325,19 @@ export class BrowserCaptureService {
     return browserRetainedCaptures(this.#window(threadId));
   }
 
-  /** Every capture in the thread's retained window, recordings past the cap included. */
+  /**
+   * Every capture in the thread's retained window whose bytes the store still
+   * holds, recordings past the cap included.
+   */
   #window(threadId: BrowserThreadId): ReadonlyArray<BrowserCapture> {
+    const journaled = this.#journaledWindow(threadId);
+    if (journaled.length === 0) return journaled;
+    const held = this.#store.held(threadId);
+    return journaled.filter((capture) => held.has(String(capture.captureId)));
+  }
+
+  /** The newest journaled captures, as many as the setting keeps, newest first. */
+  #journaledWindow(threadId: BrowserThreadId): ReadonlyArray<BrowserCapture> {
     const aggregateId = String(threadId);
     const head = readAggregateVersion(
       this.#connection,
@@ -300,13 +345,19 @@ export class BrowserCaptureService {
       aggregateId,
     );
     if (head === 0) return [];
-    const { firstRetainedVersion } = browserCaptureRetention(head);
+    const limit = this.#capturesPerThread();
+    const { firstRetainedVersion } = browserCaptureRetention(head, limit);
+    const afterVersion = Math.max(
+      firstRetainedVersion - 1,
+      this.#droppedThrough.get(aggregateId) ?? 0,
+    );
+    if (afterVersion >= head) return [];
     return this.#journal
       .replayAggregate({
         aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE,
         aggregateId,
-        afterVersion: firstRetainedVersion - 1,
-        limit: MAX_BROWSER_CAPTURES_PER_THREAD,
+        afterVersion,
+        limit,
       })
       .map((event) => decodeBrowserCapture(event.payload))
       .reverse();
@@ -405,20 +456,43 @@ export class BrowserCaptureService {
   }
 
   async #dropOlderThan(threadId: BrowserThreadId, headVersion: number): Promise<void> {
-    const droppedVersion = browserCaptureRetention(headVersion).firstRetainedVersion - 1;
-    if (droppedVersion < 1) return;
-    const [dropped] = this.#journal.replayAggregate({
-      aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE,
-      aggregateId: String(threadId),
-      afterVersion: droppedVersion - 1,
-      limit: 1,
-    });
-    if (dropped === undefined) return;
-    // A removal that fails here is not lost: the journal already no longer
-    // retains the capture, so the next recovery pass removes it.
-    await this.#store
-      .remove(threadId, decodeBrowserCapture(dropped.payload).captureId)
-      .catch(() => undefined);
+    const kept = this.#capturesPerThread();
+    const droppedVersion = browserCaptureRetention(headVersion, kept).firstRetainedVersion - 1;
+    const keptBefore = this.#keptAtLastDrop.get(String(threadId)) ?? this.#keptAtStart;
+    let everyRemovalSucceeded = true;
+    if (droppedVersion >= 1) {
+      this.#droppedThrough.set(
+        String(threadId),
+        Math.max(this.#droppedThrough.get(String(threadId)) ?? 0, droppedVersion),
+      );
+      // The window normally advances by one capture a keep. After the person
+      // lowers the number it jumps, and every version it passed over goes, or
+      // raising the number again would list captures that were dropped.
+      const firstDropped = kept < keptBefore ? 1 : droppedVersion;
+      // The journal replays at most a thousand events a call, and a lowered
+      // number on a long-lived thread passes over more than that.
+      for (let after = firstDropped - 1; after < droppedVersion; after += REPLAY_PAGE) {
+        const dropped = this.#journal.replayAggregate({
+          aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE,
+          aggregateId: String(threadId),
+          afterVersion: after,
+          limit: Math.min(REPLAY_PAGE, droppedVersion - after),
+        });
+        // A removal that fails here is not lost: listing no longer reaches the
+        // capture, the next keep sweeps again, and recovery removes it.
+        for (const event of dropped) {
+          await this.#store
+            .remove(threadId, decodeBrowserCapture(event.payload).captureId)
+            .catch(() => {
+              everyRemovalSucceeded = false;
+            });
+        }
+      }
+    }
+    // Recorded only after a sweep that removed everything it passed over: a
+    // sweep that threw, or a deletion that failed, keeps the higher number here,
+    // so the next keep sweeps the passed-over versions again.
+    if (everyRemovalSucceeded) this.#keptAtLastDrop.set(String(threadId), kept);
   }
 
   /**

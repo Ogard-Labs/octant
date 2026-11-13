@@ -17,7 +17,8 @@ import {
   decodeWorkThreadId,
   decodeUtcTimestamp,
   effectiveAgentRunConcurrency,
-  DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES,
+  agentRunWorkingTimeLimitMinutes,
+  DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES,
   LOCAL_HOST_ID,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
@@ -115,6 +116,34 @@ import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { HarnessStateWiring } from "./harnessState";
+
+/**
+ * Whether the child's thread has Full access now. Read for each attempt, so
+ * a thread a person narrowed gives its next attempt a working-time limit
+ * again. An unreadable thread counts as not at Full access.
+ */
+function agentRunParentThreadAtFullAccess(
+  persistence: PersistenceService,
+  workThreadProjection: WorkThreadProjection,
+  run: AgentRun,
+): boolean {
+  try {
+    const threadId = String(run.parentThreadId);
+    switch (run.routingReceipt.mode) {
+      case "chat":
+        return false;
+      case "work":
+        return workThreadProjection.read(decodeWorkThreadId(threadId))?.access === "full-access";
+      case "code":
+        return (
+          persistence.readCodeThread(decodeCodeThreadId(threadId))?.executionPolicy ===
+          "full-access"
+        );
+    }
+  } catch {
+    return false;
+  }
+}
 
 /** The thread a child belongs to as it stands now, in whichever mode started it. */
 function readAgentRunParentThread(
@@ -747,9 +776,16 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         deps.toolEffectLedger.supersede(record);
         return deps.toolEffectLedger.forTurn(record);
       },
-      workingTimeLimitMs: () =>
-        (agentRunSettingsStore.current().workingTimeLimitMinutes ??
-          DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES) * 60_000,
+      workingTimeLimitMs: (run) => {
+        const minutes = agentRunWorkingTimeLimitMinutes(agentRunSettingsStore.current(), {
+          threadAtFullAccess: agentRunParentThreadAtFullAccess(
+            persistence,
+            workThreadProjection,
+            run,
+          ),
+        });
+        return minutes === "none" ? "none" : minutes * 60_000;
+      },
       reviewCapture: createAgentRunReviewCapture(),
       outsideContentMarks: runtimeOutsideContentMarks,
       canCaptureReview: (run) => {
@@ -936,7 +972,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         agentRunLiveConversations.begin(runId, { resume: resumed });
         agentRunLiveConversations.appendStatus(
           runId,
-          `Working-time limit: ${workingTimeLimitMs / 60_000} minutes for this attempt. Waiting for your approval or answer does not count. Retry and Resume start a fresh window.`,
+          workingTimeLimitMs === "none"
+            ? "Working-time limit: none for this attempt, because its thread has Full access and Helper agents settings lift the limit there. It runs until it finishes or is cancelled."
+            : `Working-time limit: ${workingTimeLimitMs / 60_000} minutes for this attempt. Waiting for your approval or answer does not count. Retry and Resume start a fresh window.`,
           decodeUtcTimestamp(new Date().toISOString()),
         );
       },
@@ -993,6 +1031,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     },
     approvals: { isCurrent: () => true },
     processes: agentRunProcessSupervisor,
+    providerSlotWaitLimitMs: () =>
+      (agentRunSettingsStore.current().providerSlotWaitMinutes ??
+        DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES) * 60_000,
     parentAuthority: {
       current: (run) =>
         currentParentAuthorityForWaiter({

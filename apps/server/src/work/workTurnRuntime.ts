@@ -1,4 +1,8 @@
-import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import {
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  MAX_PROVIDER_ATTACHMENTS,
+  MAX_TURN_RUNTIME_EVENTS,
+} from "@octant/contracts";
 import type {
   ProviderChildActivityEvent,
   ShieldWatcherLabel,
@@ -7,10 +11,12 @@ import type {
 import {
   observeTurnMetrics,
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
+  isNativeHarnessDriverKind,
   markThreadToolStepOutsideContent,
   markThreadToolStepRoutine,
   outsideContentRecordedOnly,
   refusesFullAccessSandbox,
+  recordThreadAppToolStep,
   recordThreadShieldReview,
   recordThreadToolStep,
   startTurnMetrics,
@@ -19,6 +25,7 @@ import {
 } from "@octant/domain";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import { boundedToolResultJson } from "../providers/toolResultJson";
+import type { ThreadToolCallRecorder } from "../threadToolCallRecorder";
 import {
   MAX_PROVIDER_CONTEXT_BLOCKS,
   MAX_WORK_TURN_RESPONSE_BYTES,
@@ -69,7 +76,7 @@ import {
 } from "../providers/turnBudget";
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const MAX_EVENTS = 4_096;
+const MAX_EVENTS = MAX_TURN_RUNTIME_EVENTS;
 // How long a finished turn waits for its provider session to interrupt or stop.
 const CLEANUP_TIMEOUT_MS = 1_000;
 const RESPONSE_TRUNCATION_MARKER = "\n[Output truncated by Octant.]";
@@ -157,6 +164,14 @@ export interface WorkTurnRuntimePort {
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
     /** The turn's tool calls, whole, whenever one starts, moves, or ends. */
     readonly onToolSteps?: (toolSteps: ThreadToolSteps) => void;
+    /**
+     * How many tool calls the turn keeps: the person's setting for the level
+     * this turn runs at, or `"off"` for no limit. Absent reads as the default
+     * below Full access.
+     */
+    readonly toolStepLimit?: number | "off";
+    /** Keeps each call's input and output outside the journal; absent keeps none. */
+    readonly toolCallRecords?: ThreadToolCallRecorder;
     readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
     readonly onRequestSettled?: (
       input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
@@ -352,6 +367,14 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         });
       }
       let toolSteps: ThreadToolSteps | undefined;
+      const stepLimit =
+        input.toolStepLimit === "off"
+          ? undefined
+          : (input.toolStepLimit ?? DEFAULT_THREAD_TOOL_STEPS_PER_TURN);
+      // An Octant Harness turn's runtime announces no tool call of its own:
+      // every tool it has is one Octant runs for it, so the request is the
+      // only sign of the call and the host gives it its row.
+      const announcesNoCall = isNativeHarnessDriverKind(input.driver.kind);
       const recordedOnly = outsideContentRecordedOnly({
         mode: "work",
         executionPolicy: workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS).executionPolicy,
@@ -360,7 +383,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       // the turn's tool rows, whether the runtime asked through its session
       // or the turn's own tools asked out of band.
       const showShieldReview = (review: WorkShieldReview) => {
-        toolSteps = recordThreadShieldReview(toolSteps, review);
+        toolSteps = recordThreadShieldReview(toolSteps, review, stepLimit);
         input.onToolSteps?.(toolSteps);
       };
       const threadKey = String(input.command.threadId);
@@ -503,12 +526,16 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   toolName: string,
                   labels: ReadonlyArray<ShieldWatcherLabel>,
                 ) => {
-                  const next = markThreadToolStepOutsideContent(toolSteps, {
-                    toolCallId,
-                    toolName,
-                    // At Full access the mark is recorded only: a quiet tag.
-                    mark: recordedOnly ? { labels, recordedOnly: true } : { labels },
-                  });
+                  const next = markThreadToolStepOutsideContent(
+                    toolSteps,
+                    {
+                      toolCallId,
+                      toolName,
+                      // At Full access the mark is recorded only: a quiet tag.
+                      mark: recordedOnly ? { labels, recordedOnly: true } : { labels },
+                    },
+                    stepLimit,
+                  );
                   if (next === undefined || next === toolSteps) return;
                   toolSteps = next;
                   input.onToolSteps?.(next);
@@ -547,6 +574,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   });
                 }
                 if (handledEvents > MAX_EVENTS) return;
+                input.toolCallRecords?.observe(event);
+                // Kept in the record above; never a step or a turn event.
+                if (event.kind === "tool-call-content") return;
                 if (event.kind === "usage") input.onUsage?.(event);
                 const sighting = compactions.observe(event);
                 if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {
@@ -588,7 +618,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   tasks = next;
                   input.onTasks?.(next);
                 }
-                const nextToolSteps = recordThreadToolStep(toolSteps, event);
+                const nextToolSteps = recordThreadToolStep(toolSteps, event, stepLimit);
                 if (nextToolSteps !== toolSteps && nextToolSteps !== undefined) {
                   toolSteps = nextToolSteps;
                   input.onToolSteps?.(nextToolSteps);
@@ -620,6 +650,20 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       ? input.signal
                       : AbortSignal.any([input.signal, requestSignal]);
                   if (executionSignal.aborted) return;
+                  // Keyed by the request id, which the call's record is kept
+                  // under, so the row opens that record.
+                  const showAppTool = (state: "started" | "completed" | "failed") => {
+                    if (!announcesNoCall) return;
+                    const next = recordThreadAppToolStep(
+                      toolSteps,
+                      { toolCallId: event.requestId, toolName: event.toolName, state },
+                      stepLimit,
+                    );
+                    if (next === undefined || next === toolSteps) return;
+                    toolSteps = next;
+                    input.onToolSteps?.(next);
+                  };
+                  showAppTool("started");
                   const execution = yield* idle.during(
                     Effect.promise(async () => {
                       try {
@@ -645,21 +689,33 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     markToolRow(event.requestId, event.toolName, execution.outsideContent.labels);
                   }
                   if (execution.isError !== true && execution.routine !== undefined) {
-                    const next = markThreadToolStepRoutine(toolSteps, {
-                      toolCallId: event.requestId,
-                      toolName: event.toolName,
-                      routine: execution.routine,
-                    });
+                    const next = markThreadToolStepRoutine(
+                      toolSteps,
+                      {
+                        toolCallId: event.requestId,
+                        toolName: event.toolName,
+                        routine: execution.routine,
+                      },
+                      stepLimit,
+                    );
                     if (next !== undefined && next !== toolSteps) {
                       toolSteps = next;
                       input.onToolSteps?.(next);
                     }
                   }
+                  showAppTool(execution.isError === true ? "failed" : "completed");
+                  const resultJson = boundedToolResultJson(execution.result);
+                  input.toolCallRecords?.appTool({
+                    toolCallId: event.requestId,
+                    toolName: event.toolName,
+                    inputJson: event.inputJson,
+                    resultJson,
+                  });
                   yield* connection
                     .answerTool({
                       sessionId: input.providerSessionId,
                       requestId: event.requestId,
-                      resultJson: boundedToolResultJson(execution.result),
+                      resultJson,
                       ...(execution.images === undefined ? {} : { images: execution.images }),
                       isError: execution.isError === true,
                     })
@@ -719,23 +775,28 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               : [{ kind: "user-message" as const, text: feedback.context }]),
           ];
           meter.sent();
-          input.onPromptSent?.();
-          return connection.send({
-            sessionId: input.providerSessionId,
-            prompt: input.command.prompt,
-            // Keep the existing standing-context hold. New note context remains
-            // a user-message block and is carried only by this admitted turn.
-            context:
-              input.driver.conversationOwnership === "provider"
-                ? heldTurnContext.forTurn({
-                    sessionId: input.providerSessionId,
-                    resumed: input.resumeCursor !== undefined,
-                    context,
-                  }).context
-                : context,
-            attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
-            tools: [...(input.appManagedTools?.definitions ?? [])],
-          });
+          // Report the prompt sent only once the provider accepted it: the
+          // service confirms carried messages delivered (deleting their
+          // bodies) on this signal, and a send refused before anything left,
+          // such as an inactive session, must leave them for the next turn.
+          return connection
+            .send({
+              sessionId: input.providerSessionId,
+              prompt: input.command.prompt,
+              // Keep the existing standing-context hold. New note context remains
+              // a user-message block and is carried only by this admitted turn.
+              context:
+                input.driver.conversationOwnership === "provider"
+                  ? heldTurnContext.forTurn({
+                      sessionId: input.providerSessionId,
+                      resumed: input.resumeCursor !== undefined,
+                      context,
+                    }).context
+                  : context,
+              attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
+              tools: [...(input.appManagedTools?.definitions ?? [])],
+            })
+            .pipe(Effect.tap(() => Effect.sync(() => input.onPromptSent?.())));
         }),
       });
       yield* Fiber.join(events);

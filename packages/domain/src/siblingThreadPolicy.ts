@@ -210,9 +210,10 @@ export function siblingThreadActionIngestsContent(action: SiblingThreadAction): 
 /**
  * The operations one turn is offered, in the order its enum lists them. The
  * read-only operations reach every Work and Code turn whose profile names the
- * tool, Plan included. Messaging is Code to Code only: it is withheld in Plan,
- * from Work (its turns do not carry messages, so a message to a Work thread
- * would never arrive), and from a profile that does not name it. `board` is
+ * tool, Plan included. Messaging is Code to Code or Work to Work, since a
+ * Project has one mode: it is withheld in Plan, from a mode whose turns the
+ * host does not carry messages into (a message there would never arrive), and
+ * from a profile that does not name it. `board` is
  * the designated planner's alone. `help` comes with any other operation and
  * never alone, so a turn with nothing it may do is offered no tool at all.
  */
@@ -239,12 +240,7 @@ export function threadsToolOperations(input: {
   const operations: ThreadsToolOperation[] = [];
   if (input.profileAllowsRead) operations.push("list", "read", "wait");
   const writingLevel = input.coordinatorLevel ?? input.posture;
-  if (
-    input.mode === "code" &&
-    input.messagingCarried &&
-    input.profileAllowsSend &&
-    writingLevel !== "plan"
-  ) {
+  if (input.messagingCarried && input.profileAllowsSend && writingLevel !== "plan") {
     operations.push("send", "acknowledge", "receipts");
   }
   if (input.mode === "code" && input.plannerThread && input.profileAllowsBoard) {

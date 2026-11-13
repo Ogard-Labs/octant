@@ -59,11 +59,11 @@ describe("browserCapturePageOrigin", () => {
 describe("browserCaptureRetention", () => {
   it("keeps every capture until a thread passes its allowance", () => {
     expect(browserCaptureRetention(1)).toEqual({ firstRetainedVersion: 1 });
-    expect(browserCaptureRetention(32)).toEqual({ firstRetainedVersion: 1 });
+    expect(browserCaptureRetention(200)).toEqual({ firstRetainedVersion: 1 });
   });
 
-  it("drops the oldest capture first once the allowance is passed", () => {
-    expect(browserCaptureRetention(33)).toEqual({ firstRetainedVersion: 2 });
+  it("drops the oldest capture first once the default 200 is passed", () => {
+    expect(browserCaptureRetention(201)).toEqual({ firstRetainedVersion: 2 });
   });
 
   it("keeps the newest few when the allowance is smaller", () => {

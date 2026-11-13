@@ -1,4 +1,4 @@
-import type { UtcTimestamp } from "@octant/contracts";
+import type { CoordinatorBounds, CoordinatorWorkerLevel, UtcTimestamp } from "@octant/contracts";
 import type { CodeCommand, CodeThread, CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
 
@@ -87,13 +87,34 @@ export function wakeCodeThread(thread: CodeThread): CodeCommand {
   };
 }
 
-/** Make coordinator and Stop coordinating; the host refuses it for a worker. */
-export function setCodeThreadCoordinator(thread: CodeThread, coordinator: boolean): CodeCommand {
+/**
+ * Make coordinator and Stop coordinating; the host refuses it for a worker.
+ * A worker level fixes every worker's level and is accepted only while making.
+ */
+export function setCodeThreadCoordinator(
+  thread: CodeThread,
+  coordinator: boolean,
+  workerLevel?: CoordinatorWorkerLevel,
+): CodeCommand {
   return {
     kind: "set-code-thread-coordinator",
     threadId: thread.id,
     expectedVersion: thread.version,
     coordinator,
+    ...(workerLevel === undefined ? {} : { workerLevel }),
+  };
+}
+
+/** A coordinator's wake, round and start bounds; a bound left out returns to its default. */
+export function setCodeThreadCoordinatorBounds(
+  thread: CodeThread,
+  bounds: CoordinatorBounds,
+): CodeCommand {
+  return {
+    kind: "set-code-thread-coordinator-bounds",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+    bounds,
   };
 }
 

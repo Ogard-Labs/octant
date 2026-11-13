@@ -232,6 +232,15 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
+      // Whether a message may start a turn here unattended is the same kind
+      // of choice, made where Code's switch is made.
+      if (command.kind === "set-work-thread-message-wake" && refusesFullAccessRaise(request)) {
+        return failureResponse(
+          { category: "unauthorized", message: MESSAGE_WAKE_LOCAL_ONLY },
+          403,
+          origin,
+        );
+      }
       return jsonResponse(
         decodeWorkThreadCommandResult(
           await dependencies.service.execute(authenticatedWindowId, command, {
@@ -405,6 +414,8 @@ function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {
 
 const RESTART_CONTINUATION_LOCAL_ONLY =
   "Continue after restart is set at a window on this computer.";
+
+const MESSAGE_WAKE_LOCAL_ONLY = "Wake when a message arrives is set at a window on this computer.";
 
 function setsRestartContinuation(command: WorkThreadCommand): boolean {
   return (

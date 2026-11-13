@@ -1,6 +1,6 @@
 import type { BrowserActionKind, BrowserCapture, ThreadExportAttachment } from "@octant/contracts";
 import {
-  MAX_BROWSER_CAPTURES_PER_THREAD,
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_RECORDINGS_PER_THREAD,
 } from "@octant/contracts";
 import { imageFileExtension } from "./imageGenerationInvocationPolicy";
@@ -43,7 +43,7 @@ export function browserCapturePageOrigin(url: string | undefined): string | unde
  */
 export function browserCaptureRetention(
   headVersion: number,
-  limit: number = MAX_BROWSER_CAPTURES_PER_THREAD,
+  limit: number = DEFAULT_BROWSER_CAPTURES_PER_THREAD,
 ): { readonly firstRetainedVersion: number } {
   return { firstRetainedVersion: Math.max(1, headVersion - limit + 1) };
 }

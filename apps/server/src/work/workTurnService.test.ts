@@ -2332,6 +2332,52 @@ describe("WorkTurnService", () => {
     });
   });
 
+  it("carries a sibling Work thread's message into the turn and confirms delivery only once the provider has it", async () => {
+    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    const confirmed: Array<ReadonlyArray<string>> = [];
+    const carried = vi.fn(async () => [{ messageId: "message-1", text: "Framed sibling message" }]);
+    const fixture = serviceFixture({
+      carryAgentMessages: carried,
+      confirmAgentMessagesDelivered: async (messageIds) => {
+        confirmed.push(messageIds);
+      },
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          // The provider does not have the context until the prompt is sent.
+          expect(confirmed).toEqual([]);
+          input.onPromptSent?.();
+          return { kind: "completed", response: "Ready" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    expect(carried).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(contexts.flat()).toContainEqual({
+      kind: "user-message",
+      text: "Framed sibling message",
+    });
+    expect(confirmed).toEqual([["message-1"]]);
+  });
+
+  it("leaves a carried message waiting when the Work turn never reaches a provider", async () => {
+    const confirmed = vi.fn(async () => {});
+    const fixture = serviceFixture({
+      carryAgentMessages: async () => [{ messageId: "message-1", text: "Framed sibling message" }],
+      confirmAgentMessagesDelivered: confirmed,
+      turnRuntime: {
+        run: async () => ({
+          kind: "failed",
+          failure: { category: "unavailable", message: "The provider was unavailable." },
+        }),
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    expect(confirmed).not.toHaveBeenCalled();
+  });
+
   it("refuses changed skill selections when a Work request is retried", async () => {
     const fixture = serviceFixture({
       resolveSelectedExtensions: async () => ({
@@ -4023,7 +4069,13 @@ describe("WorkTurnService", () => {
       value: { kind: "response-delta", sequence: 1 },
     });
     await expect(stream.next()).resolves.toMatchObject({
-      value: { kind: "turn-tools", sequence: 2, requestId: ids.request },
+      value: {
+        kind: "turn-tool-step",
+        sequence: 2,
+        requestId: ids.request,
+        toolStep: { toolCallId: "call-1", state: "started" },
+        toolStepsTruncated: false,
+      },
     });
     gate.resolve();
     for (;;) {
@@ -4036,6 +4088,32 @@ describe("WorkTurnService", () => {
       { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "notes.md" },
     ]);
     controller.abort();
+  });
+
+  it("keeps 64 tool calls of a turn below Full access, every call of one that runs at Full access, and the person's number at either", async () => {
+    const limitOf = async (
+      options: Parameters<typeof serviceFixture>[0],
+      start?: Parameters<WorkTurnService["startFirstTurn"]>[2],
+    ) => {
+      const run = vi.fn(async (_input: Parameters<WorkTurnRuntimePort["run"]>[0]) => ({
+        kind: "completed" as const,
+        response: "Done",
+      }));
+      const fixture = serviceFixture({ ...options, turnRuntime: { run } });
+      await fixture.service.startFirstTurn(ids.window, startCommand(), start);
+      await fixture.waitForIdle();
+      return run.mock.calls[0]?.[0].toolStepLimit;
+    };
+    expect(await limitOf({})).toBe(64);
+    expect(await limitOf({ threadAccess: "full-access" })).toBe("off");
+    // The level the turn runs at, not the thread's stored one: a caller's
+    // ceiling holds this turn below Full access, so it keeps the limit.
+    expect(
+      await limitOf({ threadAccess: "full-access" }, { accessCeiling: "auto-accept-edits" }),
+    ).toBe(64);
+    const chosen = () => ({ toolStepsPerTurn: 200, fullAccessToolStepsPerTurn: 1_000 });
+    expect(await limitOf({ toolStepSettings: chosen })).toBe(200);
+    expect(await limitOf({ threadAccess: "full-access", toolStepSettings: chosen })).toBe(1_000);
   });
 
   it("streams a published page's link live and keeps its snapshot for the settled turn", async () => {
@@ -4067,18 +4145,20 @@ describe("WorkTurnService", () => {
     await fixture.service.startFirstTurn(ids.window, startCommand());
     const controller = new AbortController();
     const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
-    const live: unknown[] = [];
+    const live: Array<{ readonly toolCallId?: string }> = [];
     for (;;) {
       const frame = (await stream.next()).value as {
         readonly kind: string;
-        readonly toolSteps?: unknown;
+        readonly toolStep?: { readonly toolCallId?: string };
       };
-      if (frame.kind !== "turn-tools") continue;
-      live.push(frame.toolSteps);
+      if (frame.kind !== "turn-tool-step") continue;
+      live.push(frame.toolStep ?? {});
       if (live.length === 2) break;
     }
-    // Every step change restates the whole list, so a snapshot carried live
-    // would be resent, and held in the feed, once per later tool event.
+    // Each frame is the one step that changed, never the list again: the
+    // second call's frame does not restate the first call.
+    expect(live.map((step) => step.toolCallId)).toEqual(["call-1", "call-2"]);
+    // The feed holds each frame, so the snapshot stays out of it.
     expect(JSON.stringify(live)).not.toContain("# Notes");
     expect(JSON.stringify(live)).toContain(published.url);
     const running = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
@@ -5699,6 +5779,8 @@ function serviceFixture(
     readonly resolveSelectedExtensions?: WorkTurnServiceDependencies["resolveSelectedExtensions"];
     readonly resolveSideChatReturns?: WorkTurnServiceDependencies["resolveSideChatReturns"];
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
+    readonly carryAgentMessages?: WorkTurnServiceDependencies["carryAgentMessages"];
+    readonly confirmAgentMessagesDelivered?: WorkTurnServiceDependencies["confirmAgentMessagesDelivered"];
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
     readonly nativeHarness?: WorkTurnServiceDependencies["nativeHarness"];
@@ -5714,6 +5796,7 @@ function serviceFixture(
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
     readonly runningAccess?: RunningWorkTurnAccess;
+    readonly toolStepSettings?: WorkTurnServiceDependencies["toolStepSettings"];
     /** Read on every thread read, so a test can mark and reactivate between turns. */
     readonly completionConfirmed?: () => boolean;
     /** Replaces the host's selection of a conversation to hand to a new provider session. */
@@ -5913,6 +5996,12 @@ function serviceFixture(
     ...(options.resolveFileMentionContext === undefined
       ? {}
       : { resolveFileMentionContext: options.resolveFileMentionContext }),
+    ...(options.carryAgentMessages === undefined
+      ? {}
+      : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.confirmAgentMessagesDelivered === undefined
+      ? {}
+      : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
     ...(options.resolveAppManagedTools === undefined
       ? {}
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
@@ -5932,6 +6021,9 @@ function serviceFixture(
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),
+    ...(options.toolStepSettings === undefined
+      ? {}
+      : { toolStepSettings: options.toolStepSettings }),
     uuid: (() => {
       let n = 0;
       return () => {

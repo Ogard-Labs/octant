@@ -779,14 +779,15 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
-          // The coordinator role, the wake switches, and how coordinators
-          // start workers are the person's choices, at a window on this host
-          // or on a device they paired; any agent-gated caller may watch,
-          // never set.
+          // The coordinator role, its bounds and workers' level, the wake
+          // switches, and how coordinators start workers are the person's
+          // choices, at a window on this host or on a device they paired; any
+          // agent-gated caller may watch, never set.
           if (
             command !== undefined &&
             callerAuthority !== "local-window" &&
             (command.kind === "set-code-thread-coordinator" ||
+              command.kind === "set-code-thread-coordinator-bounds" ||
               command.kind === "set-code-thread-message-wake" ||
               command.kind === "set-code-thread-coordinator-wake" ||
               (command.kind === "update-code-settings" &&

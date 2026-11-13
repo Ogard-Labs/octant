@@ -911,6 +911,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "helper agents subagents working time minutes limit budget retry resume approval question waits",
         },
         {
+          id: settingId("subagent-no-limit-full-access"),
+          label: "No helper time limit at Full access",
+          scope: "app",
+          keywords: "helper agents subagents working time limit none unlimited full access",
+        },
+        {
+          id: settingId("subagent-provider-wait-minutes"),
+          label: "Minutes a helper waits for a full provider",
+          scope: "app",
+          keywords:
+            "helper agents subagents provider full capacity wait minutes request slot limit",
+        },
+        {
           id: settingId("default-model"),
           label: "Default model",
           scope: "app",
@@ -1106,6 +1119,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "disposable desktop cloud billed spend cap budget money monthly limit cost",
         },
+        {
+          id: settingId("desktop-confirm-billed"),
+          label: "Confirm each billed desktop",
+          scope: "host",
+          keywords:
+            "disposable desktop cloud billed confirm ask approve start transfer off machine",
+        },
+        {
+          id: settingId("desktop-leases-per-thread"),
+          label: "Desktops per thread",
+          scope: "host",
+          keywords: "disposable desktop lease limit count thread how many",
+        },
+        {
+          id: settingId("desktop-leases-on-host"),
+          label: "Desktops on this host",
+          scope: "host",
+          keywords: "disposable desktop lease limit count host local how many",
+        },
       ],
     },
     {
@@ -1217,6 +1249,34 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "browser downloads agents download files save workspace downloads folder allow block switch",
+        },
+        {
+          id: settingId("browser-captures-per-thread"),
+          label: "Browser captures kept per thread",
+          scope: "host",
+          keywords:
+            "browser captures screenshots recordings kept per thread limit retention storage",
+        },
+        {
+          id: settingId("tool-call-records"),
+          label: "Keep tool inputs and outputs",
+          scope: "host",
+          keywords:
+            "tool calls records inputs outputs keep store inspect what an agent ran returned chat work purge privacy switch",
+        },
+        {
+          id: settingId("tool-steps-per-turn"),
+          label: "Tool steps kept per turn",
+          scope: "host",
+          keywords:
+            "tool steps calls kept per turn limit count rows chat work transcript truncated more",
+        },
+        {
+          id: settingId("tool-steps-per-turn-full-access"),
+          label: "Tool steps kept per turn at Full access",
+          scope: "host",
+          keywords:
+            "tool steps calls kept per turn full access no limit off unlimited spend ceiling work",
         },
         {
           id: settingId("browser-transfer-file-limit"),

@@ -3990,7 +3990,9 @@ describe("Code tool families", () => {
     // usage is in help.
     // The Browser's dialog answer argument added about 165 bytes; its usage
     // is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(7_025);
+    // The Browser wait's timeoutMs maximum grew from 30000 to 600000 (ten
+    // minutes), one more digit.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(7_026);
   });
 
   it.each([

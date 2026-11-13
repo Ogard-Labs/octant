@@ -23,6 +23,7 @@ import {
   WorkTurnCancelResult,
   WorkTurnLookupResult,
   type WorkTurnRequestId,
+  MAX_WORK_TURN_STREAM_FRAME_BYTES,
   WorkTurnStreamFrame,
   type StartWorkThreadTurnCommand,
   decodeHostAnswer,
@@ -305,7 +306,7 @@ async function* parseWorkTurnStream(
   let lastSequence = afterSequence;
   let frameCount = 0;
   const decodeLine = (line: string): WorkTurnStreamFrame => {
-    if (encoder.encode(line).byteLength > 160 * 1024) {
+    if (encoder.encode(line).byteLength > MAX_WORK_TURN_STREAM_FRAME_BYTES) {
       throw new WorkTurnClientFailure("Work turn stream frame is too large.", 0);
     }
     let frame: WorkTurnStreamFrame;
@@ -339,7 +340,7 @@ async function* parseWorkTurnStream(
         if (line.trim() !== "") yield decodeLine(line);
         newline = buffer.indexOf("\n");
       }
-      if (encoder.encode(buffer).byteLength > 160 * 1024) {
+      if (encoder.encode(buffer).byteLength > MAX_WORK_TURN_STREAM_FRAME_BYTES) {
         throw new WorkTurnClientFailure("Work turn stream frame is too large.", 0);
       }
     }

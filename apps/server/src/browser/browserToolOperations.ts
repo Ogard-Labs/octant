@@ -15,6 +15,7 @@ import {
   BROWSER_RESIZE_BOUNDS,
   BrowserColorScheme,
   BrowserDialogAnswer,
+  DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_FLOW_NAME_LENGTH,
   type BrowserAuditKind,
   MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
@@ -321,6 +322,18 @@ export function parseBrowserToolInput(
       return undefined;
     parsedSteps.push(one);
   }
+  // One call must answer inside the time a runtime allows an app-managed
+  // call, so a batch's waits share the limit one wait has instead of each
+  // step bringing its own ten minutes.
+  const waitedMs = parsedSteps.reduce(
+    (total, step) =>
+      step.operation === "wait"
+        ? total +
+          (("waitFor" in step ? step.waitFor.timeoutMs : undefined) ?? DEFAULT_BROWSER_WAIT_MS)
+        : total,
+    0,
+  );
+  if (waitedMs > MAX_BROWSER_WAIT_MS) return undefined;
   return { operation: "steps", steps: parsedSteps, ...(recorded ? { record: true } : {}) };
 }
 

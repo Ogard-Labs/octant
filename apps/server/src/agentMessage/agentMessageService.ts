@@ -154,6 +154,19 @@ export interface AgentMessageServiceOptions {
   readonly openModes: ReadonlyArray<OctantMode>;
 }
 
+/**
+ * Whether a message would pass between two modes. Messaging is Code to Code
+ * or Work to Work: a Project has one mode, so a thread of another mode is
+ * unreachable in the same words as one of another Project, whatever Project
+ * its record names.
+ */
+function crossesModes(
+  sender: AgentMessageEndpointFacts | undefined,
+  recipient: AgentMessageEndpointFacts | undefined,
+): boolean {
+  return sender !== undefined && recipient !== undefined && sender.mode !== recipient.mode;
+}
+
 export class AgentMessageDeliveryRefused extends Error {
   constructor(
     readonly reason: "policy" | "oversize",
@@ -381,7 +394,13 @@ export class AgentMessageService {
 
   #mayReadReceipts(threadId: string): boolean {
     const endpoint = this.#resolveEndpoint(threadId);
-    return this.#openModes.has("code") && endpoint?.mode === "code" && !endpoint.terminal;
+    // Code and Work turns carry messages; a Chat thread neither sends nor receives.
+    return (
+      endpoint !== undefined &&
+      (endpoint.mode === "code" || endpoint.mode === "work") &&
+      this.#openModes.has(endpoint.mode) &&
+      !endpoint.terminal
+    );
   }
 
   #receipt(record: AgentMessageReceiptRecord): AgentMessageReceiptOutcome {
@@ -572,6 +591,9 @@ export class AgentMessageService {
     | undefined {
     const recipientEndpoint = this.#resolveEndpoint(String(recipientThreadId));
     const senderEndpoint = this.#resolveEndpoint(String(request.senderThreadId));
+    if (crossesModes(senderEndpoint, recipientEndpoint)) {
+      return { status: "refused", reason: "unauthorized", message: AGENT_MESSAGE_UNREACHABLE };
+    }
     const decision = decideAgentMessageDelivery({
       sender: {
         scope: { threadId: String(request.senderThreadId), projectId: senderEndpoint?.projectId },
@@ -614,6 +636,9 @@ export class AgentMessageService {
       return { status: "refused", reason: "unauthorized", message: AGENT_MESSAGE_UNREACHABLE };
     }
     const senderEndpoint = this.#resolveEndpoint(String(record.senderThreadId));
+    if (crossesModes(senderEndpoint, recipientEndpoint)) {
+      return { status: "refused", reason: "unauthorized", message: AGENT_MESSAGE_UNREACHABLE };
+    }
     const decision = decideAgentMessageDeliveryAtRecheck({
       senderMessagingAdmitted: senderEndpoint !== undefined && !senderEndpoint.terminal,
       senderScope: {

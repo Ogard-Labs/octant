@@ -56,7 +56,9 @@ import {
   type BrowserCredentialFillLease,
 } from "./browserCredentialUseService";
 import {
+  DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_HELD_DOWNLOADS,
+  MAX_BROWSER_WAIT_MS,
   ANY_BROWSER_ORIGIN,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_BROWSER_THREAD_CONTEXTS,
@@ -326,6 +328,12 @@ const hostPolicy: BrowserContextPolicy = {
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;
+/**
+ * How long past a wait's own limit its page is kept. A wait may last up to the
+ * Browser wait maximum, and without this the page would expire at the instant
+ * the wait answers. Enough for the last check and the settled answer.
+ */
+const WAIT_KEEP_MARGIN_MS = 30_000;
 /**
  * How long a take-over keeps the page without person input. A sign-in ask has
  * no such window: its card waits until the person answers, and the page waits
@@ -1532,6 +1540,7 @@ export class BrowserAutomationService {
       );
     const meaningful = activityBy !== undefined || PERSON_PAGE_ACTIONS.has(input.request.kind);
     if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
+    if (meaningful) this.#keepThroughWait(owned, resolved.request);
     try {
       const credentialEpoch = owned.credentialEpoch;
       if (owned.credentialFill !== undefined)
@@ -3206,6 +3215,23 @@ export class BrowserAutomationService {
     if (renewLifetime && !this.#renewActivity(owned, true)) return;
     owned.personInputs += 1;
     owned.refs = undefined;
+  }
+
+  /**
+   * Keep the page for an admitted wait's own limit and a short margin. The
+   * hold is fixed when the wait is dispatched and bounded by the wait's
+   * limit, so a call that hangs past it still cannot extend the page's life.
+   */
+  #keepThroughWait(owned: OwnedContext, request: BrowserActionRequest): void {
+    if (request.kind !== "wait" || owned.waitingForPerson !== undefined) return;
+    const waitMs = Math.min(
+      request.waitFor?.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS,
+      MAX_BROWSER_WAIT_MS,
+    );
+    const until = this.#now() + waitMs + WAIT_KEEP_MARGIN_MS;
+    if ((owned.keptUntil ?? 0) >= until) return;
+    owned.keptUntil = until;
+    this.#scheduleExpiry(owned);
   }
 
   #renewActivity(owned: OwnedContext, personInput = false): boolean {

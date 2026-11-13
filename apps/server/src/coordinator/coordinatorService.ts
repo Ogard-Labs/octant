@@ -8,6 +8,7 @@ import {
   type CodeSettings,
   type CodeThread,
   type CodeThreadId,
+  type CoordinatorBounds,
   type CoordinatorStartInput,
   type CoordinatorWorkerState,
   type Project,
@@ -207,7 +208,9 @@ export class CoordinatorService {
       openWorkers: workers.length,
       openWorkerLimit: settings?.coordinatorOpenWorkerLimit,
       startsInLastHour,
+      bounds: caller?.coordinatorBounds,
       requestedLevel: call.level,
+      fixedWorkerLevel: caller?.coordinatorWorkerLevel,
     });
     if (decision.status === "refused") return refusedAnswer(decision.reason, decision.message);
     // Narrowed by the decision: a refused caller never reaches here.
@@ -492,6 +495,7 @@ export class CoordinatorService {
       hop,
       wakeTurnRunning: false,
       wakeTurnsInLastHour: this.#ports.counts.wakesSince(recipientId, now - HOUR_MS),
+      bounds: this.#boundsFor(recipient),
     });
     if (decision.status !== "wake") return;
     this.#ports.counts.recordWake(recipientId, now);
@@ -602,6 +606,19 @@ export class CoordinatorService {
   /** Leaves a wake the restart found open for a person; it never starts by itself. */
   holdWakeAfterRestart(wake: OpenCoordinatorWake): void {
     this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "held" });
+  }
+
+  /**
+   * The wake and round bounds a person set for the coordinator that directs
+   * this thread: its own while it holds the role, its coordinator's while it
+   * is that coordinator's worker. Any other thread has none and takes the
+   * defaults, as does a worker whose coordinator stopped coordinating.
+   */
+  #boundsFor(thread: CodeThread): CoordinatorBounds | undefined {
+    if (thread.coordinator === true) return thread.coordinatorBounds;
+    if (thread.coordinatorThreadId === undefined) return undefined;
+    const coordinator = this.#ports.readThread(String(thread.coordinatorThreadId));
+    return coordinator?.coordinator === true ? coordinator.coordinatorBounds : undefined;
   }
 
   /**

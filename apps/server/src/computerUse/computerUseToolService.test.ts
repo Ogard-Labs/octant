@@ -28,7 +28,10 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import type { ComputerUseEvidenceEvent } from "./computerUseRuntime";
 import { createComputerUseToolService } from "./computerUseToolService";
-import type { DesktopTransferConfirmation } from "./desktopLeaseService";
+import type {
+  DesktopExtensionConfirmation,
+  DesktopTransferConfirmation,
+} from "./desktopLeaseService";
 
 const owner = decodeComputerUseOwner({
   windowId: "11111111-1111-4111-8111-111111111111",
@@ -922,6 +925,30 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
           : { kind: "refused", reason: "declined", message: "Declined." };
       },
     );
+    const extend = vi.fn(
+      async (
+        _owner: ComputerUseOwner,
+        byMinutes: number,
+        confirm: (request: DesktopExtensionConfirmation) => Promise<"approved" | "declined">,
+      ): Promise<ComputerControlResult> => {
+        const expiresAt = "2026-10-26T13:00:00.000Z";
+        const answer = await confirm({
+          owner: { mode: "code", threadId: onDesktop.threadId },
+          leaseId,
+          provider: {
+            providerId: decodeDesktopProviderId("host-local"),
+            displayName: "This host",
+            locality: "host-local",
+            billed: false,
+          },
+          byMinutes,
+          expiresAt,
+        });
+        return answer === "approved"
+          ? decodeComputerControlResult({ kind: "extended", expiresAt })
+          : { kind: "refused", reason: "declined", message: "Declined." };
+      },
+    );
     const answers = [...(options.answers ?? [])];
     const asked: Array<string> = [];
     const ask = vi.fn(async (summary: string) => {
@@ -945,7 +972,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
             },
           }
         : {}),
-      leases: { bindable: () => options.bindable ?? true, control, sendFile },
+      leases: { bindable: () => options.bindable ?? true, control, sendFile, extend },
       destination: () => ({
         status: "leasable",
         kind: "disposable-desktop",
@@ -973,6 +1000,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       service,
       control,
       sendFile,
+      extend,
       transfers,
       ask,
       asked,
@@ -1175,6 +1203,41 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       expect(f.asked[0]).toBe(
         `Send dist/notes-app (9 bytes, SHA-256 ${"a".repeat(64)}) into this thread's disposable desktop on This host for "Notes app"? Approving also covers this thread's later files into that desktop.`,
       );
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("extends the desktop's lease through the host, asking in the thread with the minutes and the new end", async () => {
+    const f = desktop({ answers: ["denied", "approved"] });
+    try {
+      const tools = f.tools();
+      expect(JSON.stringify(tools.definitions[0]?.inputSchema)).toContain("extend");
+      const extend = call({ operation: "extend", minutes: 30 });
+      await expect(tools.execute(extend)).resolves.toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "declined" },
+      });
+      await expect(tools.execute(extend)).resolves.toEqual({
+        result: { kind: "extended", expiresAt: "2026-10-26T13:00:00.000Z" },
+        isError: false,
+      });
+      expect(f.extend.mock.calls.map(([, minutes]) => minutes)).toEqual([30, 30]);
+      expect(f.asked[0]).toBe(
+        `Keep this thread's disposable desktop on This host running 30 more minutes, until 2026-10-26T13:00:00.000Z, for "Notes app"?`,
+      );
+      // Minutes the contract does not allow never reach the host.
+      for (const operation of [
+        { operation: "extend", minutes: 0 },
+        { operation: "extend", minutes: 241 },
+        { operation: "extend" },
+      ]) {
+        await expect(tools.execute(call(operation))).resolves.toMatchObject({
+          isError: true,
+          result: { kind: "refused", reason: "invalid-command" },
+        });
+      }
+      expect(f.extend).toHaveBeenCalledTimes(2);
     } finally {
       await f.service.close();
     }

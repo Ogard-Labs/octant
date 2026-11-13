@@ -137,6 +137,36 @@ describe("AgentRunSettingsStore", () => {
     });
   });
 
+  it("keeps a lifted Full access time limit across another change and a restart, until a person restores it", () => {
+    const journal = createJournal();
+    const store = createStore(journal);
+    store.update({
+      creationPosture: "automatic",
+      noWorkingTimeLimitAtFullAccess: true,
+      expectedVersion: 0,
+    });
+    store.update({
+      creationPosture: "automatic",
+      workingTimeLimitMinutes: 60,
+      providerSlotWaitMinutes: 45,
+      expectedVersion: 1,
+    });
+    expect(createStore(journal).current()).toMatchObject({
+      workingTimeLimitMinutes: 60,
+      providerSlotWaitMinutes: 45,
+      noWorkingTimeLimitAtFullAccess: true,
+    });
+    store.update({
+      creationPosture: "automatic",
+      noWorkingTimeLimitAtFullAccess: false,
+      expectedVersion: 2,
+    });
+    expect(createStore(journal).current()).toMatchObject({
+      providerSlotWaitMinutes: 45,
+      noWorkingTimeLimitAtFullAccess: false,
+    });
+  });
+
   it("refuses limits above the ceiling", () => {
     const store = createStore();
     expect(() =>

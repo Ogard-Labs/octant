@@ -2045,6 +2045,8 @@ export class CodeService {
         if (
           command.thread.coordinator !== undefined ||
           command.thread.coordinatorThreadId !== undefined ||
+          command.thread.coordinatorBounds !== undefined ||
+          command.thread.coordinatorWorkerLevel !== undefined ||
           command.thread.messageWake !== undefined ||
           command.thread.coordinatorWakeOff !== undefined
         ) {
@@ -2216,6 +2218,7 @@ export class CodeService {
       }
       if (
         command.kind === "set-code-thread-coordinator" ||
+        command.kind === "set-code-thread-coordinator-bounds" ||
         command.kind === "set-code-thread-message-wake" ||
         command.kind === "set-code-thread-coordinator-wake"
       ) {
@@ -3961,10 +3964,11 @@ export class CodeService {
   }
 
   /**
-   * A person's coordinator role and wake switches. Making a thread a
+   * A person's coordinator role, bounds and wake switches. Making a thread a
    * coordinator also turns its Wake when a message arrives switch on, so its
    * workers' messages and state reach it while it is idle; stopping it leaves
-   * the switch as the person last set it.
+   * the switch as the person last set it, and drops the bounds and the
+   * workers' level, which belong to the role.
    */
   #coordinatorSwitches(
     current: CodeThread,
@@ -3973,6 +3977,7 @@ export class CodeService {
       {
         readonly kind:
           | "set-code-thread-coordinator"
+          | "set-code-thread-coordinator-bounds"
           | "set-code-thread-message-wake"
           | "set-code-thread-coordinator-wake";
       }
@@ -3981,11 +3986,45 @@ export class CodeService {
   ): CodeThread {
     const {
       coordinator: _coordinator,
+      coordinatorBounds: _bounds,
+      coordinatorWorkerLevel: _workerLevel,
       messageWake: _messageWake,
       coordinatorWakeOff: _wakeOff,
-      ...rest
+      ...withoutRole
     } = current;
+    // The bounds and the workers' level stay with the role through every
+    // change here but Stop coordinating and a bounds change itself.
+    const rest = {
+      ...withoutRole,
+      ...(current.coordinatorBounds === undefined
+        ? {}
+        : { coordinatorBounds: current.coordinatorBounds }),
+      ...(current.coordinatorWorkerLevel === undefined
+        ? {}
+        : { coordinatorWorkerLevel: current.coordinatorWorkerLevel }),
+    };
     const stamp = { version: command.expectedVersion + 1, updatedAt };
+    if (command.kind === "set-code-thread-coordinator-bounds") {
+      if (current.coordinator !== true) {
+        throw this.#failure("invalid", "Only a coordinator thread has bounds to set.");
+      }
+      const unchanged =
+        current.coordinatorBounds?.wakesPerHour === command.bounds.wakesPerHour &&
+        current.coordinatorBounds?.rounds === command.bounds.rounds &&
+        current.coordinatorBounds?.startsPerHour === command.bounds.startsPerHour;
+      if (unchanged) return current;
+      return decodeCodeThread({
+        ...withoutRole,
+        coordinator: true,
+        ...(Object.keys(command.bounds).length === 0 ? {} : { coordinatorBounds: command.bounds }),
+        ...(current.coordinatorWorkerLevel === undefined
+          ? {}
+          : { coordinatorWorkerLevel: current.coordinatorWorkerLevel }),
+        ...(current.messageWake === true ? { messageWake: true } : {}),
+        ...(current.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+        ...stamp,
+      });
+    }
     if (command.kind === "set-code-thread-message-wake") {
       return decodeCodeThread({
         ...rest,
@@ -4005,6 +4044,15 @@ export class CodeService {
         ...(command.wake ? {} : { coordinatorWakeOff: true }),
         ...stamp,
       });
+    }
+    if (
+      command.workerLevel !== undefined &&
+      (!command.coordinator || current.coordinator === true)
+    ) {
+      throw this.#failure(
+        "invalid",
+        "The workers' level is fixed when a thread is made a coordinator.",
+      );
     }
     const project = this.#persistence.readProject?.(current.projectId);
     // The designated planner reads as a coordinator, so it counts toward the
@@ -4038,10 +4086,16 @@ export class CodeService {
     if (decision.status === "refused") throw this.#failure("invalid", decision.message);
     if (decision.status === "unchanged") return current;
     return decodeCodeThread({
-      ...rest,
+      ...withoutRole,
       ...(current.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
       ...(command.coordinator
-        ? { coordinator: true, messageWake: true }
+        ? {
+            coordinator: true,
+            messageWake: true,
+            ...(command.workerLevel === undefined
+              ? {}
+              : { coordinatorWorkerLevel: command.workerLevel }),
+          }
         : current.messageWake === true
           ? { messageWake: true }
           : {}),

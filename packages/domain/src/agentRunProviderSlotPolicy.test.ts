@@ -28,4 +28,16 @@ describe("a child waiting for a provider slot", () => {
       ),
     ).toBe(false);
   });
+
+  it("waits half an hour unless a person chose another wait", () => {
+    const parkedMs = Date.parse(parkedAt);
+    expect(AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS).toBe(30 * 60_000);
+    expect(agentRunProviderSlotWaitExpired(waiting, parkedMs + 10 * 60_000)).toBe(false);
+    expect(agentRunProviderSlotWaitExpired(waiting, parkedMs + 10 * 60_000, 10 * 60_000)).toBe(
+      true,
+    );
+    expect(agentRunProviderSlotWaitExpired(waiting, parkedMs + 31 * 60_000, 60 * 60_000)).toBe(
+      false,
+    );
+  });
 });

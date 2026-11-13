@@ -46,6 +46,8 @@ export interface DesktopPaneRouteDependencies {
     | "recipeMachines"
     | "spend"
     | "setSpendCap"
+    | "leaseSettings"
+    | "setLeaseSettings"
   >;
   /**
    * What a Code Project's recipe editor says about its key. Absent on a host
@@ -197,6 +199,19 @@ async function answer(
   if (request.kind === "spend") return service.spend({ actor });
   if (request.kind === "set-spend-cap") {
     return service.setSpendCap({ actor, monthlyCapUsdCents: request.monthlyCapUsdCents });
+  }
+  // The lease settings are host-wide too, and one of them decides whether a
+  // billed desktop asks, so they are answered and changed the same way.
+  if (request.kind === "lease-settings") return service.leaseSettings({ actor });
+  if (request.kind === "set-lease-settings") {
+    return service.setLeaseSettings({
+      actor,
+      change: {
+        confirmBilledDesktops: request.confirmBilledDesktops,
+        leasesPerThread: request.leasesPerThread,
+        hostLocalLeasesPerHost: request.hostLocalLeasesPerHost,
+      },
+    });
   }
   const caller = callerFor(request.threadId, actor, scopeId);
   switch (request.kind) {

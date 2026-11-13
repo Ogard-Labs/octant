@@ -6,6 +6,10 @@ import {
   decodeThreadHandOffOutcome,
   type ThreadHandOffOutcome,
 } from "@octant/contracts/thread-hand-off";
+import {
+  decodeThreadToolCallRecordsResult,
+  type ThreadToolCallRecordsResult,
+} from "@octant/contracts";
 import type { ThreadExportActorKind } from "@octant/domain";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -39,17 +43,34 @@ export interface ThreadHandOffRouteDependencies {
 }
 
 export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDependencies) {
-  return createThreadCommandRouteHandler({
-    label: "Thread export",
-    path: "/api/threads/export",
+  const shared = {
     windowAuthorityStore: dependencies.windowAuthorityStore,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+  };
+  const exportThread = createThreadCommandRouteHandler({
+    ...shared,
+    label: "Thread export",
+    path: "/api/threads/export",
     execute: (windowId, actorKind, body) =>
       dependencies.service.exportThread(windowId, actorKind, body),
     status: (outcome: ThreadExportOutcome) =>
       outcome.kind === "exported" ? 200 : outcome.reason === "unauthorized" ? 401 : 404,
     encode: decodeThreadExportOutcome,
   });
+  // The same service and the same check that the caller may read the thread,
+  // so one turn's tool-call records are served beside the export.
+  const toolCallRecords = createThreadCommandRouteHandler({
+    ...shared,
+    label: "Tool-call records",
+    path: "/api/threads/tool-call-records",
+    execute: (windowId, actorKind, body) =>
+      dependencies.service.readToolCallRecords(windowId, actorKind, body),
+    status: (outcome: ThreadToolCallRecordsResult) =>
+      outcome.kind === "records" ? 200 : outcome.reason === "unauthorized" ? 401 : 404,
+    encode: decodeThreadToolCallRecordsResult,
+  });
+  return async (request: Request): Promise<Response | undefined> =>
+    (await exportThread(request)) ?? (await toolCallRecords(request));
 }
 
 export function createThreadHandOffRouteHandler(dependencies: ThreadHandOffRouteDependencies) {

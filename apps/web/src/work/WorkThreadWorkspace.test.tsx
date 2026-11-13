@@ -2288,6 +2288,50 @@ describe("WorkThreadWorkspace", () => {
     }
   });
 
+  it("adds each streamed tool step to the running turn's tool group, one step a frame", async () => {
+    const running = workTurn({
+      status: "running",
+      response: undefined,
+      transcript: [
+        { role: "user", text: "Start" },
+        { role: "assistant", text: "", status: "running" },
+      ],
+    });
+    const hold = deferred<void>();
+    const transcript = vi.fn(async () => ({ threadId, turns: [running], liveCursor: 0 }));
+    const step = (sequence: number, toolCallId: string, toolName: string, state: string) => ({
+      kind: "turn-tool-step" as const,
+      sequence,
+      threadId,
+      requestId: running.requestId,
+      toolStep: { toolCallId, toolName, state },
+      toolStepsTruncated: false,
+    });
+    const subscribe = vi.fn(async function* () {
+      yield step(1, "call-1", "Read", "started");
+      yield step(2, "call-2", "Bash", "started");
+      yield step(3, "call-1", "Read", "completed");
+      await hold.promise;
+    });
+
+    render(
+      <WorkThreadWorkspace
+        changeRevision={0}
+        initialThread={workThread()}
+        requestClient={{ list: vi.fn(async () => ({ requests: [] })) } as never}
+        threadClient={{ execute: vi.fn() } as never}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript, subscribe } as never}
+      />,
+    );
+
+    // Both calls show: the second frame added its step and kept the first.
+    expect(await screen.findByText(/Read/)).toBeInTheDocument();
+    expect(await screen.findByText(/Bash/)).toBeInTheDocument();
+    hold.resolve();
+  });
+
   it("stops showing a retry once the retried response arrives without text", async () => {
     const running = workTurn({
       status: "running",

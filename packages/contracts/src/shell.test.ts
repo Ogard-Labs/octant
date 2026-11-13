@@ -111,6 +111,10 @@ const settings = {
   rememberedBrowserOrigins: [],
   rememberedBrowserProfileSites: [],
   agentBrowserDownloads: false,
+  browserCapturesPerThread: 200,
+  keepToolCallRecords: true,
+  toolStepsPerTurn: 64,
+  fullAccessToolStepsPerTurn: 0,
   browserTransferFileLimitMegabytes: 25,
   browserHeldDownloadLimit: 5,
   browserUploadFileCountLimit: 5,
@@ -200,6 +204,51 @@ describe("default folder paths", () => {
 });
 
 describe("shell bootstrap contracts", () => {
+  it("keeps 200 Browser captures a thread for a store saved before the setting, and lets a person choose 1 to 500", () => {
+    const { browserCapturesPerThread: _omitted, ...saved } = settings;
+    expect(decodeShellSettings(saved).browserCapturesPerThread).toBe(200);
+    expect(
+      decodeShellSettings({ ...settings, browserCapturesPerThread: 500 }).browserCapturesPerThread,
+    ).toBe(500);
+    for (const value of [0, 501, 1.5]) {
+      expect(() => decodeShellSettings({ ...settings, browserCapturesPerThread: value })).toThrow();
+    }
+  });
+
+  it("keeps tool-call records for a store saved before the setting, until a person turns them off", () => {
+    const { keepToolCallRecords: _omitted, ...saved } = settings;
+    expect(decodeShellSettings(saved).keepToolCallRecords).toBe(true);
+    expect(
+      decodeShellSettings({ ...settings, keepToolCallRecords: false }).keepToolCallRecords,
+    ).toBe(false);
+  });
+
+  it("keeps 64 tool steps a turn below Full access and no limit at Full access for a store saved before the settings", () => {
+    const {
+      toolStepsPerTurn: _steps,
+      fullAccessToolStepsPerTurn: _fullAccessSteps,
+      ...saved
+    } = settings;
+    expect(decodeShellSettings(saved).toolStepsPerTurn).toBe(64);
+    // Zero is how the setting says off: no step limit at Full access.
+    expect(decodeShellSettings(saved).fullAccessToolStepsPerTurn).toBe(0);
+    const chosen = decodeShellSettings({
+      ...settings,
+      toolStepsPerTurn: 512,
+      fullAccessToolStepsPerTurn: 4_096,
+    });
+    expect(chosen.toolStepsPerTurn).toBe(512);
+    expect(chosen.fullAccessToolStepsPerTurn).toBe(4_096);
+    for (const value of [0, 4_097, 1.5]) {
+      expect(() => decodeShellSettings({ ...settings, toolStepsPerTurn: value })).toThrow();
+    }
+    for (const value of [-1, 4_097, 1.5]) {
+      expect(() =>
+        decodeShellSettings({ ...settings, fullAccessToolStepsPerTurn: value }),
+      ).toThrow();
+    }
+  });
+
   it("defaults transcript text to the compact reading size", () => {
     const { transcriptTextSize: _omitted, ...withoutTranscriptTextSize } = settings;
     expect(decodeShellSettings(withoutTranscriptTextSize).transcriptTextSize).toBe("small");

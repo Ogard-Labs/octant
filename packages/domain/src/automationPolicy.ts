@@ -1053,6 +1053,8 @@ export type AutomationFollowUpThreadFacts =
 
 export type AutomationFollowUpDecision =
   | { readonly kind: "ready" }
+  /** The thread is running a turn; the follow-up runs after it. */
+  | { readonly kind: "waiting" }
   | {
       readonly kind: "blocked";
       readonly reason: AutomationBlockReason;
@@ -1063,8 +1065,10 @@ export type AutomationFollowUpDecision =
  * Whether a follow-up may send its turn into its thread now. Each check
  * refuses rather than adapts: the follow-up was confirmed for that thread as
  * it was, so a thread that has moved on is told nothing. A thread already
- * running a turn is skipped, not waited on: waiting would put a scheduled
- * turn behind the person's own, at a time nobody chose.
+ * running a turn is waited on, not skipped: the person asked for the check,
+ * and a skipped one is silently lost. Every refusal is decided before the
+ * wait, so a thread that moved on while it was busy is still told nothing,
+ * and the missed window bounds the wait at a day past the scheduled time.
  */
 export function decideAutomationFollowUp(input: {
   readonly projectId: string;
@@ -1110,12 +1114,7 @@ export function decideAutomationFollowUp(input: {
       "The thread's provider or model changed since the follow-up was set, so it did not run.",
     );
   }
-  if (thread.busy) {
-    return blocked(
-      "thread-busy",
-      "A turn was already running in the thread, so the follow-up was skipped.",
-    );
-  }
+  if (thread.busy) return { kind: "waiting" };
   return { kind: "ready" };
 }
 

@@ -247,8 +247,16 @@ export const MAX_BROWSER_HELD_DOWNLOADS = 5;
 /** The most held downloads a person may choose; each is a file on the host's disk. */
 export const MAX_BROWSER_HELD_DOWNLOAD_LIMIT = 50;
 
-/** The longest any wait may last; a wait names its own limit up to this. */
-export const MAX_BROWSER_WAIT_MS = 30_000;
+/**
+ * The longest any wait may last; a wait names its own limit up to this.
+ *
+ * Ten minutes, because a build, a deploy or an upload a page reports on
+ * routinely outlasts the earlier 30 seconds, and an agent then polled with
+ * repeated waits. It is not longer because one tool call must answer inside
+ * the eleven minutes the Claude runtime allows an app-managed call, and a
+ * page's idle interval is ten minutes.
+ */
+export const MAX_BROWSER_WAIT_MS = 600_000;
 /** How long a wait lasts when it names no limit. */
 export const DEFAULT_BROWSER_WAIT_MS = 10_000;
 

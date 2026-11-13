@@ -312,6 +312,13 @@ export type ClaudeDecodedMessage =
         readonly toolUseId: string;
         readonly isError: boolean;
         /**
+         * The result's text as the model was handed it, cut to what one
+         * tool-call content event carries. Only a thread's tool-call record
+         * reads it.
+         */
+        readonly text?: string;
+        readonly textTruncated?: true;
+        /**
          * The claude.ai page the tool's structured result names, read only
          * from a message that settles one call. The mapper keeps it only for
          * an Artifact call.
@@ -454,10 +461,15 @@ export interface ClaudeUserMessage {
    */
   readonly onContextDelivered?: () => void;
   readonly appManagedTools?: ReadonlyArray<ProviderToolDefinition>;
+  /**
+   * `toolUseId` is the transcript's tool_use id when Claude Code names it, so
+   * the call can be answered under the step its row already shows.
+   */
   readonly onAppToolCall?: (
     name: string,
     inputJson: string,
     signal: AbortSignal,
+    toolUseId?: string,
   ) => Promise<ManagedToolAnswer>;
 }
 
@@ -1551,11 +1563,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     if (listing.kind === "grown") {
                       const prepared = createManagedMcpTools(
                         listing.tools,
-                        (name, inputJson, signal) => {
+                        (name, inputJson, signal, call) => {
                           const answer = answerToolCall;
+                          // Claude Code 2.1 sends each call's tool_use id in
+                          // this request metadata key.
+                          const toolUseId = call?.metadata["claudecode/toolUseId"];
                           return offeredToolNames.includes(managedName(name)) &&
                             answer !== undefined
-                            ? answer(name, inputJson, signal)
+                            ? typeof toolUseId === "string"
+                              ? answer(name, inputJson, signal, toolUseId)
+                              : answer(name, inputJson, signal)
                             : Promise.resolve(WITHDRAWN_TOOL_ANSWER);
                         },
                       );

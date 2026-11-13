@@ -646,6 +646,35 @@ describe("createAgentRunSessionRuntime", () => {
     }
   });
 
+  it("never cuts off a turn the person gave no working-time limit, and records no limit", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = fakeProvider();
+      const limits: Array<number | "none"> = [];
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, {
+          workingTimeLimitMs: () => "none",
+          onSessionStarted: ({ workingTimeLimitMs }) => limits.push(workingTimeLimitMs),
+        }),
+      );
+      let outcome: AgentRunSessionOutcome | undefined;
+      runtime.start(agentRun()).onSettled((value) => {
+        outcome = value;
+      });
+      await vi.advanceTimersByTimeAsync(10 * 60 * 60_000);
+      expect(outcome).toBeUndefined();
+      expect(limits).toEqual(["none"]);
+      await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+      await provider.emit({ kind: "completed", sessionId });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toMatchObject({ kind: "completed" });
+      expect(outcome?.evidence?.workingTime).toMatchObject({ activeMs: 10 * 60 * 60_000 });
+      expect(outcome?.evidence?.workingTime?.limitMs).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps provider startup bounded when the person allows a longer working window", async () => {
     vi.useFakeTimers();
     try {

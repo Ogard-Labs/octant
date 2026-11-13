@@ -1303,13 +1303,15 @@ describe("SettingsView", () => {
     for (const selector of [
       "\\.settings-view__select",
       "\\.settings-font-picker",
-      "\\.octant-number-stepper",
+      "\\.setrow-control > \\.octant-number-stepper",
     ]) {
       expect(styles).toMatch(
         new RegExp(`${selector}[^{}]*\\{[^}]*width:\\s*var\\(--oct-settings-control`),
       );
     }
-    expect(styles).toMatch(
+    // The stepper's own rules load with the app, outside the lazy Settings sheet.
+    const components = readFileSync(resolve(process.cwd(), "src/styles/components.css"), "utf8");
+    expect(components).toMatch(
       /\.octant-number-stepper \{[^}]*grid-template-columns:\s*30px minmax\(0, 1fr\) auto 30px;/,
     );
   });
@@ -1989,6 +1991,54 @@ describe("SettingsView", () => {
     ).toBeVisible();
     await userEvent.setup().click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ agentBrowserDownloads: true });
+  });
+
+  it("keeps 200 Browser captures a thread until the person chooses another number", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Browser captures" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Captures kept per thread" })).toHaveValue(200);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Decrease Captures kept per thread" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserCapturesPerThread: 199 });
+  });
+
+  it("keeps tool-call records until the person turns the switch off", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Tool-call records" })).toBeInTheDocument();
+    const control = screen.getByRole("switch", { name: "Keep tool inputs and outputs" });
+    expect(control).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/removed when its thread is purged/)).toBeVisible();
+    await userEvent.setup().click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ keepToolCallRecords: false });
+  });
+
+  it("keeps 64 tool steps a turn below Full access and every step at Full access until the person sets a number", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Tool steps" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Tool steps kept per turn" })).toHaveValue(64);
+    const fullAccess = screen.getByRole("spinbutton", {
+      name: "Tool steps kept per turn at Full access",
+    });
+    expect(fullAccess).toHaveValue(0);
+    expect(screen.getByText(/0 means no limit/)).toBeVisible();
+    // The fixed stop that guards against a runaway turn is said where the limit is set.
+    expect(
+      screen.getByText(/still stops after 4,096 runtime events, whatever this is set to/),
+    ).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Decrease Tool steps kept per turn" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ toolStepsPerTurn: 63 });
+    await user.click(
+      screen.getByRole("button", { name: "Increase Tool steps kept per turn at Full access" }),
+    );
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ fullAccessToolStepsPerTurn: 1 });
   });
 
   it("lets the person change the largest file and the downloads kept waiting from their defaults", async () => {

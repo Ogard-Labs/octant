@@ -124,6 +124,7 @@ export interface SidebarContainerProps {
     | "setProjectArchived"
     | "setProjectColor"
     | "setCodeThreadCoordinator"
+    | "editCodeThreadCoordinatorBounds"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
     | "setCodeThreadRestartContinuation"
@@ -512,6 +513,13 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           threadId: decodeWorkThreadId(threadId),
           expectedVersion,
           continueAfterRestart,
+        })),
+      onSetMessageWake: (threadId, wake) =>
+        void actions.runWorkRestCommand(threadId, (expectedVersion) => ({
+          kind: "set-work-thread-message-wake",
+          threadId: decodeWorkThreadId(threadId),
+          expectedVersion,
+          wake,
         })),
       onPinInPane: actions.pinWorkThreadInPane,
       onAttachAsContext: (threadId) => {

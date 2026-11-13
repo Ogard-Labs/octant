@@ -13,6 +13,7 @@ import {
 import { ExtensionNpmSource } from "./extensionIdentity";
 import { OctantMode } from "./modes";
 import { ThreadPublishedPage } from "./threadToolSteps";
+import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "./threadToolCallRecords";
 import {
   ACP_AGENT_KINDS,
   AcpAgentAuthentication,
@@ -2821,6 +2822,22 @@ export const ProviderRuntimeEvent = Schema.Union(
     /** `remote-command`: what a server printed for an `ssh`, `scp`, or `rsync` command the runtime ran. */
     source: Schema.Literal("web-search", "web-fetch", "hosted-tool", "remote-command"),
     text: Schema.NonEmptyString.pipe(Schema.maxLength(OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS)),
+  }).annotations(strict),
+  /**
+   * What one tool call was given, or what it returned, as far as the adapter
+   * can see it: text, cut to the bound here with `truncated` set when it was
+   * longer. It exists only for a Chat or Work thread's tool-call record,
+   * which lives in purgeable storage: it is never journaled, never part of a
+   * tool step, and never handed to a model. Every other consumer drops it. An
+   * adapter whose runtime exposes neither sends none.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("tool-call-content"),
+    toolCallId: Schema.NonEmptyTrimmedString,
+    part: Schema.Literal("input", "output"),
+    text: Schema.NonEmptyString.pipe(Schema.maxLength(MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS)),
+    truncated: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

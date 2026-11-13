@@ -1,3 +1,4 @@
+import type { ThreadToolCallRecord } from "@octant/contracts";
 import type { ToolOutsideContentMark } from "@octant/contracts/shield";
 import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
 import { ChatRichText } from "../chat/ChatRichText";
@@ -12,7 +13,15 @@ import {
   ShieldCheck,
   ShieldX,
 } from "lucide-react";
-import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type ToggleEvent,
+} from "react";
 import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PublishedPageCard } from "./PublishedPageCard";
@@ -40,7 +49,21 @@ export interface TurnActivityRowsProps {
    * published it. Absent leaves such a snapshot unable to run here.
    */
   readonly publishedSnapshotRuntime?: (toolCallId: string) => DesignRunRuntime | undefined;
+  /**
+   * Reads this turn's kept tool-call records. Absent where a surface keeps
+   * none (Code), and a tool row then shows its summary alone. Called when a
+   * tool row is first opened, never before.
+   */
+  readonly toolCallRecords?: ToolCallRecordsReader;
 }
+
+/** Rejects when the records cannot be read from this window. */
+export type ToolCallRecordsReader = () => Promise<ReadonlyArray<ThreadToolCallRecord>>;
+
+type ToolCallRecordsState =
+  | { readonly status: "loading" }
+  | { readonly status: "unavailable" }
+  | { readonly status: "read"; readonly records: ReadonlyArray<ThreadToolCallRecord> };
 
 /** Expanded summaries are clipped to this many characters until the user asks for all of it. */
 export const TOOL_SUMMARY_PREVIEW_LIMIT = 1_200;
@@ -175,6 +198,23 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const [revealedSummaryIds, setRevealedSummaryIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [toolCallRecords, setToolCallRecords] = useState<ToolCallRecordsState>();
+  const readRecords = props.toolCallRecords;
+  // Held in a ref so a caller that passes a new function each render does not
+  // read the records again on every render.
+  const readRecordsRef = useRef(readRecords);
+  readRecordsRef.current = readRecords;
+  // One read serves every row of the turn. A row that settles reads again,
+  // since its output is kept only when the call ends.
+  const loadToolCallRecords = useCallback(() => {
+    const read = readRecordsRef.current;
+    if (read === undefined) return;
+    setToolCallRecords((current) => current ?? { status: "loading" });
+    read().then(
+      (records) => setToolCallRecords({ status: "read", records }),
+      () => setToolCallRecords({ status: "unavailable" }),
+    );
+  }, []);
   const { activity, running } = props;
   const settled = props.settled === true;
   const hasRows = activity.rows.length > 0;
@@ -226,6 +266,9 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
         onToggle={onToggle(id)}
         open={isOpen(id)}
         revealed={revealedSummaryIds.has(id)}
+        {...(readRecords === undefined || row.kind !== "tool"
+          ? {}
+          : { records: toolCallRecords, onLoadRecords: loadToolCallRecords })}
         row={row}
         settled={settled && !running}
         onReveal={() => setRevealedSummaryIds((current) => setHas(current, id, true))}
@@ -409,9 +452,17 @@ function ActivityDisclosure(props: {
   readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
   readonly onToggle: (event: ToggleEvent<HTMLDetailsElement>) => void;
   readonly onReveal: () => void;
+  /** Present on a tool row whose surface keeps tool-call records. */
+  readonly records?: ToolCallRecordsState | undefined;
+  readonly onLoadRecords?: () => void;
 }) {
   const { row } = props;
   const StateIcon = outcomeIcon(row, props.settled);
+  const { onLoadRecords, open } = props;
+  const state = row.state;
+  useEffect(() => {
+    if (open) onLoadRecords?.();
+  }, [open, onLoadRecords, state]);
   return (
     <details
       className="turn-activity__disclosure"
@@ -434,7 +485,12 @@ function ActivityDisclosure(props: {
         <span className="turn-activity__outcome">{outcomeLabel(row, props.settled)}</span>
         <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={12} />
       </summary>
-      <div className="turn-activity__body">{activityDetail(row, props)}</div>
+      <div className="turn-activity__body">
+        {activityDetail(row, props)}
+        {props.onLoadRecords === undefined ? null : (
+          <ToolCallRecordDetail records={props.records} toolCallId={row.id} />
+        )}
+      </div>
     </details>
   );
 }
@@ -483,6 +539,61 @@ function activityDetail(
           Show all
         </OctantButton>
       ) : null}
+    </>
+  );
+}
+
+/**
+ * What a tool call was given and what it returned, from the turn's kept
+ * records. The record is read from the host when the row opens; it is not
+ * part of the journaled step the row is drawn from.
+ */
+function ToolCallRecordDetail(props: {
+  readonly records: ToolCallRecordsState | undefined;
+  readonly toolCallId: string;
+}) {
+  const { records } = props;
+  if (records === undefined || records.status === "loading") {
+    return <p className="turn-activity__empty-detail">Reading the kept input and output…</p>;
+  }
+  if (records.status === "unavailable") {
+    return (
+      <p className="turn-activity__empty-detail">
+        The kept input and output could not be read from this window.
+      </p>
+    );
+  }
+  const record = records.records.find((candidate) => candidate.toolCallId === props.toolCallId);
+  if (record === undefined || (record.input === undefined && record.output === undefined)) {
+    return (
+      <p className="turn-activity__empty-detail">No input or output was kept for this call.</p>
+    );
+  }
+  return (
+    <>
+      {record.input === undefined ? null : <ToolCallRecordPart label="Input" part={record.input} />}
+      {record.output === undefined ? null : (
+        <ToolCallRecordPart label="Output" part={record.output} />
+      )}
+      {record.outputWithheld === undefined ? null : (
+        <p className="turn-activity__empty-detail">
+          The output was not kept because the call named a protected file.
+        </p>
+      )}
+    </>
+  );
+}
+
+function ToolCallRecordPart(props: {
+  readonly label: string;
+  readonly part: { readonly text: string; readonly truncated: boolean };
+}) {
+  return (
+    <>
+      <p className="turn-activity__empty-detail">
+        {props.part.truncated ? `${props.label} (cut to what is kept)` : props.label}
+      </p>
+      <p className="turn-activity__pre">{props.part.text}</p>
     </>
   );
 }

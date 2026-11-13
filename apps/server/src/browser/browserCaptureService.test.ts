@@ -15,7 +15,7 @@ import {
   type CorrelationId,
   type ProviderInstanceId,
 } from "@octant/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -39,8 +39,16 @@ const personActorId = "d0000000-0000-4000-8000-0000000000ff";
 const providerInstanceId = "d0000000-0000-4000-8000-0000000000aa" as ProviderInstanceId;
 const correlationId = "d0000000-0000-4000-8000-0000000000cc" as CorrelationId;
 
+/**
+ * The person's setting in these tests: small enough to pass quickly, large
+ * enough to hold the eight recordings a thread keeps beside its screenshots.
+ */
+const KEPT = 12;
+let capturesPerThread = KEPT;
+
 const directories: string[] = [];
 afterEach(() => {
+  capturesPerThread = KEPT;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -67,8 +75,9 @@ function open(dataDirectory?: string) {
     personActor: { kind: "local-user", actorId: personActorId as never },
     uuid: randomUUID,
     clock: () => new Date(Date.parse(now) + ++tick * 1_000).toISOString(),
+    capturesPerThread: () => capturesPerThread,
   });
-  return { connection, directory: root, service };
+  return { connection, directory: root, journal, service };
 }
 
 function pngDataUrl(bytes: Uint8Array = PNG): string {
@@ -223,15 +232,15 @@ describe("BrowserCaptureService", () => {
     expect(await service.read(threadA, decodeBrowserCaptureId(randomUUID()))).toBeUndefined();
   });
 
-  it("lists newest first and keeps only the newest 32, removing the oldest bytes first", async () => {
+  it("lists newest first and keeps only as many as the person's setting, removing the oldest bytes first", async () => {
     const { directory, service } = open();
     const ids: string[] = [];
-    for (let index = 0; index < MAX_BROWSER_CAPTURES_PER_THREAD + 2; index += 1) {
+    for (let index = 0; index < KEPT + 2; index += 1) {
       ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
     }
 
     const listed = service.list(threadA);
-    expect(listed).toHaveLength(MAX_BROWSER_CAPTURES_PER_THREAD);
+    expect(listed).toHaveLength(KEPT);
     expect(listed[0]?.captureId).toBe(ids.at(-1));
     expect(listed.at(-1)?.captureId).toBe(ids[2]);
     expect(existsSync(captureDirectory(directory, threadA, ids[0] ?? ""))).toBe(false);
@@ -240,10 +249,184 @@ describe("BrowserCaptureService", () => {
     expect(await service.read(threadA, decodeBrowserCaptureId(ids[0] ?? ""))).toBeUndefined();
   });
 
+  it("removes every capture a lowered number passes over at the next keep, so raising it brings none back", async () => {
+    const { directory, service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    ids.push(kept(await service.keep(request({ title: "After lowering" }))));
+
+    for (const id of ids.slice(0, -3)) {
+      expect(existsSync(captureDirectory(directory, threadA, id))).toBe(false);
+    }
+    capturesPerThread = KEPT;
+    expect(service.list(threadA).map((capture) => capture.captureId)).toEqual(
+      ids.slice(-3).reverse(),
+    );
+  });
+
+  it("removes every passed-over capture of a thread with more than a thousand captures when the number is lowered", async () => {
+    const { directory, service } = open();
+    capturesPerThread = MAX_BROWSER_CAPTURES_PER_THREAD;
+    const ids: string[] = [];
+    for (let index = 0; index < 1_100; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    ids.push(kept(await service.keep(request({ title: "After lowering" }))));
+
+    const left = ids.filter((id) => existsSync(captureDirectory(directory, threadA, id)));
+    expect(left).toEqual(ids.slice(-3));
+  }, 60_000);
+
+  it("retries the sweep of a lowered number at the next keep when it failed", async () => {
+    const { directory, journal, service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    const replay = journal.replayAggregate.bind(journal);
+    const sweepFails = vi
+      .spyOn(journal, "replayAggregate")
+      .mockImplementationOnce(() => {
+        throw new Error("journal unavailable");
+      })
+      .mockImplementation(replay);
+    // The first call of this keep is the sweep; it fails and leaves the bytes.
+    ids.push(kept(await service.keep(request({ title: "Sweep fails" }))));
+    expect(existsSync(captureDirectory(directory, threadA, String(ids[0])))).toBe(true);
+    sweepFails.mockRestore();
+
+    ids.push(kept(await service.keep(request({ title: "Sweep retried" }))));
+    const left = ids.filter((id) => existsSync(captureDirectory(directory, threadA, id)));
+    expect(left).toEqual(ids.slice(-3));
+  });
+
+  it("retries a passed-over capture whose deletion failed at the next keep, and never lists it again", async () => {
+    const { directory, service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    const fifth = String(ids[4]);
+    const remove = BrowserCaptureStore.prototype.remove;
+    const deletionFails = vi
+      .spyOn(BrowserCaptureStore.prototype, "remove")
+      .mockImplementation(function (this: BrowserCaptureStore, threadId, captureId) {
+        return String(captureId) === fifth
+          ? Promise.reject(new Error("disk busy"))
+          : remove.call(this, threadId, captureId);
+      });
+    ids.push(kept(await service.keep(request({ title: "Deletion fails" }))));
+    expect(existsSync(captureDirectory(directory, threadA, fifth))).toBe(true);
+    deletionFails.mockRestore();
+
+    capturesPerThread = KEPT;
+    expect(service.list(threadA).map((capture) => String(capture.captureId))).not.toContain(fifth);
+    capturesPerThread = 3;
+
+    ids.push(kept(await service.keep(request({ title: "Deletion retried" }))));
+    const left = ids.filter((id) => existsSync(captureDirectory(directory, threadA, id)));
+    expect(left).toEqual(ids.slice(-3));
+  });
+
+  it("removes a passed-over capture whose deletion failed at recovery after the number is raised again", async () => {
+    const { directory, service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    const fifth = String(ids[4]);
+    const remove = BrowserCaptureStore.prototype.remove;
+    const deletionFails = vi
+      .spyOn(BrowserCaptureStore.prototype, "remove")
+      .mockImplementation(function (this: BrowserCaptureStore, threadId, captureId) {
+        return String(captureId) === fifth
+          ? Promise.reject(new Error("disk busy"))
+          : remove.call(this, threadId, captureId);
+      });
+    await service.keep(request({ title: "Deletion fails" }));
+    deletionFails.mockRestore();
+
+    capturesPerThread = KEPT;
+    await service.recover();
+    expect(existsSync(captureDirectory(directory, threadA, fifth))).toBe(false);
+  });
+
+  it("keeps the newest 200 captures when the person chose no number", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-browser-capture-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const service = new BrowserCaptureService({
+      store: new BrowserCaptureStore(directory),
+      journal: new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      }),
+      connection,
+      personActor: { kind: "local-user", actorId: personActorId as never },
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const ids: string[] = [];
+    for (let index = 0; index < 201; index += 1) {
+      ids.push(kept(await service.keep(request())));
+    }
+    const listed = service.list(threadA);
+    expect(listed).toHaveLength(200);
+    expect(listed.at(-1)?.captureId).toBe(ids[1]);
+    expect(existsSync(captureDirectory(directory, threadA, ids[0] ?? ""))).toBe(false);
+  }, 60_000);
+
+  it("drops the captures past a smaller number the person chooses, at the next listing", async () => {
+    const { service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request())));
+    }
+    capturesPerThread = 3;
+    expect(service.list(threadA).map((capture) => capture.captureId)).toEqual(
+      ids.slice(-3).reverse(),
+    );
+    expect(await service.read(threadA, decodeBrowserCaptureId(ids[0] ?? ""))).toBeUndefined();
+  });
+
+  it("never lists a dropped capture again when the person chooses a larger number", async () => {
+    const { service } = open();
+    capturesPerThread = 3;
+    const ids: string[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      ids.push(kept(await service.keep(request())));
+    }
+    expect(service.list(threadA)).toHaveLength(3);
+
+    // The journal still names all six; the bytes of the first three are gone.
+    capturesPerThread = KEPT;
+    expect(service.list(threadA).map((capture) => capture.captureId)).toEqual(
+      ids.slice(-3).reverse(),
+    );
+    expect(await service.read(threadA, decodeBrowserCaptureId(ids[0] ?? ""))).toBeUndefined();
+
+    // Captures kept from here on fill the larger number.
+    for (let index = 0; index < 4; index += 1) {
+      ids.push(kept(await service.keep(request())));
+    }
+    expect(service.list(threadA)).toHaveLength(7);
+  });
+
   it("does not let one thread's captures push out another thread's", async () => {
     const { service } = open();
     const first = kept(await service.keep(request({ threadId: threadB })));
-    for (let index = 0; index < MAX_BROWSER_CAPTURES_PER_THREAD + 1; index += 1) {
+    for (let index = 0; index < KEPT + 1; index += 1) {
       kept(await service.keep(request()));
     }
     expect(service.list(threadB).map((capture) => capture.captureId)).toEqual([first]);
@@ -252,7 +435,7 @@ describe("BrowserCaptureService", () => {
   it("finishes removing dropped bytes on recovery and keeps the retained ones", async () => {
     const { directory, service } = open();
     const ids: string[] = [];
-    for (let index = 0; index < MAX_BROWSER_CAPTURES_PER_THREAD + 1; index += 1) {
+    for (let index = 0; index < KEPT + 1; index += 1) {
       ids.push(kept(await service.keep(request())));
     }
     // A crash between the journal append and the byte removal leaves the
@@ -269,7 +452,7 @@ describe("BrowserCaptureService", () => {
     expect(existsSync(stale)).toBe(false);
     expect(existsSync(join(staged, "finalized.bin"))).toBe(true);
     expect(existsSync(join(staged, "staged.bin.tmp"))).toBe(false);
-    expect(service.list(threadA)).toHaveLength(MAX_BROWSER_CAPTURES_PER_THREAD);
+    expect(service.list(threadA)).toHaveLength(KEPT);
   });
 
   it("removes bytes that no journaled capture owns on recovery", async () => {

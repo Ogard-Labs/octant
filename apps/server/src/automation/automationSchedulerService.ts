@@ -67,6 +67,13 @@ export const AUTOMATION_SCHEDULER_DEFAULTS: AutomationSchedulerConfig = {
   pollIntervalMs: 60_000,
 };
 
+/**
+ * How soon a follow-up waiting on a busy thread is checked again. Short
+ * enough that it follows the turn it waited for, long enough that a check,
+ * which reads one thread and writes nothing, stays cheap over a long turn.
+ */
+const FOLLOW_UP_BUSY_RECHECK_MS = 15_000;
+
 export class AutomationSchedulerError extends Error {
   override readonly name = "AutomationSchedulerError";
   readonly category: "hydration-failed" | "journal-mismatch";
@@ -742,6 +749,25 @@ export class AutomationSchedulerService {
   }
 
   #recoverAndOffer(definition: AutomationDefinition, run: AutomationRun, out: PassCollector): void {
+    if (
+      run.lifecycle === "dispatching" &&
+      run.dispatchIntent === undefined &&
+      run.definitionSnapshot.targetPolicy === "same-thread" &&
+      run.cancellationTombstone === undefined
+    ) {
+      // A follow-up whose thread is busy waits here, and its dispatch up to
+      // the intent is synchronous, so a pass never sees one mid-dispatch.
+      // It is offered again on every pass rather than through the lease: a
+      // turn can run for hours, and a lease recovery would journal two rows
+      // every few minutes for a run that has not changed.
+      try {
+        this.#dispatch.offer({ definition, run });
+      } catch {
+        // The waiting run is durable; the next pass offers it again.
+      }
+      this.#addWake(out, out.nowMs + FOLLOW_UP_BUSY_RECHECK_MS);
+      return;
+    }
     if (run.lifecycle === "dispatching" && run.dispatchIntent === undefined) {
       // A pre-thread dispatch lease is bounded by the persisted transition
       // instant, so it survives restart. A run with a committed thread

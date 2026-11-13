@@ -15,7 +15,16 @@ import {
 } from "@octant/domain";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { HostExportService, type HostExportServiceOptions } from "./hostExportService";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  createLiveHostExportService,
+  HostExportService,
+  type HostExportServiceOptions,
+} from "./hostExportService";
+import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
+import { openSqlite } from "./persistence/sqlitePort";
 
 const now = "2026-08-19T12:00:00.000Z";
 const generatedAt = decodeUtcTimestamp(now);
@@ -79,7 +88,21 @@ const THREAD_OWNED_CANVAS = {
   },
 };
 
-function bundleFor(mode: "chat" | "work" | "code", threadId: string) {
+/** One kept tool-call record, as the thread export carries it. */
+const TOOL_CALL = {
+  turnId: "40000000-0000-4000-8000-0000000000a1",
+  toolCallId: "call-1",
+  toolName: "run-command",
+  input: { text: '{"command":"ls -la"}', truncated: false },
+  output: { text: "README.md", truncated: true },
+  recordedAt: now,
+};
+
+function bundleFor(
+  mode: "chat" | "work" | "code",
+  threadId: string,
+  toolCalls?: ThreadExportSource["toolCalls"],
+) {
   const source: ThreadExportSource = {
     threadId,
     mode,
@@ -101,6 +124,7 @@ function bundleFor(mode: "chat" | "work" | "code", threadId: string) {
     attachments: [],
     citations: [],
     omissions: [],
+    ...(toolCalls === undefined ? {} : { toolCalls }),
   };
   return buildThreadExportBundle(source);
 }
@@ -255,5 +279,70 @@ describe("host export", () => {
     expect(fixture.limits.every((limit) => limit === 1)).toBe(true);
     expect(Math.max(...resident)).toBe(1);
     expect(resident.length).toBe(4);
+  });
+
+  it("carries each thread's tool-call records in Export my data, as the thread export wrote them", async () => {
+    const fixture = service({
+      exportThread: async (_windowId, mode, threadId) => ({
+        kind: "exported",
+        bundle: bundleFor(mode, threadId, mode === "code" ? undefined : [TOOL_CALL as never]),
+      }),
+    });
+    const collected = [];
+    for await (const page of fixture.service.exportPages({ principal: "local-window", windowId })) {
+      collected.push(page);
+    }
+    const assembled = assembleHostExportBundle(collected);
+    expect(assembled.kind).toBe("exported");
+    if (assembled.kind !== "exported") return;
+    const byMode = (mode: string) =>
+      assembled.bundle.threads.filter((thread) => thread.octant.mode === mode);
+    for (const thread of [...byMode("chat"), ...byMode("work")]) {
+      expect(thread.evidence.toolCalls).toEqual([TOOL_CALL]);
+    }
+    // Code keeps no such records, so its bundle names none.
+    expect(byMode("code")[0]?.evidence.toolCalls).toBeUndefined();
+  });
+
+  it("asks for every thread as a local window, the one export that carries tool-call records", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-host-export-"));
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const exportThread = vi.fn(
+        async (_window: unknown, _actor: unknown, request: { readonly threadId: string }) => ({
+          kind: "exported" as const,
+          bundle: bundleFor("work", request.threadId, [TOOL_CALL as never]),
+        }),
+      );
+      const live = createLiveHostExportService({
+        hostId,
+        clock: () => now,
+        threads: { exportThread } as never,
+        connection,
+        listWorkThreadIds: () => [...THREADS.work],
+        listProjects: () => [],
+        readProjectMemory: (id) => ({ projectId: decodeProjectId(id), active: [], history: [] }),
+        personMemoryEntries: () => [],
+        listCanvases: () => [],
+        readSettings: () => ({ chatEnabled: true, workEnabled: true, themeMode: "dark" }),
+        listProjectIds: () => [],
+      });
+      const collected = [];
+      for await (const page of live.exportPages({ principal: "local-window", windowId })) {
+        collected.push(page);
+      }
+      const assembled = assembleHostExportBundle(collected);
+      expect(assembled.kind).toBe("exported");
+      if (assembled.kind !== "exported") return;
+      expect(exportThread).toHaveBeenCalledExactlyOnceWith(windowId, "local-window", {
+        mode: "work",
+        threadId: THREADS.work[0],
+      });
+      expect(assembled.bundle.threads[0]?.evidence.toolCalls).toEqual([TOOL_CALL]);
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

@@ -574,6 +574,52 @@ describe("CodeTurnRunner", () => {
     expect(observed.map((next) => next.providerKind)).toEqual(["text-delta", "completed"]);
   });
 
+  it("journals nothing of a tool call's input or output a runtime reported for a record", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Bash" }),
+          event({
+            kind: "tool-call-content",
+            toolCallId: "call-1",
+            part: "input",
+            text: "cat notes-input-marker.txt",
+          }),
+          event({
+            kind: "tool-call-content",
+            toolCallId: "call-1",
+            part: "output",
+            text: "notes-output-marker",
+          }),
+          event({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toEqual(["completed"]);
+    expect(observed.map((next) => next.providerKind)).toEqual([
+      "tool-start",
+      "tool-success",
+      "completed",
+    ]);
+    expect(JSON.stringify(observed)).not.toContain("marker");
+  });
+
   it("marks the thread when the runtime runs its own web search, and for no other tool", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(

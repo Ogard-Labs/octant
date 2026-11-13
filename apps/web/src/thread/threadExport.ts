@@ -33,7 +33,7 @@ export function resolveThreadExportClient(input: {
  * from a local cache.
  */
 export async function exportThreadBundle(
-  client: ThreadExportClient,
+  client: Pick<ThreadExportClient, "exportThread">,
   input: { readonly mode: OctantMode; readonly threadId: string; readonly title: string },
 ): Promise<string> {
   try {

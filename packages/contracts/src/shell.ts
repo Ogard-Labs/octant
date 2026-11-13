@@ -15,7 +15,15 @@ import {
   MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
   MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
 } from "./browserAutomation";
+import {
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
+  MAX_BROWSER_CAPTURES_PER_THREAD,
+} from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
+import {
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  MAX_THREAD_TOOL_STEPS_SETTING,
+} from "./threadToolSteps";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
@@ -979,6 +987,41 @@ export const ShellSettings = Schema.Struct({
    * decodes to off.
    */
   agentBrowserDownloads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * How many Browser captures each thread keeps, newest first. A host
+   * setting like the switch above. A store persisted before this shipped
+   * decodes to the default.
+   */
+  browserCapturesPerThread: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_CAPTURES_PER_THREAD)),
+    { default: () => DEFAULT_BROWSER_CAPTURES_PER_THREAD },
+  ),
+  /**
+   * Whether Chat and Work keep a bounded copy of each tool call's input and
+   * output in purgeable storage. A host setting. Turning it off stops new
+   * records and leaves the ones already kept, which go with their threads. A
+   * store persisted before this shipped decodes to on.
+   */
+  keepToolCallRecords: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * How many tool calls one Chat or Work turn keeps as steps, and so keeps
+   * records for, while it runs below Full access. A host setting. A turn
+   * that calls more still runs; its later calls have no row. A store
+   * persisted before this shipped decodes to the default.
+   */
+  toolStepsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_THREAD_TOOL_STEPS_SETTING)),
+    { default: () => DEFAULT_THREAD_TOOL_STEPS_PER_TURN },
+  ),
+  /**
+   * The same limit for a Work turn that runs at Full access. `0`, the
+   * default, is off: every call is kept, and the spend ceiling is what
+   * bounds the turn. A person may set a number here too.
+   */
+  fullAccessToolStepsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(0, MAX_THREAD_TOOL_STEPS_SETTING)),
+    { default: () => 0 },
+  ),
   /**
    * The largest file, in megabytes, an agent may upload through a page or have
    * held and saved from one. A store persisted before this shipped decodes to

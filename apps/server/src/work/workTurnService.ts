@@ -75,6 +75,8 @@ import {
   type AgentRun,
   type AgentRunId,
   type WorkTurnStreamFrame,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  type ThreadToolStep,
   type HarnessRetryNotice,
   type Project,
   type ProjectId,
@@ -101,6 +103,7 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
+import type { ThreadToolCallRecorders } from "../threadToolCallRecorder";
 import {
   accumulateTurnUsage,
   decideConversationSession,
@@ -110,7 +113,9 @@ import {
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   workProjectKeepsStatusFile,
+  changedThreadToolStep,
   clampWorkAccess,
+  threadToolStepLimit,
   workThreadAccessOf,
   workTurnCapabilityFacts,
   projectExtraFolderRoots,
@@ -505,6 +510,16 @@ export interface WorkTurnServiceDependencies {
   readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly consumeIssueContextFramed?: (threadId: string) => void;
+  /**
+   * The agent messages waiting for a Work thread, rechecked, marked on the
+   * thread, and framed as data for the turn about to start. Absent, Work
+   * turns carry no messages.
+   */
+  readonly carryAgentMessages?: (
+    threadId: string,
+  ) => Promise<ReadonlyArray<{ readonly messageId: string; readonly text: string }>>;
+  /** Journals delivery of carried messages once a provider has the turn's context. */
+  readonly confirmAgentMessagesDelivered?: (messageIds: ReadonlyArray<string>) => Promise<void>;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly expectedHostId?: string;
@@ -524,6 +539,17 @@ export interface WorkTurnServiceDependencies {
   readonly usageStore?: WorkTurnUsageStore;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
+  /** Keeps each turn's tool-call input and output in purgeable storage; absent keeps none. */
+  readonly toolCallRecorders?: ThreadToolCallRecorders;
+  /**
+   * The person's tool-step limits, read when a turn starts: how many calls a
+   * turn keeps below Full access, and at Full access (`0` is off). Absent
+   * reads as the defaults.
+   */
+  readonly toolStepSettings?: () => {
+    readonly toolStepsPerTurn: number;
+    readonly fullAccessToolStepsPerTurn: number;
+  };
   /**
    * Read access to journaled subagent runs. A turn that claims to carry a
    * finished run's result is verified here — parent thread, terminal
@@ -601,6 +627,8 @@ export class WorkTurnService {
   readonly #takeIssueContextFramed: WorkTurnServiceDependencies["takeIssueContextFramed"];
   readonly #peekIssueContextFramed: WorkTurnServiceDependencies["peekIssueContextFramed"];
   readonly #consumeIssueContextFramed: WorkTurnServiceDependencies["consumeIssueContextFramed"];
+  readonly #carryAgentMessages: WorkTurnServiceDependencies["carryAgentMessages"];
+  readonly #confirmAgentMessagesDelivered: WorkTurnServiceDependencies["confirmAgentMessagesDelivered"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #expectedHostId: string;
@@ -609,6 +637,8 @@ export class WorkTurnService {
   readonly #liveUpdates: WorkTurnLiveStore;
   readonly #usageStore: WorkTurnUsageStore | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
+  readonly #toolCallRecorders: ThreadToolCallRecorders | undefined;
+  readonly #toolStepSettings: NonNullable<WorkTurnServiceDependencies["toolStepSettings"]>;
   readonly #agentRuns: WorkTurnServiceDependencies["agentRuns"];
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
@@ -664,6 +694,8 @@ export class WorkTurnService {
     if (dependencies.consumeIssueContextFramed !== undefined) {
       this.#consumeIssueContextFramed = dependencies.consumeIssueContextFramed;
     }
+    this.#carryAgentMessages = dependencies.carryAgentMessages;
+    this.#confirmAgentMessagesDelivered = dependencies.confirmAgentMessagesDelivered;
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#expectedHostId = dependencies.expectedHostId ?? "local";
@@ -671,6 +703,13 @@ export class WorkTurnService {
     this.#liveUpdates = dependencies.liveUpdates ?? new WorkTurnLiveStore();
     this.#usageStore = dependencies.usageStore;
     this.#liveTurns = dependencies.liveTurns;
+    this.#toolCallRecorders = dependencies.toolCallRecorders;
+    this.#toolStepSettings =
+      dependencies.toolStepSettings ??
+      (() => ({
+        toolStepsPerTurn: DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+        fullAccessToolStepsPerTurn: 0,
+      }));
     this.#agentRuns = dependencies.agentRuns;
   }
 
@@ -1433,6 +1472,16 @@ export class WorkTurnService {
       const priorTranscript = nativeConversation
         ? []
         : this.#priorTranscriptContributions(command.threadId);
+      // A sibling Work thread's messages reach this thread's next turn, as a
+      // Code thread's do. Carrying marks the thread as having read outside
+      // content before the text is returned. A failed read costs the turn its
+      // messages, not the person their turn; the messages wait for the next.
+      const agentMessages =
+        thread === undefined
+          ? []
+          : await (
+              this.#carryAgentMessages?.(String(command.threadId)) ?? Promise.resolve([])
+            ).catch(() => []);
       const planned = planWorkTurnContext({
         threadId: command.threadId,
         providerInstanceId: command.authority.providerInstanceId,
@@ -1534,6 +1583,16 @@ export class WorkTurnService {
             command.threadId,
           )),
           ...this.#issueContextContribution(command.threadId),
+          ...agentMessages.map(
+            (message): WorkTurnContextContribution => ({
+              text: message.text,
+              sourceKind: "message",
+              referenceId: `agent-message:${message.messageId}`,
+              category: "workspace-context",
+              posture: "required",
+              block: { kind: "user-message", text: message.text },
+            }),
+          ),
           ...(externalData === undefined
             ? []
             : [
@@ -1733,6 +1792,7 @@ export class WorkTurnService {
         ...(preparedFeedback === undefined ? {} : { preparedProductFeedback: preparedFeedback }),
         contextPlan: planned,
         sessionHolds,
+        agentMessageIds: agentMessages.map((message) => message.messageId),
         admissionCurrent: () =>
           folderCurrent() && options?.admissionCurrent?.() !== false && inputsCurrent?.() !== false,
         ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
@@ -2154,6 +2214,8 @@ export class WorkTurnService {
      * unchanged, and the context it sends names no entries.
      */
     readonly sessionHolds: ReadonlySet<ProviderContextBlock>;
+    /** Agent messages this turn's context carries, confirmed delivered once sent. */
+    readonly agentMessageIds: ReadonlyArray<string>;
     readonly admissionCurrent?: () => boolean;
     readonly routineRun?: AutomationRunReference;
     readonly signal: AbortSignal;
@@ -2291,6 +2353,13 @@ export class WorkTurnService {
     let usageFacts: WorkUsageFacts = {};
     let promptSent = false;
     let runOutcome: WorkTurnRuntimeOutcome | undefined;
+    // The level this turn runs at, which a caller's ceiling may hold below
+    // the thread's own: a routine's turn on a Full access thread keeps the
+    // limit of the level it runs at.
+    const toolStepLimit = threadToolStepLimit({
+      fullAccess: input.access === "full-access",
+      settings: this.#toolStepSettings(),
+    });
     try {
       if (input.access !== undefined) {
         this.#runningAccess.set(String(input.command.threadId), {
@@ -2441,6 +2510,14 @@ export class WorkTurnService {
             }),
         onPromptSent: () => {
           promptSent = true;
+          // A message is delivered when a provider has it, not when the turn
+          // was accepted: until the send it stays waiting, and a turn that
+          // never reaches a provider leaves it for the next one.
+          if (input.agentMessageIds.length > 0) {
+            void this.#confirmAgentMessagesDelivered?.(input.agentMessageIds).catch(
+              () => undefined,
+            );
+          }
         },
         ...(this.#contextHarness === undefined
           ? {}
@@ -2506,14 +2583,29 @@ export class WorkTurnService {
           this.#liveTasks.set(String(input.command.requestId), tasks);
           this.#liveUpdates.appendTasks(input.command.threadId, input.command.requestId, tasks);
         },
+        ...(this.#toolCallRecorders === undefined
+          ? {}
+          : {
+              toolCallRecords: this.#toolCallRecorders({
+                mode: "work",
+                threadId: String(input.command.threadId),
+                turnId: String(input.command.requestId),
+                callLimit: toolStepLimit,
+              }),
+            }),
+        toolStepLimit: toolStepLimit ?? "off",
         onToolSteps: (toolSteps) => {
           if (input.signal.aborted) return;
+          const before = this.#liveToolSteps.get(String(input.command.requestId));
           this.#liveToolSteps.set(String(input.command.requestId), toolSteps);
-          this.#liveUpdates.appendToolSteps(
-            input.command.threadId,
-            input.command.requestId,
-            withoutPublishedSnapshots(toolSteps),
-          );
+          // Streamed as the one step that changed. The whole list is read
+          // from the transcript, which a view that falls behind is sent to.
+          const step = changedThreadToolStep(before, toolSteps);
+          if (step === undefined && toolSteps.truncated === (before?.truncated === true)) return;
+          this.#liveUpdates.appendToolStep(input.command.threadId, input.command.requestId, {
+            ...(step === undefined ? {} : { step: withoutPublishedSnapshot(step) }),
+            truncated: toolSteps.truncated,
+          });
         },
       });
       runOutcome = outcome;
@@ -3433,16 +3525,15 @@ function extraFolderContributions(
   ];
 }
 
+function withoutPublishedSnapshot(step: ThreadToolStep): ThreadToolStep {
+  if (step.published?.snapshot === undefined) return step;
+  const { snapshot: _settled, ...page } = step.published;
+  return { ...step, published: page };
+}
+
 function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps {
   if (!toolSteps.steps.some((step) => step.published?.snapshot !== undefined)) return toolSteps;
-  return {
-    ...toolSteps,
-    steps: toolSteps.steps.map((step) => {
-      if (step.published?.snapshot === undefined) return step;
-      const { snapshot: _settled, ...page } = step.published;
-      return { ...step, published: page };
-    }),
-  };
+  return { ...toolSteps, steps: toolSteps.steps.map(withoutPublishedSnapshot) };
 }
 
 /**

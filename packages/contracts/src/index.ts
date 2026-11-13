@@ -40,6 +40,7 @@ export * from "./threadTasks";
 export * from "./threadToolSteps";
 export * from "./threadRoutineReceipt";
 export * from "./threadToolStepList";
+export * from "./threadToolCallRecords";
 export * from "./threadWindow";
 export * from "./agentMessage";
 export * from "./siblingThreads";

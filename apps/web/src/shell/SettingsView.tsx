@@ -52,6 +52,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
 import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   isSettingsSectionAvailable,
@@ -157,6 +158,7 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
+import { DesktopLeaseSettings } from "../settings/DesktopLeaseSettings";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
@@ -193,7 +195,14 @@ import {
   type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { LOCAL_HOST_ID } from "@octant/contracts";
+import {
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  LOCAL_HOST_ID,
+  MAX_BROWSER_CAPTURES_PER_THREAD,
+  MAX_THREAD_TOOL_STEPS_SETTING,
+  MAX_TURN_RUNTIME_EVENTS,
+} from "@octant/contracts";
 import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
 import type { PickerGroup } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
@@ -1190,10 +1199,16 @@ function ActiveSectionContent({
             {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
           />
           {props.desktopPaneClient === undefined ? null : (
-            <DesktopSpendCapSettings
-              client={props.desktopPaneClient}
-              focusedSetting={focusedSetting}
-            />
+            <>
+              <DesktopSpendCapSettings
+                client={props.desktopPaneClient}
+                focusedSetting={focusedSetting}
+              />
+              <DesktopLeaseSettings
+                client={props.desktopPaneClient}
+                focusedSetting={focusedSetting}
+              />
+            </>
           )}
         </>
       );
@@ -1671,6 +1686,80 @@ function ActiveSectionContent({
                   </OctantButton>
                 </SettingRow>
               ))}
+            </div>
+          </SettingsSection>
+          <SettingsSection title="Browser captures">
+            <div className="setgroup">
+              <SettingRow
+                description={`How many screenshots and recordings each thread keeps, newest first. Default ${DEFAULT_BROWSER_CAPTURES_PER_THREAD}. A smaller number drops a thread's older captures, and a larger one never brings them back.`}
+                focused={focusedSetting === settingId("browser-captures-per-thread")}
+                label="Captures kept per thread"
+                scope="host"
+                settingId="browser-captures-per-thread"
+              >
+                <OctantNumberStepper
+                  label="Captures kept per thread"
+                  max={MAX_BROWSER_CAPTURES_PER_THREAD}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ browserCapturesPerThread: value })}
+                  value={props.settings.browserCapturesPerThread}
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
+          <SettingsSection title="Tool-call records">
+            <div className="setgroup">
+              <SettingRow
+                description="Chat and Work keep a bounded copy of what each tool call was given and what it returned, so you can open a tool row and see it. Kept on this computer outside the journal, with keys redacted, and removed when its thread is purged. Off keeps no new records; the ones already kept stay until their threads go."
+                focused={focusedSetting === settingId("tool-call-records")}
+                label="Keep tool inputs and outputs"
+                scope="host"
+                settingId="tool-call-records"
+              >
+                <OctantSwitch
+                  checked={props.settings.keepToolCallRecords}
+                  label="Keep tool inputs and outputs"
+                  onCheckedChange={(checked) =>
+                    props.onSettingsChange({ keepToolCallRecords: checked })
+                  }
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
+          <SettingsSection title="Tool steps">
+            <div className="setgroup">
+              <SettingRow
+                description={`How many tool calls a Chat or Work turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row.`}
+                focused={focusedSetting === settingId("tool-steps-per-turn")}
+                label="Tool steps kept per turn"
+                scope="host"
+                settingId="tool-steps-per-turn"
+              >
+                <OctantNumberStepper
+                  label="Tool steps kept per turn"
+                  max={MAX_THREAD_TOOL_STEPS_SETTING}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ toolStepsPerTurn: value })}
+                  value={props.settings.toolStepsPerTurn}
+                />
+              </SettingRow>
+              <SettingRow
+                description={`The same limit for a Work turn that runs at Full access. 0 means no limit: every call is kept, and the spend ceiling is what bounds the turn. A turn still stops after ${MAX_TURN_RUNTIME_EVENTS.toLocaleString("en-US")} runtime events, whatever this is set to.`}
+                focused={focusedSetting === settingId("tool-steps-per-turn-full-access")}
+                label="Tool steps kept per turn at Full access"
+                scope="host"
+                settingId="tool-steps-per-turn-full-access"
+              >
+                <OctantNumberStepper
+                  label="Tool steps kept per turn at Full access"
+                  max={MAX_THREAD_TOOL_STEPS_SETTING}
+                  min={0}
+                  onChange={(value) =>
+                    props.onSettingsChange({ fullAccessToolStepsPerTurn: value })
+                  }
+                  value={props.settings.fullAccessToolStepsPerTurn}
+                />
+              </SettingRow>
             </div>
           </SettingsSection>
           {props.canvasClient?.publicLinkSettings === undefined ? null : (

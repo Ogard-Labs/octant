@@ -2967,6 +2967,48 @@ describe("BrowserAutomationService", () => {
       await f.service.close();
     });
 
+    it("keeps the page open through a wait as long as the idle interval, then lets it expire", async () => {
+      const f = harness();
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, sessionTimeoutMs: 600_000 },
+      });
+      let finish!: () => void;
+      vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { url: "https://example.com", title: "Still waiting" };
+      });
+      const waiting = f.service.act({
+        windowId,
+        capturedBy: "agent",
+        request: request({
+          kind: "wait",
+          waitFor: {
+            conditions: [{ kind: "text", text: "Deployed", present: true }],
+            match: "all",
+            timeoutMs: 600_000,
+          },
+        }),
+      });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      // The wait's own limit and the idle interval end at the same instant;
+      // the page must outlive the wait so its answer is not lost to expiry.
+      f.advance(600_000);
+      f.expire();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+      // The hold is the wait's limit and a short margin, never open-ended.
+      f.advance(60_000);
+      f.expire();
+      await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+      finish();
+      expect((await waiting).failure?.category).toBe("context-expired");
+      await f.service.close();
+    });
+
     it.each(["stale", "credential"] as const)("does not renew for a %s refusal", async (reason) => {
       const f = harness();
       await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
