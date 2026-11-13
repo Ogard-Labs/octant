@@ -132,8 +132,10 @@ the Browser pane
   that cannot be read leaves the captures out and the export still succeeds. A
   thread with no captures exports unchanged.
 - No new route. The export route already requires that the caller can open the
-  thread, and only a local window's export carries captures: a paired device
-  never reads them, so its export leaves them out.
+  thread, and a local window's or a paired device's export carries captures
+  (maintainer decision, 2026-11-12; not built yet: today only a local window's
+  does, because a paired device never reads them, so its export leaves them
+  out).
 - Implemented by `browserCaptureExportAttachments` in the domain package and the
   `browserCaptures` option of the server's thread export service.
 
@@ -141,7 +143,9 @@ the Browser pane
 
 - `POST /api/browser/captures` lists the retained captures, newest first.
   `POST /api/browser/captures/image` returns one as an image data URL.
-- Both answer only a local window that can open the thread (403 otherwise),
+- Both answer a local window or a paired device that can open the thread (403
+  otherwise; maintainer decision, 2026-11-12; not built yet: today a local
+  window only),
   under the same rule that lets a window read the thread's generated images.
   The thread need not be live: an archived thread, a thread in an archived
   Project, and a thread whose provider is switched off still show what they
@@ -149,8 +153,8 @@ the Browser pane
 - The take route drives the Browser, so it needs the thread's live Browser
   authority as well, and the context must belong to the named thread. An
   archived thread shows its captures and takes no new one.
-- The product route classifier leaves all three unlisted, so a paired device is
-  stopped before the route too.
+- Not built yet: today the product route classifier leaves all three unlisted,
+  so a paired device is stopped before the route too.
 
 ## Canvas design assets
 
@@ -336,13 +340,14 @@ request, and only by choosing to.
   is not part of an accessible name, so typing leaves no trace of what was
   typed.
 - **Reads.** `POST /api/browser/steps` lists them, oldest first, and answers
-  exactly the callers `POST /api/browser/captures` answers: a local window that
-  can open the thread, archived or not. The product route classifier leaves it
-  unlisted, so a paired device is stopped before the route.
+  exactly the callers `POST /api/browser/captures` answers: a local window or a
+  paired device that can open the thread, archived or not. Not built yet: today
+  the product route classifier leaves it unlisted, so a paired device is stopped
+  before the route.
 - Rationale: the proof names pages and elements the person browsed and sits
-  beside pictures a paired device may not read, so reading it is the same
-  authority as reading a capture, not wider. A paired device therefore cannot
-  view, attach, or save the proof; Code threads' pull-request flow reads it
+  beside the pictures, so reading it is the same authority as reading a capture,
+  not wider. Today a paired device therefore cannot view, attach, or save the
+  proof; Code threads' pull-request flow reads it
   from the person's own window.
 - **The agent.** It reads its own step list only as it reads any tool result
   today (`changed` and the failure it gets back). No new operation reads the
@@ -382,7 +387,9 @@ request, and only by choosing to.
 - Rationale: saving to a folder the person picks is the narrowest option that
   works: nothing is uploaded, no new credential or host is involved, and the
   picker is the person's consent for the one folder.
-- **Paired devices.** Reading the proof is refused for a paired device, so a
+- **Paired devices.** A paired device reads and attaches the proof as a window
+  does (maintainer decision, 2026-11-12). Not built yet: today reading the proof
+  is refused for a paired device, so a
   pull-request form reached from one says "Browser proof can be attached only
   from a window on this computer." and creates nothing until the person turns
   the choice off. "Save screenshots…" exists only where the desktop app's bridge
@@ -390,7 +397,8 @@ request, and only by choosing to.
   Code commands; this adds nothing to what it may do there.
 - **Signed-in pages.** A capture or step of a page in a Project or Personal
   profile follows the capture rules: it is kept, names its profile, and is read
-  only by a local window. Attaching it to a pull request is the person's
+  by a local window or, not built yet, a paired device. Attaching it to a pull
+  request is the person's
   choice like any other proof.
 
 ## Recordings
@@ -509,8 +517,8 @@ attached the same way.
   of kilobytes, so the bound holds a few dozen distinct frames, and a waiting
   page costs none.
 - **Privacy.** A recording follows every capture rule: it stays on this
-  computer, under the data directory; only a local window that can open the
-  thread reads it, never a paired device; it is in no telemetry, Canvas share,
+  computer, under the data directory; a local window or, not built yet, a paired
+  device that can open the thread reads it; it is in no telemetry, Canvas share,
   replica sync, or diagnostics export; and it leaves the host only in the local
   owner's thread or data export and in the folder the person saves it to.
 

@@ -40,7 +40,8 @@ built as well: a recipe names the computer a Space on another of the person's
 computers runs on, the pane says when a view is refused because the session
 could be read on its way, and the host refuses network where a placement
 cannot have it ([Built: Cua follow-ups](#built-cua-follow-ups)). Recipe key
-entry is built too: a local window enters, replaces, and removes the key a
+entry is built too: a local window (a paired device too once built) enters,
+replaces, and removes the key a
 cloud recipe's provider reads, kept only in the host credential store
 ([Built: recipe key entry](#built-recipe-key-entry)); it shows only for a
 provider the host offers, which now includes E2B.
@@ -232,8 +233,9 @@ lease anyway.
   provider. For a provider that bills the person, the monthly cap is
   mandatory, and inside it a person confirms each billed lease in every
   posture, Full access included, while the setting "Confirm each billed
-  desktop" is on, which is the default. Only a person at a local window
-  changes that setting, as with the cap. With it off, a billed lease inside
+  desktop" is on, which is the default. Only a person changes that setting, at a
+  local window or a paired device, as with the cap. With it off, a billed lease
+  inside
   the cap follows the thread's level as a host-local one does
   ([decision 2](#maintainer-decisions); exception 6 of
   [the Full access rule](../architecture.md#security-and-authority);
@@ -253,10 +255,11 @@ lease anyway.
   are off until a person sets a monthly cap in Settings › Computer use. Before
   any billed lease is journaled, the host estimates it and refuses it if the
   month's spend plus the estimate would pass the cap; reaching the cap ends no
-  running lease, refuses new ones, and tells the person why. Only a person at
-  a local window reads or changes the cap; an agent, in any posture, and a
-  paired device are refused before anything is journaled, so no turn can raise
-  what it may spend.
+  running lease, refuses new ones, and tells the person why. Only a person reads
+  or changes the cap, at a local window or a paired device (maintainer decision,
+  2026-11-12); an agent, in any posture, is refused before anything is
+  journaled, so no turn can raise what it may spend. Not built yet: today a
+  paired device is refused as an agent is.
 - **Reading** the screen (a frame, a screenshot, a window list) needs no
   approval. **Agent input** follows the existing computer-use rules unchanged:
   the tool offered on every eligible turn, per-application approval,
@@ -1095,14 +1098,16 @@ Rules this delivery resolved:
 - **Only a Code Project holds a recipe.** Only Code threads have a Desktop
   tab, so a Work recipe could never start a desktop; Work gets one when Work
   leasing is delivered. A Chat Project never does.
-- **Set from a local window; read anywhere the Project is.** Setting or
-  removing a recipe chooses what this host runs, so only a local window may:
-  the Project route refuses the command from a paired device, which the
-  remote route policy already denies a Project command. A paired device may
-  read the recipe with the Project, and still watches and operates its
+- **Set by the person; read anywhere the Project is.** Setting or removing a
+  recipe chooses what this host runs, so only the person may, at a local window
+  or a paired device (maintainer decision, 2026-11-12). Not built yet: today the
+  Project route refuses the command from a paired device, which the remote route
+  policy already denies a Project command; a paired device may read the recipe
+  with the Project, and still watches and operates its
   desktops ([decision 3](#maintainer-decisions)). An agent has no command
   that reaches it.
-- **The editor is a local window's.** No paired client mounts it: the paired
+- **The editor is a local window's today.** Not built yet: a paired client
+  mounts it too. Today none does: the paired
   browser (`RemoteWorkspace`) serves thread lists and threads but no Project
   settings, and the phone shows none. A paired surface that later shows a
   Project's settings renders the recipe read-only, with no Save or Remove
@@ -1608,10 +1613,11 @@ The spend-cap rules:
   tells the person: the pane says the cap stopped the start and Settings
   shows the month's spend against it. Lowering the cap below what runs ends
   no lease.
-- **Agents cannot raise the cap.** Only a person at a local window reads or
-  changes it (`spend-cap-local-only` for anyone else). No agent tool reaches
-  it, and the lease service refuses an agent, a paired device, and the
-  system actor before journaling anything.
+- **Agents cannot raise the cap.** Only a person reads or changes it, at a local
+  window or, not built yet, a paired device (today `spend-cap-local-only` for
+  anyone but a local window). No agent tool reaches it, and the lease service
+  refuses an agent and the system actor before journaling anything, and today a
+  paired device too.
 - **Journaled without secrets.** A change is `desktop.spend-cap-changed@1`
   (the previous and new cap, as the person), and a refusal the cap made is
   `desktop.billed-lease-refused@1` (owner, provider, placement, reason, month,
@@ -2311,7 +2317,8 @@ Rules this delivery resolved:
   person's own machines declares `choosesMachine`, and a recipe on it must
   name one (`machine`); a recipe on any other placement, or for a provider
   with none, that names one is refused, at save and at acquire. The person
-  picks it in a local window from the machines the provider lists now,
+  picks it in a local window (on a paired device too once built) from the
+  machines the provider lists now,
   offline ones marked; the editor never picks one. The recipe keeps the name
   the person chose it by, so the pane, the Start confirmation, and a paired
   device show which computer a desktop uses without asking the provider. The
@@ -2320,9 +2327,10 @@ Rules this delivery resolved:
   counts as removed. The driver creates only on the named machine, refusing
   `machine-not-found` when the daemon does not list it and `machine-offline`
   when it does not answer, so it never chooses another.
-- **Listing machines is a local window's act.** Only a local window sets a
-  recipe, so only a person there is answered `recipe-machines`; a paired
-  device, an agent, and `system` are refused `not-permitted`. It asks only a
+- **Listing machines is the person's act.** Only the person sets a recipe, so
+  only the person is answered `recipe-machines`, at a local window or, not built
+  yet, a paired device; an agent and `system` are refused `not-permitted`, and
+  today a paired device is too. It asks only a
   provider offered for leasing now, on a placement that chooses a machine,
   bounded like a teardown call. The driver is untrusted: an id that is not
   one is left out, names are cut to 128 characters and trimmed again after the cut, for provider and placement names alike, and at most 64 machines
@@ -2382,7 +2390,8 @@ smokes; `cua-other-machine` now names the one machine its setup requires.
 ### Built: recipe key entry
 
 A person enters, replaces, and removes the API key a cloud recipe's provider
-reads, in the recipe editor of a local window. The key field shows only for
+reads, in the recipe editor of a local window (a paired device's too once
+built). The key field shows only for
 a provider the host offers for leasing, which now includes E2B; its tests
 offer a fake cloud provider.
 
@@ -2409,10 +2418,13 @@ offer a fake cloud provider.
 
 Rules this delivery resolved:
 
-- **Entered only from a local window, through the Project route.** The key
-  travels with the recipe change, so the route that already refuses a paired
-  device's recipe change refuses it before the service runs and anything is
-  stored. An agent has no command that reaches it. Model endpoint keys are
+- **Entered through the Project route.** The key travels with the recipe change,
+  so it follows the recipe's rule: a local window or a paired device (maintainer
+  decision, 2026-11-12; [Architecture: Remote
+  clients](../architecture.md#security-and-authority)). Not built yet: today the
+  route that refuses a paired device's recipe change refuses the key with it,
+  before the service runs and anything is stored. An agent has no command that
+  reaches it. Model endpoint keys are
   saved from a desktop window over native IPC; a desktop recipe is set from
   any local window, a browser on a headless host included, so its key takes
   the Project route to the broker instead, as a sync bucket's key pair does.
@@ -2489,8 +2501,8 @@ horizontal overflow, and the typed key absent from the page after saving.
 Nothing here is owed by the maintainer beyond slice 6's E2B live smoke, which
 is the evidence for what the recorded E2B API cannot show. Left for later: a key stored for a change that was
 not journaled stays in the store if deleting it fails too, since nothing
-names it and the store is never listed. The key field is a local window's
-like the rest of the editor, which no paired client mounts
+names it and the store is never listed. Today the key field is a local window's
+like the rest of the editor, which no paired client mounts yet
 ([recipe storage](#built-recipe-storage)).
 
 ### Built: offering E2B and Cua

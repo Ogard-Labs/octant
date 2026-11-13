@@ -244,45 +244,6 @@ export class BrowserToolApprovalService {
   }
 
   /**
-   * The profile site approvals an owner device may read after its unlock: a
-   * page in a stored profile asking to be opened at an origin, raised under an
-   * authority that still holds. An upload, a download, a sign-in request and
-   * a script each show the person something only a window of this computer
-   * presents, so they are left out, as is a page with no profile, which the
-   * device that raised it already answers.
-   */
-  listProfileSiteApprovals(): ReadonlyArray<BrowserToolApproval> {
-    this.#expire();
-    return [...this.#pending.values()]
-      .filter(
-        (pending) =>
-          isProfileSiteApproval(pending.view) &&
-          this.#options.authorityIsCurrent(pending.threadId, pending.authority, pending.windowId),
-      )
-      .map((pending) => pending.view);
-  }
-
-  /**
-   * An owner device's answer to one profile site approval, allow once or deny.
-   * The caller has verified the owner and its unlock. Nothing is remembered:
-   * a remembered site is journaled by the window that answered, and an owner
-   * device is no window.
-   */
-  decideProfileSiteApproval(
-    decision: Pick<BrowserToolApprovalDecision, "approvalId" | "decision">,
-  ): boolean {
-    this.#expire();
-    const pending = this.#pending.get(String(decision.approvalId));
-    if (pending === undefined || !isProfileSiteApproval(pending.view)) return false;
-    if (!this.#options.authorityIsCurrent(pending.threadId, pending.authority, pending.windowId)) {
-      pending.resolve("denied");
-      return false;
-    }
-    pending.resolve(decision.decision);
-    return true;
-  }
-
-  /**
    * A window answers its own prompts. A routine's prompt has no window of its
    * own, so any window that may drive that thread's browser answers it; the
    * answer settles only this prompt and lends the window nothing else of the
@@ -348,15 +309,4 @@ export class BrowserToolApprovalService {
       }
     }
   }
-}
-
-/** A page in a stored profile asking to be opened at an origin, and nothing else. */
-function isProfileSiteApproval(view: BrowserToolApproval): boolean {
-  return (
-    view.profile !== undefined &&
-    view.upload === undefined &&
-    view.download === undefined &&
-    view.signIn === undefined &&
-    view.script === undefined
-  );
 }

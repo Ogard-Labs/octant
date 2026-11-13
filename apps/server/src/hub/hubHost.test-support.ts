@@ -42,7 +42,7 @@ import { DelegatingSpokeService, type DelegatingParentPort } from "./delegatingS
 import { createDelegationStateStore, type DelegationStatePort } from "./delegationStateStore";
 import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
-import { createHubOwnerRouteHandler, type OwnerSiteApprovalHost } from "./hubOwnerRoutes";
+import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import type { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
 import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
@@ -249,7 +249,6 @@ export interface HubTestHost {
 
 export async function startHubTestHost(input: {
   readonly ownerApprovals?: OwnerApprovalHost;
-  readonly ownerSiteApprovals?: OwnerSiteApprovalHost;
   readonly ownerBrowser?: OwnerBrowserControlService;
   readonly name: string;
   readonly address: string;
@@ -789,7 +788,6 @@ export async function startHubTestHost(input: {
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     ...(input.ownerApprovals === undefined ? {} : { approvals: input.ownerApprovals }),
     approvalAnswerNeedsOwnUnlock: () => ownerApprovalAnswerUnlock.required(),
-    ...(input.ownerSiteApprovals === undefined ? {} : { siteApprovals: input.ownerSiteApprovals }),
     ...(input.ownerBrowser === undefined ? {} : { browser: input.ownerBrowser }),
     hub,
     spoke,

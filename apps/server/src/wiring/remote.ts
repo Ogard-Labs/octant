@@ -273,7 +273,6 @@ export type RemoteDependencies = {
     | "browserExtensionService"
     | "browserFlowService"
     | "browserProfileService"
-    | "browserToolApprovalService"
   > &
   Pick<
     CodeToolingWiring,
@@ -340,7 +339,6 @@ export function wireRemote(deps: RemoteDependencies) {
     browserExtensionService,
     browserFlowService,
     browserProfileService,
-    browserToolApprovalService,
     agentMessageService,
     agentRunAdmission,
     agentRunOrchestration,
@@ -1959,10 +1957,6 @@ export function wireRemote(deps: RemoteDependencies) {
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     approvals: ownerApprovals,
     approvalAnswerNeedsOwnUnlock: () => ownerApprovalAnswerUnlock.required(),
-    siteApprovals: {
-      list: () => browserToolApprovalService.listProfileSiteApprovals(),
-      answer: (decision) => browserToolApprovalService.decideProfileSiteApproval(decision),
-    },
     browser: ownerBrowserControlService,
     hub: hubService,
     spoke: spokeLinkService,

@@ -119,12 +119,21 @@ it.each([
         extension: { kind: "core" },
       }),
     };
+    const supportsTools = vi.fn(() => true);
     const childTarget = currentManagedChildBrowserTarget(workRun, {
       canReview: () => true,
       resolveParent: () => parentTarget.authority,
-      supportsTools: () => true,
+      supportsTools,
     })?.target;
     expect(childTarget).toBeDefined();
+    // The tool gate is asked at the level the child's own session runs at,
+    // so a runtime that carries Octant's tools only at Full access answers
+    // for a Full access child and for no other.
+    expect(supportsTools).toHaveBeenCalledWith(
+      workRun.routingReceipt.executionResolution.providerInstanceId,
+      workRun.routingReceipt.executionResolution.modelId,
+      { executionPolicy: workRun.authority.executionPolicy },
+    );
     if (childTarget === undefined) throw Error("Expected an eligible Work child");
     const target = { ...childTarget, grantee: command.grantee };
     const executionId = "90000000-0000-4000-8000-000000000001";

@@ -183,7 +183,6 @@ import {
   decodeCodeDebugStartRequest,
   decodeCodeDebugStartResult,
 } from "@octant/contracts/code-debug";
-import { authorizePrincipalAction } from "@octant/domain";
 import { Schema } from "effect";
 import type { CodeDebugService } from "./code/codeDebugService";
 import type { CodeLanguageService } from "./code/codeLanguageService";
@@ -803,27 +802,12 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           // Full access no longer asks for a native confirmation, so the
           // confirmation no longer keeps a paired device from reaching it.
-          // A device may lower a thread; raising one to Full access, or
-          // starting one there, is chosen at a window on this host or on an
-          // owner device, whose fresh unlock for this exact command comes
-          // beside it. The default new threads start at stays with a window.
+          // A device may lower a thread; raising one to Full access is chosen
+          // at a window on this host.
           if (
             command !== undefined &&
             callerKind === "remote-device" &&
-            raisesToFullAccess(command) &&
-            authorizePrincipalAction({
-              principalKind: callerKind,
-              action: "code.remember-full-access",
-              ownerUnlock:
-                command.kind !== "update-code-settings" &&
-                dependencies.pairedMergeUnlock?.()?.verifyAction("full-access", {
-                  path: url.pathname,
-                  body: fatalUtf8.decode(body),
-                  proof: request.headers.get(OWNER_UNLOCK_HEADER),
-                }).status === "unlocked"
-                  ? "fresh"
-                  : "absent",
-            }).kind === "deny"
+            raisesToFullAccess(command)
           ) {
             return failureResponse(
               { category: "unauthorized", message: FULL_ACCESS_LOCAL_ONLY },
@@ -3258,8 +3242,7 @@ class CodeRouteRejected extends Error {
 
 const AUTOMATIC_MODEL_LOCAL_ONLY =
   "The model for automatic calls is chosen in the Octant window on this host.";
-const FULL_ACCESS_LOCAL_ONLY =
-  "Full access is chosen in the Octant window on this host, or on one of its owner devices after a fresh unlock.";
+const FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window on this host.";
 
 function raisesToFullAccess(command: CodeCommand): boolean {
   switch (command.kind) {

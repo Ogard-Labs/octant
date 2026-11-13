@@ -282,9 +282,12 @@ it: it carries no content and reaches no transcript, journal, usage figure, or
 turn event budget. A session that goes fully silent still times out, at the
 stalled-turn limit: a setting in Settings › Providers & Models, 30 minutes by
 default, which may be turned off. A provider tool call the runtime reports as
-running pauses that clock, as an app-managed call does; Force stop is
-unchanged (maintainer request, 2026-11-12). Not built yet: today the limit is
-a fixed five minutes and a running provider tool call does not pause it.
+running pauses that clock, as an app-managed call does; a call that reports a
+start and never a finish pauses it for at most a setting, two hours by
+default, that may be turned off (maintainer decision, 2026-11-12). Force stop
+is unchanged (maintainer request, 2026-11-12). Not built yet: today the limit
+is a fixed five minutes, a running provider tool call does not pause it, and
+no bound on that pause exists.
 
 Codex sends nothing while the model streams a tool call's arguments: the
 installed 0.163.0 app-server schema has no argument-delta notification, and
@@ -801,9 +804,15 @@ runtime outside the sandbox the receipt rests on, so a release that proves
 exclusivity below Full access is mixed there too, unless the thread keeps the
 opt-in sandbox. The capability is reported only when the connection check saw
 the runtime accept the tool endpoint's declaration; that check runs on macOS
-only, so on Linux nothing is reported as mixed. Not built yet: a child agent
-session, a routine's own Browser target and a saved flow still read
-`appManagedTools` alone, so they are not offered tools on a mixed runtime.
+only, so on Linux nothing is reported as mixed. Every reader of the tool
+gate follows the level the turn runs at (maintainer decision, 2026-11-13): a
+child agent session reads the level its own session runs at; a routine's own
+Browser target reads its running turn's level; a saved flow, which runs
+between turns, reads the level its thread holds then. While a person reviews
+a routine's Browser permission no turn runs, so a routine opted into its
+Project's level is read at Full access there and stays reviewable; a review
+offers no tool, and each turn is still judged at its own level. Below Full
+access all three read `appManagedTools` alone, as before.
 Process exit, stream failure, interruption, and scope cleanup retire pending
 tool requests.
 

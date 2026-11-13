@@ -490,6 +490,7 @@ export function wireWork(deps: WorkDependencies) {
             ? undefined
             : routineBrowserTools({
                 routineRun: input.routineRun,
+                turnLevel: appToolThreadLevel(input.thread),
                 threadId: decodeBrowserThreadId(String(input.thread.id)),
                 currentAuthority: () =>
                   browserAuthority.resolve(decodeBrowserThreadId(String(input.thread.id)), "work"),

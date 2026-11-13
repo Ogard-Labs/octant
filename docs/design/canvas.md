@@ -1238,10 +1238,11 @@ that board), the artifact SVG sidecar and thumbnail (the layout scaled into the
 band), and the HTML export (the layout drawn inline as plain SVG elements with
 no script, id, or external reference) place the same nodes; the Markdown
 export names a shaped node by its role.
-Mermaid outside the translated subset is drawn by a bundled renderer inside
-the existing sandboxed, no-network frame, and its raw source shows only when
-that rendering fails (maintainer request, 2026-11-12). Not built yet: today
-Mermaid is never rendered and such a source stays a code block. The pure `importCanvasMermaid` translates a bounded
+The translator is widened to the constructs models use most, with no new
+dependency and no Mermaid renderer; Mermaid still outside the translated
+subset stays a code block showing its raw source (maintainer decision, 2026-11-12,
+which replaces the earlier bundled-renderer direction). Not built yet: today
+the subset is the narrower one described next. The pure `importCanvasMermaid` translates a bounded
 subset into the typed blocks above: a `flowchart` or `graph` (TD/TB or LR;
 `[ ]` process, `{ }` decision, `([ ])` terminator, `( )` the plain box;
 `-->`, `---`, and `-.->` links with a piped or inline label; one level of
@@ -1438,9 +1439,11 @@ marks no outside content, and a share, an export, a mirrored file, and
 artifact sync all leave it here. The pure `admitCanvasTagCommand` policy
 validates shape and budgets, and the refusals are named values
 (`malformed-request`, `oversized-payload`, `duplicate-tag`, `unknown-tag`,
-`tag-budget-exceeded`, `stale-version`). Only a window on this host changes
-tags: the command route is host-window only, a paired device reads a
-listing's tags and changes none, and the host stamps the event's timestamp
+`tag-budget-exceeded`, `stale-version`). Only the person changes tags, at a
+window on this host or a paired device (maintainer decision, 2026-11-12; not
+built yet: today the command route is host-window only, and a paired device
+reads a listing's tags and changes none), and the host stamps the event's
+timestamp
 and its own person, never a field the request carries. The listing carries
 each entry's tags and a roster of every tag with how many artifacts carry
 it; the query filters by one tag, matched exactly, and a synced artifact —
@@ -1711,10 +1714,13 @@ font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none';
 form-action 'none'; base-uri 'none'`, `Referrer-Policy: no-referrer`, and
 `Cache-Control: no-store`; a refusal carries the same headers. A design or
 prototype has a per-Canvas **Allow network** switch, off by default, that only
-the person sets, never an agent, a routine, or a paired device; while it is
-on, that Canvas's running page is served with a policy that lets it make
-network requests, and nothing else about its sandbox changes (maintainer
-request, 2026-11-12). Not built yet: today no design page reaches the network. Declared
+the person sets, at a local window or a paired device, never an agent or a
+routine; while it is on, that Canvas's running page reaches the network only
+through a filtering egress proxy on the host that refuses loopback, private
+ranges, link-local addresses and the Octant server, and nothing else about
+its sandbox changes. The proxy is built first and the switch after it
+(maintainer decision, 2026-11-12). Not built yet: today neither exists and no
+design page reaches the network. Declared
 images are resolved under the version's provenance and written in as `data:`
 images: every image once, and a repeated reference only while the page's
 images stay within the design's 5 MiB as base64, after which it draws a

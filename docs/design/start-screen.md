@@ -35,8 +35,10 @@ use Settings once on launch instead, preserving the onboarding outcome. Skip for
 now clears pending setup without disabling Computer use; it remains optional for
 starting a task. The state distinguishes enabled, permissions granted and verified
 working. See [Computer use](../architecture.md#extensions-and-skills) for the
-diagnostic's exact-window scope and lifecycle. A read-only surface omits those links; paired clients
-have no first-run capability card and acquire no local settings authority.
+diagnostic's exact-window scope and lifecycle. A read-only surface omits those
+links; paired clients have no first-run capability card, because those
+permissions are granted on the host computer, and (not built yet) today they
+acquire no local settings authority.
 Installation, package trust, enablement and task access remain separate.
 
 **Dismiss capability card** hides only this card for the current setup session.
@@ -325,8 +327,9 @@ computer is not connected, the card says it cannot check it rather than
 listing this computer's servers under its name. Stop is the
 Environment's authorized stop unchanged: a server Octant owns stops at once, one
 it does not own asks for the same confirmation naming process, folder, and port,
-and a Stop the host will not offer (a server in a Plan thread's own worktree, a
-server Octant does not own from a paired device) is explained in a line with no
+and a Stop the host will not offer (a server in a Plan thread's own worktree,
+today, a server Octant does not own from a paired device) is explained in a line
+with no
 control. A server in the Project folder itself is no one thread's, so it is
 judged as the person's own, approval-gated, even when a Plan thread works in
 that folder. At most five rows show, then

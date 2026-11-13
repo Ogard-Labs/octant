@@ -4,7 +4,6 @@ import { UtcTimestamp } from "./events";
 import { HubMemberId, HubMemberRole } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
 import { PermissionPersistence, ProviderExecutionPolicy } from "./providers";
-import { ToolApprovalId } from "./toolActions";
 import { WorkAccess, WorkThreadId } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -14,19 +13,6 @@ const base64Url = (maxLength: number) =>
     Schema.maxLength(maxLength),
     Schema.pattern(/^[A-Za-z0-9_-]+$/),
   );
-
-/**
- * Product routes whose command a paired client may send with an owner device's
- * fresh unlock beside it, for an action only a window on the host or an owner
- * device may take: choosing Full access for a Code or Work thread, and
- * navigating or typing in the host's agent Browser. The owner route issues a
- * challenge for these paths to an owner only.
- */
-export const OWNER_UNLOCKED_ACTION_PATHS = [
-  "/api/code/commands",
-  "/api/work/threads/commands",
-  "/api/browser/actions",
-] as const;
 
 /** Request headers an owner device adds to a signed member request. */
 export const OWNER_UNLOCK_HEADER = "x-octant-owner-unlock";
@@ -120,9 +106,9 @@ export type PairedMergeUnlockRequest = typeof PairedMergeUnlockRequest.Type;
 export const decodePairedMergeUnlockRequest = Schema.decodeUnknownSync(PairedMergeUnlockRequest);
 
 /**
- * A window chooses whether each approval answer from an owner device (a
- * runtime approval or a profile site approval) needs its own fresh unlock on
- * this host, instead of riding the device's open five-minute session.
+ * A window chooses whether each runtime approval answer from an owner device
+ * needs its own fresh unlock on this host, instead of riding the device's open
+ * five-minute session.
  */
 export const OwnerApprovalAnswerUnlockRequest = Schema.Struct({
   enabled: Schema.Boolean,
@@ -130,20 +116,6 @@ export const OwnerApprovalAnswerUnlockRequest = Schema.Struct({
 export type OwnerApprovalAnswerUnlockRequest = typeof OwnerApprovalAnswerUnlockRequest.Type;
 export const decodeOwnerApprovalAnswerUnlockRequest = Schema.decodeUnknownSync(
   OwnerApprovalAnswerUnlockRequest,
-);
-
-/**
- * An owner device's answer to one waiting profile site approval on a host:
- * allow the page once, or deny it. It cannot ask the host to remember the
- * site; that stays with a window on the host.
- */
-export const OwnerSiteApprovalAnswerRequest = Schema.Struct({
-  approvalId: ToolApprovalId,
-  decision: Schema.Literal("approved", "denied"),
-}).annotations(strict);
-export type OwnerSiteApprovalAnswerRequest = typeof OwnerSiteApprovalAnswerRequest.Type;
-export const decodeOwnerSiteApprovalAnswerRequest = Schema.decodeUnknownSync(
-  OwnerSiteApprovalAnswerRequest,
 );
 
 export const HubRoleRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);

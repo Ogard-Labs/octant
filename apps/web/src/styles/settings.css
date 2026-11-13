@@ -207,7 +207,9 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .settings-view__workspace-titlebar {
   display: flex;
   align-items: center;
-  padding: 0 var(--oct-space-5);
+  /* The page's own gutter at both ends, so the band's first and last control
+     stand on the edges the content below stands on. */
+  padding: 0 var(--oct-settings-gutter);
 }
 
 /* The page head is a preference window's: the title at the section-label
@@ -911,7 +913,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   max-width: calc(
     var(--oct-settings-reading-width) + var(--oct-settings-gutter) + var(--oct-settings-gutter)
   );
-  padding: 48px var(--oct-settings-gutter) 72px;
+  padding: var(--oct-space-12) var(--oct-settings-gutter) var(--oct-space-12);
   margin: 0 auto;
 }
 
@@ -1000,7 +1002,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-section-stack {
   display: grid;
-  gap: 28px;
+  gap: var(--oct-space-6);
 }
 
 /* All preference sections share an open layout, including expanded editors.
@@ -1536,10 +1538,10 @@ textarea.settings-view__text-input {
 /* Appearance's blocks are sections of the same page as General's, so they take
    the same rhythm between them rather than a tighter one of their own. */
 /* The editor's sections are Settings sections, so they keep the page's
-   28px rhythm; at 16px Appearance read as one crowded section. */
+   24px rhythm; at 16px Appearance read as one crowded section. */
 .settings-theme-editor {
   display: grid;
-  gap: 28px;
+  gap: var(--oct-space-6);
   padding: 0;
   margin: 0;
 }
@@ -3089,7 +3091,7 @@ html[data-octant-increased-contrast="true"]
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
-  line-height: 1.35;
+  line-height: var(--oct-line-label);
 }
 
 .settings-view .settings-card-section.settings-card-section--open > h2,
@@ -3097,15 +3099,13 @@ html[data-octant-increased-contrast="true"]
   padding-bottom: var(--oct-space-3);
 }
 
-.settings-view
-  .settings-card-section.settings-card-section--open
-  > h2:has(+ .settings-section-note) {
-  padding-bottom: var(--oct-space-1);
-}
-
 .settings-view .settings-card-section--open > .settings-section-note {
   max-width: 68ch;
+  /* One rule for what follows a label and what follows a note: 12px, whole
+     pixels (the label's and the note's lines are role leadings rounded to a
+     pixel, not 1.45 of the size). */
   padding: 0 0 var(--oct-space-3);
+  line-height: var(--oct-line-detail);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
 }
@@ -3208,12 +3208,6 @@ html[data-octant-increased-contrast="true"]
 }
 
 /* A label that carries actions on its own line pads the same way. */
-.settings-view
-  .settings-card-section.settings-card-section--open
-  > .settings-section-head:has(+ .settings-section-note) {
-  padding-bottom: var(--oct-space-1);
-}
-
 .settings-view .settings-card-section.settings-card-section--open > :is(legend, summary) {
   padding: 0 0 var(--oct-space-3);
   color: var(--octant-text-secondary);
@@ -3252,7 +3246,7 @@ html[data-octant-increased-contrast="true"]
 .settings-view__content-inner :has(> .settings-card-section--open) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 28px;
+  gap: var(--oct-space-6);
 }
 
 .settings-view .settings-card-section--open {
@@ -3532,7 +3526,7 @@ html[data-octant-increased-contrast="true"]
 .settings-view .provider-history__content {
   width: 100%;
   padding: 0;
-  gap: 28px;
+  gap: var(--oct-space-6);
 }
 
 .settings-view .provider-history__status {
@@ -3917,10 +3911,6 @@ html[data-octant-increased-contrast="true"]
   background: transparent;
   border: 0;
   border-radius: 0;
-}
-
-.settings-view--sheet .settings-view__workspace-titlebar {
-  padding-inline-end: var(--oct-space-3);
 }
 
 .settings-view--sheet .settings-view__content-inner {

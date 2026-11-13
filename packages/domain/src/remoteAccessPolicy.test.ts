@@ -154,66 +154,6 @@ describe("remote access policy", () => {
     ).toEqual({ kind: "deny", reason: "unknown-action" });
   });
 
-  it("lets an owner device with a verified fresh unlock choose Full access, and no other paired device", () => {
-    const fromDevice = (ownerUnlock?: "fresh" | "absent") =>
-      authorizePrincipalAction({
-        principalKind: "remote-device",
-        action: "code.remember-full-access",
-        ...(ownerUnlock === undefined ? {} : { ownerUnlock }),
-      });
-
-    expect(fromDevice("fresh")).toEqual({ kind: "allow" });
-    expect(fromDevice("absent")).toEqual({ kind: "deny", reason: "local-host-required" });
-    expect(fromDevice()).toEqual({ kind: "deny", reason: "local-host-required" });
-  });
-
-  it("lets an owner device with a verified fresh unlock drive the host's agent Browser, and no other paired device", () => {
-    const fromDevice = (ownerUnlock: "fresh" | "absent") =>
-      authorizePrincipalAction({
-        principalKind: "remote-device",
-        action: "browser.session.manage",
-        ownerUnlock,
-      });
-
-    expect(fromDevice("fresh")).toEqual({ kind: "allow" });
-    expect(fromDevice("absent")).toEqual({ kind: "deny", reason: "local-host-required" });
-  });
-
-  it("keeps credentials, pairing, device management, extension trust and install, and root binding with a window whatever unlock a device shows", () => {
-    for (const action of [
-      "provider.credentials.write",
-      "provider.credentials.read",
-      "desktop.approve-device",
-      "desktop.revoke-device",
-      "desktop.enable-listener",
-      "desktop.device.rename",
-      "extension.trust",
-      "extension.install",
-      "project.root.bind",
-      "project.root.relink",
-      "host-key.rotate",
-    ]) {
-      expect(
-        authorizePrincipalAction({ principalKind: "remote-device", action, ownerUnlock: "fresh" }),
-        action,
-      ).toEqual({ kind: "deny", reason: "local-host-required" });
-    }
-    expect(
-      authorizePrincipalAction({
-        principalKind: "remote-device",
-        action: "desktop.issue-local-approval",
-        ownerUnlock: "fresh",
-      }),
-    ).toEqual({ kind: "deny", reason: "remote-cannot-mint-local-receipt" });
-    expect(
-      authorizePrincipalAction({
-        principalKind: "remote-device",
-        action: "invented.action",
-        ownerUnlock: "fresh",
-      }),
-    ).toEqual({ kind: "deny", reason: "unknown-action" });
-  });
-
   it("lets a paired device watch a thread's running product without driving the host", () => {
     // A companion screen is a read of what the host is already showing, plus
     // the gestures that land inside that view. Pointing the host's browser
