@@ -131,7 +131,7 @@
 .oct-row-label {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   line-height: var(--oct-leading-label);
 }
 
@@ -476,7 +476,7 @@
   border-bottom: 2px solid transparent;
   border-radius: 0;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .surface-tabs > [aria-selected="true"],

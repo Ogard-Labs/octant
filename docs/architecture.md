@@ -13106,13 +13106,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
   and image generation offers (their stated request time), computer-use owners
   and five-minute app grants, Claude's pre-tool grants, credential command
   requests, Browser upload and download permissions (which are not restored
-  after a restart), and server preview tunnels. A grant that is stored and
+  after a restart), Browser tool approvals, Browser session grants and
+  Browser credential use, and server preview tunnels. A deadline that
+  crosses to the desktop app crosses as time remaining, restated in the
+  desktop's wall time, and the desktop's own wall deadline stays its local
+  check; the server never compares one clock's deadline with the other's. A grant that is stored and
   must outlive a restart cannot use a process epoch and stays on wall time,
   stated in UTC: a paired device's registration expiry, and any stored
   `expiresAt` a later process reads back. Such a grant stays revocable by the
-  person at any time, which is what bounds it when the clock is wrong. Not
-  yet moved: Browser tool approvals, session grants and credential use read
-  wall time though they live in the process. Routine proposals and image
+  person at any time, which is what bounds it when the clock is wrong.
+  Routine proposals and image
   generation offers end on a timer alone; a timer is Node's monotonic clock,
   which on Linux does not count a suspend.
   _Why elapsed time is trusted._ On Linux `os.uptime()` reads `/proc/uptime`
