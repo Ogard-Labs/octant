@@ -30,7 +30,7 @@ interface PendingApproval {
   readonly view: ExtensionToolApproval;
   readonly windowId: WindowId;
   readonly expiresAt: number;
-  readonly remember?: () => boolean;
+  readonly remember?: (scope: "tool" | "server") => boolean;
   readonly resolve: (approved: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly signal?: AbortSignal;
@@ -101,11 +101,12 @@ export class ExtensionToolApprovalService {
     /** The sources that marked the thread, read by the host when it asks. */
     readonly outsideContent?: ApprovalOutsideContent;
     /**
-     * Records "always allow in this Project" for this tool and says whether it
-     * was recorded. Absent when this call can only be approved once; the
-     * prompt then offers no such answer and one sent anyway is refused.
+     * Records "always allow" for this tool, or for every tool of its server,
+     * and says whether it was recorded. Absent when this call can only be
+     * approved once; the prompt then offers no such answer and one sent
+     * anyway is refused.
      */
-    readonly remember?: () => boolean;
+    readonly remember?: (scope: "tool" | "server") => boolean;
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
@@ -187,7 +188,7 @@ export class ExtensionToolApprovalService {
         answerer.kind !== "local-window" ||
         String(pending.windowId) !== String(answerer.scopeId) ||
         this.options.isHostScope?.(answerer.scopeId) === true ||
-        !pending.remember()
+        !pending.remember(decision.rememberScope ?? "tool")
       ) {
         return false;
       }

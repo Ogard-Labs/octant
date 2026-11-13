@@ -152,6 +152,49 @@ async function selectedFixture(directory = "reports", kind: "main" | "extra" = "
 describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
   "saving a Browser download",
   () => {
+    it("refuses an installer below Full access and saves it into downloads at Full access", async () => {
+      const fixture = await selectedFixture();
+      const ask = vi.fn(async () => "approved" as const);
+      const save = (programsAllowed: boolean) =>
+        saveBrowserDownload({
+          workspaceRoot: fixture.workspace,
+          name: "setup.sh",
+          claim: async () => fixture.held,
+          isHeldPath: async () => true,
+          ask,
+          ...(programsAllowed ? { programsAllowed: true as const } : {}),
+        });
+
+      expect(await save(false)).toMatchObject({
+        status: "refused",
+        error: "download-executable",
+        reason: "executable",
+      });
+      expect(ask).not.toHaveBeenCalled();
+      expect(await readdir(fixture.workspace)).toEqual([]);
+
+      expect(await save(true)).toMatchObject({ status: "saved", path: "downloads/setup.sh" });
+      expect(await readdir(join(fixture.workspace, "downloads"))).toEqual(["setup.sh"]);
+    });
+
+    it("refuses a held file over the per-file limit the person set, before anyone is asked", async () => {
+      const fixture = await selectedFixture();
+      const ask = vi.fn(async () => "approved" as const);
+      const save = (maxFileBytes: number) =>
+        saveBrowserDownload({
+          workspaceRoot: fixture.workspace,
+          name: "report.txt",
+          claim: async () => fixture.held,
+          isHeldPath: async () => true,
+          ask,
+          maxFileBytes,
+        });
+      // The held fixture is 23 bytes.
+      expect(await save(22)).toMatchObject({ status: "refused", error: "download-too-large" });
+      expect(ask).not.toHaveBeenCalled();
+      expect(await save(23)).toMatchObject({ status: "saved", path: "downloads/report.txt" });
+    });
+
     it.each(["main", "extra"] as const)(
       "saves only to the selected %s root and returns its honest relative receipt",
       async (kind) => {

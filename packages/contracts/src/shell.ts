@@ -5,7 +5,16 @@ import { AppleProjectPath } from "./appleToolchain";
 import { ChatThreadId } from "./chat";
 import { CodeProjectFilePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
-import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
+import {
+  BrowserContextId,
+  BrowserThreadId,
+  DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+  MAX_BROWSER_HELD_DOWNLOADS,
+  MAX_BROWSER_HELD_DOWNLOAD_LIMIT,
+  MAX_BROWSER_UPLOAD_FILES,
+  MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
+  MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+} from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId, LOCAL_HOST_ID } from "./host";
@@ -584,6 +593,20 @@ export const RememberedBrowserProfileSite = Schema.Struct({
 }).annotations(strict);
 export type RememberedBrowserProfileSite = typeof RememberedBrowserProfileSite.Type;
 
+/**
+ * One "Always allow" answer to an agent's upload or download-save below Full
+ * access: later transfers in that direction between that site and that
+ * thread workspace do not ask. It never covers the other direction, another
+ * site, or another workspace, and it lifts no path, size or type check.
+ */
+export const RememberedBrowserTransfer = Schema.Struct({
+  direction: Schema.Literal("upload", "download"),
+  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  /** The thread workspace on this host: a Work Project folder or a Code checkout. */
+  workspaceRoot: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
+}).annotations(strict);
+export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -876,7 +899,8 @@ export const ShellSettings = Schema.Struct({
    * Personal Browser profile. A pair, never an origin alone: a remembered
    * Private origin does not cover a signed-in page, and a pair for one profile
    * does not cover another. Grows only through the approval answer, like
-   * `rememberedBrowserOrigins`.
+   * `rememberedBrowserOrigins`. A pair whose origin is `ANY_BROWSER_ORIGIN` is
+   * the answer "Allow all sites in this profile".
    */
   rememberedBrowserProfileSites: Schema.optionalWith(
     Schema.Array(RememberedBrowserProfileSite).pipe(Schema.maxItems(1_024)),
@@ -892,6 +916,40 @@ export const ShellSettings = Schema.Struct({
    * decodes to off.
    */
   agentBrowserDownloads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * The largest file, in megabytes, an agent may upload through a page or have
+   * held and saved from one. A store persisted before this shipped decodes to
+   * the former fixed limit.
+   */
+  browserTransferFileLimitMegabytes: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES)),
+    { default: () => DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES },
+  ),
+  /**
+   * How many downloads one browsing context holds for the agent at once; the
+   * oldest is discarded first. Decodes to the former fixed limit when absent.
+   */
+  browserHeldDownloadLimit: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_HELD_DOWNLOAD_LIMIT)),
+    { default: () => MAX_BROWSER_HELD_DOWNLOADS },
+  ),
+  /**
+   * How many files an agent may send in one upload. Decodes to the former
+   * fixed count when absent.
+   */
+  browserUploadFileCountLimit: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT)),
+    { default: () => MAX_BROWSER_UPLOAD_FILES },
+  ),
+  /**
+   * Uploads and download saves the person answered "Always allow". Grows only
+   * through that approval answer, like `rememberedBrowserOrigins`; a settings
+   * replacement may only forget entries.
+   */
+  rememberedBrowserTransfers: Schema.optionalWith(
+    Schema.Array(RememberedBrowserTransfer).pipe(Schema.maxItems(1_024)),
+    { default: () => [] },
+  ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */
   persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);

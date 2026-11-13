@@ -462,9 +462,9 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
-    expect(await screen.findByRole("button", { name: "Allow app for 5 minutes" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Allow app for this thread" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Hide activity preview" }));
-    expect(screen.getByRole("button", { name: "Allow app for 5 minutes" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Allow app for this thread" })).toBeVisible();
   });
 
   it("keeps Computer Use approval and stop controls while the preview is collapsed", async () => {

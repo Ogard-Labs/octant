@@ -62,6 +62,11 @@ export interface ExtensionToolThread {
    * approval never covers a call from such a turn; a person is asked.
    */
   readonly planTurn?: boolean;
+  /**
+   * The thread runs at Full access, where a tool call asks nobody. Chat has
+   * no such level, so a Chat thread never carries this.
+   */
+  readonly fullAccessTurn?: boolean;
 }
 
 export interface ExtensionToolExecutionPort {

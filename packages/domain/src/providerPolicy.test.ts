@@ -37,6 +37,7 @@ import {
   createClaudeProvider,
   setClaudeArtifactDelivery,
   setProviderNativeSetup,
+  setProviderOwnMemory,
   formatClaudeAuthLoginCommand,
   createGeminiImageProvider,
   createIdeogramImageProvider,
@@ -2544,6 +2545,40 @@ describe("provider instance policy", () => {
 
     const off = setClaudeArtifactDelivery(on, { enabled: false, updatedAt });
     expect(off.configuration).not.toHaveProperty("artifactDelivery");
+  });
+
+  it("turns a provider's own memory on only for a Claude Code or Codex account, apart from running as itself", () => {
+    for (const account of [claudeProvider(), codexProvider()]) {
+      const on = setProviderOwnMemory(account, { enabled: true, updatedAt });
+      expect(on.ownMemory).toBe(true);
+      expect(on).not.toHaveProperty("nativeSetup");
+      expect(on.version).toBe(account.version + 1);
+      expect(decodeProviderInstance(on)).toEqual(on);
+      expect(setProviderNativeSetup(on, { enabled: true, updatedAt })).toMatchObject({
+        ownMemory: true,
+        nativeSetup: true,
+      });
+      expect(setProviderOwnMemory(on, { enabled: false, updatedAt })).not.toHaveProperty(
+        "ownMemory",
+      );
+    }
+    const claudeOn = setProviderOwnMemory(claudeProvider(), { enabled: true, updatedAt });
+    if (claudeOn.driverKind !== "claude")
+      throw new Error("A Claude account stays a Claude account.");
+    expect(
+      changeClaudeConfiguration(claudeOn, {
+        configuration: { ...claudeProvider().configuration, accent: "rose" },
+        activeSessionCount: 1,
+        updatedAt,
+      }),
+    ).toMatchObject({ ownMemory: true });
+
+    // OpenCode and Mistral Vibe keep no memory of their own behind a switch.
+    for (const account of [provider(), mistralVibeProvider(), piProvider(), httpProvider()]) {
+      expect(() => setProviderOwnMemory(account, { enabled: true, updatedAt })).toThrow(
+        "Only a Claude Code or Codex account has a memory of its own to turn on.",
+      );
+    }
   });
 
   it("lets only a key provider account run as itself, and keeps the switch through an account edit", () => {

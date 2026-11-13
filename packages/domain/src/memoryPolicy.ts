@@ -95,7 +95,28 @@ function agentProvenance(origin: AgentAuthoredMemoryProvenance): AgentAuthoredMe
     kind: "agent-authored",
     mode: origin.mode,
     ...(origin.threadId === undefined ? {} : { threadId: origin.threadId }),
+    ...(origin.unconfirmed === true ? { unconfirmed: true } : {}),
   };
+}
+
+/**
+ * What becomes of a write a thread's agent asks Project memory for. Plan
+ * refuses before anything else. Full access, or the Project's setting below
+ * it, writes with nobody asked. Otherwise the person confirms a card, and a
+ * turn with nobody at a window on the host has no one to show it to.
+ */
+export type AgentProjectMemoryWrite = "refuse-plan" | "write" | "ask" | "refuse-nobody-to-confirm";
+
+export function agentProjectMemoryWrite(input: {
+  readonly plan: boolean;
+  readonly fullAccess: boolean;
+  /** The Project's "Agents may write Project memory without asking" setting. */
+  readonly projectAllows: boolean;
+  readonly somebodyAtWindow: boolean;
+}): AgentProjectMemoryWrite {
+  if (input.plan) return "refuse-plan";
+  if (input.fullAccess || input.projectAllows) return "write";
+  return input.somebodyAtWindow ? "ask" : "refuse-nobody-to-confirm";
 }
 
 export interface CreateMemoryEntryInput {
@@ -188,6 +209,8 @@ export interface RetractMemoryEntryInput {
   readonly actor: ProjectActor;
   readonly retractedAt: UtcTimestamp;
   readonly expectedVersion: AggregateVersion;
+  /** The thread whose agent retracted it; absent when the person did. */
+  readonly agentOrigin?: AgentAuthoredMemoryProvenance;
 }
 
 export function retractMemoryEntry(
@@ -204,6 +227,9 @@ export function retractMemoryEntry(
     retractionReason: normalizeReason(input.reason),
     retractedBy,
     retractedAt: input.retractedAt,
+    ...(input.agentOrigin === undefined
+      ? {}
+      : { retractionOrigin: agentProvenance(input.agentOrigin) }),
     version: nextVersion(input.expectedVersion),
     updatedAt: input.retractedAt,
   };

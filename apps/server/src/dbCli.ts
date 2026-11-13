@@ -522,6 +522,7 @@ const PROVIDER_INSTANCE_SNAPSHOT_EVENTS = new Set([
   "provider.instance-driver-quarantined@1",
   "provider.instance-enabled-changed@1",
   "provider.instance-native-setup-changed@1",
+  "provider.instance-own-memory-changed@1",
 ]);
 const PROVIDER_INSTANCE_REMOVED_EVENT = "provider.instance-removed@1";
 const PROVIDER_INSTANCE_ID_PATTERN =

@@ -82,6 +82,39 @@ describe("RememberedToolApprovalsPanel", () => {
     expect(screen.getAllByText(/without asking/).length).toBeGreaterThan(0);
   });
 
+  it("lists a whole server's approval and the account's approvals, and revokes them", async () => {
+    const user = userEvent.setup();
+    const {
+      mcpToolName: _mcpToolName,
+      definitionDigest: _definitionDigest,
+      ...wholeServer
+    } = grant({ grantId: `sha256:${"4".repeat(64)}` as never });
+    const { projectId: _projectId, ...forAccount } = grant({
+      grantId: `sha256:${"5".repeat(64)}` as never,
+    });
+    const extensionClient = client({
+      grants: [wholeServer as ExtensionToolGrant, forAccount as ExtensionToolGrant],
+    });
+    renderPanel(extensionClient);
+
+    const octant = await screen.findByRole("group", { name: "Octant" });
+    expect(within(octant).getByText("All tools of files")).toBeInTheDocument();
+    const account = screen.getByRole("group", { name: "Chat outside a Project" });
+    expect(within(account).getByText("read_file")).toBeInTheDocument();
+
+    await user.click(
+      within(octant).getByRole("button", { name: "Revoke All tools of files in Octant" }),
+    );
+    expect(extensionClient.revokeToolGrant).toHaveBeenCalledWith(`sha256:${"4".repeat(64)}`);
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Octant" })).not.toBeInTheDocument(),
+    );
+    await user.click(
+      within(account).getByRole("button", { name: "Revoke read_file in Chat outside a Project" }),
+    );
+    expect(extensionClient.revokeToolGrant).toHaveBeenCalledWith(`sha256:${"5".repeat(64)}`);
+  });
+
   it("says plainly that nothing is remembered yet", async () => {
     renderPanel(client({ grants: [] }));
 

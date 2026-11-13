@@ -40,7 +40,9 @@ before continuing." Its **Resume** button explicitly submits one continuation
 in the same thread. Completed turns, deliberate stops, and a lost renderer
 connection alone do not show it. A turn a restart cut off continues by
 itself, once, as the host, unless its thread is held: Continue after restart is
-off in Settings or for the thread, its last effect is uncertain, or its provider
+off in Settings or for the thread, its last effect is uncertain (a push or pull
+request step whose outcome is unknown, or a tool call that may change something
+and has no record of finishing, which the notice names by its tool), or its provider
 cannot resume it. Only a held thread shows this notice (maintainer request,
 2026-11-12; [Continuing a turn a restart cut off](decisions.md#continuing-a-turn-a-restart-cut-off)).
 
@@ -1627,7 +1629,10 @@ number and linked threads.
 With grouping on, each repository has a slim header: its name, the count and a
 "..." menu. That menu holds what the old Project header held: **Auto-refresh**
 and **Agents may merge**, with the same labels and the same setters as before,
-and Refresh. With grouping off those switches are in the page's **Repository
+then **Agents may comment on pull requests**, which is off until chosen, closes
+the menu on one activation as Agents may merge does, and shows no chip, and
+Refresh. **Agents may push to the default branch** is not in the menu until an
+agent push path to the default branch exists (maintainer decision, 2026-11-12). With grouping off those switches are in the page's **Repository
 settings** menu, one group per connected repository, because they act on a
 Project and must stay one step from the list; they are never in Filter, which
 only narrows what is shown. The permission is readable without opening a menu: where Agents may merge is
@@ -1635,8 +1640,9 @@ on, that repository's group header shows the quiet chip "Agents may merge"
 beside the count, and, with grouping off, the Repository settings button carries
 the same dot as a narrowing filter and its tooltip names those repositories;
 Auto-refresh is not an authority and has no chip, only the check in the menu.
-The server still owns both settings, refuses a
-device that may not set them, and enforces the merge choice at the merge. A
+The server still owns every one of these settings, refuses a
+device that may not set them, and enforces the merge, comment and
+default-branch choices at the act. A
 Project that is not on GitHub is not drawn as an empty block: one quiet line at
 the foot says how many, with their names in a disclosure. A connected Project
 never refreshed is named in one line (flat) or keeps its group with the empty
@@ -2685,7 +2691,7 @@ number in tabular numerals at the trailing edge); one quiet chip or a success
 check at the trailing edge of the title line instead of three chips; no hairline
 between rows and the control hover fill with the row radius under the pointer.
 Grouping by repository gives each group a slim header with a "..." menu holding
-Auto-refresh, Agents may merge and Refresh. A Project that is not on GitHub is
+Auto-refresh, Agents may merge, Agents may comment on pull requests and Refresh. A Project that is not on GitHub is
 one notice at the foot, never an empty block. Where agents may merge is on, the
 group shows a quiet chip and the Repository settings button a dot. The Issues
 place uses the same row, group head and Sort menu. The dock packs its search,

@@ -7,7 +7,12 @@ import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { OctantMode } from "./modes";
-import { KeyProviderDriverKinds, PermissionMode, ProviderInstanceId } from "./providers";
+import {
+  KeyProviderDriverKinds,
+  PermissionMode,
+  ProviderInstanceId,
+  ProviderModelId,
+} from "./providers";
 import { AutoReviewer } from "./shield";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -141,6 +146,28 @@ export const ProjectColor = Schema.Literal(
 );
 export type ProjectColor = typeof ProjectColor.Type;
 
+/**
+ * Whether an agent below Full access may write this Project's memory without
+ * the person confirming each change. Absent means disabled: each write waits
+ * for the person. Full access never asks and Plan never writes, whatever this
+ * says. Only a window on the host sets it.
+ */
+export const ProjectAgentMemoryWrites = Schema.Literal("enabled", "disabled");
+export type ProjectAgentMemoryWrites = typeof ProjectAgentMemoryWrites.Type;
+
+/**
+ * The image profile and model a person told a thread of this Project to keep
+ * using without asking ("Don't ask again" on the image card). An agent's image
+ * call in the Project then generates with it at every level, in a routine's
+ * turn too. Absent means each call asks, apart from Full access with exactly
+ * one ready image profile. The host drops a choice it can no longer run.
+ */
+export const ProjectImageGenerationChoice = Schema.Struct({
+  profileInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+}).annotations(strict);
+export type ProjectImageGenerationChoice = typeof ProjectImageGenerationChoice.Type;
+
 const ProjectFields = {
   id: ProjectId,
   name: Schema.NonEmptyTrimmedString,
@@ -153,6 +180,8 @@ const ProjectFields = {
    * both.
    */
   brandKit: Schema.optional(CanvasDesignBrand),
+  agentMemoryWrites: Schema.optional(ProjectAgentMemoryWrites),
+  imageGenerationChoice: Schema.optional(ProjectImageGenerationChoice),
   lifecycle: ProjectLifecycle,
   pinned: Schema.Boolean,
   rank: ProjectRank,
@@ -287,6 +316,22 @@ export type CodeProjectPullRequestBackgroundRefresh =
  */
 export const CodeProjectAgentMerge = Schema.Literal("enabled", "disabled");
 export type CodeProjectAgentMerge = typeof CodeProjectAgentMerge.Type;
+/**
+ * Whether a Code agent below Full access may post a comment or a review reply
+ * on the pull request its thread owns without the per-post approval. Absent
+ * means disabled: each post asks. Full access never asks, whatever this says.
+ * Only a window on the host sets it.
+ */
+export const CodeProjectAgentPullRequestComments = Schema.Literal("enabled", "disabled");
+export type CodeProjectAgentPullRequestComments = typeof CodeProjectAgentPullRequestComments.Type;
+/**
+ * Whether a push to the default branch goes ahead on the thread's ordinary
+ * push authority. Absent means disabled: such a push needs the person's
+ * approval for that one act, as a plain force-push always does. Only a window
+ * on the host sets it.
+ */
+export const CodeProjectAgentDefaultBranchPush = Schema.Literal("enabled", "disabled");
+export type CodeProjectAgentDefaultBranchPush = typeof CodeProjectAgentDefaultBranchPush.Type;
 
 /**
  * Whether this Project's language services run the Project's own copy of a
@@ -415,6 +460,8 @@ export const CodeProject = Schema.Struct({
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
   ownToolchain: Schema.optional(CodeProjectOwnToolchain),
+  agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
+  agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
   /**
    * The mode this Project's new threads start in, overriding Settings. Absent
    * follows Settings, except that a Project which remembered Full access
@@ -477,6 +524,8 @@ const CodeProjectSummary = Schema.Struct({
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
   ownToolchain: Schema.optional(CodeProjectOwnToolchain),
+  agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
+  agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
   defaultPermissionMode: Schema.optional(PermissionMode),
   /** New threads here at Full access keep the sandbox; absent follows Settings. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
@@ -530,14 +579,18 @@ const TransferredMemoryProvenance = Schema.Struct({
 }).annotations(strict);
 
 /**
- * An entry an agent proposed from a thread and the person approved. The
- * approving person is the entry's author; this names where the words came
- * from. A thread purge removes `threadId` and keeps the entry.
+ * A change an agent made from a thread: where the words came from. When the
+ * person approved it they are the entry's author. `unconfirmed` marks a change
+ * accepted with nobody asked, at Full access or under the Project's setting;
+ * the author field then holds the host's person only because every entry has
+ * one, not because they saw the change. A thread purge removes `threadId` and
+ * keeps the entry.
  */
 export const AgentAuthoredMemoryProvenance = Schema.Struct({
   kind: Schema.Literal("agent-authored"),
   mode: OctantMode,
   threadId: Schema.optional(Schema.UUID),
+  unconfirmed: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type AgentAuthoredMemoryProvenance = typeof AgentAuthoredMemoryProvenance.Type;
 
@@ -586,6 +639,8 @@ export const RetractedMemoryEntry = Schema.Struct({
   retractionReason: Schema.NonEmptyTrimmedString,
   retractedBy: EventActor,
   retractedAt: UtcTimestamp,
+  /** The thread whose agent retracted it; absent when the person did it themselves. */
+  retractionOrigin: Schema.optional(AgentAuthoredMemoryProvenance),
 }).annotations(strict);
 export type RetractedMemoryEntry = typeof RetractedMemoryEntry.Type;
 
@@ -739,6 +794,16 @@ export const ProjectCommand = Schema.Union(
     ownToolchain: CodeProjectOwnToolchain,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-code-project-agent-pull-request-comments"),
+    ...ProjectCommandFields,
+    agentPullRequestComments: CodeProjectAgentPullRequestComments,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-code-project-agent-default-branch-push"),
+    ...ProjectCommandFields,
+    agentDefaultBranchPush: CodeProjectAgentDefaultBranchPush,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-code-project-actions"),
     ...ProjectCommandFields,
     /** The whole list; an empty list removes every action. */
@@ -779,6 +844,17 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     /** The whole list; an empty list removes every action. */
     actions: ProjectActions,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-project-agent-memory-writes"),
+    ...ProjectCommandFields,
+    agentMemoryWrites: ProjectAgentMemoryWrites,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-project-image-generation-choice"),
+    ...ProjectCommandFields,
+    /** The choice to keep; absent drops it, so the next call asks again. */
+    imageGenerationChoice: Schema.optional(ProjectImageGenerationChoice),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-project-brand-kit"),
@@ -864,6 +940,14 @@ export const ProjectCommandResult = Schema.Union(
     project: CodeProject,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("code-project-agent-pull-request-comments-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-agent-default-branch-push-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("code-project-actions-changed"),
     project: CodeProject,
   }).annotations(strict),
@@ -890,6 +974,14 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("work-project-actions-changed"),
     project: WorkProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-agent-memory-writes-changed"),
+    project: Project,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-image-generation-choice-changed"),
+    project: Project,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("project-brand-kit-changed"),
@@ -1132,6 +1224,18 @@ export const CodeProjectOwnToolchainChanged = Schema.Struct({ project: CodeProje
   strict,
 );
 export type CodeProjectOwnToolchainChanged = typeof CodeProjectOwnToolchainChanged.Type;
+/** Journaled once per change, as the merge permission is, so it survives a restart and shows who set it. */
+export const CodeProjectAgentPullRequestCommentsChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectAgentPullRequestCommentsChanged =
+  typeof CodeProjectAgentPullRequestCommentsChanged.Type;
+/** Journaled once per change, as the merge permission is, so it survives a restart and shows who set it. */
+export const CodeProjectAgentDefaultBranchPushChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectAgentDefaultBranchPushChanged =
+  typeof CodeProjectAgentDefaultBranchPushChanged.Type;
 /** Journaled once per save so every window and a restarted host see the same list. */
 export const CodeProjectActionsChanged = Schema.Struct({ project: CodeProject }).annotations(
   strict,
@@ -1164,6 +1268,14 @@ export const WorkProjectActionsChanged = Schema.Struct({ project: WorkProject })
   strict,
 );
 export type WorkProjectActionsChanged = typeof WorkProjectActionsChanged.Type;
+export const ProjectAgentMemoryWritesChanged = Schema.Struct({ project: Project }).annotations(
+  strict,
+);
+export type ProjectAgentMemoryWritesChanged = typeof ProjectAgentMemoryWritesChanged.Type;
+export const ProjectImageGenerationChoiceChanged = Schema.Struct({ project: Project }).annotations(
+  strict,
+);
+export type ProjectImageGenerationChoiceChanged = typeof ProjectImageGenerationChoiceChanged.Type;
 export const ProjectBrandKitChanged = Schema.Struct({ project: Project }).annotations(strict);
 export type ProjectBrandKitChanged = typeof ProjectBrandKitChanged.Type;
 export const ProjectDesignSystemChanged = Schema.Struct({ project: Project }).annotations(strict);
@@ -1279,6 +1391,12 @@ export const decodeCodeProjectAgentMergeChanged = Schema.decodeUnknownSync(
 export const decodeCodeProjectOwnToolchainChanged = Schema.decodeUnknownSync(
   CodeProjectOwnToolchainChanged,
 );
+export const decodeCodeProjectAgentPullRequestCommentsChanged = Schema.decodeUnknownSync(
+  CodeProjectAgentPullRequestCommentsChanged,
+);
+export const decodeCodeProjectAgentDefaultBranchPushChanged = Schema.decodeUnknownSync(
+  CodeProjectAgentDefaultBranchPushChanged,
+);
 export const decodeCodeProjectActionsChanged = Schema.decodeUnknownSync(CodeProjectActionsChanged);
 export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(
   ProjectProviderPolicyChanged,
@@ -1296,6 +1414,12 @@ export const decodeWorkProjectPermissionModeChanged = Schema.decodeUnknownSync(
   WorkProjectPermissionModeChanged,
 );
 export const decodeWorkProjectActionsChanged = Schema.decodeUnknownSync(WorkProjectActionsChanged);
+export const decodeProjectAgentMemoryWritesChanged = Schema.decodeUnknownSync(
+  ProjectAgentMemoryWritesChanged,
+);
+export const decodeProjectImageGenerationChoiceChanged = Schema.decodeUnknownSync(
+  ProjectImageGenerationChoiceChanged,
+);
 export const decodeProjectBrandKitChanged = Schema.decodeUnknownSync(ProjectBrandKitChanged);
 export const decodeProjectDesignSystemChanged = Schema.decodeUnknownSync(
   ProjectDesignSystemChanged,

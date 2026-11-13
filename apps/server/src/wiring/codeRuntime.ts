@@ -6,7 +6,7 @@ import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthorit
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
-import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
+import { projectForgeChoicesFor, standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
@@ -92,6 +92,7 @@ import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import {
   clampTurnAccessPosture,
+  browserTransferLimits,
   defaultShellSettings,
   isNativeHarnessDriverKind,
   projectExtraFolderRoots,
@@ -314,7 +315,10 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools" | "threadDesktopDestination"> &
-  Pick<WorkspaceWiring, "codeBoardPlanProgressSource" | "contextHarness" | "projectService"> &
+  Pick<
+    WorkspaceWiring,
+    "codeBoardPlanProgressSource" | "contextHarness" | "keptImageChoices" | "projectService"
+  > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
   Pick<
@@ -348,6 +352,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerDataDirectory"
+    | "verifyModelToolsOnFirstUse"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
     | "worktreePreparation"
@@ -463,6 +468,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     projectPullRequestActionService,
     projectPullRequestCadence,
     projectPullRequestService,
+    keptImageChoices,
     projectService,
     providerDataDirectory,
     providerRuntimeRegistry,
@@ -501,15 +507,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeToolContributors.push(contributor);
     };
     // A routine's turn has nobody at a window to answer the image card, so it
-    // is not offered the tool.
+    // is offered the tool only where its Project keeps a choice.
     contributeCodeTools(({ windowId, thread, readThread, folders }) => {
-      if (isRoutineHostScope(windowId)) return undefined;
       const checkoutRoot = folders[0];
+      // The journaled level and the running one are both read and the
+      // stricter wins, as for the save below.
+      const level = () =>
+        clampTurnAccessPosture({
+          requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+          thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
+        });
       return createThreadImageAgentTools({
         windowId,
+        unattended: isRoutineHostScope(windowId),
         threadKind: "code-thread",
         scopeId: decodeImageGenerationScopeId(String(thread.id)),
         offers: imageGenerationOffers,
+        kept: keptImageChoices,
+        fullAccess: () => level() === "full-access",
         jobs: imageJobService,
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>
@@ -521,21 +536,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ?.models.find((candidate) => String(candidate.id) === String(thread.modelId))
             ?.inputModalities.includes("image") === true,
         // A file edit at the turn's level, under the checkout the turn
-        // works in. The journaled posture and the running one are both
-        // read and the stricter wins, so a session-only grant never lets
-        // this write through without asking.
+        // works in. The stricter of the journaled and running postures
+        // decides, so a session-only grant never lets this write through
+        // without asking.
         ...(checkoutRoot === undefined
           ? {}
           : {
               save: {
                 posture: () => {
-                  const level = clampTurnAccessPosture({
-                    requested: readThread()?.executionPolicy ?? thread.executionPolicy,
-                    thread:
-                      persistence.readCodeThread(thread.id)?.executionPolicy ??
-                      thread.executionPolicy,
-                  });
-                  return level === "plan" ? "refuse" : level === "approval-gated" ? "ask" : "allow";
+                  const current = level();
+                  return current === "plan"
+                    ? "refuse"
+                    : current === "approval-gated"
+                      ? "ask"
+                      : "allow";
                 },
                 write: (relativePath: string, bytes: Uint8Array) =>
                   saveGeneratedImageUnder({ root: checkoutRoot, relativePath, bytes }),
@@ -681,6 +695,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       );
       codeOperationRuntime = createCodeOperationRuntime({
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
+        verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
           if (checkout?.kind !== "managed-worktree") return undefined;
@@ -867,6 +882,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             parentThreadId: String(input.thread.id),
             mode: "code",
             projectId: input.thread.projectId,
+            ...(input.ask === undefined ? {} : { ask: input.ask }),
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
@@ -1080,6 +1096,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           },
         },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
+        browserTransferApprovals: browserToolApprovalService,
+        browserUploadFileCountLimit: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .browserUploadFileCountLimit,
+        browserUploadFileLimitBytes: () =>
+          browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .maxFileBytes,
         // A paired device is not at the computer a saved download would land on.
         browserDownloadRefusal: (windowId) =>
           browserToolApprovalService.isPairedDevice(windowId)
@@ -1508,6 +1531,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 : persistence.automationProjection.getDefinition(run.automationId),
           });
         },
+        projectForgeChoices: (thread) =>
+          projectForgeChoicesFor(persistence.readProject(thread.projectId)),
         // The switch service wakes threads through this runtime, so it is
         // built after it; a watch asked for before then is unavailable.
         pullRequestWatch: {

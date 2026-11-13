@@ -13,8 +13,12 @@ import {
   type CanonicalProjectBinding,
   type ChatProject,
   type CodeProject,
+  type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
   type CodeProjectOwnToolchain,
+  type ProjectAgentMemoryWrites,
+  type ProjectImageGenerationChoice,
+  type CodeProjectAgentPullRequestComments,
   type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
   type WorkProject,
@@ -558,6 +562,44 @@ export function changeCodeProjectOwnToolchain(
 }
 
 /**
+ * Let a Code agent below Full access comment on the pull request its thread
+ * owns without asking for each post, or stop that. Absence reads as disabled.
+ * Rejects a non-Code Project and a no-op change, as the merge setting does.
+ */
+export function changeCodeProjectAgentPullRequestComments(
+  project: Project,
+  agentPullRequestComments: CodeProjectAgentPullRequestComments,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have an agent comment setting");
+  }
+  if ((project.agentPullRequestComments ?? "disabled") === agentPullRequestComments) {
+    reject("invalid-lifecycle", "Code Project agent comment setting is already selected");
+  }
+  return { ...project, agentPullRequestComments, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Let a push to the default branch go ahead without the person's approval for
+ * that one act, or stop that. Absence reads as disabled. Rejects a non-Code
+ * Project and a no-op change, as the merge setting does.
+ */
+export function changeCodeProjectAgentDefaultBranchPush(
+  project: Project,
+  agentDefaultBranchPush: CodeProjectAgentDefaultBranchPush,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have a default-branch push setting");
+  }
+  if ((project.agentDefaultBranchPush ?? "disabled") === agentDefaultBranchPush) {
+    reject("invalid-lifecycle", "Code Project default-branch push setting is already selected");
+  }
+  return { ...project, agentDefaultBranchPush, version: nextVersion(project), updatedAt };
+}
+
+/**
  * Opt a Work Project into, or out of, the `STATUS.md` Octant keeps in its
  * folder. Absence reads as disabled, so every Project starts with Octant
  * writing nothing there. The default-folder Project collects what nobody gave
@@ -578,6 +620,54 @@ export function changeWorkProjectStatusFile(
     reject("invalid-lifecycle", "Work Project status file setting is already selected");
   }
   return { ...project, statusFile, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Let agents below Full access write this Project's memory without the person
+ * confirming each change, or stop that. Absence reads as disabled. Every mode's
+ * Project has memory, so every mode's Project takes the setting. Rejects a
+ * no-op change so the journal never carries an event that changed nothing.
+ */
+export function changeProjectAgentMemoryWrites(
+  project: Project,
+  agentMemoryWrites: ProjectAgentMemoryWrites,
+  updatedAt: UtcTimestamp,
+): Project {
+  if ((project.agentMemoryWrites ?? "disabled") === agentMemoryWrites) {
+    reject("invalid-lifecycle", "Project agent memory writes is already selected");
+  }
+  return { ...project, agentMemoryWrites, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Keep the image profile and model this Project's agents generate with
+ * without asking, replace it, or (with no choice) drop it so the next call
+ * asks again. Every mode's Project can hold one, because every mode's agent
+ * can generate. Rejects a no-op change so the journal never carries an event
+ * that changed nothing.
+ */
+export function changeProjectImageGenerationChoice(
+  project: Project,
+  choice: ProjectImageGenerationChoice | undefined,
+  updatedAt: UtcTimestamp,
+): Project {
+  const current = project.imageGenerationChoice;
+  const unchanged =
+    choice === undefined
+      ? current === undefined
+      : current !== undefined &&
+        String(current.profileInstanceId) === String(choice.profileInstanceId) &&
+        String(current.modelId) === String(choice.modelId);
+  if (unchanged) {
+    reject("invalid-lifecycle", "Project image generation choice is already selected");
+  }
+  const { imageGenerationChoice: _dropped, ...rest } = project;
+  return {
+    ...rest,
+    ...(choice === undefined ? {} : { imageGenerationChoice: choice }),
+    version: nextVersion(project),
+    updatedAt,
+  };
 }
 
 /**

@@ -51,6 +51,64 @@ describe("TerminalBrowserApprovalPrompt", () => {
     );
   });
 
+  it("asks about the Code agent's upload as the agent's own, and remembers Always allow for the site", async () => {
+    const browser = client([
+      {
+        ...approval(),
+        upload: { files: [{ name: "report.pdf", sizeBytes: 12_288 }] },
+      } as BrowserToolApproval,
+    ]);
+    render(
+      <TerminalBrowserApprovalPrompt
+        client={browser}
+        threadId={threadId}
+        threadTitle="Fix the login page"
+      />,
+    );
+
+    const card = await screen.findByRole("group", { name: "Browser upload approval" });
+    expect(card).toHaveTextContent("Let the agent upload report.pdf");
+    expect(card).not.toHaveTextContent("terminal");
+    expect(screen.getByRole("button", { name: "Upload once" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Allow all sites in this profile" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Always allow" }));
+    await waitFor(() =>
+      expect(browser.decideApproval).toHaveBeenCalledWith({
+        approvalId: "22222222-2222-4222-8222-222222222222",
+        decision: "approved",
+        remember: true,
+      }),
+    );
+  });
+
+  it("asks about the Code agent's download save with Save once, Always allow and Deny", async () => {
+    const browser = client([
+      {
+        ...approval(),
+        download: { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+      } as BrowserToolApproval,
+    ]);
+    render(
+      <TerminalBrowserApprovalPrompt
+        client={browser}
+        threadId={threadId}
+        threadTitle="Fix the login page"
+      />,
+    );
+
+    const card = await screen.findByRole("group", { name: "Browser download approval" });
+    expect(card).toHaveTextContent("Let the agent save report.pdf");
+    expect(screen.getByRole("button", { name: "Always allow" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Save once" }));
+    await waitFor(() =>
+      expect(browser.decideApproval).toHaveBeenCalledWith({
+        approvalId: "22222222-2222-4222-8222-222222222222",
+        decision: "approved",
+      }),
+    );
+  });
+
   it("shows the exact script and account authority with only a one-use answer", async () => {
     const browser = client([
       {
@@ -109,6 +167,39 @@ describe("TerminalBrowserApprovalPrompt", () => {
         screen.queryByRole("group", { name: "Browser request from a terminal" }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("offers to allow all sites in the profile on the agent's signed-in site approval, and never on a Private one", async () => {
+    const browser = client([
+      { ...approval(), profile: { kind: "personal" } } as unknown as BrowserToolApproval,
+    ]);
+    const { unmount } = render(
+      <TerminalBrowserApprovalPrompt client={browser} threadId={threadId} threadTitle="Thread" />,
+    );
+
+    const card = await screen.findByRole("group", { name: "Browser origin approval" });
+    expect(card).toHaveTextContent(
+      "Let the agent use https://example.com in the Personal profile?",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Allow all sites in this profile" }));
+    await waitFor(() =>
+      expect(browser.decideApproval).toHaveBeenCalledWith({
+        approvalId: "22222222-2222-4222-8222-222222222222",
+        decision: "approved",
+        rememberProfile: true,
+      }),
+    );
+    unmount();
+
+    render(
+      <TerminalBrowserApprovalPrompt
+        client={client([approval()])}
+        threadId={threadId}
+        threadTitle="Thread"
+      />,
+    );
+    await screen.findByRole("group", { name: "Browser request from a terminal" });
+    expect(screen.queryByRole("button", { name: "Allow all sites in this profile" })).toBeNull();
   });
 
   it("shows only this Code thread's requests, not another thread's or a Work thread's", async () => {

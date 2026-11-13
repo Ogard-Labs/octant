@@ -151,7 +151,7 @@ export function createComputerUseRuntime(_options: {
   /**
    * The grant an approval offers. A function lets the caller answer per
    * request: a request that will only ever be approved once (see the tool
-   * service's taint rule) must not read as a five-minute grant.
+   * service's taint rule) must not read as an app grant.
    */
   readonly approvalScope?:
     | "application-session"
@@ -163,9 +163,8 @@ export function createComputerUseRuntime(_options: {
   ) => ApprovalOutsideContent | undefined;
 }): ComputerUseRuntime {
   const options = _options;
-  // The fallback summary below promises five minutes; the default offer must
-  // live as long as its words, or a decision made inside the promised window
-  // expires silently and reads as a denial.
+  // How long an unanswered offer waits. A shorter default let a decision the
+  // person made minutes later expire silently and read as a denial.
   const approvalTtlMs = options.approvalTtlMs ?? 5 * 60_000;
   const sessions = new Map<string, RuntimeSession>();
   const destination = (): ComputerUseDestinationReport =>
@@ -491,7 +490,7 @@ export function createComputerUseRuntime(_options: {
           summary:
             options.approvalSummary?.(input.request) ??
             (approvalScope === "application-session"
-              ? `Allow control of ${session.observation.targetApp} for this task for 5 minutes.`
+              ? `Allow control of ${session.observation.targetApp} for this thread.`
               : `${input.request.kind} in ${session.observation.targetApp}`),
           ...(approvalScope === undefined ? {} : { scope: approvalScope }),
           ...outsideContentOf(options.approvalOutsideContent?.(input.request)),

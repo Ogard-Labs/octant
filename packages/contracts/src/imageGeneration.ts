@@ -325,7 +325,7 @@ export const MAX_PENDING_IMAGE_GENERATION_OFFERS = 32;
  * An agent asking, in its thread, to generate an image with a configured
  * image model instead of drawing it itself. Nothing is spent until the person
  * answers: they pick the profile and model, may let the agent draw it after
- * all, or may say not to ask again in this thread. `suggested` is what the
+ * all, or may say not to ask again (for the Project, or the thread outside one). `suggested` is what the
  * card preselects; the person's choice is what runs.
  */
 export const ImageGenerationGenerateOffer = Schema.Struct({
@@ -378,8 +378,9 @@ export type ImageGenerationOffersResponse = typeof ImageGenerationOffersResponse
 
 /**
  * The person's answer. `generate` names the profile and model they chose and
- * whether this thread may generate with that choice from now on without
- * asking; `agent-draws` lets the agent make the visual with its own output;
+ * whether to keep generating with that choice without asking: for the
+ * thread's Project, journaled, or for the thread itself when it stands outside
+ * a Project (`rememberForThread` keeps its name for clients already built); `agent-draws` lets the agent make the visual with its own output;
  * `save` writes the image a save offer names; `cancel` does nothing.
  */
 export const ImageGenerationOfferDecision = Schema.Union(

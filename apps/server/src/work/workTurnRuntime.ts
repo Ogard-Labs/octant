@@ -47,6 +47,7 @@ import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
@@ -116,6 +117,13 @@ export interface WorkTurnRuntimePort {
     /** What the session may load of the provider's own setup; absent keeps it all off. */
     readonly nativeSetup?: ProviderNativeSetup;
     readonly appManagedTools?: AppManagedToolSet;
+    /**
+     * The turn's record of tool calls about to take effect: each call the host
+     * runs is journaled before it runs and settled after, and the runtime's own
+     * tool reports are recorded as they are read. A restart reads it to tell
+     * whether the turn it cut off left a call nobody saw finish.
+     */
+    readonly toolEffects?: TurnToolEffects;
     /**
      * Records that the runtime's own web search, page fetch, or hosted tool
      * put outside content in front of the model. Without it such a call stops
@@ -463,6 +471,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Stream.filter((event) => event.kind !== "liveness"),
             Stream.tap((event) => Effect.sync(() => meter.observe(event))),
             Stream.tap((event) => Effect.sync(() => input.observeRemoteCommand?.(event))),
+            Stream.tap((event) =>
+              Effect.sync(() => input.toolEffects?.observe(event, input.appManagedTools)),
+            ),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
@@ -566,7 +577,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "tool-request") {
                   if (answeredToolRequestIds.has(event.requestId)) return;
                   answeredToolRequestIds.add(event.requestId);
-                  const toolSet = input.appManagedTools;
+                  const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
                   const offered = toolSet?.definitions.some(
                     (definition) => definition.name === event.toolName,
                   );
@@ -597,6 +608,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                           name: event.toolName,
                           inputJson: event.inputJson,
                           signal: executionSignal,
+                          toolCallId: event.requestId,
                         });
                       } catch {
                         return {

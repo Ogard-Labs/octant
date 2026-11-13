@@ -269,7 +269,7 @@ describe("ComputerUseRuntime", () => {
     expect(adapter.execute).not.toHaveBeenCalled();
   });
 
-  it("keeps an approval live for the five minutes its summary offers", async () => {
+  it("keeps an unanswered approval live for five minutes", async () => {
     let now = Date.parse("2026-07-27T20:00:00.000Z");
     let id = 0;
     const adapter: ComputerUseNativeAdapter = {

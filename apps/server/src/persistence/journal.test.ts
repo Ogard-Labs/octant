@@ -242,6 +242,10 @@ describe("Journal", () => {
         sidebarSearchPresentation: "icon",
         sidebarCollapsedPresentation: "rail",
         agentBrowserDownloads: false,
+        browserTransferFileLimitMegabytes: 25,
+        browserHeldDownloadLimit: 5,
+        browserUploadFileCountLimit: 5,
+        rememberedBrowserTransfers: [],
         persistentBrowserOwner: false,
       },
     } as const;

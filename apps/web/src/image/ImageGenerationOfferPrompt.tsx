@@ -70,8 +70,9 @@ function modelChoices(
 /**
  * The thread's agent asking to generate a picture with an image model instead
  * of drawing it itself, as a card at the foot of the thread. The person picks
- * the profile and model, may tell this thread not to ask again, or lets the
- * agent draw it after all. Nothing is spent until Generate, which the host
+ * the profile and model, may say not to ask again (kept for the thread's
+ * Project, or for the thread itself outside one), or lets the agent draw it
+ * after all. Nothing is spent until Generate, which the host
  * checks against the profiles it can run. The host lists only this window's
  * offers for this thread, oldest first.
  */
@@ -79,6 +80,12 @@ export function ImageGenerationOfferPrompt(props: {
   readonly client: ImageGenerationClient | undefined;
   readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
   readonly scopeId: ImageGenerationScopeId | undefined;
+  /**
+   * Where the host keeps "Don't ask again": on the thread's Project, across
+   * restarts, or for a thread outside a Project on that thread until the host
+   * restarts.
+   */
+  readonly keptIn: "project" | "thread";
   readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
   /** A running turn is polled often, because its call is waiting on the answer. */
   readonly turnActive: boolean;
@@ -270,7 +277,9 @@ export function ImageGenerationOfferPrompt(props: {
               id={rememberId}
               onChange={(event) => setRemember(event.currentTarget.checked)}
             />{" "}
-            Don't ask again in this thread
+            {props.keptIn === "project"
+              ? "Don't ask again in this Project"
+              : "Don't ask again in this thread"}
           </label>
         </div>
         <div className="follow-up-card__actions">

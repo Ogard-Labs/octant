@@ -877,8 +877,10 @@ At Full access a Private page needs no site approval and may navigate across
 origins; a profile page keeps its site approval at every level, which the
 person can remember or widen to "Allow all sites in this profile"
 ([the Full access rule](#security-and-authority); maintainer request,
-2026-11-12). Not built yet: today a Private page asks for each site at Full
-access too, and no profile-wide answer exists.
+2026-11-12). Built: the agent tool opens that Private page with the any-site
+entry in its allowlist, which the browser service admits from no other caller
+and never beside a stored profile
+([Browser for agents](design/browser-agent-tool.md#refusal-and-expiry-recovery)).
 Plan admits only the Browser operations that read the page already open in
 the thread's own Browser (`audit` among them) and `stop`, and refuses every
 other one as `plan-mode-read-only`, a recording included, from one table of
@@ -905,11 +907,15 @@ download the person starts in the Browser pane saves to the Downloads folder
 at every level. Ordinary uploads do not ask at Full access; below it they ask
 and "Always allow" is remembered per site, folder and profile, as for a
 save. The size and held-file caps are
-Settings defaults, not constants (maintainer request, 2026-11-12). Not built
-yet: today the save and each upload ask every time at every access level,
-agent downloads are off by default at every level, programs and installers
-are refused at every level, a person's own download in the Browser pane is
-blocked, and the caps are constants. A local person may separately review a
+Settings defaults, not constants (maintainer request, 2026-11-12), and so is
+the count of files one upload may send, five by default. Work and Code ask on
+the same Browser approval card and read the remembered answer through one
+function, so "Always allow" exists in both. At Full access a download is not
+held for a second call: it is saved into `downloads/` as the action that
+started it answers, with the size cap, the link checks and the journal record
+unchanged (maintainer decision, 2026-11-13). Not built yet: an unanswered ask
+still expires instead of waiting, and the person's own download has not been
+run in a packaged window. A local person may separately review a
 fixed-content routine upload manifest from one approved Project folder, binding
 caller/model/authority, profile/site, exact files, quota and expiry. It grants no
 account access or downloads; revocation and expiry close affected contexts, and
@@ -1024,15 +1030,20 @@ intent at the moment of action instead:
 - The first Computer action on each application in a thread asks, even under
   Full access: no app grant exists until the person approves one, and the
   tool never reads the execution policy to skip the ask. A grant lasts the
-  thread and covers that application, owner, and authority only; a setting
-  can remember it for the Project (maintainer request, 2026-11-12; not built
-  yet: today a grant lapses after five minutes).
+  thread and covers that application, owner, and authority only. It has no
+  clock: it ends when the task is stopped, when the thread is archived or
+  otherwise stops being active, when its provider, model, or authority
+  changes, when Computer is disabled, and at a host restart, because grants
+  are held in memory and never journaled. A setting can remember it for the
+  Project (maintainer request, 2026-11-12; not built yet: no setting
+  remembers a grant for the Project).
 - Below Full access, once outside content has entered the thread (a Browser page, a tool result,
   imported content), no standing grant carries a Computer action: every
   action asks again, for that one action, and the ask names what marked the
   thread. At Full access outside content does not make later actions ask
-  again (maintainer request, 2026-11-12; not built yet: today it does at
-  every level).
+  again (maintainer request, 2026-11-12). The level is the thread's as it
+  stands when the action is asked, so lowering a thread brings the ask back
+  on its next action, and a Code turn sent below its thread's level asks.
 - The approval card shows the agent's stated reason, quoted as its words, and
   the outside sources with their last read.
 - The person approves control of this Mac, at a local window or a paired device
@@ -1657,12 +1668,35 @@ environment.
 
 Provider-owned memory stays off in every mode unless the person turns it on
 for that key provider account, a setting that is off by default (maintainer
-request, 2026-11-12; not built yet: today it is off with no setting). A provider's global memory
-follows its own rules into every Project, outside Octant's controls: Codex runs
+request, 2026-11-12). A provider's global memory
+follows its own rules into every Project, outside Octant's controls: with the
+setting off Codex runs
 with `features.memories` off, which also keeps its memory folder out of its
-sandbox's readable roots, and Claude runs with no setting sources. Octant keeps
+sandbox's readable roots, and Claude runs with its auto-memory guard and no
+setting sources. Octant keeps
 two memories of its own instead: Project memory, scoped to one Project, and
 person memory below.
+
+The setting is **Use <provider>'s own memory** in Settings › Providers, beside
+Run as itself (built for Claude Code and Codex). It is `ownMemory` on the
+provider account, changed only by `set-provider-own-memory` from a local
+window or a paired device (maintainer decision, 2026-11-12; not built yet:
+today a paired device is refused) and journaled as
+`provider.instance-own-memory-changed@1`. Run as itself, a trusted Project,
+and Full access never turn it on. Each driver reads it when it launches a
+process: a Claude Code launch goes without `CLAUDE_CODE_DISABLE_AUTO_MEMORY`
+and keeps every other guard, and a Codex process is leased without the
+`features.memories=false` override, so Codex's own configuration decides and
+Octant never forces the feature on; that lease is a process of its own, like
+the one that runs Codex's subagents. It applies to Work and Code sessions
+outside Plan. A Plan launch keeps memory off at every setting: Plan may write
+nothing a later session would load, and the runtime's memory folder is exactly
+that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)).
+OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant
+sets, so their accounts carry no setting. Not built yet: Chat, where a
+provider's memory stays off at every setting, because no confined Chat launch
+has been run with it on. Live check owed: no real Claude Code or Codex turn
+has yet run with the setting on.
 
 ### Project memory
 
@@ -1688,8 +1722,16 @@ authoritative.
   accepted without a confirmation, marked agent-written with its thread and
   shown in the thread; below Full access the Project setting "Agents may
   write Project memory without asking" (off by default) does the same
-  (maintainer request, 2026-11-12; not built yet: today every write is a
-  proposal at every level). Otherwise a write is a proposal: the
+  (maintainer request, 2026-11-12; built). The setting is on every mode's
+  Project, in Project Overview; a person sets it from a local window or a
+  paired device (maintainer decision, 2026-11-12; not built yet: today a
+  paired device is refused), and each change is journaled as
+  `project.agent-memory-writes-changed@1`. A Chat thread has no Full access,
+  so in Chat only the setting skips the card. The tool call is the thread's
+  record of such a write: its result reports `written` with the entry's
+  text. The write goes through the same memory command path and checks as a
+  confirmed one, against the memory version the agent saw. Otherwise a write
+  is a proposal: the
   thread shows the person a card with the exact change, and only their
   confirmation writes it, through the same memory command path and checks
   (archived Project, mode switched off, memory version) as the person's own
@@ -1710,12 +1752,17 @@ authoritative.
   any other, and its card names what the thread read.
 - **Agent-written provenance.** A confirmed agent write is authored by the
   person who confirmed it and marked `agent-authored` with the thread's mode
-  and id; a write accepted without a confirmation carries the same mark and
-  names no confirming person. Project Overview shows "Written by an agent in a … thread" with the
+  and id; a write accepted without a confirmation carries the same mark with
+  `unconfirmed: true` and names no confirming person: its author field holds
+  the host's local user only because every entry has one, and Project
+  Overview shows "Nobody was asked" in place of "Approved by". An agent's
+  retraction keeps the entry's own provenance and records the retracting
+  thread beside it as `retractionOrigin`. Project Overview shows "Written by an agent in a … thread" with the
   thread, and data export carries the provenance with the entry. The
   person retracts such an entry like any other. A thread purge removes the
-  thread id from the entry and keeps the entry. Older events decode unchanged:
-  the new provenance is one more variant, not a changed shape.
+  thread id from the entry, and from its retraction, and keeps the entry.
+  Older events decode unchanged: the new provenance is one more variant, and
+  the two later fields are optional.
 
 ### Person memory
 
@@ -2659,9 +2706,15 @@ authorized parent target; a configured but unavailable or disallowed route does
 not bypass its settings. The selected target and routing decisions remain
 visible. Off, paused, and unauthorized parents cannot start helpers. A parent
 that read outside content can: at Full access delegation is not refused and
-the mark follows into the child; below Full access the person (the reviewer at
-Auto) is asked once per thread (maintainer request, 2026-11-12). Not built
-yet: today a tainted parent cannot start helpers at any level.
+the mark follows into the child; below Full access the person is asked once
+per thread and their yes is journaled for the thread
+(`thread.standing-answer-recorded@1`, erased with the thread), so later
+helpers start unasked and a waiting helper is kept; Plan stays refused
+(maintainer decision, 2026-11-13). The level is the one the turn runs at.
+Built for a Code thread, which asks in the thread's tool approval. Not built
+yet: a Work or Chat thread below Full access is still refused, because their
+turns have no way to ask a person from a host tool, and the reviewer at Auto
+does not answer in the person's place.
 
 Parent conversation context is opt-in and fixed at admission. Chat uses its
 admitted conversation; Work and Code expose bounded accepted prompts and
@@ -2871,12 +2924,25 @@ hold for every action in it:
   happens only with the person's approval for that one act,
   which a standing Full access grant does not stand in for; the person's own
   click in a window is that approval. A push to the default branch follows a
-  Project setting (maintainer request, 2026-11-12; not built yet: today it
-  needs the same one-act approval). The setting's switch, "Agents may push to
-  the default branch", stays hidden in Settings until an agent push path to
-  the default branch exists; the server field and rule stay (maintainer decision, 2026-11-12;
-  not built yet: today the switch is shown). Both are journaled with the thread's
-  other Git work.
+  Project setting (maintainer request, 2026-11-12). Built: the Code Project
+  setting **Agents may push to the default branch** (`agentDefaultBranchPush`
+  on the Project, `change-code-project-agent-default-branch-push`, journaled
+  as `project.code-agent-default-branch-push-changed@1`), off by default and
+  set from a local window or a paired device (maintainer decision, 2026-11-12;
+  not built yet: today a paired device is answered 403). Its
+  switch is hidden in the app until an agent push path to the default branch
+  exists; the server field, command and rule stay (maintainer decision,
+  2026-11-12). With
+  it off, a push to the default branch needs the same one-act approval. With
+  it on, the host, which reads the switch again at each push, lets an ordinary
+  `push-git` to the default branch follow the thread's usual push rule: it
+  asks below Full access and does not ask at Full access. The switch never
+  covers a force of either kind onto the default branch. `push-git` is where
+  Octant decides a push before it runs: a paired device's push arrives there
+  gated as an agent's, and no agent tool sends it today, so an agent's own
+  push goes through the shell and follows the shell rules below, which the
+  switch does not change. Both are journaled with the thread's other Git
+  work.
 - **Labels, close, and reopen.** `update-pull-request` also adds and removes
   labels the repository already has (a label it lacks is refused, never
   created) and closes or reopens the thread's own pull request. `state` stands
@@ -2887,16 +2953,25 @@ hold for every action in it:
   does not ask. Below Full access the Project switch "Agents may comment on
   pull requests" stands in for the per-post ask on a thread that has read no
   outside content; a thread that has read outside content still asks before
-  posting, switch on or off (maintainer decision, 2026-11-12); with the switch off
-  the agent drafts the post by asking, and the approval shows the whole text
-  (maintainer request, 2026-11-12). Not built yet: today the host posts only
-  with an approval for that act, at every level.
+  posting, switch on or off (maintainer decision, 2026-11-12); with the switch off the agent
+  drafts the post by asking, and the approval shows the whole text
+  (maintainer request, 2026-11-12). The level is the one the turn runs at, and
+  a host that cannot tell whether the thread is marked asks. Built: the switch is `agentPullRequestComments`
+  on the Project (`change-code-project-agent-pull-request-comments`, journaled
+  as `project.code-agent-pull-request-comments-changed@1`), off by default and
+  set from a local window or a paired device (maintainer decision, 2026-11-12;
+  not built yet: today a paired device is answered 403). With
+  it in force the tool sends the post as `authorization: standing` naming
+  `project`; the host does not take that word, it reads the switch again at
+  the post, with the thread's outside-content mark, and refuses with
+  `unauthorized` when the switch is off or the thread is marked, and it accepts a
+  `full-access` claim only from a thread that is at Full access. Plan refuses
+  every post.
 - **Watching its own pull request.** The tool's `watch` lets the host wake the
   thread when its pull request changes, instead of the agent polling; it is
   not a forge change, and `unwatch` ends it. The host resolves the thread's own
   open linked pull request (the agent names none), and `watch` needs no
-  approval at any level (maintainer request, 2026-11-12; not built yet: today
-  `watch` asks the person for that act at every level). Plan refuses `watch` (not `unwatch`,
+  approval at any level (maintainer request, 2026-11-12). Plan refuses `watch` (not `unwatch`,
   which only takes reach away), and so does a turn the host
   started on its own (`automation-recursion`), such as a wake:
   a wake must not renew its own watch. The rules are under
@@ -2944,22 +3019,22 @@ hold for every action in it:
   Agents do not approve or request changes on a pull request; the forge does
   not let a pull request's author approve their own.
 
-| Action                                     | Who                                                                                          | Approval                                                                                                                                                    | Still refused                                               | Built                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                                                       | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                                                                                                                                                                                                                                                                             |
-| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                                                 | A repository outside the binding; a base outside it         | Yes, ready or draft (`create-pull-request`)                                                                                                                                                                                                                                                                                                  |
-| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                                                 | As for opening                                              | Yes (`create-pull-request` with `draft`)                                                                                                                                                                                                                                                                                                     |
-| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                                                 | A pull request the thread does not own                      | Yes (`update-pull-request`, `draft: false`)                                                                                                                                                                                                                                                                                                  |
-| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                                                 | A parent branch no thread or linked thread of this one owns | Yes (`create-pull-request` with `base`; the parent branch needs an open pull request)                                                                                                                                                                                                                                                        |
-| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                                                 | A protected or a shared branch; any other thread's branch   | Yes (`push-git` with `force: with-lease`)                                                                                                                                                                                                                                                                                                    |
-| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's approval for this one act, at every level; a push to the default branch follows a Project setting (not built yet)                              | Without that approval; another thread's branch              | Yes (`push-git`; a standing Full access grant does not cover it)                                                                                                                                                                                                                                                                             |
-| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                                                 | A pull request the thread did not open and is not linked to | Yes (`update-pull-request`)                                                                                                                                                                                                                                                                                                                  |
-| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                                                 | Creating repository-wide labels                             | Yes (`update-pull-request` with labels; the person's `actions` route)                                                                                                                                                                                                                                                                        |
-| Review replies and comments                | Agent or person                                                                              | None at Full access; below it the Project switch "Agents may comment on pull requests", else each post asks (not built yet: every post asks at every level) | Approving or requesting changes                             | Yes (`comment-pull-request`; the person's `actions` route)                                                                                                                                                                                                                                                                                   |
-| Approve or request changes                 | Person                                                                                       | —                                                                                                                                                           | The pull request's own author, by the forge's rule          | Yes: the person's `actions` route, on the head they read                                                                                                                                                                                                                                                                                     |
-| Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                                          | Deleting the branch; reopening a merged pull request        | Yes (`update-pull-request` with `state`; the person's `actions` route)                                                                                                                                                                                                                                                                       |
-| Watch its own pull request                 | Agent or person                                                                              | None at any level (not built yet: the person approves each watch)                                                                                           | Plan; a host-started turn; another pull request             | Yes (the tool's `watch` and `unwatch`; see Merge when ready and Auto-fix)                                                                                                                                                                                                                                                                    |
-| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                                                      | An agent on its own initiative; hub or peer hosts           | Yes: a person merging one pull request or a stack from a window, phone, or web client; Merge when ready from a window, phone, or web client with the same confirmation; an agent's merge on request (`merge-pull-request`, asks each time), or without asking when a Project's Agents may merge switch or a routine's merge choice allows it |
+| Action                                     | Who                                                                                          | Approval                                                                                                                                                 | Still refused                                               | Built                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                                                    | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                                                                                                                                                                                                                                                                             |
+| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                                              | A repository outside the binding; a base outside it         | Yes, ready or draft (`create-pull-request`)                                                                                                                                                                                                                                                                                                  |
+| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                                              | As for opening                                              | Yes (`create-pull-request` with `draft`)                                                                                                                                                                                                                                                                                                     |
+| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                                              | A pull request the thread does not own                      | Yes (`update-pull-request`, `draft: false`)                                                                                                                                                                                                                                                                                                  |
+| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                                              | A parent branch no thread or linked thread of this one owns | Yes (`create-pull-request` with `base`; the parent branch needs an open pull request)                                                                                                                                                                                                                                                        |
+| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                                              | A protected or a shared branch; any other thread's branch   | Yes (`push-git` with `force: with-lease`)                                                                                                                                                                                                                                                                                                    |
+| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's approval for this one act, at every level; a push to the default branch follows the Project switch "Agents may push to the default branch"  | Without that approval; another thread's branch              | Yes (`push-git`; a standing Full access grant does not cover it, and the Project switch covers only an ordinary push to the default branch)                                                                                                                                                                                                  |
+| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                                              | A pull request the thread did not open and is not linked to | Yes (`update-pull-request`)                                                                                                                                                                                                                                                                                                                  |
+| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                                              | Creating repository-wide labels                             | Yes (`update-pull-request` with labels; the person's `actions` route)                                                                                                                                                                                                                                                                        |
+| Review replies and comments                | Agent or person                                                                              | None at Full access; below it the Project switch "Agents may comment on pull requests" on a thread that has read no outside content, else each post asks | Approving or requesting changes                             | Yes (`comment-pull-request`; the person's `actions` route)                                                                                                                                                                                                                                                                                   |
+| Approve or request changes                 | Person                                                                                       | —                                                                                                                                                        | The pull request's own author, by the forge's rule          | Yes: the person's `actions` route, on the head they read                                                                                                                                                                                                                                                                                     |
+| Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                                       | Deleting the branch; reopening a merged pull request        | Yes (`update-pull-request` with `state`; the person's `actions` route)                                                                                                                                                                                                                                                                       |
+| Watch its own pull request                 | Agent or person                                                                              | None at any level                                                                                                                                        | Plan; a host-started turn; another pull request             | Yes (the tool's `watch` and `unwatch`; see Merge when ready and Auto-fix)                                                                                                                                                                                                                                                                    |
+| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                                                   | An agent on its own initiative; hub or peer hosts           | Yes: a person merging one pull request or a stack from a window, phone, or web client; Merge when ready from a window, phone, or web client with the same confirmation; an agent's merge on request (`merge-pull-request`, asks each time), or without asking when a Project's Agents may merge switch or a routine's merge choice allows it |
 
 Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
@@ -3160,7 +3235,7 @@ person's click is the approval; nothing else turns either on. Beside them, a
 thread's agent may watch its own pull request, which needs no approval
 (maintainer decision, 2026-11-05: an agent waiting on
 CI or reviewers should be woken, not left polling; maintainer request,
-2026-11-12, removed the per-watch approval, which is still asked today).
+2026-11-12, removed the per-watch approval).
 
 - **Who.** Auto-fix: a `local-window` principal or a paired device (maintainer
   decision, 2026-11-12; not built yet: today only a `local-window` principal,
@@ -5207,7 +5282,9 @@ or .zip>` write the same files, built by one host command
   with the reason in the restart notice, when: Settings › Code › Continue after
   restart is off; the thread's own switch is off (`restartContinuationOff`);
   any of its runtime work is `ambiguous` (a push or pull request step whose
-  outcome the restart left unknown); its own automatic continuation was cut
+  outcome the restart left unknown); the cut-off turn started a tool call
+  that may change something and nothing records that it finished (the
+  `uncertain-tool-call` hold, below); its own automatic continuation was cut
   off by a restart twice (the crash-loop guard counts per thread in the host
   store, keyed by the continuation it last started, and survives the restart
   it counts); its newest provider session on the same provider and model has
@@ -5223,10 +5300,114 @@ or .zip>` write the same files, built by one host command
   start keeps what it did as `restartRecovery` on the host control status (the
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
-  threads that window can open. Chat and Work turns are continued by the same
+  threads that window can open. A client decodes a hold reason it does not
+  know as `other` and still shows the host's own sentence for it, so a reason
+  a later host adds does not fail the status (maintainer decision,
+  2026-11-13). This protects clients built from now on. A client built before
+  it reads the reason as a closed list and refuses the whole status of a host
+  that reports an `uncertain-tool-call` hold, until that start's report is
+  replaced by the next one; the window a host serves is built with the host
+  and is not affected. Chat and Work turns are continued by the same
   rule (Chat and Work restart recovery, below), and so are Work goal loops,
   subagent runs (subagent restart recovery, below) and pending coordinator
   wakes (coordinator wake restart recovery, below).
+
+  A restart cuts a turn off wherever it is, and a turn cut off inside a shell
+  command, an edit or an MCP call may or may not have changed something. The
+  host therefore records every tool call before it takes effect (maintainer
+  decision, 2026-11-12). `ToolEffectLedger` appends `tool-effect-intended@1`
+  before the call runs and `tool-effect-settled@1` (`succeeded` or `failed`; a
+  refused call is reported as an error result and reads `failed`) when its
+  outcome is known, on a `turn-tool-effects` aggregate keyed by the turn as
+  its mode names it: a Code operation, a Chat attempt, a Work turn request.
+  A frame carries the thread, the turn, the call id, the tool's name, its
+  effect class and who ran it, and never arguments, paths, commands or
+  results. Each append commits before the tool starts, so a call costs two
+  small frames and nothing else. The effect class fails closed: a tool is
+  `read-only` only when `READ_ONLY_TOOLS` declares it (`read`, `grep`, `glob`,
+  `web-fetch`, `web-search`, `context-remaining`, `journal-lookup`,
+  `octant_github`, `octant_past_threads` and the side chat's three file
+  tools), and every other tool is `side-effecting`. A family with one writing
+  operation is not declared, because the record never looks at arguments. A
+  call the journal refuses to record is not run. Nothing is rebuilt at start:
+  restart recovery reads only the cut-off turn's own aggregate, and a thread
+  whose turn left a `side-effecting` call with no settled frame is held with
+  the `uncertain-tool-call` reason and the tool's name ("Octant stopped while
+  the tool "shell" was running, so it may or may not have taken effect. Check
+  it, then continue."). A record the host cannot read holds the thread too. A
+  turn whose unsettled calls are all `read-only`, or that started none,
+  continues. The person's Resume or next message continues a held thread as
+  before, and the host never runs a call again. A thread's purge takes these
+  frames by the thread id they carry.
+
+  A call that was only waiting for its own approval when the host stopped
+  does not hold the thread: the turn continues and asks again (maintainer
+  decision, 2026-11-13). The first frame is still written before the tool is
+  entered, so a record always precedes any effect. When the tool then asks a
+  person, the approval service appends `tool-effect-awaiting-approval@1` for
+  the call, and when the person answers (allow, deny, expiry or cancel) it
+  appends `tool-effect-intended@1` again before the tool hears the answer; a
+  journal that refuses that second frame stops the call. Restart recovery
+  reads a call whose last frame is the awaiting one as a call that never ran.
+  Writing the first frame only after approval was rejected: the record cannot
+  know which tools will ask, so every tool would have to announce its own
+  effect and one that forgot would run unrecorded. This way a tool whose
+  approval service says nothing keeps today's hold. Built for the two
+  approvals asked before a call does anything: the harness's own tool
+  approvals (shell, edit, goal checks and the rest of
+  `NativeHarnessApprovalStore`) and a selected MCP server's tool approval.
+  Not built yet: Browser site, upload, download and sign-in prompts, routine
+  and memory proposals, image offers and a tool's question to the person keep
+  the first frame, so a call waiting on one of them still holds its thread (a
+  Browser prompt can follow a click that already happened, so it is not known
+  to precede every effect); and a runtime's own tool waiting on the runtime's
+  approval request still holds, because the request names no tool call and
+  the answer is sent from eleven places across the three modes.
+
+  What the record covers, by who runs the tool:
+
+  - Tools the host runs for a Chat, Work or Code turn (the harness's own
+    tools on key and endpoint providers, and Octant's app tools and selected
+    MCP servers' tools on every provider, including the runtimes that call
+    them back): the three turn runners record the call before they run it, so
+    a stop anywhere inside the call holds the thread, except while the call
+    waits for its own approval (above).
+  - A runtime's own tools (Codex, Claude Code, ACP agents, Pi, OpenCode): each
+    adapter reports `tool-start` and `tool-success` or `tool-failure`. The
+    host records the start when it reads it, always as `side-effecting`
+    because a runtime's tool name proves nothing, and the finish when it
+    reads that. A reported start with no finish holds the thread. A runtime
+    also reports a start for a call it hands to the host, under its own call
+    id and its own spelling of the tool, and the host already records that
+    call itself. Such a start is therefore not recorded (maintainer decision,
+    2026-11-13), so a read-only host tool never holds a thread through the
+    runtime's duplicate. It is recognized by name against the tools the turn
+    offers: the tool's own name (Codex, Pi), `mcp__octant__<tool>` (Claude
+    Code) and `octant-<16 hex>_<tool>` (OpenCode; this spelling is not
+    checked against a live OpenCode). Any other spelling stays a runtime
+    tool. Not built yet: an ACP agent titles its calls freely, so its start
+    for a host tool is still recorded as a runtime tool and can hold the
+    thread; and, not provable from what a runtime reports, a tool the runtime
+    started that the host had not read when it stopped leaves no record, and
+    that turn continues as before.
+  - A managed child agent run (maintainer decision, 2026-11-13): the tools
+    the host runs for the child, including a delegated Browser child's, and
+    the child runtime's own reported tools are recorded the same way on one
+    record per run, keyed by the run and carrying the parent thread's id. At
+    a start, a thread's cut-off turn is also held when a child run of that
+    thread which the same start found cut off left a `side-effecting` call
+    unfinished ("Octant stopped while a child agent's tool ..."). When a run
+    executes again, the calls its earlier execution left open are closed as
+    `superseded`, so one restart's record never holds a later one. The host's
+    own resume of a cut-off run (subagent restart recovery, below) reads the
+    run's record first: a run that left a `side-effecting` call unfinished,
+    or whose record cannot be read, is held with the same reason and stays
+    Interrupted for a person's Resume, whether or not its parent thread had a
+    turn running.
+  - Not built yet: a terminal-started Browser session and a saved Browser
+    flow's run call the Browser tool outside any turn or run, so there is no
+    record a restart would read, and they write none.
+
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5339,7 +5520,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   through the same blockers a person's Resume checks, because admission refuses
   a session still recovery-required); or admission refuses the send. Chat and
   Work keep no journaled push or pull
-  request step, so the uncertain-external-action hold reads nothing there; the
+  request step, so the uncertain-external-action hold reads nothing there. A
+  Chat answer or Work turn that left a tool call nobody saw finish is held with
+  the `uncertain-tool-call` reason exactly as a Code turn is (Code restart
+  recovery, above); for the rest the
   continuation message tells the agent to inspect before repeating. Queued
   messages follow the continuation under the same release as Code. A Chat
   attempt already waiting on a question or approval at the restart is retained
@@ -5387,7 +5571,9 @@ ls-remote` against the thread's remote and the GitHub reads they already
   so a run never has two executions at once. A run waits for its person
   instead, still Interrupted and resumable only by a person's Resume, when its
   parent mode's Continue after restart setting is off, its parent thread's own
-  switch is off, a person quit Octant while it ran, the parent's mode is turned
+  switch is off, it left a tool call nobody saw finish (the
+  `uncertain-tool-call` hold, above, read before the resume closes the run's
+  record), a person quit Octant while it ran, the parent's mode is turned
   off (the run resume does not read the mode switch, so it is checked here),
   its own automatic continuation was cut off by a restart twice, or the resume
   refuses it. The
@@ -6306,8 +6492,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact.
   The agent's tool is offered in Chat, Work, and Code turns whose provider
-  carries app-managed tools (never a Side Chat or a routine's turn, which has
-  nobody to answer), and only while an enabled image profile exists; every
+  carries app-managed tools (never a Side Chat; in a turn the host runs as
+  itself, such as a routine's, only where the Project holds a kept choice
+  when the turn starts, since nobody could answer its card), and only while
+  an enabled image profile exists; every
   provider is also told, in the turn's tool host lines, to call it for a
   picture instead of drawing one as SVG or HTML. A call spends nothing by
   itself: the host holds an image offer for the window whose turn asked, and
@@ -6316,11 +6504,24 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   profile and model the host can run when the answer arrives, checked again
   before the job is queued. The "do not ask again" choice keeps that
   profile and model, is journaled per Project and survives a restart, and a
-  routine in that Project may use it (maintainer request, 2026-11-12; not
-  built yet: today "Don't ask again in this thread" keeps the choice for the
-  thread in host memory only, so a restart asks again, and a routine's turn
-  is not offered the tool). A kept choice the host can no longer run is
-  dropped and asked again rather than swapped. An offer lives at most ten minutes and is given
+  routine in that Project may use it (maintainer request, 2026-11-12). It is
+  the Project's `imageGenerationChoice`, changed by
+  `project.image-generation-choice-changed@1`: the host journals it when the
+  card's answer asks, every thread of the Project then generates with it
+  without a card at every level, and Project Overview names the kept model
+  with "Ask again", which drops it. A local window or a paired device sets
+  or drops it and answers the card (maintainer decision, 2026-11-12). Not
+  built yet: today the Project command that sets or drops it is refused from
+  a paired device, and the card itself is answered only at a window on the
+  host. A Chat thread
+  outside a Project has no Project to hold a choice and keeps it for that
+  thread in host memory, so a restart asks again there. At Full access a
+  call with no kept choice also skips the card when exactly one image
+  profile is ready, and generates on that profile's default model: the
+  agent's own model suggestion is not a person's choice
+  (`imageGenerationWithoutAsking` in `@octant/domain`). A kept choice the
+  host can no longer run is dropped and asked again rather than swapped, at
+  Full access too; in a turn nobody attends the call then starts nothing. An offer lives at most ten minutes and is given
   up when its turn stops or its window goes away; Plan refuses the call,
   because a generation calls a paid provider and stores the result.
   After Generate the call waits up to two minutes for the job. A finished job
@@ -9009,7 +9210,29 @@ the model at another size.
   Harness says the same for a slot's chosen model. The host also runs the
   verification by itself the first time a model is used, because it is a
   capability probe, not a grant; the manual action stays (maintainer request,
-  2026-11-12; not built yet: today only the Verify tools action runs it).
+  2026-11-12). `verifyModelToolsOnFirstUse` on the provider service is that
+  run: the same host-run check, writing the same record, called once where a
+  use starts (a Chat send, a Code provider turn's start, and a Work thread's
+  model selection, which is where Work first needs the tools). An endpoint
+  the host has not looked at since it started has its connection checked
+  first. It never fails the use: a model that does not call the test tool, or
+  a run that fails or is interrupted, leaves the model unverified, so the
+  turn runs without tools (and Work refuses the selection) exactly as for an
+  unverified model. Uses that arrive together share one request. A run that
+  did not finish is tried again at the next use. A model that answered
+  without calling the tool is not asked again by the host until its
+  endpoint's configuration changes, the host restarts, or a person presses
+  Verify tools: asking on every use would bill a request per turn for an
+  answer that does not change. The last run that left a model without tools
+  is reported with the runtime as `toolChecks` (model, `unsupported` or
+  `failed`, the reason, the time), kept in host memory, and the endpoint's
+  model row shows it beside "Chat only · Verify tools"; it grants and
+  withholds nothing, since admission reads the verified set alone. The check
+  is one request holding the echo tool and a two-word prompt. The endpoint
+  may bill it, and spend ceilings do not count it, as they never counted the
+  button's: a ceiling sums the usage turns record, and this request belongs
+  to no turn. It is bounded by the rule above, at most one per model until
+  something changes, or one per use start while the endpoint keeps failing.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
@@ -10795,8 +11018,10 @@ that is not yet effective for the thread is refused and never reaches the model.
   trusted and enabled server runs without asking, on a thread marked by
   outside content too
   ([the Full access rule](#security-and-authority); maintainer request,
-  2026-11-12). Not built yet: today every call asks at every level unless a
-  remembered approval covers it, and an answer covers one tool. Who may
+  2026-11-12); a Plan turn on such a thread still asks. Built: the Full access
+  rule. Not built yet: below Full access every call still asks unless a
+  remembered approval covers it, and an answer covers one tool unless the
+  person allows all tools of the server (next item). Who may
   answer: a local window or a paired device, alike, for any prompt on a thread
   it may drive, with the same answers, remembering included (maintainer
   decision, 2026-11-12). Not built yet: today the three rules below hold:
@@ -10893,9 +11118,14 @@ that is not yet effective for the thread is refused and never reaches the model.
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
   that one Project (`extension.tool-grant-recorded@1` on the Project's
-  `extension-tool-grant` aggregate). The person can also allow all tools of
-  one server at once, at every level (maintainer request, 2026-11-12; not
-  built yet: today a grant covers one tool, never the whole server). The grant
+  `extension-tool-grant` aggregate). The person can also answer "allow all
+  tools of this server", wherever the prompt offers to remember (maintainer
+  request, 2026-11-12). That journals the same event with no tool name and no
+  listing digest: it binds the Project, extension, package, component, and
+  the package version and digest, so it covers every tool the server lists,
+  including one added later under the same digest, and an update asks again.
+  It is revoked, listed, and forgotten exactly as a tool's grant is, and the
+  Plan and outside-content rules below apply to it unchanged. A tool's grant
   binds the Project, extension, package, component, and MCP tool name, the
   package version and digest, and a SHA-256 of the tool's name, description,
   and input schema as its server listed them at connect; the provider-facing
@@ -10921,9 +11151,13 @@ that is not yet effective for the thread is refused and never reaches the model.
     (maintainer decision, 2026-11-12). Not built yet: today a grant binds the
     package version and digest, so every update is a new question.
   - A Plan turn is asked for every call, and the answer covers that call
-    alone. A Chat thread outside a Project can remember a grant for the
-    account (maintainer request, 2026-11-12; not built yet: today a thread
-    with no Project is asked for every call). An answer that asks to be
+    alone. A Chat thread outside a Project remembers a grant for the
+    account (maintainer request, 2026-11-12): the same events with no
+    Project, on one fixed account aggregate
+    (`EXTENSION_TOOL_GRANT_ACCOUNT_AGGREGATE_ID`). Only a thread outside a
+    Project uses an account grant; a Project's thread keeps to its own
+    Project's grants, so an answer given in Chat never spares a prompt where
+    a Project's files and shell are in reach. An answer that asks to be
     remembered where it cannot be is refused and the call keeps waiting.
   - Below Full access, on a thread that has taken in outside content, a grant holds for a
     stdio server, which Octant launches with no network and writes limited to
@@ -10947,10 +11181,12 @@ that is not yet effective for the thread is refused and never reaches the model.
     and a call asks again. A person
     revokes one through `/api/extensions/tool-grants`, which
     lists and revokes and has no request that adds a grant. Settings ›
-    Permissions lists them by Project with Revoke, and the prompt offers "always
-    allow" to a local window and a paired device (maintainer decision, 2026-11-12;
-    not built yet: today the route is local-only and the prompt offers
-    "always allow" only to a client on a loopback host).
+    Permissions lists them by Project with Revoke, a whole server's grant as
+    "All tools of" that server and the account's under "Chat outside a
+    Project", and the prompt offers "always allow" to a local window and a
+    paired device (maintainer decision, 2026-11-12; not built yet: today the
+    route is local-only and the prompt offers "always allow" only to a client
+    on a loopback host).
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example
     a Codex Work or Code thread using `~/.codex/config.toml`) is called
@@ -12009,8 +12245,8 @@ for an action to the host, which shows it on the approval and grants nothing
 for it. The first action in each application asks once and the grant lasts the
 thread; a setting can remember it for the Project. At Full access outside
 content does not make later actions ask again; below Full access that re-ask
-stays (maintainer request, 2026-11-12). Not built yet: today each
-application's approval lapses after five minutes. Stop, cancellation, changed authority, or disable revokes
+stays (maintainer request, 2026-11-12). Not built yet: no setting
+remembers a grant for the Project. Stop, cancellation, changed authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
 for image-capable models. Application content remains untrusted.
 Lifecycle evidence retains the exact tool authority: Chat may have no Project;
@@ -12612,8 +12848,7 @@ settings sandbox on|off [--work]`. A window on this host or any paired
     Private page asks nothing there. Both are entries in the Full access
     rule above (maintainer request, 2026-11-12, replacing the earlier
     decision that both asked at every level). Not built yet: the Browser
-    still asks for each site on a Private page, and a Computer grant still
-    lapses after five minutes.
+    still asks for each site on a Private page.
   - **Plan is an overlay,** not a level: a mode of a thread at any level,
     always read-only.
   - **Lowering is journaled and shown.** Each change records who lowered it,
@@ -12687,9 +12922,10 @@ settings sandbox on|off [--work]`. A window on this host or any paired
   with approval policy `never`, with no Octant wrapping for any provider
   runtime, and nothing asks there, a publish of a Project file to a
   provider's hosted service included. A review reply posted under the
-  person's name still asks at every level today; the rule is that it asks
-  only below Full access and only where the Project's "Agents may comment on
-  pull requests" switch is off ([Modes](#modes-chat-work-and-code)).
+  person's name asks only below Full access and only where the Project's
+  "Agents may comment on pull requests" switch is off or the thread has read
+  outside content
+  ([Modes](#modes-chat-work-and-code)).
   Built in Code for Mistral Vibe's auto-approve mode, the one ACP profile that
   declares its own reviewer. Every other ACP agent reports
   `harnessAutoReview` `unsupported`, and Settings › Providers & Models › Capabilities
@@ -13104,8 +13340,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   and starts a fresh epoch, so no stored clock value can block startup. On it
   today: Code operation approvals, window and launch sessions, managed-root
   grants, simulator input grants, extension tool approvals, routine proposals
-  and image generation offers (their stated request time), computer-use owners
-  and five-minute app grants, Claude's pre-tool grants, credential command
+  and image generation offers (their stated request time), computer-use
+  approval offers (an app grant itself has no clock and lasts the thread),
+  Claude's pre-tool grants, credential command
   requests, Browser upload and download permissions (which are not restored
   after a restart), Browser tool approvals, Browser session grants and
   Browser credential use, and server preview tunnels. A deadline that
@@ -13421,8 +13658,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
   built-in agents, and marketplace auto-install. The provider's own memory
   alone has a setting per key provider account, off by default, that turns
-  it on (maintainer request, 2026-11-12; not built yet: today it is off on
-  every launch); telemetry and self-update stay off. The runtime's release-note,
+  it on (maintainer request, 2026-11-12; built for Work and Code launches
+  outside Plan, [Modes](#modes-chat-work-and-code)): such a launch goes
+  without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` alone, which the bundled runtime
+  (Agent SDK 0.3.211) reads on no other path; its memory then lives under the
+  account's configuration directory, in `projects/<session folder>/memory/`.
+  A Plan launch, a Chat launch, and the version read keep the guard.
+  Telemetry and self-update stay off. The runtime's release-note,
   PR-badge, and availability checks are therefore its own traffic to
   Anthropic under the person's account; they carry no Project content.
   Feature-flag fetching stays off: Anthropic's environment-variable reference
@@ -14339,9 +14581,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   or selected terminal session may use an existing sign-in only through an
   explicit grant from the person, "this routine or child may use this profile on
   these sites", which is persistent and survives a host restart and an app
-  update (maintainer request, 2026-11-12; not built yet: today it is a
-  host/recipient/model/authority/profile/HTTPS session permission that lapses
-  on every restart and must be reviewed again). It is
+  update (maintainer request, 2026-11-12). It keeps its reviewed expiry and
+  its host/recipient/model/authority/profile/HTTPS binding, and is restored
+  only when a clean host close journaled it as still live; a terminal's
+  permission ends with the host. Not built yet: a restored grant takes no
+  lease on the background native owner. It is
   revalidated before effects and observations; it owns its context and receives
   no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
   Not built yet: today a paired device sees only that a signed-in page exists.
@@ -17049,8 +17293,8 @@ documents its authority, privacy, and release boundaries):
   person's request in the turn, after the person approves that one merge; an
   agent's merge on a Project setting or routine; the Merge when ready and
   Auto-fix switches the person turns on there; and a thread's watch on its own
-  pull request, which needs no approval (maintainer request, 2026-11-12; not
-  built yet: today the person allows each watch). The rest of the allowed
+  pull request, which needs no approval (maintainer request, 2026-11-12).
+  The rest of the allowed
   actions are not built yet.
 - Linked external secret stores, built for the 1Password CLI
   ([linked secret stores](#linked-secret-stores)): a pointer in the credential

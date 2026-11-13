@@ -5,16 +5,19 @@ import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-sc
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
+  BrowserContextRecord,
   ProviderToolImage,
 } from "@octant/contracts";
+import { originAllowed, storedBrowserProfile } from "@octant/domain";
 import {
+  ANY_BROWSER_ORIGIN,
   BROWSER_DEVICE_PRESETS,
   BROWSER_RESIZE_BOUNDS,
   BrowserColorScheme,
   BrowserDialogAnswer,
   MAX_BROWSER_FLOW_NAME_LENGTH,
   type BrowserAuditKind,
-  MAX_BROWSER_UPLOAD_FILES,
+  MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
   MAX_BROWSER_WAIT_MS,
   type BrowserDevicePreset,
   type BrowserWaitCondition,
@@ -487,7 +490,8 @@ function parseBrowserToolRecord(
       named === undefined ||
       !Array.isArray(files) ||
       files.length === 0 ||
-      files.length > MAX_BROWSER_UPLOAD_FILES ||
+      // The most a person may choose; the count they chose is checked with the files.
+      files.length > MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT ||
       !files.every((file) => typeof file === "string" && file !== "" && file.length <= 4096)
     )
       return undefined;
@@ -922,6 +926,70 @@ export function signInPageRefusal(snapshot: BrowserAutomationSnapshot): string |
   return context.presentation === "native-live" ? undefined : "sign-in-needs-the-app-browser";
 }
 
+/**
+ * Whether a page admits every site: the Private page an agent opened at Full
+ * access, which needs no site approval and may navigate across origins.
+ */
+export function browserPageAdmitsEverySite(context: BrowserContextRecord | undefined): boolean {
+  return context?.policy.allowedOrigins.includes(ANY_BROWSER_ORIGIN) === true;
+}
+
+/**
+ * Whether a call needs a new page in place of the open one, because the open
+ * page's reach no longer fits the thread's level. An any-site page was opened
+ * at Full access and has no site approval to stand on below it; Plan only
+ * reads it where it is, so it stays. A Private page opened below Full access
+ * holds one site, and at Full access a navigation elsewhere reopens it rather
+ * than being refused.
+ */
+export function browserPageReach(input: {
+  readonly existing: BrowserContextRecord;
+  readonly fullAccess: boolean;
+  readonly plan: boolean;
+  /** The address a `navigate` asks for, when the call is one that stays Private. */
+  readonly privateNavigation: string | undefined;
+}): "kept" | "reopen" | "navigation-required" {
+  const everySite = browserPageAdmitsEverySite(input.existing);
+  if (everySite && !input.fullAccess && !input.plan) return "navigation-required";
+  if (
+    !everySite &&
+    input.fullAccess &&
+    storedBrowserProfile(input.existing.policy.profile) === undefined &&
+    input.privateNavigation !== undefined &&
+    httpOrigin(input.privateNavigation) !== undefined &&
+    !originAllowed(input.privateNavigation, input.existing.policy.allowedOrigins)
+  ) {
+    return "reopen";
+  }
+  return "kept";
+}
+
+/**
+ * The site a call concerns, which an ask names. A page that admits every site
+ * has no approved origin to name, so it is where the call navigates or where
+ * the page is.
+ */
+export function browserCallOrigin(
+  input: { readonly operation: string; readonly url?: string },
+  existing: BrowserContextRecord | undefined,
+  pageUrl: string | undefined,
+): string | undefined {
+  const target = input.operation === "navigate" ? httpOrigin(input.url) : undefined;
+  if (existing === undefined) return target;
+  if (!browserPageAdmitsEverySite(existing)) return existing.policy.allowedOrigins.join(", ");
+  return input.operation === "navigate" ? target : (httpOrigin(pageUrl) ?? ANY_BROWSER_ORIGIN);
+}
+
+function httpOrigin(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** What one operation answered, as an executor returns it. */
 export interface BrowserToolAnswer {
   readonly images?: ReadonlyArray<ProviderToolImage>;
@@ -1094,7 +1162,83 @@ export function browserToolCallDidNotRun(answer: BrowserToolAnswer): boolean {
   );
 }
 
-export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
+/**
+ * A download an action started at Full access, as its answer reports it: where
+ * it is in the workspace now, or why it is not there.
+ */
+export type BrowserLandedDownload =
+  | {
+      readonly state: "saved";
+      readonly name: string;
+      readonly path: string;
+      readonly sizeBytes: number;
+      readonly mediaType: string;
+    }
+  | { readonly state: "refused"; readonly name: string; readonly reason: string };
+
+/**
+ * At Full access a download is not kept waiting for the agent to ask for it:
+ * each file the action's page started is saved into the workspace as the
+ * action answers, through the same save a `download-save` runs, so the size
+ * cap, the link and destination checks and the journal record all still
+ * apply. Holding below Full access exists so a person can be asked about the
+ * file; at this level nobody is asked, and a second call bought nothing.
+ *
+ * The snapshot comes back without the files that were dealt with, beside what
+ * became of each.
+ */
+export async function landHeldDownloads(
+  snapshot: BrowserAutomationSnapshot,
+  save: (downloadId: string) => Promise<
+    | {
+        readonly status: "saved";
+        readonly path: string;
+        readonly sizeBytes: number;
+        readonly mediaType: string;
+      }
+    | { readonly status: "refused"; readonly error: string }
+  >,
+): Promise<{
+  readonly snapshot: BrowserAutomationSnapshot;
+  readonly landed: ReadonlyArray<BrowserLandedDownload>;
+}> {
+  const reports = snapshot.observation?.downloads;
+  if (snapshot.observation === undefined || reports === undefined) {
+    return { snapshot, landed: [] };
+  }
+  const landed: BrowserLandedDownload[] = [];
+  for (const report of reports) {
+    if (report.state !== "held") continue;
+    const saved = await save(report.downloadId);
+    landed.push(
+      saved.status === "saved"
+        ? {
+            state: "saved",
+            name: report.name,
+            path: saved.path,
+            sizeBytes: saved.sizeBytes,
+            mediaType: saved.mediaType,
+          }
+        : { state: "refused", name: report.name, reason: saved.error },
+    );
+  }
+  if (landed.length === 0) return { snapshot, landed };
+  const { downloads: _held, ...observation } = snapshot.observation;
+  const stopped = reports.filter((report) => report.state !== "held");
+  return {
+    snapshot: {
+      ...snapshot,
+      observation: stopped.length === 0 ? observation : { ...observation, downloads: stopped },
+    },
+    landed,
+  };
+}
+
+export function browserToolResult(
+  snapshot: BrowserAutomationSnapshot,
+  includeScreenshot = false,
+  landed: ReadonlyArray<BrowserLandedDownload> = [],
+) {
   const image = includeScreenshot
     ? browserToolImage(snapshot.observation?.screenshotDataUrl)
     : undefined;
@@ -1126,7 +1270,9 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.emulation === undefined ? {} : { emulation: observation.emulation }),
               ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
               ...(observation.dialogs === undefined ? {} : { dialogs: observation.dialogs }),
-              ...(observation.downloads === undefined ? {} : { downloads: observation.downloads }),
+              ...(observation.downloads === undefined && landed.length === 0
+                ? {}
+                : { downloads: [...(observation.downloads ?? []), ...landed] }),
               ...(bounded === undefined
                 ? {}
                 : {

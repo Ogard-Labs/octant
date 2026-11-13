@@ -5,6 +5,7 @@ import type {
   PersistentBrowserLeaseId,
 } from "@octant/contracts/persistent-browser-owner";
 import type { BrowserAccountProfileCreateResult } from "@octant/contracts/browser-profiles";
+import type { BrowserTransferLimits } from "@octant/domain";
 import type {
   OwnerBrowserNativeCommand,
   OwnerBrowserNativeResult,
@@ -273,6 +274,11 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
      * is cancelled. It is not part of the action contract, so no route can set it.
      */
     readonly downloads?: "hold";
+    /**
+     * The person's limits for the downloads this action holds, set by the
+     * server beside `downloads`. Absent, the runtime uses the defaults.
+     */
+    readonly downloadLimits?: BrowserTransferLimits;
     /** The same check for a `drag`'s drop target when it came from a ref. */
     readonly destinationExpected?: {
       readonly role: string;

@@ -52,9 +52,13 @@ import {
   changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
+  changeCodeProjectAgentDefaultBranchPush,
   changeCodeProjectAgentMerge,
   changeCodeProjectOwnToolchain,
+  changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
+  changeProjectAgentMemoryWrites,
+  changeProjectImageGenerationChoice,
   changeProjectColor,
   changeProjectProviderPolicy,
   changeProjectNativeProviders,
@@ -384,10 +388,12 @@ export class ProjectService implements ProjectServiceApi {
   }
 
   /**
-   * Applies a memory change a thread's agent proposed and the person at a
-   * window approved, marking the entry with the thread it came from. Only the
-   * host's own approval path calls it; no route accepts agent provenance. The
-   * Project, mode, lifecycle, and version checks are the person's own.
+   * Applies a memory change a thread's agent asked for, marking the entry with
+   * the thread it came from: one the person at a window approved, or one the
+   * thread's level or the Project's setting accepts with nobody asked, which
+   * the origin then says. Only the host's own memory tool path calls it; no
+   * route accepts agent provenance. The Project, mode, lifecycle, and version
+   * checks are the person's own.
    */
   async executeAgentMemory(
     command: AgentMemoryCommand,
@@ -484,6 +490,7 @@ export class ProjectService implements ProjectServiceApi {
           actor,
           retractedAt: timestamp,
           expectedVersion: command.expectedVersion,
+          ...(agentOrigin === undefined ? {} : { agentOrigin }),
         });
         result = { kind: "memory-entry-retracted", entry };
         eventName = "memory.entry-retracted@1";
@@ -874,6 +881,22 @@ export class ProjectService implements ProjectServiceApi {
           project = changeCodeProjectOwnToolchain(current, command.ownToolchain, timestamp);
           kind = "code-project-own-toolchain-changed";
           eventName = "project.code-own-toolchain-changed@1";
+        } else if (command.kind === "change-code-project-agent-pull-request-comments") {
+          project = changeCodeProjectAgentPullRequestComments(
+            current,
+            command.agentPullRequestComments,
+            timestamp,
+          );
+          kind = "code-project-agent-pull-request-comments-changed";
+          eventName = "project.code-agent-pull-request-comments-changed@1";
+        } else if (command.kind === "change-code-project-agent-default-branch-push") {
+          project = changeCodeProjectAgentDefaultBranchPush(
+            current,
+            command.agentDefaultBranchPush,
+            timestamp,
+          );
+          kind = "code-project-agent-default-branch-push-changed";
+          eventName = "project.code-agent-default-branch-push-changed@1";
         } else if (command.kind === "change-code-project-actions") {
           project = changeCodeProjectActions(current, command.actions, timestamp);
           kind = "code-project-actions-changed";
@@ -948,6 +971,18 @@ export class ProjectService implements ProjectServiceApi {
           project = changeWorkProjectActions(current, command.actions, timestamp);
           kind = "work-project-actions-changed";
           eventName = "project.work-actions-changed@1";
+        } else if (command.kind === "change-project-agent-memory-writes") {
+          project = changeProjectAgentMemoryWrites(current, command.agentMemoryWrites, timestamp);
+          kind = "project-agent-memory-writes-changed";
+          eventName = "project.agent-memory-writes-changed@1";
+        } else if (command.kind === "change-project-image-generation-choice") {
+          project = changeProjectImageGenerationChoice(
+            current,
+            command.imageGenerationChoice,
+            timestamp,
+          );
+          kind = "project-image-generation-choice-changed";
+          eventName = "project.image-generation-choice-changed@1";
         } else if (command.kind === "change-project-brand-kit") {
           project = changeProjectBrandKit(current, command.brandKit, timestamp);
           kind = "project-brand-kit-changed";
