@@ -2259,6 +2259,328 @@ describe("useChatController streaming", () => {
     expect(thread).toHaveBeenCalledTimes(1);
     unmount();
   });
+
+  it("batches streamed response deltas on a 50 ms beat and flushes pending deltas on stream exit", async () => {
+    try {
+      const turnId = "00000000-0000-4000-8000-000000000921";
+      const attemptId = "00000000-0000-4000-8000-000000000923";
+      const content = (index: number, text: string) => ({
+        contentId: `00000000-0000-4000-8000-${String(930 + index).padStart(12, "0")}`,
+        role: "assistant" as const,
+        body: text,
+        digest: "b".repeat(64),
+        byteLength: text.length,
+      });
+      const reference = (item: ReturnType<typeof content>) => ({
+        contentId: item.contentId,
+        digest: item.digest,
+        byteLength: item.byteLength,
+      });
+      const prompt = {
+        contentId: "00000000-0000-4000-8000-000000000922",
+        role: "user" as const,
+        body: "?",
+        digest: "a".repeat(64),
+        byteLength: 1,
+      };
+      const initialChunk = content(0, "chunk-0");
+      const snapshot = decodeChatThreadView({
+        ...threadView(1),
+        turns: [
+          {
+            id: turnId,
+            threadId,
+            sequence: 1,
+            userMessageRef: {
+              contentId: prompt.contentId,
+              digest: prompt.digest,
+              byteLength: prompt.byteLength,
+            },
+            attachmentIds: [],
+            attempts: [
+              {
+                id: attemptId,
+                turnId,
+                threadId,
+                providerInstanceId: "10000000-0000-4000-8000-000000000001",
+                providerSessionId: "00000000-0000-4000-8000-000000000924",
+                modelId: "model-a",
+                contextManifestId: "00000000-0000-4000-8000-000000000925",
+                outcome: "streaming",
+                responseRefs: [reference(initialChunk)],
+                citationIds: [],
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+            createdAt: now,
+          },
+        ],
+        contents: [prompt, initialChunk],
+      });
+      const streamReady = deferred<void>();
+      const startBatch = deferred<void>();
+      const batchDone = deferred<void>();
+      const holdOpen = deferred<void>();
+      const holdReconnect = deferred<void>();
+      const subscribe = vi
+        .fn()
+        .mockImplementationOnce(async function* (_threadId, _cursor, signal: AbortSignal) {
+          signal.addEventListener(
+            "abort",
+            () => {
+              startBatch.resolve();
+              holdOpen.resolve();
+            },
+            { once: true },
+          );
+          streamReady.resolve();
+          await startBatch.promise;
+          for (let index = 1; index <= 20; index += 1) {
+            const delta = content(index, `-${index}`);
+            yield decodeChatEventFrame({
+              threadId,
+              sequence: index + 1,
+              event: {
+                kind: "attempt-response-appended",
+                threadId,
+                turnId,
+                attemptId,
+                responseRef: reference(delta),
+                updatedAt: now,
+              },
+              contents: [delta],
+            });
+          }
+          batchDone.resolve();
+          await holdOpen.promise;
+          const tailDelta = content(21, "-tail");
+          yield decodeChatEventFrame({
+            threadId,
+            sequence: 22,
+            event: {
+              kind: "attempt-response-appended",
+              threadId,
+              turnId,
+              attemptId,
+              responseRef: reference(tailDelta),
+              updatedAt: now,
+            },
+            contents: [tailDelta],
+          });
+        })
+        .mockImplementation(async function* (_threadId, _cursor, signal: AbortSignal) {
+          signal.addEventListener("abort", () => holdReconnect.resolve(), { once: true });
+          await holdReconnect.promise;
+        });
+      const client = createMockClient({
+        bootstrap: vi.fn(async () => bootstrap()),
+        thread: vi.fn(async () => snapshot),
+        subscribe,
+      });
+
+      const observedViews: Array<ChatThreadView | undefined> = [];
+      const { result, unmount } = renderHook(() => {
+        const controller = useChatController({
+          activeThreadId: threadId,
+          client,
+          navigationRefreshMs: 0,
+          reconnectDelayMs: 5_000,
+          serverUrl: "http://127.0.0.1",
+          windowCapability: capability,
+        });
+        if (observedViews.at(-1) !== controller.activeView) {
+          observedViews.push(controller.activeView);
+        }
+        return controller;
+      });
+
+      await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(1));
+      await streamReady.promise;
+      vi.useFakeTimers();
+
+      const commitsBeforeBatch = observedViews.length;
+      startBatch.resolve();
+      await batchDone.promise;
+      await act(async () => {
+        for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+      });
+      // Before the 50 ms beat fires, deltas stay buffered on activeViewRef without re-rendering.
+      expect(observedViews.length - commitsBeforeBatch).toBe(0);
+      expect(result.current.activeView?.lastSequence).toBe(1);
+
+      await act(async () => vi.advanceTimersByTimeAsync(50));
+      expect(result.current.activeView?.lastSequence).toBe(21);
+      expect(result.current.activeView?.turns[0]?.attempts[0]?.responseRefs).toHaveLength(21);
+      expect(observedViews.length - commitsBeforeBatch).toBe(1);
+
+      // A trailing delta followed immediately by stream exit flushes without waiting 50 ms.
+      await act(async () => {
+        holdOpen.resolve();
+        for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+      });
+      expect(result.current.activeView?.lastSequence).toBe(22);
+      expect(result.current.activeView?.turns[0]?.attempts[0]?.responseRefs).toHaveLength(22);
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores stale stream teardown flushes after switching threads so a new stream beat is preserved", async () => {
+    try {
+      const turnTwoId = "00000000-0000-4000-8000-000000000952";
+      const attemptTwoId = "00000000-0000-4000-8000-000000000953";
+      const content = (suffix: number, text: string) => ({
+        contentId: `00000000-0000-4000-8000-${String(960 + suffix).padStart(12, "0")}`,
+        role: "assistant" as const,
+        body: text,
+        digest: "c".repeat(64),
+        byteLength: text.length,
+      });
+      const prompt = {
+        contentId: "00000000-0000-4000-8000-000000000954",
+        role: "user" as const,
+        body: "?",
+        digest: "a".repeat(64),
+        byteLength: 1,
+      };
+      const initialTwo = content(0, "initial");
+      const threadOneView = decodeChatThreadView({ ...threadView(1), turns: [] });
+      const threadTwoView = decodeChatThreadView({
+        ...threadView(1),
+        thread: bootstrap().threads[1]!,
+        turns: [
+          {
+            id: turnTwoId,
+            threadId: otherThreadId,
+            sequence: 1,
+            userMessageRef: {
+              contentId: prompt.contentId,
+              digest: prompt.digest,
+              byteLength: prompt.byteLength,
+            },
+            attachmentIds: [],
+            attempts: [
+              {
+                id: attemptTwoId,
+                turnId: turnTwoId,
+                threadId: otherThreadId,
+                providerInstanceId: "10000000-0000-4000-8000-000000000001",
+                providerSessionId: "00000000-0000-4000-8000-000000000955",
+                modelId: "model-a",
+                contextManifestId: "00000000-0000-4000-8000-000000000956",
+                outcome: "streaming",
+                responseRefs: [
+                  {
+                    contentId: initialTwo.contentId,
+                    digest: initialTwo.digest,
+                    byteLength: initialTwo.byteLength,
+                  },
+                ],
+                citationIds: [],
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+            createdAt: now,
+          },
+        ],
+        contents: [prompt, initialTwo],
+      });
+
+      const oldStreamReady = deferred<void>();
+      const releaseOldTeardown = deferred<void>();
+      const newStreamReady = deferred<void>();
+      const sendNewDelta = deferred<void>();
+      const holdNewStream = deferred<void>();
+      const subscribe = vi.fn(async function* (
+        tid: ChatThreadId,
+        _cursor: number,
+        signal: AbortSignal,
+      ) {
+        if (String(tid) === String(threadId)) {
+          oldStreamReady.resolve();
+          await releaseOldTeardown.promise;
+          return;
+        }
+        signal.addEventListener("abort", () => holdNewStream.resolve(), { once: true });
+        newStreamReady.resolve();
+        await sendNewDelta.promise;
+        const delta = content(1, "-new-stream");
+        yield decodeChatEventFrame({
+          threadId: otherThreadId,
+          sequence: 2,
+          event: {
+            kind: "attempt-response-appended",
+            threadId: otherThreadId,
+            turnId: turnTwoId,
+            attemptId: attemptTwoId,
+            responseRef: {
+              contentId: delta.contentId,
+              digest: delta.digest,
+              byteLength: delta.byteLength,
+            },
+            updatedAt: now,
+          },
+          contents: [delta],
+        });
+        await holdNewStream.promise;
+      });
+
+      const client = createMockClient({
+        bootstrap: vi.fn(async () => bootstrap()),
+        thread: vi.fn(async (id) =>
+          String(id) === String(threadId) ? threadOneView : threadTwoView,
+        ),
+        subscribe,
+      });
+
+      const { result, rerender, unmount } = renderHook(
+        ({ activeId }: { readonly activeId: ChatThreadId }) =>
+          useChatController({
+            activeThreadId: activeId,
+            client,
+            navigationRefreshMs: 0,
+            reconnectDelayMs: 5_000,
+            serverUrl: "http://127.0.0.1",
+            windowCapability: capability,
+          }),
+        { initialProps: { activeId: threadId } },
+      );
+
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(threadId));
+      await oldStreamReady.promise;
+
+      vi.useFakeTimers();
+      rerender({ activeId: otherThreadId });
+      await act(async () => {
+        for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+      });
+      await newStreamReady.promise;
+      expect(result.current.activeView?.thread.id).toBe(otherThreadId);
+
+      // Schedule a reply beat on the new thread, then let the aborted old stream exit teardown run.
+      sendNewDelta.resolve();
+      await act(async () => {
+        for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+      });
+      expect(result.current.activeView?.lastSequence).toBe(1);
+
+      releaseOldTeardown.resolve();
+      await act(async () => {
+        for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+      });
+      expect(result.current.activeView?.lastSequence).toBe(1);
+
+      // The 50 ms beat for the new thread must still fire and publish sequence 2.
+      await act(async () => vi.advanceTimersByTimeAsync(50));
+      expect(result.current.activeView?.lastSequence).toBe(2);
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("useChatController thread windows", () => {

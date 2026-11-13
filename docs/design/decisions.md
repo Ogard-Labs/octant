@@ -1178,6 +1178,7 @@ A thread paints from an authoritative snapshot before auxiliary observations beg
 - Files, Git, Browser, Computer Use and other auxiliary observations wait for the primary transcript or an explicit open. _Here only._
 - The host reports separate latency classes (navigation, thread snapshots, conversation evidence, environment observation) and returns Server-Timing on measured API responses without identifiers. _Here only._
 - Threads open on their newest turns through a windowed read; the journal and projection stay complete, and totals read the whole thread.
+- Chat publishes live reply deltas and their read cursor on a 50 ms beat, flushes on stream completion, and cancels pending publication when the view or thread is replaced or closed; stale stream teardown cannot discard the new thread's update.
 - A running turn's latest step is held in memory only, redacted at the adapter and again on observation, and is never journaled.
 
 Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
