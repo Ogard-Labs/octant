@@ -6,6 +6,7 @@ import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "../appr
 import {
   currentRoutineBrowserTarget,
   routineBrowserExecutionIsCurrent,
+  routineBrowserToolLevel,
 } from "../browser/browserRoutineSessions";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
 import type {
@@ -62,11 +63,13 @@ import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRunt
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
 import {
+  browserToolTransport,
   isToolAllowedByAllowlist,
   defaultShellSettings,
   enabledModes,
   isBrowserProfileSiteRemembered,
   workThreadAccessOf,
+  type AppToolThreadLevel,
 } from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { createBrowserDownloadJournal } from "../browser/browserDownloadJournal";
@@ -282,16 +285,16 @@ export function wireBrowser(deps: BrowserDependencies) {
       currentManagedChildBrowserTarget(run, {
         canReview: (candidate) => agentRunInteractions.canReviewSession(candidate),
         resolveParent: (threadId, mode) => browserAuthority.resolve(threadId, mode),
-        supportsTools: (providerInstanceId, modelId) => {
-          const observed = providerRuntimeRegistry.observedState(providerInstanceId);
-          return (
-            observed?.capabilities.appManagedTools === "supported" ||
-            observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) === true
-          );
-        },
+        supportsTools: (providerInstanceId, modelId, level) =>
+          browserToolTransport(
+            providerRuntimeRegistry.observedState(providerInstanceId),
+            String(modelId),
+            level,
+          ) === true,
       });
     const routineSessionTarget = (
       routineId: AutomationId,
+      turnLevel?: AppToolThreadLevel,
     ): CurrentBrowserSessionTarget | undefined => {
       const definition = persistence.automationProjection.getDefinition(routineId);
       if (definition === undefined) return undefined;
@@ -317,10 +320,11 @@ export function wireBrowser(deps: BrowserDependencies) {
         toolHostId: deriveToolHostId(persistence.dataDirectory),
         providerEligible:
           provider?.enabled === true &&
-          (observed?.capabilities.appManagedTools === "supported" ||
-            observed?.verifiedToolModelIds?.some(
-              (id) => String(id) === String(definition.executionProfile.modelId),
-            ) === true),
+          browserToolTransport(
+            observed,
+            String(definition.executionProfile.modelId),
+            routineBrowserToolLevel(definition, turnLevel),
+          ) === true,
         executionProfileCurrent:
           profile !== undefined &&
           isToolAllowedByAllowlist(profile.toolConstraints, "octant_browser") &&
@@ -512,14 +516,16 @@ export function wireBrowser(deps: BrowserDependencies) {
       readonly threadId: BrowserThreadId;
       readonly currentAuthority: () => ToolActionAuthority | undefined;
       readonly currentModelId: () => string | undefined;
+      /** The level the routine's running turn holds. */
+      readonly turnLevel: AppToolThreadLevel;
     }) => {
-      const initial = routineSessionTarget(input.routineRun.automationId);
+      const initial = routineSessionTarget(input.routineRun.automationId, input.turnLevel);
       if (initial === undefined) return undefined;
       const current = () => {
         const definition = persistence.automationProjection.getDefinition(
           input.routineRun.automationId,
         );
-        const target = routineSessionTarget(input.routineRun.automationId);
+        const target = routineSessionTarget(input.routineRun.automationId, input.turnLevel);
         if (String(input.currentModelId()) !== String(target?.target.modelId)) return undefined;
         return routineBrowserExecutionIsCurrent({
           run: persistence.automationProjection.getRun(input.routineRun.runId),

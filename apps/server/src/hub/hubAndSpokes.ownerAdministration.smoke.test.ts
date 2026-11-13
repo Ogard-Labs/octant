@@ -123,10 +123,7 @@ const changes = (host: HubTestHost, change: string) =>
   host.records.filter((record) => record.change === change);
 
 /** A hub, two spokes, and a phone the hub and both spokes list as an owner. */
-async function startWorld(
-  approvals?: import("./ownerApprovalHost").OwnerApprovalHost,
-  siteApprovals?: import("./hubOwnerRoutes").OwnerSiteApprovalHost,
-) {
+async function startWorld(approvals?: import("./ownerApprovalHost").OwnerApprovalHost) {
   const network = new HubTestNetwork();
   const [hub, a, b, phone] = [
     await startHubTestHost({ name: "Mac mini", address: "100.101.102.103", network, cleanups }),
@@ -136,7 +133,6 @@ async function startWorld(
       network,
       cleanups,
       ...(approvals === undefined ? {} : { ownerApprovals: approvals }),
-      ...(siteApprovals === undefined ? {} : { ownerSiteApprovals: siteApprovals }),
     }),
     await startHubTestHost({ name: "Desktop B", address: "100.101.102.105", network, cleanups }),
     await startHubTestHost({ name: "Phone", address: "100.101.102.106", network, cleanups }),
@@ -281,172 +277,6 @@ describe("owner approval answers under the five-minute session", () => {
 
     expect(answered.json).toEqual({ status: "refused", kind: "owners-not-honored" });
     expect(answer).not.toHaveBeenCalled();
-  });
-});
-
-describe("an owner device answering a profile's site approvals", () => {
-  const APPROVAL = "40000000-0000-4000-8000-000000000009";
-  const waiting = {
-    approvalId: APPROVAL,
-    threadId: "50000000-0000-4000-8000-000000000001",
-    mode: "code",
-    origin: "https://github.com",
-    profile: { kind: "personal" },
-    requestedAt: "2026-11-12T10:00:00.000Z",
-  };
-  const siteHost = () => ({
-    list: vi.fn(() => [waiting] as never),
-    answer: vi.fn((_decision: { readonly approvalId: string; readonly decision: string }) => true),
-  });
-  const allow = { approvalId: APPROVAL, decision: "approved" };
-
-  it("reads the waiting approvals and answers them under one open session, and journals each answer with the owner", async () => {
-    const site = siteHost();
-    const { a, phone, asPhone, openSession } = await startWorld(undefined, site);
-    const session = await openSession(a);
-
-    const read = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalRead, {}, { session });
-    const answered = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalAnswer, allow, { session });
-    const denied = await asPhone(
-      a,
-      HUB_OWNER_ROUTES.siteApprovalAnswer,
-      { approvalId: APPROVAL, decision: "denied" },
-      { session },
-    );
-
-    expect(read.json).toEqual({ status: "read", approvals: [waiting] });
-    expect(answered.json).toEqual({ status: "answered" });
-    expect(denied.status).toBe(200);
-    expect(site.answer.mock.calls.map(([decision]) => decision)).toEqual([
-      allow,
-      { approvalId: APPROVAL, decision: "denied" },
-    ]);
-    expect(changes(a, "owner-site-approval-answered")).toEqual([
-      {
-        change: "owner-site-approval-answered",
-        actingPrincipal: { kind: "owner-unlock", memberId: phone.hostId },
-        memberId: phone.hostId,
-      },
-      {
-        change: "owner-site-approval-answered",
-        actingPrincipal: { kind: "owner-unlock", memberId: phone.hostId },
-        memberId: phone.hostId,
-      },
-    ]);
-  });
-
-  it("takes a fresh unlock for one answer, once, and refuses an answer that asks to remember the site", async () => {
-    const site = siteHost();
-    const { a, asPhone, unlock } = await startWorld(undefined, site);
-
-    const sent = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalAnswer, allow, { unlock });
-    const replayed = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalAnswer, allow, {
-      unlock: { ...unlock, ...(sent.proofHeader === undefined ? {} : { reuse: sent.proofHeader }) },
-    });
-    const remembered = await asPhone(
-      a,
-      HUB_OWNER_ROUTES.siteApprovalAnswer,
-      { ...allow, remember: true },
-      { unlock },
-    );
-
-    expect(sent.json).toEqual({ status: "answered" });
-    expect(replayed.status).toBe(403);
-    expect(remembered.status).toBe(400);
-    expect(site.answer).toHaveBeenCalledOnce();
-  });
-
-  it("says so, and journals nothing, when the approval is gone or was already answered", async () => {
-    const site = siteHost();
-    site.answer.mockReturnValue(false);
-    const { a, asPhone, unlock } = await startWorld(undefined, site);
-
-    const answered = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalAnswer, allow, { unlock });
-
-    expect(answered.status).toBe(409);
-    expect(answered.json).toEqual({ status: "refused", kind: "not-waiting" });
-    expect(changes(a, "owner-site-approval-answered")).toEqual([]);
-  });
-
-  it("refuses a reading and an answer with no unlock, after the session's five minutes, from a member that is not an owner, and where Owners is unticked", async () => {
-    const site = siteHost();
-    const { network, hub, a, asPhone, openSession } = await startWorld(undefined, site);
-    const tablet = await startHubTestHost({
-      name: "Tablet",
-      address: "100.101.102.107",
-      network,
-      cleanups,
-    });
-    await joinHub(hub, tablet, { owner: false });
-    await vi.waitFor(() => {
-      const held = a.spoke.status();
-      if (held.membership !== "member") throw new Error("Not a member.");
-      expect(held.roster.roster.members.map((member) => member.name)).toContain("Tablet");
-    });
-    const session = await openSession(a);
-    const routes = [
-      [HUB_OWNER_ROUTES.siteApprovalRead, {}],
-      [HUB_OWNER_ROUTES.siteApprovalAnswer, allow],
-    ] as const;
-
-    for (const [route, body] of routes) {
-      expect((await asPhone(a, route, body)).json, route).toEqual({
-        status: "refused",
-        kind: "unlock-required",
-      });
-      const unlisted = await ownerCall({
-        device: tablet,
-        network,
-        target: a,
-        route,
-        body,
-        session,
-      });
-      expect(unlisted.json, route).toEqual({ status: "refused", kind: "not-an-owner" });
-    }
-    a.clock.offset += 5 * MINUTE + 1_000;
-    // The host forgets a session the first time it finds it expired.
-    const [expiredRead, expiredAnswer] = [
-      await asPhone(a, routes[0][0], routes[0][1], { session }),
-      await asPhone(a, routes[1][0], routes[1][1], { session }),
-    ];
-    expect(expiredRead.json).toEqual({ status: "refused", kind: "session-expired" });
-    expect(expiredAnswer.json).toEqual({ status: "refused", kind: "no-such-session" });
-    const second = await openSession(a);
-    a.spoke.setGrant({ items: ["roster", "introduce"], actProjects: [] }, window);
-    for (const [route, body] of routes) {
-      expect((await asPhone(a, route, body, { session: second })).json, route).toEqual({
-        status: "refused",
-        kind: "owners-not-honored",
-      });
-    }
-    expect(site.list).not.toHaveBeenCalled();
-    expect(site.answer).not.toHaveBeenCalled();
-  });
-
-  it("asks for an unlock per answer when the host's window set that, and still reads under the session", async () => {
-    const site = siteHost();
-    const { a, asPhone, unlock, openSession } = await startWorld(undefined, site);
-    a.ownerApprovalAnswerUnlock.setRequired(true, window);
-    const session = await openSession(a);
-
-    const read = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalRead, {}, { session });
-    const underSession = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalAnswer, allow, { session });
-    const fresh = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalAnswer, allow, { unlock });
-
-    expect(read.status).toBe(200);
-    expect(underSession.json).toEqual({ status: "refused", kind: "own-unlock-required" });
-    expect(fresh.json).toEqual({ status: "answered" });
-    expect(site.answer).toHaveBeenCalledOnce();
-  });
-
-  it("answers unsupported on a host with no Browser approvals", async () => {
-    const { a, asPhone, unlock } = await startWorld();
-
-    const read = await asPhone(a, HUB_OWNER_ROUTES.siteApprovalRead, {}, { unlock });
-
-    expect(read.status).toBe(409);
-    expect(read.json).toEqual({ status: "refused", kind: "unsupported" });
   });
 });
 

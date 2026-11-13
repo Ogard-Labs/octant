@@ -101,6 +101,7 @@ import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-polic
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
   activeChatTurns,
+  browserToolTransport,
   chatTurnAnsweredAttempt,
   modelCanTakeDelegatedWork,
 } from "@octant/domain";
@@ -775,13 +776,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         if (contributed.every((set) => set === undefined)) return undefined;
         return combineAppManagedToolSets(...contributed);
       },
-      appManagedToolTransport: ({ providerInstanceId, modelId }) => {
+      appManagedToolTransport: ({ providerInstanceId, modelId, executionPolicy }) => {
         const observed = providerRuntimeRegistry.observedState(providerInstanceId);
         const supported =
-          observed?.capabilities.appManagedTools === "supported" ||
-          observed?.verifiedToolModelIds?.some(
-            (candidate: unknown) => String(candidate) === String(modelId),
-          ) === true;
+          browserToolTransport(observed, String(modelId), { executionPolicy }) === true;
         if (supported) return "supported" as const;
         return observed === undefined ? ("unavailable" as const) : ("unsupported" as const);
       },

@@ -59,7 +59,6 @@ import type { FoundationsWiring } from "./foundations";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 import type { CodeRuntimeWiring } from "./codeRuntime";
-import type { CodeToolingWiring } from "./codeTooling";
 import type { HarnessStateWiring } from "./harnessState";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
@@ -94,7 +93,6 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     "nativeHarnessApprovals" | "nativeHarnessQuestions" | "nativeHarnessSessions"
   > &
   Pick<ChatWiring, "chatService"> &
-  Pick<CodeToolingWiring, "pairedMergeUnlockSlot"> &
   Pick<
     WorkWiring,
     | "observeWorkThreadRuntime"
@@ -120,7 +118,6 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     nativeHarnessQuestions,
     nativeHarnessSessions,
     observeWorkThreadRuntime,
-    pairedMergeUnlockSlot,
     persistence,
     projectService,
     providerDataDirectory,
@@ -371,8 +368,6 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     windowAuthorityStore,
   });
   const workThreadRoutes = createWorkThreadRouteHandler({
-    // The hub side is wired after this and binds the owner unlock into the slot.
-    ownerActionUnlock: pairedMergeUnlockSlot.current,
     service: {
       bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
       navigation: (windowId) => workThreadServiceWithWorkflows.navigation(windowId),

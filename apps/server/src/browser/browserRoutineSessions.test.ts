@@ -17,6 +17,7 @@ import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreati
 import { deriveToolHostId } from "./browserAuthorityResolver";
 import {
   currentRoutineBrowserTarget,
+  routineBrowserToolLevel,
   routineBrowserExecutionIsCurrent,
   withRoutineBrowserProfiles,
 } from "./browserRoutineSessions";
@@ -104,6 +105,23 @@ it("withholds an earlier page's observation and refuses concurrent calls while a
     await Promise.all([oldRead, switching]);
     await tools.close?.();
   }
+});
+
+it("reads a routine's Browser tool gate at the level its turn runs at, and at Full access between turns only when it runs at its Project's level", () => {
+  const definition = automationDefinitionFixture();
+  const optedIn = { ...definition, projectLevel: "opted-in" as const };
+  const fullAccessTurn = { executionPolicy: "full-access" as const, fullAccessSandbox: undefined };
+  const guardedTurn = { executionPolicy: "approval-gated" as const, fullAccessSandbox: undefined };
+
+  expect(routineBrowserToolLevel(optedIn, fullAccessTurn)).toEqual(fullAccessTurn);
+  expect(routineBrowserToolLevel(optedIn, guardedTurn)).toEqual(guardedTurn);
+  // No turn runs while a person reviews the routine's Browser permission. A
+  // routine opted into its Project's level may run at Full access, so its
+  // target stays reviewable on a runtime that carries tools only there.
+  expect(routineBrowserToolLevel(optedIn, undefined)).toEqual({ executionPolicy: "full-access" });
+  // Every other routine runs below Full access, where the guarded
+  // capability alone answers.
+  expect(routineBrowserToolLevel(definition, undefined)).toBeUndefined();
 });
 
 it("binds a recurring permission to its definition rather than routine observation counters", () => {

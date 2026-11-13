@@ -74,9 +74,8 @@ These rules hold for every phase and are not reopened by any slice:
   route class, admitted by the fail-closed remote route classifier
   (`apps/server/src/remoteRoutePolicy.ts`) and refused on every route it does
   not name. Local-host-required actions stay unavailable on the phone, except
-  what an owner device may do under
-  [Hub and spokes: Owner devices](hub-and-spokes.md#owner-devices), choosing
-  Full access included (maintainer request, 2026-11-12).
+  what an owner device may do through a host's owner routes under
+  [Hub and spokes: Owner devices](hub-and-spokes.md#owner-devices).
 - A notification is awareness, never authority. It carries no action that
   approves, denies, sends, or mutates; opening it lands on the thread, where the
   ordinary authenticated session and biometric gate apply.

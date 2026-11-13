@@ -1,6 +1,5 @@
-// Whether an owner device's approval answers (runtime approvals and profile
-// site approvals) ride its open five-minute session on this host, or each
-// needs its own fresh unlock. Riding the session
+// Whether an owner device's runtime approval answers ride its open five-minute
+// session on this host, or each needs its own fresh unlock. Riding the session
 // is the default: the person already proved presence for it, and a second
 // prompt per Allow or Deny adds a tap without adding a check. The switch is
 // for a host whose person wants that tap anyway, and only a window on this

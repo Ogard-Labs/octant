@@ -159,87 +159,6 @@ describe("Work thread routes", () => {
     expect(local?.status).toBe(200);
   });
 
-  describe("an owner device choosing Full access for a Work thread from a paired client", () => {
-    const remoteDeviceId = "73000000-0000-4000-8000-000000000020";
-    const raise = {
-      kind: "change-work-thread-access",
-      threadId,
-      expectedVersion: 1,
-      access: "full-access",
-    };
-    const fromDevice = (command: unknown, proof?: string) => {
-      const remote = request("/api/work/threads/commands", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(proof === undefined ? {} : { "x-octant-owner-unlock": proof }),
-        },
-        body: JSON.stringify(command),
-      });
-      bindPrincipalRouteContext(remote, {
-        principal: createRemoteDevicePrincipal({
-          hostId: "local" as never,
-          deviceId: remoteDeviceId as never,
-          credentialGeneration: 1,
-          origin: "https://octant.invalid",
-          protocolVersion: 1,
-          capabilityDigest: "b".repeat(64),
-          sessionId: "73000000-0000-4000-8000-000000000021" as never,
-        }),
-        scopeId: remoteDeviceId as never,
-      });
-      return remote;
-    };
-    const port = (answer: unknown) => ({ verifyAction: vi.fn(() => answer) });
-
-    it("raises the thread when the request carries an owner device's fresh unlock for that exact command", async () => {
-      const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
-      const ownerActionUnlock = port({
-        status: "unlocked",
-        ownerMemberId: "22222222-2222-4222-8222-222222222222",
-      });
-      const route = routeFixture({ execute }, ownerActionUnlock);
-
-      const response = await route(fromDevice(raise, "cHJvb2Y"));
-
-      expect(response?.status).toBe(200);
-      expect(ownerActionUnlock.verifyAction).toHaveBeenCalledWith("full-access", {
-        path: "/api/work/threads/commands",
-        body: JSON.stringify(raise),
-        proof: "cHJvb2Y",
-      });
-      expect(execute).toHaveBeenCalledOnce();
-    });
-
-    it("refuses the raise when the unlock is missing or refused, and never takes one for the Work default", async () => {
-      const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
-      const refusing = port({ status: "owner-unlock-required", reason: "not-an-owner" });
-      const accepting = port({
-        status: "unlocked",
-        ownerMemberId: "22222222-2222-4222-8222-222222222222",
-      });
-
-      const missing = await routeFixture({ execute }, refusing)(fromDevice(raise));
-      const refused = await routeFixture({ execute }, refusing)(fromDevice(raise, "cHJvb2Y"));
-      const noOwnerSide = await routeFixture({ execute })(fromDevice(raise, "cHJvb2Y"));
-      const workDefault = await routeFixture(
-        { execute },
-        accepting,
-      )(
-        fromDevice(
-          { kind: "update-work-settings", expectedVersion: 1, defaultAccess: "full-access" },
-          "cHJvb2Y",
-        ),
-      );
-
-      expect([missing?.status, refused?.status, noOwnerSide?.status, workDefault?.status]).toEqual([
-        403, 403, 403, 403,
-      ]);
-      expect(accepting.verifyAction).not.toHaveBeenCalled();
-      expect(execute).not.toHaveBeenCalled();
-    });
-  });
-
   it("refuses a paired device changing Continue after restart for a Work thread or the Work setting", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
     const route = routeFixture({ execute });
@@ -509,10 +428,7 @@ function request(path: string, init: RequestInit = {}): Request {
   return new Request(`http://127.0.0.1${path}`, { ...init, headers });
 }
 
-function routeFixture(
-  overrides: Record<string, unknown>,
-  ownerActionUnlock?: { readonly verifyAction: (...args: never[]) => unknown },
-) {
+function routeFixture(overrides: Record<string, unknown>) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const service = {
@@ -525,9 +441,6 @@ function routeFixture(
     service,
     windowAuthorityStore: store,
     now: () => 1,
-    ...(ownerActionUnlock === undefined
-      ? {}
-      : { ownerActionUnlock: () => ownerActionUnlock as never }),
   });
 }
 

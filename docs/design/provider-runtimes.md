@@ -801,9 +801,15 @@ runtime outside the sandbox the receipt rests on, so a release that proves
 exclusivity below Full access is mixed there too, unless the thread keeps the
 opt-in sandbox. The capability is reported only when the connection check saw
 the runtime accept the tool endpoint's declaration; that check runs on macOS
-only, so on Linux nothing is reported as mixed. Not built yet: a child agent
-session, a routine's own Browser target and a saved flow still read
-`appManagedTools` alone, so they are not offered tools on a mixed runtime.
+only, so on Linux nothing is reported as mixed. Every reader of the tool
+gate follows the level the turn runs at (maintainer decision, 2026-11-13): a
+child agent session reads the level its own session runs at; a routine's own
+Browser target reads its running turn's level; a saved flow, which runs
+between turns, reads the level its thread holds then. While a person reviews
+a routine's Browser permission no turn runs, so a routine opted into its
+Project's level is read at Full access there and stays reviewable; a review
+offers no tool, and each turn is still judged at its own level. Below Full
+access all three read `appManagedTools` alone, as before.
 Process exit, stream failure, interruption, and scope cleanup retire pending
 tool requests.
 

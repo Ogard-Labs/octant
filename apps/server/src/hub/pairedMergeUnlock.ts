@@ -6,18 +6,12 @@
 // the merge route's own method, path, and body hash, answered by that owner's
 // unlock key. The switch is off by default, so no paired client is locked out
 // until the person turns it on in a window on this host.
-//
-// The same check answers an action a paired client may take only as an owner
-// device: choosing Full access for a thread, and navigating or typing in the
-// host's agent Browser. There the unlock is not a switch: without it the route
-// refuses, as it does for every other paired device.
 
 import {
   HubMemberId,
   type AuditActingPrincipal,
   type CodeOwnerMergeUnlockReason,
   type CodeOwnerMergeUnlockRefusal,
-  type HubMembershipChange,
   type HubMembershipChangedPayload,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -33,34 +27,8 @@ export type PairedMergeUnlockCheck =
   | { readonly status: "unlocked"; readonly ownerMemberId: HubMemberId }
   | CodeOwnerMergeUnlockRefusal;
 
-/** An action a paired client's request may take only with an owner device's fresh unlock beside it. */
-export type OwnerUnlockedAction = "full-access" | "browser-drive";
-
-const OWNER_ACTION_CHANGE: Readonly<Record<OwnerUnlockedAction, HubMembershipChange>> = {
-  "full-access": "owner-full-access-unlocked",
-  "browser-drive": "owner-browser-action-unlocked",
-};
-
-interface OwnerProofRequest {
-  readonly path: string;
-  readonly body: string;
-  readonly proof: string | null;
-}
-
-/** What a product route asks of the hub side before an action only an owner device may take remotely. */
-export interface OwnerActionUnlockPort {
-  /**
-   * Checks the unlock a paired client's request carries for this action,
-   * before any side effect. The unlock is always required: there is no switch.
-   */
-  readonly verifyAction: (
-    action: OwnerUnlockedAction,
-    request: OwnerProofRequest,
-  ) => PairedMergeUnlockCheck;
-}
-
 /** What the Code merge routes ask of the hub side. */
-export interface PairedMergeUnlockPort extends OwnerActionUnlockPort {
+export interface PairedMergeUnlockPort {
   /** Whether a paired client's merge needs an owner unlock on this host. */
   readonly required: () => boolean;
   /** Checks the unlock a paired client's merge carries, before any side effect. */
@@ -126,18 +94,11 @@ export class PairedMergeUnlockService implements PairedMergeUnlockPort {
     return { status: "changed", enabled };
   }
 
-  verify(request: OwnerProofRequest): PairedMergeUnlockCheck {
-    return this.#verifyOwnerProof(request, "owner-merge-unlocked");
-  }
-
-  verifyAction(action: OwnerUnlockedAction, request: OwnerProofRequest): PairedMergeUnlockCheck {
-    return this.#verifyOwnerProof(request, OWNER_ACTION_CHANGE[action]);
-  }
-
-  #verifyOwnerProof(
-    request: OwnerProofRequest,
-    change: HubMembershipChange,
-  ): PairedMergeUnlockCheck {
+  verify(request: {
+    readonly path: string;
+    readonly body: string;
+    readonly proof: string | null;
+  }): PairedMergeUnlockCheck {
     const scope = ownerScopeFor(this.#owners, request.path);
     if ("kind" in scope) return { status: "owner-unlock-required", reason: "no-owner-list" };
     const hostMemberId = decodeHubMemberId(this.#owners.hub.hubMemberId());
@@ -149,7 +110,7 @@ export class PairedMergeUnlockService implements PairedMergeUnlockPort {
     if (request.proof === null) return refuse("missing");
     const proof = readUnlockProofHeader(request.proof);
     if (proof === undefined) return refuse("invalid");
-    // The challenge is consumed here whatever follows, so one unlock opens at most one action.
+    // The challenge is consumed here whatever follows, so one unlock opens at most one merge.
     const answered = this.#unlock.verifyIssued({
       proof,
       request: { method: "POST", path: request.path, body: request.body },
@@ -184,7 +145,7 @@ export class PairedMergeUnlockService implements PairedMergeUnlockPort {
       );
     }
     this.#record({
-      change,
+      change: "owner-merge-unlocked",
       actingPrincipal: { kind: "owner-unlock", memberId: owner.memberId },
       memberId: owner.memberId,
     });

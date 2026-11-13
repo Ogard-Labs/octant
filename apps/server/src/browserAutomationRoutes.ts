@@ -11,11 +11,7 @@ import type { BrowserUploadPermissions } from "./browser/browserUploadPermission
 import { browserProfileFromChoice } from "@octant/domain";
 import type { BrowserAgentAvailability } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
-import {
-  OWNER_UNLOCK_HEADER,
-  sameToolActionAuthority,
-  type ToolActionAuthority,
-} from "@octant/contracts";
+import { sameToolActionAuthority, type ToolActionAuthority } from "@octant/contracts";
 import {
   decodeBrowserTaskProfileReadCommand,
   decodeBrowserTaskProfileSelectCommand,
@@ -58,12 +54,7 @@ import type {
   BrowserTaskProfileCommit,
 } from "./browser/browserAutomationService";
 import type { BrowserCaptureService } from "./browser/browserCaptureService";
-import {
-  authorizePrincipalAction,
-  ownerDeviceMayDriveBrowser,
-  remoteBrowserActionReach,
-} from "@octant/domain";
-import type { OwnerActionUnlockPort } from "./hub/pairedMergeUnlock";
+import { remoteBrowserActionReach } from "@octant/domain";
 import {
   decodeProjectAgentPages,
   decodeProjectAgentPagesCommand,
@@ -182,12 +173,6 @@ export interface BrowserAutomationRouteDependencies {
   readonly flows?: Pick<BrowserFlowService, "summaries" | "delete">;
   readonly flowRuns?: BrowserFlowRuns;
   readonly windowAuthorityStore: WindowAuthorityStore;
-  /**
-   * The owner unlock a paired client's navigate or type action may carry. The
-   * hub side is wired later, so it is read when an action arrives; absent, a
-   * paired client never drives the host's Browser.
-   */
-  readonly ownerActionUnlock?: () => OwnerActionUnlockPort | undefined;
   readonly maxRequestBodySize: number;
 }
 
@@ -913,25 +898,7 @@ export function createBrowserAutomationRouteHandler(
         // client can never navigate, type, or close a tab on the host.
         if (readPrincipalRouteContext(request)?.principal.kind === "remote-device") {
           const reach = remoteBrowserActionReach(input.kind);
-          // Navigating and typing drive the host, so they are a window's, or
-          // an owner device's whose fresh unlock for this exact action comes
-          // beside it. Every other denied kind stays denied whatever comes.
-          if (
-            reach.kind === "denied" &&
-            authorizePrincipalAction({
-              principalKind: "remote-device",
-              action: "browser.session.manage",
-              ownerUnlock:
-                ownerDeviceMayDriveBrowser(input.kind) &&
-                dependencies.ownerActionUnlock?.()?.verifyAction("browser-drive", {
-                  path: url.pathname,
-                  body: decoded.text,
-                  proof: request.headers.get(OWNER_UNLOCK_HEADER),
-                }).status === "unlocked"
-                  ? "fresh"
-                  : "absent",
-            }).kind === "deny"
-          ) {
+          if (reach.kind === "denied") {
             return failure({ category: "unauthorized", message: reach.reason }, 403, origin);
           }
           // A tap on a signed-in page would act as the person's account from a
@@ -1051,15 +1018,13 @@ function failure(
 async function readJson(
   request: Request,
   maxBytes: number,
-): Promise<
-  { kind: "ok"; value: unknown; text: string } | { kind: "invalid" } | { kind: "too-large" }
-> {
+): Promise<{ kind: "ok"; value: unknown } | { kind: "invalid" } | { kind: "too-large" }> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) return { kind: "too-large" };
   const text = await request.text();
   if (Buffer.byteLength(text, "utf8") > maxBytes) return { kind: "too-large" };
   try {
-    return { kind: "ok", value: text === "" ? {} : JSON.parse(text), text };
+    return { kind: "ok", value: text === "" ? {} : JSON.parse(text) };
   } catch {
     return { kind: "invalid" };
   }

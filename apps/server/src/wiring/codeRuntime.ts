@@ -1040,6 +1040,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         routineBrowserTools: ({ thread, readThread, routineRun }) =>
           routineBrowserTools({
             routineRun,
+            turnLevel: appToolThreadLevel(thread),
             threadId: decodeBrowserThreadId(String(thread.id)),
             currentAuthority: () =>
               readThread() === undefined

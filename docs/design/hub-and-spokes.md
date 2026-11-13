@@ -674,8 +674,7 @@ from their phone or laptop what they could do sitting at any of them. An
   unlock for each approval answer", off by default, set only in a window on
   the host (Settings › Remote access › Hub, beside the owner devices) and
   journaled as `owner-approval-answer-unlock-on` or `-off`. It covers runtime
-  approval answers and profile site approval answers; readings ride the
-  session either way. An answer that rode a session is delivered only while
+  approval answers; readings ride the session either way. An answer that rode a session is delivered only while
   that session is still open when the runtime takes it. An owner client
   spends the unlock for its first reading on a session, and unlocks again for
   one answer only when the host refuses the session with
@@ -735,50 +734,18 @@ from their phone or laptop what they could do sitting at any of them. An
   changing that host's hub and peer grants; and copying sign-ins
   ([Shared sign-ins](#shared-sign-ins)). Each use is journaled on the host
   with the device and `owner-unlock`.
-- **Threads, the Browser, and terminals.** An owner device the person marked
-  may also raise a thread to Full access or start one there (exception 7 of
-  [the Full access rule](../architecture.md#security-and-authority); the
-  choice keeps its own unlock), navigate and type in the host's agent
-  Browser, write to a thread terminal, and answer a profile's site approvals
-  (maintainer request, 2026-11-12). Any other paired device is unchanged.
-  The host side of three of these is built; no client sends them yet, and the
-  terminal is not built:
-  - **Full access.** The Code and Work thread command routes
-    (`/api/code/commands`, `/api/work/threads/commands`) accept a paired
-    client's command that raises a thread to Full access, or starts a Code
-    thread there, when an owner device's own fresh unlock for that exact
-    command comes beside it. The owner route issues the challenge for the
-    route's path and body hash to an owner only, as for a paired merge; the
-    host consumes it once and journals `owner-full-access-unlocked` with the
-    owner. The default new threads start at (Code and Work settings) stays
-    with a window. A Work thread carries no level when it is created, so it
-    is started and then raised. Not built yet: no phone or browser composer
-    attaches the unlock, so today they still change a level only through the
-    posture routes in the [recovery inventory](#recovery-inventory).
-  - **Profile site approvals.** The owner routes `site-approvals/read` and
-    `site-approvals/answer` list and answer a waiting approval for a page in
-    a stored profile, Allow once or Deny, under the session by default and
-    under the per-answer setting above. Each answer is journaled as
-    `owner-site-approval-answered`. An upload, a download, a sign-in request
-    and a script approval are left out, as is a page with no profile, which
-    the paired device that raised it already answers. Not built yet: no
-    client screen, and remembering the site or "Allow all sites in this
-    profile" from an owner device.
-  - **The agent Browser.** `/api/browser/actions` accepts `navigate` and
-    `type` from a paired client when an owner device's own fresh unlock for
-    that exact action comes beside it, journaled as
-    `owner-browser-action-unlocked`. Closing a tab, choosing an option,
-    dragging, uploading, resizing, recording and tab changes stay with a
-    window, and a page in a stored profile stays refused to every paired
-    client, which cannot see it. Not built yet: no client attaches the
-    unlock. The 60-second control of an open Code Private page above is
-    unchanged.
-  - **A thread terminal.** Not built yet: a paired client's `write-terminal`
-    travels the Code command route, which already takes an owner unlock, but
-    the host ties a terminal to the window that opened it and gates a paired
-    client's operations as an agent's. Building it needs that tie relaxed for
-    a verified owner write only, and a decision between an unlock per write
-    and a short terminal-bound controller like the Browser's.
+- **Threads, the Browser, and terminals.** On the product routes an owner
+  device is an ordinary paired device (maintainer decision, 2026-11-13). It
+  has no per-action unlock for raising a thread to Full access or starting
+  one there, for navigating or typing in the host's agent Browser, for
+  writing to a thread terminal, or for answering a profile's site approvals;
+  the host refuses each as it does for any paired device. What an owner
+  device does about a thread it does through the owner routes: the posture
+  and runtime approval recovery in the
+  [recovery inventory](#recovery-inventory), and the 60-second control of an
+  open Code Private page above. Rationale: the unlock per action was a second
+  ladder beside pairing that no client was built for; whether a paired device
+  may take these actions is a rule about paired devices, not about owners.
 - **Before a paired client's merge.** A host may also ask a paired phone or
   web client's merge for an owner unlock, under a switch its window sets, off
   by default. The owner device answers a challenge this host's owner route

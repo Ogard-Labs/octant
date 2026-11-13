@@ -653,7 +653,7 @@ the program run in one capsule confined as a terminal, on the session's own
 ends at once when the thread, its posture, its checkout, the confirmation, or
 the Project goes. An agent may also start, control and read a debug session:
 unasked at Full access, approval-gated per configuration below it, and refused
-in Plan; a paired device that is not an owner device stays refused (maintainer
+in Plan; a paired device stays refused (maintainer
 request, 2026-11-12). The host's start decision follows this rule and skips
 the confirmation at Full access. Not built yet: today the routes under
 `/api/code/debug/` are local-window only with no remote action and no agent
@@ -933,8 +933,10 @@ receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime; see [Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
 At Full access a runtime whose inherited configuration cannot prove that
 exclusivity is still offered Octant's tools, labelled as mixed; below Full
-access the rule is unchanged (maintainer request, 2026-11-12). Built for a
-Work or Code thread's own turns; what remains is named in
+access the rule is unchanged (maintainer request, 2026-11-12). The level
+read is the one the turn runs at, for a thread's own turns and for a child
+agent session, a routine's own Browser target and a saved flow (maintainer
+decision, 2026-11-13); detail is in
 [Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
 
 **Browser and Computer are tools, not mentions.** The host offers them on
@@ -12112,9 +12114,11 @@ mechanisms are:
     6. Billed or off-machine desktops: the spend cap is mandatory, and
        inside it the confirmation of each billed or off-machine lease and
        each transfer to a cloud desktop is a setting, on by default.
-    7. Who may choose Full access: a local window, or an owner device the
-       person marked. No other paired device and no agent grant raises a
-       thread to it.
+    7. Who may choose Full access: a local window. No paired device and no
+       agent grant raises a thread to it. An owner device has no unlock of
+       its own for the choice (maintainer decision, 2026-11-13): it reaches
+       Full access only through the hub's owner posture recovery
+       ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
     8. The one-time warning when a machine or a Project first picks it.
 
     Rationale: the same agent already holds an unwrapped shell and an open
@@ -12211,7 +12215,7 @@ mechanisms are:
       access" beside a Project's default mode. In the terminal: `octant
 settings sandbox on|off [--work]`. Only a window on this host can turn
       it off for a Full access thread, because that change names Full access,
-      which a paired device that is not an owner device cannot.
+      which a paired device cannot.
       Verified with the real Seatbelt profile on macOS: writes inside the
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a
@@ -12518,11 +12522,9 @@ access` agree); a thread's own change is journaled as
   revoked on the thread's next mode change. A paired device may lower a
   thread but cannot raise one to Full access or start one at Full access;
   the host refuses those at the route with "Full
-  access is chosen in the Octant window on this host, or on one of its owner
-  devices after a fresh unlock." An owner device the
-  person marked may do both (maintainer request, 2026-11-12): the route takes
-  its own fresh unlock for that exact command. Not built yet: no client
-  attaches the unlock. `octant agent` keeps
+  access is chosen in the Octant window on this host." An owner device is
+  refused there as any paired device is; the per-command owner unlock these
+  routes took was removed (maintainer decision, 2026-11-13). `octant agent` keeps
   sending Full access exactly when the Project remembers it, and
   `octant agent --access <mode>` asks for any mode on a new thread:
   `full-access` is remembered for the Code Project through the same
@@ -14160,17 +14162,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   back; that hold is the person's at a window of this computer, checked by the
   route, and the gateway does not admit its paths
   ([Person and agent together](design/browser-agent-tool.md#person-and-agent-together)).
-  An owner device the person marked at a local window is the exception
-  (maintainer request, 2026-11-12): it may raise a thread to Full access or
-  start one there, navigate and type in the host's agent Browser, write to a
-  thread terminal, and answer profile site approvals. Its approval answers
-  ride the five-minute unlock session by default; an unlock for each answer is
-  a setting. Every other paired device keeps the limits above
+  An owner device the person marked at a local window is held to the same
+  limits on these product routes: the per-action owner unlock for choosing
+  Full access, navigating and typing in the agent Browser, and answering
+  profile site approvals was removed (maintainer decision, 2026-11-13). An
+  owner device keeps meaning only on the hub's own owner routes, where its
+  runtime approval answers ride the five-minute unlock session by default and
+  an unlock for each answer is a setting
   ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
-  Session-riding approval answers and their setting are built. The host side
-  of the Full access choice, of profile site approvals, and of navigate and
-  type is built and no client sends them yet; the terminal write is not
-  built.
   - **Pairing budgets.** Hello and claim share ten requests per source per
     minute and sixty per host. A window waiting for approval polls its ticket's
     status once a second for up to the ticket's five minutes, which that budget
