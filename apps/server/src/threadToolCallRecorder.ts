@@ -30,7 +30,11 @@ export type ThreadToolCallRecorders = (turn: {
   readonly callLimit: number | undefined;
 }) => ThreadToolCallRecorder;
 
-/** How many path-shaped words of one input are judged; the rest of a longer input is not read. */
+/**
+ * How many path-shaped words of one input are judged. An input that names more
+ * is treated as naming a protected file: the unread rest could hide one, so
+ * its output is withheld rather than judged safe.
+ */
 const MAX_JUDGED_PATHS = 256;
 const PATH_SHAPED = /^(?:\/|~(?:\/|$)|\$HOME(?:\/|$)|\$\{HOME\}(?:\/|$))/;
 
@@ -60,7 +64,7 @@ export function textNamesProtectedPath(
       if (!PATH_SHAPED.test(word)) continue;
       if (protectedPath(word)) return true;
       judged += 1;
-      if (judged >= MAX_JUDGED_PATHS) return false;
+      if (judged >= MAX_JUDGED_PATHS) return true;
     }
   }
   return false;

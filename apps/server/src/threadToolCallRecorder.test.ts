@@ -219,6 +219,11 @@ describe("textNamesProtectedPath", () => {
     );
   });
 
+  it("counts an input as naming a protected file when it names more paths than are judged", () => {
+    const ordinary = Array.from({ length: 256 }, (_, index) => `/tmp/file-${index}`).join(" ");
+    expect(textNamesProtectedPath(`cat ${ordinary} ~/.ssh/id_ed25519`, protectedPath)).toBe(true);
+  });
+
   it("finds a protected file a JSON command names just before a newline or a tab", () => {
     for (const command of [
       "cat ~/.ssh/id_ed25519\nprintf done",
