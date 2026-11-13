@@ -85,6 +85,8 @@ export const HubMembershipChange = Schema.Literal(
   "owner-merge-unlocked",
   "paired-merge-unlock-on",
   "paired-merge-unlock-off",
+  "owner-approval-answer-unlock-on",
+  "owner-approval-answer-unlock-off",
   "credential-ticket-issued",
   "credential-copy-sent",
   "credential-copy-received",

@@ -38,7 +38,9 @@ import {
   type CodeLanguageUnavailableReason,
 } from "@octant/contracts/code-language";
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import {
+  decideAgentReadThroughRepositoryTooling,
   decideLanguageServerLaunch,
   type LanguageServerHostPlatform,
   type PrincipalKind,
@@ -155,16 +157,37 @@ export interface CodeLanguageServerComponent {
   readonly languages: ReadonlyArray<string>;
   readonly launchClass: ExtensionLanguageServerClass;
   /**
-   * The absolute path of the binary to run, resolved at every start. An
-   * installed server's resolves only once its stored package still matches
-   * the digest the person reviewed; undefined means it does not, and the
-   * start fails without running anything.
+   * The absolute path of the binary to run, resolved at every start for the
+   * folder the server reads. An installed server's resolves only once its
+   * stored package still matches the digest the person reviewed; undefined
+   * means it does not, and the start fails without running anything.
    */
-  readonly executable: () => Promise<string | undefined>;
+  readonly executable: (serverRoot: string) => Promise<string | undefined>;
   readonly args: ReadonlyArray<string>;
-  readonly installRoot: string;
+  /**
+   * The component's own install, readable to the server. Absent when the
+   * binary is found inside the folder the server reads, which the launch
+   * already binds.
+   */
+  readonly installRoot?: string;
   /** The diagnostic source label used when the server's own label is unusable. */
   readonly sourceLabel: string;
+  /**
+   * How the same server runs from the Project's own copy of its toolchain,
+   * for a Project whose "Use the Project's own toolchain" setting is on.
+   * That copy is a program the repository supplies, so the server it gives
+   * is `repo-tooling` whatever this component's class: approved per checkout,
+   * refused in Plan, started only by the person at the machine. Absent for a
+   * component with no such copy, which the setting leaves as it is.
+   */
+  readonly projectToolchain?: {
+    /**
+     * The copy's binary inside the folder the server reads, resolved at every
+     * start; undefined when the folder holds none, and the start then fails
+     * without falling back to another copy.
+     */
+    readonly executable: (serverRoot: string) => Promise<string | undefined>;
+  };
 }
 
 export interface CodeLanguageAuthority {
@@ -247,9 +270,11 @@ export type CodeLanguageAgentRead =
  * an agent gets. `too-large` is a saved file past the server's frame.
  * `unsaved-edits` is a file an editor holds with text other than the saved
  * file's, which the agent's read never replaces and never answers from.
+ * `repositoryTooling` marks an answer a `repo-tooling` server computed: the
+ * repository's own programs wrote it, so it is outside content to the thread.
  */
 export type CodeLanguageAgentReadResult =
-  | CodeLanguageReadResult
+  | (CodeLanguageReadResult & { readonly repositoryTooling?: true })
   | { readonly status: "too-large" }
   | { readonly status: "unsaved-edits" };
 
@@ -280,6 +305,11 @@ export interface CodeLanguageServiceOptions {
    * answered `turned-off` so the editor can say where the switch is.
    */
   readonly turnedOffComponents?: () => ReadonlyArray<CodeLanguageServerComponent>;
+  /**
+   * Whether a Code Project's "Use the Project's own toolchain" setting is on.
+   * Absent, or a read that throws, counts as off: the bundled copy serves.
+   */
+  readonly usesProjectToolchain?: (projectId: ProjectId) => boolean;
   readonly processes: {
     readonly launch: (input: LanguageServerLaunchInput) => Promise<LanguageServerLaunchOutcome>;
   };
@@ -380,6 +410,7 @@ export class CodeLanguageService {
   readonly #threadTainted: (threadId: CodeThreadId) => boolean;
   readonly #components: () => ReadonlyArray<CodeLanguageServerComponent>;
   readonly #turnedOffComponents: () => ReadonlyArray<CodeLanguageServerComponent>;
+  readonly #usesProjectToolchain: (projectId: ProjectId) => boolean;
   readonly #processes: CodeLanguageServiceOptions["processes"];
   readonly #platform: LanguageServerHostPlatform;
   readonly #cacheRoot: string;
@@ -401,6 +432,7 @@ export class CodeLanguageService {
     this.#threadTainted = options.threadTainted ?? (() => true);
     this.#components = options.components;
     this.#turnedOffComponents = options.turnedOffComponents ?? (() => []);
+    this.#usesProjectToolchain = options.usesProjectToolchain ?? (() => false);
     this.#processes = options.processes;
     this.#platform = options.platform;
     this.#cacheRoot = options.cacheRoot;
@@ -480,7 +512,7 @@ export class CodeLanguageService {
         document.revision !== request.expectedRevision
       )
         return { status: "stale" };
-      const chosen = this.#componentFor(document.path);
+      const chosen = this.#componentFor(document.path, fresh.thread.projectId);
       if (chosen.status === "refused") return chosen;
       if (
         chosen.component.componentKey !== record.component.componentKey ||
@@ -635,7 +667,7 @@ export class CodeLanguageService {
         contained.root.rootIdentity.inode !== record.rootIdentity.inode
       )
         return { status: "stale" };
-      const chosen = this.#componentFor(document.path);
+      const chosen = this.#componentFor(document.path, fresh.thread.projectId);
       if (chosen.status === "refused") return chosen;
       if (
         chosen.component.componentKey !== record.component.componentKey ||
@@ -850,7 +882,7 @@ export class CodeLanguageService {
         if (response.status !== "answered") return unavailable(response);
         mapped = await toReferenceTargets({
           result: response.result,
-          roots: { checkoutRoot: record.rootPath, installRoot: record.component.installRoot },
+          roots: { checkoutRoot: record.rootPath, installRoot: installRootOf(record) },
           realpath: (path) => realpath(path),
           current,
         });
@@ -878,7 +910,7 @@ export class CodeLanguageService {
         final.thread.bindingRevisionId !== authorized.thread.bindingRevisionId
       )
         return { status: "stale" };
-      const component = this.#componentFor(document.path);
+      const component = this.#componentFor(document.path, final.thread.projectId);
       if (component.status === "refused") return component;
       if (
         component.component.componentKey !== record.component.componentKey ||
@@ -964,18 +996,36 @@ export class CodeLanguageService {
 
   /**
    * Whether an agent's language read could be answered for any file of these
-   * folders, judged when a Code turn's tools are composed: some server
+   * folders, judged when a Code turn's tools are composed. Either some server
    * effective now that an agent may start (`static`) covers a file a bounded
-   * scan finds there. The Settings switch is read through the effective set,
-   * so a bundled server turned off covers nothing, and a `repo-tooling`
-   * server never counts because an agent's read never starts or reads
-   * through one. It decides only whether the tool is offered; every read is
-   * still checked as it runs.
+   * scan finds there, or a `repo-tooling` server the person started is
+   * running on one of the folders for a turn outside Plan, since an agent
+   * reads through one but never starts it. The Settings switch and the
+   * Project's toolchain setting are read through the effective set, so a
+   * bundled server turned off, or replaced by the Project's own copy, covers
+   * nothing as `static`. It decides only whether the tool is offered; every
+   * read is still checked as it runs.
    */
-  servesAgentsIn(folders: ReadonlyArray<string>): boolean {
+  servesAgentsIn(
+    folders: ReadonlyArray<string>,
+    turn?: { readonly projectId: ProjectId; readonly posture: ProviderExecutionPolicy },
+  ): boolean {
     if (this.#platform !== "macos" && this.#platform !== "linux") return false;
+    if (turn !== undefined && turn.posture !== "plan") {
+      for (const record of this.#servers.values()) {
+        if (
+          record.component.launchClass === "repo-tooling" &&
+          record.state === "ready" &&
+          String(record.projectId) === String(turn.projectId) &&
+          folders.includes(record.rootPath)
+        )
+          return true;
+      }
+    }
+    const components =
+      turn === undefined ? this.#components() : this.#componentsFor(turn.projectId);
     const languages = new Set(
-      this.#components()
+      components
         .filter((component) => component.launchClass === "static")
         .flatMap((component) => component.languages),
     );
@@ -999,10 +1049,11 @@ export class CodeLanguageService {
    *
    * The launch decision is asked, on every read, as a request the person at
    * the machine did not make, as a paired device's is: an agent can start a
-   * `static` server and never starts or reads through one that runs
-   * repository tooling, even one already running under a person's approval.
-   * It never resets the crash budget either; reopening in the editor stays
-   * the person's retry.
+   * `static` server and never starts one that runs repository tooling. It
+   * reads through such a server only while one the person started is running
+   * under an approval that still covers it, outside Plan, and that answer is
+   * marked `repositoryTooling`. It never resets the crash budget either;
+   * reopening in the editor stays the person's retry.
    */
   async readForAgent(
     scopeId: WindowId,
@@ -1030,7 +1081,7 @@ export class CodeLanguageService {
       return { status: "too-large" };
     }
     const local = pathInResolvedRoot(root, request.path);
-    const served = await this.#serve(caller, authorized, request.path, "existing", root);
+    const served = await this.#serve(caller, authorized, request.path, "agent-read", root);
     if (served.status !== "served") return served;
     const { record } = served;
     const uri = pathToFileURL(join(record.rootPath, local)).href;
@@ -1080,7 +1131,13 @@ export class CodeLanguageService {
     if (document.version !== version && editorHolds(document)) {
       return { status: "unsaved-edits" };
     }
-    return answer;
+    const answered =
+      answer.status === "diagnostics" ||
+      answer.status === "definition" ||
+      answer.status === "references";
+    return answered && record.component.launchClass === "repo-tooling"
+      ? { ...answer, repositoryTooling: true }
+      : answer;
   }
 
   /** Asks a ready server one read about a document it holds. */
@@ -1141,7 +1198,7 @@ export class CodeLanguageService {
     if (response.status !== "answered") return unavailable(response);
     const targets = await toDefinitionTargets({
       result: response.result,
-      roots: { checkoutRoot: record.rootPath, installRoot: record.component.installRoot },
+      roots: { checkoutRoot: record.rootPath, installRoot: installRootOf(record) },
       realpath: (path) => realpath(path),
     });
     // A server rooted in an extra folder places a target relative to that
@@ -1191,7 +1248,7 @@ export class CodeLanguageService {
     if (response.status !== "answered") return unavailable(response);
     const mapped = await toReferenceTargets({
       result: response.result,
-      roots: { checkoutRoot: record.rootPath, installRoot: record.component.installRoot },
+      roots: { checkoutRoot: record.rootPath, installRoot: installRootOf(record) },
       realpath: (path) => realpath(path),
       current,
     });
@@ -1222,9 +1279,6 @@ export class CodeLanguageService {
    */
   async sweep(): Promise<void> {
     const now = this.#now();
-    const effective = new Map(
-      this.#components().map((component) => [component.componentKey, component]),
-    );
     const threads = this.#authority.readThreads();
     const stops: Promise<void>[] = [];
     for (const record of this.#servers.values()) {
@@ -1235,7 +1289,11 @@ export class CodeLanguageService {
         }
       }
       const checkout = this.#authority.readCheckout(record.checkoutId);
-      const current = effective.get(record.component.componentKey);
+      // Read per Project: the Project's toolchain setting decides which copy
+      // of a server is the effective one there.
+      const current = this.#componentsFor(record.projectId).find(
+        (component) => component.componentKey === record.component.componentKey,
+      );
       const live =
         checkout?.availability === "available" &&
         threads.some(
@@ -1272,7 +1330,7 @@ export class CodeLanguageService {
     if (authorized.status === "refused") return authorized;
     const contained = await this.#containedRoot(caller, authorized, request.path);
     if (contained.status === "refused") return contained;
-    const chosen = this.#componentFor(request.path);
+    const chosen = this.#componentFor(request.path, authorized.thread.projectId);
     if (chosen.status === "refused") return chosen;
     const { component } = chosen;
     if (component.launchClass === "static") return { status: "not-required" };
@@ -1450,18 +1508,47 @@ export class CodeLanguageService {
     caller: CodeLanguageCaller,
     authorized: Extract<Authorized, { status: "authorized" }>,
     path: CodeRelativePath,
-    intent: "open" | "existing",
+    intent: "open" | "existing" | "agent-read",
     resolved?: CodeFolderRootResolution,
   ): Promise<Served> {
     const rootPath = resolved?.rootPath;
     const extraFolder = resolved?.relativePath !== undefined;
-    const chosen = this.#componentFor(path);
+    const chosen = this.#componentFor(path, authorized.thread.projectId);
     if (chosen.status === "refused") return chosen;
     const { component } = chosen;
-    // Decided on every request, not only at the start: a paired device, an
-    // agent's read, or a Plan thread is refused a running `repo-tooling`
-    // server too, because what it opens is what the server then runs the
-    // repository's tooling on.
+    const key = serverKey(authorized.checkout.id, component, extraFolder ? rootPath : undefined);
+    if (intent === "agent-read" && component.launchClass === "repo-tooling") {
+      // An agent reads through this class only as it stands: nothing here
+      // starts, restarts, or retargets a server, so one that is stopped,
+      // crashed, mid-start, on another folder, or running a package state
+      // other than the effective one is the same as none.
+      const running = this.#servers.get(key);
+      const usable =
+        running !== undefined &&
+        running.state === "ready" &&
+        running.connection?.closed === false &&
+        running.rootPath === rootPath &&
+        running.component.approvalKey === component.approvalKey;
+      const read = decideAgentReadThroughRepositoryTooling({
+        posture: authorized.thread.executionPolicy,
+        platform: this.#platform,
+        server: usable ? "running" : "not-running",
+        shellCommandApproval: this.#approvalHolds(
+          authorized.thread.projectId,
+          authorized.checkout.id,
+          component,
+        )
+          ? "granted"
+          : "absent",
+      });
+      if (read.status === "refused") return read;
+      return running === undefined || !usable
+        ? { status: "refused", reason: "local-host-required" }
+        : { status: "served", record: running };
+    }
+    // Decided on every request, not only at the start: a paired device or a
+    // Plan thread is refused a running `repo-tooling` server too, because
+    // what it opens is what the server then runs the repository's tooling on.
     const decision = decideLanguageServerLaunch({
       launchClass: component.launchClass,
       posture: authorized.thread.executionPolicy,
@@ -1475,7 +1562,6 @@ export class CodeLanguageService {
     });
     if (decision.status === "refused") return decision;
 
-    const key = serverKey(authorized.checkout.id, component, extraFolder ? rootPath : undefined);
     let record = this.#servers.get(key);
     if (record !== undefined && rootPath !== undefined && record.rootPath !== rootPath) {
       // The checkout now resolves somewhere else; the old server reads the
@@ -1533,9 +1619,41 @@ export class CodeLanguageService {
     return { status: "served", record };
   }
 
-  /** The effective component that reads this file, or why none does. */
+  /**
+   * The components effective for one Code Project. A Project whose toolchain
+   * setting is on gets, for each component that can run from the Project's
+   * own copy, that copy as a `repo-tooling` server in place of the bundled
+   * one, under a key of its own so the two never share a process, a cache, or
+   * an approval.
+   */
+  #componentsFor(projectId: ProjectId): ReadonlyArray<CodeLanguageServerComponent> {
+    const components = this.#components();
+    let own: boolean;
+    try {
+      own = this.#usesProjectToolchain(projectId);
+    } catch {
+      own = false;
+    }
+    if (!own) return components;
+    return components.map((component): CodeLanguageServerComponent => {
+      const toolchain = component.projectToolchain;
+      if (toolchain === undefined) return component;
+      return {
+        componentKey: `${component.componentKey}:project-toolchain`,
+        approvalKey: `${component.approvalKey}:project-toolchain`,
+        languages: component.languages,
+        launchClass: "repo-tooling",
+        executable: toolchain.executable,
+        args: component.args,
+        sourceLabel: component.sourceLabel,
+      };
+    });
+  }
+
+  /** The effective component that reads this file in this Project, or why none does. */
   #componentFor(
     path: CodeRelativePath,
+    projectId: ProjectId,
   ):
     | { readonly status: "chosen"; readonly component: CodeLanguageServerComponent }
     | { readonly status: "refused"; readonly reason: CodeLanguageRefusalReason } {
@@ -1543,7 +1661,9 @@ export class CodeLanguageService {
     const component =
       languageId === undefined
         ? undefined
-        : this.#components().find((candidate) => candidate.languages.includes(languageId));
+        : this.#componentsFor(projectId).find((candidate) =>
+            candidate.languages.includes(languageId),
+          );
     if (component !== undefined) return { status: "chosen", component };
     const turnedOff =
       languageId !== undefined &&
@@ -1572,7 +1692,7 @@ export class CodeLanguageService {
    */
   #startCovered(record: ServerRecord): boolean {
     if (record.component.launchClass === "static") return true;
-    const current = this.#components().find(
+    const current = this.#componentsFor(record.projectId).find(
       (component) => component.componentKey === record.component.componentKey,
     );
     return (
@@ -1642,7 +1762,7 @@ export class CodeLanguageService {
       record.state = "stopped";
       return "crashed";
     }
-    const executable = await record.component.executable().catch(() => undefined);
+    const executable = await record.component.executable(record.rootPath).catch(() => undefined);
     if (record.generation !== generation) return "crashed";
     if (executable === undefined) return this.#crash(record, generation);
     const outcome = await this.#processes.launch({
@@ -1659,7 +1779,7 @@ export class CodeLanguageService {
         : {}),
       executable,
       args: record.component.args,
-      installRoot: record.component.installRoot,
+      installRoot: installRootOf(record),
       checkoutRoot: record.rootPath,
       cacheDirectory: join(this.#cacheRoot, record.key),
       cacheRoot: this.#cacheRoot,
@@ -1901,6 +2021,11 @@ function editorHolds(document: OpenDocument): boolean {
 
 function isActiveThread(thread: CodeThread): boolean {
   return thread.lifecycle === "active" && thread.completedAt === undefined;
+}
+
+/** A binary found inside the folder its server reads is installed there. */
+function installRootOf(record: ServerRecord): string {
+  return record.component.installRoot ?? record.rootPath;
 }
 
 function languageOf(path: string): string | undefined {

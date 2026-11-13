@@ -343,8 +343,26 @@ export class ExtensionApiService {
         case "install-package": {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
+          if (command.enable === true) {
+            // Switching on at install always trusts first; without trust there
+            // is nothing to enable.
+            if (command.trust !== true) return failure("invalid", lifecycleMessage("invalid"));
+          }
+          if (
+            command.enable === true &&
+            inspection.manifest.components.some((component) => component.kind === "provider-driver")
+          ) {
+            // A provider driver is admitted by its own flow, which names the
+            // step that stopped it.
+            const admitted = await this.#lifecycle.admitOutsideDriver(inspection, actor);
+            return await this.#stateUpdated(admitted.snapshot, command, admitted.stoppedAt);
+          }
           return await this.#stateUpdated(
-            await this.#lifecycle.install(inspection, { trust: command.trust === true }, actor),
+            await this.#lifecycle.install(
+              inspection,
+              { trust: command.trust === true, enable: command.enable === true },
+              actor,
+            ),
             command,
           );
         }
@@ -503,6 +521,7 @@ export class ExtensionApiService {
   async #stateUpdated(
     snapshot: ExtensionSnapshot,
     command: ExtensionCommand,
+    stoppedAt?: "trust" | "enable",
   ): Promise<ExtensionCommandResult> {
     if (this.#onStateChanged !== undefined) {
       await this.#onStateChanged(snapshot, command);
@@ -510,6 +529,7 @@ export class ExtensionApiService {
     return {
       kind: "extension-state-updated",
       snapshot: this.#markAddedInSettings(this.#withBundledPlugins(snapshot)),
+      ...(stoppedAt === undefined ? {} : { stoppedAt }),
     };
   }
 }

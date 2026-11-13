@@ -990,6 +990,7 @@ export function startOctantServer(
       extensionLifecycleService,
       extensionPackageStore,
       managedWorktreeReceipts,
+      externalContentIngestionStore,
       options,
       persistence,
       projectRootPort,

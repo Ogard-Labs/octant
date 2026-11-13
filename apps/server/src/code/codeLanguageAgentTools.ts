@@ -14,7 +14,12 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { isToolAllowedByAllowlist } from "@octant/domain";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { CodeLanguageAgentReadResult, CodeLanguageService } from "./codeLanguageService";
 
@@ -25,13 +30,17 @@ import type { CodeLanguageAgentReadResult, CodeLanguageService } from "./codeLan
  * docs/design/language-services.md (decision D5).
  *
  * It is offered only where a read can be answered: some server an agent may
- * start covers a file of the turn's checkout. Each call is decoded against
+ * start covers a file of the turn's checkout, or a `repo-tooling` server the
+ * person started is running there. Each call is decoded against
  * its closed-catalog argument schema, wrapped as a `ToolActionRequest` under
  * the thread's authority as it stands, and authorized by the tool-call choke
  * point before the language service runs. The service then checks the read
  * as it checks an editor's, on the turn's window. Every operation is
  * `project-file-reads`, so Plan keeps them and no posture asks; nothing here
- * writes, runs, or reaches the network.
+ * writes, runs, or reaches the network. An answer a `repo-tooling` server
+ * computed is the repository's own programs speaking, so it is journaled as
+ * outside content and passes Octant Shield's Watcher before the model sees
+ * it, and one that cannot be journaled is withheld.
  */
 
 const MAX_TOOL_INPUT_BYTES = 4 * 1024;
@@ -59,11 +68,20 @@ export interface CodeLanguageAgentToolsOptions {
   /** The authority the thread holds now; undefined means it speaks for nothing. */
   readonly authority: () => ToolActionAuthority | undefined;
   readonly externalContentIngested: () => boolean;
+  /** Marks the thread when an answer comes from a server that runs repository tooling. */
+  readonly recordExternalContentIngestion: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
   readonly language: Pick<CodeLanguageService, "readForAgent" | "servesAgentsIn">;
   readonly uuid: () => string;
 }
 
-type ToolOutcome = { readonly result: unknown; readonly isError: boolean };
+type ToolOutcome = {
+  readonly result: unknown;
+  readonly isError: boolean;
+  /** Set when a server that runs repository tooling computed the result. */
+  readonly repositoryTooling?: true;
+};
 
 /**
  * The tool for one Code turn, or nothing when a profile leaves it out or no
@@ -76,7 +94,14 @@ export function createCodeLanguageAgentTools(
 ): AppManagedToolSet | undefined {
   const allowlist = options.thread.toolConstraints ?? [];
   if (!isToolAllowedByAllowlist(allowlist, CODE_LANGUAGE_TOOL_NAME)) return undefined;
-  if (!options.language.servesAgentsIn(options.folders)) return undefined;
+  if (
+    !options.language.servesAgentsIn(options.folders, {
+      projectId: options.thread.projectId,
+      posture: options.thread.executionPolicy,
+    })
+  ) {
+    return undefined;
+  }
   const gate = new ToolCallAuthorityService({
     resolveGrantedAuthority: () => options.authority(),
     resolveLiveFacts: () => {
@@ -98,9 +123,13 @@ export function createCodeLanguageAgentTools(
     },
   });
 
-  return {
+  const reads = {
     definitions: [CODE_LANGUAGE_TOOL_DEFINITION],
-    execute: async ({ name, inputJson, signal }) => {
+    execute: async ({
+      name,
+      inputJson,
+      signal,
+    }: Parameters<AppManagedToolSet["execute"]>[0]): Promise<ToolOutcome> => {
       if (signal?.aborted === true) return refused("tool-interrupted", "The turn was stopped.");
       if (name !== CODE_LANGUAGE_TOOL_NAME) {
         return refused("tool-unavailable", `${name} is not offered on this turn.`);
@@ -165,6 +194,7 @@ export function createCodeLanguageAgentTools(
             truncated: answer.truncated || diagnostics.cut,
           },
           isError: false,
+          ...fromRepositoryTooling(answer),
         };
       }
       const position = { line: call.line - 1, character: call.column - 1 };
@@ -184,6 +214,7 @@ export function createCodeLanguageAgentTools(
             definitions: answer.targets.map(agentDefinition),
           },
           isError: false,
+          ...fromRepositoryTooling(answer),
         };
       }
       const answer = await options.language.readForAgent(options.windowId, {
@@ -207,9 +238,31 @@ export function createCodeLanguageAgentTools(
           truncated: answer.truncated || references.cut,
         },
         isError: false,
+        ...fromRepositoryTooling(answer),
       };
     },
   };
+  return {
+    definitions: reads.definitions,
+    execute: async (call) => {
+      const { repositoryTooling, ...outcome } = await reads.execute(call);
+      if (repositoryTooling !== true) return outcome;
+      // The same marking every other app-managed tool's outside content
+      // gets, applied to this one answer.
+      return taintAppManagedToolResults({
+        tools: { definitions: reads.definitions, execute: async () => outcome },
+        threadId: options.thread.id,
+        recordExternalContentIngestion: options.recordExternalContentIngestion,
+        uuid: options.uuid,
+      }).execute(call);
+    },
+  };
+}
+
+function fromRepositoryTooling(answer: {
+  readonly repositoryTooling?: true;
+}): Pick<ToolOutcome, "repositoryTooling"> {
+  return answer.repositoryTooling === true ? { repositoryTooling: true } : {};
 }
 
 /** The call's arguments under the same schema the closed catalog decodes them with. */

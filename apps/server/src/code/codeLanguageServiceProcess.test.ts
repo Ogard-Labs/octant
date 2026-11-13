@@ -172,6 +172,7 @@ function harness(input: {
   readonly approvals?: CodeLanguageServiceOptions["approvals"];
   readonly egress?: LanguageServerEgress;
   readonly threadTainted?: CodeLanguageServiceOptions["threadTainted"];
+  readonly usesProjectToolchain?: CodeLanguageServiceOptions["usesProjectToolchain"];
 }): Harness {
   const state = {
     thread: codeThread(),
@@ -230,6 +231,9 @@ function harness(input: {
     ...(input.watcher === undefined ? {} : { watcher: input.watcher }),
     ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
     ...(input.threadTainted === undefined ? {} : { threadTainted: input.threadTainted }),
+    ...(input.usesProjectToolchain === undefined
+      ? {}
+      : { usesProjectToolchain: input.usesProjectToolchain }),
   });
   services.push(service);
   const scope = () => ({ threadId: state.thread.id, checkoutId: state.checkout.id });
@@ -725,6 +729,150 @@ describe("Code language service authority", () => {
     expect(scope.checkoutTainted()).toBe(false);
   });
 
+  describe("with a server that can run from the Project's own toolchain", () => {
+    function toolchain(overrides: { readonly approved?: () => boolean } = {}) {
+      const paths = workspace();
+      const log = join(paths.root, "server.log");
+      const prepared: ProcessConfinementPrepareInput[] = [];
+      const ownRoots: string[] = [];
+      let egressStarts = 0;
+      const setting = { on: false };
+      const test = harness({
+        ...paths,
+        component: {
+          ...fakeComponent("normal", log),
+          projectToolchain: {
+            executable: async (serverRoot) => {
+              ownRoots.push(serverRoot);
+              return process.execPath;
+            },
+          },
+        },
+        confinement: {
+          prepare: (input) => {
+            prepared.push(input);
+            return { command: input.executable, args: input.args };
+          },
+        },
+        approvals: { holds: overrides.approved ?? (() => true), record: () => "recorded" },
+        egress: {
+          start: async () => {
+            egressStarts += 1;
+            return {
+              status: "listening",
+              endpoint: { kind: "loopback", port: 9 },
+              token: "language-server-egress",
+              close: async () => undefined,
+            };
+          },
+        },
+        usesProjectToolchain: () => setting.on,
+      });
+      return { paths, test, prepared, ownRoots, setting, egressStarts: () => egressStarts };
+    }
+
+    it("keeps the bundled copy, read-only and offline, while the Project's setting is off", async () => {
+      const { test, prepared, ownRoots, egressStarts } = toolchain({ approved: () => false });
+      expect((await test.open("b.ts", { principal: "remote-device" })).status).toBe("synced");
+      expect(await test.agent("a.ts")).toMatchObject({ status: "diagnostics" });
+      expect(await test.agent("a.ts")).not.toHaveProperty("repositoryTooling");
+      expect(test.launches()).toBe(1);
+      expect(ownRoots).toEqual([]);
+      expect(egressStarts()).toBe(0);
+      expect(prepared[0]).toMatchObject({
+        writeBoundRoot: false,
+        networkEgress: "none",
+        allowProcessExec: false,
+        allowProcessFork: false,
+      });
+    });
+
+    it("runs the Project's own copy only as approved repository tooling: refused in Plan, to a paired device, to an agent, and without an approval", async () => {
+      let approved = false;
+      const { test, paths, prepared, ownRoots, setting, egressStarts } = toolchain({
+        approved: () => approved,
+      });
+      setting.on = true;
+      expect(await test.open("b.ts")).toEqual({ status: "refused", reason: "plan-read-only" });
+
+      test.state.thread = codeThread({ executionPolicy: "full-access" });
+      test.state.threads = [test.state.thread];
+      expect(await test.open("b.ts")).toEqual({ status: "refused", reason: "approval-required" });
+      approved = true;
+      expect(await test.open("b.ts", { principal: "remote-device" })).toEqual({
+        status: "refused",
+        reason: "local-host-required",
+      });
+      expect(await test.agent("b.ts")).toEqual({
+        status: "refused",
+        reason: "local-host-required",
+      });
+      expect(test.launches()).toBe(0);
+      expect(ownRoots).toEqual([]);
+
+      expect((await test.open("b.ts")).status).toBe("synced");
+      expect(test.launches()).toBe(1);
+      expect(ownRoots).toEqual([paths.checkout]);
+      expect(egressStarts()).toBe(1);
+      // Confined exactly as any other repository tooling: the checkout
+      // writable, programs allowed, and the network only through its proxy.
+      expect(prepared[0]).toMatchObject({
+        boundRoot: paths.checkout,
+        writeBoundRoot: true,
+        networkEgress: { kind: "proxied" },
+        allowProcessExec: true,
+        allowProcessFork: true,
+        readRoots: [paths.checkout],
+      });
+    });
+
+    it("stops the bundled copy's server when the setting turns on, and the Project's when it turns off", async () => {
+      const { test, setting, prepared } = toolchain();
+      test.state.thread = codeThread({ executionPolicy: "full-access" });
+      test.state.threads = [test.state.thread];
+      const bundled = syncedFileId(await test.open("b.ts"));
+      setting.on = true;
+      await test.service.sweep();
+      expect(await test.diagnostics(bundled)).toEqual({
+        status: "refused",
+        reason: "file-outside-thread",
+      });
+      const own = syncedFileId(await test.open("b.ts"));
+      expect(test.launches()).toBe(2);
+      // A sweep leaves the Project's own server running while the setting holds.
+      await test.service.sweep();
+      expect((await test.diagnostics(own)).status).toBe("diagnostics");
+
+      setting.on = false;
+      await test.service.sweep();
+      expect(await test.diagnostics(own)).toEqual({
+        status: "refused",
+        reason: "file-outside-thread",
+      });
+      expect((await test.open("b.ts")).status).toBe("synced");
+      expect(test.launches()).toBe(3);
+      expect(prepared[2]).toMatchObject({ writeBoundRoot: false, networkEgress: "none" });
+    });
+
+    it("starts nothing when the checkout holds no copy of the toolchain", async () => {
+      const paths = workspace();
+      const test = harness({
+        ...paths,
+        component: {
+          ...fakeComponent("normal", join(paths.root, "server.log")),
+          projectToolchain: { executable: async () => undefined },
+        },
+        confinement: passthrough,
+        approvals: { holds: () => true, record: () => "recorded" },
+        usesProjectToolchain: () => true,
+      });
+      test.state.thread = codeThread({ executionPolicy: "full-access" });
+      test.state.threads = [test.state.thread];
+      expect(await test.open("b.ts")).toEqual({ status: "unavailable", reason: "crashed" });
+      expect(test.launches()).toBe(0);
+    });
+  });
+
   it("answers a read only for a document this thread opened", async () => {
     const { test } = fake();
     const unopened = deriveCodeFileId(
@@ -895,11 +1043,12 @@ describe("Code language service reads for an agent", () => {
     });
   });
 
-  it("never starts or reads through a server that runs repository tooling, even one a local approval covers", async () => {
-    const { test, log } = fake(
+  it("never starts a server that runs repository tooling, and reads through one only while the person's approved server runs", async () => {
+    let approved = true;
+    const { test, log, paths } = fake(
       { launchClass: "repo-tooling" },
       {
-        approvals: { holds: () => true, record: () => "recorded" },
+        approvals: { holds: () => approved, record: () => "recorded" },
         egress: {
           start: async () => ({
             status: "listening",
@@ -915,17 +1064,82 @@ describe("Code language service reads for an agent", () => {
     const refused = { status: "refused", reason: "local-host-required" };
     expect(await test.agent("b.ts")).toEqual(refused);
     expect(test.launches()).toBe(0);
+    const offered = (posture: CodeThread["executionPolicy"]) =>
+      test.service.servesAgentsIn([paths.checkout], {
+        projectId: test.state.thread.projectId,
+        posture,
+      });
+    // Nothing an agent could read through runs yet, so the tool is not offered.
+    expect(offered("full-access")).toBe(false);
 
-    // The person at the machine opens a file, so the approved server runs;
-    // the agent is still refused it, and its read sends the server nothing.
+    // The person at the machine opens a file, so the approved server runs.
+    // The agent now reads through it, marked as the repository tooling's
+    // answer, and its read starts nothing.
     const fileId = syncedFileId(await test.open("a.ts"));
     expect(test.launches()).toBe(1);
-    expect(await test.agent("b.ts")).toEqual(refused);
-    expect(await test.agent("a.ts", { line: 0, character: 16 })).toEqual(refused);
-    // The editor's own read goes through, and answers after everything sent before it.
+    expect(await test.agent("b.ts")).toMatchObject({
+      status: "diagnostics",
+      repositoryTooling: true,
+    });
+    expect(await test.agent("a.ts", { line: 0, character: 16 })).toMatchObject({
+      status: "definition",
+      repositoryTooling: true,
+    });
     expect((await test.definition(fileId, 0, 16)).status).toBe("definition");
     expect(test.launches()).toBe(1);
-    expect(logged(log).filter((entry) => entry.method === "textDocument/didOpen")).toHaveLength(1);
+    const opened = () =>
+      logged(log).filter((entry) => entry.method === "textDocument/didOpen").length;
+    expect(opened()).toBe(2);
+    expect(offered("full-access")).toBe(true);
+    expect(offered("plan")).toBe(false);
+
+    // Plan refuses the class even while the server runs for another thread.
+    test.state.thread = codeThread({ executionPolicy: "plan" });
+    test.state.threads = [test.state.thread];
+    expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "plan-read-only" });
+
+    // An approval that no longer covers the server ends the agent's reads
+    // before the server itself is stopped, and once it stops the agent does
+    // not bring it back.
+    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    test.state.threads = [test.state.thread];
+    approved = false;
+    expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "approval-required" });
+    await test.service.sweep();
+    approved = true;
+    expect(await test.agent("b.ts")).toEqual(refused);
+    expect(test.launches()).toBe(1);
+    expect(opened()).toBe(2);
+  });
+
+  it("does not restart a crashed repository-tooling server for an agent's read", async () => {
+    const { test } = fake(
+      { launchClass: "repo-tooling", args: [fakeServer, "crash-on-read", "/dev/null"] },
+      {
+        approvals: { holds: () => true, record: () => "recorded" },
+        egress: {
+          start: async () => ({
+            status: "listening",
+            endpoint: { kind: "loopback", port: 9 },
+            token: "language-server-egress",
+            close: async () => undefined,
+          }),
+        },
+      },
+    );
+    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    test.state.threads = [test.state.thread];
+    const fileId = syncedFileId(await test.open("a.ts"));
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      expect(await test.diagnostics(fileId)).toEqual({ status: "unavailable", reason: "crashed" });
+    }
+    await eventually(() => test.launches() === 3);
+    expect(await test.diagnostics(fileId)).toEqual({ status: "unavailable", reason: "crashed" });
+    expect(await test.agent("b.ts")).toEqual({
+      status: "refused",
+      reason: "local-host-required",
+    });
+    expect(test.launches()).toBe(3);
   });
 
   it("reads the saved file and never replaces the text an editor holds", async () => {

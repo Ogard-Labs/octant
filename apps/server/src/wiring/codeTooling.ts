@@ -54,6 +54,7 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { LanguageServerProcessPort } from "../code/languageServerProcess";
 import { managedTargetPath } from "../code/managedWorktreeService";
 import { installedLanguageServerComponents } from "../code/installedLanguageServers";
+import { projectTypeScriptServerBinary } from "../code/projectTypeScriptToolchain";
 import { isExtensionCompatibilityCompatible } from "../extensions/packageInspector";
 import { EXTENSION_AGGREGATE_TYPE } from "../persistence/extensionProjection";
 import {
@@ -110,7 +111,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     AuthorityWiring,
     "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore" | "onWindowRevoked"
   > &
-  Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
+  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
     CodeWiring,
@@ -150,6 +151,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     codeWorkingDirectoryProbePath,
     extensionLifecycleService,
     extensionPackageStore,
+    externalContentIngestionStore,
     managedWorktreeReceipts,
     onWindowRevoked,
     options,
@@ -635,6 +637,12 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       threadTainted: (threadId) => toolEgressRules.threadTainted(String(threadId)),
       components: () => [...bundledLanguageServers("effective"), ...installedLanguageServers()],
       turnedOffComponents: () => bundledLanguageServers("turned-off"),
+      // Read on every request, so the Project's choice holds from the event
+      // that journals it.
+      usesProjectToolchain: (projectId) => {
+        const project = persistence.readProject(projectId);
+        return project?.type === "code" && project.ownToolchain === "enabled";
+      },
       processes: languageServerProcesses,
       platform: languageServerHostPlatform(process.platform),
       cacheRoot: join(persistence.dataDirectory, "code", "language-server-cache"),
@@ -644,8 +652,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     yield* Effect.promise(() => languageServerProcesses.reconcile().catch(() => undefined));
     languageService.startSweeping();
     // An archived or completed thread, a checkout that went away, the Settings
-    // switch turned off, or a server whose trust or switch was withdrawn stops
-    // at once rather than at the next timed sweep.
+    // switch turned off, a Project's toolchain setting changed, or a server
+    // whose trust or switch was withdrawn stops at once rather than at the
+    // next timed sweep.
     const unsubscribeLanguageServerAuthority = persistence.journal.subscribeCommitted((append) => {
       if (
         append.events.some(
@@ -653,6 +662,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             event.aggregateType === "code-thread" ||
             event.aggregateType === "code-checkout" ||
             event.aggregateType === "code-settings" ||
+            event.eventName === "project.code-own-toolchain-changed@1" ||
             event.aggregateType === EXTENSION_AGGREGATE_TYPE,
         )
       ) {
@@ -760,6 +770,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         externalContentIngested: () =>
           readThreadExternalContentTaint(persistence.connection, String(thread.id))
             .externalContentIngested,
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         language: languageService,
         uuid: randomUUID,
       }),
@@ -1101,6 +1112,10 @@ function bundledLanguageServerComponents(
         args: ["--lsp", "--stdio"],
         installRoot: dirname(typeScriptBinary),
         sourceLabel: "typescript",
+        projectToolchain: {
+          executable: (serverRoot) =>
+            projectTypeScriptServerBinary(serverRoot, process.platform, process.arch),
+        },
       },
     ];
   };

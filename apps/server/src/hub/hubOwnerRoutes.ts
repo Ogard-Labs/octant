@@ -11,7 +11,9 @@ import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // fresh challenge for one action, or an open administration session (five
 // minutes, decision H17) for the actions that class allows; Full access, a
 // credential copy, an owner change, and opening a session each need their own
-// challenge. The hub, a
+// challenge. Reading private runtime approval facts and answering an approval
+// ride the session unless this host's window asked for an unlock per answer.
+// The hub, a
 // standby, a peer, and anything that is not on the owner list are refused; an
 // agent or a routine holds no member key and reaches only the product routes.
 
@@ -172,8 +174,6 @@ const MERGE_ROUTES: ReadonlySet<string> = new Set(CODE_OWNER_UNLOCKED_MERGE_PATH
  * decided by the posture asked for; an owner join code by its body.
  */
 const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
-  HUB_OWNER_ROUTES.approvalRead,
-  HUB_OWNER_ROUTES.approvalAnswer,
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
@@ -190,8 +190,13 @@ const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 /** Which unlock this action asks for. A body that does not decode asks for the strictest. */
-function unlockClassFor(route: string, body: string): OwnerUnlockClass {
+function unlockClassFor(
+  route: string,
+  body: string,
+  approvalAnswerNeedsOwnUnlock: boolean,
+): OwnerUnlockClass {
   if (OWN_UNLOCK_ROUTES.has(route)) return "own";
+  if (route === HUB_OWNER_ROUTES.approvalAnswer && approvalAnswerNeedsOwnUnlock) return "own";
   try {
     if (route === HUB_OWNER_ROUTES.joinCode) {
       return decodeOwnerJoinCodeRequest(JSON.parse(body)).owner ? "own" : "administration";
@@ -220,6 +225,11 @@ const NO_STORE = { "cache-control": "no-store" } as const;
 
 export interface HubOwnerRouteOptions {
   readonly approvals?: OwnerApprovalHost;
+  /**
+   * Whether each runtime approval answer needs its own fresh unlock here.
+   * Absent or false, an open administration session covers the answers.
+   */
+  readonly approvalAnswerNeedsOwnUnlock?: () => boolean;
   readonly browser?: OwnerBrowserControlService;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
@@ -365,7 +375,9 @@ export function createHubOwnerRouteHandler(
     // challenge answer is judged by it alone; one that carries only a session
     // id is covered only if its action is an administration one.
     const needsUnlock = UNLOCKED_ROUTES.has(route);
-    const unlockClass = needsUnlock ? unlockClassFor(route, body) : "own";
+    const unlockClass = needsUnlock
+      ? unlockClassFor(route, body, options.approvalAnswerNeedsOwnUnlock?.() === true)
+      : "own";
     const proof = readUnlockProof(request);
     const sessionId = request.headers.get(OWNER_SESSION_HEADER);
     let unlockResult: OwnerUnlockVerification | undefined;
@@ -419,10 +431,20 @@ export function createHubOwnerRouteHandler(
     };
 
     if (route === HUB_OWNER_ROUTES.approvalRead || route === HUB_OWNER_ROUTES.approvalAnswer) {
-      if (options.approvals === undefined || unlockResult?.status !== "fresh")
-        return refused(403, "unlock-required");
+      if (options.approvals === undefined) return refused(403, "unlock-required");
       const stamp = ownerListStamp(scope);
       const deadline = (options.now ?? Date.now)() + 60_000;
+      // An answer that rode a session is delivered only while that session is
+      // still open: the runtime asks again immediately before its one-use
+      // delivery, and a session that ended in between covers nothing.
+      const unlockStillCovers = () =>
+        unlockResult?.status === "fresh" ||
+        (sessionId !== null &&
+          options.unlock.checkSession({
+            sessionId,
+            ownerMemberId: senderId,
+            ownerListStamp: stamp,
+          }).status === "open");
       const current = () => {
         const latest = scopeFor(route, body);
         return (
@@ -431,6 +453,7 @@ export function createHubOwnerRouteHandler(
           !("kind" in latest) &&
           ownerListStamp(latest) === stamp &&
           !latest.inactiveDeviceMemberIds.includes(senderId) &&
+          unlockStillCovers() &&
           authorizeOwnerRequest({
             host: latest.host,
             grant: latest.grant,

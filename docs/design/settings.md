@@ -243,13 +243,15 @@ pending icon, readable summary and detail, wrapping action row, and inline
 failure announcement. The requesting feature supplies the scope, choices, and
 callbacks; the existing host or server still decides whether an action may
 proceed. Native Code approvals keep their isolated host-owned document. The
-extension tool request names the plugin, its server, and the tool, and adds
-"Always allow in this Project" only when the host marks the call rememberable
-and the window is a local one. The same card offers "Allow all tools of this
-server", which remembers the server instead of the one tool, and a Chat thread
-outside a Project offers "Always allow for this account" in place of the
-Project choice (maintainer request, 2026-11-12; not built yet: today a grant
-covers one tool and needs a Project). Settings › Permissions lists those answers by
+extension tool request names the plugin, its server, and the tool, and its
+choices follow what the host says an approval covers
+(maintainer decision, 2026-11-12). Where the approval is kept for the Project
+(for the account on a Chat thread outside a Project), the main action is "Allow
+all tools of this server", the detail says a server is asked about once, and a
+local window also offers "Allow only this tool". For a network server on a
+thread that has read outside content the action is "Allow this server in this
+thread", and the detail says why. Otherwise it is "Approve once". Not built
+yet: the mobile approval card does not show these choices. Settings › Permissions lists those answers by
 Project, each with Revoke, beside Remembered websites. Settings › Work and
 Settings › Code show the global guardrail level with one-click change,
 which governs Work and Code alike; a Work or Code Project overrides it from

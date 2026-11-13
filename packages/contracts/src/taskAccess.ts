@@ -90,7 +90,9 @@ export const TaskAccessSnapshot = Schema.Struct({
           "nativeChildAgents",
           "forceStop",
         ),
-        support: ProviderCapabilitySupport,
+        // `mixed` is reported for Octant's tools alone: offered at Full
+        // access beside tools the runtime loaded that Octant did not supply.
+        support: Schema.Union(ProviderCapabilitySupport, Schema.Literal("mixed")),
       }).annotations(strict),
     ).pipe(Schema.maxItems(5)),
   }).annotations(strict),

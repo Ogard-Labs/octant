@@ -381,6 +381,23 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // The Project's own toolchain is a program the repository supplies, so
+      // choosing to run it is the person's act at the machine, as approving
+      // any other repository tooling is.
+      if (
+        command.kind === "change-code-project-own-toolchain" &&
+        principal !== undefined &&
+        principal.kind !== "local-window"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "Whether a Project uses its own toolchain is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       // Letting an agent merge, comment, or push to the default branch without
       // asking each time is the person's standing permission, so only a window
       // on this host sets it, and a paired device cannot widen it on their

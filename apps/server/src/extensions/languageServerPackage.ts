@@ -10,6 +10,7 @@ import {
   type ExtensionArchiveEntry,
   type ResolvedExtensionPackage,
 } from "./packageInspector";
+import { readPackagePublisherSignature } from "./outsideDriverSignature";
 
 /**
  * A folder holding a language server a person adds, as the local folder
@@ -51,11 +52,17 @@ export function readLanguageServerPackage(
   if (reading.status === "refused") return reading;
   // The digest covers the document as the author wrote it, so the host adds
   // its facts to the raw manifest rather than to the decoded one.
+  const signature = readPackagePublisherSignature(input.entries, {
+    name: reading.document.manifest.slug,
+    version: reading.document.manifest.version,
+  });
+  if (signature.status === "invalid") return refused("signature-invalid");
   const manifest = hostStatedManifest(
     "octant.language-server-package",
     input.source,
     document.manifest,
     reading.document.manifest.slug,
+    signature.status === "signed" ? signature.publisherKey : undefined,
   );
   const filesRefusal = binaryOnlyFilesRefusal(
     input.entries,
@@ -120,6 +127,8 @@ export function languageServerPackageRefusalMessage(
       return "This language server's binary is not in its package, or is not executable.";
     case "ships-other-program":
       return "This language server ships a program besides its own binary; it may run its binary and nothing else.";
+    case "signature-invalid":
+      return "This language server's signature does not match its files, name, or version, or does not verify.";
   }
 }
 
@@ -169,13 +178,15 @@ function refused(reason: LanguageServerPackageRefusalReason): LanguageServerPack
  * folder updates the same package, and a package can never name itself into
  * another one's identity, a bundled component's included. The digest covers
  * the document as the author wrote it, so the facts are added to the raw
- * manifest rather than to the decoded one.
+ * manifest rather than to the decoded one. `publisherKey` is the key whose
+ * signature of the package the host verified, when it carries one.
  */
 export function hostStatedManifest(
   namespace: string,
   source: Extract<ExtensionSource, { readonly kind: "local-folder" }>,
   authored: Readonly<Record<string, unknown>>,
   slug: string,
+  publisherKey?: string,
 ): Readonly<Record<string, unknown>> {
   return {
     ...authored,
@@ -183,7 +194,11 @@ export function hostStatedManifest(
     packageId: stableUuid(namespace, `package:${source.sourceRef}:${slug}`),
     digest: `sha256:${"0".repeat(64)}`,
     source,
-    provenance: { ...(isRecord(authored.provenance) ? authored.provenance : {}), reviewed: false },
+    provenance: {
+      ...(isRecord(authored.provenance) ? authored.provenance : {}),
+      ...(publisherKey === undefined ? {} : { publisherKey }),
+      reviewed: false,
+    },
   };
 }
 

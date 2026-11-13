@@ -67,6 +67,7 @@ export const LanguageServerPackageRefusalReason = Schema.Literal(
   "document-invalid",
   "entry-point-missing",
   "ships-other-program",
+  "signature-invalid",
 );
 export type LanguageServerPackageRefusalReason = typeof LanguageServerPackageRefusalReason.Type;
 

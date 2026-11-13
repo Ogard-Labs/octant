@@ -31,21 +31,20 @@ export async function listMobileExtensionToolApprovals(input: {
 }
 
 /**
- * Approves one call or denies it. `remember` asks the host to always allow
- * the tool in its Project; the host takes that only for a prompt it marked
- * rememberable and from a session that acts as its own person, so a caller
- * sends it only then.
+ * Approves or denies. What an approval covers is the host's to say on the
+ * prompt (`answerCovers`); `remember` only narrows a whole-server approval
+ * to this one tool, where the prompt offers that.
  */
 export async function decideMobileExtensionToolApproval(input: {
   readonly transport: MobileRemoteTransport;
   readonly approvalId: string;
   readonly decision: "approved" | "denied";
-  readonly remember?: true;
+  readonly remember?: boolean;
 }): Promise<"accepted" | "refused"> {
   const decision = decodeExtensionToolApprovalDecision({
     approvalId: input.approvalId,
     decision: input.decision,
-    ...(input.remember === true && input.decision === "approved" ? { remember: true } : {}),
+    ...(input.remember === true ? { remember: true } : {}),
   });
   const response = await input.transport.authenticatedFetch({
     method: "POST",

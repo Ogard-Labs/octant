@@ -211,6 +211,7 @@ import type {
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "../extensions/extensionToolGrantStore";
+import { readUpdateLine, readVerifiedPublisherKey } from "../persistence/extensionProjection";
 import {
   readApprovalOutsideContent,
   readThreadExternalContentTaint,
@@ -220,6 +221,8 @@ import {
   NativeHarnessEndpointRegistry,
 } from "../harness/nativeHarnessEndpointRegistry";
 import {
+  appToolThreadLevel,
+  browserToolTransport,
   claudePlanUsageStateDirectory,
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
@@ -1039,6 +1042,9 @@ export function wireProviders(deps: ProvidersDependencies) {
               .externalContentIngested,
           outsideContent: (threadId) =>
             readApprovalOutsideContent(persistence.connection, threadId),
+          verifiedPublisherKey: (version) =>
+            readVerifiedPublisherKey(persistence.connection, version),
+          updateLine: (version) => readUpdateLine(persistence.connection, version),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
@@ -1183,10 +1189,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       carriesAppManagedTools: (thread) => {
         const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
         return (
-          observed?.capabilities.appManagedTools === "supported" ||
-          observed?.verifiedToolModelIds?.some(
-            (candidate) => String(candidate) === String(thread.modelId),
-          ) === true
+          browserToolTransport(observed, String(thread.modelId), appToolThreadLevel(thread)) ===
+          true
         );
       },
     });

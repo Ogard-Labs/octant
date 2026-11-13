@@ -36,6 +36,7 @@ import {
   decodeOwnerMemberRequest,
   decodeOwnerRemovalRequest,
   decodePairedMergeUnlockRequest,
+  decodeOwnerApprovalAnswerUnlockRequest,
   decodeHandoverContinueRequest,
   decodeHandoverControlRequest,
   decodeHandoverRequest,
@@ -129,6 +130,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/paired-merge-unlock",
     decodeBody: decodePairedMergeUnlockRequest,
+  },
+  "owner-approval-answer-unlock": {
+    method: "POST",
+    path: "/api/desktop/hub/owner-approval-answer-unlock",
+    decodeBody: decodeOwnerApprovalAnswerUnlockRequest,
   },
   "confirm-member": {
     method: "POST",

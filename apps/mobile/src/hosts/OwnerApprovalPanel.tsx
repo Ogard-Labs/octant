@@ -99,8 +99,9 @@ export function OwnerApprovalPanel({ spokes }: { readonly spokes: ReadonlyArray<
     <View style={{ gap: space.sm }} testID="mobile-owner-approval-recovery">
       <Text style={{ color: colors.textPrimary, fontWeight: "600" }}>Owner approval recovery</Text>
       <Text style={{ color: colors.textSecondary }}>
-        One Code or Work file action only. Reading private details needs an unlock; each answer
-        needs a new exact unlock. Nothing is remembered.
+        One Code or Work file action only. Reading private details needs an unlock, which then
+        covers Allow once and Deny for five minutes unless that computer asks for an unlock per
+        answer. Nothing is remembered.
       </Text>
       <Text style={{ color: colors.textPrimary }}>Computer: {host.name}</Text>
       {spokes.map((entry) =>
@@ -130,8 +131,8 @@ export function OwnerApprovalPanel({ spokes }: { readonly spokes: ReadonlyArray<
               <Text selectable style={{ color: colors.textPrimary }}>
                 {JSON.stringify(JSON.parse(selected.action.input), null, 2)}
               </Text>
-              {button("allow", "Unlock and allow once", () => void answer(true))}
-              {button("deny", "Unlock and deny", () => void answer(false))}
+              {button("allow", "Allow once", () => void answer(true))}
+              {button("deny", "Deny", () => void answer(false))}
             </>
           )}
         </>
@@ -141,7 +142,7 @@ export function OwnerApprovalPanel({ spokes }: { readonly spokes: ReadonlyArray<
         </Text>
       )}
       <Text accessibilityLiveRegion="polite" style={{ color: colors.textSecondary }}>
-        {busy ? "Waiting for this host and your fresh unlock…" : message}
+        {busy ? "Waiting for this host and your unlock…" : message}
       </Text>
     </View>
   );

@@ -1283,24 +1283,29 @@ describe("MCP servers added by hand", () => {
       const answered = await handler(request("/api/extensions/user-servers", setup));
       expect(answered?.status).toBe(200);
       expect(add).toHaveBeenCalledWith(setup);
+      // The one confirmation is the one-step install every plugin uses.
       expect(observed.map((command) => command.kind)).toEqual([
         "inspect-package",
         "install-package",
-        "set-source-trust",
-        "set-plugin-desired",
-        "set-component-desired",
       ]);
-      expect(observed[2]).toMatchObject({ trusted: true, expectedStateVersion: 1 });
-      expect(observed[3]).toMatchObject({ desired: true, expectedStateVersion: 2 });
-      expect(observed[4]).toMatchObject({
-        componentId: "mcp-docs-search",
-        desired: true,
-        expectedStateVersion: 3,
-      });
+      expect(observed[1]).toMatchObject({ trust: true, enable: true });
       expect(await answered?.json()).toMatchObject({
         kind: "extension-state-updated",
         addedPackage: { extensionId, componentId: "mcp-docs-search" },
       });
+
+      // Add only leaves trusting and turning on as the person's own steps.
+      observed.length = 0;
+      const addedOnly = await handler(
+        request("/api/extensions/user-servers", { ...setup, installOnly: true }),
+      );
+      expect(addedOnly?.status).toBe(200);
+      expect(observed.map((command) => command.kind)).toEqual([
+        "inspect-package",
+        "install-package",
+      ]);
+      expect(observed[1]).not.toHaveProperty("trust");
+      expect(observed[1]).not.toHaveProperty("enable");
     },
   );
 

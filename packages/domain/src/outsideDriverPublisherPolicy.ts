@@ -1,5 +1,7 @@
 /**
- * Publisher key pinning for outside provider drivers.
+ * Publisher key pinning for installed packages. It began with outside
+ * provider drivers, whose names it keeps, and now holds for every package
+ * kind whose signature the host verifies on the way in.
  *
  * A package name from one source keeps the publisher key it was first
  * trusted under. The pin outlives an uninstall, so reinstalling the same
@@ -40,6 +42,111 @@ export function outsideDriverPublisherPinAtTrust<Key extends string>(
   selected: Key | undefined,
 ): Key | undefined {
   return pinned === undefined ? selected : undefined;
+}
+
+/**
+ * Whether an update keeps the trust the package already had. It does when
+ * the key pinned for the package signed the updated version: the person
+ * trusted that publisher, and the host verified the signature. A new key, a
+ * missing signature, or a package with no pin asks again, and so does an
+ * update that may do more than the version the person reviewed.
+ */
+export function outsideDriverUpdateKeepsTrust(input: {
+  readonly trusted: boolean;
+  readonly pinned: string | undefined;
+  readonly updated: string | undefined;
+  readonly capabilitiesWidened: boolean;
+}): boolean {
+  return (
+    input.trusted &&
+    !input.capabilitiesWidened &&
+    input.pinned !== undefined &&
+    outsideDriverPublisherStanding(input.pinned, input.updated).kind === "pinned-publisher"
+  );
+}
+
+/**
+ * Whether an update's version must wait for the person's trust because of
+ * who signed it. It must when the pinned key did not sign it (another key,
+ * or none), and when it is signed and no key is pinned: the first signature
+ * to appear on a package the person trusted unsigned is a key nobody has
+ * accepted, and it could be anyone's. The update loses its trust and its
+ * switch; trusting the source again, with the key shown, pins that key, and
+ * from then on the key rule holds. Letting the first signed version run and
+ * pinning nothing would leave the package with a key that is never checked.
+ */
+export function updateAwaitsPublisherTrust(
+  pinned: string | undefined,
+  updated: string | undefined,
+): boolean {
+  return pinned === undefined
+    ? updated !== undefined
+    : outsideDriverPublisherStanding(pinned, updated).kind === "publisher-changed";
+}
+
+/** Where the host recorded a package came from, as its manifest states it. */
+export interface ExtensionSourceIdentity {
+  readonly source:
+    | { readonly kind: string; readonly sourceRef: string }
+    | { readonly kind: string; readonly catalogId: string; readonly entryId: string };
+  /** The registry and package name, for a package the host fetched from npm. */
+  readonly npm?: { readonly packageName: string; readonly registry: string } | undefined;
+}
+
+/**
+ * Whether two versions came from one source: the same folder, the same
+ * catalog entry, or the same package of the same npm registry. The version
+ * and the tarball's integrity differ between two releases and are not part
+ * of where a package comes from.
+ */
+export function sameExtensionSource(
+  previous: ExtensionSourceIdentity,
+  next: ExtensionSourceIdentity,
+): boolean {
+  const a = previous.source;
+  const b = next.source;
+  if (a.kind !== b.kind) return false;
+  const sameReference =
+    "sourceRef" in a
+      ? "sourceRef" in b && a.sourceRef === b.sourceRef
+      : !("sourceRef" in b) && a.catalogId === b.catalogId && a.entryId === b.entryId;
+  if (!sameReference) return false;
+  if (previous.npm === undefined || next.npm === undefined) return previous.npm === next.npm;
+  return (
+    previous.npm.packageName === next.npm.packageName && previous.npm.registry === next.npm.registry
+  );
+}
+
+/**
+ * Whether an unsigned package's update keeps the approvals its tools were
+ * given (maintainer decision, 2026-11-13). No key vouches for either
+ * version, so what the person trusted is the source: an update the host took
+ * from that same source keeps them, and the person is shown the update and
+ * can roll it back. It asks again when the package was not trusted, when the
+ * source differs, when the update may do more than the reviewed version, and
+ * wherever a key exists or existed: then the key rule above decides.
+ *
+ * Accepted risk: whoever controls that source can publish an update that
+ * runs under the approvals already given. The notice, the one-click roll
+ * back, and the asks that never rest on a grant (Plan, an ask-every-call
+ * tool) are what bound it.
+ */
+export function unsignedUpdateKeepsApprovals(input: {
+  readonly trusted: boolean;
+  readonly pinned: string | undefined;
+  readonly previous: string | undefined;
+  readonly updated: string | undefined;
+  readonly sameSource: boolean;
+  readonly capabilitiesWidened: boolean;
+}): boolean {
+  return (
+    input.trusted &&
+    input.sameSource &&
+    !input.capabilitiesWidened &&
+    input.pinned === undefined &&
+    input.previous === undefined &&
+    input.updated === undefined
+  );
 }
 
 export type OutsideDriverNewPublisherDecision<Key extends string = string> =

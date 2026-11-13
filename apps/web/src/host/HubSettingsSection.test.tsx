@@ -715,6 +715,41 @@ describe("HubSettingsSection owner unlock before a paired merge", () => {
     ).toBeVisible();
   });
 
+  it("asks for an owner unlock per approval answer when the window turns it on, and says what changed", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: linkedStatus() },
+      "owner-approval-answer-unlock": { status: 200, body: { status: "changed", enabled: true } },
+    });
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Owner unlock for each approval answer",
+    });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "owner-approval-answer-unlock")?.body).toEqual(
+        { enabled: true },
+      ),
+    );
+    expect(
+      await screen.findByText(
+        "Each approval answer from an owner device now needs its own unlock.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("shows the per-answer unlock as on when the host reports it", async () => {
+    renderHub({
+      status: { status: 200, body: { ...linkedStatus(), ownerApprovalAnswerUnlock: true } },
+    });
+
+    expect(
+      await screen.findByRole("switch", { name: "Owner unlock for each approval answer" }),
+    ).toBeChecked();
+  });
+
   it("is not offered where the hub grant leaves owners out", async () => {
     renderHub({ status: { status: 200, body: linkedStatus({ items: ["roster"] }) } });
 

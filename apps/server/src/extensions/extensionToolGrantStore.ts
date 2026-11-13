@@ -82,11 +82,15 @@ export class ExtensionToolGrantStore {
     return grant === undefined ? undefined : this.#standing(grant);
   }
 
-  /** Every grant a call could still use, across Projects and the account. */
+  /**
+   * Every grant a call could still use, across Projects and the account. A
+   * thread's own answer is not one: it covers no other thread, so Settings
+   * does not list it among what is remembered.
+   */
   list(): ReadonlyArray<ExtensionToolGrant> {
     return readActiveExtensionToolGrants(this.#connection)
       .map((grant) => this.#standing(grant))
-      .filter((grant) => grant.revocationReason === undefined)
+      .filter((grant) => grant.revocationReason === undefined && grant.threadId === undefined)
       .map(
         ({ revocationReason: _revocationReason, lastSequence: _lastSequence, ...grant }) => grant,
       );
@@ -113,6 +117,7 @@ export class ExtensionToolGrantStore {
       payload = decodeExtensionToolGrantRecorded({
         grantId: extensionToolGrantId(grant),
         ...(grant.projectId === undefined ? {} : { projectId: grant.projectId }),
+        ...(grant.threadId === undefined ? {} : { threadId: grant.threadId }),
         extensionId: grant.extensionId,
         packageId: grant.packageId,
         componentId: grant.componentId,
@@ -145,8 +150,9 @@ export class ExtensionToolGrantStore {
 
   /**
    * Ends every grant of one extension's tools and servers, in every Project
-   * and for the account, and reports how many it ended. Called when the package is uninstalled, rolled back, or
-   * loses its trust.
+   * and for the account, and every answer a thread holds for them, and
+   * reports how many it ended. Called when the package is uninstalled,
+   * rolled back, or loses its trust.
    */
   revokeExtension(
     extensionId: string,

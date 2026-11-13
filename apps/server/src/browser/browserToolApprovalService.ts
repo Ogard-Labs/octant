@@ -121,7 +121,8 @@ export class BrowserToolApprovalService {
     };
     /**
      * The thread workspace an upload or a download save is for. With it, the
-     * person's "Always allow" is remembered for this site and this workspace.
+     * person's "Always allow" is remembered for this site, this workspace and
+     * the page's profile.
      */
     readonly workspaceRoot?: string;
     /** The agent asks the person to sign in here; see the contract. */
@@ -244,7 +245,8 @@ export class BrowserToolApprovalService {
     }
     pending.resolve(decision.decision);
     // An upload's or a download's "Always allow" covers later transfers in that
-    // direction between this site and this workspace; it never becomes a
+    // direction between this site and this workspace on a page in the same
+    // profile; it never becomes a
     // remembered grant to open the origin. A paired device is not at this
     // computer's files, so its answer covers this one transfer only.
     const direction =
@@ -261,7 +263,14 @@ export class BrowserToolApprovalService {
       !this.#isPairedDevice(windowId)
     ) {
       this.#options.rememberTransfer?.(
-        { direction, origin: pending.view.origin, workspaceRoot: pending.workspaceRoot },
+        {
+          direction,
+          origin: pending.view.origin,
+          workspaceRoot: pending.workspaceRoot,
+          ...(pending.view.profile === undefined
+            ? { privatePage: true as const }
+            : { profile: pending.view.profile }),
+        },
         windowId,
       );
     }

@@ -2456,7 +2456,7 @@ describe("AppleToolchainService Open URL", () => {
     );
     expect(planned.outcome).toBe("unauthorized");
 
-    // Only a person asks for an address, never the host, even under Full access.
+    // A person or an agent asks for an address, never the host, even under Full access.
     const byHost = await service.execute(
       openUrlRequest({
         actionId: "30000000-0000-4000-8000-000000000015" as never,
@@ -2641,7 +2641,7 @@ describe("AppleToolchainService screen recording", () => {
     ).toBe(false);
   });
 
-  it("asks before starting, refuses Plan and anyone but a person, and never asks again to stop", async () => {
+  it("asks before starting, refuses Plan and the host asking on its own, and never asks again to stop", async () => {
     const { service, execute } = await recordingService();
     const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: false };
     await service.discover(discoveryRequest, gated);
@@ -2658,13 +2658,13 @@ describe("AppleToolchainService screen recording", () => {
     });
     expect(planned.outcome).toBe("unauthorized");
 
-    const byAgent = await service.execute(
+    const byHost = await service.execute(
       recording("start-recording", startId, {
         requestedBy: { kind: "system", actorId: actor.actorId },
       }),
       context,
     );
-    expect(byAgent.outcome).toBe("unauthorized");
+    expect(byHost.outcome).toBe("unauthorized");
     expect(execute.mock.calls.some(([input]) => input.argv.includes("recordVideo"))).toBe(false);
 
     // Stopping ends what a person already approved starting.

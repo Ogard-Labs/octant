@@ -82,7 +82,7 @@ These rules hold for every phase and are not reopened by any slice:
   The phone asks each host what its session is (`actsAsHostPerson`) and reads
   anything but a plain yes as restricted. On a host that knows it only through
   the hub's roster, local-host-required actions stay unavailable, except what
-  an owner device may do under
+  an owner device may do through a host's owner routes under
   [Hub and spokes: Owner devices](hub-and-spokes.md#owner-devices). Not built
   yet: the phone has controls only for the modes and the remembered tool
   approval in the table below; the rest of what the host now accepts from it

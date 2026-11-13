@@ -959,6 +959,7 @@ function controller(): CodeController {
     cancelTurn: vi.fn(async () => true),
     archiveThread: vi.fn(async () => true),
     completeThread: vi.fn(async () => ({ status: "ok" }) as const),
+    markThreadDone: vi.fn(async () => ({ status: "ok" }) as const),
     reopenThread: vi.fn(async () => ({ status: "ok" }) as const),
     snoozeThread: vi.fn(async () => ({ status: "ok" }) as const),
     wakeThread: vi.fn(async () => ({ status: "ok" }) as const),

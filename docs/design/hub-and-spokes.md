@@ -356,8 +356,19 @@ the CLI. The hub depends on that:
     Work-turn and Code-command/operation entry points refuse Windows before
     launch or journal mutation, including background routine calls and Full
     access, and provider process preparation refuses Windows before
-    its unconfined Full-access branch. Native experiments do not admit foreground
-    or desktop startup.
+    its unconfined Full-access branch. Lifting those gates for Full access is
+    not enough to run a turn, so they stay as they are until the launches
+    behind them have Windows forms: at every level the host's Git reads and
+    mutations, thread terminals, language servers, debug adapters, and
+    provider version and readiness probes launch through the shared
+    confinement port, which supports macOS and Linux only and has no
+    unconfined fallback; the harness's command port, Full access included,
+    and every provider process need an owned process group and a
+    process-identity receipt, which the server has for macOS and Linux only;
+    and the provider driver factory admits Ollama alone. The host's own file
+    tools' path checks, which keep them out of the private profile at every
+    level, have not been exercised under Windows path rules either. Native
+    experiments do not admit foreground or desktop startup.
     The Windows foreground entry resolves the fixed native artifacts from the
     actual portable resources layout, claims the selected native profile before
     server/persistence imports, and composes its journal, usage cache, private
@@ -677,8 +688,15 @@ or guest grant. Built for a device the host's own person paired; for a member th
   challenge and are refused with `own-unlock-required` when a session is all
   that is presented. Reading private runtime approval facts and each approval
   answer ride the session by default; a setting asks for an unlock per answer
-  instead (maintainer request, 2026-11-12). Not built yet: today each such
-  reading and each answer needs its own challenge.
+  instead (maintainer request, 2026-11-12). Built: the setting is "Owner
+  unlock for each approval answer", off by default, set only in a window on
+  the host (Settings › Remote access › Hub, beside the owner devices) and
+  journaled as `owner-approval-answer-unlock-on` or `-off`. It covers runtime
+  approval answers; readings ride the session either way. An answer that rode a session is delivered only while
+  that session is still open when the runtime takes it. An owner client
+  spends the unlock for its first reading on a session, and unlocks again for
+  one answer only when the host refuses the session with
+  `own-unlock-required`.
 - **Alerts live on spokes.** Each spoke compares a newer roster with the one it
   held and keeps an alert for every member added, whatever Confirm new members
   says. An owner device reads them from the spoke it concerns; the hub holds no
@@ -743,14 +761,17 @@ or guest grant. Built for a device the host's own person paired; for a member th
   [the Full access rule](../architecture.md#security-and-authority)). The host
   reads who admitted a device from its own approval record: a device it knows
   only through the hub's roster, a guest and an owner device included, is not
-  such a device there and keeps the owner rules of this section: on a host it
-  did not pair with directly an owner device changes an existing thread's or
-  Project's posture with its own unlock, controls only an already-open Code
-  Private page for 60 seconds as above, starts no thread, writes to no
-  terminal, and answers no site approval; the
-  [recovery inventory](#recovery-inventory) records what is built. Not built
-  yet: no device answers a profile's site approval, and no paired device takes
-  the Browser page over from the agent or hands it back.
+  such a device there. On the product routes such an owner device is an
+  ordinary roster member: it has no per-action unlock for any of these
+  (removed by maintainer decision, 2026-11-13), starts no thread, writes to no
+  terminal, and answers no site approval. What it does about a thread it does
+  through the owner routes: the posture and runtime approval recovery in the
+  [recovery inventory](#recovery-inventory), and the 60-second control of an
+  open Code Private page above. Rationale: the unlock per action was a second
+  ladder beside pairing that no client was built for; whether a paired device
+  may take these actions is a rule about who paired it, not about owners. Not
+  built yet: no device answers a profile's site approval, and no paired device
+  takes the Browser page over from the agent or hands it back.
 - **Before a paired client's merge.** A paired client's merge needs no owner
   unlock when the host's own person paired the device (maintainer decision,
   2026-11-12). A host may still ask the merge of a phone or web client the
@@ -786,14 +807,14 @@ owner device every action that can unblock a task. The inventory below keeps
 those decisions separate. A refused request has no effect; retry requires a
 new authoritative reading and the proof required for that action.
 
-| Request                                  | Eligible responder and current boundary                                                                                                                                                                                    | Queue and resume                                                                                                    | Additional authority needed                                                                                                                                                                                                                           |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Code thread or Code Project posture      | An owner on this host's current owner list; Full access needs its own fresh unlock. The existing owner route applies the change through the Code or Project service after checking its current-state token.                | Changing a level affects subsequent launches; it does not answer a waiting prompt or restart a turn.                | Built through the existing posture routes and Settings/phone controls; no other grant follows.                                                                                                                                                        |
-| Work level                               | An enrolled owner uses the existing signed posture route for an active local Work thread and Project. The exact target/current-state digest is required; Full access needs its own fresh unlock.                           | The next turn uses the chosen level; a running turn keeps its admitted level. No automatic resume.                  | Built in the Work service and Settings/phone controls. No Plan, remembered Project default or approval answer is granted.                                                                                                                             |
-| Approval answer                          | Existing paired-device answers to their own Code turns remain unchanged. Separately, an enrolled owner may recover one eligible live local Code or Work runtime file or Shell approval through the fresh owner proof path. | Private details and each Allow once or Deny require separate fresh unlocks. No automatic retry or remembered grant. | Built for complete supported file calls and confined Shell callbacks within the current bound root; see [Owner runtime approval recovery](#owner-runtime-approval-recovery). Unsupported Shell runtimes and excluded capabilities remain unavailable. |
-| File restore                             | The existing restore command and its approval, checkout freshness and live-writer checks.                                                                                                                                  | An owner posture change neither approves nor retries a restore.                                                     | Any owner recovery path must reuse those checks and define its own proof.                                                                                                                                                                             |
-| Saved-action launch                      | Existing action-launch authority on the selected host and checkout.                                                                                                                                                        | No automatic relaunch after a lost reply or posture change.                                                         | Server action delivery remains a separate slice; posture recovery adds no launch grant.                                                                                                                                                               |
-| Browser interaction, profile or transfer | Existing host-local take-over, profile and transfer rules. Owner posture recovery adds no remote controller or profile access.                                                                                             | Preserve the existing pause, hand-back and disconnect rules.                                                        | A separate owner browser decision must name permitted operations, controller arbitration and local recovery.                                                                                                                                          |
+| Request                                  | Eligible responder and current boundary                                                                                                                                                                                     | Queue and resume                                                                                                                                                          | Additional authority needed                                                                                                                                                                                                                           |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Code thread or Code Project posture      | An owner on this host's current owner list; Full access needs its own fresh unlock. The existing owner route applies the change through the Code or Project service after checking its current-state token.                 | Changing a level affects subsequent launches; it does not answer a waiting prompt or restart a turn.                                                                      | Built through the existing posture routes and Settings/phone controls; no other grant follows.                                                                                                                                                        |
+| Work level                               | An enrolled owner uses the existing signed posture route for an active local Work thread and Project. The exact target/current-state digest is required; Full access needs its own fresh unlock.                            | The next turn uses the chosen level; a running turn keeps its admitted level. No automatic resume.                                                                        | Built in the Work service and Settings/phone controls. No Plan, remembered Project default or approval answer is granted.                                                                                                                             |
+| Approval answer                          | Existing paired-device answers to their own Code turns remain unchanged. Separately, an enrolled owner may recover one eligible live local Code or Work runtime file or Shell approval through the signed owner proof path. | Private details and each Allow once or Deny ride the open session, or a fresh unlock per answer where the host's window set that. No automatic retry or remembered grant. | Built for complete supported file calls and confined Shell callbacks within the current bound root; see [Owner runtime approval recovery](#owner-runtime-approval-recovery). Unsupported Shell runtimes and excluded capabilities remain unavailable. |
+| File restore                             | The existing restore command and its approval, checkout freshness and live-writer checks.                                                                                                                                   | An owner posture change neither approves nor retries a restore.                                                                                                           | Any owner recovery path must reuse those checks and define its own proof.                                                                                                                                                                             |
+| Saved-action launch                      | Existing action-launch authority on the selected host and checkout.                                                                                                                                                         | No automatic relaunch after a lost reply or posture change.                                                                                                               | Server action delivery remains a separate slice; posture recovery adds no launch grant.                                                                                                                                                               |
+| Browser interaction, profile or transfer | Existing host-local take-over, profile and transfer rules. Owner posture recovery adds no remote controller or profile access.                                                                                              | Preserve the existing pause, hand-back and disconnect rules.                                                                                                              | A separate owner browser decision must name permitted operations, controller arbitration and local recovery.                                                                                                                                          |
 
 Rationale: the earlier rule, that only a window on the host may administer it
 or hold its most sensitive powers, assumed every other device might belong to
@@ -812,9 +833,8 @@ authority and never falls back to that route. The host checks its current
 owner list and grant. By default an open administration session covers
 reading the private action facts and each Allow once or Deny answer; a setting
 asks for a fresh unlock per answer instead (maintainer request, 2026-11-12).
-Not built yet: today an administration session cannot read private action
-facts or answer an approval: unlock freshly to read the complete facts, then
-unlock again for **each** Allow once or Deny answer.
+Built: see the administration session rule under
+[Owner devices](#owner-devices).
 
 The private reading names the host, authenticated owner, mode, thread and Project.
 Its digests bind the live callback, current thread/Project/binding and checkout

@@ -1,6 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { browserAgentAvailability, browserToolTransport } from "@octant/domain";
+import { appToolThreadLevel, browserAgentAvailability, browserToolTransport } from "@octant/domain";
 import {
   createBrowserAppManagedTools,
   BROWSER_TOOL_NAME,
@@ -597,7 +597,16 @@ export function wireContext(deps: ContextDependencies) {
       effective?.providerInstanceId ?? thread.providerInstanceId,
     );
     return browserAgentAvailability({
-      toolTransport: browserToolTransport(observed, String(effective?.modelId ?? thread.modelId)),
+      toolTransport: browserToolTransport(
+        observed,
+        String(effective?.modelId ?? thread.modelId),
+        // Chat has no Full access, so only a Work or Code thread has a level.
+        effective !== undefined
+          ? appToolThreadLevel(effective)
+          : work !== undefined
+            ? appToolThreadLevel(work)
+            : undefined,
+      ),
       hostLendsBrowser:
         (code !== undefined && codeOperationRuntime !== undefined) || work !== undefined,
       toolConstraints: effective?.toolConstraints ?? code?.toolConstraints ?? [],
@@ -673,10 +682,15 @@ export function wireContext(deps: ContextDependencies) {
           workTurnService.isTurnActive(decodeWorkThreadId(String(task.threadId)))
     )
       return undefined;
-    const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+    // A flow runs between turns (a running turn refused above), so the level
+    // it runs at is the one the thread holds now: a runtime that carries
+    // Octant's tools only at Full access serves a Full access thread's flow.
     if (
-      observed?.capabilities.appManagedTools !== "supported" &&
-      observed?.verifiedToolModelIds?.some((id) => String(id) === String(thread.modelId)) !== true
+      browserToolTransport(
+        providerRuntimeRegistry.observedState(thread.providerInstanceId),
+        String(thread.modelId),
+        appToolThreadLevel(thread),
+      ) !== true
     )
       return undefined;
     const authority = browserAuthority.resolve(task.threadId, task.mode);

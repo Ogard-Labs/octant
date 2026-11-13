@@ -854,6 +854,37 @@ describe("a running debug session", () => {
     );
   });
 
+  it("starts an unconfirmed configuration at Full access, keeps it running, and ends it when the thread leaves Full access", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const value = test.configuration();
+
+    test.threads[0] = { ...test.thread(), executionPolicy: "full-access" };
+    const started = await test.start(value);
+    if (started.status !== "started") throw new Error(`not started: ${JSON.stringify(started)}`);
+    expect(test.journal.approvals()).toHaveLength(0);
+    // Nothing confirmed the configuration, and at Full access nothing has to.
+    await test.service.sweep();
+    expect(test.service.running).toBe(1);
+    expect(await test.ask(started.sessionId, { kind: "state" })).not.toMatchObject({
+      state: { status: "ended" },
+    });
+    // A paired device still starts nothing, whatever the level.
+    expect(await test.start(value, "remote-device")).toEqual({
+      status: "refused",
+      reason: "local-host-required",
+    });
+
+    test.threads[0] = { ...test.thread(), executionPolicy: "approval-gated" };
+    await test.service.sweep();
+    expect(await test.ask(started.sessionId, { kind: "state" })).toMatchObject({
+      state: { status: "ended", endReason: "network-changed" },
+    });
+    // Below Full access the same configuration is a proposal again.
+    expect(await test.start(value)).toEqual({ status: "refused", reason: "approval-required" });
+  });
+
   it("ends at once when the window whose own Full access it ran under moves the thread to Plan", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));

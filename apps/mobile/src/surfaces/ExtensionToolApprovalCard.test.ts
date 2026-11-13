@@ -34,7 +34,10 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function hostWithOnePrompt(outsideContent?: unknown, rememberable = false) {
+function hostWithOnePrompt(
+  outsideContent?: unknown,
+  answerCovers?: "call" | "server" | "server-on-thread",
+) {
   const answers: Array<unknown> = [];
   let answered = false;
   const transport: MobileRemoteTransport = {
@@ -62,7 +65,8 @@ function hostWithOnePrompt(outsideContent?: unknown, rememberable = false) {
                 mcpToolName: "search",
                 inputJson: '{"q":"plan"}',
                 requestedAt: "2026-10-15T06:00:00.000Z",
-                rememberable,
+                rememberable: answerCovers === "server",
+                ...(answerCovers === undefined ? {} : { answerCovers }),
                 ...(outsideContent === undefined ? {} : { outsideContent }),
               },
             ],
@@ -125,10 +129,8 @@ describe("MCP tool prompt on the phone", () => {
     expect(container.querySelector('[data-testid="mobile-extension-tool-approval"]')).toBeNull();
   });
 
-  async function mountCard(input: {
-    readonly transport: MobileRemoteTransport;
-    readonly actsAsHostPerson: boolean;
-  }) {
+  it("offers the whole server or this tool alone where the host keeps the answer, and says what allowing covers", async () => {
+    const { transport, answers } = hostWithOnePrompt(undefined, "server");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -139,8 +141,8 @@ describe("MCP tool prompt on the phone", () => {
           preference: "light",
           surfaceStyle: "flat",
           children: createElement(ExtensionToolApprovalCard, {
-            transport: input.transport,
-            actsAsHostPerson: input.actsAsHostPerson,
+            transport,
+            actsAsHostPerson: true,
             authenticator: confirming(),
             threadId,
             refreshIntervalMs: 60_000,
@@ -148,36 +150,77 @@ describe("MCP tool prompt on the phone", () => {
         }),
       );
     });
-    return container;
-  }
 
-  it("lets the host's own person always allow a tool in its Project when the prompt may be remembered", async () => {
-    const { transport, answers } = hostWithOnePrompt(undefined, true);
-    const container = await mountCard({ transport, actsAsHostPerson: true });
-
-    expect(choices(container)).toEqual(["Allow", "Deny", "Always allow in this Project"]);
-    const always = [...container.querySelectorAll('[role="button"]')].find(
-      (node) => node.textContent?.trim() === "Always allow in this Project",
+    expect(choices(container)).toEqual([
+      "Allow all tools of this server",
+      "Deny",
+      "Allow only this tool",
+    ]);
+    expect(container.textContent).toContain("Octant asks about a server once");
+    const narrow = [...container.querySelectorAll('[role="button"]')].find(
+      (node) => node.textContent?.trim() === "Allow only this tool",
     );
     await act(async () => {
-      (always as HTMLElement | undefined)?.click();
+      (narrow as HTMLElement | undefined)?.click();
     });
-
     expect(answers).toEqual([{ kind: "decide", approvalId, decision: "approved", remember: true }]);
   });
 
-  it("offers a restricted session, and a prompt that may not be remembered, one Allow and Deny", async () => {
-    const restricted = await mountCard({
-      transport: hostWithOnePrompt(undefined, true).transport,
-      actsAsHostPerson: false,
+  it("does not offer a restricted session the narrower one-tool answer the host would refuse", async () => {
+    const { transport } = hostWithOnePrompt(undefined, "server");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          surfaceStyle: "flat",
+          children: createElement(ExtensionToolApprovalCard, {
+            transport,
+            actsAsHostPerson: false,
+            authenticator: confirming(),
+            threadId,
+            refreshIntervalMs: 60_000,
+          }),
+        }),
+      );
     });
-    expect(choices(restricted)).toEqual(["Allow", "Deny"]);
 
-    const oneCall = await mountCard({
-      transport: hostWithOnePrompt(undefined, false).transport,
-      actsAsHostPerson: true,
+    expect(choices(container)).toEqual(["Allow all tools of this server", "Deny"]);
+  });
+
+  it("offers a marked thread's network server for the rest of that thread", async () => {
+    const { transport, answers } = hostWithOnePrompt(undefined, "server-on-thread");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          surfaceStyle: "flat",
+          children: createElement(ExtensionToolApprovalCard, {
+            transport,
+            authenticator: confirming(),
+            threadId,
+            refreshIntervalMs: 60_000,
+          }),
+        }),
+      );
     });
-    expect(choices(oneCall)).toEqual(["Allow", "Deny"]);
+
+    expect(choices(container)).toEqual(["Allow this server in this thread", "Deny"]);
+    expect(container.textContent).toContain("for the rest of this thread");
+    const allow = [...container.querySelectorAll('[role="button"]')].find(
+      (node) => node.textContent?.trim() === "Allow this server in this thread",
+    );
+    await act(async () => {
+      (allow as HTMLElement | undefined)?.click();
+    });
+    expect(answers).toEqual([{ kind: "decide", approvalId, decision: "approved" }]);
   });
 
   it("shows why a marked thread asks and what marked it before Allow", async () => {

@@ -356,6 +356,9 @@ function AccessSection(
               {...(props.onProviderOAuth === undefined
                 ? {}
                 : { onProviderOAuth: props.onProviderOAuth })}
+              {...(props.onOpenExternalUrl === undefined
+                ? {}
+                : { onOpenExternalUrl: props.onOpenExternalUrl })}
             />
           )}
           {instance.driverKind !== "ollama" && instance.driverKind !== "amazon-bedrock" && (

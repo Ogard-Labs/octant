@@ -27,4 +27,6 @@ export declare function signOutsideDriverPackage(input: {
   readonly privateKeyPem: string | Uint8Array;
   /** The name the signature carries; defaults to the driver document's slug. For npm, the npm package name. */
   readonly name?: string;
+  /** With `name`, signs a package that is not a provider driver and has no driver document. */
+  readonly version?: string;
 }): Promise<{ readonly fingerprint: string; readonly path: string }>;

@@ -32,11 +32,12 @@ export interface ExtensionToolApprovalCardProps {
 
 /**
  * An MCP tool call this phone's turn made waits on the host until someone
- * answers it, here or at a local window that may drive the thread. Allow
- * covers this one call. "Always allow in this Project" is offered as a window
- * offers it: for a prompt the host marked rememberable, to a session that
- * acts as the host's own person. The host refuses it from any other session,
- * which is offered Allow and Deny only.
+ * answers it, here or at a local window that may drive the thread. The host
+ * says what approving covers, and the card offers exactly that, as the
+ * desktop card does: every tool of the server (or this tool alone), the
+ * server for the rest of a thread that has read outside content, or this one
+ * call. The phone never decides what is kept; a host that keeps nothing for
+ * this turn says `call`, and the card is then Allow and Deny.
  */
 export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps) {
   const { colors } = useTheme();
@@ -59,8 +60,11 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
   const pending = resource.value?.[0];
   if (pending === undefined) return null;
 
-  const canRemember = pending.rememberable && props.actsAsHostPerson === true;
-  const decide = async (decision: "approved" | "denied", remember?: true) => {
+  const covers = pending.answerCovers ?? "call";
+  // Narrowing to one tool is recorded as a grant, which the host takes only
+  // from a session acting as its own person, so it is offered to no other.
+  const canNarrow = covers === "server" && props.actsAsHostPerson === true;
+  const decide = async (decision: "approved" | "denied", narrowToTool = false) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
@@ -70,7 +74,7 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
           transport: props.transport,
           approvalId: String(pending.approvalId),
           decision,
-          ...(remember === undefined ? {} : { remember }),
+          ...(narrowToTool ? { remember: true } : {}),
         });
       // Denying is the safe direction, so only Allow asks for confirmation.
       const outcome: ConfirmedSendResult<Awaited<ReturnType<typeof send>>> =
@@ -132,10 +136,31 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
       {pending.outsideContent === undefined ? null : (
         <OutsideContentNote outsideContent={pending.outsideContent} />
       )}
+      {covers === "call" ? null : (
+        <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+          {covers === "server"
+            ? MOBILE_COPY.toolApprovalServerDetail
+            : MOBILE_COPY.toolApprovalServerOnThreadDetail}
+        </Text>
+      )}
       <ApprovalDecisionButtons
+        allowLabel={
+          covers === "server"
+            ? MOBILE_COPY.toolApprovalAllowServer
+            : covers === "server-on-thread"
+              ? MOBILE_COPY.toolApprovalAllowServerOnThread
+              : undefined
+        }
         busy={busy}
+        narrower={
+          canNarrow
+            ? {
+                label: MOBILE_COPY.toolApprovalAllowToolOnly,
+                onPress: () => void decide("approved", true),
+              }
+            : undefined
+        }
         onAllow={() => void decide("approved")}
-        onAllowProject={canRemember ? () => void decide("approved", true) : undefined}
         onDeny={() => void decide("denied")}
       />
       {resource.error === undefined ? null : (

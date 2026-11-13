@@ -1612,10 +1612,10 @@ function ActiveSectionContent({
                 <SettingRow
                   description={
                     transfer.direction === "upload"
-                      ? `Agents upload files from ${transfer.workspaceRoot} to this site without asking.`
-                      : `Agents save downloads from this site into ${transfer.workspaceRoot} without asking.`
+                      ? `Agents upload files from ${transfer.workspaceRoot} to this site ${rememberedTransferProfile(transfer)} without asking.`
+                      : `Agents save downloads from this site ${rememberedTransferProfile(transfer)} into ${transfer.workspaceRoot} without asking.`
                   }
-                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}`}
+                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}\0${transfer.profile === undefined && transfer.privatePage !== true ? "any" : browserProfileKey(transfer.profile)}`}
                   label={`${transfer.direction === "upload" ? "Uploads to" : "Downloads from"} ${transfer.origin}`}
                   scope="host"
                   settingId="browser-agent-downloads"
@@ -2191,6 +2191,18 @@ const BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES: ReadonlyArray<number> = [5, 10, 20, 5
 const BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES: ReadonlyArray<number> = [1, 5, 10, 20, 50];
 
 /** One of the Browser transfer limits; a stored value outside the choices stays selectable. */
+/** Where a remembered upload or download answer applies: the profile the page was in. */
+function rememberedTransferProfile(
+  transfer: SettingsViewProps["settings"]["rememberedBrowserTransfers"][number],
+): string {
+  const profile = transfer.profile;
+  // Remembered before the page was recorded: it covered every page then and still does.
+  if (profile === undefined && transfer.privatePage !== true) return "on any page";
+  if (profile === undefined) return "on Private pages";
+  if (profile.kind === "personal") return "in the Personal profile";
+  return profile.kind === "project" ? "in a Project profile" : "in an added account profile";
+}
+
 function BrowserTransferLimitSelect(props: {
   readonly id: string;
   readonly label: string;
@@ -2326,6 +2338,28 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           />
         </div>
       </SettingsSection>
+      {/* Only the Mac app has the ⌘Q menu accelerator the second press guards. */}
+      {props.hostBridge?.setQuitShortcutSecondPress === undefined || !isApplePlatform() ? null : (
+        <SettingsSection title="Quitting">
+          <div className="setgroup">
+            <SettingRow
+              description="The first ⌘Q shows a notice and the second, within a moment, quits. Off, one press quits. Choosing Quit from a menu always quits at once, and Octant still asks before stopping running work."
+              focused={focusedSetting === settingId("quit-shortcut-second-press")}
+              label="Press ⌘Q twice to quit"
+              scope="app"
+              settingId="quit-shortcut-second-press"
+            >
+              <OctantSwitch
+                checked={props.settings.quitShortcutNeedsSecondPress}
+                label="Press ⌘Q twice to quit"
+                onCheckedChange={(checked) =>
+                  props.onSettingsChange({ quitShortcutNeedsSecondPress: checked })
+                }
+              />
+            </SettingRow>
+          </div>
+        </SettingsSection>
+      )}
       <SettingsSection title="Files">
         <div className="setgroup">
           <SettingRow

@@ -312,6 +312,7 @@ import {
 import {
   readSidebarCollapsed,
   useAutomaticUpdateCheckSync,
+  useQuitShortcutSecondPressSync,
   useReleaseRingSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
@@ -898,6 +899,10 @@ function LaunchedShell(
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
   useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
   useReleaseRingSync(props.hostBridge, controller.settings?.releaseRing);
+  useQuitShortcutSecondPressSync(
+    props.hostBridge,
+    controller.settings?.quitShortcutNeedsSecondPress,
+  );
   const sidebarBackgroundFetcher = useSidebarBackgroundFetcher(
     props.launch.serverUrl,
     props.projectWindowCapability,
@@ -4852,6 +4857,7 @@ function LaunchedShell(
               : { lineageParentThreadId: thread.lineageParentThreadId }),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+            ...(thread.markedDone === true ? { markedDone: true } : {}),
             ...(thread.coordinator === true ? { coordinator: true } : {}),
             ...(thread.planner === true ? { planner: true } : {}),
             ...workerLineage(thread.coordinatorThreadId),
@@ -5337,6 +5343,7 @@ function LaunchedShell(
       renameCodeThread,
       renameProject: projectController.rename,
       reopenChatThread: chatController.reopenThread,
+      markCodeThreadDone: codeController.markThreadDone,
       reopenCodeThread: codeController.reopenThread,
       resetNewTaskDraft,
       retryActiveModeThreads,
@@ -5411,6 +5418,7 @@ function LaunchedShell(
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
+      setProjectOwnToolchain: projectController.setCodeOwnToolchain,
       setProjectWorkDeveloperTools: projectController.setWorkDeveloperTools,
       setProjectsListOpen,
       setRailPlaceholder,
@@ -8221,6 +8229,20 @@ function LaunchedShell(
                     : undefined,
               });
             },
+            // Only the desktop app can check for its own updates. Where it
+            // keeps the preference itself the answer goes straight to it;
+            // otherwise the shell setting carries it and the sync above tells
+            // the host.
+            onSetUpdateChecks:
+              props.hostBridge?.setAutomaticAppUpdateChecks === undefined
+                ? undefined
+                : (allowed) =>
+                    props.hostBridge?.appUpdatePreferenceScope === "local"
+                      ? (props.hostBridge.setAutomaticAppUpdateChecks?.(allowed).then(
+                          () => true,
+                          () => false,
+                        ) ?? Promise.resolve(false))
+                      : controller.updateSettings({ automaticUpdateChecks: allowed }),
             workEnabled: controller.settings?.workEnabled ?? true,
             workModel:
               workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,

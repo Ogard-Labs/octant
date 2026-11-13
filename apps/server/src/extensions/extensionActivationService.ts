@@ -111,9 +111,11 @@ export class ExtensionActivationService {
     const stale =
       query.expectedCatalogEpoch !== undefined && query.expectedCatalogEpoch !== catalogEpoch;
     const packages = evaluated.map(({ packageState, environmentCompatible, components }) => ({
-      // An outside driver's publisher keys, an npm package's source and the
-      // mark for a server added in Settings are lifecycle facts for Settings,
-      // not part of what a scope may use.
+      // An outside driver's publisher keys, an npm package's source, the
+      // mark for a server added in Settings and the notice of an update kept
+      // from its trusted source are lifecycle facts for Settings, not part of
+      // what a scope may use. The effective schema refuses excess fields, so
+      // leaving one in failed every effective-state query.
       ...withoutSettingsFacts(packageState),
       components: components.map(({ componentState, policy }) => {
         const activation = {
@@ -177,12 +179,16 @@ function isScopeActivated(packageState: ExtensionPackageState): boolean {
 
 function withoutSettingsFacts(
   packageState: ExtensionPackageState,
-): Omit<ExtensionPackageState, "publisher" | "npm" | "addedInSettings" | "localSetupId"> {
+): Omit<
+  ExtensionPackageState,
+  "publisher" | "npm" | "addedInSettings" | "localSetupId" | "updated"
+> {
   const {
     publisher: _publisher,
     npm: _npm,
     addedInSettings: _added,
     localSetupId: _local,
+    updated: _updated,
     ...rest
   } = packageState;
   return rest;

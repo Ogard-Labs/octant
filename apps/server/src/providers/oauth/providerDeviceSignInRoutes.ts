@@ -1,5 +1,7 @@
-// Host-local organization sign-in with a device code, for a host without the
-// desktop app.
+// Host-local organization sign-in with a device code: from the host's
+// terminal, for a host without the desktop app, or from a local desktop
+// window, whose main process holds the bridge secret and calls these routes
+// for it.
 //
 // The desktop and a browser sign an Azure AI Foundry endpoint in on a loopback
 // redirect, which a person at another device cannot reach. A headless host's
@@ -10,8 +12,9 @@
 // address, under a registered window capability. The private listener never
 // forwards `/api/desktop`, so a paired device cannot reach them, and a browser
 // page on the host never holds the bridge secret. A device code is never shown
-// to Settings or any browser: the flow is the easier one to phish, so it
-// begins only where the person typed the command.
+// to a paired device or a browser: the flow is the easier one to phish, so it
+// begins only on the host itself, where the person typed the command or
+// pressed Sign in in a local desktop window.
 //
 // An Amazon Bedrock instance signs in only this way: its cloud's single
 // sign-on is a device authorization at the organization's portal, so these
@@ -93,7 +96,8 @@ const REFUSAL_STATUS: Readonly<Record<ProviderDeviceSignInRefusal, number>> = {
 };
 
 const REFUSAL_MESSAGE: Readonly<Record<ProviderDeviceSignInRefusal, string>> = {
-  unauthorized: "Device-code sign-in can be started only by the host-local octant command.",
+  unauthorized:
+    "Device-code sign-in can be started only on the host: by the octant command or a local desktop window.",
   invalid: "The sign-in request is invalid.",
   "not-found": "No provider has that id or name.",
   ambiguous: "More than one provider has that name.",

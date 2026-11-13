@@ -37,6 +37,7 @@ interface PendingApproval {
   readonly windowId: WindowId;
   readonly expiresAt: number;
   readonly remember?: (scope: "tool" | "server", actor?: EventActor) => boolean;
+  readonly approvedBy?: (actor: EventActor | undefined) => void;
   readonly resolve: (approved: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly signal?: AbortSignal;
@@ -113,6 +114,13 @@ export class ExtensionToolApprovalService {
      * anyway is refused.
      */
     readonly remember?: (scope: "tool" | "server", actor?: EventActor) => boolean;
+    /** What an approval lets run afterwards, which the prompt states. */
+    readonly answerCovers?: "call" | "server" | "server-on-thread";
+    /**
+     * Told who approved, before the call resumes, so an approval the host
+     * keeps is journaled as that person's device or window.
+     */
+    readonly approvedBy?: (actor: EventActor | undefined) => void;
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
@@ -133,6 +141,7 @@ export class ExtensionToolApprovalService {
       inputJson: input.inputJson,
       requestedAt: new Date(requestedAt).toISOString(),
       rememberable: input.remember !== undefined,
+      ...(input.answerCovers === undefined ? {} : { answerCovers: input.answerCovers }),
       ...(input.outsideContent === undefined ? {} : { outsideContent: input.outsideContent }),
     });
     return new Promise<boolean>((resolve) => {
@@ -155,6 +164,7 @@ export class ExtensionToolApprovalService {
         windowId: input.windowId,
         expiresAt: requestedAt + this.#ttlMs,
         ...(input.remember === undefined ? {} : { remember: input.remember }),
+        ...(input.approvedBy === undefined ? {} : { approvedBy: input.approvedBy }),
         resolve: settle,
         timer,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -200,6 +210,7 @@ export class ExtensionToolApprovalService {
         return false;
       }
     }
+    if (decision.decision === "approved") pending.approvedBy?.(answerer.actor);
     pending.resolve(decision.decision === "approved");
     return true;
   }

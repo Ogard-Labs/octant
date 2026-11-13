@@ -38,6 +38,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { CodeContentStore, type CodeContentStoreOptions } from "./codeContentStore";
 import {
@@ -926,6 +927,49 @@ describe("CodeService commands", () => {
     ).resolves.toMatchObject({
       settings: { defaultExecutionPolicy: "plan", bundledLanguageServer: false },
     });
+  });
+
+  it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+
+    const untouched = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+    });
+    if (untouched.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(untouched.settings.androidEmulatorSnapshotBoot).toBeUndefined();
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: untouched.settings } as never);
+
+    const turnedOn = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 1,
+      androidEmulatorSnapshotBoot: true,
+    });
+    expect(turnedOn).toMatchObject({ settings: { androidEmulatorSnapshotBoot: true } });
+    if (turnedOn.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: turnedOn.settings } as never);
+
+    const kept = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      defaultExecutionPolicy: "plan",
+    });
+    expect(kept).toMatchObject({ settings: { androidEmulatorSnapshotBoot: true } });
+    if (kept.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: kept.settings } as never);
+
+    const turnedOff = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 3,
+      androidEmulatorSnapshotBoot: false,
+    });
+    if (turnedOff.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(turnedOff.settings.androidEmulatorSnapshotBoot).toBeUndefined();
   });
 
   it("keeps the Auto reviewer and Shield model across later changes, and returns Shield to the thread's provider on null", async () => {
@@ -5516,6 +5560,63 @@ describe("completing and snoozing a Code thread", () => {
     });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
     expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("lets a person mark a thread Done whatever its delivery target says, journals the mark as their override, and clears it on Reopen", async () => {
+    const fixture = serviceFixture();
+
+    const marked = await fixture.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(marked).toMatchObject({
+      kind: "thread-updated",
+      thread: { markedDoneAt: now, version: 2 },
+    });
+    const markAppend = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ eventName: string; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(markAppend.events[0]?.eventName).toBe("code.thread-updated@1");
+    expect(markAppend.events[0]?.payload.thread.markedDoneAt).toBe(now);
+    // The delivery target is left exactly as the person confirmed it: the
+    // override never rewrites what the thread was asked to deliver.
+    expect(markAppend.events[0]?.payload.thread.deliveryTarget).toEqual(thread().deliveryTarget);
+
+    const alreadyMarked = serviceFixture({ threads: [thread({ markedDoneAt: nowAt })] });
+    await expect(
+      alreadyMarked.service.execute(ids.window, {
+        kind: "mark-code-thread-done",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: "This thread is already marked Done." },
+    });
+
+    const reopened = await alreadyMarked.service.execute(ids.window, {
+      kind: "reopen-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(reopened).toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    if (!("thread" in reopened)) throw new Error("expected the reopened thread");
+    expect(reopened.thread).not.toHaveProperty("markedDoneAt");
+  });
+
+  it("refuses a routine or anything else acting as the host when it tries to mark a Code thread Done", async () => {
+    const fixture = serviceFixture();
+
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "mark-code-thread-done",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: "Only a person can mark a Code thread Done." },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("reopens a completed thread and wakes a snoozed one back into play", async () => {

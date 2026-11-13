@@ -7,6 +7,7 @@ import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   EXTENSION_AGGREGATE_TYPE,
   EXTENSION_LIFECYCLE_EVENT,
+  hasCapabilityExpansion,
   readExtensionRecord,
   readExtensionRecords,
   readExtensionSnapshot,
@@ -18,6 +19,9 @@ import type { ExtensionPackageStore, ExtensionVersionReference } from "./extensi
 import {
   decideOutsideDriverNewPublisher,
   outsideDriverPublisherPinAtTrust,
+  outsideDriverUpdateKeepsTrust,
+  sameExtensionSource,
+  unsignedUpdateKeepsApprovals,
 } from "@octant/domain/outside-driver-publisher-policy";
 import type { ExtensionRuntimeEvidence } from "./extensionSupervisor";
 
@@ -104,13 +108,15 @@ export class ExtensionLifecycleService {
 
   /**
    * Installs a package. With `trust`, the person's one confirmation also
-   * trusts its source: the journal holds the install and the trust as two
-   * events, and enabling stays its own switch. If the trust is refused (a
-   * driver whose publisher changed), the package stays installed untrusted.
+   * trusts its source, and with `enable` beside it also turns the package
+   * and each of its components on. The journal holds the install, the trust,
+   * and each switch as their own events. If the trust is refused (a driver
+   * whose publisher changed), the package stays installed untrusted and
+   * nothing is turned on; `enable` without `trust` turns nothing on either.
    */
   async install(
     inspection: InspectedExtensionPackage,
-    options: { readonly trust?: boolean } = {},
+    options: { readonly trust?: boolean; readonly enable?: boolean } = {},
     actor?: EventActor,
   ): Promise<ExtensionSnapshot> {
     const existing = readExtensionRecord(this.#connection, inspection.manifest.extensionId);
@@ -124,7 +130,7 @@ export class ExtensionLifecycleService {
     if (options.trust !== true) return installed;
     const record = this.#installedRecord(inspection.manifest.extensionId);
     try {
-      return await this.setSourceTrust(
+      const trusted = await this.setSourceTrust(
         {
           extensionId: inspection.manifest.extensionId as never,
           expectedStateVersion: record.aggregateVersion as never,
@@ -132,12 +138,130 @@ export class ExtensionLifecycleService {
         },
         actor,
       );
+      if (options.enable !== true) return trusted;
+      return this.#turnOn(inspection.manifest.extensionId, actor);
     } catch (error) {
       // A refused trust leaves the install in place, untrusted, as the person
       // would have it after Confirm install; they trust it from Installed.
       if (error instanceof ExtensionLifecycleServiceError) return this.snapshot();
       throw error;
     }
+  }
+
+  /**
+   * Turns a trusted package and every one of its components on, as the
+   * separate switches would. A component held for review or admission stays
+   * held: a switch never lifts a hold.
+   */
+  #turnOn(extensionId: string, actor: EventActor | undefined): ExtensionSnapshot {
+    const record = this.#installedRecord(extensionId);
+    if (!record.trusted) return this.snapshot();
+    this.#append(
+      extensionId,
+      [
+        ...(record.pluginDesired
+          ? []
+          : [{ kind: "plugin-desired-state-changed" as const, desired: true }]),
+        ...installedManifest(record)
+          .components.filter((component) => record.componentDesired[component.id] !== true)
+          .map((component) => ({
+            kind: "component-desired-state-changed" as const,
+            componentId: component.id,
+            desired: true,
+          })),
+      ],
+      undefined,
+      actor,
+    );
+    return this.snapshot();
+  }
+
+  /**
+   * The one flow that admits an outside provider driver: install, trust the
+   * source, then switch on the plugin and its driver component, on the
+   * person's one confirmation of the review. Each step is the separate
+   * action's own method, so it journals and refuses exactly as that action
+   * does. A refused step stops the flow and the steps before it stand;
+   * `stoppedAt` names it. Any other package is refused before it is
+   * installed, because enabling a plugin stays its own switch.
+   */
+  async admitOutsideDriver(
+    inspection: InspectedExtensionPackage,
+    actor?: EventActor,
+  ): Promise<{
+    readonly snapshot: ExtensionSnapshot;
+    readonly stoppedAt?: "trust" | "enable";
+  }> {
+    if (!holdsProviderDriver(inspection.manifest)) {
+      throw new ExtensionLifecycleServiceError(
+        "invalid",
+        "Only an outside provider driver installs, trusts and switches on in one step.",
+      );
+    }
+    const { extensionId } = inspection.manifest;
+    await this.install(inspection, {}, actor);
+    // Read before each step: every step advances the version the next expects.
+    const expectedStateVersion = () => {
+      const state = this.snapshot().packages.find(
+        (candidate) => String(candidate.extensionId) === String(extensionId),
+      );
+      if (state === undefined) {
+        throw new ExtensionLifecycleServiceError("invalid", "Extension package is not installed.");
+      }
+      return state.stateVersion;
+    };
+    const steps = [
+      {
+        step: "trust" as const,
+        run: () =>
+          this.setSourceTrust(
+            {
+              extensionId,
+              expectedStateVersion: expectedStateVersion(),
+              trusted: true,
+            },
+            actor,
+          ),
+      },
+      {
+        step: "enable" as const,
+        run: () =>
+          this.setPluginDesired(
+            {
+              extensionId,
+              expectedStateVersion: expectedStateVersion(),
+              desired: true,
+            },
+            actor,
+          ),
+      },
+      ...inspection.manifest.components
+        .filter((component) => component.kind === "provider-driver")
+        .map((component) => ({
+          step: "enable" as const,
+          run: () =>
+            this.setComponentDesired(
+              {
+                extensionId,
+                expectedStateVersion: expectedStateVersion(),
+                componentId: component.id,
+                desired: true,
+              },
+              actor,
+            ),
+        })),
+    ];
+    for (const { step, run } of steps) {
+      try {
+        await run();
+      } catch (error) {
+        if (error instanceof ExtensionLifecycleServiceError) {
+          return { snapshot: this.snapshot(), stoppedAt: step };
+        }
+        throw error;
+      }
+    }
+    return { snapshot: this.snapshot() };
   }
 
   async update(
@@ -160,11 +284,88 @@ export class ExtensionLifecycleService {
         "Extension version is already retained.",
       );
     }
-    return this.#promote(inspection, "update", actor);
+    // An outside driver's update is held until it is trusted again, because
+    // trust is given to one digest. An update the pinned publisher key signed
+    // keeps the trust and the on switch the package had: both are journaled
+    // again after the update's own commit, so the journal shows why the new
+    // version runs. A new or missing key stays held and asks.
+    const previous = existing.current;
+    const driver = holdsProviderDriver(inspection.manifest);
+    const capabilitiesWidened =
+      previous !== undefined && hasCapabilityExpansion(previous, inspection.manifest);
+    const keepsTrust =
+      previous !== undefined &&
+      driver &&
+      outsideDriverUpdateKeepsTrust({
+        trusted: existing.trusted,
+        pinned: existing.publisherPin,
+        updated: inspection.manifest.provenance.publisherKey,
+        capabilitiesWidened,
+      });
+    // Any other package keeps its trust across an update that may do no
+    // more. What an unsigned one needs journaled is that the update came
+    // from the source the person trusted: that is what lets the approvals
+    // its tools were given hold, and what the Updated notice and its roll
+    // back read. A driver is admitted digest by digest and is left out.
+    const keptFromSource =
+      previous !== undefined &&
+      !driver &&
+      unsignedUpdateKeepsApprovals({
+        trusted: existing.trusted,
+        pinned: existing.publisherPin,
+        previous: previous.provenance.publisherKey,
+        updated: inspection.manifest.provenance.publisherKey,
+        sameSource: sameExtensionSource(
+          { source: previous.source, npm: previous.provenance.npm },
+          { source: inspection.manifest.source, npm: inspection.manifest.provenance.npm },
+        ),
+        capabilitiesWidened,
+      });
+    // The kept-from-source fact rides in the same journal append as
+    // `update-committed`: appended separately, a stop between the two left
+    // the update trusted but without its Updated notice, roll back and
+    // update line, and nothing at startup or on retry could rebuild them.
+    const updated = await this.#promote(
+      inspection,
+      "update",
+      actor,
+      keptFromSource && previous !== undefined
+        ? [
+            {
+              kind: "update-kept-from-source",
+              packageId: inspection.manifest.packageId,
+              version: inspection.manifest.version,
+              digest: inspection.manifest.digest,
+              previousVersion: previous.version,
+              previousDigest: previous.digest,
+            },
+          ]
+        : [],
+    );
+    if (keptFromSource || !keepsTrust) return updated;
+    this.#append(
+      inspection.manifest.extensionId,
+      [
+        { kind: "source-trust-changed", trusted: true },
+        ...(existing.pluginDesired
+          ? [{ kind: "plugin-desired-state-changed" as const, desired: true }]
+          : []),
+      ],
+      undefined,
+      actor,
+    );
+    return this.snapshot();
   }
 
+  /**
+   * Selects a retained version again. A roll back leaves the package
+   * untrusted and off and ends its remembered approvals. With `restoreTrust`,
+   * and only when the target is the version an Updated notice names, the
+   * trust and the switches the package had are journaled again after it:
+   * the person is returning to the digest they trusted.
+   */
   async rollback(
-    target: ExtensionVersionReference,
+    target: ExtensionVersionReference & { readonly restoreTrust?: boolean | undefined },
     actor?: EventActor,
   ): Promise<ExtensionSnapshot> {
     const record = this.#installedRecord(target.extensionId);
@@ -201,6 +402,15 @@ export class ExtensionLifecycleService {
       );
       throw new ExtensionLifecycleServiceError("invalid", "Rollback version is not verified.");
     }
+    const update = record.sourceUpdate;
+    const restores =
+      target.restoreTrust === true &&
+      record.trusted &&
+      update !== undefined &&
+      record.current?.version === update.version &&
+      record.current.digest === update.digest &&
+      retained.manifest.version === update.previousVersion &&
+      retained.manifest.digest === update.previousDigest;
     this.#append(
       target.extensionId,
       {
@@ -210,6 +420,25 @@ export class ExtensionLifecycleService {
         digest: retained.manifest.digest,
         manifest: retained.manifest,
       },
+      undefined,
+      actor,
+    );
+    if (!restores) return this.snapshot();
+    this.#append(
+      target.extensionId,
+      [
+        { kind: "source-trust-changed", trusted: true },
+        ...(record.pluginDesired
+          ? [{ kind: "plugin-desired-state-changed" as const, desired: true }]
+          : []),
+        ...retained.manifest.components
+          .filter((component) => record.componentDesired[component.id] === true)
+          .map((component) => ({
+            kind: "component-desired-state-changed" as const,
+            componentId: component.id,
+            desired: true,
+          })),
+      ],
       undefined,
       actor,
     );
@@ -231,10 +460,9 @@ export class ExtensionLifecycleService {
       );
     }
     const manifest = installedManifest(record);
-    const pin =
-      command.trusted && holdsProviderDriver(manifest)
-        ? outsideDriverPublisherPinAtTrust(record.publisherPin, manifest.provenance.publisherKey)
-        : undefined;
+    const pin = command.trusted
+      ? outsideDriverPublisherPinAtTrust(record.publisherPin, manifest.provenance.publisherKey)
+      : undefined;
     this.#append(
       command.extensionId,
       [
@@ -258,8 +486,8 @@ export class ExtensionLifecycleService {
   }
 
   /**
-   * Re-trusts the publisher of an outside driver held because another key,
-   * the one the person confirms, signed its selected version. The new key
+   * Re-trusts the publisher of a package held because another key, the one
+   * the person confirms, signed its selected version. The new key
    * replaces the pin and the package stays held until the person trusts it.
    */
   async trustNewPublisher(
@@ -268,13 +496,11 @@ export class ExtensionLifecycleService {
   ): Promise<ExtensionSnapshot> {
     const record = this.#stateMutationRecord(command.extensionId, command.expectedStateVersion);
     const manifest = installedManifest(record);
-    const decision = holdsProviderDriver(manifest)
-      ? decideOutsideDriverNewPublisher({
-          pinned: record.publisherPin,
-          selected: manifest.provenance.publisherKey,
-          confirmed: command.publisherKey,
-        })
-      : ({ kind: "refused", reason: "not-held" } as const);
+    const decision = decideOutsideDriverNewPublisher({
+      pinned: record.publisherPin,
+      selected: manifest.provenance.publisherKey,
+      confirmed: command.publisherKey,
+    });
     if (decision.kind === "refused") {
       throw new ExtensionLifecycleServiceError("invalid", "No new publisher is waiting for trust.");
     }
@@ -606,6 +832,7 @@ export class ExtensionLifecycleService {
     inspection: InspectedExtensionPackage,
     operation: "install" | "update",
     actor: EventActor | undefined,
+    committedWith: ReadonlyArray<ExtensionLifecycleEvent["payload"]> = [],
   ): Promise<ExtensionSnapshot> {
     const staged = await this.#store.stage(inspection);
     try {
@@ -641,14 +868,17 @@ export class ExtensionLifecycleService {
     this.#fault?.("after-promotion");
     this.#append(
       inspection.manifest.extensionId,
-      {
-        kind: operation === "install" ? "install-committed" : "update-committed",
-        transactionId: staged.transactionId as never,
-        packageId: inspection.manifest.packageId,
-        version: inspection.manifest.version,
-        digest: inspection.manifest.digest,
-        manifest: inspection.manifest,
-      },
+      [
+        {
+          kind: operation === "install" ? "install-committed" : "update-committed",
+          transactionId: staged.transactionId as never,
+          packageId: inspection.manifest.packageId,
+          version: inspection.manifest.version,
+          digest: inspection.manifest.digest,
+          manifest: inspection.manifest,
+        },
+        ...committedWith,
+      ],
       undefined,
       actor,
     );
