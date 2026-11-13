@@ -54,8 +54,8 @@
 // `ELECTRON_OVERRIDE_DIST_PATH` to a directory holding `Electron.app`. It
 // starts one hidden Electron at a time with a throwaway user data directory,
 // and stops it. Exits 0 when every assertion holds, 1 when one fails, and 2
-// when no Electron is available. Needs a macOS desktop session; it is not run
-// in hosted CI.
+// when no Electron is available. Needs a macOS desktop session; the macOS CI
+// job runs it with the pinned Electron runtime.
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";

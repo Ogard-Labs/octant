@@ -286,6 +286,11 @@ jobs:
           ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/Electron "$export_smoke_directory/canvasExportWorker.smoke.mjs"
       - run: bun run --cwd apps/desktop typecheck
       - run: bun run --cwd apps/desktop test
+      # Exercise the role-selecting entry in sandboxed Electron, including
+      # direct-network refusal, the filtered proxy, and forwarded input.
+      - name: Canvas prototype containment
+        timeout-minutes: 8
+        run: bun run smoke:canvas-prototype-containment
       # Confined Code and Work opens prove where they landed with
       # O_NOFOLLOW_ANY on macOS and /proc/self/fd on Linux. The server job
       # runs only the Linux path, so the ancestor-swap port tests run here too.
