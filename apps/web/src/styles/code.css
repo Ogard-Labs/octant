@@ -760,6 +760,19 @@ html:not([data-octant-reduced-transparency="true"])
   padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-6);
 }
 
+.unified-diff--virtualized {
+  gap: 0;
+}
+
+.unified-diff--virtualized .unified-diff__file + .unified-diff__file {
+  margin-top: var(--oct-space-4);
+}
+
+.unified-diff__spacer {
+  padding: 0;
+  border: 0;
+}
+
 .unified-diff__file {
   overflow: hidden;
   border: 1px solid var(--oct-border);
