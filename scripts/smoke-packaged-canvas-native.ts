@@ -36,6 +36,10 @@ import { openReadOnlySqlite } from "../apps/server/src/persistence/sqlitePort";
 import { createQuitAppleScript } from "./package-desktop";
 import {
   cleanupPackagedProcess,
+  coldLaunchPhases,
+  collectHostInteractionMarks,
+  formatColdLaunchPhases,
+  readHostStartupTimes,
   runBoundedCommand,
   sanitizedPackagedEnvironment,
   spawnPackagedApplication,
@@ -305,6 +309,10 @@ async function main(): Promise<void> {
         join(root, "data"),
       ),
       OCTANT_SERVER_PORT: String(port),
+      // Local launch marks on the app's stderr and a service log of this run's
+      // own, so a slow cold launch reports which phase took the time.
+      OCTANT_PERF_TRACE: "1",
+      OCTANT_LOGS_DIR: join(root, "logs"),
       ...(process.env.RUNNER_TRACKING_ID === undefined
         ? {}
         : { RUNNER_TRACKING_ID: process.env.RUNNER_TRACKING_ID }),
@@ -475,7 +483,9 @@ async function main(): Promise<void> {
       throw Error(
         "Packaged Keychain synthetic environment probe failed; see sanitized fixture evidence.",
       );
+    const launchedAt = Date.now();
     app = spawnPackagedApplication({ executable, env });
+    const launchMarks = collectHostInteractionMarks(app.child.stderr);
     pid = app.child.pid;
     if (pid === undefined) throw Error("No owned packaged application process.");
     const ownPid = pid;
@@ -639,7 +649,29 @@ const timer = setInterval(() => {
         },
         { timeoutMs: 5000 },
       );
-    await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
+    try {
+      await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
+    } finally {
+      // Reported whether or not the window arrived: a launch that never left
+      // "Connecting to Chat" is the case that needs the phases most.
+      const phases = coldLaunchPhases({
+        launchedAt,
+        marks: launchMarks(),
+        ...(await readHostStartupTimes({
+          dataDirectory: join(root, "data"),
+          logsDirectory: join(root, "logs"),
+        })),
+      });
+      console.log(formatColdLaunchPhases(phases));
+      await writeFile(
+        join(artifacts, "cold-launch-phases.json"),
+        JSON.stringify(
+          phases.map((phase) => ({ ...phase, sinceLaunchMs: phase.sinceLaunchMs ?? null })),
+          null,
+          2,
+        ),
+      ).catch(() => undefined);
+    }
     await runBoundedCommand(
       nativeControllerPath,
       ["click", String(ownPid), join(artifacts, "skip-setup-target.png"), "Skip setup"],

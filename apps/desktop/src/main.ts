@@ -365,7 +365,11 @@ import {
   type PageStoragePort,
   PairedComputerPins,
 } from "./pairedComputers";
-import { markHostInteraction } from "./interactionTrace";
+import {
+  hostInteractionTraceEnabled,
+  isChatBootstrapRequest,
+  markHostInteraction,
+} from "./interactionTrace";
 import {
   installCanvasFrameGuards,
   isolateEachCanvasFrameDocument,
@@ -1614,6 +1618,13 @@ function installTrustedRendererRequestHeaders(): void {
           ? undefined
           : trustedRendererRequests.get(details.webContentsId);
       const frameUrl = details.frame?.url ?? details.webContents?.getURL();
+      if (
+        context !== undefined &&
+        hostInteractionTraceEnabled() &&
+        isChatBootstrapRequest(details.url, context.serverOrigin)
+      ) {
+        markHostInteraction("renderer", "chat-bootstrap-sent");
+      }
       callback({
         requestHeaders: decorateTrustedRendererHeaders({
           requestHeaders: details.requestHeaders,
@@ -1623,6 +1634,27 @@ function installTrustedRendererRequestHeaders(): void {
         }),
       });
     },
+  );
+  if (!hostInteractionTraceEnabled()) return;
+  const chatBootstrapSettled = (
+    details: { readonly url: string; readonly webContentsId?: number },
+    name: "chat-bootstrap-answered" | "chat-bootstrap-failed",
+  ) => {
+    const context =
+      details.webContentsId === undefined
+        ? undefined
+        : trustedRendererRequests.get(details.webContentsId);
+    if (context !== undefined && isChatBootstrapRequest(details.url, context.serverOrigin)) {
+      markHostInteraction("renderer", name);
+    }
+  };
+  session.defaultSession.webRequest.onCompleted(
+    { urls: ["http://*/*", "https://*/*"] },
+    (details) => chatBootstrapSettled(details, "chat-bootstrap-answered"),
+  );
+  session.defaultSession.webRequest.onErrorOccurred(
+    { urls: ["http://*/*", "https://*/*"] },
+    (details) => chatBootstrapSettled(details, "chat-bootstrap-failed"),
   );
 }
 
@@ -2081,6 +2113,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
               : { [KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]: desktopKeychainServiceFamily }),
           },
         });
+        markHostInteraction("server", "host-start");
         return spawn(spec.command, spec.args, {
           env: spec.env,
           stdio: [...spec.stdio] as ["pipe", "inherit", "pipe"],
