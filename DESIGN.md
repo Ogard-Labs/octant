@@ -506,7 +506,7 @@ have no corner to nest (see [Depth and material](#depth-and-material)).
 Product chrome uses those tokens and nothing else: a `border-radius` is a token,
 `0`, `50%`, or the 1–4px of a chart bar, mark, or status dot, never a rem or a
 bare pixel literal. A rem corner also shrinks with the interface font size,
-which a token does not. The `--oct-radius-*` tokens live in `octant.css`. The
+which a token does not. `bun run ui:check` refuses a new corner off this list ([Enforcement](#enforcement)). The `--oct-radius-*` tokens live in `octant.css`. The
 shadcn recipes derive their scale in `tailwind.css` from `--radius`, which
 `shadcn-theme.css` sets to `--oct-radius-sm`: `rounded-md` and `rounded-lg` both
 land on the control's 4px, `rounded-xl` on the container's 12px, and
@@ -525,7 +525,7 @@ Controls are 20, 24, 28, or 32px, and rows 32 or 44px. Recipe controls (buttons,
 tabs, toggles, comboboxes, badges) take their height in rem so they grow with the
 interface size, rounded to a whole 2px (`h-[round(2.154rem,2px)]` is 28px at the
 13px root): a quarter-rem step is 3.25px at that root, and an odd step drawn bare
-lands between pixels.
+lands between pixels. `bun run ui:check` refuses a new fixed `h-[…]` or `size-[…]` in the shared recipes that is not 20, 24, 28 or 32px at the 13px root ([Enforcement](#enforcement)).
 
 | Height | Token or recipe                                                     | Used by                                                                                                                                    |
 | ------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -2283,10 +2283,24 @@ durations, `!important` outside an accessibility fallback, any `font-weight`
 heavier than 600 outside the title roles (see [Scale](#scale)), and any paint
 (colour, background, border, radius, shadow, outline) that a feature rule puts on
 a class handed to an Octant primitive (place or size a shared control, never
-repaint it; pick a recipe variant instead) ratchet against
+repaint it; pick a recipe variant instead), a corner that is not a radius
+token, `0`, `50%` or a 1–4px mark (each part of the value must be one of those
+alone: a token with a fallback, beside a literal, or plus a length is refused;
+only `calc(token - Npx)`, optionally under `max(1–4px, …)`, may derive a part
+inside a control), read in stylesheets, in arbitrary `rounded-[…]` classes, and
+in inline `borderRadius`, its longhand and logical forms, `el.style` assignments
+and `setProperty` (a conditional or template is judged by the literals it spells
+out), and a fixed `h-[…]` or `size-[…]` in the shared recipes under
+`apps/web/src/ui/base` and `ui/shadcn`, subfolders included, that is not 20, 24,
+28 or 32px at the 13px root (`min-h` and `max-h` are not read: a field's minimum
+and a popup's maximum are not control heights) ratchet against
 `scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
 re-record the lower count with `--write-baseline` so the baseline never
 overstates.
+
+Off-scale pixel spacing (see [Spacing](#spacing)) ratchets the same way. Icon
+sizes are not in this script: `apps/web/src/ui/iconScaleContract.test.ts`
+refuses an icon asked for at a size off 12/14/16/20 or a stroke off 1.5.
 
 The remaining control repaints are burned down by restoring each control to its
 recipe, in small batches. Each batch is its own pull request with before and
