@@ -48,6 +48,7 @@ export type RemoteShellSurfaceKind =
   | "provider-models"
   | "settings-read"
   | "shell-settings"
+  | "design-systems"
   | "approvals"
   | "extension-install"
   | "provider-setup"
@@ -124,6 +125,14 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     // No catalogued action: the host opens the route only to a session that
     // acts as its person, so a restricted session reads it as unavailable.
     catalogAction: "shell.settings.replace",
+  },
+  {
+    id: "design-systems",
+    label: "Design systems",
+    description: "List, read, create, and save a Project's design systems.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "project.design-system.write",
   },
   {
     id: "approvals",

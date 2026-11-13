@@ -1046,6 +1046,25 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 512 * 1_024,
   },
+  // A Project's design systems, for a device the host's own person paired:
+  // the list and one file are reads, a save is a POST the route holds to its
+  // own 256 KiB document bound.
+  {
+    kind: "exact" as const,
+    path: "/api/design-systems",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    namesProjectInQuery: true as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/design-systems/file",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 300_000,
+    namesProjectInQuery: true as const,
+  },
   // Host control, for a device the host's own person paired: status, the
   // data map and the retention windows are reads; service lifecycle, backup,
   // memory limits, retention and purge are changes the route holds to 8 KiB.
@@ -1170,7 +1189,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
-    allowQuery: match.kind === "prefix",
+    allowQuery: match.kind === "prefix" || "namesProjectInQuery" in match,
   };
 });
 

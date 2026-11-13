@@ -1911,8 +1911,7 @@ kept on the record as `designSystem` and journaled as
 Work and Code turn is told to follow it and carries the Project's own file as
 keyed standing context; Canvas designs draw with its tokens, which take the
 place of the brand kit when present, and a Canvas that follows it (Canvas
-schema version 28) draws its typed blocks' colours from it. A local window or a paired device lists, reads, creates, or
-saves one (maintainer decision, 2026-11-12; not built yet: today only a window on this host does), a save replaces only the revision it was opened at, and no read or
+schema version 28) draws its typed blocks' colours from it. A local window or a device the host's own person paired lists, reads, creates, or saves one (maintainer decision, 2026-11-12), a save replaces only the revision it was opened at, and no read or
 write follows a link. This is product context, not an agent brief: the rule
 below that Octant writes no agent brief and a Work turn reads no `AGENTS.md`
 is unchanged. See [Project design systems](design/design-systems.md).
@@ -14301,7 +14300,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Developer tools, desktop recipe, provider trust, "Agents may merge",
     coordinator and wake switches, and Shield model; remembers a tool approval
     and reads and revokes remembered ones; installs, updates, trusts, enables,
-    and removes a package, adds a server, pins a plugin, and signs in to or reconnects a server; searches, previews, installs, updates, and removes skills and reconciles the skill folders (`/api/extensions/skills`; maintainer decision, 2026-11-13); adds, changes, and removes a provider, starts a
+    and removes a package, adds a server, pins a plugin, and signs in to or reconnects a server; lists, reads, creates, and saves a Project's design systems (`/api/design-systems`; maintainer decision, 2026-11-13); searches, previews, installs, updates, and removes skills and reconciles the skill folders (`/api/extensions/skills`; maintainer decision, 2026-11-13); adds, changes, and removes a provider, starts a
     provider sign-in, and stores, replaces, or removes a provider key
     ([Provider credentials](#security-and-authority)); navigates and types in the host's agent Browser and reviews its session, upload, and download permissions, for every active Work or Code Project, since no workspace on the host is bound for a device; writes to a thread terminal and lists, reads, and starts a
     thread from a terminal session; merges a pull request or a stack, acts on
@@ -14331,9 +14330,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; provider cloud
     sessions; scanning the host for installed provider commands; choosing a new skill folder or a local plugin folder, which goes through the host's native folder picker; the replica store and its membership; and the whole host's
-    export, bulk data with no bound for a remote caller. Not built yet: usage
-    reset, server Projects, disk cleanup, design systems, file-arrival and
-    event routines, and diagnostics are not forwarded either, and creating or
+    export, bulk data with no bound for a remote caller. Not built yet: usage reset, server Projects, disk cleanup, switching a Canvas to another design system, file-arrival and event routines, and diagnostics are not forwarded either, and creating or
     widening an agent grant stays on the loopback administration channel. In
     the Browser no device takes the page over from the agent or hands it
     back, reads a signed-in profile's page or a capture, grants login
