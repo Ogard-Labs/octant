@@ -842,6 +842,14 @@ describe("Agent Plugin MCP session manager", () => {
                             { name: "missing" },
                             { name: "boolean", inputSchema: false },
                             {
+                              name: "asynchronous",
+                              inputSchema: {
+                                $async: true,
+                                type: "object",
+                                required: ["target"],
+                              },
+                            },
+                            {
                               name: "regex-pattern",
                               inputSchema: {
                                 type: "object",

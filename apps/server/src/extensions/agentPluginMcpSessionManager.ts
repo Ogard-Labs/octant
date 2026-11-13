@@ -1108,6 +1108,7 @@ function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
       return true;
     }
     if (
+      Object.prototype.hasOwnProperty.call(record, "$async") ||
       Object.prototype.hasOwnProperty.call(record, "$dynamicRef") ||
       Object.prototype.hasOwnProperty.call(record, "$recursiveRef")
     ) {
@@ -1279,6 +1280,7 @@ async function prepareMcpTool(
       validateFormats: false,
       validateSchema: true,
     }).compile<unknown>(providerDefinition.inputSchema as AnySchema);
+    if ("$async" in validateInput) return undefined;
     return { listed: tool, providerDefinition, validateInput };
   } catch {
     return undefined;
