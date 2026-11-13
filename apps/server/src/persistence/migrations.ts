@@ -2640,6 +2640,14 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
     `,
   },
+  {
+    version: 104,
+    name: "index_code_file_content_id",
+    sql: `
+      CREATE INDEX IF NOT EXISTS code_file_content_idx
+        ON code_file_projection(content_id);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

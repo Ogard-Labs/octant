@@ -241,6 +241,7 @@ function harness(
     readCodeCheckouts: () => [],
     readCodeFileReference: () => undefined,
     readCodeFileReferences: () => [],
+    readCodeFileReferencesByContentId: () => [],
     readCodeThreadView: () => undefined,
     readProject: () => project,
   };

@@ -15,6 +15,7 @@ import {
   readCodeCheckouts,
   readCodeFileReference,
   readCodeFileReferences,
+  readCodeFileReferencesByContentId,
   readCodeRuntimeWork,
   readCodeRuntimeWorks,
   readCodeSettings,
@@ -491,6 +492,114 @@ describe("reconcileCodeRestart", () => {
       // An outcome that could not be established stays unresolved rather than
       // being rewritten into a conclusion nobody observed.
       expect(byId.get(ids.runtimeAmbiguous)?.work.state).toBe("ambiguous");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("looks up every candidate thread and project for a content id through code_file_content_idx", () => {
+    const { connection, journal } = openStore();
+    try {
+      appendFixture(journal);
+      const otherProjectId = "81000000-0000-4000-8000-000000000091";
+      const otherThreadId = "81000000-0000-4000-8000-000000000092";
+      const otherFileId = "81000000-0000-4000-8000-000000000093";
+      const common = {
+        correlationId: ids.correlation,
+        actor: { kind: "system" as const, actorId: ids.actor },
+        occurredAt: "2026-07-21T00:00:00.000Z",
+      };
+      journal.append({
+        aggregate: { aggregateType: "code-thread", aggregateId: otherThreadId },
+        expectedVersion: 0,
+        events: [
+          {
+            ...common,
+            eventId: "81000000-0000-4000-8000-000000000991",
+            eventName: "code.thread-created@1",
+            eventVersion: 1,
+            payload: {
+              kind: "thread-created",
+              thread: {
+                id: otherThreadId,
+                projectId: otherProjectId,
+                bindingRevisionId: ids.binding,
+                repositoryId,
+                checkoutId: ids.checkout,
+                title: "Second project thread",
+                lifecycle: "active",
+                providerInstanceId: ids.provider,
+                modelId: "model-a",
+                executionPolicy: "approval-gated",
+                permissionPersistence: "current-session",
+                deliveryTarget: {
+                  branchIntent: "feature/other-branch",
+                  remoteName: "origin",
+                  proposedBaseRepository: "octocat/octant",
+                  proposedBaseBranch: "development",
+                  outcomeKind: "opened-pr",
+                  confirmedAt: common.occurredAt,
+                },
+                version: 1,
+                createdAt: common.occurredAt,
+                updatedAt: common.occurredAt,
+              },
+            },
+          },
+        ],
+      });
+      journal.append({
+        aggregate: { aggregateType: "code-file", aggregateId: otherFileId },
+        expectedVersion: 0,
+        events: [
+          {
+            ...common,
+            eventId: "81000000-0000-4000-8000-000000000992",
+            eventName: "code.file-reference-updated@1",
+            eventVersion: 1,
+            payload: {
+              kind: "file-reference-updated",
+              file: {
+                id: otherFileId,
+                threadId: otherThreadId,
+                checkoutId: ids.checkout,
+                contentId: ids.content,
+                digest: "c".repeat(64),
+                byteLength: 12,
+                state: "available",
+                version: 1,
+                updatedAt: common.occurredAt,
+              },
+            },
+          },
+        ],
+      });
+
+      const candidates = readCodeFileReferencesByContentId(connection, ids.content);
+      expect(candidates.map((candidate) => String(candidate.projectId))).toEqual([
+        otherProjectId,
+        ids.project,
+      ]);
+      expect(candidates.map((candidate) => String(candidate.reference.id))).toEqual([
+        otherFileId,
+        ids.file,
+      ]);
+
+      const plan = connection
+        .prepare(
+          `
+            EXPLAIN QUERY PLAN
+            SELECT f.*, t.project_id AS thread_project_id, t.schema_version AS thread_schema_version
+            FROM code_file_projection f
+            JOIN code_thread_projection t ON t.thread_id = f.thread_id
+            WHERE f.content_id = ?
+          `,
+        )
+        .all(ids.content)
+        .map((row) => String((row as { readonly detail: string }).detail));
+      expect(plan.some((detail) => detail.includes("USING INDEX code_file_content_idx"))).toBe(
+        true,
+      );
     } finally {
       connection.close();
     }
