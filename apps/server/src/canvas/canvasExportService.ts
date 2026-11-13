@@ -224,8 +224,10 @@ export class CanvasExportService {
       // next start settles again, and the person must not read silence.
       settled.push(record);
     }
+    // A dismissed record still retires the older notices it superseded live;
+    // only its own notice is suppressed, so replay matches the live state.
     for (const record of settled) {
-      if (!dismissed.has(String(record.exportId))) this.#noteRecorded(record);
+      this.#noteRecorded(record, dismissed.has(String(record.exportId)));
     }
   }
 
@@ -273,12 +275,12 @@ export class CanvasExportService {
   }
 
   /** A recorded export retires earlier notices for its Canvas and destination. */
-  #noteRecorded(record: CanvasExportRecorded): void {
+  #noteRecorded(record: CanvasExportRecorded, dismissed = false): void {
     const key = String(record.canvasId);
     const kept = (this.#unconfirmed.get(key) ?? []).filter(
       (earlier) => String(earlier.targetId) !== String(record.targetId),
     );
-    if (record.outcome.kind === "unconfirmed") kept.push(record);
+    if (record.outcome.kind === "unconfirmed" && !dismissed) kept.push(record);
     if (kept.length === 0) this.#unconfirmed.delete(key);
     else this.#unconfirmed.set(key, kept);
   }

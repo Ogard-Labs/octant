@@ -1162,6 +1162,47 @@ describe("canvas export service", () => {
     connection.close();
   });
 
+  it("keeps an older notice retired after the newer one to that destination is dismissed and the host restarts", async () => {
+    const { service, eventStore, restart, connection } = harness();
+    const lost = vi.spyOn(eventStore, "append").mockImplementation(() => {
+      throw new Error("host stopped");
+    });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    for (let round = 0; round < 2; round += 1) {
+      const prepared = await service.prepare(prepareRequest(), true);
+      if (prepared.kind !== "approval") throw new Error("expected an approval card");
+      await service.decide({
+        canvasId,
+        approvalId: prepared.card.approvalId,
+        decision: "approved",
+        permitted: true,
+        actor: localActor,
+      });
+    }
+    lost.mockRestore();
+    logged.mockRestore();
+    const next = restart();
+    next.settleUnconfirmed(localActor);
+    const notices = next.offers(canvasId)?.unconfirmed ?? [];
+    expect(notices).toHaveLength(1);
+    const newer = notices[0];
+    if (newer === undefined) throw new Error("expected a notice");
+    expect(
+      next.dismissUnconfirmed({
+        canvasId,
+        exportId: newer.exportId,
+        permitted: true,
+        actor: localActor,
+      }),
+    ).toMatchObject({ kind: "dismissed" });
+
+    const later = restart();
+    later.settleUnconfirmed(localActor);
+
+    expect(later.offers(canvasId)?.unconfirmed).toEqual([]);
+    connection.close();
+  });
+
   it("reports a delivered export the journal could not record instead of failing it", async () => {
     const { calls, service, eventStore, connection } = harness();
     const prepared = await service.prepare(prepareRequest(), true);

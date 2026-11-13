@@ -220,6 +220,13 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
       setCard(undefined);
       setLinkPassword("");
       if (result.kind === "exported") {
+        // The host retires this destination's notices once an export to it
+        // is recorded; drop them here too, or Dismiss would be refused.
+        const target = String(result.record.targetId);
+        const retired = notices
+          .filter((notice) => String(notice.targetId) === target)
+          .map((notice) => String(notice.exportId));
+        setDismissed((current) => [...current, ...retired]);
         setMessage(receiptText(result.record.outcome));
         return;
       }

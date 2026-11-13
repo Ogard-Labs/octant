@@ -158,6 +158,76 @@ describe("CanvasExportPanel", () => {
     );
   });
 
+  it("drops a destination's not-confirmed notice once an export to it is recorded", async () => {
+    type Notice = NonNullable<CanvasExportOfferList["unconfirmed"]>[number];
+    const user = userEvent.setup();
+    const exportId = "33333333-3333-4333-8333-333333333333";
+    const onPrepare = vi.fn(async () => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-approval" as const,
+        approvalId,
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "reading-copy",
+        destinationLabel: "Reading copy",
+        format: "markdown" as const,
+        title: "Launch plan",
+        payload: "# Launch plan\n",
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        byteLength: 15,
+      },
+    }));
+    const onDecide = vi.fn(async () => ({
+      kind: "exported" as const,
+      record: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export" as const,
+        exportId: "55555555-5555-4555-8555-555555555555",
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "reading-copy",
+        destinationLabel: "Reading copy",
+        format: "markdown" as const,
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        approvalId,
+        outcome: {
+          kind: "receipt" as const,
+          receipt: { kind: "remote-id" as const, remoteId: "copy-2" },
+        },
+      },
+    }));
+    render(
+      <CanvasExportPanel
+        offers={{
+          ...offers(),
+          unconfirmed: [
+            {
+              exportId: exportId as Notice["exportId"],
+              targetId: "reading-copy" as Notice["targetId"],
+              destinationLabel: "Reading copy",
+              format: "markdown",
+              sequence: 1,
+            },
+          ],
+        }}
+        onDecide={onDecide as never}
+        onDismissNotice={vi.fn()}
+        onPrepare={onPrepare as never}
+      />,
+    );
+    expect(screen.getByTestId("canvas-export-unconfirmed")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Review export" }));
+    await user.click(await screen.findByRole("button", { name: "Approve export" }));
+
+    expect(await screen.findByText(/Exported\. copy-2/)).toBeInTheDocument();
+    expect(screen.queryByTestId("canvas-export-unconfirmed")).toBeNull();
+  });
+
   it("dismisses an unconfirmed notice through the host without exporting again", async () => {
     type Notice = NonNullable<CanvasExportOfferList["unconfirmed"]>[number];
     const user = userEvent.setup();
