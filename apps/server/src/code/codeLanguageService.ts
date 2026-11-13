@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   INTELLIGENCE_METHODS,
   INTELLIGENCE_CAPABILITIES,
@@ -212,6 +213,8 @@ export interface CodeLanguageAuthority {
 export interface CodeLanguageCaller {
   readonly scopeId: WindowId;
   readonly principal: PrincipalKind;
+  /** Who the journal names for what this caller approves; absent means the person at this host. */
+  readonly actor?: EventActor | undefined;
   /** Host-owned original request proof; never decoded from a document or read body. */
   readonly isCurrent?: () => boolean;
 }
@@ -223,12 +226,15 @@ export interface CodeLanguageApprovals {
     readonly checkoutId: CodeCheckoutId;
     readonly component: string;
   }) => boolean;
-  readonly record: (subject: {
-    readonly projectId: ProjectId;
-    readonly checkoutId: CodeCheckoutId;
-    readonly component: string;
-    readonly scope: CodeLanguageApprovalRequest["scope"];
-  }) => "recorded" | "not-recorded";
+  readonly record: (
+    subject: {
+      readonly projectId: ProjectId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly component: string;
+      readonly scope: CodeLanguageApprovalRequest["scope"];
+    },
+    actor?: EventActor,
+  ) => "recorded" | "not-recorded";
 }
 
 /**
@@ -1337,12 +1343,15 @@ export class CodeLanguageService {
     });
     if (decision.status === "refused") return decision;
     const recorded =
-      this.#approvals?.record({
-        projectId: authorized.thread.projectId,
-        checkoutId: authorized.checkout.id,
-        component: component.approvalKey,
-        scope: request.scope,
-      }) ?? "not-recorded";
+      this.#approvals?.record(
+        {
+          projectId: authorized.thread.projectId,
+          checkoutId: authorized.checkout.id,
+          component: component.approvalKey,
+          scope: request.scope,
+        },
+        caller.actor,
+      ) ?? "not-recorded";
     if (recorded !== "recorded") return { status: "not-recorded" };
     return {
       status: "approved",

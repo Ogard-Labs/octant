@@ -13,14 +13,15 @@ import {
   type WindowId,
 } from "@octant/contracts";
 
-const DEFAULT_TTL_MS = 5 * 60_000;
-const MAX_TTL_MS = 10 * 60_000;
+/**
+ * An approval waits until it is answered or withdrawn, never for a fixed
+ * time, so this host-wide cap is the only bound on how many are held.
+ */
 const MAX_PENDING_APPROVALS = 32;
 
 interface BrowserToolApprovalServiceOptions {
   readonly uuid: () => string;
   readonly now: () => number;
-  readonly ttlMs?: number;
   readonly authorityIsCurrent: (
     threadId: string,
     authority: ToolActionAuthority,
@@ -67,11 +68,22 @@ interface BrowserToolApprovalServiceOptions {
   readonly profileLabel?: (profile: StoredBrowserProfile) => Promise<string | undefined>;
   /**
    * The waiting set changed: a prompt became listable or left the list for
-   * a decision, a cancel, an expiry, a close, or a revocation. Wired only at
+   * a decision, a cancel, a close, or a revocation. Wired only at
    * composition so the service stays free of the change feed.
    */
   readonly onChanged?: () => void;
+  /**
+   * An ask began to wait. Wired at composition to the paired phones'
+   * notifications; it names the thread and the ask and nothing of its content.
+   */
+  readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
 }
+
+/**
+ * How an ask ends. None of them is a lapse: an approval that timed out would
+ * tell the agent the person refused something they never saw.
+ */
+export type BrowserToolApprovalOutcome = "approved" | "denied" | "cancelled";
 
 interface PendingApproval {
   readonly view: BrowserToolApproval;
@@ -80,9 +92,7 @@ interface PendingApproval {
   readonly authority: ToolActionAuthority;
   /** The thread workspace an upload reads from or a download lands in. */
   readonly workspaceRoot?: string;
-  readonly resolve: (decision: "approved" | "denied" | "cancelled" | "expired") => void;
-  readonly timer: ReturnType<typeof setTimeout>;
-  readonly ttlMs: number;
+  readonly resolve: (decision: BrowserToolApprovalOutcome) => void;
   readonly signal?: AbortSignal;
   readonly onAbort?: () => void;
 }
@@ -90,17 +100,21 @@ interface PendingApproval {
 /**
  * Host-owned, provider-neutral origin approval for managed Browser calls.
  * Pending entries are scoped to the requesting window and exact thread
- * authority; a routine's entries go to the windows that can see its thread. A decision is one-shot; abort, expiry, and window revocation all
- * settle as denial so a late answer cannot resume a browser effect.
+ * authority; a routine's entries go to the windows that can see its thread. A
+ * decision is one-shot; abort, thread archive, and window revocation all
+ * settle as cancelled so a late answer cannot resume a browser effect. No ask
+ * has an expiry (a site, an upload, a download, a script, a sign-in): each
+ * ends with the person's answer, its turn, its thread's archive, its window,
+ * or the host. An upload's staged copies and a download's held file are
+ * released by the caller on any outcome but approval, so a withdrawn ask
+ * leaves nothing behind.
  */
 export class BrowserToolApprovalService {
   readonly #pending = new Map<string, PendingApproval>();
-  readonly #ttlMs: number;
   readonly #options: BrowserToolApprovalServiceOptions;
 
   constructor(options: BrowserToolApprovalServiceOptions) {
     this.#options = options;
-    this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, MAX_TTL_MS));
   }
 
   async request(input: {
@@ -121,14 +135,15 @@ export class BrowserToolApprovalService {
     };
     /**
      * The thread workspace an upload or a download save is for. With it, the
-     * person's "Always allow" is remembered for this site and this workspace.
+     * person's "Always allow" is remembered for this site, this workspace and
+     * the page's profile.
      */
     readonly workspaceRoot?: string;
     /** The agent asks the person to sign in here; see the contract. */
     readonly signIn?: { readonly reason?: string };
     readonly script?: { readonly source: string };
     readonly signal?: AbortSignal;
-  }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
+  }): Promise<BrowserToolApprovalOutcome> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve("denied");
     let profileLabel: string | undefined;
@@ -189,22 +204,16 @@ export class BrowserToolApprovalService {
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
-      const settle = (decision: "approved" | "denied" | "cancelled" | "expired") => {
+      const settle = (decision: BrowserToolApprovalOutcome) => {
         const current = this.#pending.get(String(approvalId));
         if (current === undefined) return;
         this.#pending.delete(String(approvalId));
         this.#options.onChanged?.();
-        clearTimeout(current.timer);
         if (current.signal !== undefined && current.onAbort !== undefined) {
           current.signal.removeEventListener("abort", current.onAbort);
         }
         resolve(decision);
       };
-      // Signing in can take a second factor and a password manager; it gets
-      // the longest wait the service allows.
-      const ttlMs = input.signIn === undefined ? this.#ttlMs : MAX_TTL_MS;
-      const timer = setTimeout(() => settle("expired"), ttlMs);
-      timer.unref?.();
       const onAbort = input.signal === undefined ? undefined : () => settle("cancelled");
       const pending: PendingApproval = {
         view,
@@ -213,13 +222,12 @@ export class BrowserToolApprovalService {
         authority: input.authority,
         ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
         resolve: settle,
-        timer,
-        ttlMs,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(onAbort === undefined ? {} : { onAbort }),
       };
       this.#pending.set(String(approvalId), pending);
       this.#options.onChanged?.();
+      this.#options.onAsked?.({ threadId: input.threadId, askId: String(approvalId) });
       if (input.signal !== undefined && onAbort !== undefined) {
         input.signal.addEventListener("abort", onAbort, { once: true });
       }
@@ -228,14 +236,12 @@ export class BrowserToolApprovalService {
   }
 
   list(windowId: WindowId): ReadonlyArray<BrowserToolApproval> {
-    this.#expire();
     return [...this.#pending.values()]
       .filter((pending) => this.#answerableBy(pending, windowId))
       .map((pending) => pending.view);
   }
 
   decide(windowId: WindowId, decision: BrowserToolApprovalDecision): boolean {
-    this.#expire();
     const pending = this.#pending.get(String(decision.approvalId));
     if (pending === undefined || !this.#answerableBy(pending, windowId)) return false;
     if (!this.#options.authorityIsCurrent(pending.threadId, pending.authority, pending.windowId)) {
@@ -244,7 +250,8 @@ export class BrowserToolApprovalService {
     }
     pending.resolve(decision.decision);
     // An upload's or a download's "Always allow" covers later transfers in that
-    // direction between this site and this workspace; it never becomes a
+    // direction between this site and this workspace on a page in the same
+    // profile; it never becomes a
     // remembered grant to open the origin. A paired device is not at this
     // computer's files, so its answer covers this one transfer only.
     const direction =
@@ -261,7 +268,14 @@ export class BrowserToolApprovalService {
       !this.#isPairedDevice(windowId)
     ) {
       this.#options.rememberTransfer?.(
-        { direction, origin: pending.view.origin, workspaceRoot: pending.workspaceRoot },
+        {
+          direction,
+          origin: pending.view.origin,
+          workspaceRoot: pending.workspaceRoot,
+          ...(pending.view.profile === undefined
+            ? { privatePage: true as const }
+            : { profile: pending.view.profile }),
+        },
         windowId,
       );
     }
@@ -349,16 +363,14 @@ export class BrowserToolApprovalService {
     }
   }
 
-  close(): void {
-    for (const pending of this.#pending.values()) pending.resolve("cancelled");
+  /** Gives up what a thread still waits on, when it is archived or deleted. */
+  withdrawThread(threadId: string): void {
+    for (const pending of this.#pending.values()) {
+      if (pending.threadId === threadId) pending.resolve("cancelled");
+    }
   }
 
-  #expire(): void {
-    const now = this.#options.now();
-    for (const pending of this.#pending.values()) {
-      if (Date.parse(String(pending.view.requestedAt)) + pending.ttlMs <= now) {
-        pending.resolve("expired");
-      }
-    }
+  close(): void {
+    for (const pending of this.#pending.values()) pending.resolve("cancelled");
   }
 }

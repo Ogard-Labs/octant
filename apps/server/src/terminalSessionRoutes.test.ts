@@ -53,8 +53,7 @@ describe("terminal session routes", () => {
     });
   });
 
-  it("refuses a paired device before reading any session", async () => {
-    const { handler, list } = fixture();
+  const fromDevice = (admittedBy?: "host-person" | "hub-roster") => {
     const request = listRequest();
     bindPrincipalRouteContext(request, {
       principal: createRemoteDevicePrincipal({
@@ -65,13 +64,27 @@ describe("terminal session routes", () => {
         protocolVersion: 1,
         capabilityDigest: "a".repeat(64),
         sessionId: "session-remote" as never,
+        ...(admittedBy === undefined ? {} : { admittedBy }),
       }),
       scopeId: "10000000-0000-4000-8000-000000000002" as never,
     });
+    return request;
+  };
 
-    const response = await handler(request);
+  it("refuses a hub-introduced device and an unproved pairing before reading any session", async () => {
+    const { handler, list } = fixture();
 
-    expect(response?.status).toBe(403);
+    expect((await handler(fromDevice()))?.status).toBe(403);
+    expect((await handler(fromDevice("hub-roster")))?.status).toBe(403);
     expect(list).not.toHaveBeenCalled();
+  });
+
+  it("gets past the device refusal for a device the host's own person paired", async () => {
+    const { handler } = fixture();
+
+    const response = await handler(fromDevice("host-person"));
+
+    expect(response?.status).not.toBe(403);
+    expect(response?.status).not.toBe(401);
   });
 });

@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { WindowId } from "@octant/contracts";
 import {
@@ -117,7 +116,7 @@ describe("extension tool approval service", () => {
     service.revokeWindow(windowId);
   });
 
-  it("denies and removes pending requests on caller abort or window revocation", async () => {
+  it("denies and removes pending requests on caller abort, window revocation, or the thread's archive", async () => {
     const service = new ExtensionToolApprovalService({
       uuid: () => crypto.randomUUID(),
       now: Date.now,
@@ -132,6 +131,14 @@ describe("extension tool approval service", () => {
     service.revokeWindow(windowId);
     await expect(revoked).resolves.toBe(false);
     expect(service.list(atWindow(windowId))).toEqual([]);
+
+    const archived = request(service);
+    const waiting = service.list(atWindow(windowId))[0];
+    service.withdrawThread("44000000-0000-4000-8000-00000000dead");
+    expect(service.list(atWindow(windowId))).toHaveLength(1);
+    service.withdrawThread(String(waiting?.threadId));
+    await expect(archived).resolves.toBe(false);
+    expect(service.list(atWindow(windowId))).toEqual([]);
   });
 
   it("reports a new prompt and every way it leaves the waiting list", async () => {
@@ -141,7 +148,6 @@ describe("extension tool approval service", () => {
       const service = new ExtensionToolApprovalService({
         uuid: () => crypto.randomUUID(),
         now: Date.now,
-        ttlMs: 1_000,
         onChanged: () => lists.push(service.list(atWindow(windowId)).length),
       });
       const controller = new AbortController();
@@ -163,14 +169,12 @@ describe("extension tool approval service", () => {
       expect(lists).toEqual([1, 0, 1, 0]);
 
       const third = request(service);
-      await vi.advanceTimersByTimeAsync(1_000);
+      // Time alone changes nothing: the prompt is still listed a day later.
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(lists).toEqual([1, 0, 1, 0, 1]);
+      service.revokeWindow(windowId);
       await expect(third).resolves.toBe(false);
       expect(lists).toEqual([1, 0, 1, 0, 1, 0]);
-
-      const fourth = request(service);
-      service.revokeWindow(windowId);
-      await expect(fourth).resolves.toBe(false);
-      expect(lists).toEqual([1, 0, 1, 0, 1, 0, 1, 0]);
     } finally {
       vi.useRealTimers();
     }
@@ -197,94 +201,31 @@ describe("extension tool approval service", () => {
     expect(lists).toHaveLength(MAX_PENDING_APPROVALS);
   });
 
-  it("expires unanswered approval requests", async () => {
+  it("keeps an unanswered prompt waiting a day later and still takes the person's answer", async () => {
     vi.useFakeTimers();
     try {
       const service = new ExtensionToolApprovalService({
-        uuid: () => crypto.randomUUID(),
+        uuid: () => "44000000-0000-4000-8000-000000000001",
         now: Date.now,
-        ttlMs: 1_000,
       });
       const pending = request(service);
-      await vi.advanceTimersByTimeAsync(1_000);
-      await expect(pending).resolves.toBe(false);
-      expect(service.list(atWindow(windowId))).toEqual([]);
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(service.list(atWindow(windowId))).toHaveLength(1);
+      // Nothing is left behind to fire later: the wait holds no timer.
+      expect(vi.getTimerCount()).toBe(0);
+      expect(
+        service.decide(atWindow(windowId), {
+          approvalId: "44000000-0000-4000-8000-000000000001",
+          decision: "approved",
+        }),
+      ).toBe(true);
+      await expect(pending).resolves.toBe(true);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("refuses a prompt whose elapsed time is up even when the wall clock is set back", async () => {
-    let wallClockMs = Date.parse("2026-08-09T06:00:00.000Z");
-    let elapsedMs = 1_000;
-    const clock = new ProcessAuthorityClock({
-      wallClock: () => wallClockMs,
-      suspendAwareElapsedSource: () => elapsedMs,
-    });
-    const service = new ExtensionToolApprovalService({
-      uuid: () => "44000000-0000-4000-8000-000000000001",
-      now: clock.now(),
-      ttlMs: 1_000,
-    });
-    const pending = request(service);
-    elapsedMs += 1_000;
-    wallClockMs -= 60 * 60 * 1_000;
-
-    expect(service.list(atWindow(windowId))).toEqual([]);
-    expect(
-      service.decide(atWindow(windowId), {
-        approvalId: "44000000-0000-4000-8000-000000000001",
-        decision: "approved",
-      }),
-    ).toBe(false);
-    await expect(pending).resolves.toBe(false);
-  });
-
-  it("refuses a prompt the clock has passed, though its timer has not fired yet", async () => {
-    // A timer fires late behind a busy event loop or across a machine's
-    // sleep, so the clock, not the timer, decides when a prompt's time is up.
-    let now = Date.parse("2026-08-09T06:00:00.000Z");
-    let minted = 0;
-    const service = new ExtensionToolApprovalService({
-      uuid: () => {
-        minted += 1;
-        return `44000000-0000-4000-8000-${String(minted).padStart(12, "0")}`;
-      },
-      now: () => now,
-      ttlMs: 1_000,
-    });
-    const stale = request(service);
-    now += 1_000;
-
-    expect(service.list(atWindow(windowId))).toEqual([]);
-    await expect(stale).resolves.toBe(false);
-    expect(
-      service.decide(atWindow(windowId), {
-        approvalId: "44000000-0000-4000-8000-000000000001",
-        decision: "approved",
-      }),
-    ).toBe(false);
-
-    const answeredLate = request(service);
-    now += 1_000;
-    expect(
-      service.decide(atWindow(windowId), {
-        approvalId: "44000000-0000-4000-8000-000000000002",
-        decision: "approved",
-      }),
-    ).toBe(false);
-    await expect(answeredLate).resolves.toBe(false);
-
-    const held = Array.from({ length: MAX_PENDING_APPROVALS }, () => request(service));
-    now += 1_000;
-    const afterSleep = request(service);
-    expect(service.list(atWindow(windowId))).toHaveLength(1);
-    await expect(Promise.all(held)).resolves.toEqual(Array(MAX_PENDING_APPROVALS).fill(false));
-    service.revokeWindow(windowId);
-    await expect(afterSleep).resolves.toBe(false);
-  });
-
-  it("denies a tool approval past the waiting cap at once, and frees a slot when one is answered or expires", async () => {
+  it("denies a tool approval past the waiting cap at once, a day later too, and frees a slot only when one is answered", async () => {
     vi.useFakeTimers();
     const consoleMethods = ["debug", "error", "info", "log", "warn"] as const;
     const spies = consoleMethods.map((method) =>
@@ -298,11 +239,8 @@ describe("extension tool approval service", () => {
           return `44000000-0000-4000-8000-${String(minted).padStart(12, "0")}`;
         },
         now: () => Date.parse("2026-08-09T06:00:00.000Z"),
-        ttlMs: 1_000,
       });
-      const earliest = request(service);
-      await vi.advanceTimersByTimeAsync(500);
-      const rest = Array.from({ length: MAX_PENDING_APPROVALS - 1 }, () => request(service));
+      const rest = Array.from({ length: MAX_PENDING_APPROVALS }, () => request(service));
       expect(service.list(atWindow(windowId))).toHaveLength(MAX_PENDING_APPROVALS);
 
       const mintedAtCap = minted;
@@ -318,10 +256,10 @@ describe("extension tool approval service", () => {
       expect(service.list(atWindow(windowId))).toHaveLength(MAX_PENDING_APPROVALS);
       for (const spy of spies) expect(spy).not.toHaveBeenCalled();
 
-      await vi.advanceTimersByTimeAsync(500);
-      await expect(earliest).resolves.toBe(false);
-      expect(service.list(atWindow(windowId))).toHaveLength(MAX_PENDING_APPROVALS - 1);
-      const afterExpiry = request(service);
+      // Time frees no slot: a day on, the same prompts wait and the cap holds.
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      await expect(request(service)).resolves.toBe(false);
+      expect(minted).toBe(mintedAtCap);
       expect(service.list(atWindow(windowId))).toHaveLength(MAX_PENDING_APPROVALS);
 
       const answeredId = `44000000-0000-4000-8000-${String(minted).padStart(12, "0")}`;
@@ -331,7 +269,7 @@ describe("extension tool approval service", () => {
           decision: "denied",
         }),
       ).toBe(true);
-      await expect(afterExpiry).resolves.toBe(false);
+      await expect(rest.at(-1)).resolves.toBe(false);
       expect(service.list(atWindow(windowId))).toHaveLength(MAX_PENDING_APPROVALS - 1);
       const afterAnswer = request(service);
       expect(service.list(atWindow(windowId))).toHaveLength(MAX_PENDING_APPROVALS);
@@ -356,14 +294,12 @@ describe("extension tool approval from a paired device", () => {
     options: {
       readonly threadStands?: () => boolean;
       readonly paired?: (scope: WindowId) => boolean;
-      readonly ttlMs?: number;
       readonly now?: () => number;
     } = {},
   ) {
     return new ExtensionToolApprovalService({
       uuid: () => approvalId,
       now: options.now ?? (() => Date.parse("2026-10-15T06:00:00.000Z")),
-      ...(options.ttlMs === undefined ? {} : { ttlMs: options.ttlMs }),
       isHostScope: isRoutineHostScope,
       isPairedDeviceScope:
         options.paired ?? ((scope) => [deviceScope, otherDeviceScope].includes(scope)),
@@ -481,17 +417,17 @@ describe("extension tool approval from a paired device", () => {
     await expect(pending).resolves.toBe(false);
   });
 
-  it("denies a paired device's prompt that nobody answers in time", async () => {
+  it("keeps a paired device's prompt waiting a day later for that device to answer", async () => {
     vi.useFakeTimers();
     try {
-      const service = pairedService({ ttlMs: 1_000, now: Date.now });
+      const service = pairedService({ now: Date.now });
       const pending = requestFrom(service, deviceScope);
-      await vi.advanceTimersByTimeAsync(1_000);
-      await expect(pending).resolves.toBe(false);
-      expect(service.list(atDevice(deviceScope))).toEqual([]);
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(service.list(atDevice(deviceScope))).toHaveLength(1);
       expect(service.decide(atDevice(deviceScope), { approvalId, decision: "approved" })).toBe(
-        false,
+        true,
       );
+      await expect(pending).resolves.toBe(true);
     } finally {
       vi.useRealTimers();
     }

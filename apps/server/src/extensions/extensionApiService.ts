@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import {
   MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH,
@@ -167,7 +168,10 @@ export class ExtensionApiService {
    * switch, an npm check) is refused before it reaches the installed-package
    * lifecycle, which assumes package files on disk.
    */
-  #bundledPluginCommand(command: ExtensionCommand): ExtensionCommandResult | undefined {
+  #bundledPluginCommand(
+    command: ExtensionCommand,
+    actor: EventActor | undefined,
+  ): ExtensionCommandResult | undefined {
     const bundled = this.#bundledPlugins;
     if (bundled === undefined) return undefined;
     const target =
@@ -180,11 +184,14 @@ export class ExtensionApiService {
     if (command.kind !== "set-plugin-desired") {
       return failure("invalid", "A plugin built into Octant can only be switched on or off.");
     }
-    const result = bundled.setDesired({
-      extensionId: target,
-      expectedStateVersion: command.expectedStateVersion,
-      desired: command.desired,
-    });
+    const result = bundled.setDesired(
+      {
+        extensionId: target,
+        expectedStateVersion: command.expectedStateVersion,
+        desired: command.desired,
+      },
+      actor,
+    );
     if (result.status === "stale") return failure("stale", lifecycleMessage("conflict"));
     if (result.status === "refused") return failure("invalid", lifecycleMessage("invalid"));
     return { kind: "extension-state-updated", snapshot: this.snapshot() };
@@ -219,9 +226,18 @@ export class ExtensionApiService {
     };
   }
 
-  async execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult> {
+  /**
+   * `actor` is who asked, as the route resolved it from the authenticated
+   * principal; a paired device's install, trust, enable or removal is
+   * journaled as that device. Absent means the person at this host.
+   */
+  async execute(
+    command: ExtensionCommand,
+    signal?: AbortSignal,
+    actor?: EventActor,
+  ): Promise<ExtensionCommandResult> {
     try {
-      const bundled = this.#bundledPluginCommand(command);
+      const bundled = this.#bundledPluginCommand(command, actor);
       if (bundled !== undefined) return bundled;
       switch (command.kind) {
         case "search-catalog": {
@@ -328,24 +344,35 @@ export class ExtensionApiService {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
           if (command.enable === true) {
-            // Switching on at install is the outside-driver flow, which
-            // always trusts first; without trust there is nothing to enable.
+            // Switching on at install always trusts first; without trust there
+            // is nothing to enable.
             if (command.trust !== true) return failure("invalid", lifecycleMessage("invalid"));
-            const admitted = await this.#lifecycle.admitOutsideDriver(inspection);
+          }
+          if (
+            command.enable === true &&
+            inspection.manifest.components.some((component) => component.kind === "provider-driver")
+          ) {
+            // A provider driver is admitted by its own flow, which names the
+            // step that stopped it.
+            const admitted = await this.#lifecycle.admitOutsideDriver(inspection, actor);
             return await this.#stateUpdated(admitted.snapshot, command, admitted.stoppedAt);
           }
           return await this.#stateUpdated(
-            await this.#lifecycle.install(inspection, { trust: command.trust === true }),
+            await this.#lifecycle.install(
+              inspection,
+              { trust: command.trust === true, enable: command.enable === true },
+              actor,
+            ),
             command,
           );
         }
         case "update-package": {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
-          return await this.#stateUpdated(await this.#lifecycle.update(inspection), command);
+          return await this.#stateUpdated(await this.#lifecycle.update(inspection, actor), command);
         }
         case "rollback-package":
-          return await this.#stateUpdated(await this.#lifecycle.rollback(command), command);
+          return await this.#stateUpdated(await this.#lifecycle.rollback(command, actor), command);
         case "uninstall-package": {
           const source = this.#lifecycle
             .snapshot()
@@ -366,7 +393,7 @@ export class ExtensionApiService {
             );
           }
           try {
-            const snapshot = await this.#lifecycle.uninstall(command.extensionId);
+            const snapshot = await this.#lifecycle.uninstall(command.extensionId, actor);
             // The generated folder and its secrets go only once the package is
             // really gone; a waiting uninstall keeps them for the retry.
             if (
@@ -383,19 +410,28 @@ export class ExtensionApiService {
           }
         }
         case "set-plugin-desired":
-          return await this.#stateUpdated(await this.#lifecycle.setPluginDesired(command), command);
+          return await this.#stateUpdated(
+            await this.#lifecycle.setPluginDesired(command, actor),
+            command,
+          );
         case "set-source-trust":
-          return await this.#stateUpdated(await this.#lifecycle.setSourceTrust(command), command);
+          return await this.#stateUpdated(
+            await this.#lifecycle.setSourceTrust(command, actor),
+            command,
+          );
         case "trust-new-publisher":
           return await this.#stateUpdated(
-            await this.#lifecycle.trustNewPublisher(command),
+            await this.#lifecycle.trustNewPublisher(command, actor),
             command,
           );
         case "forget-publisher":
-          return await this.#stateUpdated(await this.#lifecycle.forgetPublisher(command), command);
+          return await this.#stateUpdated(
+            await this.#lifecycle.forgetPublisher(command, actor),
+            command,
+          );
         case "set-component-desired":
           return await this.#stateUpdated(
-            await this.#lifecycle.setComponentDesired(command),
+            await this.#lifecycle.setComponentDesired(command, actor),
             command,
           );
         case "query-effective-state":

@@ -850,3 +850,87 @@ describe("queued turn admission", () => {
     expect(await port.inspect(input)).not.toEqual(before);
   });
 });
+
+describe("ordinary failure", () => {
+  it("names only a turn its mode recorded as failed an ordinary failure", async () => {
+    const { deps } = setup();
+    const now = thread.createdAt;
+    const projectId = "92000000-0000-4000-8000-000000000010";
+    const bindingRevisionId = "92000000-0000-4000-8000-000000000011";
+    const messageId = decodeThreadQueueMessageId("92000000-0000-4000-8000-000000000004");
+    const workThread = decodeWorkThread({
+      id: threadId,
+      projectId,
+      bindingRevisionId,
+      title: "Queued work",
+      lifecycle: "active",
+      providerInstanceId: thread.providerInstanceId,
+      modelId: thread.modelId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const turn = (status: WorkTurnState["status"]) =>
+      decodeWorkTurnState({
+        requestId: messageId,
+        threadId,
+        turnId: messageId,
+        projectId,
+        authority: {
+          hostId: "local",
+          projectId,
+          bindingRevisionId,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+        },
+        prompt: "Continue.",
+        status,
+        transcript: [],
+        capabilities: {
+          workspace: "project-backed",
+          confinement: "project-root-confined",
+          shell: "denied",
+          git: "denied",
+          worktree: "denied",
+          pullRequest: "denied",
+          code: "denied",
+        },
+        version: 1,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+    let turns: ReadonlyArray<WorkTurnState> = [];
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      work: { readThread: () => workThread, listTurns: () => turns, startFirstTurn: vi.fn() },
+    });
+    const scope = { mode: "work", threadId } as const;
+    const tail = async () => {
+      const inspected = await port.inspect({ scope, windowId, intent: "read" });
+      return inspected.status === "held" ? undefined : inspected.tail;
+    };
+
+    turns = [turn("failed")];
+    expect(await tail()).toEqual({ id: messageId, status: "failed", ordinaryFailure: true });
+    expect(await port.reconcile({ scope, messageId })).toEqual({
+      status: "failed",
+      ordinaryFailure: true,
+    });
+
+    // A turn a restart or a person cut short, and one a person cancelled,
+    // are not failures the queue may pass by itself.
+    turns = [
+      decodeWorkTurnState({
+        ...turn("failed"),
+        failure: { category: "interrupted", message: "Octant restarted." },
+      }),
+    ];
+    expect(await tail()).toEqual({ id: messageId, status: "failed" });
+    expect(await port.reconcile({ scope, messageId })).toEqual({ status: "failed" });
+    turns = [turn("cancelled")];
+    expect(await tail()).toEqual({ id: messageId, status: "cancelled" });
+    expect(await port.reconcile({ scope, messageId })).toEqual({ status: "cancelled" });
+  });
+});

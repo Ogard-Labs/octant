@@ -162,14 +162,17 @@ export class BrowserFlowService {
     this.#cache.delete(String(projectId));
   }
 
-  /** Delete a flow; false when the Project has none of that name. */
-  delete(projectId: ProjectId, name: string): boolean {
+  /**
+   * Delete a flow; false when the Project has none of that name. `actor` is
+   * who asked, as the route resolved them; absent, the host's own person.
+   */
+  delete(projectId: ProjectId, name: string, actor?: EventActor): boolean {
     if (!this.#flows(projectId).has(name)) return false;
     this.#append(
       projectId,
       BROWSER_FLOW_EVENT_NAMES.deleted,
       { kind: "browser-flow-deleted", projectId, name },
-      this.#personActor,
+      actor ?? this.#personActor,
     );
     return true;
   }

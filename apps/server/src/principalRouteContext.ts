@@ -2,6 +2,7 @@ import { decodeWindowId, type WindowId } from "@octant/contracts";
 import {
   assertNoPrincipalIdentityInPayload,
   ClientPrincipalError,
+  principalActsAsHostPerson,
   WINDOW_CAPABILITY_HEADER,
   resolveAuthenticatedPrincipal,
   type ClientPrincipal,
@@ -40,6 +41,17 @@ export function bindPrincipalRouteContext(request: Request, context: PrincipalRo
 /** Read a context previously bound by the server-owned dispatch boundary. */
 export function readPrincipalRouteContext(request: Request): PrincipalRouteContext | undefined {
   return boundContexts.get(request);
+}
+
+/**
+ * Whether the request's bound principal is held to the remote action
+ * catalogue: any device session except a device the host's own person paired.
+ * A request with no bound principal reached its handler on the loopback
+ * listener, where the window capability the handler checks is the authority.
+ */
+export function boundPrincipalIsRestricted(request: Request): boolean {
+  const principal = boundContexts.get(request)?.principal;
+  return principal !== undefined && !principalActsAsHostPerson(principal);
 }
 
 /**

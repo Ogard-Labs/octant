@@ -105,6 +105,36 @@ describe("provider key journal", () => {
     restarted.connection.close();
   });
 
+  it("names the paired device a key change came from, and the local person otherwise", () => {
+    const { connection, keyJournal } = open(tempDatabase());
+    const deviceId = "71000000-0000-4000-8000-0000000000de";
+    keyJournal
+      .request({
+        instanceId,
+        action: "set",
+        instanceVersion: 2,
+        windowId: WINDOW,
+        actor: { kind: "remote-device", actorId: deviceId, deviceId } as never,
+      })
+      .complete("stored");
+    keyJournal.request({ instanceId, action: "remove", instanceVersion: 2, windowId: WINDOW });
+
+    const actors = (
+      connection
+        .prepare(
+          "SELECT actor_json FROM event_journal WHERE event_name = 'provider-key.recorded@1' ORDER BY global_sequence ASC",
+        )
+        .all() as ReadonlyArray<{ actor_json: string }>
+    ).map((row) => JSON.parse(row.actor_json) as { kind: string; deviceId?: string });
+    expect(actors.map((actor) => actor.kind)).toEqual([
+      "remote-device",
+      "remote-device",
+      "local-user",
+    ]);
+    expect(actors[0]?.deviceId).toBe(deviceId);
+    connection.close();
+  });
+
   it("settles a request left without an outcome by a crash, once", async () => {
     const path = tempDatabase();
     const first = open(path);

@@ -66,10 +66,41 @@ describe("createPendingRequestClient", () => {
     });
   });
 
-  it("refuses to be created for a host that is not on loopback", () => {
+  it("reads a paired host's list through its own address, with its asks, and offers no deferral there", async () => {
+    const withAsks = {
+      ...list,
+      asks: [
+        {
+          kind: "tool-approval",
+          askId: "00000000-0000-4000-8000-000000000904",
+          mode: "work",
+          projectId: "00000000-0000-4000-8000-000000000901",
+          threadId: "00000000-0000-4000-8000-000000000902",
+          threadTitle: "Quarterly report",
+          requestedAt: "2026-10-06T08:01:00.000Z",
+          text: "Run search_issues from Linear?",
+          inPlace: true,
+        },
+      ],
+    };
+    const fetch = vi.fn(async () => Response.json(withAsks));
+    const client = createPendingRequestClient({
+      baseUrl: "https://octant.example",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(client.list()).resolves.toEqual(withAsks);
+    expect(fetch).toHaveBeenCalledWith("https://octant.example/api/pending-requests", {
+      method: "GET",
+      headers: { "x-octant-window-capability": capability },
+    });
+    expect(client.defer).toBeUndefined();
+  });
+
+  it("refuses to be created for an address that is not a host", () => {
     expect(() =>
       createPendingRequestClient({
-        baseUrl: "https://octant.example",
+        baseUrl: "not a url",
         fetch: vi.fn(),
         windowCapability: capability,
       }),

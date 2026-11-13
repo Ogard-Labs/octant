@@ -59,6 +59,7 @@ export const DebugAdapterPackageRefusalReason = Schema.Literal(
   "document-invalid",
   "entry-point-missing",
   "ships-other-program",
+  "signature-invalid",
 );
 export type DebugAdapterPackageRefusalReason = typeof DebugAdapterPackageRefusalReason.Type;
 

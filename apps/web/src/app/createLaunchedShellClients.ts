@@ -285,8 +285,8 @@ export function createLaunchedShellClients(
   try {
     pendingRequestClient = createPendingRequestClient(port);
   } catch {
-    // Every approval and question across Projects is read at a local window
-    // only; a client on any other host leaves it out.
+    // A base URL that names no host leaves Needs you out; a paired device
+    // reads the list from its host under its own scope.
     pendingRequestClient = undefined;
   }
 

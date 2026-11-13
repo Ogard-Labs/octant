@@ -33,7 +33,23 @@ export interface ChildPendingRequestSources {
     readonly threadId: string;
     readonly windowId: string;
   }) => boolean | Promise<boolean>;
+  /**
+   * Whether a paired device may answer this run's request: the same
+   * ownership rule the harness session route applies to its answer. A device
+   * scope has no window workspace, so the window check cannot speak for it,
+   * and without this rule a device lists nothing.
+   */
+  readonly mayAnswerFromDevice?: (input: {
+    readonly runId: string;
+    readonly parentThreadId: string;
+    readonly deviceId: string;
+  }) => boolean;
 }
+
+/** Who reads the child rows: a window of this computer, or a paired device. */
+export type ChildPendingReader =
+  | { readonly kind: "local-window"; readonly windowId: string }
+  | { readonly kind: "remote-device"; readonly deviceId: string };
 
 /**
  * A window may see a waiting child when it is bound to the parent's project.
@@ -123,7 +139,7 @@ export function windowMayListChildThread(
  */
 export async function listChildPendingRequests(
   sources: ChildPendingRequestSources,
-  windowId: string,
+  reader: ChildPendingReader,
 ): Promise<ReadonlyArray<PendingRequest>> {
   const waiting = [
     ...sources.approvals
@@ -145,12 +161,25 @@ export async function listChildPendingRequests(
     if (run.routingReceipt.mode === "chat") continue;
     const title = sources.parentThreadTitle(run)?.trim();
     if (title === undefined || title.length === 0) continue;
-    let mayOpen = authorized.get(wait.threadId);
-    if (mayOpen === undefined) {
-      mayOpen = await sources.authorizeThread({ threadId: wait.threadId, windowId });
-      authorized.set(wait.threadId, mayOpen);
+    if (reader.kind === "remote-device") {
+      const mayAnswer =
+        sources.mayAnswerFromDevice?.({
+          runId: String(run.id),
+          parentThreadId: wait.threadId,
+          deviceId: reader.deviceId,
+        }) === true;
+      if (!mayAnswer) continue;
+    } else {
+      let mayOpen = authorized.get(wait.threadId);
+      if (mayOpen === undefined) {
+        mayOpen = await sources.authorizeThread({
+          threadId: wait.threadId,
+          windowId: reader.windowId,
+        });
+        authorized.set(wait.threadId, mayOpen);
+      }
+      if (!mayOpen) continue;
     }
-    if (!mayOpen) continue;
     const text = modeText(run.routingReceipt.mode, wait.kind, item.text);
     const task = cut(
       run.routingReceipt.mode === "work"

@@ -1,4 +1,5 @@
 import { createHash, verify } from "node:crypto";
+import type { EventActor } from "@octant/contracts";
 import { REMOTE_ACCESS_EVENT_NAMES, type StableHostId } from "@octant/contracts/remote-access";
 import {
   decodeRemoteOwnDeviceMetadataV1,
@@ -216,12 +217,15 @@ export class RemoteCredentialLifecycleService {
     readonly hostId: StableHostId;
     readonly deviceId: string;
     readonly reasonCode?: string;
+    /** The paired device that asked. Absent, the host's own record is written. */
+    readonly actor?: EventActor;
   }): RemoteCredentialOperationReceipt {
     const reasonCode = input.reasonCode ?? "device-revoked";
     return this.#mutate({
       commandId: input.commandId,
       hostId: input.hostId,
       deviceId: input.deviceId,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
       reasonCode,
       operationKind: "revoke-device",
       operationDigest: digestOperation({
@@ -247,6 +251,8 @@ export class RemoteCredentialLifecycleService {
     readonly commandId: string;
     readonly hostId: StableHostId;
     readonly reasonCode?: string;
+    /** The paired device that asked. Absent, the host's own record is written. */
+    readonly actor?: EventActor;
   }): RemoteCredentialOperationReceipt {
     const reasonCode = input.reasonCode ?? "all-devices-revoked";
     const devices = readDeviceRegistrations(this.#connection)
@@ -261,6 +267,7 @@ export class RemoteCredentialLifecycleService {
         reasonCode,
       }),
       devices,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
       buildEvents: (now, device) => [
         {
           eventName: REMOTE_ACCESS_EVENT_NAMES.deviceRevoked,
@@ -893,6 +900,11 @@ export class RemoteCredentialLifecycleService {
     readonly operationKind: string;
     readonly operationDigest: string;
     readonly devices?: ReadonlyArray<DeviceRegistrationProjectionRow>;
+    /**
+     * Who the change and its receipt are journaled as. The sessions the change
+     * ends are the host's own consequence and keep the host's actor.
+     */
+    readonly actor?: EventActor;
     readonly prefixEvents?: (
       now: string,
     ) => ReadonlyArray<{ readonly eventName: string; readonly payload: unknown }>;
@@ -996,7 +1008,7 @@ export class RemoteCredentialLifecycleService {
       eventName: event.eventName,
       eventVersion: 1,
       correlationId: input.commandId,
-      actor: { kind: "system" as const, actorId: this.#actorId },
+      actor: input.actor ?? { kind: "system" as const, actorId: this.#actorId },
       occurredAt: now,
       payload: event.payload,
     }));

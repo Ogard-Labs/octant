@@ -1,3 +1,6 @@
+import type { EventActor } from "@octant/contracts";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import {
   BENCHMARK_ROUTE_PATHS,
   decodeBenchmarkCellRateRequest,
@@ -89,6 +92,7 @@ export function createBenchmarkRouteHandler(
       return failure("Benchmarks require POST.", 405, origin, allowedOrigin);
     }
     let windowId: WindowId;
+    let actor: EventActor;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -96,7 +100,8 @@ export function createBenchmarkRouteHandler(
         now: now(),
       });
       windowId = context.scopeId;
-      if (WRITE_PATHS.has(url.pathname) && context.principal.kind !== "local-window") {
+      actor = eventActorForPrincipal(context.principal);
+      if (WRITE_PATHS.has(url.pathname) && !principalActsAsHostPerson(context.principal)) {
         return failure("Benchmark changes stay with a local window.", 403, origin, allowedOrigin);
       }
     } catch (error) {
@@ -122,6 +127,7 @@ export function createBenchmarkRouteHandler(
         url.pathname,
         body,
         windowId,
+        actor,
         dependencies.service,
         dependencies.reports,
         origin,
@@ -137,6 +143,7 @@ async function dispatch(
   path: string,
   body: unknown,
   windowId: WindowId,
+  actor: EventActor,
   service: BenchmarkRouteDependencies["service"],
   reports: BenchmarkRouteDependencies["reports"],
   origin: string | null,
@@ -164,13 +171,13 @@ async function dispatch(
       const request = parse(decodeBenchmarkSuiteSaveRequest);
       return request === undefined
         ? invalid()
-        : answer(service.saveSuite(request), (suite) => ({ suite }));
+        : answer(service.saveSuite(request, actor), (suite) => ({ suite }));
     }
     case BENCHMARK_ROUTE_PATHS.suitesDelete: {
       const request = parse(decodeBenchmarkSuiteDeleteRequest);
       return request === undefined
         ? invalid()
-        : answer(service.deleteSuite(request), (value) => value);
+        : answer(service.deleteSuite(request, actor), (value) => value);
     }
     case BENCHMARK_ROUTE_PATHS.runsList: {
       const request = parse(decodeBenchmarkRunsListRequest);
@@ -202,25 +209,25 @@ async function dispatch(
       const request = parse(decodeBenchmarkRunStartRequest);
       return request === undefined
         ? invalid()
-        : answer(await service.startRun(windowId, request), (run) => ({ run }));
+        : answer(await service.startRun(windowId, request, actor), (run) => ({ run }));
     }
     case BENCHMARK_ROUTE_PATHS.runsCancel: {
       const request = parse(decodeBenchmarkRunCancelRequest);
       return request === undefined
         ? invalid()
-        : answer(await service.cancelRun(request), (run) => ({ run }));
+        : answer(await service.cancelRun(request, actor), (run) => ({ run }));
     }
     case BENCHMARK_ROUTE_PATHS.cellsRate: {
       const request = parse(decodeBenchmarkCellRateRequest);
       return request === undefined
         ? invalid()
-        : answer(service.rateCell(request), (value) => value);
+        : answer(service.rateCell(request, actor), (value) => value);
     }
     default: {
       const request = parse(decodeBenchmarkRunPurgeRequest);
       return request === undefined
         ? invalid()
-        : answer(await service.purgeRun(request), (value) => value);
+        : answer(await service.purgeRun(request, actor), (value) => value);
     }
   }
 }

@@ -191,6 +191,8 @@ export class ThreadFollowUpSuggestionStore {
     threadId: string,
     suggestionId: NativeHarnessFollowUpId,
     created: NativeHarnessFollowUpCreation,
+    /** Who took the suggestion, as the route resolved them; absent means the store's own actor. */
+    actor?: typeof EventActor.Type,
   ): "activated" | "suggestion-not-found" | "already-activated" {
     const record = this.#records.get(threadId);
     const suggestion = record?.current.followUps.suggestions.find(
@@ -199,10 +201,13 @@ export class ThreadFollowUpSuggestionStore {
     if (record === undefined || suggestion === undefined) return "suggestion-not-found";
     if (record.activated.some((id) => String(id) === String(suggestionId)))
       return "already-activated";
-    this.#append(threadId, record.version, THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.activated, {
-      suggestionId,
-      created,
-    });
+    this.#append(
+      threadId,
+      record.version,
+      THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES.activated,
+      { suggestionId, created },
+      actor,
+    );
     record.version += 1;
     record.activated.push(suggestion.id);
     record.created.set(String(suggestion.id), created);
@@ -210,7 +215,13 @@ export class ThreadFollowUpSuggestionStore {
     return "activated";
   }
 
-  #append(threadId: string, version: number, eventName: string, payload: unknown): void {
+  #append(
+    threadId: string,
+    version: number,
+    eventName: string,
+    payload: unknown,
+    actor: typeof EventActor.Type = this.#actor,
+  ): void {
     this.#journal.append({
       aggregate: {
         aggregateType: THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
@@ -223,7 +234,7 @@ export class ThreadFollowUpSuggestionStore {
           eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: this.#actor,
+          actor,
           occurredAt: this.#clock(),
           payload,
         },

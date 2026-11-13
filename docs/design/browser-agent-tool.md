@@ -250,9 +250,9 @@ the page, the workspace, or the person is reached.
   tool's bounded model bindings; they are not persistent page history.
 - Session deadlines follow [Page lifetime](#page-lifetime): the agent tool
   opens a page with a ten-minute idle interval, which admitted agent activity
-  renews. A handoff
-  or take-over keeps it for eleven minutes from the hold, take-over input
-  renews that retention, and release keeps it for two minutes, always using
+  renews. A sign-in hand-off keeps it for as long as its card waits. A
+  take-over keeps it for eleven minutes from the hold, take-over input
+  renews that retention, and release of either keeps it for two minutes, always using
   the later of that retention and the ordinary idle deadline.
 
 ## Actions
@@ -284,17 +284,14 @@ the page, the workspace, or the person is reached.
   front the agent can still list tabs and switch to another. On the headless
   Browser, a tab that followed a redirect off the allowed origins after its own
   action is sent to a blank page before it is listed.
-- A paired device does all of this as a local window does: hover, list tabs,
-  choose an option, drag, upload, save a download, open, switch, and close a
-  tab, navigate and type (maintainer decision, 2026-11-12). Not built yet: today
-  it may hover and list tabs only
+- A device the host's own person paired does all of this as a local window does: hover, list tabs, choose an option, drag, upload, save a download, open, switch, and close a tab, navigate and type (maintainer decision, 2026-11-12; built for every page action the route takes). A device the host knows only through the hub's roster may hover and list tabs only
   ([Architecture: remote access](../architecture.md#security-and-authority)).
 
 ### Upload
 
 Below Full access a file leaves this computer through a page only after a
 person approves its file authority. Ordinary uploads use the thread's workspace
-and an answer the person may remember for the site; a recurring routine may
+and an answer the person may remember for the site, folder and profile; a recurring routine may
 instead use the explicit manifest below. At Full access an upload does not ask
 and the path checks below still hold
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
@@ -330,12 +327,16 @@ of waiting.
   covers those files to that site once, or, with "Always allow", later uploads
   to that site from that folder in that profile: the remembered answer is
   keyed by site, folder and profile (maintainer decision, 2026-11-12). Built:
-  the remembered answer is one direction, one site and one workspace folder; it
+  the remembered answer is one direction, one site, one workspace folder and
+  one profile: the entry records the stored profile the page was in, and a
+  later transfer is covered only on a page in that same profile, because a
+  site's signed-in session differs by profile. It
   is journaled in the shell settings like a remembered site, lifts no path or
-  size check, and is listed with a Forget control in Settings › Permissions ›
-  Browser uploads and downloads. Not built yet: the remembered answer is not
-  keyed by profile, and it grows only through the approval answer of a window
-  of this computer (a paired device's answer covers one upload). An unanswered ask waits in Needs
+  size check, and is listed, with its profile, with a Forget control in
+  Settings › Permissions › Browser uploads and downloads. Not built yet: it
+  grows only through the approval answer of a window
+  of this computer (a paired device's answer covers one upload).
+  An answer given on a Private page is stored as one and covers Private pages alone. An answer remembered before the page was recorded names neither a profile nor a Private page: it was given for the site and the folder on any page, so it keeps covering every profile and Private pages, shown as "on any page" in Settings, until the person forgets it (maintainer decision, 2026-11-13). It was not narrowed because that would ask again for what the person already answered, and it cannot be confused with a newer answer, which always names its page. An unanswered ask waits in Needs
   you. At Full access nothing is asked. Work and Code both ask in the
   thread's Browser approval card ("Upload once", "Always allow" or "Deny"),
   through one host function that reads the remembered answer and raises the
@@ -410,7 +411,7 @@ not establish packaged or personal-account acceptance.
 A file comes from a page into a thread's workspace only while a switch is on.
 At Full access the switch is on by default and a save does not ask; below Full
 access the person turns it on and answers for the file, an answer they may
-remember for the site, or separately reviews the bounded routine download manifest below
+remember for the site, folder and profile, or separately reviews the bounded routine download manifest below
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
 request, 2026-11-12). At Full access a download is not kept waiting for a
 second call either: it is saved as the action that started it answers
@@ -421,8 +422,7 @@ desktop pane's download handler, has not been run in a packaged window.
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default below Full access and on by default for a thread at Full access.
   It is a host setting in the shell settings, which a window of this computer
-  or a paired device writes (maintainer decision, 2026-11-12; not built yet:
-  today the shell route is local-only and a paired device cannot); a
+  or a device the host's own person paired writes (maintainer decision, 2026-11-12; built on the shell settings route); a
   routine, a subagent, a plugin, a CLI in a thread terminal, and an agent have
   no way to set it, and a change is journaled like every shell setting. Off,
   every download on every page of a thread below Full access stays blocked, as
@@ -486,7 +486,7 @@ desktop pane's download handler, has not been run in a packaged window.
   in that profile: the remembered answer is keyed by site, folder and profile
   (maintainer decision, 2026-11-12). Built: "Always allow" covers later saves
   from that site into this thread's workspace, remembered and forgotten as an
-  upload's is. Not built yet: the remembered answer is not keyed by profile. At Full access the save is not asked and the checks, the
+  upload's is, keyed by profile as an upload's is. At Full access the save is not asked and the checks, the
   destination rules and the journal record still apply. Work and Code both ask in the thread's
   Browser approval card ("Save once", "Always allow" or "Deny"), through the same host
   function an upload asks through (maintainer decision, 2026-11-13).
@@ -863,8 +863,28 @@ made active.
   a hung call, queued call, late answer or late input cannot extend or revive
   it. A timer that was already queued checks the latest deadline before expiry,
   and cannot restart a stopped context's scheduling.
-- **Handoffs have their existing phase bounds.** A sign-in card waits at most
-  ten minutes; its page is retained for eleven minutes from the hold. Take-over
+- **A waiting question keeps its page.** An upload, download, script or
+  site question about an open page has no expiry (maintainer decision,
+  2026-11-13), and its page has no idle deadline while the question waits, so
+  a later answer still finds the page. When the question ends, by an answer, the call or turn stopping,
+  the thread's archive, the window's revocation or the host stopping, the
+  page returns to a finite deadline (two minutes of grace, or its ordinary
+  idle deadline if later). The staged upload copies and the held download
+  file are deleted on any outcome but approval. Every question about an open
+  page, its site approval, a script, a sign-in, an upload or a download, also
+  ends when its page closes or is stopped, in Work, Code and a terminal's
+  Browser grant alike, so the turn goes on and a question that waits holds
+  nothing after it is withdrawn. The first navigate's site approval has no
+  page yet, so only its call or turn ends it.
+- **Handoffs have their own phase bounds.** A sign-in card has no expiry
+  ([Asking the person to sign in](#asking-the-person-to-sign-in)), and its page
+  has no deadline and holds no expiry timer while the card waits: the card is
+  the wait, and a page that closed under it would leave the person a card
+  with nothing to sign in to. The card ends, and the page returns to a finite
+  deadline, when the person answers, the turn stops, the thread is archived,
+  the window's authority is revoked, the page is closed or stopped, or the
+  host stops. A take-over's page is
+  retained for eleven minutes from the hold, and take-over
   input renews that eleven-minute hold, with the existing one-minute scheduling
   throttle. Answering the card or handing back replaces the hold with two
   minutes of grace, taking the later of that grace and the ordinary idle
@@ -898,8 +918,10 @@ needed.
   thread; both are the same host approval, never remembered, and it waits until
   the person answers it, as every ask does under
   [Unattended work](../architecture.md#security-and-authority) (maintainer
-  request, 2026-11-12). Not built yet: today it expires after 10 minutes with
-  `browser-sign-in-expired`.
+  request, 2026-11-12; built). It is cancelled, never answered for the person,
+  when the turn stops, the thread is archived, the window's authority is
+  revoked, or the host stops. Not built yet: the pending-requests read (Needs
+  you) does not list it; it waits as the card in its thread.
 - The page is marked as waiting for the person. Every window showing the thread
   brings its Browser forward once, through the thread's activity preview, and
   the agent tool holds every other agent Browser call on the page until the
@@ -908,7 +930,7 @@ needed.
   already waiting on an approval when the hand-off began does not act either.
   One hand-off at a time per page.
 - The page outlives the hand-off under the finite phase windows described in
-  [Page lifetime](#page-lifetime): eleven minutes from the hold, then the later
+  [Page lifetime](#page-lifetime): for as long as the card waits, then the later
   of its ordinary idle deadline and two minutes after the card is answered so
   the agent can read it.
 - The person signs in manually or explicitly approves a selected 1Password
@@ -920,9 +942,9 @@ needed.
 - On **Continue** the agent gets a fresh snapshot of whatever page the person
   left. If that site is unapproved, the refusal says plainly that the person
   left the page on an unapproved site after Continue; it reads nothing there
-  and does not widen the original origin approval. **Cancel**, the card expiring, or the turn stopping ends the hand-off with
-  `browser-sign-in-denied`, `-expired`, or `-cancelled`, and the page is the
-  agent's again.
+  and does not widen the original origin approval. **Cancel** ends the hand-off with `browser-sign-in-denied`, and the turn
+  stopping, the thread's archive, or the window's revocation with
+  `browser-sign-in-cancelled`, and the page is the agent's again.
 - Refused before anyone is asked on a routine's or a subagent's turn and for a
   CLI in a thread terminal (`sign-in-needs-a-person`): nobody there can sign
   in. A paired device's turn is offered the sign-in, and the person signs in

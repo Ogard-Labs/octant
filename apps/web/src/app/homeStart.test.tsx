@@ -7,6 +7,7 @@ import { useHomeStart, type HomeStartInput } from "./homeStart";
 const settings = settingsPastFirstRun();
 const workspace = codeShellBootstrap().workspace;
 const emptyMap = new Map<string, never>();
+const noAskClients = {};
 const none: ReadonlyArray<never> = [];
 const codeOnly: HomeStartInput["workingNowModes"] = ["code"];
 const noPullRequests: HomeStartInput["githubPullRequestCapability"] = { readable: false };
@@ -38,6 +39,7 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
     loadHomePullRequests,
     needsYouCoordinatorTitles: emptyMap,
     needsYouThreadProviders: emptyMap,
+    needsYouAskClients: noAskClients,
     now: 0,
     openRunningServiceLive: undefined,
     pendingRequestClient: undefined,

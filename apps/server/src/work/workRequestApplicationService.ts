@@ -9,6 +9,7 @@ import {
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
+import type { EventActor } from "@octant/contracts";
 import type { WorkRequestService, WorkRequestServiceResult } from "./workRequestService";
 
 const MAX_WORK_REQUEST_LIST_LIMIT = 128;
@@ -125,6 +126,9 @@ export class WorkRequestApplicationService {
   async execute(
     windowId: WindowId,
     command: WorkRequestCommand,
+    // Who answered, resolved from the authenticated principal; absent means
+    // the person at this host.
+    actor?: EventActor,
   ): Promise<WorkRequestCommandResult> {
     const entry = this.#requests.lookup(command.requestId);
     if (entry === undefined) {
@@ -133,8 +137,8 @@ export class WorkRequestApplicationService {
     await this.#assertWorkProjectAccess(windowId, entry.projectId);
     const result: WorkRequestServiceResult =
       command.kind === "resolve-work-request"
-        ? await this.#requests.resolve(command)
-        : await this.#requests.cancel(command);
+        ? await this.#requests.resolve(command, undefined, actor)
+        : await this.#requests.cancel(command, actor);
     return unwrap(result, command.kind);
   }
 

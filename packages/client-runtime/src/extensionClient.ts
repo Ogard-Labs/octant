@@ -27,10 +27,18 @@ import {
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
+import type { RemoteSessionStanding } from "./remoteSurfaceMatrix";
+
 export interface ExtensionClientOptions {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
   readonly windowCapability: string;
+  /**
+   * Set by a client carried over a paired device's session, with what the
+   * host said of that session. The base URL then only shapes the path, so the
+   * host's word decides what the URL would otherwise decide.
+   */
+  readonly session?: RemoteSessionStanding;
 }
 
 export interface ExtensionClient {
@@ -43,8 +51,9 @@ export interface ExtensionClient {
   decideToolApproval(decision: ExtensionToolApprovalDecision): Promise<boolean>;
   /**
    * Whether this client may remember an approval or list and revoke remembered
-   * ones. True for a local window; the host refuses a paired device, so the
-   * client does not offer it off a loopback host.
+   * ones. True for a local window and for a session that acts as the host's
+   * own person; the host refuses every other device, so the client does not
+   * offer it there.
    */
   readonly toolGrantsAvailable: boolean;
   /** The MCP tools a person always allows, per Project. A local window only. */
@@ -92,7 +101,10 @@ export class ExtensionClientFailure extends Error {
 export function createExtensionClient(options: ExtensionClientOptions): ExtensionClient {
   const fetch = bindFetchPort(options.fetch);
   const headers = { "x-octant-window-capability": options.windowCapability };
-  const toolGrantsAvailable = isLoopbackHttp(options.baseUrl);
+  const toolGrantsAvailable =
+    options.session === undefined
+      ? isLoopbackHttp(options.baseUrl)
+      : options.session.actsAsHostPerson;
   return {
     toolGrantsAvailable,
     resolveSkillFolder(receiptId, signal) {

@@ -1513,7 +1513,15 @@ describe("CodeService commands", () => {
       terminalSessions,
     });
 
-    await expect(fixture.service.execute(ids.window, command)).resolves.toMatchObject({
+    // The person who brought the session in is who its import names.
+    const importer = {
+      kind: "remote-device",
+      actorId: "00000000-0000-4000-8000-0000000000d1",
+      deviceId: "00000000-0000-4000-8000-0000000000d1",
+    } as never;
+    await expect(
+      fixture.service.execute(ids.window, command, undefined, { actor: importer }),
+    ).resolves.toMatchObject({
       kind: "thread-created",
     });
     expect(record).toHaveBeenCalledWith(
@@ -1526,7 +1534,11 @@ describe("CodeService commands", () => {
     expect(record.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared);
+    expect(terminalSessions.journalImported).toHaveBeenCalledWith(
+      String(ids.thread),
+      prepared,
+      importer,
+    );
 
     const elsewhere = serviceFixture({
       recordExternalContentIngestion: record,
@@ -1979,6 +1991,44 @@ describe("CodeService commands", () => {
           ? (result.thread as { fullAccessSandbox?: boolean }).fullAccessSandbox
           : "missing",
       ).toBeUndefined();
+    });
+
+    it("journals a paired device's Full access changes with the device as their actor, and a local window's as the local user", async () => {
+      const deviceId = "00000000-0000-4000-8000-0000000000d1";
+      const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+      const raiseDefault = {
+        kind: "update-code-settings",
+        expectedVersion: 0,
+        defaultExecutionPolicy: "full-access",
+        defaultPermissionPersistence: "current-session",
+      };
+      const changesBy = async (context?: { readonly actor: never }) => {
+        const fixture = serviceFixture({
+          threads: [thread({ executionPolicy: "approval-gated" })],
+          approve: false,
+        });
+        await fixture.service.execute(ids.window, raise("current-session"), undefined, context);
+        await fixture.service.execute(ids.window, raiseDefault, undefined, context);
+        return fixture.persistence.journal.append.mock.calls.flatMap(([request]) =>
+          request.events.map((event: { eventName: string; actor: unknown }) => [
+            event.eventName,
+            event.actor,
+          ]),
+        );
+      };
+
+      expect(await changesBy({ actor: device })).toEqual([
+        ["code.thread-updated@1", device],
+        ["guardrail.level-lowered@1", device],
+        ["code.settings-updated@1", device],
+        ["guardrail.level-lowered@1", device],
+      ]);
+      expect((await changesBy()).map(([, actor]) => actor)).toEqual(
+        Array.from({ length: 4 }, () => ({
+          kind: "local-user",
+          actorId: "00000000-0000-4000-8000-000000000002",
+        })),
+      );
     });
 
     it("journals a lowered default in Settings at the global scope", async () => {

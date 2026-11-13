@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import type { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import type { EventActor } from "@octant/contracts";
+import type { PrincipalKind } from "@octant/domain/remote-access-policy";
+import type { PendingQuestionDeferral, WaitingAsk } from "@octant/contracts/pending-requests";
 import {
   decodePendingRequestList,
   MAX_PENDING_REQUESTS,
@@ -11,10 +13,21 @@ import {
 } from "@octant/contracts";
 import { enabledModes } from "@octant/domain";
 
+/**
+ * Who reads the list: a window of this computer or a paired device, by the
+ * service scope its authenticated principal resolved to. The services that
+ * hold asks decide differently for the two, so the kind travels with the
+ * scope instead of being guessed from it.
+ */
+export interface PendingRequestReader {
+  readonly kind: PrincipalKind;
+  readonly scopeId: WindowId;
+}
+
 export interface PendingRequestSources {
   readonly deferrals?: {
     readonly read: (key: string) => string | undefined;
-    readonly record: (change: PendingQuestionDeferral) => void;
+    readonly record: (change: PendingQuestionDeferral, actor?: EventActor) => void;
   };
   /**
    * The second opinion on a decision, by the decision's identity key. It
@@ -41,7 +54,15 @@ export interface PendingRequestSources {
    * answering stays on the harness session route, in the thread's own approval
    * card or its Agents tab.
    */
-  readonly children: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
+  readonly children: (reader: PendingRequestReader) => Promise<ReadonlyArray<PendingRequest>>;
+  /**
+   * Every other ask waiting on the person that this reader could answer: MCP
+   * tool approvals, Project memory and routine proposals, image offers, and
+   * Browser approvals and sign-in cards, a host-run turn's among them. Each
+   * comes from its holding service's own list for the reader, and is answered
+   * through that service's own route.
+   */
+  readonly asks?: (reader: PendingRequestReader) => ReadonlyArray<WaitingAsk>;
 }
 
 /**
@@ -62,6 +83,7 @@ export class PendingRequestService {
     windowId: WindowId,
     change: PendingQuestionDeferral,
     current: () => boolean,
+    actor?: EventActor,
   ): Promise<boolean> {
     if (this.#sources.deferrals === undefined) return false;
     if (
@@ -81,16 +103,26 @@ export class PendingRequestService {
       )
     )
       return false;
-    this.#sources.deferrals.record(change);
+    this.#sources.deferrals.record(change, actor);
     return true;
   }
 
-  async list(windowId: WindowId): Promise<PendingRequestList> {
+  async list(
+    windowId: WindowId,
+    readerKind: PendingRequestReader["kind"] = "local-window",
+  ): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
+    const asks = (this.#sources.asks?.({ kind: readerKind, scopeId: windowId }) ?? [])
+      .filter((ask) => modes.includes(ask.mode))
+      .toSorted(
+        (left, right) =>
+          left.requestedAt.localeCompare(right.requestedAt) ||
+          left.askId.localeCompare(right.askId),
+      );
     const [work, code, children] = await Promise.all([
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),
-      this.#sources.children(windowId),
+      this.#sources.children({ kind: readerKind, scopeId: windowId }),
     ]);
     const chat = modes.includes("chat") ? this.#sources.chat() : [];
     const oldestFirst = [
@@ -126,6 +158,8 @@ export class PendingRequestService {
         };
       }),
       truncated: oldestFirst.length > MAX_PENDING_REQUESTS,
+      // Absent when nothing waits, so the list reads as it did before asks.
+      ...(asks.length === 0 ? {} : { asks: asks.slice(0, MAX_PENDING_REQUESTS) }),
     });
   }
 }

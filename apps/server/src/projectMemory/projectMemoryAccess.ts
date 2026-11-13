@@ -59,12 +59,14 @@ export function createProjectMemoryAccess(input: {
   readonly uuid: () => string;
   readonly now: () => number;
   readonly onChanged?: () => void;
+  readonly onAsked?: (ask: { readonly threadId: string; readonly askId: string }) => void;
 }): ProjectMemoryAccess {
   const proposals = new ProjectMemoryProposalService({
     uuid: input.uuid,
     now: input.now,
-    apply: (command, origin) => input.projects.executeAgentMemory(command, origin),
+    apply: (command, origin, actor) => input.projects.executeAgentMemory(command, origin, actor),
     ...(input.onChanged === undefined ? {} : { onChanged: input.onChanged }),
+    ...(input.onAsked === undefined ? {} : { onAsked: input.onAsked }),
   });
   return {
     proposals,

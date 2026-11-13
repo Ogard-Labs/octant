@@ -114,6 +114,7 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
+import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 
 export function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -157,7 +158,7 @@ export function withCodeOperationRuntime(
           readOperationContents: (windowId, input, admissionCurrent) =>
             readEvidenceBatch(windowId, input, admissionCurrent),
         }),
-    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
       ? {}
@@ -202,7 +203,7 @@ function withCodeBoard(
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
-    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
       ? {}
@@ -290,6 +291,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "imageGenerationOffers"
     | "liveTurns"
     | "machineChangeFeed"
+    | "onThreadArchived"
     | "onWindowRevoked"
     | "simulatorInputGrants"
     | "personMemoryAccess"
@@ -457,6 +459,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     onHarnessQuestionSettled,
     onHarnessRecoveryLifted,
     onPullRequestSnapshotRefreshed,
+    onThreadArchived,
     onWindowRevoked,
     nativeHarnessTranscripts,
     options,
@@ -645,6 +648,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             act: (input) => browserAutomationService.act(input),
             releaseThread: (windowId, threadId) =>
               browserAutomationService.releaseThread(windowId, threadId),
+            holdForAsk: (windowId, threadId) =>
+              browserAutomationService.holdForAsk(windowId, threadId),
           },
           approvals: browserToolApprovalService,
         },
@@ -662,6 +667,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       yield* Effect.addFinalizer(() => Effect.sync(unbindTerminalSessions));
       onWindowRevoked((windowId) => grants.revokeWindow(windowId));
       onWindowRevoked((windowId) => codeOperationRuntime?.revokeTerminalStreams(windowId));
+      onThreadArchived((threadId) => codeOperationRuntime?.withdrawThreadAsks?.(threadId));
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
         for (const event of append.events) {
           if (
@@ -694,6 +700,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        stalledTurnLimitMs: () =>
+          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        providerToolCallPauseLimitMs: () =>
+          providerToolCallPauseLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ),
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
         verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
         prepareWorktree: async (thread, root, current) => {
@@ -1082,6 +1094,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.releaseThread(windowId, threadId),
           holdForPerson: (windowId, threadId) =>
             browserAutomationService.holdForPerson(windowId, threadId),
+          holdForAsk: (windowId, threadId) =>
+            browserAutomationService.holdForAsk(windowId, threadId),
           snapshotRefs: (windowId, threadId) =>
             browserAutomationService.snapshotRefs(windowId, threadId),
         },
@@ -2019,9 +2033,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
       readPlanner: (windowId, projectId) => codePlannerService.readView(windowId, projectId),
-      executePlanner: (windowId, command) => codePlannerService.execute(windowId, command),
-      executePlannerProposal: (windowId, command, signal) =>
-        codePlannerService.resolveProposal(windowId, command, signal),
+      executePlanner: (windowId, command, actor) =>
+        codePlannerService.execute(windowId, command, actor),
+      executePlannerProposal: (windowId, command, signal, actor) =>
+        codePlannerService.resolveProposal(windowId, command, signal, actor),
       queryProjectPullRequests: (windowId, query) =>
         projectPullRequestService.query(windowId, query),
       refreshProjectPullRequests: async (windowId, command, signal) => {
@@ -2049,25 +2064,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // A paired phone or web client merges under the same head and
       // required-check rules as the desktop window; it must also carry the
       // person's confirmation, which the service enforces.
-      mergeProjectPullRequest: (windowId, command, signal, caller) =>
+      mergeProjectPullRequest: (windowId, command, signal, caller, actor) =>
         projectPullRequestService.merge(
           windowId,
           command,
           signal ?? new AbortController().signal,
           caller,
+          actor,
         ),
-      mergeProjectPullRequestStack: (windowId, command, signal, caller) =>
-        projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
-      actOnProjectPullRequest: (windowId, command, signal, caller) =>
-        projectPullRequestActionService.act(windowId, command, signal, caller),
+      mergeProjectPullRequestStack: (windowId, command, signal, caller, actor) =>
+        projectPullRequestActionService.mergeStack(windowId, command, signal, caller, actor),
+      actOnProjectPullRequest: (windowId, command, signal, caller, actor) =>
+        projectPullRequestActionService.act(windowId, command, signal, caller, actor),
       readProjectPullRequestActionContext: (windowId, query, signal, caller) =>
         projectPullRequestActionService.readContext(windowId, query, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>
         pullRequestSwitchService.query(windowId, target),
-      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller) =>
-        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal),
-      setProjectPullRequestAutoFix: (windowId, command, initiator) =>
-        pullRequestSwitchService.setAutoFix(windowId, command, initiator),
+      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller, actor) =>
+        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal, actor),
+      setProjectPullRequestAutoFix: (windowId, command, initiator, actor) =>
+        pullRequestSwitchService.setAutoFix(windowId, command, initiator, actor),
       noteComposerActivity: (_windowId, activity) =>
         pullRequestSwitchService.noteComposerActivity(activity.threadId),
     };

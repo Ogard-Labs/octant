@@ -249,13 +249,13 @@ describe("createImageAgentTools", () => {
     expect(outcome.result).toMatchObject({ status: "agent-draws" });
   });
 
-  it("starts nothing when the card is dismissed or left to expire", async () => {
-    for (const status of ["cancelled", "expired"] as const) {
-      const { enqueue, set } = tools([imageProfile()], [], [], { answer: () => ({ status }) });
-      const outcome = await call(set, { prompt: "a red cube" });
-      expect(enqueue).not.toHaveBeenCalled();
-      expect(outcome.result).toMatchObject({ status: "cancelled" });
-    }
+  it("starts nothing when the card is dismissed", async () => {
+    const { enqueue, set } = tools([imageProfile()], [], [], {
+      answer: () => ({ status: "cancelled" }),
+    });
+    const outcome = await call(set, { prompt: "a red cube" });
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(outcome.result).toMatchObject({ status: "cancelled" });
   });
 
   it("generates without asking with the model this thread was told to keep using", async () => {

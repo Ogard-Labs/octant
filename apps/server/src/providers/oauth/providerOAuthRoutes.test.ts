@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts/host-oauth";
 import { encodeSubscriptionOAuthCredential } from "@octant/provider-sdk/subscription-oauth";
 import { describe, expect, it, vi } from "vitest";
+import { bindPrincipalRouteContext } from "../../principalRouteContext";
 import { WindowAuthorityStore } from "../../windowAuthorityStore";
 import type { ProviderCredentialStore } from "../credentialBrokerClient";
 import type { HostOAuthService } from "./hostOAuthService";
@@ -321,6 +322,32 @@ describe("provider OAuth routes", () => {
       }),
     );
     expect(credentials.delete).toHaveBeenCalledWith(instanceId);
+  });
+
+  it("hands a paired device's sign-out to the service as the device's", async () => {
+    const deviceId = "80000000-0000-4000-8000-0000000000d1";
+    const signOut = vi.fn<HostOAuthService["signOut"]>(async () => ({ kind: "signed-out" }));
+    const route = fixture({
+      credentials: pointerStore("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+      signOut,
+    });
+    const request = new Request("http://127.0.0.1/api/providers/oauth", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "sign-out", instanceId, descriptorId: "fixture-oauth" }),
+    });
+    bindPrincipalRouteContext(request, {
+      principal: { kind: "remote-device", deviceId, admittedBy: "host-person" } as never,
+      scopeId: deviceId as never,
+    });
+
+    expect(await (await route(request))?.json()).toMatchObject({ kind: "signed-out" });
+    expect(signOut).toHaveBeenCalledWith(
+      expect.objectContaining({
+        principalKind: "person-paired-device",
+        actor: { kind: "remote-device", actorId: deviceId, deviceId },
+      }),
+    );
   });
 
   it("drops the replaced grant on a re-sign-in even when the issuer cannot be told", async () => {

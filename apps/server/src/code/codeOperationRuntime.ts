@@ -385,6 +385,17 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
   /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off,
+   * read as each turn starts. Absent uses the default limit.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off, read as each turn starts.
+   * Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
+  /**
    * The extra folders of a Code thread's Project, read at each turn start so
    * a folder added or removed applies from the next turn. Absent reads none.
    */
@@ -987,6 +998,13 @@ export interface CodeOperationRuntime {
    * could answer through `execute`, under the same scope those answers pass.
    */
   pendingRequests?(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>>;
+  /**
+   * Gives up the app-managed tool asks (a Browser session, a device effect, a
+   * terminal command, a pull-request change) a thread's turn is parked on,
+   * when the thread is archived or deleted. They wait with no expiry, so the
+   * archive is one of the ways they end.
+   */
+  withdrawThreadAsks?(threadId: string): void;
   /** Whether this window's `start-provider-turn` would pass its scope on the thread's checkout. */
   admitsTurn?(windowId: WindowId, thread: Pick<CodeThread, "id" | "checkoutId">): Promise<boolean>;
   /**
@@ -1441,9 +1459,9 @@ export function createCodeOperationRuntime(
       : { recordReviewContent: options.recordExternalContentIngestion }),
     reviewFindings: {
       list: (windowId, threadId) => reviewFindings.list(windowId, threadId),
-      create: (windowId, input, admissionCurrent) =>
-        reviewFindings.create(windowId, input, admissionCurrent),
-      changeState: (windowId, input, admissionCurrent) =>
+      create: (windowId, input, admissionCurrent, actor) =>
+        reviewFindings.create(windowId, input, admissionCurrent, actor),
+      changeState: (windowId, input, admissionCurrent, actor) =>
         reviewFindings.changeState(
           windowId,
           {
@@ -1451,6 +1469,7 @@ export function createCodeOperationRuntime(
             findingId: decodeCodeReviewFindingId(input.findingId),
           },
           admissionCurrent,
+          actor,
         ),
     },
     turns,
@@ -2001,6 +2020,7 @@ export function createCodeOperationRuntime(
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
     withdrawHarnessQuestion: (input) => turns.withdrawHarnessQuestion(input),
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
+    withdrawThreadAsks: (threadId) => turns.withdrawThreadAsks(threadId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
     recordShieldReview: (input) => turns.recordShieldReview(input),
@@ -2950,7 +2970,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #runtimeWork: CodeRuntimeWorkRecorder;
   readonly #observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
   #service: CodeOperationService | undefined;
-  readonly #runner = new CodeTurnRunner();
+  readonly #runner: CodeTurnRunner;
   /**
    * Starts noted before the service prepares them, under each start's own
    * operation. A stopped start can still be preparing when the next one on
@@ -2981,6 +3001,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     approvalStore: CodeOperationApprovalStore | undefined;
   }) {
     this.#options = input.options;
+    this.#runner = new CodeTurnRunner({
+      ...(input.options.stalledTurnLimitMs === undefined
+        ? {}
+        : { stalledTurnLimitMs: input.options.stalledTurnLimitMs }),
+      ...(input.options.providerToolCallPauseLimitMs === undefined
+        ? {}
+        : { providerToolCallPauseLimitMs: input.options.providerToolCallPauseLimitMs }),
+    });
     this.#active = input.options.activeTurns ?? new Map();
     this.#approvalStore = input.approvalStore;
     this.#spendReservations = input.spendReservations;
@@ -4597,18 +4625,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
         if (!active.toolApprovals.delete(String(approvalId))) return;
         active.approvalPostures.delete(String(approvalId));
-        clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         active.abort.signal.removeEventListener("abort", abort);
-        // An answer journals its own operation result; expiry and abandonment
-        // journal nothing.
+        // An answer journals its own operation result; abandonment journals
+        // nothing.
         if (outcome === "cancelled" || outcome === "expired") {
           this.#options.onPendingRequestWithdrawn?.();
         }
         resolve(outcome);
       };
+      // No timer: the ask is a question, holding no secret and no native
+      // resource, so it waits until the person answers, the call or the turn
+      // stops, or the thread is archived (`withdrawThreadAsks`).
       const abort = () => finish("cancelled");
-      const timer = setTimeout(() => finish("expired"), 10 * 60_000);
       active.toolApprovals.set(String(approvalId), {
         ...(origin === undefined ? {} : { origin }),
         finish,
@@ -4630,6 +4659,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         finish("cancelled");
       }
     });
+  }
+
+  withdrawThreadAsks(threadId: string): void {
+    for (const active of this.#active.values()) {
+      if (String(active.thread.id) !== threadId) continue;
+      for (const ask of active.toolApprovals.values()) ask.finish("cancelled");
+    }
   }
 
   ownerApprovals(): ReadonlyArray<RuntimeApprovalRecovery> {

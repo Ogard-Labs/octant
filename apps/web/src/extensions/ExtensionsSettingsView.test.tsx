@@ -80,6 +80,12 @@ interface InstalledSnapshotOptions {
   readonly componentActivation?: Activation;
   readonly componentEffectiveState?: EffectiveState;
   readonly publisher?: Record<string, string>;
+  readonly updated?: {
+    readonly previousVersion: string;
+    readonly previousDigest: string;
+    readonly at: string;
+    readonly rollbackAvailable: boolean;
+  };
   readonly diagnostics?: ReadonlyArray<{ readonly code: string; readonly message: string }>;
 }
 
@@ -115,6 +121,7 @@ function installedSnapshot(options: InstalledSnapshotOptions = {}): ExtensionSna
         },
         activation,
         ...(options.publisher === undefined ? {} : { publisher: options.publisher }),
+        ...(options.updated === undefined ? {} : { updated: options.updated }),
         components: [
           {
             component: {
@@ -350,6 +357,17 @@ describe("ExtensionsSettingsView", () => {
     expect(screen.getByText("macos")).toBeInTheDocument();
     expect(screen.getByText("code")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: /effective/i })).toBeInTheDocument();
+  });
+
+  it("still lists installed packages when the scope's effective state cannot be read", async () => {
+    const c = client();
+    c.effectiveState = vi.fn(async () => {
+      throw new Error("Package source is unavailable.");
+    });
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    expect(screen.queryByText("Extensions are unavailable.")).not.toBeInTheDocument();
   });
 
   it("hides uninstalled lifecycle tombstones from the Installed tab", async () => {
@@ -809,6 +827,54 @@ describe("ExtensionsSettingsView", () => {
     );
   });
 
+  it("shows what an update that kept trust changed and when, and rolls it back in one click", async () => {
+    const previousDigest = `sha256:${"c".repeat(64)}`;
+    const c = client({
+      snapshot: installedSnapshot({
+        activation: baseActivation({ trusted: true, pluginDesired: true }),
+        updated: {
+          previousVersion: "1.1.0",
+          previousDigest,
+          at: "2026-11-13T09:30:00.000Z",
+          rollbackAvailable: true,
+        },
+      }),
+    });
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    const notice = screen.getByRole("status", { name: "Updated" });
+    expect(notice).toHaveTextContent("Updated from v1.1.0 to v1.2.0");
+    expect(notice).toHaveTextContent("2026-11-13");
+    const digests = screen.getByLabelText("Update digests");
+    expect(within(digests).getByText("Was").nextSibling?.textContent).toBe(previousDigest);
+    expect(within(digests).getByText("Now").nextSibling?.textContent).toBe(digest);
+
+    fireEvent.click(screen.getByRole("button", { name: "Roll back to v1.1.0" }));
+    await waitFor(() =>
+      expect(c.calls).toContainEqual({
+        kind: "rollback-package",
+        extensionId,
+        packageId,
+        version: "1.1.0",
+        digest: previousDigest,
+        restoreTrust: true,
+      }),
+    );
+  });
+
+  it("shows the key a first signed version carries and says trusting the source pins it", async () => {
+    const selected = `ed25519:${"b".repeat(64)}`;
+    const c = client({ snapshot: installedSnapshot({ publisher: { selected } }) });
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    expect(screen.getByText(/Trusting this source pins the key below/)).toBeInTheDocument();
+    const keys = screen.getByLabelText("Publisher keys");
+    expect(within(keys).getByText("Signed by").nextSibling?.textContent).toBe(selected);
+    expect(screen.getByRole("button", { name: "Trust source" })).toBeEnabled();
+  });
+
   it("says an unsigned held version is unsigned and does not offer to trust a new publisher", async () => {
     const pinned = `ed25519:${"a".repeat(64)}`;
     const c = client({
@@ -866,7 +932,7 @@ describe("ExtensionsSettingsView", () => {
           {
             code: "outside-driver-publisher-changed",
             message:
-              "Another publisher signed this provider driver. It stays held until you trust the new publisher or forget the old one.",
+              "Another publisher signed this package, or nobody did. It stays held until you trust the new publisher or forget the old one.",
           },
           { code: "other", message: "Something else." },
         ],
@@ -1149,6 +1215,33 @@ describe("ExtensionsSettingsView", () => {
       ).toBe(true),
     );
     expect(c.calls.filter((command) => command.kind === "set-source-trust")).toHaveLength(0);
+  });
+
+  it("installs, trusts and turns on with one confirmation, sent as one install command", async () => {
+    const c = client();
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    fireEvent.click(viewButton(/marketplace/i));
+    const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
+    fireEvent.change(search, { target: { value: "build" } });
+    fireEvent.click(screen.getByRole("button", { name: /run search/i }));
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /inspect build helper/i }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install, trust and turn on" }));
+    await waitFor(() =>
+      expect(
+        c.calls.some(
+          (command) =>
+            command.kind === "install-package" && command.trust === true && command.enable === true,
+        ),
+      ).toBe(true),
+    );
+    expect(
+      c.calls.filter(
+        (command) => command.kind === "set-source-trust" || command.kind === "set-plugin-desired",
+      ),
+    ).toHaveLength(0);
   });
 
   it("clears stale catalog cards before a later marketplace search fails", async () => {
@@ -1939,7 +2032,10 @@ describe("ExtensionsSettingsView", () => {
       "Follow the full frontend review checklist before changing code.",
     );
     expect(
-      screen.getByText(/Installs start disabled — trust and enable them from Installed\./),
+      screen.getByText(/Choose whether to trust and turn it on as you install it\./),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Install, trust and turn on skill" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /confirm skill install/i }));
 

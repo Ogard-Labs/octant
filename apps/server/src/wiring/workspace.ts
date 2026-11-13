@@ -42,6 +42,7 @@ import { ProjectRootPort } from "../projectRootPort";
 import { WorkProjectStatusFiles } from "../work/workProjectStatusFiles";
 import { WorkProjectStatusReader } from "../work/workProjectStatusReader";
 import { createShellRouteHandler } from "../shellRoutes";
+import { createShellSettingsRouteHandler } from "../shellSettingsRoutes";
 import { createReplyDetailRouteHandler } from "../replyDetailRoutes";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
@@ -64,6 +65,8 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
     | "imageGenerationOffers"
     | "isPairedDeviceScope"
     | "machineChangeFeed"
+    | "onThreadArchived"
+    | "onWaitingAsk"
     | "onWindowRevoked"
     | "windowAuthorityStore"
   > &
@@ -87,6 +90,8 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     isPairedDeviceScope,
     machineChangeFeed,
     offeredDesktopProviders,
+    onThreadArchived,
+    onWaitingAsk,
     onWindowRevoked,
     options,
     persistence,
@@ -190,11 +195,14 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     });
     onWindowRevoked((windowId) => shellService.revokeWindow(windowId));
     const allowedRendererHttpOrigin = options.allowedRendererHttpOrigin;
-    const shellRoutes = createShellRouteHandler(shellService, {
+    const windowShellRoutes = createShellRouteHandler(shellService, {
       windowAuthorityStore,
       now: Date.now,
       ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
     });
+    const shellSettingsRoutes = createShellSettingsRouteHandler(shellService);
+    const shellRoutes = async (request: Request) =>
+      (await shellSettingsRoutes(request)) ?? windowShellRoutes(request);
     const replyDetailRoutes = createReplyDetailRouteHandler({
       readShellSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       windowAuthorityStore,
@@ -403,8 +411,10 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       uuid: randomUUID,
       now: Date.now,
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+      onAsked: onWaitingAsk,
     });
     onWindowRevoked((windowId) => projectMemoryAccess.proposals.revokeWindow(windowId));
+    onThreadArchived((threadId) => projectMemoryAccess.proposals.withdrawThread(threadId));
     // "Don't ask again" on the image card. The host journals it on the
     // thread's Project as itself: the answer route has already checked that
     // the answering window may open the thread that asked.

@@ -106,6 +106,41 @@ describe("thread follow-up suggestions", () => {
     expect(storeOn(connection).read(threadId)?.followUps.suggestions).toEqual([]);
   });
 
+  it("journals a suggestion a paired device took with the device as actor, and the reply that offered it as the store's own", () => {
+    const connection = openConnection();
+    const journal = journalFor(connection);
+    const store = new ThreadFollowUpSuggestionStore({
+      journal,
+      uuid: uuidFactory(),
+      actor,
+      clock: () => now,
+    });
+    const deviceId = "71000000-0000-4000-8000-0000000000d6";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    store.recordReply({
+      threadId,
+      mode: "code",
+      projectId: projectId as never,
+      suggestedBy: claude,
+      followUps: suggestions(),
+    });
+    store.activate(
+      threadId,
+      suggestionId as never,
+      {
+        kind: "new-thread",
+        mode: "code",
+        projectId: projectId as never,
+        title: "Add tests" as never,
+        threadId: "00000000-0000-4000-8000-000000000098" as never,
+      },
+      device,
+    );
+    expect(
+      journal.replay({ afterSequence: 0 as never, limit: 10 } as never).map((event) => event.actor),
+    ).toEqual([actor, device]);
+  });
+
   it("remembers which thread a started follow-up came from, past a later reply and a restart", () => {
     const connection = openConnection();
     const store = storeOn(connection);

@@ -448,8 +448,8 @@ with a listed approval is not listed again as waiting for approval. The Inbox
 is a triage view: a line under its title reads "N waiting", with "· M urgent" in
 the warning colour when any decision is marked urgent, and a single-choice group
 of chips (**All**, **Urgent**, **Decide**, **Stuck**, **Finished**, each with its
-count) narrows it. Urgent is the decisions marked urgent, Decide every decision,
-Stuck every approval, question and waiting subagent, and Finished the threads
+count) narrows it. Urgent is the decisions marked urgent, Decide every decision
+and proposal, Stuck every approval, question and waiting subagent, and Finished the threads
 whose turn ended and wait for what is next. A chip with nothing stays in place
 with a count of 0, and its list says so in one line. Only All also shows the
 assigned GitHub and Linear work, and a due follow-up shows under All only. The
@@ -461,7 +461,19 @@ deferred ones, urgent or not. The choice lives in the open Inbox and is not reme
 finished turn is never counted by the Inbox's tile or the dock badge, and All
 does not list it; it belongs to To review (the Finished chip is the one place the
 Inbox lists it), and its one-shot banner is unchanged. The list is read at a local
-window only, so a remote window has no Needs you source. What it includes and leaves out is in
+window or a paired device, which reads under its own scope. The card and the
+Inbox also list the host's waiting asks (an MCP tool approval, a Project
+memory or routine proposal, an image offer, a Browser approval or sign-in
+card) as `WaitingAskRow`s: the thread, the Project, the wait, one line of
+what is asked and the detail its card shows. A row offers the ask's two plain
+answers only when the host marks it answerable in place, which the host
+does for no kind today because each ask's card shows more than its row (a
+Browser row names its profile and whether a terminal asked), and **Open thread**
+always; on the card these rows take the places the requests leave under its
+row limit, and the Inbox files them under their Project and counts them
+under All and Stuck, except a memory or routine proposal, which the person
+decides and Decide lists. Each ask's thread counts once toward the Inbox tile. The board, the command palette and the Review page list
+requests only. What the list includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 With every window closed, the desktop menu bar carries the same waiting threads
 as its **Needs you** section, beside **Working** and **Done since you looked**;

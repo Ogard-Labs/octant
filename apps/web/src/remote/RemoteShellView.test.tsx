@@ -87,10 +87,137 @@ interface ProductRequest {
 }
 
 /** A fake host that answers the reads the remote workspace performs. */
-function answerProduct(seen: ProductRequest[], withCanvas = false) {
+const workProjectId = "30000000-0000-4000-8000-000000000002";
+const codeProjectId = "30000000-0000-4000-8000-000000000003";
+const bindingRevisionId = "31000000-0000-4000-8000-000000000001";
+const boundProject = {
+  lifecycle: "active",
+  pinned: false,
+  rank: "0/1",
+  version: 1,
+  createdAt: now,
+  updatedAt: now,
+  binding: { canonicalRoot: "/repos/octant" },
+  bindingRevisionId,
+};
+// What the fake host says of the Code Project's Git remotes; a test may replace it.
+let remoteFacts: { remotes: string[]; upstreamRemote?: string; defaultRemote?: string } = {
+  remotes: ["upstream", "fork"],
+  defaultRemote: "upstream",
+};
+
+const preparedCheckout = {
+  id: "70000000-0000-4000-8000-000000000001",
+  repositoryId: `repo_${"a".repeat(64)}`,
+  kind: "existing-worktree",
+  availability: "available",
+  head: { kind: "branch", name: "main", oid: "a".repeat(40) },
+  observedAt: now,
+};
+
+function answerProduct(
+  seen: ProductRequest[],
+  withCanvas = false,
+  withToolPrompt = false,
+  withBoundProjects = false,
+) {
+  let toolPromptAnswered = false;
+  const createdWork: unknown[] = [];
   return (input: ProductRequest): Response => {
     seen.push(input);
     const { method, path, body } = input;
+    if (withBoundProjects && method === "GET" && path === "/api/projects/bootstrap") {
+      return Response.json({
+        active: [
+          { ...boundProject, id: workProjectId, name: "Reports", type: "work" },
+          {
+            ...boundProject,
+            id: codeProjectId,
+            name: "Octant",
+            type: "code",
+            codeAccessPersistence: "current-session",
+            connectedRepository: { host: "github.com", owner: "acme", repository: "octant" },
+            defaultPermissionMode: "full-access",
+          },
+        ],
+        archived: [],
+        availability: [workProjectId, codeProjectId].map((projectId) => ({
+          projectId,
+          status: "available",
+          observedAt: now,
+        })),
+        memory: [],
+      });
+    }
+    if (withBoundProjects && method === "GET" && path.startsWith("/api/work/")) {
+      return Response.json({ threads: createdWork, runtime: [] });
+    }
+    if (withBoundProjects && method === "POST" && path === "/api/work/threads/commands") {
+      const command = body as Record<string, unknown>;
+      if (command.kind === "create-work-thread") {
+        const thread = {
+          id: command.threadId,
+          projectId: command.projectId,
+          title: command.title,
+          lifecycle: "active",
+          providerInstanceId: command.providerInstanceId,
+          modelId: command.modelId,
+          bindingRevisionId: command.bindingRevisionId,
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+        };
+        createdWork.push(thread);
+        return Response.json({ kind: "thread-created", thread });
+      }
+    }
+    if (withBoundProjects && method === "POST" && path === "/api/code/commands") {
+      const command = body as Record<string, unknown>;
+      if (command.kind === "get-worktree-remote-facts") {
+        return Response.json({
+          kind: "worktree-remote-facts-retrieved",
+          projectId: codeProjectId,
+          facts: remoteFacts,
+        });
+      }
+      if (command.kind === "prepare-code-project-checkout") {
+        return Response.json({
+          kind: "checkout-prepared",
+          bindingRevisionId,
+          checkout: preparedCheckout,
+        });
+      }
+      if (command.kind === "create-code-thread") {
+        return Response.json({ kind: "thread-created", thread: command.thread });
+      }
+    }
+    if (withToolPrompt && method === "POST" && path === "/api/extensions/tool-approvals") {
+      if ((body as { readonly kind?: string }).kind === "decide") {
+        toolPromptAnswered = true;
+        return Response.json({ accepted: true });
+      }
+      return Response.json(
+        toolPromptAnswered
+          ? []
+          : [
+              {
+                approvalId: "70000000-0000-4000-8000-000000000001",
+                threadId: chatThreadId,
+                projectId: chatProjectId,
+                extensionId: "70000000-0000-4000-8000-000000000002",
+                packageId: "70000000-0000-4000-8000-000000000003",
+                componentId: "server",
+                serverName: "notes",
+                providerToolName: "plugin__notes__search",
+                mcpToolName: "search",
+                inputJson: '{"q":"plan"}',
+                requestedAt: now,
+                rememberable: true,
+                answerCovers: "server",
+              },
+            ],
+      );
+    }
     if (method === "GET" && path === "/api/canvas/thread-reference-cards") {
       return Response.json({
         mode: "chat",
@@ -299,6 +426,23 @@ function answerProduct(seen: ProductRequest[], withCanvas = false) {
             createdAt: now,
             updatedAt: now,
           },
+          // Signs in with a subscription, so the Providers page asks the
+          // host's credential store whether its grant is stored.
+          {
+            id: "10000000-0000-4000-8000-000000000002",
+            displayName: "Claude personal",
+            driverKind: "claude",
+            configuration: {
+              kind: "claude-agent-sdk",
+              binaryPath: "/opt/homebrew/bin/claude",
+              authentication: "subscription",
+            },
+            enabled: true,
+            environmentPolicy: "inherit-host",
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
         ],
         defaults: { permissionPersistence: "current-session", version: 1 },
         observedStates: [
@@ -370,8 +514,17 @@ function answerProduct(seen: ProductRequest[], withCanvas = false) {
   };
 }
 
-async function readyBridge(seen: ProductRequest[] = [], withCanvas = false) {
-  const server = createFakeRemoteServer({ handleProductRequest: answerProduct(seen, withCanvas) });
+async function readyBridge(
+  seen: ProductRequest[] = [],
+  withCanvas = false,
+  actsAsHostPerson?: boolean,
+  withToolPrompt = false,
+  withBoundProjects = false,
+) {
+  const server = createFakeRemoteServer({
+    handleProductRequest: answerProduct(seen, withCanvas, withToolPrompt, withBoundProjects),
+    ...(actsAsHostPerson === undefined ? {} : { actsAsHostPerson }),
+  });
   const pairingStore = createInMemoryDeviceKeyStore();
   const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
     "sign",
@@ -529,6 +682,238 @@ describe("RemoteShellView", () => {
     expect(screen.getByText("Provider credentials")).toBeInTheDocument();
     expect(screen.getAllByText("Unavailable remotely").length).toBeGreaterThanOrEqual(4);
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+  });
+
+  it("offers a browser the host's own person paired the default modes, and marks local only what the host forwards to no device", async () => {
+    const user = userEvent.setup();
+    const { bridge } = await readyBridge([], false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const localOnly = await screen.findByRole("note", { name: "Local host only surfaces" });
+    await waitFor(() => expect(within(localOnly).queryByText("Approvals")).toBeNull());
+    expect(within(localOnly).queryByText("Extensions")).toBeNull();
+    expect(within(localOnly).queryByText("Provider setup")).toBeNull();
+    expect(within(localOnly).queryByText("Provider credentials")).toBeNull();
+    expect(within(localOnly).queryByText("Host controls")).toBeNull();
+    expect(within(localOnly).queryByText("Paired devices")).toBeNull();
+    expect(within(localOnly).getByText("Remote listener")).toBeInTheDocument();
+    expect(within(localOnly).queryByText(/cannot bind folders, approve tool use/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Code" }));
+    const defaults = await screen.findByRole("region", { name: "Default modes" });
+    expect(
+      await within(defaults).findByRole("combobox", { name: "Default mode for new threads" }),
+    ).toHaveTextContent("Plan");
+  });
+
+  it("offers a restricted session no default modes, whether its host says so or does not say", async () => {
+    const user = userEvent.setup();
+    for (const actsAsHostPerson of [false, undefined]) {
+      const { bridge } = await readyBridge([], false, actsAsHostPerson);
+      const { unmount } = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+      const localOnly = await screen.findByRole("note", { name: "Local host only surfaces" });
+      expect(within(localOnly).getByText("Approvals")).toBeInTheDocument();
+      expect(within(localOnly).getByText("Extensions")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Code" }));
+      await screen.findByRole("navigation", { name: "Code thread list" });
+      await screen.findByText(/No Code threads on this host yet/i);
+      expect(screen.queryByRole("region", { name: "Default modes" })).toBeNull();
+      unmount();
+    }
+  });
+
+  it("shows a waiting tool prompt to the host's own person, who may allow only this tool", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+    await user.click(await within(list).findByRole("button", { name: "Planning from the phone" }));
+    expect(
+      await screen.findByRole("button", { name: "Allow all tools of this server" }),
+    ).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Allow only this tool" }));
+
+    await waitFor(() =>
+      expect(
+        seen
+          .filter((request) => request.path === "/api/extensions/tool-approvals")
+          .map((request) => request.body),
+      ).toContainEqual({
+        kind: "decide",
+        approvalId: "70000000-0000-4000-8000-000000000001",
+        decision: "approved",
+        remember: true,
+      }),
+    );
+  });
+
+  it("shows a restricted session the tool prompt with one approval and a denial, and nothing to remember", async () => {
+    const user = userEvent.setup();
+    const { bridge } = await readyBridge([], false, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+    await user.click(await within(list).findByRole("button", { name: "Planning from the phone" }));
+    expect(
+      await screen.findByRole("button", { name: "Allow all tools of this server" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow only this tool" })).toBeNull();
+  });
+
+  it("starts a Work thread in a Project from a browser the host's own person paired", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+    const work = await screen.findByRole("navigation", { name: "Work thread list" });
+    await user.click(await within(work).findByRole("button", { name: "New thread" }));
+
+    await waitFor(() =>
+      expect(
+        seen
+          .filter((request) => request.path === "/api/work/threads/commands")
+          .map((request) => request.body),
+      ).toContainEqual(
+        expect.objectContaining({
+          kind: "create-work-thread",
+          projectId: workProjectId,
+          bindingRevisionId,
+          providerInstanceId,
+          modelId: "model-a",
+          hostId: "local",
+        }),
+      ),
+    );
+    expect(
+      await within(work).findByRole("button", { name: "New thread", current: true }),
+    ).toBeInTheDocument();
+  });
+
+  it("starts a Code thread at its Project's mode, Full access included, from a browser the host's own person paired", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Code" }));
+    const code = await screen.findByRole("navigation", { name: "Code thread list" });
+    await user.type(
+      await within(code).findByRole("textbox", { name: "First message" }),
+      "Fix the build",
+    );
+    await user.click(within(code).getByRole("button", { name: "Start thread" }));
+
+    await waitFor(() =>
+      expect(
+        seen
+          .filter((request) => request.path === "/api/code/commands")
+          .map((request) => request.body),
+      ).toContainEqual(
+        expect.objectContaining({
+          kind: "create-code-thread",
+          thread: expect.objectContaining({
+            projectId: codeProjectId,
+            checkoutId: preparedCheckout.id,
+            title: "Fix the build",
+            executionPolicy: "full-access",
+            // The repository the Project is connected to, the remote the host
+            // names as the repository's default, and the branch the checkout
+            // is on: what the host reads, with nothing assumed.
+            deliveryTarget: expect.objectContaining({
+              branchIntent: "main",
+              remoteName: "upstream",
+              proposedBaseRepository: "acme/octant",
+              proposedBaseBranch: "main",
+              outcomeKind: "local-implementation",
+            }),
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("refuses to start a Code thread when the host cannot say which remote the repository delivers to", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const known = remoteFacts;
+    remoteFacts = { remotes: ["upstream", "fork"] };
+    try {
+      const { bridge } = await readyBridge(seen, false, true, false, true);
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+      await user.click(await screen.findByRole("button", { name: "Code" }));
+      const code = await screen.findByRole("navigation", { name: "Code thread list" });
+      await user.type(
+        await within(code).findByRole("textbox", { name: "First message" }),
+        "Fix the build",
+      );
+      await user.click(within(code).getByRole("button", { name: "Start thread" }));
+
+      expect(
+        await within(code).findByText(/has more than one remote and none is its default/),
+      ).toBeInTheDocument();
+      expect(
+        seen.some(
+          (request) =>
+            (request.body as { kind?: string } | undefined)?.kind === "create-code-thread",
+        ),
+      ).toBe(false);
+    } finally {
+      remoteFacts = known;
+    }
+  });
+
+  it("offers a restricted session no way to start a Work or Code thread", async () => {
+    const user = userEvent.setup();
+    const { bridge } = await readyBridge([], false, false, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+    const work = await screen.findByRole("navigation", { name: "Work thread list" });
+    expect(await within(work).findByText(/Start one from the host/)).toBeInTheDocument();
+    expect(within(work).queryByRole("button", { name: "New thread" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Code" }));
+    const code = await screen.findByRole("navigation", { name: "Code thread list" });
+    expect(await within(code).findByText(/Start one from the host/)).toBeInTheDocument();
+    expect(within(code).queryByRole("button", { name: "Start thread" })).toBeNull();
+  });
+
+  it("opens the host's Extensions and Providers settings for a browser the host's own person paired", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge } = await readyBridge(seen, false, true);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    const settings = await screen.findByRole("region", { name: "Host settings" });
+    await user.click(await within(settings).findByRole("button", { name: "Providers" }));
+    expect(await within(settings).findByText("Codex local")).toBeInTheDocument();
+
+    // The Providers page asks the host's credential store over the session.
+    await waitFor(() =>
+      expect(seen.map((request) => request.path)).toContain("/api/providers/credentials/status"),
+    );
+    await user.click(within(settings).getByRole("button", { name: "Extensions" }));
+    await waitFor(() =>
+      expect(seen.map((request) => request.path)).toContain("/api/extensions/snapshot"),
+    );
+    for (const request of seen) {
+      expect(request.headers.get("x-octant-window-capability")).toBeNull();
+    }
+  });
+
+  it("offers a restricted session no host settings", async () => {
+    const { bridge } = await readyBridge([], false, false);
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    await screen.findByRole("note", { name: "Local host only surfaces" });
+    expect(screen.queryByRole("region", { name: "Host settings" })).toBeNull();
   });
 
   it("shows sync status and the computers read-only, with nothing to set up or revoke", async () => {

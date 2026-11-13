@@ -374,6 +374,13 @@
   justify-self: start;
 }
 
+/* Matches the Library detail actions: one row that wraps at narrow widths. */
+.extensions-settings__preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
 .extensions-settings__preview-heading {
   margin: 0;
   font-family: var(--oct-font-mono);

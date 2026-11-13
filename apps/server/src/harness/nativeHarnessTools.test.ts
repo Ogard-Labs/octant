@@ -407,7 +407,7 @@ describe("native harness tools", () => {
       {
         approvals: async (input) => {
           decisions.push(`${input.toolName}:${input.approvalClass}`);
-          return answers[index++] ?? "expired";
+          return answers[index++] ?? "cancelled";
         },
       },
     );

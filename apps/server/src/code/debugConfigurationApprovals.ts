@@ -87,6 +87,8 @@ export class DebugConfigurationApprovalStore {
     readonly configurationDigest: CodeDebugConfigurationDigest;
     readonly adapter: DebugAdapterPackageState;
     readonly scope: CodeDebugApprovalScope;
+    /** Who confirmed, as the route resolved it; absent means the person at this host. */
+    readonly actor?: EventActorValue | undefined;
   }): "recorded" | "not-recorded" {
     const projectKey = String(input.projectId);
     const held = this.#projects.get(projectKey);
@@ -116,7 +118,7 @@ export class DebugConfigurationApprovalStore {
             eventName: decodeEventName(CODE_DEBUG_EVENT_NAMES.configurationApproved),
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#uuid()),
-            actor: this.#personActor,
+            actor: input.actor ?? this.#personActor,
             occurredAt: decodeTimestamp(this.#clock()),
             payload,
           },

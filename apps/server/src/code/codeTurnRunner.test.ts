@@ -1952,6 +1952,118 @@ describe("CodeTurnRunner", () => {
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
   });
 
+  it("reads the stalled-turn limit when each turn starts, so a changed setting applies to the next turn", async () => {
+    const limits: Array<number | null> = [40, null];
+    const runner = new CodeTurnRunner({ stalledTurnLimitMs: () => limits.shift() ?? null });
+    const outcomes: CodeTurnOutcome[] = [];
+
+    // The first turn runs under a 40ms limit and its provider stays silent.
+    const silent = fakeConnection({ subscribe: Effect.succeed(Stream.never) });
+    const cut = await Effect.runPromiseExit(
+      Effect.scoped(
+        runner.run(
+          input({
+            provider: { acquire: () => Effect.succeed(silent) },
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(cut._tag).toBe("Failure");
+    expect(outcomes.at(-1)).toBe("interrupted");
+    expect(silent.interrupt).toHaveBeenCalledWith(sessionId);
+
+    // The setting is Off by the second turn: 150ms of silence no longer ends it.
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const slow = fakeConnection({
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      send: vi.fn(() =>
+        Effect.gen(function* () {
+          yield* Effect.sleep(150);
+          yield* Queue.offer(queue, event({ kind: "completed" }));
+        }),
+      ),
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run(
+          input({
+            provider: { acquire: () => Effect.succeed(slow) },
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(outcomes.at(-1)).toBe("completed");
+    expect(slow.interrupt).not.toHaveBeenCalled();
+  });
+
+  it("does not cut a turn off while the provider reports one of its own tool calls as running", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      send: vi.fn(() =>
+        Effect.gen(function* () {
+          yield* Queue.offer(
+            queue,
+            event({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
+          );
+          // The provider's own command runs silently for five 40ms limits.
+          yield* Effect.sleep(200);
+          yield* Queue.offer(
+            queue,
+            event({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+          );
+          yield* Queue.offer(queue, event({ kind: "completed" }));
+        }),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner({ timeoutMs: 40 }).run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes.at(-1)).toBe("completed");
+    expect(connection.interrupt).not.toHaveBeenCalled();
+  });
+
+  it("cuts a turn off once a provider tool call that reports no finish has paused the clock for the longest pause, read as the turn starts", async () => {
+    const pauses: Array<number | null> = [60];
+    const read = vi.fn(() => pauses.shift() ?? null);
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      send: vi.fn(() =>
+        Queue.offer(queue, event({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" })),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+
+    const cut = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner({ timeoutMs: 40, providerToolCallPauseLimitMs: read }).run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(cut._tag).toBe("Failure");
+    expect(outcomes.at(-1)).toBe("interrupted");
+    expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a turn alive through liveness alone without recording it as a turn event", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = fakeConnection({

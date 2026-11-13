@@ -102,7 +102,7 @@ describe("ProviderApiKeyEditor", () => {
     expect(host.addProviderApiKey).not.toHaveBeenCalled();
   });
 
-  it("shows the host's refusal for a duplicate label and keeps the typed key", async () => {
+  it("shows the host's refusal for a duplicate label and leaves no key in the field", async () => {
     const user = userEvent.setup();
     const host = bridgeWith([WORK]);
     host.addProviderApiKey.mockRejectedValueOnce(
@@ -119,7 +119,7 @@ describe("ProviderApiKeyEditor", () => {
     expect(
       await screen.findByText("Two keys for this provider cannot have the same label."),
     ).toBeInTheDocument();
-    expect(secret).toHaveValue("sk-team-0000");
+    expect(secret).toHaveValue("");
   });
 
   it("renames a key without touching its secret", async () => {

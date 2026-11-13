@@ -56,7 +56,8 @@ export function automationRemoteDevicePrincipal(): AutomationClientPrincipal {
   return {
     kind: "remote-device",
     hostId: "local",
-    deviceId: "device-1",
+    // A real device id is a UUID; the journaled actor is decoded from it.
+    deviceId: "ba000000-0000-4000-8000-0000000000de",
     credentialGeneration: 1,
     origin: "https://remote.example",
     protocolVersion: 1,

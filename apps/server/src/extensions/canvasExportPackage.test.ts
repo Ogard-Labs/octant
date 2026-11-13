@@ -7,9 +7,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readCanvasExportPackage } from "./canvasExportPackage";
 import { ExtensionPackageStore } from "./extensionPackageStore";
-import { inspectExtensionPackage } from "./packageInspector";
+import { inspectExtensionPackage, type ExtensionArchiveEntry } from "./packageInspector";
+import { signPackageEntries } from "./packageSignatureTestFixtures";
 
-function reading() {
+function reading(
+  sign?: (entries: ReadonlyArray<ExtensionArchiveEntry>) => ReadonlyArray<ExtensionArchiveEntry>,
+) {
   const manifest = {
     provenance: { publisher: "Example Publisher", canonicalUrl: "https://example.test/export" },
     manifestVersion: 1,
@@ -51,18 +54,40 @@ function reading() {
     }),
     format: "directory",
     archiveBytes: 1024,
-    entries: [
+    entries: (sign ?? ((entries) => entries))([
       {
         path: "octant-canvas-export.json",
         kind: "file",
         content: Buffer.from(JSON.stringify({ manifest })),
       },
       { path: "export.mjs", kind: "file", content: Buffer.from("export const canvasExport = {};") },
-    ],
+    ]),
     appVersion: "1.0.0",
     platform: "darwin",
   });
 }
+
+describe("a signed Canvas export package", () => {
+  it("records the key that signed it and refuses a signature that does not match its files", () => {
+    let fingerprint = "";
+    const signed = reading((entries) => {
+      const signature = signPackageEntries(entries, { name: "page-export", version: "1.0.0" });
+      fingerprint = signature.fingerprint;
+      return [...entries, signature.entry];
+    });
+    if (signed.status !== "accepted") throw new Error("expected an accepted package");
+    expect(inspectExtensionPackage(signed.resolved).manifest.provenance.publisherKey).toBe(
+      fingerprint,
+    );
+
+    expect(
+      reading((entries) => [
+        ...entries,
+        signPackageEntries(entries.slice(0, 1), { name: "page-export", version: "1.0.0" }).entry,
+      ]),
+    ).toEqual({ status: "refused", reason: "signature-invalid" });
+  });
+});
 
 describe("installed Canvas export modules", () => {
   it("verifies a non-executable module and admits only the fixed worker launch under isolation", async () => {

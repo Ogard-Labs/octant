@@ -63,9 +63,11 @@ cancel, and a Work thread's Done mark. After an ordinary provider failure or a
 clean restart it continues by itself once, and a second failure in a row holds
 it. A paired device may queue (maintainer request, 2026-11-12;
 [Architecture: persistence](../architecture.md#persistence) owns the queue).
-Not built yet: today queued messages must be reviewed and removed before Resume
-can queue the continuation, any failure or restart holds the queue until a
-person resumes it, and a paired device cannot queue. A refused recovery leaves the notice
+Built: the queue passes one turn its mode recorded as failed and lifts the hold
+of one restart that cut nothing of it, and a paired device queues on a thread
+it may already send to; Resume queues the continuation ahead of the messages
+already waiting, with no review of them. A queue the person paused stays
+paused, with the continuation waiting first. A refused recovery leaves the notice
 and an actionable reason. A continuation already queued is visible in the
 ordinary message queue, including any later admission refusal. A tool may have
 taken effect before the crash without recording its result; Resume is not an
@@ -1465,7 +1467,10 @@ prefilled, for what to check. A pending follow-up reads "Follows up tomorrow
 at 9:00".
 
 An agent's proposal, a routine or a follow-up, waits as a suggestion chip at
-the foot of the thread, in the same card as the reply's suggested tasks. It is
+the foot of the thread, in the same card as the reply's suggested tasks (a
+routine the agent suggests in a turn running at Full access is not a chip: it
+is created paused and shown as the **Created automation** card,
+[Architecture: modes](../architecture.md#modes-chat-work-and-code)). It is
 labelled "Routine · suggested" or "Follow-up here · suggested" and states the
 name, the schedule and its time zone, the first run, the missed-run policy,
 what each run does, and the exact prompt. Its one action, **Create routine**

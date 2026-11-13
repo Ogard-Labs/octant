@@ -375,6 +375,26 @@ describe("image routes", () => {
       offers.close();
     });
 
+    it("keeps an offer waiting a day later, and gives it up when its thread is archived", async () => {
+      vi.useFakeTimers();
+      try {
+        const { offers } = setup();
+        const outcome = offers.offer({ windowId: windowId as never, offer });
+        await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+        expect(offers.list(windowId as never, scope)).toHaveLength(1);
+        // Nothing is left behind to fire later: the wait holds no timer.
+        expect(vi.getTimerCount()).toBe(0);
+
+        offers.withdrawThread("b3000000-0000-4000-8000-00000000dead");
+        expect(offers.list(windowId as never, scope)).toHaveLength(1);
+        offers.withdrawThread(scopeId);
+        await expect(outcome).resolves.toEqual({ status: "cancelled" });
+        expect(offers.list(windowId as never, scope)).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("saves only on a save request, and refuses an answer that fits the other kind", async () => {
       const { handler, offers } = setup();
       const saveOutcome = offers.offer({

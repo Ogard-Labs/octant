@@ -12,6 +12,7 @@ import {
   type ExtensionArchiveEntry,
   type ResolvedExtensionPackage,
 } from "./packageInspector";
+import { readPackagePublisherSignature } from "./outsideDriverSignature";
 
 const semverPattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -70,6 +71,19 @@ export function normalizeAgentPluginPackage(
   const name = loaded.manifest.name;
   const slug = toOctantSlug(name);
   const version = toOctantVersion(loaded.manifest.version);
+  // Checked against the files as they arrived, before the host rewrites the
+  // MCP configuration below. A signature names the plugin as its source
+  // does: the npm package's name, or the plugin's own.
+  const signature = readPackagePublisherSignature(input.entries, {
+    name: input.npm?.packageName ?? name,
+    version,
+  });
+  if (signature.status === "invalid") {
+    throw new AgentPluginIngestionError(
+      "signature-invalid",
+      "Agent Plugin signature does not match its files, name, or version, or does not verify.",
+    );
+  }
   const components: Array<Record<string, unknown>> = [];
   const packageCapabilities = new Set<string>();
   const entries = [...input.entries];
@@ -233,6 +247,7 @@ export function normalizeAgentPluginPackage(
       ...(canonicalUrl === undefined ? {} : { canonicalUrl }),
       ...(input.npm === undefined ? {} : { npm: input.npm }),
       publisher: publisher.slice(0, 256),
+      ...(signature.status === "signed" ? { publisherKey: signature.publisherKey } : {}),
       ...(syntheticCommit === undefined ? {} : { sourceCommit: syntheticCommit }),
       ...(isReviewed && binding ? { sourceCommit: binding.sourceCommit } : {}),
       reviewed: isReviewed,

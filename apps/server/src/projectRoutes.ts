@@ -1,3 +1,5 @@
+import { boundPrincipalIsRestricted } from "./principalRouteContext";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import {
   decodeMemoryCommand,
   decodeProjectMemoryProposalDecision,
@@ -12,6 +14,7 @@ import type { CodeEnvironmentServiceApi } from "./codeEnvironmentService";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import { readPrincipalRouteContext } from "./principalRouteContext";
 import type { ProjectIconReader } from "./projectIcon";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { ProjectServiceError, type ProjectServiceApi } from "./projectService";
 import type { ProjectMemoryProposalService } from "./projectMemory/projectMemoryProposalService";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -256,7 +259,11 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         const result =
           dependencies.memoryProposals === undefined
             ? { kind: "project-memory-proposal-gone" as const }
-            : await dependencies.memoryProposals.decide(windowId, decision);
+            : await dependencies.memoryProposals.decide(
+                windowId,
+                decision,
+                eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+              );
         return response(decodeProjectMemoryProposalDecisionResult(result), 200, origin);
       }
       if (isMemoryCommands) {
@@ -270,7 +277,14 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
             origin,
           );
         }
-        return response(await dependencies.service.executeMemory(command), 200, origin);
+        return response(
+          await dependencies.service.executeMemory(
+            command,
+            eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+          ),
+          200,
+          origin,
+        );
       }
       let command;
       try {
@@ -290,7 +304,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           ((command.kind === "change-code-project-permission-mode" ||
             command.kind === "change-work-project-permission-mode") &&
             command.permissionMode === "full-access")) &&
-        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+        boundPrincipalIsRestricted(request)
       ) {
         return response(
           {
@@ -306,7 +320,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       if (
         (command.kind === "change-code-project-actions" ||
           command.kind === "change-work-project-actions") &&
-        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+        boundPrincipalIsRestricted(request)
       ) {
         return response(
           {
@@ -322,7 +336,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       // time, so a paired device does not set it on their behalf.
       if (
         command.kind === "change-work-project-developer-tools" &&
-        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+        boundPrincipalIsRestricted(request)
       ) {
         return response(
           {
@@ -338,7 +352,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       // operate the desktops a recipe produces.
       if (
         command.kind === "change-code-project-desktop-recipe" &&
-        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+        boundPrincipalIsRestricted(request)
       ) {
         return response(
           {
@@ -356,7 +370,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       if (
         command.kind === "change-project-native-providers" &&
         principal !== undefined &&
-        principal.kind !== "local-window"
+        !principalActsAsHostPerson(principal)
       ) {
         return response(
           {
@@ -393,7 +407,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           command.kind === "change-code-project-agent-pull-request-comments" ||
           command.kind === "change-code-project-agent-default-branch-push") &&
         principal !== undefined &&
-        principal.kind !== "local-window"
+        !principalActsAsHostPerson(principal)
       ) {
         return response(
           {
@@ -444,7 +458,15 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
-      return response(await dependencies.service.executeProject(windowId, command), 200, origin);
+      return response(
+        await dependencies.service.executeProject(
+          windowId,
+          command,
+          eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+        ),
+        200,
+        origin,
+      );
     } catch (error) {
       if (error instanceof ProjectServiceError) return failureResponse(error.failure, origin);
       return response(

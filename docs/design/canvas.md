@@ -1011,7 +1011,7 @@ does not, and the only drawing on a surface with no runtime.
 
 The block reads only, listing its questions and options with one line saying
 why, wherever it cannot send: a window without a message queue for the thread
-(a paired or remote client, whose queue commands the host also refuses), a
+(a paired or remote client), a
 Canvas the host gave no workspace scope for (its thread cannot be reached from
 here), a version older than the head on screen, and every surface that draws a
 Canvas without its thread: the thread itself (a Canvas holding a choice is a
@@ -1704,8 +1704,8 @@ gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
 wait the stalled-turn limit for a provider event before cutting a turn off, as Code does.
 The limit is a setting in Settings › Providers & Models, 30 minutes by default,
-which may be turned off (maintainer request, 2026-11-12). Not built yet: today
-it is a fixed five minutes.
+which may be turned off (maintainer request, 2026-11-12); see
+[Provider runtimes](provider-runtimes.md).
 Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer.

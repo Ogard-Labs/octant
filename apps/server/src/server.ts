@@ -113,6 +113,7 @@ import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
 import { createAgentGrantRouteSlot } from "./agentAccess/agentGrantRoutes";
+import { createPairedDeviceRouteSlot } from "./remote/pairedDeviceRouteSlot";
 import { createThreadMoveHolds } from "./hub/threadMoveHolds";
 import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
@@ -265,9 +266,13 @@ export function startOctantServer(
       codeSessionAuthority,
       extensionToolApprovalService,
       isPairedDeviceScope,
+      isRestrictedDeviceScope,
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
+      onThreadArchived,
+      onWaitingAsk,
+      waitingAskAnnouncement,
       onWindowRevoked,
       personMemory,
       personMemoryAccess,
@@ -279,6 +284,7 @@ export function startOctantServer(
       imageGenerationOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
+      unsubscribeThreadArchivals,
       windowAuthorityStore,
     } = wireAuthority({
       browserAuthority,
@@ -301,6 +307,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunRequestOwner,
       agentRunPersistence,
+      onThreadArchived,
       persistence,
       workThreadProjection,
     });
@@ -481,6 +488,8 @@ export function startOctantServer(
       imageGenerationOffers,
       isPairedDeviceScope,
       machineChangeFeed,
+      onThreadArchived,
+      onWaitingAsk,
       onWindowRevoked,
       serverProjectStore,
       bindingReceiptStore,
@@ -565,7 +574,7 @@ export function startOctantServer(
       extensionToolApprovalService,
       externalContentIngestionStore,
       githubExtensionSnapshot,
-      isPairedDeviceScope,
+      isRestrictedDeviceScope,
       latencyStats,
       managedWorktreeReceipts,
       nativeHarnessRouter,
@@ -678,6 +687,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      isPairedDeviceScope,
       projectMemoryAccess,
       threadMoveHolds,
       serverConnection,
@@ -800,6 +810,8 @@ export function startOctantServer(
       agentRunInteractions,
       codeSessionAuthority,
       machineChangeFeed,
+      onThreadArchived,
+      onWaitingAsk,
       onWindowRevoked,
       browserCaptures,
       codeEvidence,
@@ -843,6 +855,7 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       threadMoveHolds,
+      onThreadArchived,
       codeSessionConversation,
       worktreePreparation,
       conversationInputTransfer,
@@ -1088,6 +1101,8 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      codeProjectAccess,
+      isPairedDeviceScope,
       threadMoveHolds,
       conversationInputTransfer,
       codeBoardEventStore,
@@ -1383,6 +1398,7 @@ export function startOctantServer(
       pushNotificationTokenStore,
       workThreadProjection,
     });
+    waitingAskAnnouncement.notify = (ask) => threadNotifications.notifyWaitingAsk(ask);
     const {
       designSystemRoutes,
       fleetActivityRoutes,
@@ -1393,6 +1409,12 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      agentRunInteractions,
+      browserToolApprovalService,
+      extensionToolApprovalService,
+      imageGenerationOffers,
+      projectMemoryAccess,
+      routineProposalService,
       decisionReviewModelPort,
       isProjectPolicyTargetAllowed,
       observeWorkThreadRuntime,
@@ -1721,8 +1743,10 @@ export function startOctantServer(
     });
     yield* Effect.addFinalizer(() => Effect.promise(() => cloudSessions.service.close()));
     const agentGrantRouteSlot = createAgentGrantRouteSlot();
+    const pairedDeviceRouteSlot = createPairedDeviceRouteSlot();
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
       agentGrantRoutes: agentGrantRouteSlot.routes,
+      pairedDeviceRoutes: pairedDeviceRouteSlot.routes,
       conversationInputRoutes,
       providerCloudSessionRoutes: cloudSessions.routes,
       credentialRequestRoutes,
@@ -1849,6 +1873,7 @@ export function startOctantServer(
     } = wireRemote({
       restartRecovery,
       agentGrantRouteSlot,
+      pairedDeviceRouteSlot,
       workRequestRuntime,
       workRequestService,
       chatService,
@@ -2218,6 +2243,7 @@ export function startOctantServer(
           }
           try {
             unsubscribeMachineChanges();
+            unsubscribeThreadArchivals();
             machineChangeFeed.close();
             workTurnService.closeLiveUpdates();
           } catch (error) {

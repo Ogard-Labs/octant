@@ -39,7 +39,7 @@ import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OpenCodeManagedUpdate } from "./OpenCodeManagedUpdate";
-import type { OctantHostBridge } from "../shell/hostBridge";
+import type { ProviderKeyHost } from "./providerKeyHost";
 import {
   ProviderCreateForm,
   type ProviderCreateProviderType,
@@ -74,7 +74,7 @@ export interface ProviderSettingsViewProps {
   readonly busy: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
-  readonly hostBridge?: OctantHostBridge;
+  readonly hostBridge?: ProviderKeyHost;
   /** Open provider-owned sign-in pages through the desktop host bridge. */
   readonly onOpenExternalUrl?: (url: string) => void;
   readonly onCreate: (

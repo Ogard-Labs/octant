@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -272,13 +273,15 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    /** Who began it, as the route resolved them; the sign-in's records are journaled as theirs. */
+    actor?: EventActor,
   ): Promise<McpServerSignInView> {
     if (this.#removals.has(extensionId))
       return Promise.resolve(
         refused("unavailable", "Finish removing this server before starting another sign-in."),
       );
     return this.#forServer(extensionId, componentId, () =>
-      this.#begin(extensionId, componentId, principalKind),
+      this.#begin(extensionId, componentId, principalKind, actor),
     );
   }
   poll(
@@ -295,6 +298,8 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    /** Who asked, as the route resolved them; the sign-out record is journaled as theirs. */
+    actor?: EventActor,
   ): Promise<McpServerSignInView> {
     return this.#forServer(extensionId, componentId, async () => {
       if (principalKind === "local-window" && this.#removals.has(extensionId)) {
@@ -304,7 +309,7 @@ export class McpServerSignIn {
           ? recordView(record)
           : refused("unavailable", "Finish removing this server before changing its sign-in.");
       }
-      return this.#signOut(extensionId, componentId, principalKind);
+      return this.#signOut(extensionId, componentId, principalKind, actor);
     });
   }
   async preparePackageRemoval(extensionId: string): Promise<() => void> {
@@ -915,6 +920,7 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    actor?: EventActor,
   ): Promise<McpServerSignInView> {
     if (this.#removals.has(extensionId))
       return refused("unavailable", "Finish removing this server before starting another sign-in.");
@@ -927,7 +933,7 @@ export class McpServerSignIn {
     if (previous !== undefined) {
       if (previous.signOutPending || previous.signInAgain === undefined)
         return recordView(previous);
-      const cleaned = await this.#signOut(extensionId, componentId, principalKind);
+      const cleaned = await this.#signOut(extensionId, componentId, principalKind, actor);
       if (cleaned.kind !== "signed-out") return cleaned;
     }
     const existing = this.#attempts.get(key);
@@ -1057,6 +1063,7 @@ export class McpServerSignIn {
     const acknowledged = this.#options.oauth.acknowledgeTerms({
       principalKind,
       actorId: this.#options.actorId,
+      actor,
       descriptor,
     });
     if (acknowledged.kind === "refused") return fromRefusal(acknowledged.reason);
@@ -1065,7 +1072,7 @@ export class McpServerSignIn {
         "unavailable",
         "The server changed before sign-in could start. Reopen this connection.",
       );
-    const state = await this.#boundedBegin(principalKind, descriptor);
+    const state = await this.#boundedBegin(principalKind, descriptor, actor);
     if (state === "timed-out")
       return refused("unavailable", "The credential broker did not start the sign-in. Try again.");
     if (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") {
@@ -1089,10 +1096,12 @@ export class McpServerSignIn {
   async #boundedBegin(
     principalKind: PrincipalKind,
     descriptor: HostOAuthDescriptor,
+    actor?: EventActor,
   ): Promise<HostOAuthSignInState | "timed-out"> {
     const started = this.#options.oauth.begin({
       principalKind,
       actorId: this.#options.actorId,
+      actor,
       descriptor,
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1276,6 +1285,7 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    actor?: EventActor,
   ): Promise<McpServerSignInView> {
     await this.#load();
     if (principalKind !== "local-window") {
@@ -1320,6 +1330,7 @@ export class McpServerSignIn {
         result = await Promise.race([
           this.#options.oauth.signOut({
             principalKind,
+            actor,
             descriptor: owner.descriptor,
             credentialRef: owner.credentialRef,
             forgetWhenNotRevoked: true,

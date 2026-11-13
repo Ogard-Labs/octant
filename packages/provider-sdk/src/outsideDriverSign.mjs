@@ -22,6 +22,12 @@
  * does, so Octant refuses the same files republished under another npm name.
  * Sign the exact files the tarball will hold: the folder `npm pack` unpacks to.
  *
+ * A package of another kind (an Agent Plugin, a Codex plugin, a language
+ * server, a debug adapter, a Canvas export target) has no driver document.
+ * Give `--name` and `--version` as Octant shows them for the package: the
+ * signature then carries no protocol version, and Octant checks it the same
+ * way.
+ *
  * This file imports only runtime built-ins, so an author can copy it and run
  * it on Node or Bun without installing anything.
  */
@@ -77,12 +83,17 @@ export function publisherKeyFingerprint(rawPublicKey) {
  * Signs the package folder at `root` with `privateKeyPem` and writes its
  * signature file. Returns the fingerprint of the key that signed it.
  *
- * @param {{ root: string, privateKeyPem: string | Uint8Array, name?: string }} input
+ * @param {{ root: string, privateKeyPem: string | Uint8Array, name?: string, version?: string }} input
  * @returns {Promise<{ fingerprint: string, path: string }>}
  */
 export async function signOutsideDriverPackage(input) {
   const root = resolve(input.root);
-  const document = JSON.parse(await readFile(join(root, DRIVER_DOCUMENT_PATH), "utf8"));
+  // With both a name and a version the package is named in full, so no
+  // driver document is read: that is how any other package kind is signed.
+  const named = input.name !== undefined && input.version !== undefined;
+  const document = named
+    ? { manifest: { slug: input.name, version: input.version }, protocolVersions: [] }
+    : JSON.parse(await readFile(join(root, DRIVER_DOCUMENT_PATH), "utf8"));
   const manifest = document?.manifest;
   if (
     typeof manifest?.slug !== "string" ||
@@ -176,10 +187,11 @@ async function readStandardInput() {
 async function main(argv) {
   const [folder, ...flags] = argv;
   const usage =
-    "Usage: outsideDriverSign.mjs <package-folder> (--key-file <private-key.pem> | --key-stdin) [--name <npm package name>]";
+    "Usage: outsideDriverSign.mjs <package-folder> (--key-file <private-key.pem> | --key-stdin) [--name <package name>] [--version <package version>]";
   if (folder === undefined) throw new SigningRefused(usage);
   let privateKeyPem;
   let name;
+  let version;
   for (let index = 0; index < flags.length; index += 1) {
     const flag = flags[index];
     const value = flags[index + 1];
@@ -191,6 +203,9 @@ async function main(argv) {
     } else if (flag === "--name" && value !== undefined) {
       name = value;
       index += 1;
+    } else if (flag === "--version" && value !== undefined) {
+      version = value;
+      index += 1;
     } else {
       throw new SigningRefused(usage);
     }
@@ -200,6 +215,7 @@ async function main(argv) {
     root: folder,
     privateKeyPem,
     ...(name === undefined ? {} : { name }),
+    ...(version === undefined ? {} : { version }),
   });
   process.stdout.write(`Signed ${signed.path}\nPublisher key ${signed.fingerprint}\n`);
 }

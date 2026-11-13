@@ -38,8 +38,18 @@ export const AGENT_GRANT_MODES = ["chat", "work", "code"] as const;
 export const AgentGrantMode = Schema.Literal(...AGENT_GRANT_MODES);
 export type AgentGrantMode = typeof AgentGrantMode.Type;
 
-/** Full access is not a value here: only the person turns it on, at the host. */
-export const AGENT_GRANT_LEVELS = ["ask-first", "accept-edits", "auto", "plan"] as const;
+/**
+ * The highest level a grant's agent may run a thread at. Full access is a
+ * grant's only when the person chose it for that grant (maintainer decision,
+ * 2026-11-12); the agent's prompts stay marked as outside content at every level.
+ */
+export const AGENT_GRANT_LEVELS = [
+  "ask-first",
+  "accept-edits",
+  "auto",
+  "plan",
+  "full-access",
+] as const;
 export const AgentGrantLevel = Schema.Literal(...AGENT_GRANT_LEVELS);
 export type AgentGrantLevel = typeof AgentGrantLevel.Type;
 

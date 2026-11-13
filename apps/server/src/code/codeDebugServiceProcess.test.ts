@@ -674,6 +674,32 @@ describe("starting a debug session", () => {
     expect(test.reloadedApprovals().approvals(test.thread().projectId)).toHaveLength(1);
   });
 
+  it("lets a device the host's own person paired list, confirm, start and read a session as a local window does", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const value = test.configuration();
+    const paired = "person-paired-device";
+
+    expect(await test.configurations(paired)).toMatchObject({ status: "listed", approved: [] });
+    expect(await test.start(value, paired)).toEqual({
+      status: "refused",
+      reason: "approval-required",
+    });
+    expect(await test.approve(value, "checkout", paired)).toMatchObject({ status: "approved" });
+    const started = await test.start(value, paired);
+    expect(started).toMatchObject({ status: "started" });
+    if (started.status !== "started") return;
+    expect((await test.ask(started.sessionId, { kind: "state" }, paired)).status).not.toBe(
+      "refused",
+    );
+    // Any other device session stays refused on the same running session.
+    expect(await test.ask(started.sessionId, { kind: "state" }, "remote-device")).toEqual({
+      status: "refused",
+      reason: "local-host-required",
+    });
+  });
+
   it("starts a program that lives in an extra folder, and refuses one in a folder beside it", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));

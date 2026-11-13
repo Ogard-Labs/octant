@@ -335,6 +335,19 @@ describe("extension client", () => {
 
     expect(local.toolGrantsAvailable).toBe(true);
     expect(remote.toolGrantsAvailable).toBe(false);
+    // Over a paired device's session the base URL only shapes the path, so
+    // the host's word on the session decides, not the URL.
+    const carried = { baseUrl: "http://127.0.0.1", fetch, windowCapability: "" };
+    expect(
+      createExtensionClient({ ...carried, session: { actsAsHostPerson: true } })
+        .toolGrantsAvailable,
+    ).toBe(true);
+    const restricted = createExtensionClient({
+      ...carried,
+      session: { actsAsHostPerson: false },
+    });
+    expect(restricted.toolGrantsAvailable).toBe(false);
+    await expect(restricted.listToolGrants()).rejects.toMatchObject({ category: "unavailable" });
     await expect(remote.listToolGrants()).rejects.toMatchObject({ category: "unavailable" });
     await expect(remote.revokeToolGrant(`sha256:${"b".repeat(64)}`)).rejects.toMatchObject({
       category: "unavailable",

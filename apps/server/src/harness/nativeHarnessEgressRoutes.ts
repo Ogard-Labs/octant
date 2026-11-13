@@ -4,6 +4,7 @@ import {
   type ToolEgressCommandRefusalReason,
   type ToolEgressCommandResult,
 } from "@octant/contracts";
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -90,10 +91,17 @@ export function createNativeHarnessEgressRouteHandler(
         ...(body === undefined ? {} : { body }),
       });
       windowId = String(context.scopeId);
+      // A device the host's own person paired grants what a local window
+      // grants; either device is the one its rules and changes name.
       person =
-        context.principal.kind === "remote-device"
-          ? { kind: "remote-device", deviceId: String(context.principal.deviceId) }
-          : { kind: "local-window" };
+        context.principal.kind !== "remote-device"
+          ? { kind: "local-window" }
+          : {
+              kind: principalActsAsHostPerson(context.principal)
+                ? "person-paired-device"
+                : "remote-device",
+              deviceId: String(context.principal.deviceId),
+            };
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Tool egress request is unauthorized.", 401, origin);

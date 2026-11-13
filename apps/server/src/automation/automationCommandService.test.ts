@@ -59,6 +59,7 @@ afterEach(() => {
 interface Harness {
   readonly projection: AutomationProjection;
   readonly service: AutomationCommandService;
+  readonly journal: Journal;
 }
 
 function createHarness(): Harness {
@@ -80,7 +81,7 @@ function createHarness(): Harness {
     hostId: "local",
     clock: () => now,
   });
-  return { projection, service };
+  return { projection, service, journal };
 }
 
 const principal = automationLocalWindowPrincipal();
@@ -172,6 +173,45 @@ describe("automation command service", () => {
       timeZone: "Europe/Copenhagen",
       resolvedLocalTime: "09:30",
     });
+  });
+
+  it("journals a routine a paired device made, changed and paused with the device as their actor, and a local window's as the store's own", () => {
+    const deviceId = "ba000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId };
+    const actorsBy = (by: AutomationCommand["principal"]) => {
+      const harness = createHarness();
+      const id = automationId("00d2");
+      const made = harness.service.execute(createCommand(id, { principal: by }));
+      if (made.kind !== "automation-created") throw new Error(`expected creation: ${made.kind}`);
+      const changed = harness.service.execute({
+        ...createCommand(id, { principal: by }),
+        kind: "update-automation",
+        expectedVersion: made.automation.version,
+        definition: automationDefinitionDraftFixture({ displayName: "Renamed" }),
+      } as unknown as AutomationCommand);
+      if (changed.kind !== "automation-updated")
+        throw new Error(`expected update: ${changed.kind}`);
+      const paused = harness.service.execute({
+        kind: "pause-automation",
+        automationId: id,
+        expectedVersion: changed.automation.version,
+        principal: by,
+        origin: interactive,
+      } as unknown as AutomationCommand);
+      expect(paused.kind).toBe("automation-paused");
+      return harness.journal
+        .replay({ afterSequence: 0 as never, limit: 100 } as never)
+        .map((event) => event.actor);
+    };
+
+    // The principal is the one the gateway authenticated, admission included.
+    const byDevice = actorsBy({
+      ...automationRemoteDevicePrincipal(),
+      deviceId,
+      admittedBy: "host-person",
+    } as never);
+    expect(byDevice).toEqual([device, device, device]);
+    expect(actorsBy(principal)).toEqual([actor, actor, actor]);
   });
 
   it("rejects automation-origin mutation before any side effect", () => {

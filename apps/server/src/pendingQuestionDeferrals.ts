@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { Schema } from "effect";
-import { ActorId, AggregateId, CorrelationId, EventId, LOCAL_HOST_ID } from "@octant/contracts";
+import {
+  ActorId,
+  AggregateId,
+  CorrelationId,
+  EventId,
+  LOCAL_HOST_ID,
+  type EventActor,
+} from "@octant/contracts";
 import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import { readAggregateVersion } from "./persistence/chatProjection";
 import type { Journal } from "./persistence/journal";
@@ -29,7 +36,9 @@ export function pendingQuestionDeferrals(journal: Journal, connection: SqliteCon
   }
   return {
     read: (key: string) => untilByKey.get(key),
-    record: (change: PendingQuestionDeferral) => {
+    // `actor` is who deferred it, resolved from the authenticated principal;
+    // absent means the person at this host.
+    record: (change: PendingQuestionDeferral, actor?: EventActor) => {
       const payload = Schema.decodeUnknownSync(PendingQuestionDeferral)(change);
       journal.append({
         aggregate: { aggregateType, aggregateId },
@@ -41,7 +50,7 @@ export function pendingQuestionDeferrals(journal: Journal, connection: SqliteCon
             eventVersion: 1,
             hostId: LOCAL_HOST_ID,
             correlationId: Schema.decodeUnknownSync(CorrelationId)(randomUUID()),
-            actor: {
+            actor: actor ?? {
               kind: "local-user",
               actorId: Schema.decodeUnknownSync(ActorId)(OCTANT_LOCAL_ACTOR_ID),
             },

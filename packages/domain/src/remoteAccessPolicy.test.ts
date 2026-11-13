@@ -255,6 +255,48 @@ describe("remote access policy", () => {
     ).toEqual({ kind: "deny", reason: "remote-cannot-mint-local-receipt" });
   });
 
+  it("lets a device the host's own person paired do what a local window does", () => {
+    for (const action of listRemoteActionCatalog().localHostRequired) {
+      // Minting a local receipt and calling the desktop bridge need the bridge
+      // secret, which only a window on the host holds.
+      if (action === "desktop.issue-local-approval" || action === "desktop.bridge.invoke") continue;
+      expect(authorizePrincipalAction({ principalKind: "person-paired-device", action })).toEqual({
+        kind: "allow",
+      });
+      // A hub-introduced device and an agent grant keep the restricted class.
+      expect(authorizePrincipalAction({ principalKind: "remote-device", action })).toEqual({
+        kind: "deny",
+        reason: "local-host-required",
+      });
+    }
+  });
+
+  it("never lets a device the person paired become a local window or mint its receipts", () => {
+    expect(
+      authorizePrincipalAction({
+        principalKind: "person-paired-device",
+        action: "terminal.write",
+        requestedPrincipalKind: "local-window",
+      }),
+    ).toEqual({ kind: "deny", reason: "principal-laundering" });
+    for (const action of [
+      "desktop.issue-local-approval",
+      "desktop.bridge.invoke",
+      "principal.upgrade-to-local-window",
+    ]) {
+      expect(authorizePrincipalAction({ principalKind: "person-paired-device", action })).toEqual({
+        kind: "deny",
+        reason: "remote-cannot-mint-local-receipt",
+      });
+    }
+    expect(
+      authorizePrincipalAction({
+        principalKind: "person-paired-device",
+        action: "invented.action",
+      }),
+    ).toEqual({ kind: "deny", reason: "unknown-action" });
+  });
+
   it("exports a stable least-authority catalog covering required surfaces", () => {
     const catalog = listRemoteActionCatalog();
     expect(catalog.localHostRequired).toEqual(

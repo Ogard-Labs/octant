@@ -243,7 +243,6 @@ export function createImageAgentTools(options: {
             };
           case "save":
           case "cancelled":
-          case "expired":
             return {
               result: {
                 status: "cancelled",

@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import { connect as connectSocket, createServer, type Socket } from "node:net";
 import { realpath } from "node:fs/promises";
@@ -51,6 +52,7 @@ import {
   type CodeDebugStartResult,
 } from "@octant/contracts/code-debug";
 import {
+  actsAsHostPerson,
   canonicalDebugConfigurationText,
   decideDebugSessionStart,
   proposeDebugConfigurations,
@@ -153,6 +155,8 @@ export interface CodeDebugCaller {
    * window does and never confirms a configuration.
    */
   readonly principal: PrincipalKind | "agent";
+  /** Who the journal names for what this caller confirms; absent means the person at this host. */
+  readonly actor?: EventActor | undefined;
 }
 
 /**
@@ -187,6 +191,7 @@ export interface CodeDebugApprovals {
     readonly configurationDigest: CodeDebugConfigurationDigest;
     readonly adapter: DebugAdapterPackageState;
     readonly scope: CodeDebugApprovalRequest["scope"];
+    readonly actor?: EventActor | undefined;
   }) => "recorded" | "not-recorded";
 }
 
@@ -381,7 +386,8 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     request: CodeDebugConfigurationsRequest,
   ): Promise<CodeDebugConfigurationsResult> {
-    if (caller.principal === "remote-device") return refused("local-host-required");
+    if (caller.principal !== "agent" && !actsAsHostPerson(caller.principal))
+      return refused("local-host-required");
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
     if (authorized.status === "refused") return authorized;
     const adapters = this.#adapters();
@@ -424,7 +430,8 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     scope: { readonly threadId: CodeThreadId; readonly checkoutId: CodeCheckoutId },
   ): CodeDebugThreadSession {
-    if (caller.principal === "remote-device") return refused("local-host-required");
+    if (caller.principal !== "agent" && !actsAsHostPerson(caller.principal))
+      return refused("local-host-required");
     const authorized = this.#authorize(caller, scope.threadId, scope.checkoutId);
     if (authorized.status === "refused") return authorized;
     const running = this.#runningFor(scope.threadId);
@@ -447,7 +454,8 @@ export class CodeDebugService {
   }
 
   /**
-   * The person at a local window confirms one configuration for this
+   * The host's own person, at a local window or on a device they paired
+   * (maintainer decision, 2026-11-13), confirms one configuration for this
    * checkout or the thread's Project. Every check a start makes runs first,
    * with the confirmation taken as given, so Plan refuses and nothing is
    * recorded for a configuration the thread could not start.
@@ -456,7 +464,8 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     request: CodeDebugApprovalRequest,
   ): Promise<CodeDebugApprovalResult> {
-    if (caller.principal !== "local-window") return refused("local-host-required");
+    if (caller.principal === "agent" || !actsAsHostPerson(caller.principal))
+      return refused("local-host-required");
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
     if (authorized.status === "refused") return authorized;
     const adapter = this.#adapterFor(request.configuration);
@@ -486,14 +495,16 @@ export class CodeDebugService {
       configurationDigest,
       adapter: adapter.packageState,
       scope: request.scope,
+      actor: caller.actor,
     });
     if (recorded !== "recorded") return { status: "not-recorded" };
     return { status: "approved", configurationDigest, scope: request.scope };
   }
 
   /**
-   * A person's Start at a local window, or the thread's agent's through its
-   * tool. Nothing launches until every check passes.
+   * A person's Start, at a local window or on a device they paired, or the
+   * thread's agent's through its tool. Nothing launches until every check
+   * passes.
    */
   async start(
     caller: CodeDebugCaller,
@@ -647,7 +658,8 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     call: CodeDebugSessionCall,
   ): Promise<CodeDebugSessionResult> {
-    if (caller.principal === "remote-device") return refused("local-host-required");
+    if (caller.principal !== "agent" && !actsAsHostPerson(caller.principal))
+      return refused("local-host-required");
     const authorized = this.#authorize(caller, call.threadId, call.checkoutId);
     if (authorized.status === "refused") return authorized;
     const record = this.#sessions.get(String(call.sessionId));

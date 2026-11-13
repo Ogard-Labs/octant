@@ -594,6 +594,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     AuthorityWiring,
     | "bindingReceiptStore"
     | "codeSessionAuthority"
+    | "isPairedDeviceScope"
     | "liveTurns"
     | "machineChangeFeed"
     | "onWindowRevoked"
@@ -662,6 +663,7 @@ export function wireCode(deps: CodeDependencies) {
     managedWorktreeService,
     managedWorktreeSourcePreview,
     onGithubPullRequestsUnreadable,
+    isPairedDeviceScope,
     onWindowRevoked,
     options,
     persistence,
@@ -881,6 +883,7 @@ export function wireCode(deps: CodeDependencies) {
       // window that reopens registers the same window id again.
       isWindowLive: (scopeId) =>
         windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)),
+      isPairedDevice: isPairedDeviceScope,
     });
     const canAccessCodeProject = (scopeId: WindowId, projectId: ProjectId) =>
       codeProjectAccess.canAccessProject(scopeId, projectId);
@@ -1160,10 +1163,11 @@ export function wireCode(deps: CodeDependencies) {
       merge: projectPullRequestPorts.merge,
       requiredChecks: (request, signal) =>
         projectPullRequestPorts.actions.requiredChecks(request, signal),
-      recordMerge: (record) =>
+      recordMerge: (record, actor) =>
         journalPullRequestMerge(persistence.journal, record, {
           uuid: randomUUID,
           clock: () => new Date().toISOString(),
+          ...(actor === undefined ? {} : { actor }),
         }),
       cacheStats,
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
@@ -1179,12 +1183,13 @@ export function wireCode(deps: CodeDependencies) {
     const projectPullRequestActionService = new CodeProjectPullRequestActionService({
       authority: projectPullRequestService,
       forge: projectPullRequestPorts.actions,
-      merge: (windowId, command, signal, caller) =>
-        projectPullRequestService.merge(windowId, command, signal, caller),
-      record: (record) =>
+      merge: (windowId, command, signal, caller, actor) =>
+        projectPullRequestService.merge(windowId, command, signal, caller, actor),
+      record: (record, actor) =>
         journalPullRequestAction(persistence.journal, record, {
           uuid: randomUUID,
           clock: () => new Date().toISOString(),
+          ...(actor === undefined ? {} : { actor }),
         }),
     });
     onGithubPullRequestsUnreadable(() => projectPullRequestService.revokeGithub());

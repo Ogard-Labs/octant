@@ -39,10 +39,7 @@ import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
 import { resolveEffectiveThemeMode } from "@octant/domain/theme-policy";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController, LocateBinaryOutcome } from "../providers/useDiscoveryController";
-import {
-  ProviderSettingsView,
-  type ProviderSettingsViewProps,
-} from "../providers/ProviderSettingsView";
+import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
 import { ProviderSettingsList } from "../providers/ProviderSettingsList";
@@ -218,7 +215,7 @@ import {
   agentAccessAdministrationOf,
   type OctantHostBridge,
 } from "./hostBridge";
-import { openExternalUrl } from "./openExternalUrl";
+import { providerSettingsViewProps } from "../providers/providerSettingsViewProps";
 import { ApplicationIdentity } from "./ApplicationIdentity";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import "../styles/settings.css";
@@ -1235,6 +1232,40 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           </div>
+          <div hidden={harnessEndpointOpen} id="settings-stalled-turns">
+            <SettingsSection title="Stalled turns">
+              <div className="setgroup">
+                <SettingRow
+                  description="Cuts a turn off when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
+                  focused={focusedSetting === settingId("stalled-turn-limit")}
+                  label="Stalled-turn limit"
+                  scope="host"
+                  settingId="stalled-turn-limit"
+                >
+                  <StalledTurnLimitSelect
+                    minutes={props.settings.stalledTurnLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ stalledTurnLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  description="Pauses the stalled-turn limit for at most this long while one tool call the provider reports as running has not finished, from the next turn."
+                  focused={focusedSetting === settingId("provider-tool-call-pause-limit")}
+                  label="Tool-call pause limit"
+                  scope="host"
+                  settingId="provider-tool-call-pause-limit"
+                >
+                  <ProviderToolCallPauseLimitSelect
+                    minutes={props.settings.providerToolCallPauseLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ providerToolCallPauseLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          </div>
           <ProviderCatalogSection
             discoveryController={props.discoveryController}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -1615,10 +1646,10 @@ function ActiveSectionContent({
                 <SettingRow
                   description={
                     transfer.direction === "upload"
-                      ? `Agents upload files from ${transfer.workspaceRoot} to this site without asking.`
-                      : `Agents save downloads from this site into ${transfer.workspaceRoot} without asking.`
+                      ? `Agents upload files from ${transfer.workspaceRoot} to this site ${rememberedTransferProfile(transfer)} without asking.`
+                      : `Agents save downloads from this site ${rememberedTransferProfile(transfer)} into ${transfer.workspaceRoot} without asking.`
                   }
-                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}`}
+                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}\0${transfer.profile === undefined && transfer.privatePage !== true ? "any" : browserProfileKey(transfer.profile)}`}
                   label={`${transfer.direction === "upload" ? "Uploads to" : "Downloads from"} ${transfer.origin}`}
                   scope="host"
                   settingId="browser-agent-downloads"
@@ -2083,81 +2114,6 @@ function ProviderCatalogSection(props: {
  * instances shares: Providers & Models lists agent runtimes and Octant
  * Harness lists model endpoints, over the same controller.
  */
-function providerSettingsViewProps(
-  controller: ProviderController,
-  hostBridge: OctantHostBridge | undefined,
-): Omit<ProviderSettingsViewProps, "discovery" | "discoverySnapshot"> {
-  return {
-    busy: controller.busy,
-    credentialManagementAvailable: controller.credentialManagementAvailable,
-    defaults: controller.defaults,
-    instances: controller.instances,
-    ...(controller.message === undefined ? {} : { message: controller.message }),
-    observedByInstance: controller.observedByInstance,
-    presentationObservedByInstance: controller.presentationObservedByInstance,
-    onOpenExternalUrl: (url) => openExternalUrl(hostBridge, url),
-    ...(hostBridge === undefined ? {} : { hostBridge: hostBridge }),
-    onChangeBinary: controller.changeBinary,
-    onChangeClaudeConfiguration: controller.changeClaudeConfiguration,
-    onChangeCodexConfiguration: controller.changeCodexConfiguration,
-    onChangeAcpAgentConfiguration: controller.changeAcpAgentConfiguration,
-    onChangePiConfiguration: controller.changePiConfiguration,
-    onChangeOhMyPiConfiguration: controller.changeOhMyPiConfiguration,
-    onChangeOllamaConfiguration: controller.changeOllamaConfiguration,
-    onChangeOutsideHarnessEndpointConfiguration:
-      controller.changeOutsideHarnessEndpointConfiguration,
-    onChangeOpenAiCompatibleConfiguration: controller.changeOpenAiCompatibleConfiguration,
-    onChangeOpenAiImageConfiguration: controller.changeOpenAiImageConfiguration,
-    onChangeGeminiImageConfiguration: controller.changeGeminiImageConfiguration,
-    onChangeBflImageConfiguration: controller.changeBflImageConfiguration,
-    onChangeIdeogramImageConfiguration: controller.changeIdeogramImageConfiguration,
-    onChangeAnthropicCompatibleConfiguration: controller.changeAnthropicCompatibleConfiguration,
-    onChangeAzureFoundryConfiguration: controller.changeAzureFoundryConfiguration,
-    onChangeAmazonBedrockConfiguration: controller.changeAmazonBedrockConfiguration,
-    onClearProviderCredential: controller.clearProviderCredential,
-    ...(controller.providerOAuth === undefined
-      ? {}
-      : { onProviderOAuth: controller.providerOAuth }),
-    onBeginProviderAuthentication: controller.beginProviderAuthentication,
-    onCompleteProviderAuthentication: controller.completeProviderAuthentication,
-    onUpdateProviderCli: controller.updateProviderCli,
-    onCreate: controller.create,
-    onCreateClaude: controller.createClaude,
-    onCreateAcpAgent: controller.createAcpAgent,
-    onCreateOllama: controller.createOllama,
-    onCreateOpenAiCompatible: controller.createOpenAiCompatible,
-    onCreateAnthropicCompatible: controller.createAnthropicCompatible,
-    onCreateAzureFoundry: controller.createAzureFoundry,
-    onCreateAmazonBedrock: controller.createAmazonBedrock,
-    onCreateOpenAiImage: controller.createOpenAiImage,
-    onCreateGeminiImage: controller.createGeminiImage,
-    onCreateBflImage: controller.createBflImage,
-    onCreateIdeogramImage: controller.createIdeogramImage,
-    onPermissionPersistenceChange: controller.updatePermissionPersistence,
-    onProbe: controller.probe,
-    onProviderOrderChange: controller.updateProviderOrder,
-    onAgentEligibleModelsChange: controller.updateAgentEligibleModels,
-    onHiddenModelsChange: controller.updateHiddenModels,
-    onVerifyModelTools: controller.verifyModelTools,
-    onProviderCredentialStatus: controller.providerCredentialStatus,
-    onRemove: controller.remove,
-    onRename: controller.rename,
-    onRetry: controller.retry,
-    onSetEnabled: controller.setEnabled,
-    onSetClaudeArtifactDelivery: controller.setClaudeArtifactDelivery,
-    onSetProviderNativeSetup: controller.setProviderNativeSetup,
-    onSetProviderOwnMemory: controller.setProviderOwnMemory,
-    onDataTagsChange: controller.setDataTags,
-    onModelDataTagsChange: controller.setModelDataTags,
-    onModelContextWindowChange: controller.setModelContextWindow,
-    probingIds: controller.probingIds,
-    updatingIds: controller.updatingIds,
-    latestVersions: controller.latestVersions,
-    onCheckLatestVersions: controller.checkLatestVersions,
-    status: controller.status,
-  };
-}
-
 interface SectionProps {
   readonly focusedSetting: SettingsSettingId | undefined;
   readonly props: SettingsViewProps;
@@ -2262,6 +2218,31 @@ function AutoCompactIdleSelect(props: {
   );
 }
 
+const STALLED_TURN_LIMIT_CHOICES: ReadonlyArray<number> = [5, 15, 30, 60, 120, 240, 480];
+
+/** How long a turn may go without a provider event before it is cut off, plus Off. */
+function StalledTurnLimitSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || STALLED_TURN_LIMIT_CHOICES.includes(props.minutes)
+      ? STALLED_TURN_LIMIT_CHOICES
+      : [...STALLED_TURN_LIMIT_CHOICES, props.minutes].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Stalled-turn limit"
+      id="stalled-turn-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
+        { id: "off", label: "Off" },
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
 const BROWSER_TRANSFER_FILE_LIMIT_CHOICES: ReadonlyArray<number> = [
   10, 25, 50, 100, 250, 500, 1024,
 ];
@@ -2269,6 +2250,18 @@ const BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES: ReadonlyArray<number> = [5, 10, 20, 5
 const BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES: ReadonlyArray<number> = [1, 5, 10, 20, 50];
 
 /** One of the Browser transfer limits; a stored value outside the choices stays selectable. */
+/** Where a remembered upload or download answer applies: the profile the page was in. */
+function rememberedTransferProfile(
+  transfer: SettingsViewProps["settings"]["rememberedBrowserTransfers"][number],
+): string {
+  const profile = transfer.profile;
+  // Remembered before the page was recorded: it covered every page then and still does.
+  if (profile === undefined && transfer.privatePage !== true) return "on any page";
+  if (profile === undefined) return "on Private pages";
+  if (profile.kind === "personal") return "in the Personal profile";
+  return profile.kind === "project" ? "in a Project profile" : "in an added account profile";
+}
+
 function BrowserTransferLimitSelect(props: {
   readonly id: string;
   readonly label: string;
@@ -2289,6 +2282,42 @@ function BrowserTransferLimitSelect(props: {
       value={String(props.value)}
     />
   );
+}
+
+const PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES: ReadonlyArray<number> = [30, 60, 120, 240, 480, 1440];
+
+/** How long one provider tool call may pause the stalled-turn limit, plus Off. */
+function ProviderToolCallPauseLimitSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES.includes(props.minutes)
+      ? PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES
+      : [...PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES, props.minutes].sort(
+          (left, right) => left - right,
+        );
+  return (
+    <OctantSelectField
+      aria-label="Tool-call pause limit"
+      id="provider-tool-call-pause-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
+        { id: "off", label: "Off" },
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
+/** A turn limit's choice, read as the length it allows; both turn limits share it. */
+function durationChoiceLabel(minutes: number): string {
+  return minutes < 60
+    ? `${String(minutes)} minutes`
+    : minutes === 60
+      ? "1 hour"
+      : `${String(minutes / 60)} hours`;
 }
 
 const AUTO_COMPACT_LIMIT_CHOICES: ReadonlyArray<number> = [75, 80, 85, 90, 95];

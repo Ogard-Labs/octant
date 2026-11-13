@@ -1,3 +1,4 @@
+import { actsAsHostPerson, type PrincipalKind } from "./remoteAccessPolicy";
 import {
   lookupClosedToolCatalogEntry,
   MAX_NAMED_INGESTED_SOURCES,
@@ -117,7 +118,7 @@ export type ExternalContentClearDecision =
  */
 export function decideExternalContentClear(input: {
   /** `host` is the host's own scope: a routine, goal loop, resume, or child delivery. */
-  readonly principal: "local-window" | "remote-device" | "host";
+  readonly principal: PrincipalKind | "host";
   /**
    * `active` is a running or queued turn. `unconfirmed` is a turn that ended
    * without the host learning how. `unknown` is a thread the host cannot read.
@@ -134,9 +135,11 @@ export function decideExternalContentClear(input: {
    */
   readonly threadIdShared?: boolean;
 }): ExternalContentClearDecision {
-  // Only a person at this machine reviews. Decided first, so a refused
-  // caller learns nothing about the thread.
-  if (input.principal !== "local-window") return { kind: "refuse", reason: "unauthorized" };
+  // Only the host's own person reviews, at this machine or on a device they
+  // paired. Decided first, so a refused caller learns nothing about the thread.
+  if (input.principal === "host" || !actsAsHostPerson(input.principal)) {
+    return { kind: "refuse", reason: "unauthorized" };
+  }
   if (input.turn === "unknown" || input.threadIdShared === true) {
     return { kind: "refuse", reason: "thread-unavailable" };
   }

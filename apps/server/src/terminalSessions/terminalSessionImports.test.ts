@@ -352,4 +352,26 @@ describe("terminal session imports", () => {
     expect(restarted.peekFramedForFirstTurn(threadId)).toBeUndefined();
     expect(restarted.history(threadId)?.entries).toHaveLength(2);
   });
+
+  it("journals a terminal session a paired device brought in with the device as its actor, and a local window's as the store's own", async () => {
+    const deviceId = "00000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId };
+    const importedBy = async (actor?: never) => {
+      const folder = temporaryDirectory("octant-terminal-folder-");
+      const journal = openJournal();
+      const imports = importsOn(
+        journal,
+        sessionsOnDisk(folder, temporaryDirectory("octant-terminal-elsewhere-")),
+      );
+      const prepared = await imports.prepare(request("claude", claudeSession), folder);
+      if (prepared.status !== "ready") throw new Error("expected a prepared session");
+      imports.journalImported(threadId, prepared.prepared, actor);
+      return journal
+        .replay({ afterSequence: 0 as never, limit: 10 } as never)
+        .map((event) => event.actor);
+    };
+
+    expect(await importedBy(device as never)).toEqual([device]);
+    expect((await importedBy()).map((actor) => actor.kind)).toEqual(["local-user"]);
+  });
 });

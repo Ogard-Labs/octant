@@ -123,6 +123,12 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   "provider.list-models",
   "usage.spend-ceiling.read",
 ]);
+/**
+ * What only the host's own person does: at a local window, or on a device they
+ * paired. The comments below say "stays on the host" of the sessions this list
+ * still holds: a device the hub's roster introduced, an agent grant, and any
+ * pairing that is not proved.
+ */
 const LOCAL_HOST_ACTIONS = new Set([
   "desktop.enable-listener",
   "desktop.disable-listener",
@@ -187,7 +193,19 @@ export function classifyRemoteAction(action: string): RemoteActionDecision {
   return { kind: "rejected" };
 }
 
-export type PrincipalKind = "local-window" | "remote-device";
+/**
+ * `person-paired-device` is a device the host's own person paired: it is that
+ * person, and passes wherever a local window passes (maintainer decision,
+ * 2026-11-12). `remote-device` is every other authenticated device session (a
+ * device the hub's roster introduced, an agent grant, a principal whose
+ * pairing is not proved) and stays held to the remote action catalogue.
+ */
+export type PrincipalKind = "local-window" | "person-paired-device" | "remote-device";
+
+/** Whether the principal is the host's own person, at the machine or on a device they paired. */
+export function actsAsHostPerson(principalKind: PrincipalKind): boolean {
+  return principalKind === "local-window" || principalKind === "person-paired-device";
+}
 
 export type PrincipalActionDecision =
   | { readonly kind: "allow" }
@@ -201,8 +219,9 @@ export type PrincipalActionDecision =
     };
 
 /**
- * Principal-aware least-authority gate. Unknown actions fail closed. Remote
- * principals cannot become local-window or mint native/local receipts.
+ * Principal-aware least-authority gate. Unknown actions fail closed. No device
+ * becomes a local window or mints a native or local receipt: those need the
+ * desktop bridge, which only a window on the host holds.
  */
 export function authorizePrincipalAction(input: {
   readonly principalKind: PrincipalKind;
@@ -218,7 +237,7 @@ export function authorizePrincipalAction(input: {
 
   // Explicit laundering / receipt-mint attempts.
   if (
-    input.principalKind === "remote-device" &&
+    input.principalKind !== "local-window" &&
     (input.action === "desktop.issue-local-approval" ||
       input.action === "desktop.bridge.invoke" ||
       input.action === "principal.upgrade-to-local-window")
@@ -230,7 +249,7 @@ export function authorizePrincipalAction(input: {
   if (classification.kind === "rejected") {
     return { kind: "deny", reason: "unknown-action" };
   }
-  if (classification.kind === "local-host-required" && input.principalKind !== "local-window") {
+  if (classification.kind === "local-host-required" && !actsAsHostPerson(input.principalKind)) {
     return { kind: "deny", reason: "local-host-required" };
   }
   return { kind: "allow" };

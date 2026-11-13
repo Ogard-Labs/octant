@@ -17,10 +17,12 @@ export const EXTENSION_TOOL_GRANT_PROJECTION = "extension-tool-grants";
 /**
  * What a grant is for, whatever version it binds: one MCP tool, or every tool
  * of one server when `mcpToolName` is absent, in one Project, or for the
- * account when `projectId` is absent.
+ * account when `projectId` is absent. With `threadId` it is the answer for
+ * one server on one thread that had taken in outside content.
  */
 export interface ExtensionToolGrantSubject {
   readonly projectId?: string | undefined;
+  readonly threadId?: string | undefined;
   readonly extensionId: string;
   readonly packageId: string;
   readonly componentId: string;
@@ -41,6 +43,7 @@ export interface ProjectedExtensionToolGrant extends ExtensionToolGrant {
 interface GrantRow {
   readonly grant_id: string;
   readonly project_id: string | null;
+  readonly thread_id: string | null;
   readonly extension_id: string;
   readonly package_id: string;
   readonly component_id: string;
@@ -58,7 +61,9 @@ interface GrantRow {
  * answer replaces the first row instead of standing beside it, and replaying
  * the journal twice cannot grow the table. An absent Project or tool is
  * written as null, which no id or tool name can equal, so a grant for the
- * account or for a whole server has an id of its own.
+ * account or for a whole server has an id of its own. A thread is added
+ * only when the answer is for one, so every id journaled before a thread
+ * could be named stays the id of the same grant.
  */
 export function extensionToolGrantId(subject: ExtensionToolGrantSubject): string {
   const identity = JSON.stringify([
@@ -67,6 +72,7 @@ export function extensionToolGrantId(subject: ExtensionToolGrantSubject): string
     subject.packageId,
     subject.componentId,
     subject.mcpToolName ?? null,
+    ...(subject.threadId === undefined ? [] : [subject.threadId]),
   ]);
   return `sha256:${createHash("sha256").update(identity).digest("hex")}`;
 }
@@ -99,10 +105,10 @@ export class ExtensionToolGrantProjection implements Projection {
       connection
         .prepare(
           `INSERT INTO extension_tool_grant_projection (
-            grant_id, project_id, extension_id, package_id, component_id, mcp_tool_name,
-            package_version, package_digest, definition_digest, revocation_reason, granted_at,
-            aggregate_version, last_sequence
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+            grant_id, project_id, thread_id, extension_id, package_id, component_id,
+            mcp_tool_name, package_version, package_digest, definition_digest,
+            revocation_reason, granted_at, aggregate_version, last_sequence
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
           ON CONFLICT (grant_id) DO UPDATE SET
             package_version = excluded.package_version,
             package_digest = excluded.package_digest,
@@ -116,6 +122,7 @@ export class ExtensionToolGrantProjection implements Projection {
         .run(
           grant.grantId,
           grant.projectId ?? null,
+          grant.threadId ?? null,
           String(grant.extensionId),
           String(grant.packageId),
           String(grant.componentId),
@@ -152,7 +159,7 @@ export class ExtensionToolGrantProjection implements Projection {
   }
 }
 
-const GRANT_COLUMNS = `grant_id, project_id, extension_id, package_id, component_id,
+const GRANT_COLUMNS = `grant_id, project_id, thread_id, extension_id, package_id, component_id,
   mcp_tool_name, package_version, package_digest, definition_digest, revocation_reason,
   granted_at, last_sequence`;
 
@@ -196,6 +203,7 @@ function projectGrant(row: GrantRow): ProjectedExtensionToolGrant {
     ...decodeExtensionToolGrant({
       grantId: row.grant_id,
       ...(row.project_id === null ? {} : { projectId: row.project_id }),
+      ...(row.thread_id === null ? {} : { threadId: row.thread_id }),
       extensionId: row.extension_id,
       packageId: row.package_id,
       componentId: row.component_id,
