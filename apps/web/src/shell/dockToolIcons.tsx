@@ -1,5 +1,6 @@
 import {
   Activity,
+  Layers,
   Bug,
   Bot,
   CircleDashed,
@@ -41,6 +42,7 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
   terminal: SquareTerminal,
   tests: FlaskConical,
   vitals: Activity,
+  artifacts: Layers,
 };
 
 export function dockToolIcon(surface: RightUtilityDockSurfaceId): LucideIcon {

@@ -669,6 +669,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         desktop={threadUtility("desktop")}
         debug={threadUtility("debug")}
         vitals={threadUtility("vitals")}
+        artifacts={threadUtility("artifacts")}
         {...(isNarrow
           ? {
               toolRow: {

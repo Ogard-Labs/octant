@@ -8,6 +8,7 @@ export type RightUtilityDockSurfaceId =
   | "files"
   | "document"
   | "canvas"
+  | "artifacts"
   | "plan"
   | "delivery"
   | "agents"
@@ -324,6 +325,14 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     modes: ["work", "code"],
     scope: "thread",
   },
+  {
+    // The thread's Project's artifacts, read from the host-wide library
+    // clamped to that one Project; Chat has no Project to list.
+    id: "artifacts",
+    label: "Artifacts",
+    modes: ["work", "code"],
+    scope: "thread",
+  },
 ] as const satisfies ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
@@ -346,6 +355,7 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     desktop: RIGHT_UTILITY_DOCK_SURFACES[15],
     debug: RIGHT_UTILITY_DOCK_SURFACES[16],
     vitals: RIGHT_UTILITY_DOCK_SURFACES[17],
+    artifacts: RIGHT_UTILITY_DOCK_SURFACES[18],
   };
 
 export function resolveRightUtilityDockSurface(
