@@ -1904,7 +1904,14 @@ answers no upgrade), and no path on the host but those. After the bridge the
 host writes one more script, which sends what the page's script asks of an
 absolute `http:` or `https:` address to its path instead: a `fetch`, the `src`
 of an `img` element, a `FontFace`, and a `url()` in a `style` element the
-script adds (a font in `@font-face`, an image anywhere else). A design's own
+script adds (a font in `@font-face`, an image anywhere else). An image's `src`
+is sent to its path when the script assigns it, by the property or by
+`setAttribute`, whether or not the element is in the page, so an image a
+script preloads with `new Image()` loads; markup the script inserts is caught
+when it is attached. Read back, `src` is the proxied address, as
+`getAttribute` and `currentSrc` report it. `data:` and `blob:` addresses and
+one already proxied are left as written. Not sent anywhere: `srcset`, and a
+`url()` in an inline `style` attribute. A design's own
 markup and style sheets still name no remote address
 (the markup policy under [Design block](#design-block) refuses every remote
 load when the design is written, with the switch on or off), so

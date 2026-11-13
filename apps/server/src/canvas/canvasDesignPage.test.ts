@@ -118,8 +118,24 @@ describe("a running design's page with its Canvas's network on", () => {
         image.src = value;
       },
     }));
+    // A stand-in for the browser's image element: `src` is an accessor on the
+    // prototype and `setAttribute` is inherited, as in a browser.
+    class FakeElement {
+      loads: string[] = [];
+      setAttribute(name: string, value: string) {
+        if (name === "src") this.loads.push(value);
+      }
+    }
+    class FakeImage extends FakeElement {
+      get src() {
+        return this.loads.at(-1) ?? "";
+      }
+      set src(value: string) {
+        this.loads.push(value);
+      }
+    }
     let loaded: (() => void) | undefined;
-    new Function("window", "document", "location", script)(
+    new Function("window", "document", "location", "HTMLImageElement", script)(
       pageWindow,
       {
         baseURI: "http://127.0.0.1:4455/api/canvas/design-page?ticket=x",
@@ -129,9 +145,10 @@ describe("a running design's page with its Canvas's network on", () => {
         querySelectorAll: (selector: string) => (selector === "img[src]" ? elements : []),
       },
       { origin: "null" },
+      FakeImage,
     );
     loaded?.();
-    return { pageWindow, calls };
+    return { pageWindow, calls, Image: FakeImage };
   }
 
   it("sends a page's fetch of another address to the proxy as a bare GET", async () => {
@@ -206,6 +223,30 @@ describe("a running design's page with its Canvas's network on", () => {
       "data:image/png;base64,iVBORw0KGgo=",
       `${base}image?url=https%3A%2F%2Fcdn.example.com%2Fa.png`,
     ]);
+  });
+
+  it("sends an image a script preloads without ever adding it to the page to the image path", () => {
+    const { Image } = runNetworkScript();
+    const proxied = `${base}image?url=${encodeURIComponent("https://cdn.example.com/hero.png")}`;
+    const preloaded = new Image();
+    preloaded.src = "https://cdn.example.com/hero.png";
+    // The browser is asked for the proxied address and never the one as written.
+    expect(preloaded.loads).toEqual([proxied]);
+    // Reading it back gives the address the element really loads.
+    expect(preloaded.src).toBe(proxied);
+
+    const byAttribute = new Image();
+    byAttribute.setAttribute("src", "https://cdn.example.com/hero.png");
+    byAttribute.setAttribute("alt", "https://cdn.example.com/hero.png");
+    expect(byAttribute.loads).toEqual([proxied]);
+
+    // Inline, in-memory, and already proxied addresses are left as written.
+    for (const address of ["data:image/png;base64,iVBORw0KGgo=", "blob:null/1234", proxied]) {
+      const image = new Image();
+      image.src = address;
+      image.setAttribute("src", address);
+      expect(image.loads).toEqual([address, address]);
+    }
   });
 
   it("is never the policy an exported file carries", () => {

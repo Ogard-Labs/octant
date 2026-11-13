@@ -257,7 +257,13 @@ const BRIDGE_SCRIPT = `(function () {
  * one), so everything here is what the page's script does: a `fetch`, an
  * `img` element it gives a `src`, a `FontFace` it constructs, and a `url()`
  * in a `style` element it adds (a font in `@font-face`, an image anywhere
- * else). It is a convenience, not a boundary: a page that replaces `fetch`
+ * else). An image's `src` is sent to its path when it is assigned, by the
+ * property or by `setAttribute`, so an image a script preloads and never
+ * adds to the page loads too; watching the document alone left that one
+ * asking for the address as written, which the page's policy refuses. Read
+ * back, `src` is the proxied address, the one the element really loads and
+ * the one `getAttribute` and `currentSrc` report, so the three never
+ * disagree. `srcset` is not sent anywhere. It is a convenience, not a boundary: a page that replaces `fetch`
  * again, or calls a path itself, reaches the same proxy and nothing more. A
  * `fetch` may be a `GET`, or a `POST` whose body is a JSON string; none of
  * the page's own headers are passed on, and the host declares the body as
@@ -307,10 +313,31 @@ function networkScript(networkBase: string): string {
       return address === null ? whole : 'url("' + through(resource, address) + '")';
     });
   };
-  var image = function (element) {
-    var address = elsewhere(element.getAttribute("src") || "data:,");
-    if (address !== null) element.setAttribute("src", through("image", address));
+  var routed = function (value) {
+    var address = elsewhere(String(value) || "data:,");
+    return address === null ? value : through("image", address);
   };
+  var image = function (element) {
+    var now = element.getAttribute("src") || "";
+    var next = routed(now);
+    if (next !== now) element.setAttribute("src", next);
+  };
+  if (typeof HTMLImageElement === "function") {
+    var prototype = HTMLImageElement.prototype;
+    var source = Object.getOwnPropertyDescriptor(prototype, "src");
+    var attribute = prototype.setAttribute;
+    if (source && source.set) {
+      Object.defineProperty(prototype, "src", {
+        configurable: true,
+        enumerable: source.enumerable,
+        get: source.get,
+        set: function (value) { source.set.call(this, routed(value)); }
+      });
+    }
+    prototype.setAttribute = function (name, value) {
+      return attribute.call(this, name, String(name).toLowerCase() === "src" ? routed(value) : value);
+    };
+  }
   var rules = function (list) {
     each(list, function (rule) {
       if (rule.cssRules) rules(rule.cssRules);

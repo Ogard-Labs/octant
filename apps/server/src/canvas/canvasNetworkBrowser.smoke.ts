@@ -120,6 +120,12 @@ const drawn = (address) => new Promise((resolve, reject) => {
 });
 const own = drawn(${inScript("https://public.example.test/logo.png")});
 attempt("image through the proxy", () => own.then((value) => value.split(" ").slice(0, 2).join(" ")));
+attempt("image a script preloads and never adds", () => new Promise((resolve, reject) => {
+  const image = new Image();
+  image.onload = () => resolve("loaded " + image.naturalWidth + " " + (image.src === image.currentSrc) + " " + image.src.includes("image?url="));
+  image.onerror = () => reject(new Error("ImageError"));
+  image.src = ${inScript("https://public.example.test/preloaded.png")};
+}));
 attempt("markup as an image", () => drawn(${inScript("https://public.example.test/page.html")}));
 attempt("font through the proxy", () => {
   const face = new FontFace("Smoke", 'url("https://public.example.test/face.woff2") format("woff2")');
@@ -396,6 +402,9 @@ if (executable === undefined) {
       answers["POST that is not JSON"]?.startsWith("answered:400 ") === true &&
       answers["form POST to its own proxy path"]?.startsWith("answered:415 ") === true,
     imageDrawnThroughTheProxy: answers["image through the proxy"] === "answered:loaded 1",
+    // The reviewer's case: `new Image()`, `src` set, never appended.
+    detachedImageLoadedThroughTheProxy:
+      answers["image a script preloads and never adds"] === "answered:loaded 1 true true",
     fontLoadedThroughTheProxy:
       answers["font through the proxy"] === "answered:true true" &&
       answers["font in a stylesheet the script adds"] === "answered:1 true",
@@ -409,6 +418,7 @@ if (executable === undefined) {
           "GET https://public.example.test/face.woff2",
           "GET https://public.example.test/logo.png",
           "GET https://public.example.test/page.html",
+          "GET https://public.example.test/preloaded.png",
           "GET https://public.example.test/sheet.woff2",
           "POST https://public.example.test/rpc",
         ].sort(),
