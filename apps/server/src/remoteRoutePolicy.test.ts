@@ -789,7 +789,7 @@ describe("remote route policy", () => {
     expect(accepted.status).toBe(200);
   });
 
-  it("forwards a paired device's MCP tool prompts and remembered approvals, and keeps skill folders local", () => {
+  it("forwards a paired device's MCP tool prompts and remembered approvals, and keeps the skill folder picker local", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>
       routePolicy.inspect(
@@ -816,6 +816,7 @@ describe("remote route policy", () => {
       "/api/extensions/tool-grants",
       "/api/extensions/lifecycle",
       "/api/extensions/npm",
+      "/api/extensions/skills",
       "/api/extensions/user-servers",
       "/api/extensions/sign-in",
     ]) {
@@ -825,10 +826,11 @@ describe("remote route policy", () => {
       });
       expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
     }
-    // A skill folder is chosen in the host's own folder picker.
+    // A skill folder is chosen in the host's own folder picker, whose receipt
+    // route no device is forwarded.
     for (const method of ["GET", "POST"] as const) {
-      const decision = inspect("/api/extensions/skills", method);
-      expect(decision).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
+      const decision = inspect("/api/extensions/skill-folder-selection", method);
+      expect(decision).toMatchObject({ kind: "reject" });
       if (decision.kind === "reject") expect(decision.response.status).toBe(404);
     }
     expect(() =>
@@ -836,8 +838,8 @@ describe("remote route policy", () => {
         origin,
         authenticatedRoutes: [
           {
-            id: "extension-skills",
-            match: { kind: "exact", path: "/api/extensions/skills" },
+            id: "folder-select",
+            match: { kind: "exact", path: "/api/folders/select" },
             surface: "authenticated-product",
             methods: ["GET", "POST"],
           },

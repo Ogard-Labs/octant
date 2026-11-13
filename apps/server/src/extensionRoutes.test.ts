@@ -716,6 +716,39 @@ describe("bounded authenticated extension routes", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("searches, installs and removes skills for a device the host's own person paired, journaled as that device, and for no other device", async () => {
+    const execute = vi.fn(
+      async (command: ExtensionCommand): Promise<ExtensionCommandResult> => ({
+        kind: "extension-command-failed",
+        failure: { category: "unavailable", message: command.kind },
+      }),
+    );
+    const handler = setup({ snapshot: setupSnapshot, execute });
+    const commands = [{ kind: "search-skills", query: "review" }, { kind: "reconcile-skills" }];
+    for (const command of commands) {
+      for (const admittedBy of [undefined, "hub-roster"] as const) {
+        const refused = await handler(
+          pairedDeviceRequest("/api/extensions/skills", command, admittedBy),
+        );
+        expect(refused?.status).toBe(401);
+      }
+    }
+    expect(execute).not.toHaveBeenCalled();
+    for (const command of commands) {
+      const admitted = await handler(
+        pairedDeviceRequest("/api/extensions/skills", command, "host-person"),
+      );
+      expect(admitted?.status).toBe(200);
+    }
+    expect(execute.mock.calls.map((call) => call[0].kind)).toEqual([
+      "search-skills",
+      "reconcile-skills",
+    ]);
+    for (const call of execute.mock.calls as ReadonlyArray<ReadonlyArray<unknown>>) {
+      expect(call[2]).toEqual(pairedDevice);
+    }
+  });
+
   it("looks up an npm package for a local window only, and only on its own route", async () => {
     const execute = vi.fn(
       async (): Promise<ExtensionCommandResult> => ({

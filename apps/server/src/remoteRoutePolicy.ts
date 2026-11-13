@@ -83,7 +83,6 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/shell/launch-session",
   "/api/shell/local-session",
   "/api/folders",
-  "/api/extensions/skills",
   "/api/providers/discovery",
   // The whole host's export: bulk data with no bound of its own for a remote
   // caller. Every other host-control route is forwarded below.
@@ -107,6 +106,10 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   // approvals; adding, pinning, signing in to, and reconnecting a server.
   "/api/extensions/lifecycle",
   "/api/extensions/npm",
+  // Searching, previewing, installing, updating and removing skills, and
+  // reconciling the skill folders. Choosing a new folder uses the host's
+  // native picker and stays with a window there.
+  "/api/extensions/skills",
   "/api/extensions/tool-grants",
   "/api/extensions/user-servers",
   "/api/extensions/project-pins",

@@ -850,6 +850,16 @@ export function createExtensionRouteHandler(options: {
           origin,
         );
       }
+      // Skills are read from and written to folders on this computer. Only
+      // the listener's forward list kept a restricted device from them; the
+      // route now forwards for the host's own person, so it refuses the rest.
+      if (url.pathname === "/api/extensions/skills") {
+        return response(
+          failure("unauthorized", "Skills are managed by the host's own person."),
+          401,
+          origin,
+        );
+      }
       // A lookup may fetch a provider driver, and what it fetches is
       // remembered for install, so it stays with a local window like the rest.
       if (url.pathname === "/api/extensions/npm") {
