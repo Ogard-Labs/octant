@@ -206,6 +206,13 @@ export class ProjectTerminalService {
   readonly #options: ProjectTerminalServiceOptions;
   readonly #actor: EventActorValue;
   readonly #owners = new Map<string, Owner>();
+  /**
+   * Shells the last run of this host left running, by terminal id, so a card
+   * still naming one learns that a restart ended it rather than reading a bare
+   * "not running". It names only the Project: nothing the old shell held
+   * survives to be offered back.
+   */
+  readonly #endedByRestart = new Map<string, ProjectId>();
   readonly #startingServerWork = new Map<
     string,
     {
@@ -233,6 +240,7 @@ export class ProjectTerminalService {
       if (this.#owners.has(String(running.terminalId))) continue;
       try {
         this.#journalEnded(running.projectId, running.terminalId, "host-restarted", undefined);
+        this.#endedByRestart.set(String(running.terminalId), running.projectId);
       } catch {
         // Another start of this host already recorded the end. Replay settles
         // on the same record either way.
@@ -281,6 +289,16 @@ export class ProjectTerminalService {
             uncertainty: "server-stop-unconfirmed",
           },
         };
+      }
+      const endedByRestart = this.#endedByRestart.get(String(command.terminalId));
+      if (
+        endedByRestart !== undefined &&
+        String(endedByRestart) === String(command.projectId) &&
+        this.#authority(windowId, command.projectId).kind !== "refused"
+      ) {
+        // Said only to a window that may still use this Project's terminals;
+        // starting another is the ordinary start, checked as any start is.
+        return refused("host-restarted", "This terminal ended when Octant restarted.");
       }
       return refused("unavailable", "This terminal is not running on this host.");
     }

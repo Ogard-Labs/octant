@@ -16900,8 +16900,11 @@ documents its authority, privacy, and release boundaries):
   ([process topology](#process-topology)). Not built yet: a local crash record
   (Electron crash dumps kept on the device with upload off, added to a support
   bundle only by choice, and named in the next start's notice), exporting a
-  support bundle from the recovery screen, and one-click restart of terminals,
-  dev servers and extensions a restart ended.
+  support bundle from the recovery screen, and one-click reopening of a
+  Browser session a restart ended. Code thread and Project terminals, debug
+  sessions and saved Project action runs a restart ended are offered back
+  through their ordinary start
+  ([Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the
   self-hostable reference app at `apps/share` in this repository. Ogard Labs

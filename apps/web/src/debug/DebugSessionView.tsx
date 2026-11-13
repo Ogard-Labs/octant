@@ -3,6 +3,7 @@ import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/con
 import type {
   CodeDebugChildId,
   CodeDebugChildSummary,
+  CodeDebugSessionEndReason,
   CodeDebugSessionId,
   CodeDebugSessionState,
   CodeDebugStackFrame,
@@ -49,7 +50,7 @@ export interface DebugSessionViewProps {
   readonly store?: CodeDebugWindowState;
   /** Shows a checkout file at a line: the ordinary file-open path. */
   readonly onShowLocation: (path: CodeRelativePath, line: number) => void;
-  readonly onEnded: (text: string) => void;
+  readonly onEnded: (text: string, reason?: CodeDebugSessionEndReason) => void;
   readonly pollMs?: { readonly running?: number; readonly stopped?: number };
 }
 

@@ -2,7 +2,7 @@ import type {
   ProjectTerminalCommand,
   ProjectTerminalResult,
 } from "@octant/contracts/project-terminals";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
 import { ZenProjectTerminalCard } from "./ZenProjectTerminalCard";
@@ -49,6 +49,51 @@ function xtermRuntime() {
 }
 
 describe("ZenProjectTerminalCard", () => {
+  it("offers a shell a host restart ended back in one click, and only that shell", async () => {
+    const ended = client(() => ({
+      kind: "project-terminal-refused",
+      reason: "host-restarted",
+      message: "This terminal ended when Octant restarted.",
+    }));
+    const onRestart = vi.fn(async () => undefined);
+    const { unmount } = render(
+      <ZenProjectTerminalCard
+        client={ended}
+        live
+        onRestart={onRestart}
+        projectId={projectId}
+        terminalId={terminalId}
+      />,
+    );
+
+    expect(await screen.findByText("This terminal ended when Octant restarted.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Restart terminal" }));
+    expect(onRestart).toHaveBeenCalledTimes(1);
+    // The card never starts a shell itself; the new one is the ordinary start.
+    expect(ended.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "start" }),
+      expect.anything(),
+    );
+    unmount();
+
+    const gone = client(() => ({
+      kind: "project-terminal-refused",
+      reason: "unavailable",
+      message: "This terminal is not running on this host.",
+    }));
+    render(
+      <ZenProjectTerminalCard
+        client={gone}
+        live
+        onRestart={onRestart}
+        projectId={projectId}
+        terminalId={terminalId}
+      />,
+    );
+    expect(await screen.findByText("This terminal is not running on this host.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Restart terminal" })).not.toBeInTheDocument();
+  });
+
   it("attaches to the Project's shell it was pinned to and sends what the person types", async () => {
     const shell = client((command) =>
       command.kind === "attach"

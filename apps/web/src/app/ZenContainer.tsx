@@ -273,6 +273,12 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
                   <ZenProjectTerminalCard
                     client={projectTerminalClient}
                     live={activity.activity === "live"}
+                    onRestart={async () => {
+                      // The new shell is pinned before the ended one's card
+                      // goes, so a refused start leaves the card as it was.
+                      const started = await actions.addZenProjectTerminal(element.projectId);
+                      if (started !== undefined) await zen.removeElement(element.elementId);
+                    }}
                     projectId={element.projectId}
                     terminalId={element.terminalId}
                   />
