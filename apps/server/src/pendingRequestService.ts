@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { EventActor } from "@octant/contracts";
 import type { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import {
   decodePendingRequestList,
@@ -14,7 +15,7 @@ import { enabledModes } from "@octant/domain";
 export interface PendingRequestSources {
   readonly deferrals?: {
     readonly read: (key: string) => string | undefined;
-    readonly record: (change: PendingQuestionDeferral) => void;
+    readonly record: (change: PendingQuestionDeferral, actor?: EventActor) => void;
   };
   /**
    * The second opinion on a decision, by the decision's identity key. It
@@ -62,6 +63,7 @@ export class PendingRequestService {
     windowId: WindowId,
     change: PendingQuestionDeferral,
     current: () => boolean,
+    actor?: EventActor,
   ): Promise<boolean> {
     if (this.#sources.deferrals === undefined) return false;
     if (
@@ -81,7 +83,7 @@ export class PendingRequestService {
       )
     )
       return false;
-    this.#sources.deferrals.record(change);
+    this.#sources.deferrals.record(change, actor);
     return true;
   }
 

@@ -32,16 +32,15 @@ read-only gate is a maintainer live check.
   that is one from the start, or with **Make coordinator** in an existing
   thread's header or row menu. **Stop coordinating** in the same menus makes it
   an ordinary thread again. Only a person does any of this, from a local window
-  on the host or a paired device (maintainer decision, 2026-11-12; not built
-  yet: today a paired device cannot); an agent, a routine, or a peer cannot. The
-  role
+  on the host or a device the host's own person paired (maintainer decision, 2026-11-12); an agent, a routine, or a peer cannot. The role
   is a field on the thread's own record: each change is journaled as
   `code.thread-updated@1` under the thread's expected version (commands
   `set-code-thread-coordinator`, `set-code-thread-coordinator-bounds`,
   `set-code-thread-message-wake`, and `set-code-thread-coordinator-wake`), a
-  stale version is refused, and the Code commands route today refuses all four
-  from anything but a local window. A new thread's creation command may not carry
-  the role, lineage, switches, bounds, or workers' level.
+  stale version is refused, and the Code commands route refuses all four from
+  anything but a local window or a device the host's own person paired. A new
+  thread's creation command may not carry the role, lineage, switches, bounds,
+  or workers' level.
 - **Several per Project.** A Code Project may have up to four coordinators at
   once, for separate lines of work (one for the backlog, one for a dependency
   audit). Each coordinator has its own workers.
@@ -175,9 +174,7 @@ restrict that can do it for the whole host or for one Project.
 - A Code Project's overview has the same choice with a third value, **Use
   Settings**, which is that Project's default. A Project choice wins over
   Settings.
-- Only a person changes either, from a local window on the host or a paired
-  device (maintainer decision, 2026-11-12; not built yet: today a paired device
-  cannot); an agent, a routine, or a peer cannot. Each change is journaled with
+- Only a person changes either, from a local window on the host or a device the host's own person paired (maintainer decision, 2026-11-12); an agent, a routine, or a peer cannot. Each change is journaled with
   its
   principal. The host reads the setting at every `start` call, so a change
   applies to the next call, a running turn included.
@@ -195,10 +192,7 @@ restrict that can do it for the whole host or for one Project.
   on the requested provider and model when the window can select them, starts
   its mode at the requested level, and offers no mode above it. A paired browser
   or phone reviews and answers the same proposals as a window does (maintainer
-  decision, 2026-11-12). Not built yet: today it shows them read-only (title,
-  intent, requested level) with "Approve at a window on this computer", through
-  the planner read the remote session already has, and the proposal routes
-  refuse every caller but a local window.
+  decision, 2026-11-12). Built on the server: the proposal routes take an answer from a local window or a device the host's own person paired. Not built yet: a paired browser or phone still shows them read-only (title, intent, requested level) with "Approve at a window on this computer", through the planner read the remote session already has.
 
 Rationale: the person who enables a coordinator asked for work to happen without
 a click per thread, and a worker can do nothing a person could not have started
@@ -272,15 +266,12 @@ capped ([Starting workers](#starting-workers)).
   wakes the worker only when its switch is on. A person can stop a worker from
   waking for its coordinator with **Wake for coordinator** in the worker's
   row menu or pane header menu, journaled with its principal.
-- **From a paired device.** Any paired device sets these switches as a local
-  window does (maintainer decision, 2026-11-12). Not built yet: today only an
-  owner device may set **Wake when a message
+- **From a paired device.** A device the host's own person paired sets these switches as a local window does (maintainer decision, 2026-11-12; built on the server). A device the host knows only through the hub's roster sets them only as an owner device, which may set **Wake when a message
   arrives** and **Wake for coordinator** (never the coordinator role) through
   the owner routes `code-threads/wake/read` and `code-threads/wake/change`. Each
   change needs its own fresh unlock, is checked against a digest of the current
   thread and Project, and is journaled as the owner device; refusals are
-  `not-found`, `not-a-worker`, `wake-stale`, and `refused`. Today a plain paired
-  device cannot set them, and an agent never can. The owner access recovery
+  `not-found`, `not-a-worker`, `wake-stale`, and `refused`. A roster member that is not an owner device cannot set them, and an agent never can. The owner access recovery
   screen
   on the phone and in a browser's owner section shows them for a chosen Code
   thread: **Read wake switches** (covered by an open administration session),

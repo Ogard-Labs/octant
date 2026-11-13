@@ -24,8 +24,21 @@ const packageId = "44000000-0000-4000-8000-000000000003";
 const digest = `sha256:${"a".repeat(64)}`;
 const pairedDeviceId = "55000000-0000-4000-8000-000000000001";
 
-/** A request the remote gateway already authenticated as a paired device. */
-function pairedDeviceRequest(path: string, body: unknown): Request {
+/**
+ * A request the remote gateway already authenticated as a paired device. With
+ * no admission it is held to the catalogue, as a device the hub's roster
+ * introduced or an agent grant's session is; `host-person` is a device the
+ * host's own person paired.
+ */
+/** What a paired device's change, and a local window's, is journaled as. */
+const pairedDevice = { kind: "remote-device", actorId: pairedDeviceId, deviceId: pairedDeviceId };
+const localUser = { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" };
+
+function pairedDeviceRequest(
+  path: string,
+  body: unknown,
+  admittedBy?: "host-person" | "hub-roster",
+): Request {
   const remoteRequest = new Request(`http://127.0.0.1${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -41,6 +54,7 @@ function pairedDeviceRequest(path: string, body: unknown): Request {
       protocolVersion: 1,
       capabilityDigest: "a".repeat(64),
       sessionId: "55000000-0000-4000-8000-000000000002",
+      ...(admittedBy === undefined ? {} : { admittedBy }),
     } as never,
     scopeId: pairedDeviceId as never,
   });
@@ -285,9 +299,13 @@ describe("bounded authenticated extension routes", () => {
       }),
     );
     expect(decided?.status).toBe(200);
-    expect(list).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    expect(list).toHaveBeenCalledWith({
+      kind: "local-window",
+      scopeId: windowId,
+      actor: localUser,
+    });
     expect(decide).toHaveBeenCalledWith(
-      { kind: "local-window", scopeId: windowId },
+      { kind: "local-window", scopeId: windowId, actor: localUser },
       {
         approvalId: "44000000-0000-4000-8000-000000000010",
         decision: "approved",
@@ -317,7 +335,7 @@ describe("bounded authenticated extension routes", () => {
     expect(refused?.status).toBe(409);
     expect(await refused?.json()).toEqual({ accepted: false });
     expect(decide).toHaveBeenCalledWith(
-      { kind: "local-window", scopeId: windowId },
+      { kind: "local-window", scopeId: windowId, actor: localUser },
       {
         approvalId: answer.approvalId,
         decision: "approved",
@@ -409,7 +427,72 @@ describe("bounded authenticated extension routes", () => {
     expect(revoke).not.toHaveBeenCalled();
   });
 
-  it("lets a paired device list and approve its own turn's MCP prompt once, and refuses remembering it", async () => {
+  it("lets a device the host's own person paired list and revoke remembered approvals, and remember its own turn's prompt", async () => {
+    const list = vi.fn(() => []);
+    const revoke = vi.fn(() => "revoked" as const);
+    const approvals = new ExtensionToolApprovalService({
+      uuid: () => "44000000-0000-4000-8000-000000000010",
+      now: () => now,
+      isPairedDeviceScope: (scope) => String(scope) === pairedDeviceId,
+      threadAuthorityIsCurrent: () => true,
+    });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      toolGrants: { list, revoke },
+      toolApprovals: approvals,
+      now: () => now,
+    });
+    for (const body of [
+      { kind: "list" },
+      { kind: "revoke", grantId: `sha256:${"b".repeat(64)}` },
+    ]) {
+      const response = await handler(
+        pairedDeviceRequest("/api/extensions/tool-grants", body, "host-person"),
+      );
+      expect(response?.status).toBe(200);
+    }
+    expect(list).toHaveBeenCalledOnce();
+    expect(revoke).toHaveBeenCalledOnce();
+    // The device is who the journal names for the revocation and the grant.
+    expect(revoke).toHaveBeenCalledWith(`sha256:${"b".repeat(64)}`, pairedDevice);
+
+    const remember = vi.fn(() => true);
+    const call = approvals.request({
+      windowId: pairedDeviceId as never,
+      threadId: "44000000-0000-4000-8000-000000000011",
+      projectId: "44000000-0000-4000-8000-000000000012",
+      extensionId,
+      packageId,
+      componentId: "server",
+      serverName: "server",
+      providerToolName: "plugin__server__read",
+      mcpToolName: "read",
+      inputJson: "{}",
+      remember,
+    });
+    const answer = {
+      kind: "decide",
+      approvalId: "44000000-0000-4000-8000-000000000010",
+      decision: "approved",
+      remember: true,
+    };
+    // The same answer from a device the hub's roster introduced is refused.
+    const introduced = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", answer, "hub-roster"),
+    );
+    expect(introduced?.status).toBe(409);
+    expect(remember).not.toHaveBeenCalled();
+    const remembered = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", answer, "host-person"),
+    );
+    expect(remembered?.status).toBe(200);
+    expect(remember).toHaveBeenCalledOnce();
+    expect(remember).toHaveBeenCalledWith("tool", pairedDevice);
+    await expect(call).resolves.toBe(true);
+  });
+
+  it("lets a hub-introduced device list and approve its own turn's MCP prompt once, and refuses remembering it", async () => {
     const approvals = new ExtensionToolApprovalService({
       uuid: () => "44000000-0000-4000-8000-000000000010",
       now: () => now,
@@ -580,7 +663,7 @@ describe("bounded authenticated extension routes", () => {
     expect(register).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses every package lifecycle command from a paired device before it reaches the service", async () => {
+  it("refuses every package lifecycle command from a hub-introduced device before it reaches the service, and admits one the host's own person paired", async () => {
     const execute = vi.fn(
       async (): Promise<ExtensionCommandResult> => ({
         kind: "extension-state-updated",
@@ -603,13 +686,67 @@ describe("bounded authenticated extension routes", () => {
     ]) {
       const denied = await handler(pairedDeviceRequest("/api/extensions/lifecycle", command));
       expect(denied?.status).toBe(401);
+      const introduced = await handler(
+        pairedDeviceRequest("/api/extensions/lifecycle", command, "hub-roster"),
+      );
+      expect(introduced?.status).toBe(401);
     }
     expect(execute).not.toHaveBeenCalled();
+    // A device the host's own person paired installs, trusts, and enables as
+    // a local window does.
+    for (const command of [
+      { kind: "install-package", ...target },
+      { kind: "set-source-trust", ...mutation, trusted: true },
+      { kind: "set-plugin-desired", ...mutation, desired: true },
+    ]) {
+      const admitted = await handler(
+        pairedDeviceRequest("/api/extensions/lifecycle", command, "host-person"),
+      );
+      expect(admitted?.status).toBe(200);
+    }
+    expect(execute).toHaveBeenCalledTimes(3);
+    for (const call of execute.mock.calls as ReadonlyArray<ReadonlyArray<unknown>>) {
+      expect(call[2]).toEqual(pairedDevice);
+    }
+    execute.mockClear();
     const accepted = await handler(
       request("/api/extensions/lifecycle", { kind: "install-package", ...target }),
     );
     expect(accepted?.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("searches, installs and removes skills for a device the host's own person paired, journaled as that device, and for no other device", async () => {
+    const execute = vi.fn(
+      async (command: ExtensionCommand): Promise<ExtensionCommandResult> => ({
+        kind: "extension-command-failed",
+        failure: { category: "unavailable", message: command.kind },
+      }),
+    );
+    const handler = setup({ snapshot: setupSnapshot, execute });
+    const commands = [{ kind: "search-skills", query: "review" }, { kind: "reconcile-skills" }];
+    for (const command of commands) {
+      for (const admittedBy of [undefined, "hub-roster"] as const) {
+        const refused = await handler(
+          pairedDeviceRequest("/api/extensions/skills", command, admittedBy),
+        );
+        expect(refused?.status).toBe(401);
+      }
+    }
+    expect(execute).not.toHaveBeenCalled();
+    for (const command of commands) {
+      const admitted = await handler(
+        pairedDeviceRequest("/api/extensions/skills", command, "host-person"),
+      );
+      expect(admitted?.status).toBe(200);
+    }
+    expect(execute.mock.calls.map((call) => call[0].kind)).toEqual([
+      "search-skills",
+      "reconcile-skills",
+    ]);
+    for (const call of execute.mock.calls as ReadonlyArray<ReadonlyArray<unknown>>) {
+      expect(call[2]).toEqual(pairedDevice);
+    }
   });
 
   it("looks up an npm package for a local window only, and only on its own route", async () => {
@@ -1146,24 +1283,29 @@ describe("MCP servers added by hand", () => {
       const answered = await handler(request("/api/extensions/user-servers", setup));
       expect(answered?.status).toBe(200);
       expect(add).toHaveBeenCalledWith(setup);
+      // The one confirmation is the one-step install every plugin uses.
       expect(observed.map((command) => command.kind)).toEqual([
         "inspect-package",
         "install-package",
-        "set-source-trust",
-        "set-plugin-desired",
-        "set-component-desired",
       ]);
-      expect(observed[2]).toMatchObject({ trusted: true, expectedStateVersion: 1 });
-      expect(observed[3]).toMatchObject({ desired: true, expectedStateVersion: 2 });
-      expect(observed[4]).toMatchObject({
-        componentId: "mcp-docs-search",
-        desired: true,
-        expectedStateVersion: 3,
-      });
+      expect(observed[1]).toMatchObject({ trust: true, enable: true });
       expect(await answered?.json()).toMatchObject({
         kind: "extension-state-updated",
         addedPackage: { extensionId, componentId: "mcp-docs-search" },
       });
+
+      // Add only leaves trusting and turning on as the person's own steps.
+      observed.length = 0;
+      const addedOnly = await handler(
+        request("/api/extensions/user-servers", { ...setup, installOnly: true }),
+      );
+      expect(addedOnly?.status).toBe(200);
+      expect(observed.map((command) => command.kind)).toEqual([
+        "inspect-package",
+        "install-package",
+      ]);
+      expect(observed[1]).not.toHaveProperty("trust");
+      expect(observed[1]).not.toHaveProperty("enable");
     },
   );
 
@@ -1520,7 +1662,12 @@ describe("signing in to a hosted server from Settings", () => {
     expect(signIn.status).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
     const begun = await handler(request("/api/extensions/sign-in", { kind: "begin", ...target }));
     expect(await begun?.json()).toMatchObject({ kind: "awaiting-consent" });
-    expect(signIn.begin).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
+    expect(signIn.begin).toHaveBeenCalledWith(
+      extensionId,
+      "mcp-docs",
+      "local-window",
+      expect.objectContaining({ kind: "local-user" }),
+    );
     const polled = await handler(
       request("/api/extensions/sign-in", {
         kind: "poll",
@@ -1539,7 +1686,12 @@ describe("signing in to a hosted server from Settings", () => {
     );
     expect(remote?.status).toBe(200);
     expect(await remote?.json()).toMatchObject({ kind: "refused", reason: "local-host-required" });
-    expect(signIn.begin).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
+    expect(signIn.begin).toHaveBeenLastCalledWith(
+      extensionId,
+      "mcp-docs",
+      "remote-device",
+      expect.objectContaining({ kind: "remote-device" }),
+    );
   });
 
   it("accepts safe registered-client setup only from an authorized local window", async () => {
@@ -1674,7 +1826,7 @@ describe("plugins pinned to a Project", () => {
       }),
     );
     expect(set?.status).toBe(200);
-    expect(pins.set).toHaveBeenCalledWith(projectId, extensionId, true);
+    expect(pins.set).toHaveBeenCalledWith(projectId, extensionId, true, localUser);
     expect(await set?.json()).toEqual(listing);
     const listed = await handler(
       pairedDeviceRequest("/api/extensions/project-pins", { kind: "list" }),

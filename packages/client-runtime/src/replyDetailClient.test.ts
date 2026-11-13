@@ -1,3 +1,4 @@
+import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { describe, expect, it, vi } from "vitest";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
 import { createReplyDetailClient, readMobileReplyDetail } from "./replyDetailClient";
@@ -46,5 +47,38 @@ describe("reading the host's reply detail from a paired client", () => {
     const client = createReplyDetailClient({ baseUrl: "http://127.0.0.1", fetch });
     await expect(client.read()).resolves.toEqual(reading);
     expect(String(fetch.mock.calls[0]?.[0])).toBe("http://127.0.0.1/api/reply-detail");
+  });
+
+  it("sets a thread's level by replacing the host's shell settings at the version it read", async () => {
+    const settings = { ...defaultShellSettings(), threadReplyDetail: reading.threads };
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Response.json({
+            kind: "settings-replaced",
+            settings: JSON.parse(String(init.body)).settings,
+            version: 8,
+          })
+        : Response.json({ settings, version: 7 }),
+    );
+    const client = createReplyDetailClient({ baseUrl: "http://127.0.0.1", fetch });
+    await expect(
+      client.setThreadLevel({ mode: "code", threadId: "thread-2" }, "low"),
+    ).resolves.toEqual({
+      defaultLevel: settings.replyDetail,
+      threads: [...reading.threads, { mode: "code", threadId: "thread-2", level: "low" }],
+    });
+    expect(String(fetch.mock.calls[1]?.[0])).toBe("http://127.0.0.1/api/shell/settings");
+    expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).toMatchObject({
+      expectedVersion: 7,
+    });
+  });
+
+  it("changes nothing a caller can see when the host refuses the shell settings", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 403 }));
+    const client = createReplyDetailClient({ baseUrl: "http://127.0.0.1", fetch });
+    await expect(
+      client.setThreadLevel({ mode: "code", threadId: "thread-2" }, "low"),
+    ).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

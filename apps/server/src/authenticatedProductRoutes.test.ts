@@ -204,6 +204,79 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("hands a device the host's own person paired every forwarded route, with the device as its principal", async () => {
+    const seen: Array<unknown> = [];
+    const dispatch = vi.fn(async (request: Request) => {
+      seen.push(readPrincipalRouteContext(request)?.principal);
+      return Response.json({ ok: true });
+    });
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    const paired = createRemoteDevicePrincipal({
+      hostId: principal.hostId,
+      deviceId: principal.deviceId,
+      credentialGeneration: 1,
+      origin: principal.origin,
+      protocolVersion: 1,
+      capabilityDigest: principal.capabilityDigest,
+      sessionId: principal.sessionId,
+      admittedBy: "host-person",
+    });
+    const routes = [
+      ["/api/diagnostics/export", "POST"],
+      ["/api/providers/commands", "POST"],
+      ["/api/code/project-terminals", "POST"],
+      ["/api/context/commands", "POST"],
+      ["/api/providers/credentials/set", "POST"],
+      ["/api/remote/devices/revoke", "POST"],
+      ["/api/remote/pairing-requests/approve", "POST"],
+      ["/api/host-control/lifecycle", "POST"],
+      ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "POST"],
+    ] as const;
+
+    for (const [path, method] of routes) {
+      expect((await product({ ...handoff(path, method), principal: paired }))?.status).toBe(200);
+    }
+
+    expect(dispatch).toHaveBeenCalledTimes(routes.length);
+    // The device is still the principal the route and the journal see.
+    expect(seen.every((entry) => entry === paired)).toBe(true);
+    expect(paired.kind).toBe("remote-device");
+  });
+
+  it("holds a hub-introduced device to the catalogue on the routes a person-paired device reaches", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    const introduced = createRemoteDevicePrincipal({
+      hostId: principal.hostId,
+      deviceId: principal.deviceId,
+      credentialGeneration: 1,
+      origin: principal.origin,
+      protocolVersion: 1,
+      capabilityDigest: principal.capabilityDigest,
+      sessionId: principal.sessionId,
+      admittedBy: "hub-roster",
+    });
+
+    for (const [path, method] of [
+      ["/api/diagnostics/export", "POST"],
+      ["/api/providers/commands", "POST"],
+      ["/api/code/project-terminals", "POST"],
+      ["/api/providers/credentials/set", "POST"],
+      ["/api/remote/devices/revoke", "POST"],
+      ["/api/remote/pairing-requests/approve", "POST"],
+      ["/api/host-control/lifecycle", "POST"],
+      ["/api/host-control/status", "GET"],
+      ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "POST"],
+      ["/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020", "GET"],
+    ] as const) {
+      expect((await product({ ...handoff(path, method), principal: introduced }))?.status).toBe(
+        403,
+      );
+    }
+
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("passes a shared remote principal context to the existing product route chain", async () => {
     let signal: AbortSignal | undefined;
     const dispatch = vi.fn(async (request: Request) => {

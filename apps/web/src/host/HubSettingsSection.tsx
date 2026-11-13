@@ -26,6 +26,7 @@ import {
   NewMemberChecks,
   OwnerDevices,
   PairedMergeUnlockSwitch,
+  OwnerApprovalAnswerUnlockSwitch,
   type HeldMemberRow,
   type NewMemberAlertRow,
   type OwnerCandidateRow,
@@ -260,6 +261,7 @@ interface HubStatus {
   readonly enabled: boolean;
   /** Whether a paired phone or web client's merge needs a fresh unlock on an owner device here. */
   readonly pairedMergeUnlock: boolean;
+  readonly ownerApprovalAnswerUnlock: boolean;
   readonly members: ReadonlyArray<Member>;
   /** The hub's own owner list, and the roster members that list an unlock key but are not on it. */
   readonly owners: ReadonlyArray<OwnerRow>;
@@ -1037,6 +1039,23 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
       "Octant could not remove that owner.",
     );
     if (reply !== undefined) setMessage(`Removed ${owner.name} as an owner.`);
+    await refresh();
+  };
+
+  const setOwnerApprovalAnswerUnlock = async (enabled: boolean) => {
+    const reply = await act(
+      "owner-approval-answer-unlock",
+      { enabled },
+      "changed",
+      "Octant could not change the owner unlock for approval answers.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        enabled
+          ? "Each approval answer from an owner device now needs its own unlock."
+          : "One owner unlock now covers approval answers for five minutes.",
+      );
+    }
     await refresh();
   };
 
@@ -1879,6 +1898,11 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
             enabled={status.pairedMergeUnlock}
             onChange={(enabled) => void setPairedMergeUnlock(enabled)}
           />
+          <OwnerApprovalAnswerUnlockSwitch
+            busy={busy}
+            enabled={status.ownerApprovalAnswerUnlock}
+            onChange={(enabled) => void setOwnerApprovalAnswerUnlock(enabled)}
+          />
         </SettingsSection>
       )}
 
@@ -1904,6 +1928,11 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                   busy={busy}
                   enabled={status?.pairedMergeUnlock === true}
                   onChange={(enabled) => void setPairedMergeUnlock(enabled)}
+                />
+                <OwnerApprovalAnswerUnlockSwitch
+                  busy={busy}
+                  enabled={status?.ownerApprovalAnswerUnlock === true}
+                  onChange={(enabled) => void setOwnerApprovalAnswerUnlock(enabled)}
                 />
               </>
             ) : (
@@ -2314,6 +2343,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const provision = readProvision(field(body, "provision"));
   const signIn = readSignIn(field(body, "signIn"));
   const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
+  const ownerApprovalAnswerUnlock = field(body, "ownerApprovalAnswerUnlock") === true;
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -2333,6 +2363,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     return {
       enabled,
       pairedMergeUnlock,
+      ownerApprovalAnswerUnlock,
       members,
       owners: readOwners(field(hub, "owners")),
       ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
@@ -2367,6 +2398,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   return {
     enabled,
     pairedMergeUnlock,
+    ownerApprovalAnswerUnlock,
     members,
     owners: readOwners(field(hub, "owners")),
     ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),

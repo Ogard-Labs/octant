@@ -68,6 +68,7 @@ import {
   CodeProjectAutoReviewerChanged,
   CodeProjectAgentDefaultBranchPushChanged,
   CodeProjectAgentMergeChanged,
+  CodeProjectOwnToolchainChanged,
   CodeProjectAgentPullRequestCommentsChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
   CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
@@ -520,6 +521,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
+    .register("project.code-own-toolchain-changed@1", 1, CodeProjectOwnToolchainChanged)
     .register(
       "project.code-agent-pull-request-comments-changed@1",
       1,

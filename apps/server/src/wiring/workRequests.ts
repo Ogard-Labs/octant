@@ -371,7 +371,8 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     service: {
       bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
       navigation: (windowId) => workThreadServiceWithWorkflows.navigation(windowId),
-      execute: (windowId, command) => workThreadServiceWithWorkflows.execute(windowId, command),
+      execute: (windowId, command, context) =>
+        workThreadServiceWithWorkflows.execute(windowId, command, context),
       queryBoard: async (windowId, query) => {
         const bootstrap = await workThreadServiceWithWorkflows.bootstrap(windowId);
         const projects = await projectService.bootstrap(windowId);

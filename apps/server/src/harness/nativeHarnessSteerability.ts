@@ -20,8 +20,9 @@ export function queueSteeringWhereDelivered(
   deliversSteering: DeliversSteering,
   threadId: string,
   note: Parameters<NativeHarnessSessionStore["queueSteering"]>[1],
+  actor?: Parameters<NativeHarnessSessionStore["queueSteering"]>[2],
 ): ReturnType<NativeHarnessSessionStore["queueSteering"]> | "no-session" {
   const lead = sessions.read(threadId)?.session.lead;
   if (lead !== undefined && !deliversSteering(lead.providerInstanceId)) return "no-session";
-  return sessions.queueSteering(threadId, note);
+  return sessions.queueSteering(threadId, note, actor);
 }

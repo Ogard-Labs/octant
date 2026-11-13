@@ -15,6 +15,7 @@ import {
   type CodeProject,
   type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type CodeProjectOwnToolchain,
   type ProjectAgentMemoryWrites,
   type ProjectImageGenerationChoice,
   type CodeProjectAgentPullRequestComments,
@@ -538,6 +539,26 @@ export function changeCodeProjectAgentMerge(
     reject("invalid-lifecycle", "Code Project agent merge is already selected");
   }
   return { ...project, agentMerge, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Run a Code Project's language services from the Project's own copy of a
+ * toolchain, or return to the copy Octant bundles. Absence reads as disabled.
+ * Rejects a non-Code Project and a no-op change so the journal never carries
+ * an event that changed nothing.
+ */
+export function changeCodeProjectOwnToolchain(
+  project: Project,
+  ownToolchain: CodeProjectOwnToolchain,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have a toolchain setting");
+  }
+  if ((project.ownToolchain ?? "disabled") === ownToolchain) {
+    reject("invalid-lifecycle", "Code Project toolchain is already selected");
+  }
+  return { ...project, ownToolchain, version: nextVersion(project), updatedAt };
 }
 
 /**

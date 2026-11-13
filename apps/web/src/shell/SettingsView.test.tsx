@@ -174,6 +174,30 @@ describe("SettingsView", () => {
     },
   );
 
+  it("offers the quit shortcut's second press as a switch in the desktop app only, on by default", () => {
+    const onSettingsChange = vi.fn();
+    const platform = Object.getOwnPropertyDescriptor(window.navigator, "platform");
+    Object.defineProperty(window.navigator, "platform", { value: "MacIntel", configurable: true });
+    try {
+      const { rerender, props } = renderSettings({
+        hostBridge: { setQuitShortcutSecondPress: vi.fn() } as never,
+        onSettingsChange,
+      });
+
+      const guard = screen.getByRole("switch", { name: "Press ⌘Q twice to quit" });
+      expect(guard).toBeChecked();
+      fireEvent.click(guard);
+      expect(onSettingsChange).toHaveBeenCalledWith({ quitShortcutNeedsSecondPress: false });
+
+      const { hostBridge: _bridge, ...remote } = props;
+      rerender(<SettingsView {...remote} />);
+      expect(screen.queryByRole("switch", { name: "Press ⌘Q twice to quit" })).toBeNull();
+    } finally {
+      if (platform === undefined) Reflect.deleteProperty(window.navigator, "platform");
+      else Object.defineProperty(window.navigator, "platform", platform);
+    }
+  });
+
   it("lets the reader choose to wait for finished replies from Chat settings", async () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
@@ -2016,18 +2040,28 @@ describe("SettingsView", () => {
       direction: "upload" as const,
       origin: "https://example.com",
       workspaceRoot: "/projects/brief",
+      privatePage: true as const,
     };
-    const download = { ...upload, direction: "download" as const };
+    // Remembered before the page was recorded, so it names none and covers any.
+    const download = {
+      direction: "download" as const,
+      origin: upload.origin,
+      workspaceRoot: upload.workspaceRoot,
+    };
     renderSettings({
       onSettingsChange,
       settings: { ...defaultShellSettings(), rememberedBrowserTransfers: [upload, download] },
     });
     navigateTo("Permissions");
     expect(
-      screen.getByText("Agents upload files from /projects/brief to this site without asking."),
+      screen.getByText(
+        "Agents upload files from /projects/brief to this site on Private pages without asking.",
+      ),
     ).toBeVisible();
     expect(
-      screen.getByText("Agents save downloads from this site into /projects/brief without asking."),
+      screen.getByText(
+        "Agents save downloads from this site on any page into /projects/brief without asking.",
+      ),
     ).toBeVisible();
     // The rows are listed in the order remembered: the upload, then the download.
     const forget = screen.getAllByRole("button", { name: "Forget" });

@@ -1,4 +1,7 @@
+import { principalActsAsHostPerson } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { Schema } from "effect";
+import type { EventActor } from "@octant/contracts";
 import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
@@ -19,6 +22,7 @@ export interface PendingRequestRouteDependencies {
       windowId: WindowId,
       change: PendingQuestionDeferral,
       current: () => boolean,
+      actor?: EventActor,
     ) => Promise<boolean>;
     readonly list: (windowId: WindowId) => Promise<PendingRequestList>;
   };
@@ -71,10 +75,12 @@ export function createPendingRequestRouteHandler(dependencies: PendingRequestRou
         now: dependencies.now?.() ?? Date.now(),
       });
     let windowId: WindowId;
+    let actor: EventActor;
     try {
       const context = authenticate();
-      if (context.principal.kind !== "local-window") return reply(403);
+      if (!principalActsAsHostPerson(context.principal)) return reply(403);
       windowId = context.scopeId;
+      actor = eventActorForPrincipal(context.principal);
     } catch {
       return reply(401);
     }
@@ -97,7 +103,7 @@ export function createPendingRequestRouteHandler(dependencies: PendingRequestRou
         try {
           const context = authenticate();
           return (
-            context.principal.kind === "local-window" &&
+            principalActsAsHostPerson(context.principal) &&
             String(context.scopeId) === String(windowId)
           );
         } catch {
@@ -105,7 +111,9 @@ export function createPendingRequestRouteHandler(dependencies: PendingRequestRou
         }
       };
       if (!current()) return reply(401);
-      return reply((await dependencies.service.defer?.(windowId, change, current)) ? 200 : 409);
+      return reply(
+        (await dependencies.service.defer?.(windowId, change, current, actor)) ? 200 : 409,
+      );
     } catch {
       return reply(400);
     } finally {

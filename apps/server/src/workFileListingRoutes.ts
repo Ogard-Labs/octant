@@ -10,6 +10,7 @@ import {
 import { projectExtraFolderRoots } from "@octant/domain";
 import type { PersistenceService } from "./persistence/persistenceService";
 import type { ProjectService } from "./projectService";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRouteWindowId, authenticateRoutePrincipal } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -117,9 +118,15 @@ export function createWorkFileListingRouteHandler(dependencies: WorkFileListingR
           store: dependencies.windowAuthorityStore,
           now: now(),
         });
-        if (context.principal.kind !== "local-window")
+        // A server Project's files are read by the host's own person: at a
+        // window, or on a device that person paired (maintainer decision,
+        // 2026-11-13).
+        if (!principalActsAsHostPerson(context.principal))
           return failureResponse(
-            { category: "unauthorized", message: "Server Work files require a local window." },
+            {
+              category: "unauthorized",
+              message: "Server Work files are read only by the host's own person.",
+            },
             403,
             origin,
           );
@@ -128,10 +135,13 @@ export function createWorkFileListingRouteHandler(dependencies: WorkFileListingR
           capability === null
             ? undefined
             : dependencies.windowAuthorityStore.nativeRequestSignal(capability, now());
+        // The native request signal belongs to a window. A device's request
+        // carries its session's lifetime instead, which a revoke aborts.
+        const lifetimes = [nativeSignal, context.abortSignal].filter(
+          (lifetime) => lifetime !== undefined,
+        );
         const signal =
-          nativeSignal === undefined
-            ? request.signal
-            : AbortSignal.any([request.signal, nativeSignal]);
+          lifetimes.length === 0 ? request.signal : AbortSignal.any([request.signal, ...lifetimes]);
         const current = () => {
           if (signal.aborted) return false;
           try {
@@ -141,7 +151,7 @@ export function createWorkFileListingRouteHandler(dependencies: WorkFileListingR
               now: now(),
             });
             return (
-              fresh.principal.kind === "local-window" &&
+              principalActsAsHostPerson(fresh.principal) &&
               String(fresh.scopeId) === String(authenticatedWindowId)
             );
           } catch {

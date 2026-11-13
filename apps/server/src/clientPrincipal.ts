@@ -1,10 +1,43 @@
 import type { RemoteClientPrincipal, WindowId } from "@octant/contracts";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
+import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 export const WINDOW_CAPABILITY_HEADER = "x-octant-window-capability";
 
 export type ClientPrincipal = RemoteClientPrincipal;
+
+/**
+ * The authority class a principal is judged by. A device the host's own person
+ * paired is that person and is judged as a local window is; every other device
+ * session (hub-introduced, an agent grant, an unproved pairing) keeps the
+ * restricted `remote-device` class. The principal itself is unchanged, so the
+ * device stays the recorded actor.
+ */
+export function principalAuthorityKind(principal: ClientPrincipal): PrincipalKind {
+  if (principal.kind === "local-window") return "local-window";
+  return principal.admittedBy === "host-person" ? "person-paired-device" : "remote-device";
+}
+
+/** Whether the request comes from the host's own person: a local window or a device they paired. */
+export function principalActsAsHostPerson(principal: ClientPrincipal): boolean {
+  return actsAsHostPerson(principalAuthorityKind(principal));
+}
+
+/**
+ * The origin an agent grant's session carries. It is not an HTTPS origin, so
+ * no paired device's session can carry it.
+ */
+export const AGENT_ACCESS_ORIGIN = "octant-agent-access";
+
+/**
+ * Whether the principal is an agent grant's session. Its requests passed the
+ * grant's own closed list before the product routes saw them, including the
+ * level the person chose for that grant.
+ */
+export function isAgentGrantSession(principal: ClientPrincipal): boolean {
+  return principal.kind === "remote-device" && principal.origin === AGENT_ACCESS_ORIGIN;
+}
 
 export type ClientPrincipalErrorCategory = "invalid" | "unauthorized" | "conflict" | "unavailable";
 
@@ -68,6 +101,7 @@ export interface CreateRemoteDevicePrincipalInput {
   readonly protocolVersion: number;
   readonly capabilityDigest: string;
   readonly sessionId: RemoteSessionId;
+  readonly admittedBy?: "host-person" | "hub-roster";
 }
 
 /**
@@ -99,6 +133,7 @@ export function createRemoteDevicePrincipal(
     protocolVersion: input.protocolVersion,
     capabilityDigest: input.capabilityDigest,
     sessionId: input.sessionId,
+    ...(input.admittedBy === undefined ? {} : { admittedBy: input.admittedBy }),
   });
   if (JSON.stringify(principal).includes("local-window")) {
     throw new ClientPrincipalError("invalid", "Remote principal cannot include local-window.");

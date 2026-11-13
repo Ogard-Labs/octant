@@ -132,6 +132,55 @@ describe("evaluateAndroidEmulatorRequest", () => {
     ).toMatchObject({ reason: "read-only-policy" });
   });
 
+  it("lets an agent request a device effect unasked at Full access, asked below it, and never in Plan", () => {
+    const agent = {
+      kind: "agent" as const,
+      actorId: "10000000-0000-4000-8000-000000000098" as never,
+      providerInstanceId: authority.providerInstanceId as never,
+      threadId: tap.threadId as never,
+    };
+    const { point: _point, ...base } = tap;
+    const unasked = { kind: "not-required" as const };
+    const effects: ReadonlyArray<AndroidEmulatorRequest> = [
+      { ...base, kind: "open-url", url: "https://example.com/" as never },
+      { ...base, kind: "rotate", orientation: "landscape" },
+      { ...base, kind: "start-recording" },
+    ];
+    for (const effect of effects) {
+      const asked = { ...effect, requestedBy: agent };
+      expect(
+        evaluateAndroidEmulatorRequest(
+          { ...asked, approval: unasked },
+          { ...scope, executionPolicy: "full-access" },
+          [booted],
+          sdk,
+        ),
+      ).toEqual({ kind: "allowed" });
+      expect(evaluateAndroidEmulatorRequest(asked, scope, [booted], sdk)).toEqual({
+        kind: "allowed",
+      });
+      expect(
+        evaluateAndroidEmulatorRequest({ ...asked, approval: unasked }, scope, [booted], sdk),
+      ).toMatchObject({ kind: "denied", reason: "approval-required" });
+      expect(
+        evaluateAndroidEmulatorRequest(asked, { ...scope, executionPolicy: "plan" }, [booted], sdk),
+      ).toMatchObject({ kind: "denied", reason: "read-only-policy" });
+    }
+  });
+
+  it("refuses a device effect the host asks for on its own, at Full access too", () => {
+    const host = { kind: "system" as const, actorId: tap.actionId as never };
+    const { point: _point, ...base } = tap;
+    expect(
+      evaluateAndroidEmulatorRequest(
+        { ...base, kind: "rotate", orientation: "landscape", requestedBy: host },
+        { ...scope, executionPolicy: "full-access" },
+        [booted],
+        sdk,
+      ),
+    ).toEqual({ kind: "denied", reason: "person-or-agent-required" });
+  });
+
   it("names the element a tap was aimed at alongside the point it landed on", () => {
     expect(
       redactedAndroidInputDiagnostic({ kind: "tap", target: "Sign in", point: { x: 5, y: 9 } })

@@ -12,6 +12,7 @@ import {
   type ThreadExternalContentClearOutcome,
   type ThreadExternalContentState,
 } from "@octant/contracts";
+import type { PrincipalKind } from "@octant/domain/remote-access-policy";
 import { decideExternalContentClear } from "@octant/domain/untrusted-content-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -33,7 +34,9 @@ export interface ClearExternalContentInput {
   readonly windowId: unknown;
   /** The aggregate version the person was shown. */
   readonly expectedVersion: unknown;
-  readonly principal: "local-window" | "remote-device" | "host";
+  readonly principal: PrincipalKind | "host";
+  /** The paired device that asked, journaled as the actor in place of the local user. */
+  readonly deviceId?: string;
   /** The thread's turn as its own mode reports it; see `decideExternalContentClear`. */
   readonly turn: "idle" | "active" | "unconfirmed" | "unknown";
 }
@@ -116,7 +119,14 @@ export class ExternalContentClearStore {
             eventName: this.#eventName,
             eventVersion: 1,
             correlationId: this.#uuid(),
-            actor: this.#actor,
+            actor:
+              input.deviceId === undefined
+                ? this.#actor
+                : decodeActor({
+                    kind: "remote-device",
+                    actorId: input.deviceId,
+                    deviceId: input.deviceId,
+                  }),
             occurredAt: decodeTimestamp(this.#clock()),
             payload: {
               threadId: aggregateId,

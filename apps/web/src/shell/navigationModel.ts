@@ -203,6 +203,11 @@ export interface ChatThreadNavigationItem {
   readonly updatedAt?: string;
   /** When the person completed the thread. Absent while it is in play. */
   readonly completedAt?: string;
+  /**
+   * A person marked this Code thread Done whatever its delivery target says.
+   * Reopen clears it. Absent on Chat and Work rows.
+   */
+  readonly markedDone?: boolean;
   /** The thread's snooze as the host recorded it. Absent while it is awake. */
   readonly snooze?: {
     readonly until: string;

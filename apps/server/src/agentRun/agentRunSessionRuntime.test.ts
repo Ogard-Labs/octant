@@ -1929,6 +1929,37 @@ describe("createAgentRunSessionRuntime", () => {
     expect(provider.acquired).toHaveLength(1);
   });
 
+  it("asks whether the transport carries a child's tools at the level the child's session runs at", async () => {
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({ kind: "completed", sessionId });
+      },
+    });
+    const appManagedToolTransport = vi.fn(() => "supported" as const);
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        appManagedTools: () => ({
+          definitions: [
+            {
+              name: "octant_canvas",
+              description: "Author a Canvas in this run's workspace.",
+              inputSchema: { type: "object" },
+            },
+          ],
+          execute: async () => ({ result: { ok: true } }),
+        }),
+        appManagedToolTransport,
+      }),
+    );
+    const run = agentRun();
+
+    await settled(runtime.start(run));
+
+    expect(appManagedToolTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ executionPolicy: run.authority.executionPolicy }),
+    );
+  });
+
   it("closes child-owned tools before publishing a failed acquisition outcome", async () => {
     let closed = false;
     const close = vi.fn(async () => {

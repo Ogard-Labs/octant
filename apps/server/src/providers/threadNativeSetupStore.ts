@@ -66,7 +66,12 @@ export class ThreadNativeSetupStore {
     return readThreadNativeSetup(this.#connection, threadId) ?? "inherit";
   }
 
-  set(threadId: string, choice: ThreadNativeSetupChoice): "recorded" | "refused" {
+  /** `actor` is who chose, resolved from the authenticated principal; absent means the person at this host. */
+  set(
+    threadId: string,
+    choice: ThreadNativeSetupChoice,
+    actor?: EventActorValue,
+  ): "recorded" | "refused" {
     let payload: ReturnType<typeof decodeThreadNativeSetupChanged>;
     try {
       payload = decodeThreadNativeSetupChanged({ threadId, choice });
@@ -74,10 +79,10 @@ export class ThreadNativeSetupStore {
       return "refused";
     }
     if (this.get(threadId) === choice) return "recorded";
-    return this.#append(threadId, payload) ? "recorded" : "refused";
+    return this.#append(threadId, payload, actor) ? "recorded" : "refused";
   }
 
-  #append(threadId: string, payload: unknown): boolean {
+  #append(threadId: string, payload: unknown, actor: EventActorValue = this.#actor): boolean {
     const aggregateId = decodeAggregateId(threadId);
     for (let attempt = 0; attempt < MAX_APPEND_ATTEMPTS; attempt += 1) {
       const expectedVersion = decodeAggregateVersion(
@@ -94,7 +99,7 @@ export class ThreadNativeSetupStore {
               eventName: decodeEventName(THREAD_NATIVE_SETUP_EVENT_NAMES.changed),
               eventVersion: 1,
               correlationId: eventId,
-              actor: this.#actor,
+              actor,
               occurredAt: decodeTimestamp(this.#clock()),
               payload,
             },

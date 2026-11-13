@@ -1,4 +1,5 @@
-import type { ApprovalOutsideContent, WindowId } from "@octant/contracts";
+import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
+import type { ApprovalOutsideContent, EventActor, WindowId } from "@octant/contracts";
 import {
   decodeExtensionToolApproval,
   type ExtensionToolApproval,
@@ -22,15 +23,21 @@ export const MAX_PENDING_APPROVALS = 32;
  * the service scope its authenticated principal resolved to.
  */
 export interface ExtensionToolApprovalAnswerer {
-  readonly kind: "local-window" | "remote-device";
+  readonly kind: PrincipalKind;
   readonly scopeId: WindowId;
+  /**
+   * Who a remembered answer is journaled as, resolved from the authenticated
+   * principal. Absent means the person at this host.
+   */
+  readonly actor?: EventActor;
 }
 
 interface PendingApproval {
   readonly view: ExtensionToolApproval;
   readonly windowId: WindowId;
   readonly expiresAt: number;
-  readonly remember?: (scope: "tool" | "server") => boolean;
+  readonly remember?: (scope: "tool" | "server", actor?: EventActor) => boolean;
+  readonly approvedBy?: (actor: EventActor | undefined) => void;
   readonly resolve: (approved: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly signal?: AbortSignal;
@@ -106,7 +113,14 @@ export class ExtensionToolApprovalService {
      * approved once; the prompt then offers no such answer and one sent
      * anyway is refused.
      */
-    readonly remember?: (scope: "tool" | "server") => boolean;
+    readonly remember?: (scope: "tool" | "server", actor?: EventActor) => boolean;
+    /** What an approval lets run afterwards, which the prompt states. */
+    readonly answerCovers?: "call" | "server" | "server-on-thread";
+    /**
+     * Told who approved, before the call resumes, so an approval the host
+     * keeps is journaled as that person's device or window.
+     */
+    readonly approvedBy?: (actor: EventActor | undefined) => void;
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
@@ -127,6 +141,7 @@ export class ExtensionToolApprovalService {
       inputJson: input.inputJson,
       requestedAt: new Date(requestedAt).toISOString(),
       rememberable: input.remember !== undefined,
+      ...(input.answerCovers === undefined ? {} : { answerCovers: input.answerCovers }),
       ...(input.outsideContent === undefined ? {} : { outsideContent: input.outsideContent }),
     });
     return new Promise<boolean>((resolve) => {
@@ -149,6 +164,7 @@ export class ExtensionToolApprovalService {
         windowId: input.windowId,
         expiresAt: requestedAt + this.#ttlMs,
         ...(input.remember === undefined ? {} : { remember: input.remember }),
+        ...(input.approvedBy === undefined ? {} : { approvedBy: input.approvedBy }),
         resolve: settle,
         timer,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -175,24 +191,26 @@ export class ExtensionToolApprovalService {
     const pending = this.#pending.get(decision.approvalId);
     if (pending === undefined || !this.#answerableBy(pending, answerer)) return false;
     if (decision.remember === true) {
-      // A remembered approval grows only from a person's answer at the local
-      // window whose own turn raised the prompt, and only to a prompt that
-      // offered it: one a host-owned or a paired device's turn raised arrives
-      // with no `remember`, whoever answers. The host's own scope is nobody,
-      // so it may settle its prompt but never remember one, and a paired
+      // A remembered approval grows only from the host's own person, answering
+      // from the local window or the device they paired whose own turn raised
+      // the prompt, and only to a prompt that offered it: one a host-owned, a
+      // hub-introduced device's, or an agent grant's turn raised arrives with
+      // no `remember`, whoever answers. The host's own scope is nobody, so it
+      // may settle its prompt but never remember one, and a hub-introduced
       // device approves once only. A refused or failed `remember` leaves the
       // call waiting, to be approved once.
       if (
         decision.decision !== "approved" ||
         pending.remember === undefined ||
-        answerer.kind !== "local-window" ||
+        !actsAsHostPerson(answerer.kind) ||
         String(pending.windowId) !== String(answerer.scopeId) ||
         this.options.isHostScope?.(answerer.scopeId) === true ||
-        !pending.remember(decision.rememberScope ?? "tool")
+        !pending.remember(decision.rememberScope ?? "tool", answerer.actor)
       ) {
         return false;
       }
     }
+    if (decision.decision === "approved") pending.approvedBy?.(answerer.actor);
     pending.resolve(decision.decision === "approved");
     return true;
   }

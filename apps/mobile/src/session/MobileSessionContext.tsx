@@ -33,6 +33,10 @@ import {
   type MobileHostRegistration,
 } from "../hosts/HostRegistry";
 import { createGuestHubStore, reopenGuestHub, type GuestHubStore } from "../hosts/hubGuestFlow";
+import {
+  createFullAccessWarningStore,
+  type FullAccessWarningStore,
+} from "../hosts/fullAccessWarningStore";
 import type { MobileMockScenario } from "../dev/mobileMockScenario";
 import {
   createMobileHostSessionHub,
@@ -59,6 +63,8 @@ export interface MobileSessionContextValue {
   readonly registry: MobileHostRegistry;
   /** The hub this phone joined as a guest, if any. */
   readonly guestHubStore: GuestHubStore;
+  /** The hosts whose one-time Full access warning this phone has had accepted. */
+  readonly fullAccessWarnings: FullAccessWarningStore;
   readonly deviceKeyStore: ReturnType<typeof createExpoSecureDeviceKeyStore>;
   /** Primary bridge used by PairingPanel connect/resume flows. */
   readonly bridge: RemoteSessionBridge;
@@ -101,6 +107,10 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   );
   const registry = useMemo(() => createMobileHostRegistry(registryStorage), [registryStorage]);
   const guestHubStore = useMemo(() => createGuestHubStore(registryStorage), [registryStorage]);
+  const fullAccessWarnings = useMemo(
+    () => createFullAccessWarningStore(registryStorage),
+    [registryStorage],
+  );
   const listenerFetch = useMemo(
     () =>
       createMobileListenerFetch({
@@ -238,6 +248,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     environment: { kind: "live" },
     registry,
     guestHubStore,
+    fullAccessWarnings,
     deviceKeyStore,
     bridge,
     bridgeState,
@@ -277,6 +288,10 @@ function MockMobileSessionProvider(props: {
   );
   const guestHubStore = useMemo(
     () => createGuestHubStore(createInMemoryMobileHostRegistryStorage()),
+    [],
+  );
+  const fullAccessWarnings = useMemo(
+    () => createFullAccessWarningStore(createInMemoryMobileHostRegistryStorage()),
     [],
   );
   const bridge = useMemo(
@@ -320,6 +335,7 @@ function MockMobileSessionProvider(props: {
     },
     registry,
     guestHubStore,
+    fullAccessWarnings,
     deviceKeyStore,
     bridge,
     bridgeState: bridge.getState(),

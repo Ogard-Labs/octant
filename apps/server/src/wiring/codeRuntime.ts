@@ -1,7 +1,7 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
-import { browserToolTransport } from "@octant/domain";
+import { appToolThreadLevel, browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -157,7 +157,7 @@ export function withCodeOperationRuntime(
           readOperationContents: (windowId, input, admissionCurrent) =>
             readEvidenceBatch(windowId, input, admissionCurrent),
         }),
-    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
       ? {}
@@ -202,7 +202,7 @@ function withCodeBoard(
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
-    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
       ? {}
@@ -771,6 +771,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               ...(destination === undefined ? {} : { leaseId: destination.leaseId }),
             }),
             ask,
+            appToolThreadLevel(thread),
           ),
         spendCeiling,
         terminalProcessPort,
@@ -983,7 +984,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
-          return browserToolTransport(observed, String(thread.modelId)) === true;
+          return (
+            browserToolTransport(observed, String(thread.modelId), appToolThreadLevel(thread)) ===
+            true
+          );
         },
         supportsAcpClientCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
@@ -1053,6 +1057,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         routineBrowserTools: ({ thread, readThread, routineRun }) =>
           routineBrowserTools({
             routineRun,
+            turnLevel: appToolThreadLevel(thread),
             threadId: decodeBrowserThreadId(String(thread.id)),
             currentAuthority: () =>
               readThread() === undefined
@@ -2014,9 +2019,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
       readPlanner: (windowId, projectId) => codePlannerService.readView(windowId, projectId),
-      executePlanner: (windowId, command) => codePlannerService.execute(windowId, command),
-      executePlannerProposal: (windowId, command, signal) =>
-        codePlannerService.resolveProposal(windowId, command, signal),
+      executePlanner: (windowId, command, actor) =>
+        codePlannerService.execute(windowId, command, actor),
+      executePlannerProposal: (windowId, command, signal, actor) =>
+        codePlannerService.resolveProposal(windowId, command, signal, actor),
       queryProjectPullRequests: (windowId, query) =>
         projectPullRequestService.query(windowId, query),
       refreshProjectPullRequests: async (windowId, command, signal) => {
@@ -2044,25 +2050,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // A paired phone or web client merges under the same head and
       // required-check rules as the desktop window; it must also carry the
       // person's confirmation, which the service enforces.
-      mergeProjectPullRequest: (windowId, command, signal, caller) =>
+      mergeProjectPullRequest: (windowId, command, signal, caller, actor) =>
         projectPullRequestService.merge(
           windowId,
           command,
           signal ?? new AbortController().signal,
           caller,
+          actor,
         ),
-      mergeProjectPullRequestStack: (windowId, command, signal, caller) =>
-        projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
-      actOnProjectPullRequest: (windowId, command, signal, caller) =>
-        projectPullRequestActionService.act(windowId, command, signal, caller),
+      mergeProjectPullRequestStack: (windowId, command, signal, caller, actor) =>
+        projectPullRequestActionService.mergeStack(windowId, command, signal, caller, actor),
+      actOnProjectPullRequest: (windowId, command, signal, caller, actor) =>
+        projectPullRequestActionService.act(windowId, command, signal, caller, actor),
       readProjectPullRequestActionContext: (windowId, query, signal, caller) =>
         projectPullRequestActionService.readContext(windowId, query, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>
         pullRequestSwitchService.query(windowId, target),
-      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller) =>
-        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal),
-      setProjectPullRequestAutoFix: (windowId, command, initiator) =>
-        pullRequestSwitchService.setAutoFix(windowId, command, initiator),
+      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller, actor) =>
+        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal, actor),
+      setProjectPullRequestAutoFix: (windowId, command, initiator, actor) =>
+        pullRequestSwitchService.setAutoFix(windowId, command, initiator, actor),
       noteComposerActivity: (_windowId, activity) =>
         pullRequestSwitchService.noteComposerActivity(activity.threadId),
     };

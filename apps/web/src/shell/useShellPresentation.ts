@@ -73,6 +73,23 @@ export function useAutomaticUpdateCheckSync(
 }
 
 /**
+ * Tell the desktop app whether its quit shortcut needs a second press.
+ *
+ * The app starts guarded and learns the person's choice here, once settings
+ * have loaded: a quit that arrives before then is the guarded one.
+ */
+export function useQuitShortcutSecondPressSync(
+  hostBridge: Pick<OctantHostBridge, "setQuitShortcutSecondPress"> | undefined,
+  needsSecondPress: boolean | undefined,
+): void {
+  const report = hostBridge?.setQuitShortcutSecondPress;
+  useEffect(() => {
+    if (report === undefined || needsSecondPress === undefined) return;
+    report(needsSecondPress);
+  }, [needsSecondPress, report]);
+}
+
+/**
  * Tell the host which release ring to follow, but only once someone has said.
  *
  * An unset preference is left unsent rather than resolved to a default here.

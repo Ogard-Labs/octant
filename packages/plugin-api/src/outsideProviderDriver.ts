@@ -192,10 +192,12 @@ export const OutsideProviderDriverSignatureDocument = Schema.Struct({
   format: Schema.Literal(OUTSIDE_PROVIDER_DRIVER_SIGNATURE_FORMAT),
   name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(214)),
   version: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
-  protocolVersions: Schema.Array(OutsideProviderDriverProtocolVersion).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(8),
-  ),
+  /**
+   * Empty for a package that is not a provider driver and so speaks no
+   * driver protocol. The host compares the list with the package it read, so
+   * a driver's signature that left its versions out does not verify.
+   */
+  protocolVersions: Schema.Array(OutsideProviderDriverProtocolVersion).pipe(Schema.maxItems(8)),
   files: Schema.Array(
     Schema.Struct({ path: signedPath, sha256: sha256Hex }).annotations(strict),
   ).pipe(Schema.maxItems(4096)),

@@ -260,6 +260,7 @@ export type HubAdministrationOperation =
   | "owners-remove"
   | "confirm-new-members"
   | "paired-merge-unlock"
+  | "owner-approval-answer-unlock"
   | "confirm-member"
   | "alert-dismiss"
   | "alert-remove"
@@ -365,6 +366,20 @@ export function agentAccessAdministrationOf(
 }
 
 /**
+ * An organization sign-in with a device code on a local desktop window. The
+ * desktop adds its secret and reaches the host-local sign-in routes; a paired
+ * device and a remote browser have no such bridge, so no code is ever shown
+ * to them.
+ */
+export interface ProviderDeviceSignInBridge {
+  readonly providerDeviceSignIn: (
+    request:
+      | { readonly kind: "begin"; readonly instance: string; readonly acknowledgeTerms: boolean }
+      | { readonly kind: "poll"; readonly instance: string; readonly attemptId: string },
+  ) => Promise<{ readonly status: number; readonly body: unknown }>;
+}
+
+/**
  * A Mac owner device's unlock key (Touch ID or the account password). The
  * desktop makes the key and returns only its public half, signs one owner
  * unlock challenge, and forgets the key. Absent outside the desktop app.
@@ -402,6 +417,7 @@ export interface OctantHostBridge
     Partial<PairedComputersBridge>,
     Partial<HubAdministrationBridge>,
     Partial<AgentAccessAdministrationBridge>,
+    Partial<ProviderDeviceSignInBridge>,
     Partial<OwnerUnlockBridge> {
   /**
    * Shows a server another paired computer granted this device, served by
@@ -698,6 +714,8 @@ export interface OctantHostBridge
   ) => void;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
+  /** Reports the person's setting: whether ⌘Q needs a second press. */
+  readonly setQuitShortcutSecondPress?: (needed: boolean) => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;
 }
 

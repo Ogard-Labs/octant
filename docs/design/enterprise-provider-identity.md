@@ -438,8 +438,13 @@ Rules slice 2 resolved, each the most conservative reading of decision 2:
   terminal where the person typed the command or in a local desktop window
   that reaches the host-local routes above through the desktop app, because a
   code shown on a page someone else can reach is how device-code phishing
-  works (local desktop window: maintainer request, 2026-11-12; not built yet,
-  today the code is shown only in the terminal). Both routes refuse an
+  works (local desktop window: maintainer request, 2026-11-12). Built: the
+  desktop's main process forwards a window's begin and poll over its own
+  channel ([`providerDeviceSignInControls.ts`](../../apps/desktop/src/providerDeviceSignInControls.ts)),
+  adding the bridge secret and that window's capability, which the renderer
+  never holds; the routes and their caller rule are unchanged, so a paired
+  device and a remote browser, which have no such channel, still cannot begin
+  one or read a code. Both routes refuse an
   instance that has not opted in before any broker call, and the shared
   sign-in path checks the opt-in again for every caller.
 - **The broker's device authorization.** The broker builds
@@ -728,7 +733,18 @@ depends only on 1–3.
    default, since it makes Octant read another tool's credential store, but
    the person may opt in per endpoint with "Use my AWS profile", off by
    default, which reads their existing cloud profile (maintainer request,
-   2026-11-12; not built yet: today no cloud profile is read).
+   2026-11-12; not built yet: today no cloud profile is read). The read can
+   stay inside the broker, since a profile-sourced grant would sign through
+   the same `/v1/cloud-iam/sign` route under the same stored scope and no
+   runtime or journal would see it. Unresolved before it is built: which
+   profile kinds are read (a single sign-on profile, whose portal, account
+   and role are a grant's source fields; static access keys; an assumed
+   role; a credential process, which would run a configured command inside
+   the broker); whether the broker reads the cloud command line's cached
+   portal session, which is another tool's token store, and what happens
+   when that session ends; how the account and role are proved for a profile
+   that names neither; and whether `AWS_CONFIG_FILE` and its kin redirect
+   the read.
 5. **Google Vertex.** Deferred until an organization needs it. Its bearer is
    valid across the whole cloud account, so it may never reach the server;
    when it is built, the only acceptable shape is a broker-side relay that

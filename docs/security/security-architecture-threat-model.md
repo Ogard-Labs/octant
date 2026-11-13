@@ -81,14 +81,17 @@ existing control.
 - **Extension packages and MCP servers:** third-party code and manifests. Installation never
   implies trust; executable components are quarantined until explicitly trusted, and trust never
   bypasses mode, sandbox, approval, or credential policy.
-- **Remote client:** an authenticated paired browser or mobile device. Once
-  authenticated it is the person and holds what a local window holds (maintainer
-  decision, 2026-11-12; [Architecture: Remote
-  clients](../architecture.md#security-and-authority)); it cannot exceed host,
-  mode, provider, Project, or thread authority. Not built yet: today it is a
-  remote principal, never the host owner, held to the remote action catalogue
-  and unable to mint local receipts. A hub or peer host and an agent grant stay
-  remote principals held to their grants.
+- **Remote client:** an authenticated paired browser or mobile device. A device
+  the host's own person paired is the person and holds what a local window holds
+  on every route the private listener forwards (maintainer decision, 2026-11-12;
+  [Architecture: Remote clients](../architecture.md#security-and-authority)); it
+  cannot exceed host, mode, provider, Project, or thread authority and cannot
+  mint local receipts or become a local window. The host reads who admitted a
+  device from its own journaled approval record on each session: a device the
+  hub's roster introduced, a device whose approval is not proved there, and an
+  agent grant's session stay remote principals held to the remote action
+  catalogue and their grants. A hub or peer host stays a remote principal held
+  to its grant.
 - **Child agents (subagents):** provider-native or Octant-managed. Receive equal-or-narrower
   authority than their parent; a child request is admitted only after server-side clamping.
 - **Another local principal on the loopback path:** another OS user on the same machine, a local
@@ -148,14 +151,14 @@ A trusted-looking extension ships an MCP server that requests filesystem, shell,
 credential capability it never declared, floods oversized results, or registers tools whose names
 shadow Octant core tools.
 
-| Layer               | Control                                                                                                                                                                           | Module                                                                                                  | State           |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------- |
-| Activation ladder   | Host → mode → Project → thread → trust → enablement → compatibility all fail closed; quarantine blocks first                                                                      | `packages/plugin-host/src/activation.ts` (`resolveExtensionActivation`, `isExtensionComponentModeSafe`) | Exists today    |
-| Manifest validation | Declared capabilities, entry points, paths, symlinks, and integrity validated before install                                                                                      | `apps/server/src/extensions/packageInspector.ts`, `packages/plugin-host/src/agentPlugins/mcp.ts`        | Exists today    |
-| Supervised process  | Executable components run under `sandbox-exec` with a minimal `PATH`, ready-handshake, and durable receipts                                                                       | `apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`                      | Exists today    |
-| Per-call approval   | Each MCP tool invocation is approval-gated with a bounded TTL that denies on timeout or abort; a paired device answers only its own turns' prompts, once, and never remembers one | `apps/server/src/extensions/extensionToolApprovalService.ts`                                            | Exists today    |
-| Policy engine       | An MCP-originated call carries `extension: trusted-extension` authority and cannot claim `core` identity                                                                          | `packages/contracts/src/toolActions.ts` (`ToolActionAuthority.extension`), `toolActionPolicy.ts`        | Exists today    |
-| Capability ceiling  | Requested-versus-declared capability mismatch is rejected at resolution, not merely surfaced in review UI                                                                         | Unified policy engine (see Policy engine)                                                               | Newly specified |
+| Layer               | Control                                                                                                                                                                                                                                                                    | Module                                                                                                  | State           |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------- |
+| Activation ladder   | Host → mode → Project → thread → trust → enablement → compatibility all fail closed; quarantine blocks first                                                                                                                                                               | `packages/plugin-host/src/activation.ts` (`resolveExtensionActivation`, `isExtensionComponentModeSafe`) | Exists today    |
+| Manifest validation | Declared capabilities, entry points, paths, symlinks, and integrity validated before install                                                                                                                                                                               | `apps/server/src/extensions/packageInspector.ts`, `packages/plugin-host/src/agentPlugins/mcp.ts`        | Exists today    |
+| Supervised process  | Executable components run under `sandbox-exec` with a minimal `PATH`, ready-handshake, and durable receipts                                                                                                                                                                | `apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`                      | Exists today    |
+| Per-call approval   | Each MCP tool invocation is approval-gated with a bounded TTL that denies on timeout or abort; a paired device answers only its own turns' prompts; a device the host's own person paired may remember an answer as a window does, every other device session answers once | `apps/server/src/extensions/extensionToolApprovalService.ts`                                            | Exists today    |
+| Policy engine       | An MCP-originated call carries `extension: trusted-extension` authority and cannot claim `core` identity                                                                                                                                                                   | `packages/contracts/src/toolActions.ts` (`ToolActionAuthority.extension`), `toolActionPolicy.ts`        | Exists today    |
+| Capability ceiling  | Requested-versus-declared capability mismatch is rejected at resolution, not merely surfaced in review UI                                                                                                                                                                  | Unified policy engine (see Policy engine)                                                               | Newly specified |
 
 ### AC3 — Child agent widening scope
 
@@ -180,38 +183,45 @@ authority is clamped against both the mode ceiling and the parent thread's live 
 
 ### AC4 — Remote client exceeding host policy
 
-The local-host-required action set is removed (maintainer decision, 2026-11-12):
-an authenticated paired device is the person and may do what a local window may,
-with extension trust, credential write, Project binding, device approval and
-Full access included. The threat that follows is stated plainly. **A stolen or
-compromised paired device holds the person's full authority on that host**, up
-to Full access with no sandbox and the use of every credential the broker holds,
-until its session ends or the device is revoked. What stands in front of it is
-the authentication of the device and no longer a list of actions: the device
-key, the pinned host identity over TLS, pairing approved only by a party the
-host already trusts, pairing and sign-in rate limits, session idle and absolute
-expiry with rotation, device expiry and revocation, every action journaled with
-the device as its actor, and secrets that are redacted and held only by the
-credential broker, so a device can use or replace a credential and never read
-one back. The residual risk is accepted: a device in an attacker's hands while
-its session lives, or malware on it, acts as the person, the host asks for no
-further proof of presence, and the journal shows what was done only afterwards.
+The local-host-required action set no longer holds a device the host's own
+person paired (maintainer decision, 2026-11-12): such a device is the person and
+may do what a local window may on every forwarded route, with extension trust,
+credential write, Project binding, device approval and Full access included. The
+threat that follows is stated plainly. **A stolen or compromised paired device
+holds the person's full authority on that host**, up to Full access with no
+sandbox, storing, replacing or removing a provider key, the use of every credential the broker holds, changing the host's shell settings (turning on "Let agents download files", for one), wiping the usage ledger, and approving further devices, until its session ends or the device is revoked. What stands in front
+of it is the authentication of the device and no longer a list of actions: the
+device key, the pinned host identity over TLS, pairing approved only by a party
+the host already trusts, pairing and sign-in rate limits, session idle and
+absolute expiry with rotation, device expiry and revocation, every action
+journaled with the device as its actor, and secrets that are redacted and held
+only by the credential broker, so a device can use or replace a credential and
+never read one back. The residual risk is accepted by that decision: a device in an attacker's hands while its session lives, or malware
+on it, acts as the person, the host asks for no further proof of presence, and
+the journal shows what was done only afterwards. An attacker holding one such
+device can approve a device of their own, so revoking the stolen device alone
+does not end their reach: the person revokes every device they do not recognize.
 The attacks this class still names are a replayed or expired session, an
-unauthenticated or revoked caller, a hub, peer or agent-grant principal passing
-as a paired device, and identity supplied in a payload. Not built yet: today the
-closed action sets in the table below still hold, so a paired device that
-attempts a local-only action (extension trust, credential write, Project
-binding, device approval), launders its principal into a local window, or
-approves an action class reserved for the local user is refused.
+unauthenticated or revoked caller, a hub-introduced device, a hub, peer or
+agent-grant principal passing as a person-paired device, a device laundering its
+principal into a local window, and identity supplied in a payload. For those
+sessions the closed action sets in the table below still hold. Not built yet:
+the journal does not name the device for every change (a Code operation's own
+events are journaled as the system, and cancelling a connector sign-in that is
+still waiting names no device;
+[Architecture: Remote clients](../architecture.md#security-and-authority)).
+What the private listener forwards to no device (the listener's own controls,
+the desktop bridge, secret stores, the whole host's export)
+stays out of a stolen device's reach.
 
-| Layer              | Control                                                                                                 | Module                                                                                                       | State        |
-| ------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------ |
-| Principal identity | Local-window versus remote-device principals resolved server-side; identity in payloads is rejected     | `apps/server/src/clientPrincipal.ts` (`resolveAuthenticatedPrincipal`, `assertNoPrincipalIdentityInPayload`) | Exists today |
-| Action catalog     | Closed remote-approvable and local-host-required action sets; unknown actions fail closed               | `packages/domain/src/remoteAccessPolicy.ts` (`classifyRemoteAction`, `authorizePrincipalAction`)             | Exists today |
-| Laundering denial  | A remote principal can never become local-window or mint native/local approval receipts                 | `remoteAccessPolicy.ts` (`remote-cannot-mint-local-receipt`, `principal-laundering`)                         | Exists today |
-| Session lifecycle  | Pairing TTL and attempt limits, session idle/absolute expiry and rotation, device expiry and revocation | `remoteAccessPolicy.ts`, `apps/server/src/remoteCredentialLifecycleService.ts`                               | Exists today |
-| Operation clamps   | Remote Code operations resolve to host-clamped decisions (`host-thread-credential-clamped` for push/PR) | `packages/domain/src/codePolicy.ts` (`authorizeCodeOperation`)                                               | Exists today |
-| Route policy       | Per-route security policy and request-proof validation on remote transports                             | `apps/server/src/remoteRoutePolicy.ts`, `remoteRequestProofService.ts`                                       | Exists today |
+| Layer              | Control                                                                                                                                                                                                                 | Module                                                                                                                                 | State        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| Principal identity | Local-window versus remote-device principals resolved server-side; identity in payloads is rejected; who admitted a device is read from the host's approval record, and a principal without that proof stays restricted | `apps/server/src/clientPrincipal.ts` (`resolveAuthenticatedPrincipal`, `assertNoPrincipalIdentityInPayload`, `principalAuthorityKind`) | Exists today |
+| Action catalog     | Closed remote-approvable and local-host-required action sets; unknown actions fail closed; a device the host's own person paired passes the local-host-required set, every other device session is refused it           | `packages/domain/src/remoteAccessPolicy.ts` (`classifyRemoteAction`, `authorizePrincipalAction`)                                       | Exists today |
+| Laundering denial  | A remote principal, a person-paired device included, can never become local-window or mint native/local approval receipts                                                                                               | `remoteAccessPolicy.ts` (`remote-cannot-mint-local-receipt`, `principal-laundering`)                                                   | Exists today |
+| Session lifecycle  | Pairing TTL and attempt limits, session idle/absolute expiry and rotation, device expiry and revocation                                                                                                                 | `remoteAccessPolicy.ts`, `apps/server/src/remoteCredentialLifecycleService.ts`                                                         | Exists today |
+| Operation clamps   | Remote Code operations resolve to host-clamped decisions (`host-thread-credential-clamped` for push/PR)                                                                                                                 | `packages/domain/src/codePolicy.ts` (`authorizeCodeOperation`)                                                                         | Exists today |
+| Route policy       | Per-route security policy and request-proof validation on remote transports                                                                                                                                             | `apps/server/src/remoteRoutePolicy.ts`, `remoteRequestProofService.ts`                                                                 | Exists today |
 
 ### AC5 — Loopback caller claiming the local owner
 
@@ -258,6 +268,31 @@ origin, lease, header, and redirect negatives. The confined process's escape tes
 the home folder and its keychains, another program, and the host's environment from a real Seatbelt
 process; they run on macOS only, in the `macos-15` CI job, and passed there on 2026-10-27
 ([job](https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053)).
+
+### AC7 — Trusted plugin source publishing a hostile update
+
+The source a person trusted an unsigned plugin at (a folder, a catalog entry, an npm registry
+package) is compromised, or the path to it is, and publishes a new version. Since 2026-11-13 an
+unsigned update from that same source keeps the package's trust and the approvals its tools were
+given, so the new code runs MCP tools without a new prompt. This is an accepted residual risk: the
+maintainer chose it over asking on every update of a plugin whose author does not sign, which
+trained people to approve without reading. The rule lives in
+[Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
+
+| Layer                | Control                                                                                                                                                                                                                                                                                             | Module                                                                                                        | State        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------ |
+| Source binding       | Approvals carry over only inside one journaled run of updates from the recorded source of a trusted package; a different source is a different package and a new install                                                                                                                            | `packages/domain/src/outsideDriverPublisherPolicy.ts` (`unsignedUpdateKeepsApprovals`, `sameExtensionSource`) | Exists today |
+| Key rule first       | Wherever a publisher key exists or existed, the key decides: a version the pinned key did not sign is held and loses trust, an unsigned update of a signed package never rides the source rule, and the first signed update of an unsigned package stops for the person's trust, which pins its key | `apps/server/src/persistence/extensionProjection.ts` (`withPublisherStanding`, `readVerifiedPublisherKey`)    | Exists today |
+| Capability check     | An update that declares more than the reviewed version is held for review and loses trust, so a hostile update cannot add the shell or the network silently                                                                                                                                         | `extensionProjection.ts` (`hasCapabilityExpansion`)                                                           | Exists today |
+| Notice               | The installed card says the plugin was updated, from and to which version and digest, and when; nothing is hidden behind a fold                                                                                                                                                                     | `apps/web/src/extensions/ExtensionsSettingsView.tsx` (`UpdatedNotice`)                                        | Exists today |
+| Roll back            | One press returns to the previous version from the retained, integrity-checked copy and ends every remembered approval of the package                                                                                                                                                               | `apps/server/src/extensions/extensionLifecycleService.ts` (`rollback`)                                        | Exists today |
+| Asks no grant spares | A Plan turn asks for every call, a tool the catalog marks ask-every-call asks every time, and a network server asks once per thread after the thread has read outside content                                                                                                                       | `packages/domain/src/extensionToolGrantPolicy.ts` (`decideExtensionToolGrant`)                                | Exists today |
+| Confinement          | A stdio server still launches with no network and writes limited to its plugin data; what the update can reach is what the reviewed version could                                                                                                                                                   | `apps/server/src/extensions/nodeExtensionProcessPort.ts`                                                      | Exists today |
+
+Residual: between the update and the person reading the notice, the new version can use the
+approved tools with the arguments the model gives it, and a network server can send those
+arguments out. A publisher who signs removes this case: a signed package's update is accepted only
+under the pinned key.
 
 ## Server-Side Tool-Call Policy Engine
 
@@ -388,14 +423,14 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   unmarked. Which calls each runtime exposes is listed in `docs/architecture.md`, Persistence,
   Provider runtimes' own web tools.
 - **A person may clear the mark.** The mark keeps its thread lifetime, and a person at a local
-  window may clear it after reviewing what the thread read (maintainer decision 2026-10-12). The clear
-  is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window, the
+  window or on a device they paired may clear it after reviewing what the thread read (maintainer decision 2026-10-12). The clear
+  is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window or device, the
   cleared source labels, and the ingestion count, never content). It names the aggregate version the
   person was shown, so an ingestion they have not seen refuses it, and it is refused while the
   thread's turn is running, queued, or of unknown state. Only the person's `POST
-/api/thread-external-content` clears, from a local window or a paired device
-  (maintainer decision, 2026-11-12; not built yet: today the route is local-only
-  and a paired device is refused at the private listener and at the handler);
+/api/thread-external-content` clears, from a local window or a device the
+  host's own person paired, which the journal names (maintainer decision,
+  2026-11-12); every other device session is refused at the handler, and
   the host's own scope, a tool, a command, model output, a structured
   reference, an agent message, and a host-run turn cannot. It removes the mark only and holds for
   nothing: the next ingestion marks the thread again, including content the thread had read before.
@@ -679,11 +714,10 @@ Waived or skipped rows never count as passing (consistent with the Phase 4/16 ev
   broker tokens.
 - A secret (provider credential, OAuth token, broker token, pairing secret) in the journal,
   renderer, tool result, child environment, or export.
-- A caller that is not an authenticated local window or paired device (an
-  unauthenticated, expired or revoked device, a hub or peer host, an agent
-  grant) acting with a window's or a paired device's authority. Until the
-  paired-device rule is built, also: a remote principal executing a
-  local-host-required action or minting a local approval receipt.
+- A caller that is not an authenticated local window or a device the host's own
+  person paired (an unauthenticated, expired or revoked device, a hub-introduced
+  device, a hub or peer host, an agent grant) executing a local-host-required
+  action, or any remote principal minting a local approval receipt.
 
 ### High
 
@@ -694,7 +728,7 @@ Waived or skipped rows never count as passing (consistent with the Phase 4/16 ev
 - An irreversible approval class auto-satisfied by a standing grant on a thread marked
   `external-content-ingested`.
 - A thread's `external-content-ingested` mark cleared by anything other than a person at a local
-  window.
+  window or on a device the host's own person paired.
 - Network egress from a tool subprocess whose resolved egress policy was `none`.
 - Under the harness tool egress rules, a connection from a `proxied` launch to a
   destination no live applicable rule covers, after its rule expired, or to a private address.

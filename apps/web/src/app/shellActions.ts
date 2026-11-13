@@ -214,6 +214,7 @@ export type ShellActions = {
   readonly renameCodeThread: (threadId: string, title: string) => void;
   readonly renameProject: ProjectController["rename"];
   readonly reopenChatThread: ChatController["reopenThread"];
+  readonly markCodeThreadDone: CodeController["markThreadDone"];
   readonly reopenCodeThread: CodeController["reopenThread"];
   readonly resetNewTaskDraft: (mode: OctantMode, paneId?: PaneId) => void;
   readonly retryActiveModeThreads: () => void;
@@ -302,6 +303,7 @@ export type ShellActions = {
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
   readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
+  readonly setProjectOwnToolchain: ProjectController["setCodeOwnToolchain"];
   readonly setProjectWorkDeveloperTools: ProjectController["setWorkDeveloperTools"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<

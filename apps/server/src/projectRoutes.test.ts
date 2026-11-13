@@ -15,6 +15,9 @@ const windowId = decodeWindowId("00000000-0000-4000-8000-000000000701");
 const projectId = decodeProjectId("00000000-0000-4000-8000-000000000702");
 const entryId = decodeMemoryEntryId("00000000-0000-4000-8000-000000000703");
 const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000704");
+const pairedDeviceId = "00000000-0000-4000-8000-000000000705";
+// What a local window's change is journaled as.
+const localUser = { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" };
 
 describe("Project routes", () => {
   it("authenticates an encoded environment request and returns the strict observation", async () => {
@@ -187,7 +190,11 @@ describe("Project routes", () => {
       }),
     );
     expect(response?.status).toBe(200);
-    expect(executeProject).toHaveBeenCalledWith(windowId, expect.objectContaining({ projectId }));
+    expect(executeProject).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ projectId }),
+      localUser,
+    );
 
     for (const body of [
       { kind: "create-chat-project", projectId, expectedVersion: 0, name: "Chat", windowId },
@@ -206,7 +213,58 @@ describe("Project routes", () => {
     }
   });
 
-  it("refuses a paired device's access-grant change while a local window keeps the route", async () => {
+  it("lets a device the host's own person paired change a Project's access grant and set its level to Full access, and refuses a hub-introduced device both", async () => {
+    const executeProject = vi.fn(() => ({ kind: "code-project-access-changed" }));
+    const route = routeFixture({ executeProject });
+    const commands = [
+      {
+        kind: "change-code-project-access",
+        projectId,
+        expectedVersion: 0,
+        codeAccessPersistence: "project-default",
+      },
+      {
+        kind: "change-code-project-permission-mode",
+        projectId,
+        expectedVersion: 0,
+        permissionMode: "full-access",
+      },
+    ];
+    const from = (command: unknown, admittedBy: "host-person" | "hub-roster") => {
+      const remote = new Request("http://127.0.0.1/api/projects/commands", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: { kind: "remote-device", admittedBy, deviceId: pairedDeviceId } as never,
+        scopeId: windowId,
+      });
+      return remote;
+    };
+
+    for (const command of commands) {
+      expect((await route(from(command, "hub-roster")))?.status).toBe(403);
+    }
+    expect(executeProject).not.toHaveBeenCalled();
+    for (const command of commands) {
+      expect((await route(from(command, "host-person")))?.status).toBe(200);
+    }
+    expect(executeProject).toHaveBeenCalledTimes(commands.length);
+    // The device is who the journal names for each change.
+    for (const call of executeProject.mock.calls as ReadonlyArray<ReadonlyArray<unknown>>) {
+      expect(call[2]).toEqual({
+        kind: "remote-device",
+        actorId: pairedDeviceId,
+        deviceId: pairedDeviceId,
+      });
+    }
+  });
+
+  it("refuses a hub-introduced device's access-grant change while a local window keeps the route", async () => {
     const executeProject = vi.fn(() => ({ kind: "code-project-access-changed" }));
     const route = routeFixture({ executeProject });
     const headers = {
@@ -241,6 +299,7 @@ describe("Project routes", () => {
     expect(executeProject).toHaveBeenCalledWith(
       windowId,
       expect.objectContaining({ kind: "change-code-project-access" }),
+      localUser,
     );
   });
 
@@ -278,6 +337,7 @@ describe("Project routes", () => {
     expect(executeProject).toHaveBeenCalledWith(
       windowId,
       expect.objectContaining({ kind: "change-project-native-providers" }),
+      localUser,
     );
   });
 
@@ -315,9 +375,47 @@ describe("Project routes", () => {
     expect(executeProject).toHaveBeenCalledWith(
       windowId,
       expect.objectContaining({ kind: "change-code-project-agent-merge" }),
+      localUser,
     );
   });
 
+  it("refuses a paired device turning on a Project's own toolchain while a local window keeps the route", async () => {
+    const executeProject = vi.fn(() => ({ kind: "code-project-own-toolchain-changed" }));
+    const route = routeFixture({ executeProject });
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const body = JSON.stringify({
+      kind: "change-code-project-own-toolchain",
+      projectId,
+      expectedVersion: 1,
+      ownToolchain: "enabled",
+    });
+    const remote = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body,
+    });
+    bindPrincipalRouteContext(remote, {
+      principal: { kind: "remote-device" } as never,
+      scopeId: windowId,
+    });
+    expect((await route(remote))?.status).toBe(403);
+    expect(executeProject).not.toHaveBeenCalled();
+
+    const local = new Request("http://127.0.0.1/api/projects/commands", {
+      method: "POST",
+      headers,
+      body,
+    });
+    expect((await route(local))?.status).toBe(200);
+    expect(executeProject).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ kind: "change-code-project-own-toolchain" }),
+      localUser,
+    );
+  });
   it.each([
     {
       kind: "change-code-project-agent-pull-request-comments",
@@ -363,6 +461,7 @@ describe("Project routes", () => {
       expect(executeProject).toHaveBeenCalledWith(
         windowId,
         expect.objectContaining({ kind: setting.kind }),
+        localUser,
       );
     },
   );
@@ -426,6 +525,7 @@ describe("Project routes", () => {
     expect(executeProject).toHaveBeenCalledWith(
       windowId,
       expect.objectContaining({ kind: "change-code-project-desktop-recipe" }),
+      localUser,
     );
   });
 
@@ -624,7 +724,7 @@ describe("Project routes", () => {
       }),
     );
     expect(write?.status).toBe(200);
-    expect(executeMemory).toHaveBeenCalledWith(command);
+    expect(executeMemory).toHaveBeenCalledWith(command, localUser);
 
     const forged = await route(
       new Request("http://127.0.0.1/api/projects/memory/commands", {
@@ -712,7 +812,11 @@ describe("Project memory proposal routes", () => {
     );
     expect(answered?.status).toBe(200);
     expect(await answered?.json()).toEqual({ kind: "project-memory-proposal-declined" });
-    expect(decide).toHaveBeenCalledWith(windowId, { proposalId, decision: "decline" });
+    expect(decide).toHaveBeenCalledWith(
+      windowId,
+      { proposalId, decision: "decline" },
+      expect.objectContaining({ kind: "local-user" }),
+    );
   });
 
   it("refuses an unauthenticated, forged, or malformed answer before it reaches a proposal", async () => {

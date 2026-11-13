@@ -1472,7 +1472,10 @@ prefilled, for what to check. A pending follow-up reads "Follows up tomorrow
 at 9:00".
 
 An agent's proposal, a routine or a follow-up, waits as a suggestion chip at
-the foot of the thread, in the same card as the reply's suggested tasks. It is
+the foot of the thread, in the same card as the reply's suggested tasks (a
+routine the agent suggests in a turn running at Full access is not a chip: it
+is created paused and shown as the **Created automation** card,
+[Architecture: modes](../architecture.md#modes-chat-work-and-code)). It is
 labelled "Routine · suggested" or "Follow-up here · suggested" and states the
 name, the schedule and its time zone, the first run, the missed-run policy,
 what each run does, and the exact prompt. Its one action, **Create routine**
@@ -1576,8 +1579,10 @@ add menu under attach, with no confirmation, and the card moves to Done and
 stays there until **Reopen** undoes it in one click; a Code thread reaches Done by its objectively satisfied
 delivery target, or when a person marks it Done whatever that target says,
 which is recorded as the person's override. An agent never marks a thread Done
-(maintainer request, 2026-11-12). Not built yet: today Mark done asks for a
-confirmation and a person cannot mark a Code thread Done
+(maintainer request, 2026-11-12). While a Work task is marked, its composer
+says so and carries the Reopen button. A Code thread is marked with **Mark
+done** in its row's menus in the sidebar, where **Reopen** takes its place
+once it is marked
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and
@@ -2914,8 +2919,9 @@ reach the shell.
   managed server) if shutdown has not finished.
 - The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds while
   the setting "Press ⌘Q twice to quit" is on, which is its default; with it
-  off, one press enters the guarded shutdown (maintainer request, 2026-11-12;
-  not built yet: today the double press cannot be turned off). The
+  off, one press enters the guarded shutdown (maintainer request, 2026-11-12).
+  The switch is in Settings › General under Quitting, shown only in the Mac
+  app; the app starts guarded and learns the choice when settings load. The
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first

@@ -314,6 +314,10 @@ const AutomationRemoteDevicePrincipal = Schema.Struct({
   protocolVersion: positiveInteger,
   capabilityDigest: AutomationDigest,
   sessionId: AutomationOpaqueReference,
+  // Who let the device onto the host, as the remote gateway marks every
+  // device principal. A command carries the authenticated principal whole, so
+  // a strict struct without this refused every paired device's command.
+  admittedBy: Schema.optional(Schema.Literal("host-person", "hub-roster")),
 }).annotations(strict);
 
 /** Authenticated principals accepted on mutation commands. */

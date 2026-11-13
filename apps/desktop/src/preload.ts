@@ -415,6 +415,8 @@ export interface OctantHostBridge {
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
+  /** Reports the person's setting: whether the quit shortcut needs a second press. */
+  readonly setQuitShortcutSecondPress: (needed: boolean) => void;
   /** Prepare to Shut Down… from the menu, or Move threads first… from the quit confirmation. */
   readonly subscribePrepareToShutDown?: (
     listener: (request: { readonly fromQuit: boolean }) => void,
@@ -1169,6 +1171,11 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.quitShortcutHint, receive);
       return () => ipc.removeListener(IPC_CHANNELS.quitShortcutHint, receive);
     },
+    setQuitShortcutSecondPress: (needed: boolean) => {
+      void ipc
+        .invoke(IPC_CHANNELS.quitShortcutSecondPress, needed !== false)
+        .catch(() => undefined);
+    },
     subscribeStartNewAgent: (listener: () => void) => {
       const receive: AgentStartListener = () => listener();
       ipc.on(IPC_CHANNELS.startNewAgent, receive);
@@ -1263,6 +1270,19 @@ export function createHostBridge(
             } | null;
             if (typeof answer?.status !== "number") {
               throw new Error("Octant agent access is unavailable.");
+            }
+            return { status: answer.status, body: answer.body };
+          },
+          // An organization sign-in with a device code. Main checks the
+          // request's shape and adds the desktop secret; the code it returns is
+          // shown only in this local window.
+          providerDeviceSignIn: async (request: unknown) => {
+            const answer = (await ipc.invoke(IPC_CHANNELS.providerDeviceSignIn, request)) as {
+              readonly status?: unknown;
+              readonly body?: unknown;
+            } | null;
+            if (typeof answer?.status !== "number") {
+              throw new Error("Octant sign-in with a code is unavailable.");
             }
             return { status: answer.status, body: answer.body };
           },
@@ -1486,6 +1506,7 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "subscribeRemoteServerPageSigning",
   "hubAdministrationRequest",
   "agentAccessRequest",
+  "providerDeviceSignIn",
   "openMovedThreadThere",
   "subscribePrepareToShutDown",
   "reportShutdownMovesOffered",

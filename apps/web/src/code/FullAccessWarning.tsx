@@ -8,9 +8,9 @@ export const FULL_ACCESS_WARNING =
 
 /**
  * Where the warning was seen: this machine (its Settings default and first
- * run) or one Project (its default and its threads). Kept in the window's
- * storage because only a window on this host can pick Full access; a paired
- * device is refused it at the route.
+ * run) or one Project (its default and its threads). Kept in the storage of
+ * the window or paired browser that showed it, so a browser the host's own
+ * person paired sees the warning once of its own before its first pick.
  */
 export type FullAccessWarningScope = "machine" | { readonly projectId: string };
 

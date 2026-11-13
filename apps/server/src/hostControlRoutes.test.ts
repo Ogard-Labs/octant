@@ -645,3 +645,131 @@ describe("host export route", () => {
     expect(seen.principal).toBe("remote-device");
   });
 });
+
+describe("host control from a paired device", () => {
+  const deviceId = "00000000-0000-4000-8000-00000000c101";
+  const actor = { kind: "remote-device", actorId: deviceId, deviceId };
+  const custom = { kind: "custom", pressuredGb: 3, criticalGb: 6 } as const;
+  const purgeBody = {
+    scope: { kind: "thread", mode: "chat", threadId: "c1000000-0000-4000-8000-000000000010" },
+    confirm: true,
+  };
+
+  /** The request as the product dispatch hands it on: loopback-shaped, with the device bound. */
+  async function fromDevice(
+    path: string,
+    admittedBy: "host-person" | "hub-roster" | undefined,
+    options: { method?: string; body?: unknown } = {},
+  ): Promise<Request> {
+    const { bindPrincipalRouteContext } = await import("./principalRouteContext");
+    const { createRemoteDevicePrincipal } = await import("./clientPrincipal");
+    const request = makeRequest(path, { ...options, origin: "http://127.0.0.1" });
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "00000000-0000-4000-8000-00000000c102" as never,
+        deviceId: deviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-00000000c103" as never,
+        ...(admittedBy === undefined ? {} : { admittedBy }),
+      }),
+      scopeId: decodeWindowId(deviceId),
+    });
+    return request;
+  }
+
+  function deviceSetup() {
+    const set = vi.fn(() => ({ kind: "saved", limits: custom }) as const);
+    const setWindow = vi.fn(() => ({ windows: [] }));
+    const purge = vi.fn(async () => ({ purged: [] }));
+    const readState = vi.fn(() => ({ windows: [] }));
+    return {
+      set,
+      setWindow,
+      purge,
+      ...setup({
+        memoryLimits: { set },
+        threadRetention: { setWindow, purge, readState } as never,
+      }),
+    };
+  }
+
+  it("lets a device the host's own person paired read status, set memory limits and retention, purge, back up and stop, with its changes journaled as that device", async () => {
+    const { handler, set, setWindow, purge, backup, requestOwnerStop } = deviceSetup();
+    const person = "host-person" as const;
+
+    const status = await handler(
+      await fromDevice("/api/host-control/status", person, { method: "GET" }),
+    );
+    expect(status?.status).toBe(200);
+
+    const limits = await handler(
+      await fromDevice("/api/host-control/memory-limits", person, { body: { limits: custom } }),
+    );
+    expect(limits?.status).toBe(200);
+    expect(set).toHaveBeenCalledWith({ limits: custom }, "person-paired-device", actor);
+
+    const retention = { scope: { kind: "host" }, window: { kind: "duration-days", days: 30 } };
+    const saved = await handler(
+      await fromDevice("/api/host-control/thread-retention", person, { body: retention }),
+    );
+    expect(saved?.status).toBe(200);
+    expect(setWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: { kind: "host" } }),
+      "person-paired-device",
+      actor,
+    );
+
+    const purged = await handler(
+      await fromDevice("/api/host-control/thread-purge", person, { body: purgeBody }),
+    );
+    expect(purged?.status).toBe(200);
+    expect(purge).toHaveBeenCalledWith(
+      expect.objectContaining({ confirm: true }),
+      "person-paired-device",
+      actor,
+    );
+
+    const backedUp = await handler(
+      await fromDevice("/api/host-control/backup", person, { body: {} }),
+    );
+    expect(backedUp?.status).toBe(200);
+    expect(backup).toHaveBeenCalledOnce();
+
+    const stopped = await handler(
+      await fromDevice("/api/host-control/lifecycle", person, { body: { action: "stop" } }),
+    );
+    expect(decodeHostLifecycleOutcome(await stopped?.json())).toMatchObject({ kind: "accepted" });
+    expect(requestOwnerStop).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a hub-introduced device and an unproved pairing every read and change, with no effect", async () => {
+    const { handler, setWindow, purge, backup, requestOwnerStop, setEnabled } = deviceSetup();
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      for (const [path, options] of [
+        ["/api/host-control/status", { method: "GET" }],
+        ["/api/host-control/data-map", { method: "GET" }],
+        ["/api/host-control/thread-retention", { method: "GET" }],
+        ["/api/host-control/backup", { body: {} }],
+        ["/api/host-control/lifecycle", { body: { action: "stop" } }],
+        ["/api/host-control/lifecycle", { body: { action: "disable" } }],
+        ["/api/host-control/restore", { body: {} }],
+      ] as const) {
+        const refused = await handler(await fromDevice(path, admittedBy, options));
+        expect(refused?.status).toBe(403);
+      }
+    }
+    expect(backup).not.toHaveBeenCalled();
+    expect(requestOwnerStop).not.toHaveBeenCalled();
+    expect(setEnabled).not.toHaveBeenCalled();
+    // Retention and purge are judged by their service, which refuses by the
+    // same catalogue; the route names the device's real standing to it.
+    await handler(
+      await fromDevice("/api/host-control/thread-purge", "hub-roster", { body: purgeBody }),
+    );
+    expect(purge).toHaveBeenCalledWith(expect.anything(), "remote-device", actor);
+    expect(setWindow).not.toHaveBeenCalled();
+  });
+});

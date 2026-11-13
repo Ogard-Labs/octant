@@ -30,7 +30,10 @@ import {
 } from "@octant/contracts/remote-access";
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
-import { readDeviceRegistrations } from "../persistence/remoteAccessProjection";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
 import { RemoteRequestProofService } from "../remoteRequestProofService";
 import { RemoteCredentialLifecycleService } from "../remoteCredentialLifecycleService";
 import {
@@ -679,12 +682,14 @@ function assembleServices(
         hostId: identity.hostId,
         deviceId: input.deviceId,
         reasonCode: "local-device-revoked",
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
       }),
-    revokeAll: () =>
+    revokeAll: (input) =>
       credentialLifecycle.revokeAll({
         commandId: uuid(),
         hostId: identity.hostId,
         reasonCode: "local-all-devices-revoked",
+        ...(input?.actor === undefined ? {} : { actor: input.actor }),
       }),
     reconcileExpired: () =>
       credentialLifecycle.reconcileExpired({
@@ -739,6 +744,20 @@ function assembleServices(
       }),
   };
 
+  // A device's approval record is written once, with its registration, and
+  // never changes, so the answer is kept: the audit table has no device index
+  // and this is asked on every product request.
+  const admissions = new Map<string, "host-person" | "hub-roster">();
+  const deviceAdmittedBy = (deviceId: string): "host-person" | "hub-roster" => {
+    const known = admissions.get(deviceId);
+    if (known !== undefined) return known;
+    const admittedBy = readDeviceApprovedByPerson(options.connection, deviceId)
+      ? "host-person"
+      : "hub-roster";
+    admissions.set(deviceId, admittedBy);
+    return admittedBy;
+  };
+
   // HTTP authentication — pre-auth challenge/session + authenticated
   // self-service and product dispatch.
   const auth: RemoteHttpAuthentication = createRemoteHttpAuthentication({
@@ -751,6 +770,7 @@ function assembleServices(
     ...(pushTokenStore === undefined ? {} : { pushTokenStore }),
     requestRegistry: registry as RemoteRequestRegistryPort,
     sessionRevalidation,
+    deviceAdmittedBy,
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
     ...(proxySessions === undefined || remoteServerGrants === undefined
       ? {}

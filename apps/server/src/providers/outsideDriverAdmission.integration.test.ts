@@ -477,6 +477,52 @@ describe("outside driver admission end to end", () => {
     expect(context.starts).toHaveLength(1);
   });
 
+  it("installs, trusts and switches on a driver in one confirmed flow, and adds no provider", async () => {
+    const context = await host();
+    const entry = await context.inspect();
+    const before = context.persistence.journal.headSequence();
+    const result = await context.extension({
+      kind: "install-package",
+      extensionId: entry.extensionId,
+      packageId: entry.packageId,
+      version: entry.version,
+      digest: entry.digest,
+      trust: true,
+      enable: true,
+    });
+    expect(result).not.toHaveProperty("stoppedAt");
+    expect(context.lifecycle.snapshot().packages[0]).toMatchObject({
+      activation: { trusted: true, pluginDesired: true, quarantined: false },
+      components: [
+        {
+          component: { id: "driver" },
+          activation: { componentDesired: true },
+          effectiveState: { kind: "effective" },
+        },
+      ],
+    });
+    // Each step is journaled as the separate action is, in order.
+    const journaled = JSON.stringify(
+      context.persistence.journal.replay({ afterSequence: before as never, limit: 100 } as never),
+    );
+    const order = [
+      "install-committed",
+      "source-trust-changed",
+      "plugin-desired-state-changed",
+      "component-desired-state-changed",
+    ].map((kind) => journaled.indexOf(kind));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((left, right) => left - right)).toEqual(order);
+    // The flow stops at enable: the driver is listed, bound to the reviewed
+    // digest, and adding a provider and its connection check stay separate.
+    const bootstrap = await context.providers.bootstrap(windowId);
+    expect(bootstrap.outsideDrivers).toMatchObject([
+      { driver: { digest: entry.digest }, installed: true, trusted: true },
+    ]);
+    expect(context.persistence.readProviderInstance(instanceId)).toBeUndefined();
+    expect(context.starts).toEqual([]);
+  });
+
   it("verifies tools on the host through the driver, for listed and reported models only", async () => {
     const context = await host({
       handlers: {
@@ -993,6 +1039,37 @@ describe("outside driver publisher signatures", () => {
     });
     await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
     expect(publisher(context)).toEqual({ pinned: secondKey, selected: secondKey });
+  });
+
+  it("stops the one flow at a refused trust and leaves the driver installed, untrusted and switched off", async () => {
+    const context = await host();
+    await signedFolder(context.driverRoot, "0.1.0", throwawayKey());
+    const entry = await context.install();
+    await context.mutate(entry.extensionId, { kind: "set-source-trust", trusted: true });
+    await context.extension({
+      kind: "uninstall-package",
+      extensionId: entry.extensionId,
+      packageId: entry.packageId,
+    });
+
+    // Another key signs the reinstall, so trust needs the new publisher first.
+    await signedFolder(context.driverRoot, "0.1.0", throwawayKey());
+    const again = await context.inspect();
+    const result = await context.extension({
+      kind: "install-package",
+      extensionId: again.extensionId,
+      packageId: again.packageId,
+      version: again.version,
+      digest: again.digest,
+      trust: true,
+      enable: true,
+    });
+    expect(result).toMatchObject({ kind: "extension-state-updated", stoppedAt: "trust" });
+    expect(context.lifecycle.snapshot().packages[0]).toMatchObject({
+      activation: { installed: true, trusted: false, pluginDesired: false, quarantined: true },
+      components: [{ component: { id: "driver" }, activation: { componentDesired: false } }],
+    });
+    expect((await context.providers.bootstrap(windowId)).outsideDrivers).toBeUndefined();
   });
 
   it("forgets the pin of an uninstalled package, so a reinstall by another key is not held", async () => {

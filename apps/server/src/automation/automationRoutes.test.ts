@@ -96,6 +96,7 @@ function createHarness(
     readonly historyAvailable?: () => boolean;
     readonly prepareFileSource?: AutomationRouteDependencies["prepareFileSource"];
     readonly projectAccessible?: () => boolean;
+    readonly personPairedDeviceCurrent?: AutomationRouteDependencies["personPairedDeviceCurrent"];
   } = {},
 ): Harness {
   const connection = openConnection();
@@ -141,6 +142,9 @@ function createHarness(
     ...(options.historyAvailable === undefined
       ? {}
       : { historyAvailable: options.historyAvailable }),
+    ...(options.personPairedDeviceCurrent === undefined
+      ? {}
+      : { personPairedDeviceCurrent: options.personPairedDeviceCurrent }),
     now: () => 1,
   });
   return { handler, service, projection, authority };
@@ -334,6 +338,97 @@ describe("automation routes", () => {
       expect(harness.projection.getFileSource(id)).toBeUndefined();
     },
   );
+
+  function fromDevice(request: Request, admittedBy: "host-person" | "hub-roster"): Request {
+    request.headers.delete("x-octant-window-capability");
+    bindPrincipalRouteContext(request, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "d".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000403" as never,
+        admittedBy,
+      },
+      scopeId: decodeWindowId(remoteDeviceId),
+    });
+    return request;
+  }
+
+  it("saves a file routine for a device the host's own person paired, while its pairing stands, and refuses a restricted device", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-file-save-device-")));
+    directories.push(root);
+    mkdirSync(join(root, "Inbox"));
+    let paired = true;
+    const { handler, projection } = createHarness({
+      personPairedDeviceCurrent: () => paired,
+      prepareFileSource: (input) =>
+        prepareAutomationFileDefinition({
+          automationId: input.command.automationId,
+          expectedVersion: input.command.expectedVersion,
+          filesystem: liveWorkFilesystem,
+          authority: {
+            canonicalRoot: root,
+            bindingIdentity: "fixture host-owned Project binding",
+            current: input.current,
+          },
+          definition: input.command.definition,
+          current: input.current,
+          signal: input.signal,
+          now: () => Schema.decodeUnknownSync(UtcTimestamp)(now),
+        }),
+    });
+    const save = (id: string) =>
+      postCommand({
+        kind: "create-automation",
+        automationId: automationId(id),
+        expectedVersion: 0,
+        definition: automationDefinitionDraftFixture({
+          trigger: {
+            kind: "file-arrival",
+            directory: "Inbox",
+            includeExtensions: ["txt"],
+            excludeDirectories: [],
+            settleSeconds: 2,
+            automaticStartLimit: 8,
+          },
+        }),
+      });
+    expect(await json(await handler(fromDevice(save("6101"), "hub-roster")))).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "unauthorized",
+    });
+    expect(projection.getDefinition(automationId("6101"))).toBeUndefined();
+
+    expect(await json(await handler(fromDevice(save("6102"), "host-person")))).toMatchObject({
+      kind: "automation-created",
+    });
+    expect(projection.getDefinition(automationId("6102"))?.updatedBy).toMatchObject({
+      kind: "remote-device",
+      deviceId: remoteDeviceId,
+    });
+    expect(projection.getFileSource(automationId("6102"))).toMatchObject({ phase: "arming" });
+
+    // The session's principal still says host-person, but the pairing was
+    // revoked on the host: the stand-in for a window's capability refuses.
+    paired = false;
+    expect(await json(await handler(fromDevice(save("6103"), "host-person")))).toMatchObject({
+      kind: "automation-command-failed",
+    });
+    expect(projection.getDefinition(automationId("6103"))).toBeUndefined();
+  });
+
+  it("lists event sources for a device the host's own person paired and refuses a restricted device", async () => {
+    const { handler } = createHarness({ personPairedDeviceCurrent: () => true });
+    const sources = () => new Request("http://127.0.0.1/api/automations/event-sources");
+    expect((await handler(fromDevice(sources(), "hub-roster")))?.status).toBe(403);
+    const response = await handler(fromDevice(sources(), "host-person"));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual([]);
+  });
 
   it("refuses a caller-supplied source proof or a Save without host folder preparation", async () => {
     const { handler, projection } = createHarness();

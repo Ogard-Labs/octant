@@ -1493,8 +1493,12 @@ describe("startOctantServer", () => {
           );
           expect(response.status).toBe(200);
           expect(yield* Effect.promise(() => response.json())).toEqual(result);
-          // The HTTP route speaks for the person at the window.
-          expect(runtime.execute).toHaveBeenCalledWith(windowId, command, { initiator: "user" });
+          // The HTTP route speaks for the person at the window, and names
+          // that person as the one whose change is journaled.
+          expect(runtime.execute).toHaveBeenCalledWith(windowId, command, {
+            initiator: "user",
+            actor: expect.objectContaining({ kind: "local-user" }),
+          });
 
           const replay = yield* Effect.promise(() =>
             Promise.resolve(

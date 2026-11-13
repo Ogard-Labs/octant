@@ -20,6 +20,8 @@ import {
   EXTENSION_AGGREGATE_TYPE,
   EXTENSION_LIFECYCLE_EVENT,
   readExtensionRecord,
+  readUpdateLine,
+  readVerifiedPublisherKey,
 } from "../persistence/extensionProjection";
 import {
   calculateExtensionPackageDigest,
@@ -77,6 +79,8 @@ function inspection(
     entryPoint: "runtime/main.mjs",
   },
   modes: ReadonlyArray<"chat" | "work" | "code"> = ["code"],
+  /** The publisher key the host verified for this version, when it is signed. */
+  signedBy?: string,
 ) {
   const entries: ReadonlyArray<ExtensionArchiveEntry> = [
     {
@@ -98,6 +102,7 @@ function inspection(
     provenance: {
       canonicalUrl: "https://example.com/lifecycle-fixture",
       publisher: "Example Publisher",
+      ...(signedBy === undefined ? {} : { publisherKey: signedBy }),
       reviewed: false,
     },
     license: { kind: "spdx", identifier: "MIT" },
@@ -110,6 +115,58 @@ function inspection(
     format: "zip",
     archiveBytes: 512,
     manifest,
+    entries,
+    expectedDigest: manifest.digest as never,
+    appVersion: "1.0.0",
+    platform: "darwin",
+  });
+}
+
+const publisherKey = `ed25519:${"a".repeat(64)}`;
+
+/** An outside provider driver as the host stores it, signed by `signedBy` or by nobody. */
+function driverInspection(
+  version: string,
+  signedBy: string | undefined,
+  capabilities: ReadonlyArray<"network"> = [],
+) {
+  const entries: ReadonlyArray<ExtensionArchiveEntry> = [
+    { path: "dist/driver.mjs", kind: "file", content: new TextEncoder().encode(version) },
+  ];
+  const manifest = {
+    manifestVersion: 1,
+    extensionId,
+    packageId,
+    slug: "lifecycle-driver",
+    displayName: "Lifecycle driver",
+    version,
+    digest: `sha256:${"0".repeat(64)}`,
+    source: { kind: "local-folder", sourceRef: "local-driver" },
+    provenance: {
+      canonicalUrl: "https://example.com/lifecycle-driver",
+      publisher: "Example Publisher",
+      ...(signedBy === undefined ? {} : { publisherKey: signedBy }),
+      reviewed: false,
+    },
+    license: { kind: "spdx", identifier: "MIT" },
+    compatibility: { platforms: ["macos"], modes: ["code"], providerFamilies: [] },
+    declaredCapabilities: capabilities,
+    primaryComponentId: "driver",
+    components: [
+      {
+        id: "driver",
+        kind: "provider-driver",
+        displayName: "Driver",
+        declaredCapabilities: capabilities,
+        entryPoint: "dist/driver.mjs",
+      },
+    ],
+  };
+  manifest.digest = calculateExtensionPackageDigest(manifest as never, entries);
+  return inspectExtensionPackage({
+    format: "zip",
+    archiveBytes: 512,
+    manifest: manifest as never,
     entries,
     expectedDigest: manifest.digest as never,
     appVersion: "1.0.0",
@@ -179,6 +236,15 @@ function debugAdapterComponent(declaration: Record<string, unknown> = {}) {
       ...declaration,
     },
   };
+}
+
+function lifecycleKinds(context: Awaited<ReturnType<typeof setup>>): ReadonlyArray<string> {
+  const rows = context.connection
+    .prepare("SELECT payload_json FROM event_journal WHERE event_name = ? ORDER BY global_sequence")
+    .all(EXTENSION_LIFECYCLE_EVENT) as ReadonlyArray<{ readonly payload_json: string }>;
+  return rows.map(
+    (row) => (JSON.parse(row.payload_json) as { payload: { kind: string } }).payload.kind,
+  );
 }
 
 function appendLifecycle(
@@ -295,6 +361,285 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     });
   });
 
+  it("keeps trust and the on switch across an update the pinned publisher key signed, and journals it", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(driverInspection("1.0.0", publisherKey), { trust: true });
+    appendLifecycle(context, { kind: "plugin-desired-state-changed", desired: true });
+    expect(readExtensionRecord(context.connection, extensionId)).toMatchObject({
+      trusted: true,
+      publisherPin: publisherKey,
+    });
+
+    const updated = await service.update(driverInspection("1.1.0", publisherKey));
+    expect(updated.packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: true, pluginDesired: true, quarantined: false },
+    });
+    expect(lifecycleKinds(context).slice(-4)).toEqual([
+      "update-prepared",
+      "update-committed",
+      "source-trust-changed",
+      "plugin-desired-state-changed",
+    ]);
+    for (const version of ["1.0.0", "1.1.0"]) {
+      expect(
+        readVerifiedPublisherKey(
+          context.connection,
+          targetFor(driverInspection(version, publisherKey)),
+        ),
+      ).toBe(publisherKey);
+    }
+  });
+
+  it.each([
+    ["a new signing key", `ed25519:${"b".repeat(64)}`],
+    ["no signature", undefined],
+  ] as const)("asks for trust again after an update with %s", async (_name, signedBy) => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(driverInspection("1.0.0", publisherKey), { trust: true });
+
+    const updated = await service.update(driverInspection("1.1.0", signedBy));
+    expect(updated.packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: false, pluginDesired: false },
+    });
+    expect(lifecycleKinds(context).at(-1)).toBe("update-committed");
+    expect(
+      readVerifiedPublisherKey(context.connection, targetFor(driverInspection("1.1.0", signedBy))),
+    ).toBeUndefined();
+  });
+
+  it("asks for trust again after a same-key update that widens what the driver may do", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(driverInspection("1.0.0", publisherKey), { trust: true });
+
+    const updated = await service.update(driverInspection("1.1.0", publisherKey, ["network"]));
+    expect(updated.packages[0]?.activation.trusted).toBe(false);
+  });
+
+  it("keeps an unsigned plugin's trust and approvals across an update from the source it was trusted at, and shows the update", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const first = inspection("1.0.0", "known good");
+    await service.install(first, { trust: true, enable: true });
+    expect(readUpdateLine(context.connection, targetFor(first))).toBeUndefined();
+
+    const second = inspection("1.1.0", "newer");
+    const updated = await service.update(second);
+
+    expect(updated.packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: true, pluginDesired: true, quarantined: false },
+      updated: {
+        previousVersion: "1.0.0",
+        previousDigest: first.manifest.digest,
+        at: now,
+        rollbackAvailable: true,
+      },
+    });
+    expect(lifecycleKinds(context).slice(-2)).toEqual([
+      "update-committed",
+      "update-kept-from-source",
+    ]);
+    const line = readUpdateLine(context.connection, targetFor(second));
+    expect(line).toBeDefined();
+    expect(readUpdateLine(context.connection, targetFor(first))).toBe(line);
+
+    // A third version from the same source stays on the line the first began.
+    const third = inspection("1.2.0", "newest");
+    await service.update(third);
+    expect(readUpdateLine(context.connection, targetFor(third))).toBe(line);
+    expect(service.snapshot().packages[0]?.updated).toMatchObject({ previousVersion: "1.1.0" });
+  });
+
+  it("keeps the Updated notice and the update line when the host stops right after an update kept from the trusted source commits", async () => {
+    const context = await setup();
+    const first = inspection("1.0.0", "known good");
+    await context.makeService().install(first, { trust: true, enable: true });
+
+    const second = inspection("1.1.0", "newer");
+    const stopping = context.makeService({
+      fault: (point) => {
+        if (point === "after-commit") throw new Error("simulated crash");
+      },
+    });
+    await expect(stopping.update(second)).rejects.toThrow("simulated crash");
+
+    const restarted = context.makeService({ fault: undefined });
+    await restarted.reconcileStartup();
+    expect(restarted.snapshot().packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: true, pluginDesired: true },
+      updated: { previousVersion: "1.0.0", rollbackAvailable: true },
+    });
+    expect(readUpdateLine(context.connection, targetFor(second))).toBeDefined();
+  });
+
+  it("still resolves a scope's effective state after an update kept from the trusted source", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(inspection("1.0.0", "known good"), { trust: true, enable: true });
+    const updated = await service.update(inspection("1.1.0", "newer"));
+    expect(updated.packages[0]?.updated).toMatchObject({ previousVersion: "1.0.0" });
+
+    const effective = new ExtensionActivationService({
+      policy: LOCAL_EXTENSION_ACTIVATION_POLICY,
+      catalogStatus: () => "available",
+    }).resolve(updated, {
+      scope: {
+        hostId: LOCAL_HOST_ID,
+        mode: "code",
+        projectId: null,
+        threadId: null,
+        providerFamily: "openai-compatible" as never,
+      },
+    });
+    expect(effective.packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: true, pluginDesired: true },
+    });
+  });
+
+  it("asks again for an unsigned update that may do more, or that follows one nobody trusted", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(inspection("1.0.0", "known good"), { trust: true, enable: true });
+
+    const widened = inspection("2.0.0", "expanded", ["mcp", "shell"]);
+    const updated = await service.update(widened);
+    expect(updated.packages[0]?.activation.trusted).toBe(false);
+    expect(updated.packages[0]?.updated).toBeUndefined();
+    expect(readUpdateLine(context.connection, targetFor(widened))).toBeUndefined();
+
+    const next = inspection("2.1.0", "after the held one", ["mcp", "shell"]);
+    await service.update(next);
+    expect(readUpdateLine(context.connection, targetFor(next))).toBeUndefined();
+    expect(lifecycleKinds(context)).not.toContain("update-kept-from-source");
+  });
+
+  it("rolls an update back to the version the person trusted in one step, trusted and on as it was", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const first = inspection("1.0.0", "known good");
+    await service.install(first, { trust: true, enable: true });
+    await service.update(inspection("1.1.0", "suspect"));
+
+    const rolledBack = await service.rollback({ ...targetFor(first), restoreTrust: true });
+
+    expect(rolledBack.packages[0]).toMatchObject({
+      version: "1.0.0",
+      activation: { trusted: true, pluginDesired: true },
+      components: [{ activation: { componentDesired: true } }],
+    });
+    expect(rolledBack.packages[0]?.updated).toBeUndefined();
+    expect(lifecycleKinds(context).slice(-4)).toEqual([
+      "rollback-selected",
+      "source-trust-changed",
+      "plugin-desired-state-changed",
+      "component-desired-state-changed",
+    ]);
+    // The roll back ends every approval, as any roll back does.
+    expect(readExtensionRecord(context.connection, extensionId)?.grantsEnded).toMatchObject({
+      reason: "rolled-back",
+    });
+    expect(readUpdateLine(context.connection, targetFor(first))).toBeUndefined();
+  });
+
+  it("restores trust only when rolling back the update it kept trust across", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const first = inspection("1.0.0", "known good");
+    await service.install(first);
+    await service.update(inspection("1.1.0", "never trusted"));
+
+    const rolledBack = await service.rollback({ ...targetFor(first), restoreTrust: true });
+    expect(rolledBack.packages[0]?.activation).toMatchObject({
+      trusted: false,
+      pluginDesired: false,
+    });
+  });
+
+  it("pins a signed plugin's key at trust, keeps it across a same-key update, and holds an update with another key or none", async () => {
+    for (const signedBy of [`ed25519:${"b".repeat(64)}`, undefined]) {
+      const context = await setup();
+      const service = context.makeService();
+      const first = inspection("1.0.0", "signed", ["mcp"], undefined, ["code"], publisherKey);
+      await service.install(first, { trust: true, enable: true });
+      expect(readExtensionRecord(context.connection, extensionId)?.publisherPin).toBe(publisherKey);
+
+      const sameKey = inspection("1.1.0", "same key", ["mcp"], undefined, ["code"], publisherKey);
+      const kept = await service.update(sameKey);
+      expect(kept.packages[0]?.activation).toMatchObject({ trusted: true, quarantined: false });
+      expect(readVerifiedPublisherKey(context.connection, targetFor(first))).toBe(publisherKey);
+      expect(readVerifiedPublisherKey(context.connection, targetFor(sameKey))).toBe(publisherKey);
+
+      const changed = inspection("1.2.0", "other key", ["mcp"], undefined, ["code"], signedBy);
+      const held = await service.update(changed);
+      expect(held.packages[0]).toMatchObject({
+        activation: { trusted: false, pluginDesired: false, quarantined: true },
+        publisher: { pinned: publisherKey, held: "publisher-changed" },
+      });
+      expect(readVerifiedPublisherKey(context.connection, targetFor(changed))).toBeUndefined();
+      expect(readUpdateLine(context.connection, targetFor(changed))).toBeUndefined();
+    }
+  });
+
+  it("stops a trusted unsigned plugin at its first signed update until the person trusts it, then pins that key", async () => {
+    const signed = (version: string, signedBy: string | undefined) =>
+      inspection(version, `body ${version}`, ["mcp"], undefined, ["code"], signedBy);
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(inspection("1.0.0", "unsigned"), { trust: true, enable: true });
+
+    // Nobody accepted this key yet, so the version it signed does not run.
+    const first = signed("1.1.0", publisherKey);
+    const stopped = await service.update(first);
+    expect(stopped.packages[0]).toMatchObject({
+      activation: { trusted: false, pluginDesired: false },
+      publisher: { selected: publisherKey },
+    });
+    expect(stopped.packages[0]?.publisher?.pinned).toBeUndefined();
+    expect(stopped.packages[0]?.updated).toBeUndefined();
+    expect(readVerifiedPublisherKey(context.connection, targetFor(first))).toBeUndefined();
+    expect(lifecycleKinds(context)).not.toContain("update-kept-from-source");
+
+    // Trusting the source is the person's confirmation, and it pins the key.
+    const record = readExtensionRecord(context.connection, extensionId);
+    await service.setSourceTrust({
+      extensionId: extensionId as never,
+      expectedStateVersion: record?.aggregateVersion as never,
+      trusted: true,
+    });
+    expect(lifecycleKinds(context).slice(-2)).toEqual(["source-trust-changed", "publisher-pinned"]);
+    expect(readExtensionRecord(context.connection, extensionId)?.publisherPin).toBe(publisherKey);
+    expect(readVerifiedPublisherKey(context.connection, targetFor(first))).toBe(publisherKey);
+
+    // From here the key rule holds: the same key keeps trust and approvals.
+    const sameKey = signed("1.2.0", publisherKey);
+    const kept = await service.update(sameKey);
+    expect(kept.packages[0]?.activation).toMatchObject({ trusted: true, quarantined: false });
+    expect(readVerifiedPublisherKey(context.connection, targetFor(sameKey))).toBe(publisherKey);
+
+    // Another key is held for its publisher.
+    const otherKey = `ed25519:${"b".repeat(64)}`;
+    const changed = await service.update(signed("1.3.0", otherKey));
+    expect(changed.packages[0]).toMatchObject({
+      activation: { trusted: false, pluginDesired: false, quarantined: true },
+      publisher: { pinned: publisherKey, selected: otherKey, held: "publisher-changed" },
+    });
+
+    // And so is a version whose signature was removed.
+    const removed = await service.update(signed("1.4.0", undefined));
+    expect(removed.packages[0]).toMatchObject({
+      activation: { trusted: false, quarantined: true },
+      publisher: { pinned: publisherKey, held: "publisher-changed" },
+    });
+    expect(removed.packages[0]?.publisher?.selected).toBeUndefined();
+  });
+
   it("journals independent trust and desired state with optimistic replay-safe updates", async () => {
     const context = await setup();
     const service = context.makeService();
@@ -380,6 +725,77 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
       expect(journaled).toContain(kind);
     }
     expect(journaled).not.toContain("plugin-desired-changed");
+  });
+
+  it("journals a paired device's install, trust, enable and removal with the device as their actor, and a local window's as the local user", async () => {
+    const deviceId = "00000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const actorsOf = async (actor?: never) => {
+      const context = await setup();
+      const service = context.makeService();
+      const before = context.journal.headSequence();
+      const installed = await service.install(inspection(), { trust: true }, actor);
+      const extensionId = installed.packages[0]?.extensionId as never;
+      await service.setPluginDesired(
+        {
+          extensionId,
+          expectedStateVersion: installed.packages[0]?.stateVersion as never,
+          desired: true,
+        } as never,
+        actor,
+      );
+      await service.uninstall(extensionId, actor);
+      return context.journal
+        .replay({ afterSequence: before as never, limit: 100 } as never)
+        .map((event) => event.actor);
+    };
+
+    const byDevice = await actorsOf(device);
+    expect(byDevice.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(byDevice.map((actor) => JSON.stringify(actor)))).toEqual(
+      new Set([JSON.stringify(device)]),
+    );
+    const byWindow = await actorsOf();
+    expect(new Set(byWindow.map((actor) => actor.kind))).toEqual(new Set(["local-user"]));
+  });
+
+  it("installs, trusts and turns on a plugin and its components in one step, journaled as separate events", async () => {
+    const context = await setup();
+    const snapshot = await context
+      .makeService()
+      .install(inspection(), { trust: true, enable: true });
+    expect(snapshot.packages[0]).toMatchObject({
+      activation: { installed: true, trusted: true, pluginDesired: true },
+      components: [{ activation: { componentDesired: true } }],
+    });
+    expect(lifecycleKinds(context)).toEqual([
+      "install-prepared",
+      "install-committed",
+      "source-trust-changed",
+      "plugin-desired-state-changed",
+      "component-desired-state-changed",
+    ]);
+  });
+
+  it("turns nothing on when the one step was not asked to trust", async () => {
+    const context = await setup();
+    const snapshot = await context.makeService().install(inspection(), { enable: true });
+    expect(snapshot.packages[0]).toMatchObject({
+      activation: { installed: true, trusted: false, pluginDesired: false },
+      components: [{ activation: { componentDesired: false } }],
+    });
+    expect(lifecycleKinds(context)).toEqual(["install-prepared", "install-committed"]);
+  });
+
+  it("refuses the one install-trust-enable flow for a package that holds no provider driver, before installing it", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const before = context.journal.headSequence();
+    await expect(service.admitOutsideDriver(inspection())).rejects.toThrow(
+      "Only an outside provider driver",
+    );
+    expect(context.journal.headSequence()).toBe(before);
+    expect(service.snapshot().packages).toEqual([]);
   });
 
   it("installs untrusted when trust is not asked for", async () => {

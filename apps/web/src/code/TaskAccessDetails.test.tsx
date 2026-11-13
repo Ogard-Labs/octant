@@ -105,6 +105,26 @@ describe("server-reported task access details", () => {
     expect(screen.getByText("Force Stop: temporarily unavailable")).toBeVisible();
     expect(screen.queryByRole("button", { name: /full access/i })).toBeNull();
   });
+  it("says a Full access thread's Octant tools are mixed with tools Octant did not supply", async () => {
+    const mixed = facts();
+    render(
+      header(
+        client(async () =>
+          decodeTaskAccessSnapshot({
+            ...mixed,
+            runtime: {
+              ...mixed.runtime,
+              capabilities: [{ id: "appManagedTools", support: "mixed" }],
+            },
+          }),
+        ),
+      ),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Access details" }));
+    expect(
+      await screen.findByText("Octant-managed tools: mixed with tools Octant did not supply"),
+    ).toBeVisible();
+  });
   it("keeps the chosen unavailable reviewer account and routes the real remedy to existing provider settings", async () => {
     const open = vi.fn();
     render(

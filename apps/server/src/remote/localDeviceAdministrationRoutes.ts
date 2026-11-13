@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import type { EventActor } from "@octant/contracts";
 import type {
   DeviceRegistrationV1,
   PairingDecisionV1,
@@ -14,6 +15,9 @@ import type {
   RemoteCredentialLifecycleError,
   RemoteCredentialOperationReceipt,
 } from "../remoteCredentialLifecycleService";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
+import { readPrincipalRouteContext } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 
@@ -43,21 +47,30 @@ export interface LocalDeviceAdministrationPort {
     readonly sourceClass: PairingTicketV1["sourceClass"];
   }) => CreatePairingTicketResult;
   readonly listPendingPairings: () => ReadonlyArray<PairingClaimResult>;
-  readonly approvePairing: (input: { readonly ticketId: string }) => {
+  /**
+   * `actor` on a change is the paired device that asked for it, which the
+   * journal then names; a change made at the host carries none.
+   */
+  readonly approvePairing: (input: { readonly ticketId: string; readonly actor?: EventActor }) => {
     readonly decision: PairingDecisionV1;
     readonly device: DeviceRegistrationV1;
   };
   readonly denyPairing: (input: {
     readonly ticketId: string;
     readonly reasonCode: string;
+    readonly actor?: EventActor;
   }) => PairingDecisionV1;
   readonly listDevices: () => ReadonlyArray<DeviceRegistrationV1>;
   readonly renameDevice: (input: {
     readonly deviceId: string;
     readonly deviceLabel: string;
+    readonly actor?: EventActor;
   }) => DeviceRegistrationV1;
-  readonly revokeDevice: (input: { readonly deviceId: string }) => RemoteCredentialOperationReceipt;
-  readonly revokeAll: () => RemoteCredentialOperationReceipt;
+  readonly revokeDevice: (input: {
+    readonly deviceId: string;
+    readonly actor?: EventActor;
+  }) => RemoteCredentialOperationReceipt;
+  readonly revokeAll: (input?: { readonly actor?: EventActor }) => RemoteCredentialOperationReceipt;
   readonly reconcileExpired: () => RemoteCredentialOperationReceipt;
 }
 
@@ -84,6 +97,33 @@ const ROUTES = {
   reconcileExpired: "/api/desktop/remote/devices/reconcile-expired",
 } as const;
 
+type Route = (typeof ROUTES)[keyof typeof ROUTES];
+
+const DESKTOP_ROUTE_PREFIX = "/api/desktop/remote/";
+const PAIRED_DEVICE_ROUTE_PREFIX = "/api/remote/";
+
+/**
+ * The same administration, as a device the host's own person paired reaches
+ * it: each route under `/api/remote/` in place of the desktop bridge's prefix
+ * (maintainer decision, 2026-11-12). The private listener forwards exactly
+ * these paths, and they answer no other caller.
+ */
+export const PAIRED_DEVICE_ADMINISTRATION_ROUTES: ReadonlyArray<{
+  readonly path: string;
+  readonly method: "GET" | "POST";
+}> = Object.values(ROUTES).map((route) => ({
+  path: `${PAIRED_DEVICE_ROUTE_PREFIX}${route.slice(DESKTOP_ROUTE_PREFIX.length)}`,
+  method: route === ROUTES.pending || route === ROUTES.devices ? "GET" : "POST",
+}));
+
+function pairedDeviceRoute(pathname: string): Route | undefined {
+  if (!PAIRED_DEVICE_ADMINISTRATION_ROUTES.some((route) => route.path === pathname)) {
+    return undefined;
+  }
+  const route = `${DESKTOP_ROUTE_PREFIX}${pathname.slice(PAIRED_DEVICE_ROUTE_PREFIX.length)}`;
+  return Object.values(ROUTES).find((candidate) => candidate === route);
+}
+
 export function createLocalDeviceAdministrationRouteHandler(
   options: LocalDeviceAdministrationRouteOptions,
 ): (request: Request) => Promise<Response | undefined> {
@@ -91,34 +131,58 @@ export function createLocalDeviceAdministrationRouteHandler(
   const now = options.now ?? Date.now;
   return async (request) => {
     const url = new URL(request.url);
-    if (!Object.values(ROUTES).includes(url.pathname as (typeof ROUTES)[keyof typeof ROUTES])) {
+    const deviceRoute = pairedDeviceRoute(url.pathname);
+    if (deviceRoute === undefined && !Object.values(ROUTES).includes(url.pathname as Route)) {
       return undefined;
     }
+    const route = deviceRoute ?? (url.pathname as Route);
     const control = typeof options.control === "function" ? options.control() : options.control;
-    if (options.desktopBridgeSecret === undefined || control === undefined) {
-      return failure("unavailable", 503);
+    // The device named as a change's actor, and the device a pairing request
+    // may not be its own; absent for the host's own caller.
+    let asking: { readonly deviceId: string; readonly actor: EventActor } | undefined;
+    if (deviceRoute !== undefined) {
+      // The bound principal is the whole authority here: the product dispatch
+      // set it from the device's verified session.
+      const principal = readPrincipalRouteContext(request)?.principal;
+      if (
+        principal === undefined ||
+        principal.kind !== "remote-device" ||
+        !principalActsAsHostPerson(principal)
+      ) {
+        return failure("unauthorized", 401);
+      }
+      if (control === undefined) return failure("unavailable", 503);
+      if (url.search !== "") return failure("invalid", 400);
+      asking = {
+        deviceId: String(principal.deviceId),
+        actor: eventActorForPrincipal(principal),
+      };
+    } else {
+      if (options.desktopBridgeSecret === undefined || control === undefined) {
+        return failure("unavailable", 503);
+      }
+      if (
+        !isLoopbackHostname(url.hostname) ||
+        request.headers.has("origin") ||
+        !secretsEqual(
+          options.desktopBridgeSecret,
+          request.headers.get("x-octant-desktop-secret") ?? "",
+        )
+      ) {
+        return failure("unauthorized", 401);
+      }
+      if (url.search !== "") return failure("invalid", 400);
+      try {
+        options.windowAuthorityStore.authenticate(
+          request.headers.get("x-octant-window-capability") ?? "",
+          now(),
+        );
+      } catch (error) {
+        return failure(error instanceof WindowAuthorityError ? "unauthorized" : "invalid", 401);
+      }
     }
-    if (
-      !isLoopbackHostname(url.hostname) ||
-      request.headers.has("origin") ||
-      !secretsEqual(
-        options.desktopBridgeSecret,
-        request.headers.get("x-octant-desktop-secret") ?? "",
-      )
-    ) {
-      return failure("unauthorized", 401);
-    }
-    if (url.search !== "") return failure("invalid", 400);
-    try {
-      options.windowAuthorityStore.authenticate(
-        request.headers.get("x-octant-window-capability") ?? "",
-        now(),
-      );
-    } catch (error) {
-      return failure(error instanceof WindowAuthorityError ? "unauthorized" : "invalid", 401);
-    }
+    const actor = asking === undefined ? {} : { actor: asking.actor };
 
-    const route = url.pathname as (typeof ROUTES)[keyof typeof ROUTES];
     if (route === ROUTES.pending) {
       if (request.method !== "GET") return failure("invalid", 400);
       return Response.json({ pending: control.listPendingPairings().map(toPending) });
@@ -144,7 +208,13 @@ export function createLocalDeviceAdministrationRouteHandler(
         }
         case ROUTES.approve: {
           const body = decodeTicketBody(decoded.value);
-          const result = control.approvePairing(body);
+          // A new device is approved by a party the host already trusts. A
+          // request made with the asking device's own key is that device
+          // vouching for itself, so it is left for another party to decide.
+          if (asking !== undefined && requestIsOwn(control, body.ticketId, asking.deviceId)) {
+            return failure("unauthorized", 401);
+          }
+          const result = control.approvePairing({ ...body, ...actor });
           return Response.json(
             { decision: result.decision, device: toInventory(result.device) },
             { status: 201 },
@@ -152,22 +222,31 @@ export function createLocalDeviceAdministrationRouteHandler(
         }
         case ROUTES.deny: {
           const body = decodeDenialBody(decoded.value);
-          return Response.json({ decision: control.denyPairing(body) }, { status: 201 });
+          return Response.json(
+            { decision: control.denyPairing({ ...body, ...actor }) },
+            { status: 201 },
+          );
         }
         case ROUTES.rename: {
           const body = decodeRenameBody(decoded.value);
           return Response.json(
-            { device: toInventory(control.renameDevice(body)) },
+            { device: toInventory(control.renameDevice({ ...body, ...actor })) },
             { status: 201 },
           );
         }
         case ROUTES.revoke: {
           const body = decodeDeviceBody(decoded.value);
-          return Response.json({ receipt: control.revokeDevice(body) }, { status: 201 });
+          return Response.json(
+            { receipt: control.revokeDevice({ ...body, ...actor }) },
+            { status: 201 },
+          );
         }
         case ROUTES.revokeAll:
           requireExactKeys(decoded.value, []);
-          return Response.json({ receipt: control.revokeAll() }, { status: 201 });
+          return Response.json(
+            { receipt: asking === undefined ? control.revokeAll() : control.revokeAll(actor) },
+            { status: 201 },
+          );
         case ROUTES.reconcileExpired:
           requireExactKeys(decoded.value, []);
           return Response.json({ receipt: control.reconcileExpired() }, { status: 201 });
@@ -178,6 +257,23 @@ export function createLocalDeviceAdministrationRouteHandler(
       return mapOperationError(error);
     }
   };
+}
+
+/** Whether a pending pairing request was made with the key the asking device is registered under. */
+function requestIsOwn(
+  control: LocalDeviceAdministrationPort,
+  ticketId: string,
+  askingDeviceId: string,
+): boolean {
+  const claim = control
+    .listPendingPairings()
+    .find((pending) => String(pending.ticketId) === ticketId);
+  const own = control.listDevices().find((device) => String(device.deviceId) === askingDeviceId);
+  return (
+    claim !== undefined &&
+    own !== undefined &&
+    claim.deviceKeyFingerprint === own.deviceKeyFingerprint
+  );
 }
 
 function toPending(value: PairingClaimResult): PairingClaimResult {

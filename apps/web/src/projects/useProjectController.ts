@@ -17,6 +17,7 @@ import {
   type CodeNewThreadWorkspace,
   type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type CodeProjectOwnToolchain,
   type CodeProjectAgentPullRequestComments,
   type CodeProjectPullRequestBackgroundRefresh,
   type ProjectAction,
@@ -394,6 +395,31 @@ export function useProjectController(options: ProjectControllerOptions) {
       agentMerge === "enabled"
         ? "Agents may now merge this Project's pull requests."
         : "Agents no longer merge this Project's pull requests without asking.",
+    );
+  }
+
+  /**
+   * Run a Code Project's language services from the Project's own copy of a
+   * toolchain, or return to the copy Octant bundles. The server is the
+   * authority and accepts it only from a window on the host.
+   */
+  async function setCodeOwnToolchain(
+    projectId: ProjectId,
+    ownToolchain: CodeProjectOwnToolchain,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if ((project.ownToolchain ?? "disabled") === ownToolchain) return true;
+    return execute(
+      {
+        kind: "change-code-project-own-toolchain",
+        projectId,
+        expectedVersion: project.version,
+        ownToolchain,
+      },
+      ownToolchain === "enabled"
+        ? "Language services now use this Project's own toolchain."
+        : "Language services now use the toolchain bundled with Octant.",
     );
   }
 
@@ -1056,6 +1082,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeAutoReviewer,
     setCodePullRequestBackgroundRefresh,
     setCodeAgentMerge,
+    setCodeOwnToolchain,
     setCodeAgentPullRequestComments,
     setCodeAgentDefaultBranchPush,
     setProviderPolicy,

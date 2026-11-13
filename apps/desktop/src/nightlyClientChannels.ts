@@ -85,6 +85,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   openInNewWindow: "brokered",
   openSettings: "local",
   quitShortcutHint: "local",
+  quitShortcutSecondPress: "local",
   // Prepare to shut down moves threads through Octant's hub administration.
   prepareToShutDown: "octant-only",
   shutdownMovesOffered: "octant-only",
@@ -134,6 +135,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   remoteDeviceReconcileExpired: "octant-only",
   hubAdministrationRequest: "octant-only",
   agentAccessRequest: "octant-only",
+  providerDeviceSignIn: "octant-only",
   threadMoveOpenThere: "octant-only",
   ownerUnlockMake: "octant-only",
   ownerUnlockSign: "octant-only",

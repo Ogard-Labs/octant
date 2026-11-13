@@ -399,6 +399,8 @@ export const HubState = Schema.Struct({
   pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
   /** A paired phone or web client's merge needs a fresh unlock on an owner device; set only from a window on this host. */
   ownerUnlockBeforePairedMerge: Schema.optional(Schema.Literal(true)),
+  /** Each approval answer from an owner device needs its own fresh unlock; unset, an open session covers them. Set only from a window on this host. */
+  ownerUnlockPerApprovalAnswer: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type HubState = typeof HubState.Type;
 

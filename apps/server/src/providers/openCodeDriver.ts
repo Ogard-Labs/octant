@@ -322,9 +322,20 @@ function openCodeInputModalities(model: Provider["models"][string]): ProviderInp
   return modalities.length > 0 ? modalities : ["text"];
 }
 
+/**
+ * What the probe learned about carrying Octant's tools: whether the runtime
+ * accepted the tool endpoint's declaration, and whether the launch proved
+ * that nothing else (the person's or the Project's MCP, plugins, skills) can
+ * enter the process beside it.
+ */
+export interface OpenCodeToolProof {
+  readonly accepted: boolean;
+  readonly exclusive: boolean;
+}
+
 function openCodeChatCapabilities(
   models: ReadonlyArray<{ readonly inputModalities: readonly ProviderInputModality[] }>,
-  isolatedConfiguration: boolean,
+  tools: OpenCodeToolProof,
 ): ProviderCapabilities {
   return {
     ...capabilities,
@@ -333,7 +344,12 @@ function openCodeChatCapabilities(
     )
       ? "supported"
       : "unsupported",
-    appManagedTools: isolatedConfiguration ? "supported" : "unsupported",
+    appManagedTools: tools.accepted && tools.exclusive ? "supported" : "unsupported",
+    // Full access launches this runtime outside the sandbox the exclusivity
+    // proof rests on, so even a proved release is mixed there. Reported only
+    // when the runtime accepted the declaration: a runtime that rejects it
+    // would fail every Full access session start instead of running untooled.
+    ...(tools.accepted ? { appManagedToolsAtFullAccess: "mixed" as const } : {}),
   };
 }
 
@@ -1252,13 +1268,10 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                     },
                     catch: () => false,
                   }).pipe(Effect.orDie);
-            const normalized = normalizeOpenCodeProbe(
-              instanceId,
-              health,
-              providers,
-              clock(),
-              runtime.isolatedConfiguration === true && mcpAccepted,
-            );
+            const normalized = normalizeOpenCodeProbe(instanceId, health, providers, clock(), {
+              accepted: mcpAccepted,
+              exclusive: runtime.isolatedConfiguration === true,
+            });
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
               // A launch that reports no scratch directory cannot be attested.
               // Otherwise attest that the Chat/Plan jail serves a Git work
@@ -2132,7 +2145,14 @@ function makeConnection(
               ),
             ),
             Effect.flatMap((runtimeClient) => {
-              if (state.managedTools !== undefined && !runtimeIsolated) {
+              // Below Full access the tools reach only a runtime that proved
+              // nothing else can enter it. At Full access they are offered
+              // beside whatever the runtime inherited, reported as mixed.
+              if (
+                state.managedTools !== undefined &&
+                !runtimeIsolated &&
+                input.executionPolicy !== "full-access"
+              ) {
                 return Effect.promise(() => releaseManagedTools(state)).pipe(
                   Effect.zipRight(
                     Effect.fail(
@@ -2402,7 +2422,12 @@ function makeConnection(
             }
             const reportedCapabilities = {
               ...(observed?.capabilities ?? capabilities),
-              appManagedTools: runtimeIsolated ? ("supported" as const) : ("unsupported" as const),
+              // This gates the turn's own tool offer, so a mixed Full access
+              // session carries tools here; the probe is what reports mixed.
+              appManagedTools:
+                runtimeIsolated || state.executionPolicy === "full-access"
+                  ? ("supported" as const)
+                  : ("unsupported" as const),
             };
             const rejected = validateChatTurnInput(
               input,
@@ -3332,7 +3357,7 @@ export function normalizeOpenCodeProbe(
   health: { readonly version: string },
   providers: { readonly all: ReadonlyArray<Provider>; readonly connected: ReadonlyArray<string> },
   observedAt: string,
-  isolatedConfiguration = false,
+  tools: OpenCodeToolProof = { accepted: false, exclusive: false },
 ): ProviderProbeResult {
   const connected = new Set(providers.connected);
   const models = providers.all
@@ -3365,7 +3390,7 @@ export function normalizeOpenCodeProbe(
     processState: "running",
     detectedVersion: health.version,
     models,
-    capabilities: openCodeChatCapabilities(models, isolatedConfiguration),
+    capabilities: openCodeChatCapabilities(models, tools),
     ...(models.length === 0 ? { message: "Authenticate OpenCode with a provider." } : {}),
     ...(models.length > 0 ? { lastSuccessfulProbeAt: observedAt as UtcTimestamp } : {}),
     observedAt: observedAt as UtcTimestamp,

@@ -1,4 +1,5 @@
 import {
+  type EventActor,
   decodeNativeHarnessApproval,
   type ApprovalOutsideContent,
   decodeNativeHarnessApprovalId,
@@ -49,6 +50,8 @@ export interface NativeHarnessCommandApprovalOutcome {
 /** Who decided, and the listed hosts they let this one command reach. */
 export interface NativeHarnessApprovalAnswer {
   readonly principal: ToolEgressPerson;
+  /** The actor the decision is journaled with; absent means the person at this host. */
+  readonly actor?: EventActor | undefined;
   readonly commandHosts?: ReadonlyArray<NativeHarnessCommandHostChoice> | undefined;
 }
 
@@ -66,6 +69,7 @@ interface Waiter {
     outcome: SettledApprovalOutcome,
     remembered?: boolean,
     confirmed?: ToolEgressCallConfirmation,
+    actor?: EventActor,
   ) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly onAbort: () => void;
@@ -283,16 +287,19 @@ export class NativeHarnessApprovalStore {
             outcome: SettledApprovalOutcome,
             remembered?: boolean,
             confirmed?: ToolEgressCallConfirmation,
+            actor?: EventActor,
           ) => {
             const waiter = this.#waiters.get(String(approvalId));
             if (waiter === undefined) return;
             this.#waiters.delete(String(approvalId));
             clearTimeout(waiter.timer);
             waiter.signal?.removeEventListener("abort", waiter.onAbort);
-            this.#options.sessions.settleApproval(input.threadId, approvalId, {
-              status: outcome,
-              ...(remembered === true ? { remembered: true } : {}),
-            });
+            this.#options.sessions.settleApproval(
+              input.threadId,
+              approvalId,
+              { status: outcome, ...(remembered === true ? { remembered: true } : {}) },
+              actor,
+            );
             resolve(
               outcome === "approved" && confirmed !== undefined
                 ? { outcome, confirmed }
@@ -417,7 +424,7 @@ export class NativeHarnessApprovalStore {
       this.#remembered.set(threadId, classes);
       this.#modes.set(threadId, waiter.mode);
     }
-    waiter.resolve(decision === "deny" ? "denied" : "approved", remember, confirmed);
+    waiter.resolve(decision === "deny" ? "denied" : "approved", remember, confirmed, answer?.actor);
     return "decided";
   }
 

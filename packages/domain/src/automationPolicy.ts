@@ -1241,3 +1241,28 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
 // aggregate or trigger level without creating a second implementation.
 export const validateAutomation = validateAutomationDefinition;
 export const classifyRunNow = classifyAutomationRunNow;
+
+/**
+ * How a routine a thread's agent sets up comes to exist. `create-paused`
+ * creates it at once with no card; it is paused in its first journaled event
+ * and runs only after the person enables it, so neither the agent's word that
+ * the person asked nor the thread's level can start anything. `ask-on-card`
+ * waits for the person's confirmation in the thread.
+ *
+ * Below Full access only the person's own request skips the card. At Full
+ * access the agent's own suggestion does too: the person chose a level where
+ * nothing prompts, and a paused routine is shown in the thread and does
+ * nothing until they turn it on. A turn in Plan changes nothing, so it asks,
+ * and a follow-up asks at every level because a paused one would never fire.
+ */
+export function decideRoutineFromAgent(input: {
+  readonly requestedByPerson: boolean;
+  readonly followUp: boolean;
+  /** The posture the turn runs at when the call is made, not the thread's stored level. */
+  readonly posture: "full-access" | "auto-accept-edits" | "approval-gated" | "plan" | undefined;
+}): "create-paused" | "ask-on-card" {
+  if (input.followUp || input.posture === "plan") return "ask-on-card";
+  return input.requestedByPerson || input.posture === "full-access"
+    ? "create-paused"
+    : "ask-on-card";
+}

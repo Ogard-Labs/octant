@@ -526,6 +526,7 @@ describe("CodeOperationService", () => {
       ids.window,
       expect.objectContaining({ id: findingId }),
       undefined,
+      undefined,
     );
 
     reviewFindings.changeState.mockRejectedValueOnce(new ReviewFindingServiceError("stale"));

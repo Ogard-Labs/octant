@@ -24,7 +24,12 @@ import { Schema } from "effect";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { ChatServiceError, type ChatService } from "./chat/chatService";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
+import { eventActorForPrincipal } from "./principalEventActor";
+import {
+  authenticateRouteWindowId,
+  boundPrincipalIsRestricted,
+  readPrincipalRouteContext,
+} from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const JSON_BODY_LIMIT = 1_048_576;
@@ -383,11 +388,10 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           );
         }
         // Whether the host may continue an answer by itself after a restart
-        // is a choice about this computer's unattended work, made at it.
-        const principal = readPrincipalRouteContext(request)?.principal;
+        // is the person's choice about this computer's unattended work, at a
+        // window on it or on a device they paired.
         if (
-          principal !== undefined &&
-          principal.kind !== "local-window" &&
+          boundPrincipalIsRestricted(request) &&
           (command.kind === "set-chat-thread-restart-continuation" ||
             (command.kind === "update-chat-settings" && command.restartContinuation !== undefined))
         ) {
@@ -401,7 +405,10 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           );
         }
         return jsonResponse(
-          await dependencies.service.execute(command, { windowId: authenticatedWindowId }),
+          await dependencies.service.execute(command, {
+            windowId: authenticatedWindowId,
+            actor: eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+          }),
           200,
           origin,
         );

@@ -1,4 +1,6 @@
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import {
+  type EventActor,
   decodeAnswerNativeHarnessQuestion,
   decodeDecideNativeHarnessApproval,
   decodeSteerNativeHarnessSession,
@@ -12,6 +14,7 @@ import {
   type NativeHarnessSessionCommandResult,
 } from "@octant/contracts";
 import { APPROVAL_POSTURE_CHANGED_MESSAGE } from "@octant/domain/guardrail-policy";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -89,6 +92,8 @@ export interface NativeHarnessSessionRouteDependencies {
   readonly steer?: (input: {
     readonly threadId: string;
     readonly command: SteerNativeHarnessSession;
+    /** Who sent, took or cleared the note, as the route resolved it. */
+    readonly actor: EventActor;
   }) =>
     | "queued"
     | "cleared"
@@ -100,6 +105,8 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly questionId: string;
     readonly answer: string;
+    /** Who answered, from the authenticated request. */
+    readonly actor: EventActor;
   }) => "answered" | "question-not-found" | "already-settled" | "invalid-answer";
   readonly now?: () => number;
 }
@@ -147,6 +154,7 @@ export function createNativeHarnessSessionRouteHandler(
     }
     let windowId: string;
     let person: ToolEgressPerson;
+    let actor: EventActor;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -154,10 +162,20 @@ export function createNativeHarnessSessionRouteHandler(
         now: now(),
       });
       windowId = String(context.scopeId);
+      // A device the host's own person paired answers a thread's requests as a
+      // local window does. Any other device session answers only the child
+      // requests its own turns raised, once each.
+      // The device is named either way, so what it decides is journaled as its own.
       person =
-        context.principal.kind === "remote-device"
-          ? { kind: "remote-device", deviceId: String(context.principal.deviceId) }
-          : { kind: "local-window" };
+        context.principal.kind !== "remote-device"
+          ? { kind: "local-window" }
+          : {
+              kind: principalActsAsHostPerson(context.principal)
+                ? "person-paired-device"
+                : "remote-device",
+              deviceId: String(context.principal.deviceId),
+            };
+      actor = eventActorForPrincipal(context.principal);
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Native harness session request is unauthorized.", 401, origin);
@@ -246,6 +264,7 @@ export function createNativeHarnessSessionRouteHandler(
             dependencies.store.turnInFlight(threadId)
               ? "Paused by the user. The current turn will finish; nothing new starts."
               : "Paused by the user.",
+            actor,
           );
           dependencies.onPaused?.({ threadId });
         } else if (command.kind === "resume-native-harness-session") {
@@ -284,7 +303,7 @@ export function createNativeHarnessSessionRouteHandler(
               );
             }
           }
-          if (!dependencies.store.resume(threadId)) {
+          if (!dependencies.store.resume(threadId, actor)) {
             return json(refusedCommand("not-paused"), 409, origin);
           }
           if (liftsRecovery && command.continueInterrupted !== true) {
@@ -330,6 +349,7 @@ export function createNativeHarnessSessionRouteHandler(
         // The principal comes from the request, never the body.
         answer: {
           principal: person,
+          actor,
           ...(decision.commandHosts === undefined ? {} : { commandHosts: decision.commandHosts }),
         },
       });
@@ -373,7 +393,7 @@ export function createNativeHarnessSessionRouteHandler(
       } catch {
         return failure("Native harness steering note is invalid.", 400, origin);
       }
-      const outcome = dependencies.steer?.({ threadId, command }) ?? "no-session";
+      const outcome = dependencies.steer?.({ threadId, command, actor }) ?? "no-session";
       if (typeof outcome === "object") {
         return json(
           { view: dependencies.store.read(threadId) ?? null, taken: outcome.taken },
@@ -414,6 +434,7 @@ export function createNativeHarnessSessionRouteHandler(
         threadId,
         questionId: String(answer.questionId),
         answer: answer.answer,
+        actor,
       });
       const settled = dependencies.store
         .read(threadId)
@@ -447,6 +468,7 @@ export function createNativeHarnessSessionRouteHandler(
         windowId,
         action: sub,
         body,
+        actor,
       });
       return json(settled.body, settled.status, origin);
     }

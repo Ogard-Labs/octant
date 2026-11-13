@@ -20,7 +20,13 @@ import {
   refusesThreadDocumentDelivery,
 } from "./threadDocumentDeliveryAuthority";
 import { Schema } from "effect";
-import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
+import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
+import {
+  authenticateRouteWindowId,
+  boundPrincipalIsRestricted,
+  readPrincipalRouteContext,
+} from "./principalRouteContext";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { isLoopbackHostname } from "./shellRoutes";
 import {
   refusesTerminalSessionImport,
@@ -205,8 +211,9 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
-      // A paired device may lower a thread; raising one, or the default new
-      // threads start at, to Full access is chosen at a window on this host,
+      // A hub-introduced device or an agent grant may lower a thread; raising
+      // one, or the default new threads start at, to Full access is the
+      // person's choice, at a window on this host or on a device they paired,
       // as it is for Code.
       if (raisesWorkToFullAccess(command) && refusesFullAccessRaise(request)) {
         return failureResponse(
@@ -215,9 +222,10 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
-      // Whether the host may continue a turn by itself after a restart is a
-      // choice about this computer's unattended work, made at it, as for Code.
-      if (setsRestartContinuation(command) && refusesFullAccessRaise(request)) {
+      // Whether the host may continue a turn by itself after a restart is the
+      // person's choice about this computer's unattended work, at a window on
+      // it or on a device they paired, as for Code.
+      if (setsRestartContinuation(command) && boundPrincipalIsRestricted(request)) {
         return failureResponse(
           { category: "unauthorized", message: RESTART_CONTINUATION_LOCAL_ONLY },
           403,
@@ -235,7 +243,9 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       }
       return jsonResponse(
         decodeWorkThreadCommandResult(
-          await dependencies.service.execute(authenticatedWindowId, command),
+          await dependencies.service.execute(authenticatedWindowId, command, {
+            actor: eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+          }),
         ),
         200,
         origin,
@@ -414,8 +424,18 @@ function setsRestartContinuation(command: WorkThreadCommand): boolean {
   );
 }
 
-/** A request whose principal is anything but a window on this host. */
+/**
+ * A request from anyone but the host's own person. A device that person paired
+ * raises a thread or the default to Full access exactly as a local window does
+ * (maintainer decision, 2026-11-12). An agent grant's session raises only what
+ * its own guard admitted before this route: a thread, when the person chose
+ * Full access for that grant.
+ */
 function refusesFullAccessRaise(request: Request): boolean {
   const principal = readPrincipalRouteContext(request)?.principal;
-  return principal !== undefined && principal.kind !== "local-window";
+  return (
+    principal !== undefined &&
+    !principalActsAsHostPerson(principal) &&
+    !isAgentGrantSession(principal)
+  );
 }

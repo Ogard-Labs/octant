@@ -250,6 +250,26 @@ describe("Browser profiles service", () => {
     ]);
   });
 
+  it("journals a clear as whoever the route named, and as the local person when it names nobody", async () => {
+    const { service, journal: live } = harness();
+    const deviceId = "a0000000-0000-4000-8000-0000000000d1";
+    const device = decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId });
+    const clear = { kind: "clear", profile: { kind: "personal" }, scope: "all" } as const;
+
+    await service.execute("local-window", clear, device);
+    await service.execute("local-window", clear);
+
+    expect(
+      live
+        .replayAggregateType({
+          aggregateType: BROWSER_PROFILE_AGGREGATE,
+          afterSequence: 0,
+          limit: 10,
+        })
+        .map((event) => event.actor),
+    ).toEqual([device, { kind: "local-user", actorId }]);
+  });
+
   it("can clear only the cookies of a profile", async () => {
     const { service, clear } = harness();
 

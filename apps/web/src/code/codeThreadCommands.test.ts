@@ -8,6 +8,7 @@ import {
   findCodeThread,
   pinCodeThread,
   renameCodeThread,
+  markCodeThreadDone,
   reopenCodeThread,
   snoozeCodeThread,
   wakeCodeThread,
@@ -46,6 +47,7 @@ describe("Code thread commands", () => {
     ["archives a thread", archiveCodeThread(thread), "change-code-thread-lifecycle"],
     ["completes a thread", completeCodeThread(thread), "complete-code-thread"],
     ["reopens a thread", reopenCodeThread(thread), "reopen-code-thread"],
+    ["marks a thread Done", markCodeThreadDone(thread), "mark-code-thread-done"],
     [
       "snoozes a thread",
       snoozeCodeThread(thread, decodeUtcTimestamp("2026-07-22T12:00:00.000Z")),

@@ -280,7 +280,12 @@ export class PersonMemoryStore {
     return "remembered";
   }
 
-  change(command: PersonMemoryCommand): PersonMemoryResult {
+  /**
+   * `actor` is who asked, as the route resolved it from the authenticated
+   * principal: a paired device's change is journaled as that device. Absent
+   * means the person at this host.
+   */
+  change(command: PersonMemoryCommand, actor?: EventActor): PersonMemoryResult {
     switch (command.kind) {
       case "change-person-memory-settings":
         if (command.expectedVersion !== this.#settingsVersion) {
@@ -289,13 +294,17 @@ export class PersonMemoryStore {
         this.#writeSettings(
           command.settings,
           widensMemory(this.#settings, command.settings) ? "restart" : "keep",
+          actor,
         );
         return this.view();
       case "edit-person-memory-entry": {
         const entry = this.#entries.get(String(command.entryId));
         if (entry === undefined) return refused("not-found", "That memory is already gone.");
         const now = this.#dependencies.clock();
-        this.#writeEntry({ ...entry, content: command.content, editedAt: now, updatedAt: now });
+        this.#writeEntry(
+          { ...entry, content: command.content, editedAt: now, updatedAt: now },
+          actor,
+        );
         return this.view();
       }
       case "delete-person-memory-entry":
@@ -305,10 +314,10 @@ export class PersonMemoryStore {
         this.#eraseEntry(String(command.entryId));
         return this.view();
       case "forget-person-memory":
-        this.#forgetEverything();
+        this.#forgetEverything(actor);
         return this.view();
       case "set-thread-leaves-no-trace":
-        this.#markThread(command);
+        this.#markThread(command, actor);
         return this.view();
     }
   }
@@ -322,6 +331,7 @@ export class PersonMemoryStore {
 
   #markThread(
     command: Extract<PersonMemoryCommand, { readonly kind: "set-thread-leaves-no-trace" }>,
+    actor: EventActor | undefined,
   ): void {
     const thread = { mode: command.mode, threadId: command.threadId };
     const key = threadKey(thread);
@@ -346,10 +356,11 @@ export class PersonMemoryStore {
         ...(command.title === undefined ? {} : { title: command.title }),
         leavesNoTrace: command.leavesNoTrace,
       },
+      actor,
     );
     if (!command.leavesNoTrace) {
       this.#untraced.delete(key);
-      this.#writeSettings(this.#settings, "restart");
+      this.#writeSettings(this.#settings, "restart", actor);
       return;
     }
     this.#untraced.set(key, {
@@ -361,11 +372,12 @@ export class PersonMemoryStore {
     });
     // Marking a thread erases what was already remembered from it.
     this.#gone.add(key);
-    this.#forgetThread(thread);
+    this.#forgetThread(thread, actor);
   }
 
   #forgetThread(
     thread: PersonMemoryThreadRef | { readonly mode: OctantMode; readonly threadId: string },
+    actor?: EventActor,
   ): void {
     const key = threadKey(thread);
     if (this.#digests.delete(key)) {
@@ -387,15 +399,18 @@ export class PersonMemoryStore {
       const [first, ...rest] = sources;
       if (first === undefined) this.#eraseEntry(String(entry.id));
       else
-        this.#writeEntry({
-          ...entry,
-          sources: [first, ...rest],
-          updatedAt: this.#dependencies.clock(),
-        });
+        this.#writeEntry(
+          {
+            ...entry,
+            sources: [first, ...rest],
+            updatedAt: this.#dependencies.clock(),
+          },
+          actor,
+        );
     }
   }
 
-  #forgetEverything(): void {
+  #forgetEverything(actor: EventActor | undefined): void {
     const aggregates = [
       ...[...this.#entries.keys()].map((id) => ({
         aggregateType: PERSON_MEMORY_ENTRY_AGGREGATE_TYPE,
@@ -409,7 +424,7 @@ export class PersonMemoryStore {
     this.#erase(aggregates);
     this.#entries.clear();
     this.#digests.clear();
-    this.#writeSettings(this.#settings, "restart");
+    this.#writeSettings(this.#settings, "restart", actor);
   }
 
   /**
@@ -417,7 +432,11 @@ export class PersonMemoryStore {
    * back on, letting a Project back in, or allowing a thread again must not
    * learn from what ended while it was off, kept out, or just forgotten.
    */
-  #writeSettings(settings: PersonMemorySettings, boundary: "keep" | "restart" = "keep"): void {
+  #writeSettings(
+    settings: PersonMemorySettings,
+    boundary: "keep" | "restart" = "keep",
+    actor?: EventActor,
+  ): void {
     const since =
       boundary === "restart"
         ? this.#dependencies.clock()
@@ -428,6 +447,7 @@ export class PersonMemoryStore {
       this.#settingsVersion,
       PERSON_MEMORY_SETTINGS_CHANGED,
       { settings, since },
+      actor,
     );
     this.#settings = settings;
     this.#since = since;
@@ -435,15 +455,20 @@ export class PersonMemoryStore {
   }
 
   /** Replaces an entry's whole history with one event naming its current state. */
-  #writeEntry(entry: PersonMemoryEntry): void {
+  #writeEntry(entry: PersonMemoryEntry, actor?: EventActor): void {
     const aggregate = {
       aggregateType: PERSON_MEMORY_ENTRY_AGGREGATE_TYPE,
       aggregateId: String(entry.id),
     };
     if (this.#entries.has(String(entry.id))) this.#erase([aggregate]);
-    this.#append(aggregate.aggregateType, aggregate.aggregateId, 0, PERSON_MEMORY_ENTRY_RECORDED, {
-      entry,
-    });
+    this.#append(
+      aggregate.aggregateType,
+      aggregate.aggregateId,
+      0,
+      PERSON_MEMORY_ENTRY_RECORDED,
+      { entry },
+      actor,
+    );
     this.#entries.set(String(entry.id), entry);
   }
 
@@ -477,6 +502,9 @@ export class PersonMemoryStore {
     expectedVersion: number,
     eventName: string,
     payload: unknown,
+    // What the host's own sweep learns names nobody and keeps the store's
+    // actor; a person's change names who asked.
+    actor: EventActor = this.#dependencies.actor,
   ): { readonly version: number; readonly occurredAt: UtcTimestamp } {
     const occurredAt = this.#dependencies.clock();
     const committed = this.#dependencies.journal.append({
@@ -488,7 +516,7 @@ export class PersonMemoryStore {
           eventName,
           eventVersion: 1,
           correlationId: this.#dependencies.uuid(),
-          actor: this.#dependencies.actor,
+          actor,
           occurredAt,
           payload,
         },

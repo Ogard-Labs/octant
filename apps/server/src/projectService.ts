@@ -26,6 +26,7 @@ import {
   type MemoryCommandResult,
   type MemoryEntry,
   type Project,
+  type ProjectActor,
   type ProjectBootstrap,
   type ProjectCommandResult,
   type ProjectFailure,
@@ -54,6 +55,7 @@ import {
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectAgentDefaultBranchPush,
   changeCodeProjectAgentMerge,
+  changeCodeProjectOwnToolchain,
   changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectAgentMemoryWrites,
@@ -115,12 +117,19 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 export interface ProjectServiceApi {
   readonly bootstrap: (authenticatedWindowId: WindowId) => Promise<ProjectBootstrap>;
   readonly search: (query: string) => Promise<ReadonlyArray<ProjectSummary>>;
+  /**
+   * `actor` is who asked, as the route resolved it from the authenticated
+   * principal; absent means the person at this host. It names the journaled
+   * event. What a Project records about its own history (who bound a folder,
+   * who wrote a memory entry) stays the person, whose acts a paired device's are.
+   */
   readonly executeProject: (
     authenticatedWindowId: WindowId,
     command: unknown,
+    actor?: EventActor,
   ) => Promise<ProjectCommandResult>;
   readonly memory: (projectId: unknown) => Promise<ProjectMemoryView>;
-  readonly executeMemory: (command: unknown) => Promise<MemoryCommandResult>;
+  readonly executeMemory: (command: unknown, actor?: EventActor) => Promise<MemoryCommandResult>;
 }
 
 /** The memory commands an agent may propose; transfer between Projects stays the person's. */
@@ -198,6 +207,17 @@ export class ProjectServiceError extends Error {
  * memo, so a relink, archive, or memory edit shows on the very next read.
  */
 const BOOTSTRAP_MAX_AGE_MS = 1_000;
+
+/**
+ * Who a Project record says did it. A paired device's change names the device,
+ * as the event that carries the record does; every other caller is the person
+ * at this host, which is what these records said before a device could act.
+ */
+function personNamedBy(eventActor: EventActor | undefined): ProjectActor {
+  return eventActor?.kind === "remote-device"
+    ? { kind: "remote-device", actorId: eventActor.actorId, deviceId: eventActor.deviceId }
+    : { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) };
+}
 
 export class ProjectService implements ProjectServiceApi {
   readonly #persistence: PersistenceService;
@@ -378,9 +398,9 @@ export class ProjectService implements ProjectServiceApi {
     }
   }
 
-  async executeMemory(input: unknown): Promise<MemoryCommandResult> {
+  async executeMemory(input: unknown, actor?: EventActor): Promise<MemoryCommandResult> {
     try {
-      return await this.#executeMemory(input, undefined);
+      return await this.#executeMemory(input, undefined, actor);
     } finally {
       this.#bootstrapMemo = undefined;
     }
@@ -397,9 +417,11 @@ export class ProjectService implements ProjectServiceApi {
   async executeAgentMemory(
     command: AgentMemoryCommand,
     origin: AgentAuthoredMemoryProvenance,
+    /** The person who approved it, as the route resolved them. */
+    actor?: EventActor,
   ): Promise<MemoryCommandResult> {
     try {
-      return await this.#executeMemory(command, origin);
+      return await this.#executeMemory(command, origin, actor);
     } finally {
       this.#bootstrapMemo = undefined;
     }
@@ -408,6 +430,7 @@ export class ProjectService implements ProjectServiceApi {
   async #executeMemory(
     input: unknown,
     agentOrigin: AgentAuthoredMemoryProvenance | undefined,
+    eventActor?: EventActor,
   ): Promise<MemoryCommandResult> {
     let command: ReturnType<typeof decodeMemoryCommand>;
     try {
@@ -445,7 +468,7 @@ export class ProjectService implements ProjectServiceApi {
       const destinationMemory = this.#persistence.readProjectMemory(destinationProjectId);
       this.#assertMemoryExpectedVersion(destinationMemory, command.expectedVersion);
       const timestamp = decodeTimestamp(this.#clock());
-      const actor = { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+      const actor = personNamedBy(eventActor);
       let result: MemoryCommandResult;
       let eventName: string;
       let payload: unknown;
@@ -522,7 +545,7 @@ export class ProjectService implements ProjectServiceApi {
       this.#persistence.journal.append({
         aggregate: { aggregateType: "project-memory", aggregateId: destinationProjectId },
         expectedVersion: command.expectedVersion,
-        events: [this.#pendingEvent(eventName, payload)],
+        events: [this.#pendingEvent(eventName, payload, eventActor)],
       });
       const authoritative = this.#persistence.readMemoryEntry(destinationProjectId, resultEntryId);
       if (authoritative === undefined || authoritative.version !== command.expectedVersion + 1) {
@@ -620,9 +643,10 @@ export class ProjectService implements ProjectServiceApi {
   async executeProject(
     authenticatedWindowId: WindowId,
     input: unknown,
+    actor?: EventActor,
   ): Promise<ProjectCommandResult> {
     try {
-      return await this.#executeProject(authenticatedWindowId, input);
+      return await this.#executeProject(authenticatedWindowId, input, actor);
     } finally {
       this.#bootstrapMemo = undefined;
     }
@@ -631,6 +655,7 @@ export class ProjectService implements ProjectServiceApi {
   async #executeProject(
     authenticatedWindowId: WindowId,
     input: unknown,
+    eventActor?: EventActor,
   ): Promise<ProjectCommandResult> {
     let command: ReturnType<typeof decodeProjectCommand>;
     try {
@@ -646,7 +671,7 @@ export class ProjectService implements ProjectServiceApi {
       const current = this.#persistence.readProject(command.projectId);
       this.#assertExpectedVersion(current, command.expectedVersion);
       const timestamp = decodeTimestamp(this.#clock());
-      const actor = { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+      const actor = personNamedBy(eventActor);
       let project: Project;
       let kind: ProjectCommandResult["kind"];
       let eventName: string;
@@ -876,6 +901,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeCodeProjectAgentMerge(current, command.agentMerge, timestamp);
           kind = "code-project-agent-merge-changed";
           eventName = "project.code-agent-merge-changed@1";
+        } else if (command.kind === "change-code-project-own-toolchain") {
+          project = changeCodeProjectOwnToolchain(current, command.ownToolchain, timestamp);
+          kind = "code-project-own-toolchain-changed";
+          eventName = "project.code-own-toolchain-changed@1";
         } else if (command.kind === "change-code-project-agent-pull-request-comments") {
           project = changeCodeProjectAgentPullRequestComments(
             current,
@@ -943,12 +972,13 @@ export class ProjectService implements ProjectServiceApi {
           kind = "work-project-status-file-changed";
           eventName = "project.work-status-file-changed@1";
         } else if (command.kind === "change-work-project-developer-tools") {
-          // Only a window on this host reaches this command (the route
-          // refuses a paired device), so the person who turned it is the
-          // host's local user, recorded on the Project with the time.
+          // Only the host's own person reaches this command (the route
+          // refuses any other device session). Who turned it is recorded on
+          // the Project with the time: the local user, or the paired device
+          // they turned it from.
           project = changeWorkProjectDeveloperTools(
             current,
-            { enabled: command.enabled, changedBy: actor },
+            { enabled: command.enabled, changedBy: eventActor ?? actor },
             timestamp,
           );
           kind = "work-project-developer-tools-changed";
@@ -1057,9 +1087,9 @@ export class ProjectService implements ProjectServiceApi {
           this.#persistence.journal.append({
             aggregate: { aggregateType: "project", aggregateId: project.id },
             expectedVersion: command.expectedVersion,
-            events: [this.#pendingEvent(eventName, { project, ...eventFacts })],
+            events: [this.#pendingEvent(eventName, { project, ...eventFacts }, eventActor)],
           });
-          this.#journalProjectLowering(current, command);
+          this.#journalProjectLowering(current, command, eventActor);
         });
         journaled = true;
       } finally {
@@ -1189,6 +1219,7 @@ export class ProjectService implements ProjectServiceApi {
   #journalProjectLowering(
     current: Project | undefined,
     command: ReturnType<typeof decodeProjectCommand>,
+    eventActor: EventActor | undefined,
   ): void {
     if (
       command.kind !== "change-code-project-permission-mode" &&
@@ -1217,18 +1248,22 @@ export class ProjectService implements ProjectServiceApi {
             to,
             projectId: current.id,
           }),
+          eventActor,
         ),
       ],
     });
   }
 
-  #pendingEvent(eventName: string, payload: unknown) {
+  #pendingEvent(eventName: string, payload: unknown, eventActor?: EventActor) {
     return {
       eventId: decodeEventId(this.#uuid()),
       eventName,
       eventVersion: 1,
       correlationId: decodeCorrelationId(this.#uuid()),
-      actor: { kind: "local-user" as const, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+      actor: eventActor ?? {
+        kind: "local-user" as const,
+        actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
+      },
       occurredAt: decodeTimestamp(this.#clock()),
       payload,
     };

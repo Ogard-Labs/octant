@@ -1,5 +1,5 @@
 import type { ProviderExecutionPolicy } from "@octant/contracts";
-import type { PrincipalKind } from "./remoteAccessPolicy";
+import { actsAsHostPerson, type PrincipalKind } from "./remoteAccessPolicy";
 
 export type ProviderCloudRefusalReason =
   | "unavailable"
@@ -26,7 +26,7 @@ export function decideProviderCloudSubmission(input: {
   readonly cloudExecutionConsent: boolean;
   readonly requiresUnsupportedBound: boolean;
 }): ProviderCloudSubmissionDecision {
-  if (input.principalKind !== "local-window" || !input.personOwned || !input.current) {
+  if (!actsAsHostPerson(input.principalKind) || !input.personOwned || !input.current) {
     return { status: "refused", reason: "unauthorized" };
   }
   if (input.mode !== "code" || !input.supported) {

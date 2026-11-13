@@ -56,7 +56,12 @@ export interface TerminalSessionImportPort {
     projectId?: ProjectId,
   ) => Promise<TerminalSessionPreparation>;
   /** Called inside the creation's journal unit, after the thread is appended. */
-  readonly journalImported: (threadId: string, prepared: PreparedTerminalSession) => void;
+  /** `actor` is who brought the session in; absent means the person at this host. */
+  readonly journalImported: (
+    threadId: string,
+    prepared: PreparedTerminalSession,
+    actor?: EventActor,
+  ) => void;
 }
 
 export const TERMINAL_SESSION_TEXT_CONTINUITY = {
@@ -183,11 +188,13 @@ export class TerminalSessionImports implements TerminalSessionImportPort {
     };
   }
 
-  journalImported(threadId: string, prepared: PreparedTerminalSession): void {
-    this.#append(threadId, THREAD_TERMINAL_SESSION_EVENT_NAMES.imported, {
+  journalImported(threadId: string, prepared: PreparedTerminalSession, actor?: EventActor): void {
+    this.#append(
       threadId,
-      imported: prepared.imported,
-    });
+      THREAD_TERMINAL_SESSION_EVENT_NAMES.imported,
+      { threadId, imported: prepared.imported },
+      actor,
+    );
   }
 
   /** The history a thread started from, if it started from one. */
@@ -238,7 +245,12 @@ export class TerminalSessionImports implements TerminalSessionImportPort {
     return { imported, delivered };
   }
 
-  #append(threadId: string, eventName: string, payload: unknown): void {
+  #append(
+    threadId: string,
+    eventName: string,
+    payload: unknown,
+    actor: EventActor = this.#actor,
+  ): void {
     const head = this.#journal
       .replayAggregate({
         aggregateType: THREAD_TERMINAL_SESSION_AGGREGATE,
@@ -256,7 +268,7 @@ export class TerminalSessionImports implements TerminalSessionImportPort {
           eventName,
           eventVersion: 1,
           correlationId: this.#uuid(),
-          actor: this.#actor,
+          actor,
           occurredAt: this.#clock(),
           payload,
         },

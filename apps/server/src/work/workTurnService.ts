@@ -223,7 +223,7 @@ export const WORK_TRANSCRIPT_WINDOW_BYTES = 2 * 1024 * 1024;
 const WORK_REWIND_WHILE_TURN_RUNS =
   "A turn is running in this thread. Wait for it to finish or stop it, then rewind.";
 export const WORK_THREAD_MARKED_DONE_TURN_REFUSAL =
-  "This task is marked Done. Archive and reactivate it before sending more.";
+  "This task is marked Done. Reopen it before sending more.";
 
 export class WorkTurnServiceError extends Error {
   override readonly name = "WorkTurnServiceError";

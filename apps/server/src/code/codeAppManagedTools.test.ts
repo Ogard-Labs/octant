@@ -1745,6 +1745,7 @@ describe("Code app-managed tools", () => {
         direction: "download",
         origin: "https://example.com",
         workspaceRoot: "/checkout",
+        privatePage: true,
       });
       expect(request).not.toHaveBeenCalled();
     });
@@ -1907,6 +1908,7 @@ describe("Code app-managed tools", () => {
           direction: "upload",
           origin: "https://example.com",
           workspaceRoot: workspace,
+          privatePage: true,
         });
         expect(request).not.toHaveBeenCalled();
         expect(act.mock.calls[0]?.[0].uploadFiles).toHaveLength(1);
@@ -3063,6 +3065,112 @@ describe("the Apple capability as an agent tool", () => {
     expect(requestPaneOpen).not.toHaveBeenCalled();
   });
 
+  it("sends an agent's Open URL, Rotate, recording and Repair input unasked at Full access, as the agent", async () => {
+    const request = vi.fn();
+    const { execute, tools } = appleTools({}, {}, { request });
+
+    for (const input of [
+      { operation: "open-url", simulatorId, url: "https://example.com" },
+      { operation: "rotate", simulatorId, orientation: "landscape" },
+      { operation: "rotate", simulatorId },
+      { operation: "start-recording", simulatorId },
+      { operation: "stop-recording", simulatorId },
+      { operation: "repair-input", simulatorId },
+    ]) {
+      const outcome = await tools.execute({
+        name: "octant_apple",
+        inputJson: JSON.stringify(input),
+      });
+      expect(outcome.isError).toBe(false);
+    }
+
+    expect(request).not.toHaveBeenCalled();
+    expect(execute.mock.calls.map((call) => call[1])).toMatchObject([
+      // The parsed form, so the address shown and the address sent cannot differ.
+      { kind: "open-url", url: "https://example.com/", requestedBy: { kind: "agent" } },
+      { kind: "rotate", orientation: "landscape", requestedBy: { kind: "agent" } },
+      { kind: "rotate", requestedBy: { kind: "agent" } },
+      { kind: "start-recording", requestedBy: { kind: "agent" } },
+      { kind: "stop-recording", requestedBy: { kind: "agent" } },
+      { kind: "repair-input", requestedBy: { kind: "agent" } },
+    ]);
+    expect(execute.mock.calls[2]?.[1]).not.toHaveProperty("orientation");
+  });
+
+  it("asks the person before an approval-gated agent opens a URL, rotates or records, and not before stopping a recording", async () => {
+    const approvalId = "d0000000-0000-4000-8000-000000000001";
+    const request = vi.fn(async (_effect: unknown) => ({
+      status: "approved" as const,
+      approvalId: approvalId as never,
+    }));
+    const { execute, tools } = appleTools({}, { executionPolicy: "approval-gated" } as never, {
+      request,
+    });
+
+    for (const input of [
+      { operation: "open-url", simulatorId, url: "https://example.com/welcome?from=agent" },
+      { operation: "rotate", simulatorId },
+      { operation: "start-recording", simulatorId },
+      { operation: "stop-recording", simulatorId },
+    ]) {
+      await tools.execute({ name: "octant_apple", inputJson: JSON.stringify(input) });
+    }
+
+    expect(request.mock.calls.map((call) => call[0])).toMatchObject([
+      {
+        kind: "apple-action",
+        request: { kind: "open-url", url: "https://example.com/welcome?from=agent" },
+      },
+      { kind: "apple-action", request: { kind: "rotate" } },
+      { kind: "apple-action", request: { kind: "start-recording" } },
+    ]);
+    expect(execute.mock.calls.map((call) => call[1])).toMatchObject([
+      { kind: "open-url", approval: { kind: "approved", approvalId } },
+      { kind: "rotate", approval: { kind: "approved", approvalId } },
+      { kind: "start-recording", approval: { kind: "approved", approvalId } },
+      { kind: "stop-recording", approval: { kind: "not-required" } },
+    ]);
+  });
+
+  it("refuses an agent's Open URL, Rotate and recording in Plan mode, asking no one", async () => {
+    const request = vi.fn();
+    const { execute, tools } = appleTools({}, { executionPolicy: "plan" } as never, { request });
+
+    for (const input of [
+      { operation: "open-url", simulatorId, url: "https://example.com/" },
+      { operation: "rotate", simulatorId },
+      { operation: "start-recording", simulatorId },
+      { operation: "repair-input", simulatorId },
+    ]) {
+      const outcome = await tools.execute({
+        name: "octant_apple",
+        inputJson: JSON.stringify(input),
+      });
+      expect(outcome.result).toMatchObject({ error: "plan-mode-read-only" });
+    }
+    expect(request).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("refuses to open an address that is not a credential-free http or https URL", async () => {
+    const { execute, tools } = appleTools();
+
+    for (const url of [
+      "javascript:alert(1)",
+      "file:///etc/passwd",
+      "myapp://open",
+      "https://user:secret@example.com/",
+      "example.com",
+    ]) {
+      const outcome = await tools.execute({
+        name: "octant_apple",
+        inputJson: JSON.stringify({ operation: "open-url", simulatorId, url }),
+      });
+      expect(outcome.isError).toBe(true);
+    }
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("reports a refused action as an error rather than a silent success", async () => {
     const { tools } = appleTools({
       execute: vi.fn(async () => ({
@@ -3310,6 +3418,68 @@ describe("the Android capability as an agent tool", () => {
     expect(status.isError).toBe(false);
     expect(snapshot).toHaveBeenCalledTimes(1);
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("sends an agent's Open URL, Rotate and recording to the emulator unasked at Full access, as the agent", async () => {
+    const request = vi.fn();
+    const { execute, tools } = androidTools({}, {}, { request });
+    const emulatorId = "Pixel_Test";
+
+    for (const input of [
+      { operation: "open-url", emulatorId, url: "https://example.com" },
+      { operation: "rotate", emulatorId, orientation: "landscape" },
+      { operation: "start-recording", emulatorId },
+      { operation: "stop-recording", emulatorId },
+    ]) {
+      await tools.execute({ name: "octant_android", inputJson: JSON.stringify(input) });
+    }
+    // The emulator is told which way to turn; a Rotate that names none is no request.
+    const unnamed = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "rotate", emulatorId }),
+    });
+
+    expect(unnamed.isError).toBe(true);
+    expect(request).not.toHaveBeenCalled();
+    expect(execute.mock.calls.map((call) => call[1])).toMatchObject([
+      { kind: "open-url", url: "https://example.com/", requestedBy: { kind: "agent" } },
+      { kind: "rotate", orientation: "landscape", requestedBy: { kind: "agent" } },
+      { kind: "start-recording", requestedBy: { kind: "agent" } },
+      { kind: "stop-recording", requestedBy: { kind: "agent" } },
+    ]);
+  });
+
+  it("asks the person before an approval-gated agent rotates the emulator, refuses it in Plan, and stops a recording unasked", async () => {
+    const request = vi.fn(async (_effect: unknown) => ({ status: "denied" as const }));
+    const gated = androidTools({}, { executionPolicy: "approval-gated" } as never, { request });
+    const rotate = { operation: "rotate", emulatorId: "Pixel_Test", orientation: "portrait" };
+
+    const denied = await gated.tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify(rotate),
+    });
+    await gated.tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "stop-recording", emulatorId: "Pixel_Test" }),
+    });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      kind: "android-action",
+      request: { kind: "rotate", orientation: "portrait" },
+    });
+    expect(denied.result).toMatchObject({ error: "device-approval-denied" });
+    expect(gated.execute.mock.calls.map((call) => call[1])).toMatchObject([
+      { kind: "stop-recording", approval: { kind: "not-required" } },
+    ]);
+
+    const plan = androidTools({}, { executionPolicy: "plan" } as never, { request });
+    const refused = await plan.tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify(rotate),
+    });
+    expect(refused.result).toMatchObject({ error: "plan-mode-read-only" });
+    expect(plan.execute).not.toHaveBeenCalled();
   });
 
   it("holds an approval-gated emulator boot for the person and refuses it when they deny", async () => {
@@ -3639,11 +3809,15 @@ describe("Code tool families", () => {
     // Recording a call added its record argument and one short sentence on
     // when to use it (showing a reviewer a UI change), about 145 bytes; the
     // bounds and the answer are in help.
-    // The Simulator's repair-input operation added its name (15 bytes); its
+    // The device effects an agent may now request (open-url, rotate, the two
+    // recording operations, and Repair input) added their names and the url
+    // and orientation arguments to both device tools, about 290 bytes; their
     // usage is in help.
+    // The Browser's dialog answer argument added about 165 bytes; its usage
+    // is in help.
     // The Browser wait's timeoutMs maximum grew from 30000 to 600000 (ten
     // minutes), one more digit.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_571);
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(7_026);
   });
 
   it.each([

@@ -13,8 +13,9 @@ export interface ReplyDetailRouteDependencies {
  * `GET /api/reply-detail`: the person's Reply detail default and the threads
  * that chose their own level, for a client that cannot read shell settings
  * (the phone and a paired browser). It is a read of two presentation fields
- * and nothing else from the settings document: no route here changes them,
- * which stays the shell route's, reachable only from a window on this host.
+ * and nothing else from the settings document: no route here changes them.
+ * A window changes them through the shell route, and a device the host's own
+ * person paired through the shell settings route.
  * Any authenticated client may read it, as it may read the threads it names.
  */
 export function createReplyDetailRouteHandler(dependencies: ReplyDetailRouteDependencies) {

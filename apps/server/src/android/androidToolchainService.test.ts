@@ -815,7 +815,7 @@ describe("AndroidToolchainService", () => {
       );
       expect(planned.outcome).toBe("unauthorized");
 
-      // Only a person asks for an address, never the host, even under Full access.
+      // A person or an agent asks for an address, never the host, even under Full access.
       const byHost = await service.execute(
         action("open-url", {
           actionId: "30000000-0000-4000-8000-000000000015",
@@ -1078,7 +1078,7 @@ describe("AndroidToolchainService", () => {
       expect(stopped.outcome).toBe("failed");
     });
 
-    it("asks before starting, refuses Plan and anyone but a person, and never asks again to stop", async () => {
+    it("asks before starting, refuses Plan and the host asking on its own, and never asks again to stop", async () => {
       const { service, execute } = recordingService();
       const gated = {
         ...context,
@@ -1187,6 +1187,56 @@ describe("AndroidToolchainService", () => {
       }),
     );
     expect(evidence.outcome).toBe("succeeded");
+  });
+
+  it("boots from a quickboot snapshot only while the person has snapshot boot turned on", async () => {
+    let snapshotBoot = true;
+    let attached = false;
+    const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const argv = input.argv.join(" ");
+      if (argv.includes("-list-avds")) return processResult("Pixel_8_API_34\n");
+      if (argv.includes("devices")) {
+        return processResult(
+          attached
+            ? "List of devices attached\nemulator-5554          device\n"
+            : "List of devices attached\n",
+        );
+      }
+      if (argv.includes("ro.boot.qemu.avd_name")) return processResult("Pixel_8_API_34\n");
+      if (argv.includes("sys.boot_completed")) return processResult("1\n");
+      return processResult("");
+    });
+    const spawnDetached = vi.fn(async (_input: { readonly argv: ReadonlyArray<string> }) => {
+      attached = true;
+      return { kind: "spawned" as const, stop: async () => "stopped" as const };
+    });
+    const service = new AndroidToolchainService({
+      execute,
+      spawnDetached,
+      snapshotBoot: () => snapshotBoot,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+
+    const warm = await service.execute(action("boot", { timeoutMs: 5_000 }), context);
+    expect(warm.outcome).toBe("succeeded");
+    expect(spawnDetached.mock.calls[0]?.[0].argv).toEqual(
+      expect.arrayContaining(["-avd", "Pixel_8_API_34", "-no-window", "-no-audio"]),
+    );
+    expect(spawnDetached.mock.calls[0]?.[0].argv).not.toContain("-no-snapshot");
+
+    // The setting is read at each boot, so turning it off needs no restart.
+    snapshotBoot = false;
+    attached = false;
+    await service.discover(discoveryRequest, context);
+    await service.execute(action("boot", { timeoutMs: 5_000 }), context);
+    expect(spawnDetached.mock.calls[1]?.[0].argv).toContain("-no-snapshot");
   });
 
   describe("an emulator that never comes online", () => {
