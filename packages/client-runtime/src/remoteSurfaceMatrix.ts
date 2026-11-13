@@ -47,6 +47,7 @@ export type RemoteShellSurfaceKind =
   | "preview"
   | "provider-models"
   | "settings-read"
+  | "shell-settings"
   | "approvals"
   | "extension-install"
   | "provider-setup"
@@ -114,6 +115,15 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     description: "Read non-secret settings and tool configuration.",
     availability: "remote",
     catalogAction: "settings.read-non-secret",
+  },
+  {
+    id: "shell-settings",
+    label: "Shell settings",
+    description: "Change the host's shell settings, a thread's Reply detail included.",
+    availability: "local-host-only",
+    // No catalogued action: the host opens the route only to a session that
+    // acts as its person, so a restricted session reads it as unavailable.
+    catalogAction: "shell.settings.replace",
   },
   {
     id: "approvals",

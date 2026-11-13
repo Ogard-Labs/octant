@@ -31,6 +31,7 @@ describe("remoteSurfaceMatrix", () => {
     expect(
       listRemoteShellSurfacesByAvailability("local-host-only").map((surface) => surface.id),
     ).toEqual([
+      "shell-settings",
       "approvals",
       "extension-install",
       "provider-setup",
@@ -50,7 +51,7 @@ describe("remoteSurfaceMatrix", () => {
   });
 
   it("lists every declared surface exactly once", () => {
-    expect(listRemoteShellSurfaces()).toHaveLength(13);
+    expect(listRemoteShellSurfaces()).toHaveLength(14);
   });
 });
 
@@ -117,6 +118,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "preview",
       "provider-models",
       "settings-read",
+      "shell-settings",
       "approvals",
       "extension-install",
       "provider-setup",
@@ -136,6 +138,7 @@ describe("what a session that acts as the host's own person reaches", () => {
 
   it("holds a restricted session to the catalogue, as a session that says nothing is held", () => {
     const local = [
+      "shell-settings",
       "approvals",
       "extension-install",
       "provider-setup",

@@ -31,11 +31,12 @@ import type { RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ReplyDetailClient } from "@octant/client-runtime/reply-detail-client";
-import type { ReplyDetailReading } from "@octant/contracts/shell";
+import type { ReplyDetailLevel, ReplyDetailReading } from "@octant/contracts/shell";
 import {
   ReplyDetailContext,
   ReplyDetailSourceContext,
   type ReplyDetailSource,
+  type ReplyDetailThread,
 } from "../transcript/replyDetail";
 
 export interface RemoteWorkspaceProps {
@@ -60,7 +61,11 @@ export interface RemoteWorkspaceProps {
  * desktop's sidebar is bound to a window the browser does not have.
  */
 export function RemoteWorkspace(props: RemoteWorkspaceProps) {
-  const replyDetail = useRemoteReplyDetail(props.clients.replyDetail, props.mode);
+  const replyDetail = useRemoteReplyDetail(
+    props.clients.replyDetail,
+    props.mode,
+    props.actsAsHostPerson === true,
+  );
   return (
     <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
       <ReplyDetailSourceContext.Provider value={replyDetail}>
@@ -77,10 +82,15 @@ const QUIET_READING: ReplyDetailReading = { defaultLevel: "low", threads: [] };
 /**
  * The host's Reply detail, read over the session: when the workspace opens, on
  * a change of mode, and when the window comes back into focus, so a level set
- * on the computer reaches this browser without a reload. It carries no setter:
- * changing a level is a window's act on the host, so no menu offers it here.
+ * on the computer reaches this browser without a reload. It carries a setter
+ * only for a session that acts as the host's person, whose change the host
+ * takes on its shell settings route; any other session is offered no menu.
  */
-function useRemoteReplyDetail(client: ReplyDetailClient, mode: OctantMode): ReplyDetailSource {
+function useRemoteReplyDetail(
+  client: ReplyDetailClient,
+  mode: OctantMode,
+  actsAsHostPerson: boolean,
+): ReplyDetailSource {
   const [reading, setReading] = useState<ReplyDetailReading>(QUIET_READING);
   useEffect(() => {
     const controller = new AbortController();
@@ -95,7 +105,23 @@ function useRemoteReplyDetail(client: ReplyDetailClient, mode: OctantMode): Repl
       window.removeEventListener("focus", read);
     };
   }, [client, mode]);
-  return useMemo(() => ({ reading }), [reading]);
+  return useMemo(
+    () => ({
+      reading,
+      ...(actsAsHostPerson
+        ? {
+            setThreadLevel: (thread: ReplyDetailThread, level: ReplyDetailLevel | undefined) =>
+              void client.setThreadLevel(thread, level).then(async (saved) => {
+                // A refusal or a change underneath leaves the host's own
+                // answer as what is drawn.
+                const answer = saved ?? (await client.read());
+                if (answer !== undefined) setReading(answer);
+              }),
+          }
+        : {}),
+    }),
+    [actsAsHostPerson, client, reading],
+  );
 }
 
 function RemoteModeSurface(props: RemoteWorkspaceProps) {

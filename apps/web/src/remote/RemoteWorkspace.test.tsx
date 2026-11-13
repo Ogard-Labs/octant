@@ -68,7 +68,7 @@ function workClients(
     workTurn: unused<WorkTurnClient>("workTurn"),
     workMutation: unused<WorkMutationClient>("workMutation"),
     workRequest: unused<WorkRequestClient>("workRequest"),
-    replyDetail: { read: replyDetailRead },
+    replyDetail: { read: replyDetailRead, setThreadLevel: async () => undefined },
   };
 }
 

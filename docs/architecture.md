@@ -852,9 +852,7 @@ operations; a recording already running when Plan begins is stopped and
 discarded ([Browser for agents: Plan mode](design/browser-agent-tool.md#plan-mode)).
 Downloads in the agent's Browser
 are blocked on every page unless the person turns on "Let agents download
-files" in Settings (a shell setting a local window or a paired device writes
-by maintainer decision, 2026-11-12, not built yet: today only a local window writes
-it; off by
+files" in Settings (a shell setting a local window or a device the host's own person paired writes by maintainer decision, 2026-11-12; off by
 default below Full access and on by default at Full access). Then a download
 an agent action starts is held in a private
 temporary folder of the host, never the workspace, and saved only by the
@@ -14306,9 +14304,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     and removes a package, adds a server, pins a plugin, and signs in to or
     reconnects a server; adds, changes, and removes a provider, starts a
     provider sign-in, and stores, replaces, or removes a provider key
-    ([Provider credentials](#security-and-authority)); navigates and types in
-    the host's agent Browser and reviews its session, upload, and download
-    permissions; writes to a thread terminal and lists, reads, and starts a
+    ([Provider credentials](#security-and-authority)); navigates and types in the host's agent Browser and reviews its session, upload, and download permissions, for every active Work or Code Project, since no workspace on the host is bound for a device; writes to a thread terminal and lists, reads, and starts a
     thread from a terminal session; merges a pull request or a stack, acts on
     a pull request, and switches Merge when ready and Auto-fix; sets a
     routine's level and agent merge; answers native harness approvals and
@@ -14317,7 +14313,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     outside-content mark; edits person memory and spend ceilings; saves and
     deletes benchmark suites and starts, cancels, and purges runs; changes
     Canvas public links; asks for a compaction; sets Continue after restart;
-    reads the pending requests it can answer, fleet activity, provider limits
+    reads and replaces the host's shell settings through `GET` and `POST /api/shell/settings`, a thread's Reply detail included, journaled as the device (maintainer decision, 2026-11-13; a device has no window on the host, so a window's bootstrap and workspace commands stay a window's); reads the pending requests it can answer, fleet activity, provider limits
     (and asks for a refresh), and the protected files list, which it also
     changes; controls the host (status, data map, service lifecycle, backup,
     restore guidance, memory limits, retention, purge); and lists, renames,
@@ -14333,7 +14329,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     device, a person-paired one included: the listener's own controls
     and the rest of the desktop bridge, whose routes answer only the bridge
     secret a window on the host holds and whose native controls (a folder
-    picker, an external editor) exist only there; shell settings; linking a secret store and
+    picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; provider cloud
     sessions; scanning the host for installed provider commands; skill
     folders; the replica store and its membership; and the whole host's

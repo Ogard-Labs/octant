@@ -14,6 +14,7 @@ import {
   REMOTE_PUSH_DELIVERY_HEADERS,
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
+  SHELL_SETTINGS_PATH,
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
@@ -75,7 +76,12 @@ const REMOTE_CONTENT_TYPES = [
 
 const LOCAL_ONLY_PREFIXES = [
   "/api/desktop",
-  "/api/shell",
+  // A window's own shell: its bootstrap, its workspace commands and the two
+  // local sessions. The shell settings route beside them is forwarded below.
+  "/api/shell/bootstrap",
+  "/api/shell/commands",
+  "/api/shell/launch-session",
+  "/api/shell/local-session",
   "/api/folders",
   "/api/extensions/skills",
   "/api/providers/discovery",
@@ -1025,6 +1031,17 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["POST"] as const,
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 8_192,
+  },
+  // The host's shell settings, for a device the host's own person paired: it
+  // has no window here to bootstrap, so this is where it reads them and
+  // replaces them (a thread's Reply detail, for one).
+  {
+    kind: "exact" as const,
+    path: SHELL_SETTINGS_PATH,
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 512 * 1_024,
   },
   // Host control, for a device the host's own person paired: status, the
   // data map and the retention windows are reads; service lifecycle, backup,

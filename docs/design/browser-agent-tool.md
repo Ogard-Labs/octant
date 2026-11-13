@@ -384,8 +384,7 @@ download in the pane is cancelled.
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default below Full access and on by default for a thread at Full access.
   It is a host setting in the shell settings, which a window of this computer
-  or a paired device writes (maintainer decision, 2026-11-12; not built yet:
-  today the shell route is local-only and a paired device cannot); a
+  or a device the host's own person paired writes (maintainer decision, 2026-11-12; built on the shell settings route); a
   routine, a subagent, a plugin, a CLI in a thread terminal, and an agent have
   no way to set it, and a change is journaled like every shell setting. Off,
   every download on every page stays blocked, as before: the runtime cancels

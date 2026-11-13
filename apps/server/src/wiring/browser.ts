@@ -29,7 +29,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Effect } from "effect";
-import { createHostPersonScopes } from "../hostPersonScope";
+import { createHostPersonScopes, createPersonProjectReach } from "../hostPersonScope";
 import {
   readDeviceApprovedByPerson,
   readDeviceRegistrations,
@@ -353,6 +353,15 @@ export function wireBrowser(deps: BrowserDependencies) {
       devices: () => readDeviceRegistrations(persistence.connection),
       approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
     });
+    const personHoldsProject = createPersonProjectReach<ProjectId, "work" | "code">({
+      windowHoldsProject: (scopeId, projectId, mode) =>
+        windowHoldsProject(scopeId, projectId, mode),
+      isPersonPairedDevice: (scopeId) => hostPersonScopes.deviceActor(scopeId) !== undefined,
+      isActiveProject: (projectId, mode) => {
+        const project = persistence.readProject(projectId);
+        return project !== undefined && project.type === mode && project.lifecycle === "active";
+      },
+    });
     // Upload and download permissions live only in this process, so their
     // review windows and their minutes run on the authority clock.
     const browserUploadPermissions = new BrowserUploadPermissions({
@@ -361,7 +370,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       isLocalWindow: hostPersonScopes.actsAsHostPerson,
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
-        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+        personHoldsProject(windowId, target.authority.projectId, target.authority.mode),
       current: transferRecipient,
       targets: () =>
         persistence.automationProjection.listDefinitions().flatMap((definition) => {
@@ -385,7 +394,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       isLocalWindow: hostPersonScopes.actsAsHostPerson,
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
-        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+        personHoldsProject(windowId, target.authority.projectId, target.authority.mode),
       current: transferRecipient,
       targets: () =>
         persistence.automationProjection.listDefinitions().flatMap((definition) => {
@@ -434,17 +443,27 @@ export function wireBrowser(deps: BrowserDependencies) {
         if (target.grantee.kind === "routine" || target.grantee.kind === "terminal")
           return (
             target.authority.mode !== "chat" &&
-            windowHoldsProject(windowId, target.authority.projectId, target.authority.mode)
+            personHoldsProject(windowId, target.authority.projectId, target.authority.mode)
           );
         if (target.grantee.kind !== "child") return false;
         const run = persistence.agentRunProjection.getById(target.grantee.runId);
+        if (run === undefined) return false;
+        const parentThreadId = decodeBrowserThreadId(String(run.parentThreadId));
+        if (browserAuthority.canAccessWindow(windowId, parentThreadId, target.authority.mode))
+          return true;
+        // A device the person paired has no workspace for the window check to
+        // read; it reviews a child's page where the parent thread's Project
+        // is one it reaches.
+        const projectId = browserAuthority.resolve(
+          parentThreadId,
+          target.authority.mode,
+        )?.projectId;
         return (
-          run !== undefined &&
-          browserAuthority.canAccessWindow(
-            windowId,
-            decodeBrowserThreadId(String(run.parentThreadId)),
-            target.authority.mode,
-          )
+          target.authority.mode !== "chat" &&
+          projectId !== undefined &&
+          projectId !== null &&
+          hostPersonScopes.deviceActor(windowId) !== undefined &&
+          personHoldsProject(windowId, projectId, target.authority.mode)
         );
       },
       targets: () => [

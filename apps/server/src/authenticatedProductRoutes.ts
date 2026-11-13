@@ -238,7 +238,9 @@ export function classifyProductAction(request: Request): string | undefined {
     return undefined;
   }
   // The Reply detail default and the threads' own levels: a presentation read,
-  // never a write. Changing either is the shell route's, which a device never reaches.
+  // never a write. Changing either is a settings replacement: a window's on the
+  // shell route, a person-paired device's on the shell settings route, which
+  // has no catalogued action and so stays closed to every other device.
   if (path === "/api/conversation-inputs")
     return method === "GET" ? "project.overview.read" : undefined;
   if (path === "/api/reply-detail") {

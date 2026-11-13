@@ -35,6 +35,7 @@ import { ProjectRootPort } from "../projectRootPort";
 import { WorkProjectStatusFiles } from "../work/workProjectStatusFiles";
 import { WorkProjectStatusReader } from "../work/workProjectStatusReader";
 import { createShellRouteHandler } from "../shellRoutes";
+import { createShellSettingsRouteHandler } from "../shellSettingsRoutes";
 import { createReplyDetailRouteHandler } from "../replyDetailRoutes";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
@@ -181,11 +182,14 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     });
     onWindowRevoked((windowId) => shellService.revokeWindow(windowId));
     const allowedRendererHttpOrigin = options.allowedRendererHttpOrigin;
-    const shellRoutes = createShellRouteHandler(shellService, {
+    const windowShellRoutes = createShellRouteHandler(shellService, {
       windowAuthorityStore,
       now: Date.now,
       ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
     });
+    const shellSettingsRoutes = createShellSettingsRouteHandler(shellService);
+    const shellRoutes = async (request: Request) =>
+      (await shellSettingsRoutes(request)) ?? windowShellRoutes(request);
     const replyDetailRoutes = createReplyDetailRouteHandler({
       readShellSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       windowAuthorityStore,

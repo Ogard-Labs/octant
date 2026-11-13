@@ -1,6 +1,6 @@
 import { decodeWindowId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { createHostPersonScopes } from "./hostPersonScope";
+import { createHostPersonScopes, createPersonProjectReach } from "./hostPersonScope";
 
 const windowId = decodeWindowId("10000000-0000-4000-8000-000000000001");
 const personPaired = decodeWindowId("20000000-0000-4000-8000-000000000001");
@@ -41,5 +41,22 @@ describe("the scopes that act as the host's own person", () => {
     expect(deviceActor(windowId)).toBeUndefined();
     expect(deviceActor(hubIntroduced)).toBeUndefined();
     expect(deviceActor(revoked)).toBeUndefined();
+  });
+
+  it("lets a person-paired device review every active Project, though no workspace on the host is bound for it", () => {
+    const { deviceActor } = scopes();
+    const reaches = createPersonProjectReach({
+      windowHoldsProject: (scopeId, projectId) =>
+        String(scopeId) === String(windowId) && projectId === "bound",
+      isPersonPairedDevice: (scopeId) => deviceActor(scopeId) !== undefined,
+      isActiveProject: (projectId) => projectId !== "archived",
+    });
+    expect(reaches(windowId, "bound", "code")).toBe(true);
+    expect(reaches(windowId, "other", "code")).toBe(false);
+    expect(reaches(personPaired, "other", "code")).toBe(true);
+    expect(reaches(personPaired, "archived", "work")).toBe(false);
+    // A roster member has no workspace and is not the person: it reviews nothing.
+    expect(reaches(hubIntroduced, "bound", "code")).toBe(false);
+    expect(reaches(revoked, "other", "code")).toBe(false);
   });
 });

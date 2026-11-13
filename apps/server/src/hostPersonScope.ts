@@ -51,3 +51,20 @@ export function createHostPersonScopes(options: {
         : undefined,
   };
 }
+
+/**
+ * Whether a scope reaches a Project to review what was granted there. A
+ * window reaches the Project its workspace is bound to. A device the person
+ * paired has no workspace on the host (no remote request makes one), so asked
+ * the window's question it reached nothing and was shown no review targets;
+ * it reaches every active Project, as it does when it opens a thread there.
+ */
+export function createPersonProjectReach<ProjectRef, Mode>(options: {
+  readonly windowHoldsProject: (scopeId: WindowId, projectId: ProjectRef, mode: Mode) => boolean;
+  readonly isPersonPairedDevice: (scopeId: WindowId) => boolean;
+  readonly isActiveProject: (projectId: ProjectRef, mode: Mode) => boolean;
+}): (scopeId: WindowId, projectId: ProjectRef, mode: Mode) => boolean {
+  return (scopeId, projectId, mode) =>
+    options.windowHoldsProject(scopeId, projectId, mode) ||
+    (options.isPersonPairedDevice(scopeId) && options.isActiveProject(projectId, mode));
+}

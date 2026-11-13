@@ -1379,6 +1379,25 @@ export const decodeWorkspaceSurfaceDescriptor = Schema.decodeUnknownSync(
 );
 export const decodeWorkspaceSurfaceCatalog = Schema.decodeUnknownSync(WorkspaceSurfaceCatalog);
 export const decodeShellSettings = Schema.decodeUnknownSync(ShellSettings);
+
+/**
+ * The host's shell settings for a device the host's own person paired, which
+ * has no window on the host to bootstrap: the settings with the version a
+ * replacement must name, and the replacement itself.
+ */
+export const SHELL_SETTINGS_PATH = "/api/shell/settings";
+export const ShellSettingsReading = Schema.Struct({
+  settings: ShellSettings,
+  version: AggregateVersion,
+}).annotations(strict);
+export type ShellSettingsReading = typeof ShellSettingsReading.Type;
+export const decodeShellSettingsReading = Schema.decodeUnknownSync(ShellSettingsReading);
+export const ShellSettingsReplacement = Schema.Struct({
+  expectedVersion: AggregateVersion,
+  settings: ShellSettings,
+}).annotations(strict);
+export type ShellSettingsReplacement = typeof ShellSettingsReplacement.Type;
+export const decodeShellSettingsReplacement = Schema.decodeUnknownSync(ShellSettingsReplacement);
 export const decodeWorkspaceTab = Schema.decodeUnknownSync(WorkspaceTab);
 export const decodeWorkspaceLayoutNode = Schema.decodeUnknownSync(WorkspaceLayoutNode);
 export const decodeWindowWorkspace = Schema.decodeUnknownSync(WindowWorkspace);

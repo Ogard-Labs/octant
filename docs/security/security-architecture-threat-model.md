@@ -212,7 +212,7 @@ events are journaled as the system, and cancelling a connector sign-in that is
 still waiting names no device;
 [Architecture: Remote clients](../architecture.md#security-and-authority)).
 What the private listener forwards to no device (the listener's own controls,
-the desktop bridge, shell settings, secret stores, the whole host's export)
+the desktop bridge, secret stores, the whole host's export)
 stays out of a stolen device's reach.
 
 | Layer              | Control                                                                                                                                                                                                                 | Module                                                                                                                                 | State        |
