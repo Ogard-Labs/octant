@@ -298,6 +298,8 @@ describe("App", () => {
   });
 
   it("batches streamed Chat reply deltas so the Chat pane commits once per 50 ms beat", async () => {
+    vi.useFakeTimers();
+    let view: ReturnType<typeof render> | undefined;
     paneBoundary.observing = true;
     chatBoundary.observing = true;
     paneBoundary.renders = 0;
@@ -428,7 +430,7 @@ describe("App", () => {
           }),
         ),
       };
-      const view = render(
+      view = render(
         <App
           shellClient={client(shellBootstrap)}
           chatClient={chatClient}
@@ -442,7 +444,7 @@ describe("App", () => {
           projectWindowCapability={projectWindowCapability}
         />,
       );
-      await waitFor(() => {
+      await vi.waitFor(() => {
         expect(paneBoundary.latest?.chatController.status).toBe("ready");
         expect(paneBoundary.latest?.codeController.status).toBe("ready");
         expect(paneBoundary.latest?.codeController.followUps.has(String(codeThreadId))).toBe(true);
@@ -450,9 +452,10 @@ describe("App", () => {
       });
       await streamReady.promise;
 
-      vi.useFakeTimers();
+      // Drain startup's deferred read-cursor notification before measuring
+      // reply publication, with every timer owned by the same fake clock.
       await act(async () => {
-        for (let tick = 0; tick < 30; tick += 1) await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(250);
       });
       const chatRendersBeforeBatch = chatBoundary.renders;
       const paneRendersBeforeBatch = paneBoundary.renders;
@@ -471,6 +474,7 @@ describe("App", () => {
       expect(paneBoundary.renders - paneRendersBeforeBatch).toBe(0);
       view.unmount();
     } finally {
+      view?.unmount();
       vi.useRealTimers();
       paneBoundary.observing = false;
       paneBoundary.renders = 0;
