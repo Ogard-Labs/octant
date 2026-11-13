@@ -229,6 +229,46 @@ describe("Canvas network proxy", () => {
     });
   });
 
+  it("gives up on a name lookup that outlasts the time bound, and gives its place back", async () => {
+    const { proxy, connections } = proxyOver({
+      totalTimeMs: 20,
+      resolve: (hostname) =>
+        hostname === "stuck.example.com" ? new Promise<ReadonlyArray<string>>(() => {}) : [PUBLIC],
+    });
+    const stuck = Array.from({ length: CANVAS_NETWORK_MAX_CONCURRENT_REQUESTS }, () =>
+      proxy.fetch(canvasId, "https://stuck.example.com/"),
+    );
+    const outcomes = await Promise.race([
+      Promise.all(stuck),
+      new Promise<"still waiting">((resolve) => setTimeout(() => resolve("still waiting"), 500)),
+    ]);
+    expect(outcomes).toEqual(stuck.map(() => ({ status: "refused", reason: "timed-out" })));
+    expect(connections).toEqual([]);
+    // Every place the stuck lookups held is free again.
+    await expect(proxy.fetch(canvasId, "https://api.example.com/")).resolves.toMatchObject({
+      status: "fetched",
+    });
+  });
+
+  it("connects nowhere for a name that answers after the time bound", async () => {
+    let answer: (addresses: ReadonlyArray<string>) => void = () => {};
+    const { proxy, connections } = proxyOver({
+      totalTimeMs: 20,
+      resolve: () =>
+        new Promise<ReadonlyArray<string>>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const outcome = await Promise.race([
+      proxy.fetch(canvasId, "https://late.example.com/"),
+      new Promise<"still waiting">((resolve) => setTimeout(() => resolve("still waiting"), 500)),
+    ]);
+    expect(outcome).toEqual({ status: "refused", reason: "timed-out" });
+    answer([PUBLIC]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(connections).toEqual([]);
+  });
+
   it("refuses a request past the Canvas's concurrent bound, and counts each Canvas alone", async () => {
     const release: Array<() => void> = [];
     const { proxy } = proxyOver({

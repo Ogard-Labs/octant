@@ -155,7 +155,11 @@ export class CanvasNetworkProxy {
       if (destination.kind === "refused") return refused(destination.reason);
       // The one resolution for this connection. Every address is judged, and
       // the connection is made to these addresses and no others.
-      const addresses = await this.#resolveAll(destination.host);
+      // A resolver takes no signal, so the lookup is raced against the
+      // request's deadline: a name that never answers ends the request at the
+      // bound and gives back its place, and one that answers afterwards is
+      // not connected to.
+      const addresses = await beforeAbort(this.#resolveAll(destination.host), signal);
       if (addresses.length === 0) return refused("unresolvable");
       for (const candidate of addresses) {
         const reason = canvasNetworkAddressRefusal(candidate, reserved);
@@ -190,6 +194,30 @@ export class CanvasNetworkProxy {
     }
     return refused("too-many-redirects");
   }
+}
+
+/** The work's result, or a rejection as soon as the signal aborts, whichever is first. */
+function beforeAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abandon = () => reject(new Error("aborted"));
+    if (signal.aborted) {
+      // The work may still fail later; nobody is waiting for it.
+      work.catch(() => undefined);
+      abandon();
+      return;
+    }
+    signal.addEventListener("abort", abandon, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", abandon);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abandon);
+        reject(error);
+      },
+    );
+  });
 }
 
 /** The whole body, or `undefined` once it passes the bound. */
