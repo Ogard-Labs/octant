@@ -180,6 +180,7 @@ describe("Claude provider conformance", () => {
         "text-delta",
         "reasoning-delta",
         "tool-start",
+        "tool-call-content",
         "usage",
         "tool-progress",
         "file-change",

@@ -46,6 +46,8 @@ import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffect
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
+  DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
+  DEFAULT_STALLED_TURN_LIMIT_MS,
   makeEventLoopShare,
   makeIdleTimeout,
   makeStreamedOutputBudget,
@@ -64,7 +66,6 @@ const DEFAULT_MAX_EVENTS = 4_096;
 // Inactivity window, not a wall clock: a turn lives as long as the provider
 // keeps producing events. Long-running tools (test suites, builds) can be
 // silent for minutes.
-const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 export type CodeTurnOutcome = "completed" | "waiting" | "interrupted" | "failed";
 
@@ -285,27 +286,44 @@ export interface CodeTurnRunnerInput {
 export interface CodeTurnRunnerOptions {
   /** Maximum discrete (non-delta) provider events per turn. */
   readonly maxEvents?: number;
+  /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off.
+   * Read as each turn starts, so a changed setting applies to the next turn
+   * and a running turn keeps the limit it started with.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off. Read as each turn starts,
+   * like the limit. Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
   /** Most streamed text and reasoning bytes per turn. */
   readonly maxStreamedOutputBytes?: number;
-  /** Inactivity window after which a silent turn is interrupted. */
+  /** A fixed stalled-turn limit, for a caller with no host setting to read. */
   readonly timeoutMs?: number;
 }
 
 export class CodeTurnRunner {
   readonly #maxEvents: number;
+  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #maxStreamedOutputBytes: number;
-  readonly #timeoutMs: number;
 
   constructor(options: CodeTurnRunnerOptions = {}) {
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
     this.#maxStreamedOutputBytes = options.maxStreamedOutputBytes ?? MAX_TURN_STREAMED_OUTPUT_BYTES;
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
+    this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
+    this.#providerToolCallPauseLimitMs =
+      options.providerToolCallPauseLimitMs ?? (() => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS);
   }
 
   run(input: CodeTurnRunnerInput): Effect.Effect<void, CodeTurnFailure, Scope.Scope> {
     const maxEvents = this.#maxEvents;
+    const stalledTurnLimitMs = this.#stalledTurnLimitMs;
+    const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
     const streamedOutput = makeStreamedOutputBudget(this.#maxStreamedOutputBytes);
-    const timeoutMs = this.#timeoutMs;
 
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
@@ -463,7 +481,7 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
-      const idle = yield* makeIdleTimeout(timeoutMs);
+      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
       const shareEventLoop = makeEventLoopShare();
       const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
@@ -480,9 +498,13 @@ export class CodeTurnRunner {
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 yield* shareEventLoop;
-                yield* idle.touch;
+                yield* idle.observe(event);
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
+                // A tool call's content is for a Chat or Work thread's record.
+                // Code keeps none, so it is dropped before it can be counted,
+                // sanitized, or journaled.
+                if (event.kind === "tool-call-content") return;
                 input.observeRemoteCommand?.(event);
                 input.toolEffects?.observe(event, input.appManagedTools);
                 timing = observeTurnMetrics(timing, event);
@@ -569,7 +591,8 @@ export class CodeTurnRunner {
                 // Marked above; never a turn event.
                 if (
                   sanitizedEvent.kind === "outside-content-read" ||
-                  sanitizedEvent.kind === "outside-content-result"
+                  sanitizedEvent.kind === "outside-content-result" ||
+                  sanitizedEvent.kind === "tool-call-content"
                 ) {
                   return;
                 }
@@ -883,7 +906,8 @@ function normalizeProviderEvent(
         | "context-compacted"
         | "liveness"
         | "outside-content-read"
-        | "outside-content-result";
+        | "outside-content-result"
+        | "tool-call-content";
     }
   >,
   /** Whether the runtime compacted the session earlier in this turn. */

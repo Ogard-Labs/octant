@@ -7,8 +7,10 @@ import {
   emptyThreadContentTaint,
   nativeHarnessResultTaintsThread,
   originTaintsThread,
+  outsideContentRefusesDelegation,
   projectThreadContentTaint,
   searchQueryRefusalUnderTaint,
+  threadStandingAnswerCovers,
 } from "./untrustedContentPolicy";
 
 describe("originTaintsThread", () => {
@@ -296,10 +298,13 @@ describe("a person's clear of a thread's outside-content mark", () => {
         hostOwnedTurn: false,
         pairedDeviceTurn: false,
         planTurn: false,
+        fullAccessTurn: false,
         threadTainted: taint.externalContentIngested,
         reach: "network",
         offered: binding,
         grant: { ...binding, revoked: false },
+        serverGrant: undefined,
+        markedThreadAnswer: undefined,
       });
     const ingested = {
       kind: "content-ingested",
@@ -307,7 +312,7 @@ describe("a person's clear of a thread's outside-content mark", () => {
     } as const;
 
     const tainted = projectThreadContentTaint(emptyThreadContentTaint(), ingested);
-    expect(decide(tainted)).toMatchObject({ kind: "ask", rememberable: false });
+    expect(decide(tainted)).toMatchObject({ kind: "ask", answerCovers: "server-on-thread" });
 
     const cleared = projectThreadContentTaint(tainted, { kind: "content-cleared" });
     expect(decide(cleared)).toEqual({ kind: "covered" });
@@ -316,7 +321,40 @@ describe("a person's clear of a thread's outside-content mark", () => {
     expect(decide(projectThreadContentTaint(cleared, ingested))).toEqual({
       kind: "ask",
       reason: "network-tool-on-tainted-thread",
-      rememberable: false,
+      answerCovers: "server-on-thread",
     });
+  });
+});
+
+describe("delegation on a thread that read outside content", () => {
+  it("refuses to start a helper below Full access", () => {
+    expect(
+      outsideContentRefusesDelegation({ externalContentIngested: true, fullAccessThread: false }),
+    ).toBe(true);
+  });
+
+  it("lets a Full access thread keep delegating", () => {
+    expect(
+      outsideContentRefusesDelegation({ externalContentIngested: true, fullAccessThread: true }),
+    ).toBe(false);
+  });
+
+  it("never refuses a thread that read nothing from outside", () => {
+    expect(
+      outsideContentRefusesDelegation({ externalContentIngested: false, fullAccessThread: false }),
+    ).toBe(false);
+  });
+});
+
+describe("a person's standing answer for a thread", () => {
+  it("covers its own subject, and a thread that has read outside content only when it was given after the mark", () => {
+    const beforeMark = [{ subject: "desktop-file-transfer", threadMarked: false }] as const;
+    const afterMark = [{ subject: "delegation", threadMarked: true }] as const;
+    expect(threadStandingAnswerCovers(beforeMark, "desktop-file-transfer", false)).toBe(true);
+    expect(threadStandingAnswerCovers(beforeMark, "desktop-file-transfer", true)).toBe(false);
+    expect(threadStandingAnswerCovers(beforeMark, "delegation", false)).toBe(false);
+    expect(threadStandingAnswerCovers(afterMark, "delegation", true)).toBe(true);
+    expect(threadStandingAnswerCovers(afterMark, "delegation", false)).toBe(true);
+    expect(threadStandingAnswerCovers([], "delegation", true)).toBe(false);
   });
 });

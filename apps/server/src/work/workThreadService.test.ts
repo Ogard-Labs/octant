@@ -493,7 +493,10 @@ describe("WorkThreadService", () => {
     expect(record.mock.invocationCallOrder[0]).toBeLessThan(
       imported.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared);
+    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared, {
+      kind: "local-user",
+      actorId: "00000000-0000-4000-8000-000000000002",
+    });
     expect(imported.persistence.journal.transaction).toHaveBeenCalledTimes(1);
 
     const elsewhere = serviceFixture({
@@ -738,6 +741,49 @@ describe("WorkThreadService", () => {
     });
   });
 
+  it("journals a paired device's Full access changes with the device as their actor, and a local window's as the local user", async () => {
+    const deviceId = "72000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const actorsOf = (fixture: ReturnType<typeof serviceFixture>) =>
+      fixture.persistence.journal.append.mock.calls.flatMap(([request]) =>
+        request.events.map((event: { eventName: string; actor: unknown }) => [
+          event.eventName,
+          event.actor,
+        ]),
+      );
+    const raise = {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+    };
+    const raiseDefault = {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "full-access",
+    };
+
+    const paired = serviceFixture({ threads: [thread()] });
+    await paired.service.execute(ids.window, raiseDefault, { actor: device });
+    await paired.service.execute(ids.window, raise, { actor: device });
+    expect(actorsOf(paired)).toEqual([
+      ["work.settings-updated@1", device],
+      ["guardrail.level-lowered@1", device],
+      ["work.thread-updated@1", device],
+      ["guardrail.level-lowered@1", device],
+    ]);
+
+    const local = serviceFixture({ threads: [thread()] });
+    await local.service.execute(ids.window, raiseDefault);
+    await local.service.execute(ids.window, raise);
+    expect(actorsOf(local).map(([, actor]) => actor)).toEqual(
+      Array.from({ length: 4 }, () => ({
+        kind: "local-user",
+        actorId: "00000000-0000-4000-8000-000000000002",
+      })),
+    );
+  });
+
   it("refuses to create a thread when promised GitHub issue context cannot be loaded", async () => {
     const fixture = serviceFixture({
       threads: [],
@@ -954,6 +1000,46 @@ describe("WorkThreadService", () => {
       }),
     );
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("verifies a direct-endpoint model's tools by itself when a thread first selects it, then admits it", async () => {
+    const verified: Array<string> = [];
+    const verifyModelToolsOnFirstUse = vi.fn(async (_provider: unknown, modelId: unknown) => {
+      verified.push(String(modelId));
+    });
+    const probeProvider = vi.fn(
+      async () =>
+        ({
+          readiness: "ready",
+          verifiedToolModelIds: [...verified],
+          models: [
+            {
+              id: "model-a",
+              displayName: "Endpoint model",
+              source: "discovered",
+              verification: "unverified",
+              reasoning: "unavailable",
+              inputModalities: ["text"],
+              options: [],
+            },
+          ],
+        }) as never,
+    );
+    const fixture = serviceFixture({ threads: [], probeProvider, verifyModelToolsOnFirstUse });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+      }),
+    ).resolves.toMatchObject({ kind: "thread-created" });
+    expect(verifyModelToolsOnFirstUse).toHaveBeenCalledExactlyOnceWith(ids.provider, "model-a");
   });
 
   it("admits native-agent provider models whose runtime supplies tool execution", async () => {
@@ -1532,6 +1618,40 @@ describe("WorkThreadService", () => {
     expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
   });
 
+  it("journals a person turning Wake when a message arrives on and off for a Work thread", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+
+    const on = await fixture.service.execute(ids.window, {
+      kind: "set-work-thread-message-wake",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      wake: true,
+    });
+    expect(on).toEqual({
+      kind: "thread-updated",
+      thread: thread({ messageWake: true, version: 2 as AggregateVersion, updatedAt: now }),
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledOnce();
+
+    // Setting it to what it already is journals nothing.
+    await fixture.service.execute(ids.window, {
+      kind: "set-work-thread-message-wake",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      wake: true,
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledOnce();
+
+    const off = await fixture.service.execute(ids.window, {
+      kind: "set-work-thread-message-wake",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      wake: false,
+    });
+    expect("thread" in off ? off.thread.messageWake : "missing").toBeUndefined();
+    expect("thread" in off ? off.thread.version : 0).toBe(3);
+  });
+
   it("updates thread metadata with optimistic versions and maps concurrency conflicts", async () => {
     const current = thread();
     const fixture = serviceFixture({ threads: [current] });
@@ -1725,7 +1845,69 @@ describe("WorkThreadService", () => {
     });
   });
 
-  it("refuses a provider or model change on a thread a person marked Done until it is reactivated", async () => {
+  it("reopens a thread a person marked Done in one step, and lets it be marked again", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+
+    await fixture.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Draft brief",
+      satisfactionEvidence: "The brief was saved.",
+    });
+    const reopened = await fixture.service.execute(ids.window, {
+      kind: "reopen-work-thread",
+      threadId: ids.thread,
+      expectedVersion: 2,
+    });
+
+    expect(reopened).toMatchObject({
+      kind: "thread-updated",
+      thread: { lifecycle: "active", version: 3 },
+    });
+    if (!("thread" in reopened)) throw new Error("Expected the thread update.");
+    expect(reopened.thread).not.toHaveProperty("completionConfirmed");
+    expect(reopened.thread).not.toHaveProperty("completionEvidence");
+    expect(fixture.projection.read(ids.thread)).not.toHaveProperty("completionConfirmed");
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-work-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 3,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      }),
+    ).resolves.toMatchObject({ kind: "thread-updated", thread: { version: 4 } });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "confirm-work-thread-completion",
+        threadId: ids.thread,
+        expectedVersion: 4,
+        deliveryTarget: "Draft brief",
+      }),
+    ).resolves.toMatchObject({ kind: "thread-completion-confirmed", thread: { version: 5 } });
+  });
+
+  it("refuses a routine or anything else acting as the host when it tries to reopen a thread a person marked Done", async () => {
+    const fixture = serviceFixture({ threads: [thread({ completionConfirmed: true })] });
+
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "reopen-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toEqual(
+      new WorkThreadServiceError({
+        category: "unauthorized",
+        message: "Only a person can reopen a Work thread marked Done.",
+      }),
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.read(ids.thread)?.completionConfirmed).toBe(true);
+  });
+
+  it("refuses a provider or model change on a thread a person marked Done until it is back in play", async () => {
     const fixture = serviceFixture({ threads: [thread({ completionConfirmed: true })] });
     const change = (expectedVersion: number) =>
       fixture.service.execute(ids.window, {
@@ -1739,8 +1921,7 @@ describe("WorkThreadService", () => {
     await expect(change(1)).rejects.toEqual(
       new WorkThreadServiceError({
         category: "invalid",
-        message:
-          "This task is marked Done. Archive and reactivate it before changing its provider.",
+        message: "This task is marked Done. Reopen it before changing its provider.",
       }),
     );
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
@@ -2007,6 +2188,7 @@ function serviceFixture(
     readonly providerEnabled?: boolean;
     readonly providerDriverKind?: "openai-compatible" | "azure-foundry" | "codex";
     readonly probeProvider?: WorkThreadServiceDependencies["probeProvider"];
+    readonly verifyModelToolsOnFirstUse?: WorkThreadServiceDependencies["verifyModelToolsOnFirstUse"];
     readonly readProviderModel?: WorkThreadServiceDependencies["readProviderModel"];
     readonly project?: Project;
     readonly events?: ReadonlyArray<EventEnvelope>;
@@ -2104,6 +2286,9 @@ function serviceFixture(
     workingDirectories,
     onWorkingDirectoryChanged,
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
+    ...(options.verifyModelToolsOnFirstUse === undefined
+      ? {}
+      : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
     ...(options.readProviderModel === undefined
       ? {}
       : { readProviderModel: options.readProviderModel }),
@@ -2623,7 +2808,7 @@ describe("scheduling a Work thread's usage-limit resume", () => {
     );
   });
 
-  it("refuses to schedule a resume on a thread a person marked Done until it is reactivated", async () => {
+  it("refuses to schedule a resume on a thread a person marked Done until it is back in play", async () => {
     const turn = usageLimitTurn();
     const fixture = serviceFixture({
       threads: [thread({ completionConfirmed: true })],
@@ -2640,7 +2825,7 @@ describe("scheduling a Work thread's usage-limit resume", () => {
     await expect(schedule(1)).rejects.toEqual(
       new WorkThreadServiceError({
         category: "invalid",
-        message: "This task is marked Done. Archive and reactivate it before resuming it.",
+        message: "This task is marked Done. Reopen it before resuming it.",
       }),
     );
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();

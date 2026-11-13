@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import { reviewFindingAnchorDigest } from "./codeReviewComparison";
 import {
   ActorId,
@@ -106,6 +107,8 @@ export class ReviewFindingService {
     authenticatedWindowId: WindowId,
     input: Omit<CodeReviewFinding, "state" | "version" | "createdAt" | "updatedAt">,
     admissionCurrent?: () => boolean,
+    /** Who wrote it, as the route resolved them; absent means the person at this host. */
+    actor?: EventActor,
   ): Promise<CodeReviewFinding> {
     const thread = await this.#authorize(authenticatedWindowId, input.threadId);
     if (thread.checkoutId !== input.checkoutId) throw new ReviewFindingServiceError("invalid");
@@ -172,7 +175,7 @@ export class ReviewFindingService {
     if (current.checkoutId !== input.checkoutId) throw new ReviewFindingServiceError("stale");
     if (admissionCurrent?.() === false) throw new ReviewFindingServiceError("unauthorized");
     try {
-      this.#append(finding, 0);
+      this.#append(finding, 0, actor);
     } catch (error) {
       if (error instanceof ConcurrencyConflict) throw new ReviewFindingServiceError("stale");
       throw error;
@@ -190,6 +193,7 @@ export class ReviewFindingService {
       state: CodeReviewFinding["state"];
     }>,
     admissionCurrent?: () => boolean,
+    actor?: EventActor,
   ): Promise<CodeReviewFinding> {
     const existing = this.#persistence.readReviewFinding(input.findingId);
     if (existing === undefined) throw new ReviewFindingServiceError("invalid");
@@ -215,7 +219,7 @@ export class ReviewFindingService {
     }
     if (admissionCurrent?.() === false) throw new ReviewFindingServiceError("unauthorized");
     try {
-      this.#append(finding, existing.version);
+      this.#append(finding, existing.version, actor);
     } catch (error) {
       if (error instanceof ConcurrencyConflict) throw new ReviewFindingServiceError("stale");
       throw error;
@@ -246,7 +250,7 @@ export class ReviewFindingService {
     return current;
   }
 
-  #append(finding: CodeReviewFinding, expectedVersion: number): void {
+  #append(finding: CodeReviewFinding, expectedVersion: number, actor?: EventActor): void {
     const decodeEventId = Schema.decodeUnknownSync(EventId);
     const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
     const decodeActorId = Schema.decodeUnknownSync(ActorId);
@@ -259,7 +263,7 @@ export class ReviewFindingService {
           eventName: "code.review-finding-updated@1",
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor: actor ?? { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
           occurredAt: Schema.decodeUnknownSync(UtcTimestamp)(this.#clock()),
           payload: { kind: "review-finding-updated", finding },
         },

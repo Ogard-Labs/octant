@@ -453,14 +453,62 @@ describe("WorkThreadWorkspace", () => {
     expect(row).toHaveTextContent(
       "Let the agent upload report.pdf (12 KB) to https://example.com?",
     );
-    expect(within(row).queryByRole("button", { name: "Always allow" })).toBeNull();
+    expect(
+      within(row).queryByRole("button", { name: "Allow all sites in this profile" }),
+    ).toBeNull();
     await user.click(within(row).getByRole("button", { name: "Upload once" }));
-    expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ approvalId: approval.approvalId, decision: "approved" }),
-    );
+    expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith({
+      approvalId: approval.approvalId,
+      decision: "approved",
+    });
   });
 
-  it("asks every time, naming the file, its size, its type and the site, before the agent saves a download", async () => {
+  it.each([
+    ["upload", { upload: { files: [{ name: "report.pdf", sizeBytes: 12_288 }] } }],
+    [
+      "download",
+      { download: { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" } },
+    ],
+  ])(
+    "offers Always allow on a Browser %s approval and sends that answer to the host",
+    async (kind, ask) => {
+      const user = userEvent.setup();
+      const approval = {
+        approvalId: "90000000-0000-4000-8000-000000000017",
+        threadId: String(threadId),
+        mode: "work",
+        origin: "https://example.com",
+        ...ask,
+        requestedAt: "2026-09-09T10:00:00.000Z",
+      };
+      const browserAutomationClient = {
+        listApprovals: vi.fn(async () => [approval]),
+        decideApproval: vi.fn(async () => undefined),
+      };
+      const threadClient = {
+        bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+        execute: vi.fn(),
+      } as unknown as WorkThreadClient;
+      render(
+        <WorkThreadWorkspace
+          browserAutomationClient={browserAutomationClient as never}
+          threadClient={threadClient}
+          threadId={threadId}
+          title="Draft brief"
+        />,
+      );
+
+      const row = await screen.findByRole("group", { name: `Browser ${kind} approval` });
+      await user.click(within(row).getByRole("button", { name: "Always allow" }));
+      expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith({
+        approvalId: approval.approvalId,
+        decision: "approved",
+        remember: true,
+      });
+    },
+  );
+
+  it("asks, naming the file, its size, its type and the site, before the agent saves a download", async () => {
     const user = userEvent.setup();
     const approval = {
       approvalId: "90000000-0000-4000-8000-000000000008",
@@ -499,7 +547,9 @@ describe("WorkThreadWorkspace", () => {
     expect(row).toHaveTextContent(
       "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: https://example.com → https://files.example.com.",
     );
-    expect(within(row).queryByRole("button", { name: "Always allow" })).toBeNull();
+    expect(
+      within(row).queryByRole("button", { name: "Allow all sites in this profile" }),
+    ).toBeNull();
     await user.click(within(row).getByRole("button", { name: "Save once" }));
     expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: approval.approvalId, decision: "approved" }),
@@ -1055,12 +1105,16 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
-  it("lets a person mark the task Done from the add menu, with no evidence text", async () => {
+  it("marks the task Done from the add menu with no confirmation, and Reopen undoes it in one click", async () => {
     const user = userEvent.setup();
-    const execute = vi.fn(async () => ({
-      kind: "thread-completion-confirmed" as const,
-      thread: workThread({ version: 2, completionConfirmed: true }),
-    }));
+    const execute = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "confirm-work-thread-completion"
+        ? {
+            kind: "thread-completion-confirmed" as const,
+            thread: workThread({ version: 2, completionConfirmed: true }),
+          }
+        : { kind: "thread-updated" as const, thread: workThread({ version: 3 }) },
+    );
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
       execute,
@@ -1078,32 +1132,37 @@ describe("WorkThreadWorkspace", () => {
     await screen.findByLabelText("Bound provider and model");
     await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
     await user.click(await screen.findByRole("menuitem", { name: "Mark done" }));
-    const dialog = await screen.findByRole("dialog", { name: "Mark this task Done?" });
-    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(execute).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Mark done" }));
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark done" }),
-    );
-
     expect(execute).toHaveBeenCalledWith({
       kind: "confirm-work-thread-completion",
       threadId,
       expectedVersion: 1,
       deliveryTarget: "Draft brief",
     });
-    expect(await screen.findByText("Marked Done.")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByText("This task is marked Done.")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add attachment or task action" }),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+
+    expect(execute).toHaveBeenLastCalledWith({
+      kind: "reopen-work-thread",
+      threadId,
+      expectedVersion: 2,
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("This task is marked Done.")).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "Add attachment or task action" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeEnabled();
   });
 
-  it("blocks artifact and provider mutations after completion until reactivation", async () => {
+  it("blocks artifact and provider mutations on a task marked Done until it is reopened", async () => {
     const threadClient = {
       bootstrap: vi.fn(async () => ({
         threads: [workThread({ completionConfirmed: true })],
@@ -1124,7 +1183,8 @@ describe("WorkThreadWorkspace", () => {
     expect(await screen.findByLabelText("Bound provider and model")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Work prompt" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
-    expect(screen.getByText(/Reactivate this task/)).toBeInTheDocument();
+    expect(screen.getByText("This task is marked Done.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reopen" })).toBeEnabled();
   });
 
   it("keeps post-preview Canvas tools out of the live thread toolbar", async () => {
@@ -2226,6 +2286,50 @@ describe("WorkThreadWorkspace", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("adds each streamed tool step to the running turn's tool group, one step a frame", async () => {
+    const running = workTurn({
+      status: "running",
+      response: undefined,
+      transcript: [
+        { role: "user", text: "Start" },
+        { role: "assistant", text: "", status: "running" },
+      ],
+    });
+    const hold = deferred<void>();
+    const transcript = vi.fn(async () => ({ threadId, turns: [running], liveCursor: 0 }));
+    const step = (sequence: number, toolCallId: string, toolName: string, state: string) => ({
+      kind: "turn-tool-step" as const,
+      sequence,
+      threadId,
+      requestId: running.requestId,
+      toolStep: { toolCallId, toolName, state },
+      toolStepsTruncated: false,
+    });
+    const subscribe = vi.fn(async function* () {
+      yield step(1, "call-1", "Read", "started");
+      yield step(2, "call-2", "Bash", "started");
+      yield step(3, "call-1", "Read", "completed");
+      await hold.promise;
+    });
+
+    render(
+      <WorkThreadWorkspace
+        changeRevision={0}
+        initialThread={workThread()}
+        requestClient={{ list: vi.fn(async () => ({ requests: [] })) } as never}
+        threadClient={{ execute: vi.fn() } as never}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript, subscribe } as never}
+      />,
+    );
+
+    // Both calls show: the second frame added its step and kept the first.
+    expect(await screen.findByText(/Read/)).toBeInTheDocument();
+    expect(await screen.findByText(/Bash/)).toBeInTheDocument();
+    hold.resolve();
   });
 
   it("stops showing a retry once the retried response arrives without text", async () => {

@@ -63,9 +63,11 @@ cancel, and a Work thread's Done mark. After an ordinary provider failure or a
 clean restart it continues by itself once, and a second failure in a row holds
 it. A paired device may queue (maintainer request, 2026-11-12;
 [Architecture: persistence](../architecture.md#persistence) owns the queue).
-Not built yet: today queued messages must be reviewed and removed before Resume
-can queue the continuation, any failure or restart holds the queue until a
-person resumes it, and a paired device cannot queue. A refused recovery leaves the notice
+Built: the queue passes one turn its mode recorded as failed and lifts the hold
+of one restart that cut nothing of it, and a paired device queues on a thread
+it may already send to; Resume queues the continuation ahead of the messages
+already waiting, with no review of them. A queue the person paused stays
+paused, with the continuation waiting first. A refused recovery leaves the notice
 and an actionable reason. A continuation already queued is visible in the
 ordinary message queue, including any later admission refusal. A tool may have
 taken effect before the crash without recording its result; Resume is not an
@@ -381,13 +383,20 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 - **Menus.** A Code Project's sidebar menu has **New coordinator**, which
   opens the ordinary Code draft under a "New coordinator" heading and makes the
   thread a coordinator once its creation is confirmed, before the first
-  message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
-  coordinating** on a coordinator (never on a worker), the **Wake when a message
+  message is sent. Under the heading the draft has **Workers start at** (this
+  thread's level or lower, or always at one named level, Full access included)
+  and three number fields for the coordinator's bounds (wakes an hour, rounds,
+  worker starts an hour), each empty for its default
+  ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). A Code thread's row menu has **Make coordinator**, a submenu
+  with the same worker-level choice, or **Stop
+  coordinating** on a coordinator (never on a worker); on a coordinator
+  **Coordinator limits…**, which opens a dialog with the three bounds and
+  Save; the **Wake when a message
   arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
   the **Continue after restart** checkbox, on until a person turns it off for
   that thread ([Architecture: Persistence](../architecture.md#persistence)).
   A Chat or Work thread's row menu carries the same **Continue after restart**
-  checkbox.
+  checkbox, and a Work thread's the **Wake when a message arrives** checkbox.
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.
@@ -1465,7 +1474,10 @@ prefilled, for what to check. A pending follow-up reads "Follows up tomorrow
 at 9:00".
 
 An agent's proposal, a routine or a follow-up, waits as a suggestion chip at
-the foot of the thread, in the same card as the reply's suggested tasks. It is
+the foot of the thread, in the same card as the reply's suggested tasks (a
+routine the agent suggests in a turn running at Full access is not a chip: it
+is created paused and shown as the **Created automation** card,
+[Architecture: modes](../architecture.md#modes-chat-work-and-code)). It is
 labelled "Routine · suggested" or "Follow-up here · suggested" and states the
 name, the schedule and its time zone, the first run, the missed-run policy,
 what each run does, and the exact prompt. Its one action, **Create routine**
@@ -1569,8 +1581,10 @@ add menu under attach, with no confirmation, and the card moves to Done and
 stays there until **Reopen** undoes it in one click; a Code thread reaches Done by its objectively satisfied
 delivery target, or when a person marks it Done whatever that target says,
 which is recorded as the person's override. An agent never marks a thread Done
-(maintainer request, 2026-11-12). Not built yet: today Mark done asks for a
-confirmation and a person cannot mark a Code thread Done
+(maintainer request, 2026-11-12). While a Work task is marked, its composer
+says so and carries the Reopen button. A Code thread is marked with **Mark
+done** in its row's menus in the sidebar, where **Reopen** takes its place
+once it is marked
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and
@@ -1627,7 +1641,10 @@ number and linked threads.
 With grouping on, each repository has a slim header: its name, the count and a
 "..." menu. That menu holds what the old Project header held: **Auto-refresh**
 and **Agents may merge**, with the same labels and the same setters as before,
-and Refresh. With grouping off those switches are in the page's **Repository
+then **Agents may comment on pull requests**, which is off until chosen, closes
+the menu on one activation as Agents may merge does, and shows no chip, and
+Refresh. **Agents may push to the default branch** is not in the menu until an
+agent push path to the default branch exists (maintainer decision, 2026-11-12). With grouping off those switches are in the page's **Repository
 settings** menu, one group per connected repository, because they act on a
 Project and must stay one step from the list; they are never in Filter, which
 only narrows what is shown. The permission is readable without opening a menu: where Agents may merge is
@@ -1635,8 +1652,9 @@ on, that repository's group header shows the quiet chip "Agents may merge"
 beside the count, and, with grouping off, the Repository settings button carries
 the same dot as a narrowing filter and its tooltip names those repositories;
 Auto-refresh is not an authority and has no chip, only the check in the menu.
-The server still owns both settings, refuses a
-device that may not set them, and enforces the merge choice at the merge. A
+The server still owns every one of these settings, refuses a
+device that may not set them, and enforces the merge, comment and
+default-branch choices at the act. A
 Project that is not on GitHub is not drawn as an empty block: one quiet line at
 the foot says how many, with their names in a disclosure. A connected Project
 never refreshed is named in one line (flat) or keeps its group with the empty
@@ -2685,7 +2703,7 @@ number in tabular numerals at the trailing edge); one quiet chip or a success
 check at the trailing edge of the title line instead of three chips; no hairline
 between rows and the control hover fill with the row radius under the pointer.
 Grouping by repository gives each group a slim header with a "..." menu holding
-Auto-refresh, Agents may merge and Refresh. A Project that is not on GitHub is
+Auto-refresh, Agents may merge, Agents may comment on pull requests and Refresh. A Project that is not on GitHub is
 one notice at the foot, never an empty block. Where agents may merge is on, the
 group shows a quiet chip and the Repository settings button a dot. The Issues
 place uses the same row, group head and Sort menu. The dock packs its search,
@@ -2903,8 +2921,9 @@ reach the shell.
   managed server) if shutdown has not finished.
 - The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds while
   the setting "Press ⌘Q twice to quit" is on, which is its default; with it
-  off, one press enters the guarded shutdown (maintainer request, 2026-11-12;
-  not built yet: today the double press cannot be turned off). The
+  off, one press enters the guarded shutdown (maintainer request, 2026-11-12).
+  The switch is in Settings › General under Quitting, shown only in the Mac
+  app; the app starts guarded and learns the choice when settings load. The
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first

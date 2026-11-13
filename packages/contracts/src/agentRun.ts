@@ -343,7 +343,8 @@ export const AgentRunWorkingTime = Schema.Struct({
   activeMs: Schema.Int.pipe(Schema.nonNegative()),
   totalActiveMs: Schema.Int.pipe(Schema.nonNegative()),
   attempts: Schema.Int.pipe(Schema.positive()),
-  limitMs: Schema.Int.pipe(Schema.positive()),
+  /** Absent when the attempt ran with no working-time limit. */
+  limitMs: Schema.optional(Schema.Int.pipe(Schema.positive())),
 }).annotations(strict);
 export type AgentRunWorkingTime = typeof AgentRunWorkingTime.Type;
 

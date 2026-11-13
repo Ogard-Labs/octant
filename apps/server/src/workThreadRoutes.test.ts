@@ -1,3 +1,4 @@
+import { AGENT_ACCESS_ORIGIN } from "./clientPrincipal";
 import {
   decodeWorkThread,
   decodeWorkThreadId,
@@ -63,7 +64,9 @@ describe("Work thread routes", () => {
 
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual({ kind: "thread-created", thread: thread() });
-    expect(execute).toHaveBeenCalledWith(windowId, command);
+    expect(execute).toHaveBeenCalledWith(windowId, command, {
+      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+    });
   });
 
   it("refuses a paired device turning on Claude artifacts for a thread, and lets it choose Canvas", async () => {
@@ -105,7 +108,80 @@ describe("Work thread routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("refuses a paired device raising a Work thread or the Work default to Full access, and lets it lower one", async () => {
+  it("lets a device the host's own person paired raise a Work thread and the Work default to Full access, and an agent grant's session what its own guard admitted", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000020";
+    const from = (
+      command: Record<string, unknown>,
+      principal: { readonly origin: string; readonly admittedBy?: "host-person" | "hub-roster" },
+    ) => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000021" as never,
+          ...principal,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const raiseThread = {
+      kind: "change-work-thread-access",
+      threadId,
+      expectedVersion: 1,
+      access: "full-access",
+    };
+    const raiseDefault = {
+      kind: "update-work-settings",
+      expectedVersion: 1,
+      defaultAccess: "full-access",
+    };
+    const paired = { origin: "https://octant.invalid", admittedBy: "host-person" } as const;
+
+    expect((await route(from(raiseThread, paired)))?.status).toBe(200);
+    expect((await route(from(raiseDefault, paired)))?.status).toBe(200);
+    expect((await route(from(raiseThread, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(3);
+    // The device is who the journal names; a local window's change stays the local user's.
+    expect(execute).toHaveBeenNthCalledWith(1, remoteDeviceId, expect.anything(), {
+      actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+    });
+    await route(
+      request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(raiseThread),
+      }),
+    );
+    expect(execute).toHaveBeenNthCalledWith(4, expect.anything(), expect.anything(), {
+      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+    });
+    execute.mockClear();
+    expect((await route(from(raiseThread, paired)))?.status).toBe(200);
+    expect((await route(from(raiseDefault, paired)))?.status).toBe(200);
+    expect((await route(from(raiseThread, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(200);
+
+    expect(
+      (
+        await route(
+          from(raiseThread, { origin: "https://octant.invalid", admittedBy: "hub-roster" }),
+        )
+      )?.status,
+    ).toBe(403);
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses a hub-introduced device raising a Work thread or the Work default to Full access, and lets it lower one", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000020";
@@ -159,7 +235,7 @@ describe("Work thread routes", () => {
     expect(local?.status).toBe(200);
   });
 
-  it("refuses a paired device changing Continue after restart for a Work thread or the Work setting", async () => {
+  it("lets a device the host's own person paired change Continue after restart for a Work thread or the Work setting, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000040";
@@ -177,7 +253,7 @@ describe("Work thread routes", () => {
         restartContinuation: false,
       },
     ];
-    for (const command of commands) {
+    const from = (command: unknown, admittedBy?: "host-person" | "hub-roster") => {
       const remote = request("/api/work/threads/commands", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -192,20 +268,69 @@ describe("Work thread routes", () => {
           protocolVersion: 1,
           capabilityDigest: "b".repeat(64),
           sessionId: "73000000-0000-4000-8000-000000000041" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
         }),
         scopeId: remoteDeviceId as never,
       });
-      const refused = await route(remote);
-      expect(refused?.status).toBe(403);
-      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      return remote;
+    };
+    for (const command of commands) {
+      for (const restricted of [undefined, "hub-roster"] as const) {
+        const refused = await route(from(command, restricted));
+        expect(refused?.status).toBe(403);
+        expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      }
     }
+    expect(execute).not.toHaveBeenCalled();
+
+    for (const command of commands) {
+      expect((await route(from(command, "host-person")))?.status).toBe(200);
+      expect(execute).toHaveBeenLastCalledWith(
+        remoteDeviceId,
+        expect.objectContaining({ kind: command.kind }),
+        { actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId } },
+      );
+    }
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a paired device changing Wake when a message arrives for a Work thread", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000040";
+    const command = {
+      kind: "set-work-thread-message-wake",
+      threadId,
+      expectedVersion: 1,
+      wake: true,
+    };
+    const remote = request("/api/work/threads/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(command),
+    });
+    bindPrincipalRouteContext(remote, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "73000000-0000-4000-8000-000000000041" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    const refused = await route(remote);
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
     expect(execute).not.toHaveBeenCalled();
 
     const local = await route(
       request("/api/work/threads/commands", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(commands[0]),
+        body: JSON.stringify(command),
       }),
     );
     expect(local?.status).toBe(200);

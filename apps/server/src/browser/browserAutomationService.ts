@@ -2,14 +2,17 @@ import type {
   BrowserDownloadDestination,
   BrowserDownloadSaveDecision,
 } from "./browserDownloadSave";
-import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
+import {
+  MAX_BROWSER_DOWNLOAD_FILE_BYTES,
+  type BrowserDownloadDestinationReceipt,
+} from "@octant/contracts/browser-download";
 import {
   decodeOwnerBrowserTarget,
   type OwnerBrowserControlId,
   type OwnerBrowserNativeCommand,
   type OwnerBrowserTarget,
 } from "@octant/contracts/owner-browser";
-import type { HubMemberId, UtcTimestamp } from "@octant/contracts";
+import type { EventActor, HubMemberId, UtcTimestamp } from "@octant/contracts";
 import type { PersistentBrowserLeaseBinding } from "@octant/contracts/persistent-browser-owner";
 import type { OwnerBrowserHost } from "./ownerBrowserControl";
 import type {
@@ -53,7 +56,10 @@ import {
   type BrowserCredentialFillLease,
 } from "./browserCredentialUseService";
 import {
+  DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_HELD_DOWNLOADS,
+  MAX_BROWSER_WAIT_MS,
+  ANY_BROWSER_ORIGIN,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_BROWSER_THREAD_CONTEXTS,
   MAX_PROJECT_AGENT_PAGES,
@@ -74,6 +80,7 @@ import {
   type BrowserCaptureTaker,
   type BrowserPageSnapshotRef,
   type BrowserProfileCaller,
+  type BrowserTransferLimits,
 } from "@octant/domain";
 import type {
   ExternalContentIngestionResult,
@@ -199,6 +206,11 @@ export interface BrowserAutomationServiceOptions {
    * no download is ever held.
    */
   readonly agentDownloadsEnabled?: () => boolean;
+  /**
+   * The person's size and held-file limits for an agent's downloads, read each
+   * time. Absent, the defaults.
+   */
+  readonly transferLimits?: () => BrowserTransferLimits;
   /** Where a saved, refused, or denied download is journaled. */
   readonly downloads?: BrowserDownloadRecorder;
   readonly uuid: () => string;
@@ -275,6 +287,11 @@ interface OwnedContext {
    * asked them to sign in, or they took it over.
    */
   waitingForPerson: "sign-in" | "take-over" | undefined;
+  /**
+   * Upload and download questions waiting on the person about this page. A
+   * question has no expiry, so the page it is about has none while one waits.
+   */
+  waitingAsks: number;
   /** Ends a take-over (Hand back). Absent for a sign-in, which only its card ends. */
   releaseTakeOver: (() => void) | undefined;
   ownerController: { readonly name: string; readonly expiresAt: UtcTimestamp } | undefined;
@@ -311,7 +328,17 @@ const hostPolicy: BrowserContextPolicy = {
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;
-/** A sign-in waits up to 10 minutes; the page is kept a little longer. */
+/**
+ * How long past a wait's own limit its page is kept. A wait may last up to the
+ * Browser wait maximum, and without this the page would expire at the instant
+ * the wait answers. Enough for the last check and the settled answer.
+ */
+const WAIT_KEEP_MARGIN_MS = 30_000;
+/**
+ * How long a take-over keeps the page without person input. A sign-in ask has
+ * no such window: its card waits until the person answers, and the page waits
+ * with it.
+ */
 const HAND_OFF_KEEP_MS = 11 * 60_000;
 /** After the hand-off ends, the agent has this long to read the page. */
 const AFTER_HAND_OFF_KEEP_MS = 2 * 60_000;
@@ -399,6 +426,7 @@ export class BrowserAutomationService {
   readonly #captures: BrowserAutomationServiceOptions["captures"];
   readonly #isUnattendedScope: (windowId: WindowId) => boolean;
   readonly #agentDownloadsEnabled: () => boolean;
+  readonly #transferLimits: () => BrowserTransferLimits;
   readonly #downloads: BrowserDownloadRecorder | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -447,6 +475,12 @@ export class BrowserAutomationService {
         ? (options.isUnattendedScope ?? (() => false))
         : () => true;
     this.#agentDownloadsEnabled = options.agentDownloadsEnabled ?? (() => false);
+    this.#transferLimits =
+      options.transferLimits ??
+      (() => ({
+        maxFileBytes: MAX_BROWSER_DOWNLOAD_FILE_BYTES,
+        maxHeldDownloads: MAX_BROWSER_HELD_DOWNLOADS,
+      }));
     this.#downloads = options.downloads;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
@@ -538,6 +572,12 @@ export class BrowserAutomationService {
      * local window unless the scope is the host acting alone.
      */
     readonly profileCaller?: Extract<BrowserProfileCaller, "remote-device" | "terminal-grant">;
+    /**
+     * Set only by the agent tool for a thread at Full access, whose Private
+     * page needs no site approval. No route sets it, so a window or a paired
+     * device cannot open a page that admits every site.
+     */
+    readonly fullAccessAgent?: true;
   }): Promise<BrowserAutomationSnapshot> {
     if (!this.#flowRunAllows(input.threadId, input.flowRun))
       return failedSnapshot(
@@ -560,7 +600,12 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    const denied = this.#authorizeCreate(input.action, input.policy, input.threadId);
+    const denied = this.#authorizeCreate(
+      input.action,
+      input.policy,
+      input.threadId,
+      input.fullAccessAgent === true,
+    );
     if (denied !== undefined) {
       if (current !== undefined && !this.#authorityIsActive(current)) {
         this.#revokeAuthority(current);
@@ -630,6 +675,7 @@ export class BrowserAutomationService {
       credentialFill: undefined,
       agentActedAt: undefined,
       waitingForPerson: undefined,
+      waitingAsks: 0,
       releaseTakeOver: undefined,
       ownerController: undefined,
       personInputs: 0,
@@ -675,7 +721,12 @@ export class BrowserAutomationService {
           };
           return;
         }
-        const refreshedDenial = this.#authorizeCreate(input.action, input.policy, input.threadId);
+        const refreshedDenial = this.#authorizeCreate(
+          input.action,
+          input.policy,
+          input.threadId,
+          input.fullAccessAgent === true,
+        );
         if (refreshedDenial !== undefined) {
           owned.status = "failed";
           owned.failure = refreshedDenial;
@@ -1122,6 +1173,8 @@ export class BrowserAutomationService {
      * names the agent tool or the person's pane; an unnamed caller keeps none.
      */
     readonly capturedBy?: BrowserCaptureTaker;
+    /** Who took a person's capture, as the route resolved them; the capture is journaled as theirs. */
+    readonly capturedByActor?: EventActor;
     /** Trusted caller attribution for admission/idle only; never keeps a capture. */
     readonly activityBy?: BrowserCaptureTaker;
     /**
@@ -1154,9 +1207,12 @@ export class BrowserAutomationService {
     readonly refuseStaleRevision?: boolean;
     /**
      * Set by the agent tool when this turn may have downloads held for it. The
-     * runtime holds them only if the person's switch is also on.
+     * runtime holds them only if the person's switch is also on, or the turn
+     * runs at Full access.
      */
     readonly holdDownloads?: boolean;
+    /** Set by the agent tool for a turn at Full access; no route can name it. */
+    readonly fullAccess?: true;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
     const foreign =
@@ -1294,11 +1350,13 @@ export class BrowserAutomationService {
       readonly flowRun?: BrowserFlowCustody;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly capturedByActor?: EventActor;
       readonly activityBy?: BrowserCaptureTaker;
       readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
+      readonly fullAccess?: true;
     },
   ): Promise<BrowserAutomationSnapshot> {
     const activityBy = input.activityBy ?? input.capturedBy;
@@ -1482,6 +1540,7 @@ export class BrowserAutomationService {
       );
     const meaningful = activityBy !== undefined || PERSON_PAGE_ACTIONS.has(input.request.kind);
     if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
+    if (meaningful) this.#keepThroughWait(owned, resolved.request);
     try {
       const credentialEpoch = owned.credentialEpoch;
       if (owned.credentialFill !== undefined)
@@ -1507,11 +1566,12 @@ export class BrowserAutomationService {
             ...(input.request.kind === "upload" && input.uploadFiles !== undefined
               ? { files: input.uploadFiles }
               : {}),
-            // Only an agent action, only while the person's switch is on.
+            // Only an agent action, and below Full access only while the
+            // person's switch is on.
             ...(input.holdDownloads === true &&
             input.capturedBy === "agent" &&
-            this.#agentDownloadsEnabled()
-              ? { downloads: "hold" as const }
+            (input.fullAccess === true || this.#agentDownloadsEnabled())
+              ? { downloads: "hold" as const, downloadLimits: this.#transferLimits() }
               : {}),
           },
           owned.abort.signal,
@@ -1921,6 +1981,7 @@ export class BrowserAutomationService {
     input: {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly capturedByActor?: EventActor;
       readonly discardRecording?: true;
     },
     observed: {
@@ -1961,6 +2022,7 @@ export class BrowserAutomationService {
         url: stopping ? recording?.url : observed.url,
         title: stopping ? recording?.title : observed.title,
         takenBy,
+        ...(input.capturedByActor === undefined ? {} : { takenByActor: input.capturedByActor }),
         ...(storedBrowserProfile(owned.record.policy.profile) === undefined
           ? {}
           : { profile: storedBrowserProfile(owned.record.policy.profile) }),
@@ -1991,7 +2053,7 @@ export class BrowserAutomationService {
           mediaType: report.mediaType,
           ...(report.source === undefined ? {} : { source: report.source }),
         });
-        while (owned.heldDownloads.size > MAX_BROWSER_HELD_DOWNLOADS) {
+        while (owned.heldDownloads.size > this.#transferLimits().maxHeldDownloads) {
           const oldest = owned.heldDownloads.keys().next().value;
           if (oldest === undefined) break;
           owned.heldDownloads.delete(oldest);
@@ -2047,6 +2109,8 @@ export class BrowserAutomationService {
     readonly downloadId: string;
     readonly workspaceRoot: string | undefined;
     readonly signal?: AbortSignal;
+    /** The turn runs at Full access, where a program or installer may be saved. */
+    readonly fullAccess?: true;
     readonly destination?: BrowserDownloadDestination;
     readonly permissionSignal?: AbortSignal;
     readonly finalAdmission?: (
@@ -2056,6 +2120,12 @@ export class BrowserAutomationService {
     readonly ask: (
       facts: BrowserDownloadFacts,
       origin: string,
+      /**
+       * Ends when the page, the caller, or the thread's authority goes away.
+       * The question must stop waiting then: the held file is deleted and no
+       * answer could save it.
+       */
+      signal: AbortSignal,
     ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }): Promise<
     | {
@@ -2112,6 +2182,8 @@ export class BrowserAutomationService {
       workspaceRoot: input.workspaceRoot,
       name: held.name,
       signal,
+      ...(input.fullAccess === true ? { programsAllowed: true as const } : {}),
+      maxFileBytes: this.#transferLimits().maxFileBytes,
       ...(input.destination === undefined ? {} : { destination: input.destination }),
       finalAdmission: (facts) =>
         current()
@@ -2122,10 +2194,17 @@ export class BrowserAutomationService {
           : "cancelled",
       claim: () => claim(contextId, downloadId),
       ask: async (facts) => {
-        const answer = await input.ask(
-          { ...facts, ...(held.source === undefined ? {} : { source: held.source }) },
-          context.origin,
-        );
+        const release = this.#holdForAsk(owned);
+        let answer: Awaited<ReturnType<typeof input.ask>>;
+        try {
+          answer = await input.ask(
+            { ...facts, ...(held.source === undefined ? {} : { source: held.source }) },
+            context.origin,
+            signal,
+          );
+        } finally {
+          release();
+        }
         // A question can wait minutes: the page and the thread's authority
         // must still be there when it is answered.
         if (answer === "approved" && !current()) {
@@ -2867,6 +2946,7 @@ export class BrowserAutomationService {
     request: ToolActionRequest,
     policy: BrowserContextPolicy,
     threadId: BrowserThreadId,
+    fullAccessAgent: boolean,
   ): BrowserAutomationFailure | undefined {
     if (this.#executionOwner !== undefined && !this.#executionOwner.isCurrent())
       return { category: "unauthorized", message: "Browser execution owner is no longer current." };
@@ -2881,6 +2961,17 @@ export class BrowserAutomationService {
     });
     if (decision.kind === "deny" || decision.kind === "prompt") {
       return mapToolCallDenial(decision.reason, request);
+    }
+    // Every site is the reach of one page only: the Private page the agent
+    // opens at Full access. A stored profile keeps its site approval per
+    // origin at every level, so it never carries the any-site entry.
+    if (
+      policy.allowedOrigins.includes(ANY_BROWSER_ORIGIN) &&
+      (!fullAccessAgent ||
+        policy.allowedOrigins.length !== 1 ||
+        storedBrowserProfile(policy.profile) !== undefined)
+    ) {
+      return { category: "policy-denied", message: "Browser context policy exceeds host limits." };
     }
     if (
       policy.allowedOrigins.length === 0 ||
@@ -2977,7 +3068,10 @@ export class BrowserAutomationService {
     owned.waitingForPerson = kind;
     // The page outlives the hand-off: a person signing in near the end of the
     // session must not lose the page under them, and the agent gets a moment
-    // after Continue to read it.
+    // after Continue to read it. A sign-in ask holds the page for as long as
+    // its card waits (see #expired); the release below, which the card's
+    // answer, its turn's stop, and its window's or the host's end all reach,
+    // puts the page back on a finite deadline.
     owned.keptUntil = this.#now() + HAND_OFF_KEEP_MS;
     this.#scheduleExpiry(owned);
     const release = () => {
@@ -2992,6 +3086,40 @@ export class BrowserAutomationService {
       if (owned.record.state === "active") this.#scheduleExpiry(owned);
     };
     return release;
+  }
+
+  /**
+   * Keeps the thread's page while an upload or download question about it
+   * waits on the person. The question has no expiry, and a page that closed
+   * under it at its idle deadline would turn the person's later answer into a
+   * failure. The release, which every way the question ends reaches, puts the
+   * page back on a finite deadline. It grants nothing and marks nothing as the
+   * person's: agent calls on the page are admitted as before. The signal is
+   * the page's lifetime: it ends when the page closes or is stopped, and the
+   * caller withdraws its question with it.
+   */
+  holdForAsk(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+  ): { readonly release: () => void; readonly signal?: AbortSignal } {
+    const owned = this.#current(windowId, threadId);
+    return owned === undefined || owned.record.state !== "active"
+      ? { release: () => undefined }
+      : { release: this.#holdForAsk(owned), signal: owned.abort.signal };
+  }
+
+  #holdForAsk(owned: OwnedContext): () => void {
+    owned.waitingAsks += 1;
+    this.#scheduleExpiry(owned);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      owned.waitingAsks -= 1;
+      if (owned.waitingAsks > 0) return;
+      owned.keptUntil = Math.max(owned.keptUntil ?? 0, this.#now() + AFTER_HAND_OFF_KEEP_MS);
+      if (owned.record.state === "active") this.#scheduleExpiry(owned);
+    };
   }
 
   /**
@@ -3087,6 +3215,23 @@ export class BrowserAutomationService {
     if (renewLifetime && !this.#renewActivity(owned, true)) return;
     owned.personInputs += 1;
     owned.refs = undefined;
+  }
+
+  /**
+   * Keep the page for an admitted wait's own limit and a short margin. The
+   * hold is fixed when the wait is dispatched and bounded by the wait's
+   * limit, so a call that hangs past it still cannot extend the page's life.
+   */
+  #keepThroughWait(owned: OwnedContext, request: BrowserActionRequest): void {
+    if (request.kind !== "wait" || owned.waitingForPerson !== undefined) return;
+    const waitMs = Math.min(
+      request.waitFor?.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS,
+      MAX_BROWSER_WAIT_MS,
+    );
+    const until = this.#now() + waitMs + WAIT_KEEP_MARGIN_MS;
+    if ((owned.keptUntil ?? 0) >= until) return;
+    owned.keptUntil = until;
+    this.#scheduleExpiry(owned);
   }
 
   #renewActivity(owned: OwnedContext, personInput = false): boolean {
@@ -3352,6 +3497,12 @@ export class BrowserAutomationService {
 
   #scheduleExpiry(owned: OwnedContext): void {
     if (owned.record.state !== "active" && owned.record.state !== "creating") return;
+    if (owned.waitingForPerson === "sign-in" || owned.waitingAsks > 0) {
+      // Nothing to wait for: the hold's release schedules the next deadline.
+      owned.cancelExpiry?.();
+      owned.cancelExpiry = undefined;
+      return;
+    }
     const deadline = browserContextExpiresAt(owned.record, {
       lastActivityAt: owned.lastActivityAt,
       ...(owned.keptUntil === undefined ? {} : { keptUntil: owned.keptUntil }),
@@ -3404,6 +3555,9 @@ export class BrowserAutomationService {
   }
 
   #expired(owned: OwnedContext): boolean {
+    // A page handed to the person for a sign-in the agent asked for lives as
+    // long as that card waits, and the card has no expiry.
+    if (owned.waitingForPerson === "sign-in" || owned.waitingAsks > 0) return false;
     return isContextExpired(owned.record, this.#now(), {
       lastActivityAt: owned.lastActivityAt,
       ...(owned.keptUntil === undefined ? {} : { keptUntil: owned.keptUntil }),

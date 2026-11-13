@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   MAX_AGENT_RUN_CONCURRENCY,
+  DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES,
   DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES,
+  MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES,
   MAX_AGENT_RUN_WORKING_TIME_MINUTES,
   effectiveAgentRunConcurrency,
   type AgentRunConcurrency,
@@ -69,6 +71,8 @@ export function AgentRunSettingsPanel(props: {
     async (change: {
       readonly creationPosture: AgentRunSelectableCreationPosture;
       readonly workingTimeLimitMinutes?: number;
+      readonly noWorkingTimeLimitAtFullAccess?: boolean;
+      readonly providerSlotWaitMinutes?: number;
       readonly concurrency?: AgentRunConcurrency;
     }) => {
       if (settings === undefined || saving) return;
@@ -176,7 +180,7 @@ export function AgentRunSettingsPanel(props: {
           </SettingRow>
           <SettingRow
             label="Working minutes per attempt"
-            description="How long a helper may work per attempt, not counting waits for approval or answers. Default 30 minutes; Project and thread ceilings still apply, and a change affects the next attempt."
+            description={`How long a helper may work per attempt, not counting waits for approval or answers. Default ${DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES} minutes; Project and thread ceilings still apply, and a change affects the next attempt.`}
             scope="app"
             settingId="subagent-working-minutes"
           >
@@ -187,6 +191,39 @@ export function AgentRunSettingsPanel(props: {
               value={settings?.workingTimeLimitMinutes ?? DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES}
               onChange={(value) =>
                 void save({ creationPosture: posture, workingTimeLimitMinutes: value })
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            label="No time limit at Full access"
+            description="Helpers of a thread at Full access work until they finish or you cancel them. A helper whose provider stops responding then keeps its place until you cancel it. Other threads keep the limit above."
+            scope="app"
+            settingId="subagent-no-limit-full-access"
+          >
+            <OctantSwitch
+              checked={settings?.noWorkingTimeLimitAtFullAccess === true}
+              disabled={saving}
+              label="No time limit at Full access"
+              onCheckedChange={(checked) =>
+                void save({ creationPosture: posture, noWorkingTimeLimitAtFullAccess: checked })
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            label="Minutes to wait for a full provider"
+            description={`How long a helper waits when its provider is taking no more requests, before it stops and can be retried. Default ${DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES} minutes; a change applies to helpers already waiting.`}
+            scope="app"
+            settingId="subagent-provider-wait-minutes"
+          >
+            <OctantNumberStepper
+              label="Minutes to wait for a full provider"
+              min={1}
+              max={MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES}
+              value={
+                settings?.providerSlotWaitMinutes ?? DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES
+              }
+              onChange={(value) =>
+                void save({ creationPosture: posture, providerSlotWaitMinutes: value })
               }
             />
           </SettingRow>

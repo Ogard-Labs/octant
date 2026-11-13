@@ -14,10 +14,14 @@ import {
   REMOTE_PUSH_DELIVERY_HEADERS,
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
+  SHELL_SETTINGS_PATH,
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
+import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
+import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
+import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdministrationRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
@@ -72,22 +76,65 @@ const REMOTE_CONTENT_TYPES = [
 
 const LOCAL_ONLY_PREFIXES = [
   "/api/desktop",
-  "/api/shell",
+  // A window's own shell: its bootstrap, its workspace commands and the two
+  // local sessions. The shell settings route beside them is forwarded below.
+  "/api/shell/bootstrap",
+  "/api/shell/commands",
+  "/api/shell/launch-session",
+  "/api/shell/local-session",
   "/api/folders",
-  "/api/extensions/lifecycle",
-  "/api/extensions/npm",
-  "/api/extensions/skills",
-  "/api/extensions/tool-grants",
-  "/api/providers/discovery",
-  "/api/host-control",
+  // Pointing a runtime at an executable goes through the host's native file
+  // picker and the desktop broker. Scanning and connecting are forwarded below.
+  "/api/providers/discovery/locate-binary",
+  "/api/providers/discovery/binary-receipts",
+  // The whole host's export: bulk data with no bound of its own for a remote
+  // caller. Every other host-control route is forwarded below.
+  "/api/host-control/export",
   "/api/replica-store",
   "/api/replica-membership",
   // Linking a store and pointing a key at it are acts at this machine.
   "/api/secret-stores",
   "/api/provider-cloud",
-  // Reviewing what a thread read and clearing its outside-content mark is a
-  // person's act at this machine.
+] as const;
+
+/**
+ * Routes forwarded for a device the host's own person paired, which does what
+ * a local window does (maintainer decision, 2026-11-12). Forwarding admits
+ * nobody: the product dispatch holds every other device session (one the hub's
+ * roster introduced, an agent grant) to the remote action catalogue, where
+ * none of these is an action, and each route refuses such a principal itself.
+ */
+const PERSON_PAIRED_DEVICE_ROUTES = [
+  // Installing, trusting, enabling, and removing a package; remembered tool
+  // approvals; adding, pinning, signing in to, and reconnecting a server.
+  "/api/extensions/lifecycle",
+  "/api/extensions/npm",
+  // Searching, previewing, installing, updating and removing skills, and
+  // reconciling the skill folders. Choosing a new folder uses the host's
+  // native picker and stays with a window there.
+  "/api/extensions/skills",
+  "/api/extensions/tool-grants",
+  "/api/extensions/user-servers",
+  "/api/extensions/project-pins",
+  "/api/extensions/sign-in",
+  "/api/extensions/connections",
+  "/api/extensions/discovered",
+  // Provider administration and sign-in start, and a provider key on its way
+  // to the credential broker: stored, replaced or cleared, never read back.
+  "/api/providers/commands",
+  "/api/providers/thread-native-setup",
+  "/api/providers/oauth",
+  ...PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS,
+  // Reviewing what a thread read and clearing its outside-content mark.
   "/api/thread-external-content",
+  "/api/terminal-sessions/list",
+  "/api/terminal-sessions/history",
+  "/api/person-memory/commands",
+  "/api/benchmarks/suites/save",
+  "/api/benchmarks/suites/delete",
+  "/api/benchmarks/runs/start",
+  "/api/benchmarks/runs/cancel",
+  "/api/benchmarks/runs/purge",
 ] as const;
 
 /**
@@ -797,6 +844,28 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     maxResponseBytes: 128 * 1_024,
   },
+  // The message queue: a paired device reads a thread's queue and queues a
+  // message on a thread it may already send to. The service rechecks the
+  // device's pairing, the thread and the mode on every command and again at
+  // dispatch, and keeps pause, resume and reorder with a window on the host.
+  {
+    id: "thread-message-queue",
+    match: { kind: "exact", path: "/api/thread-message-queue" },
+    surface: "authenticated-product",
+    methods: ["GET"],
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    id: "thread-message-queue-commands",
+    match: { kind: "exact", path: "/api/thread-message-queue/commands" },
+    surface: "authenticated-product",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: DEFAULT_BODY_BYTES,
+  },
   // Reply detail: the presentation level a paired device draws a thread at.
   // Read only; changing it stays with a window on the host.
   {
@@ -825,6 +894,19 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   {
     kind: "prefix" as const,
     path: "/api/native-harness/sessions/",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+    maxResponseBytes: 512 * 1_024,
+  },
+  {
+    // A Code thread's network access: its rules, its Project's rules and its
+    // open proposals, and the person's answers to them. It has no catalogued
+    // action, so only a device the host's own person paired reaches it; the
+    // route names that device in every rule and change it records.
+    kind: "prefix" as const,
+    path: "/api/native-harness/egress/threads/",
     methods: ["GET", "POST"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     allowedContentTypes: ["application/json"] as const,
@@ -874,9 +956,8 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     // A paired device lists and answers the MCP tool prompts its own turns
-    // raised, approve once or deny. Remembered approvals stay on the
-    // local-only tool-grants route, and the approval service refuses a paired
-    // device's answer that asks to be remembered.
+    // raised. The approval service lets only the host's own person remember
+    // an answer: a hub-introduced device approves once or denies.
     kind: "exact" as const,
     path: "/api/extensions/tool-approvals",
     methods: ["POST"] as const,
@@ -929,8 +1010,8 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     maxBodyBytes: 64 * 1_024,
   },
   // Benchmark reads and the stars write. Saving or deleting a suite and starting,
-  // cancelling, or purging a run are never forwarded; the route also refuses them
-  // for a remote principal.
+  // cancelling, or purging a run are forwarded with the person-paired device
+  // routes; the route refuses them for any other device session.
   ...[
     "/api/benchmarks/suites/list",
     "/api/benchmarks/runs/list",
@@ -939,6 +1020,108 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     "/api/benchmarks/runs/export",
     "/api/benchmarks/cells/rate",
   ].map((path) => ({ kind: "exact" as const, path, methods: ["POST"] as const })),
+  ...PERSON_PAIRED_DEVICE_ROUTES.map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+  })),
+  // The person's own reads and lists, for a device that person paired: every
+  // approval and question their scope can answer and putting one off, the
+  // fleet read, provider limits and an asked-for refresh, and the protected
+  // files list and its changes. None has a catalogued action.
+  ...[PENDING_REQUESTS_PATH, "/api/fleet-activity", "/api/provider-usage-limits"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
+  {
+    kind: "exact" as const,
+    path: `${PENDING_REQUESTS_PATH}/defer`,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/provider-usage-limits/refresh",
+    methods: ["POST"] as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/protected-files",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/protected-files/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  },
+  // The host's shell settings, for a device the host's own person paired: it
+  // has no window here to bootstrap, so this is where it reads them and
+  // replaces them (a thread's Reply detail, for one).
+  {
+    kind: "exact" as const,
+    path: SHELL_SETTINGS_PATH,
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 512 * 1_024,
+  },
+  // A Project's design systems, for a device the host's own person paired:
+  // the list and one file are reads, a save is a POST the route holds to its
+  // own 256 KiB document bound.
+  {
+    kind: "exact" as const,
+    path: "/api/design-systems",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    namesProjectInQuery: true as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/design-systems/file",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 300_000,
+    namesProjectInQuery: true as const,
+  },
+  // Host control, for a device the host's own person paired: status, the
+  // data map and the retention windows are reads; service lifecycle, backup,
+  // memory limits, retention and purge are changes the route holds to 8 KiB.
+  ...["status", "data-map", "thread-retention"].map((name) => ({
+    kind: "exact" as const,
+    path: `/api/host-control/${name}`,
+    methods: name === "thread-retention" ? (["GET", "POST"] as const) : (["GET"] as const),
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  })),
+  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge"].map((name) => ({
+    kind: "exact" as const,
+    path: `/api/host-control/${name}`,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  })),
+  // Paired devices and pairing requests, for a device the host's own person
+  // paired: the lists are reads, every change a POST.
+  ...PAIRED_DEVICE_ADMINISTRATION_ROUTES.map(({ path, method }) => ({
+    kind: "exact" as const,
+    path,
+    methods: [method],
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
+  {
+    kind: "exact" as const,
+    path: "/api/person-memory",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
   {
     kind: "exact" as const,
     path: "/api/usage/dashboard",
@@ -954,6 +1137,35 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/usage/diagnostics",
     methods: ["POST"] as const,
   },
+  // The catalog of Projects bound to a folder on a server, and a server's
+  // load, read by a device the host's own person paired. Changing the catalog
+  // is not forwarded: its journaled records name only a local window.
+  ...["/api/server-projects", "/api/server-projects/resources"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    namesProjectInQuery: true as const,
+  })),
+  // Scanning the host for installed provider commands and connecting what
+  // the scan found, for a device the host's own person paired; the route
+  // refuses every other.
+  ...["/api/providers/discovery/scan", "/api/providers/discovery/connect"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  })),
+  // The provider history read and the two host-wide ledger purges, for a
+  // device the host's own person paired; the routes refuse every other.
+  ...["/api/usage/local-history", "/api/usage/reset", "/api/usage/retain"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  })),
   {
     kind: "exact" as const,
     path: "/api/usage/host-health",
@@ -1031,7 +1243,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
-    allowQuery: match.kind === "prefix",
+    allowQuery: match.kind === "prefix" || "namesProjectInQuery" in match,
   };
 });
 

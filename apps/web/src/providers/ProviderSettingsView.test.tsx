@@ -1910,6 +1910,33 @@ describe("ProviderSettingsView", () => {
     },
   );
 
+  it("says why a model stayed Chat only after a tool check the host ran by itself, and keeps Verify tools", () => {
+    const props = fixture({
+      instance: httpProvider(),
+      observed: observation({
+        toolChecks: [
+          {
+            modelId: "model-1" as never,
+            outcome: "failed",
+            message: "The provider request failed with HTTP 429.",
+            checkedAt: "2026-11-12T10:00:00.000Z" as never,
+          },
+        ],
+      }),
+    });
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    const models = screen.getByRole("list", { name: "Private gateway models" });
+    expect(
+      within(models).getByText(
+        "Last tool check: The provider request failed with HTTP 429. Octant tries again the next time this model is used.",
+      ),
+    ).toBeVisible();
+    expect(
+      within(models).getByRole("button", { name: "Verify tools for Model One" }),
+    ).toBeEnabled();
+  });
+
   it("drops the Chat only tag from a model verified for tools and keeps it on the others", () => {
     const props = fixture({
       instance: httpProvider(),
@@ -2024,6 +2051,53 @@ describe("ProviderSettingsView", () => {
       },
     });
     expect(credential.value).toBe("");
+  });
+
+  it("offers a signed-out Foundry endpoint that opted in a sign-in with a code in a local desktop window, and none without the opt-in", async () => {
+    const providerDeviceSignIn = vi.fn(async () => ({ status: 200, body: { outcome: "waiting" } }));
+    const unused = vi.fn();
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: {
+        setProviderCredential: unused,
+        providerCredentialStatus: unused,
+        clearProviderCredential: unused,
+        listProviderApiKeys: unused,
+        addProviderApiKey: unused,
+        providerDeviceSignIn,
+      },
+    });
+    try {
+      const base = directoryFoundryProvider();
+      const render = (instance: ProviderInstance) =>
+        renderExpanded(
+          <ModelEndpointSettingsView
+            {...fixture({
+              instance,
+              observed: observation({ models: [], directoryBinding: foundryBinding }),
+            })}
+            onProviderOAuth={vi.fn(async () => ({ kind: "signed-out" as const }))}
+          />,
+        );
+      const withoutOptIn = render(base);
+      await within(screen.getByLabelText("Foundry relay")).findByRole("button", {
+        name: "Sign in with your organization",
+      });
+      expect(screen.queryByRole("button", { name: /Sign in with a code for/ })).toBeNull();
+      withoutOptIn.unmount();
+
+      render({
+        ...base,
+        configuration: { ...base.configuration, deviceCodeSignIn: true },
+      } as ProviderInstance);
+      expect(
+        await within(screen.getByLabelText("Foundry relay")).findByRole("button", {
+          name: "Sign in with a code for Foundry relay",
+        }),
+      ).toBeEnabled();
+    } finally {
+      Reflect.deleteProperty(window, "octantHost");
+    }
   });
 
   it("lets a Foundry organization sign-in opt in to signing in with a code from the host's terminal, and keeps the choice on save", async () => {
@@ -2195,6 +2269,62 @@ describe("ProviderSettingsView", () => {
     fireEvent.click(within(row).getByRole("button", { name: /Check again/ }));
     expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
     expect(within(row).queryByRole("button", { name: /Sign in/ })).not.toBeInTheDocument();
+  });
+
+  it("offers an Amazon Bedrock endpoint's sign-in with a code in a local desktop window, and reads the sign-in again once it finishes", async () => {
+    const providerDeviceSignIn = vi.fn(async () => ({
+      status: 200,
+      body: { outcome: "signed-in", accountLabel: "BedrockUser in account 123456789012" },
+    }));
+    const unused = vi.fn();
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: {
+        setProviderCredential: unused,
+        providerCredentialStatus: unused,
+        clearProviderCredential: unused,
+        listProviderApiKeys: unused,
+        addProviderApiKey: unused,
+        providerDeviceSignIn,
+      },
+    });
+    try {
+      const onProviderOAuth = vi.fn(async () => ({ kind: "signed-out" as const }));
+      const props = {
+        ...fixture({
+          instance: bedrockProvider(),
+          observed: observation({
+            readiness: "unauthenticated",
+            unauthenticatedReason: "missing",
+            credentialStatus: "missing",
+            models: [],
+          }),
+        }),
+        onProviderOAuth,
+      };
+      renderExpanded(<ModelEndpointSettingsView {...props} />);
+      const card = screen.getByLabelText("Contoso Bedrock");
+      const signIn = await within(card).findByRole("button", {
+        name: "Sign in with a code for Contoso Bedrock",
+      });
+      // The terminal command stays available beside it.
+      expect(
+        within(card).getAllByText('octant provider sign-in "Contoso Bedrock"'),
+      ).not.toHaveLength(0);
+      const statusReads = onProviderOAuth.mock.calls.length;
+      fireEvent.click(signIn);
+      await waitFor(() =>
+        expect(providerDeviceSignIn).toHaveBeenCalledWith({
+          kind: "begin",
+          instance: String(id),
+          acknowledgeTerms: false,
+        }),
+      );
+      await waitFor(() => expect(onProviderOAuth.mock.calls.length).toBeGreaterThan(statusReads));
+      expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+    } finally {
+      Reflect.deleteProperty(window, "octantHost");
+    }
   });
 
   it("does not say an Amazon Bedrock endpoint is signed in when the host's last check found its sign-in gone", async () => {

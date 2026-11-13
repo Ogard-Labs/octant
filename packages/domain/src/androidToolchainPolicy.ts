@@ -8,7 +8,7 @@ import type {
 import type { CodeCheckoutId, CodeThreadId, ProviderExecutionPolicy } from "@octant/contracts";
 import { sameToolActionAuthority } from "@octant/contracts";
 import { decidesCodeEffectsByApproval } from "./codePolicy";
-import { APPLE_INPUT_GRANT_MS } from "./appleToolchainPolicy";
+import { APPLE_INPUT_GRANT_MS, isPersonOrAgent } from "./appleToolchainPolicy";
 
 export type AndroidToolchainPolicyDecision =
   | { readonly kind: "allowed" }
@@ -108,16 +108,16 @@ export function evaluateAndroidEmulatorRequest(
   if (request.kind === "rotate" && request.orientation === undefined) {
     return { kind: "denied", reason: "orientation-required" };
   }
-  // Open URL, Rotate and screen recording are offered only in the pane: a
-  // person asks for them, never an agent or the host on their behalf.
+  // A person or the thread's agent may ask for Open URL, Rotate and screen
+  // recording, under the posture and approval checked above; the host never
+  // starts one on its own, because nobody in the thread asked for it.
   if (
     (request.kind === "open-url" ||
       request.kind === "rotate" ||
       isAndroidScreenRecordingKind(request.kind)) &&
-    request.requestedBy?.kind !== "local-user" &&
-    request.requestedBy?.kind !== "remote-device"
+    !isPersonOrAgent(request.requestedBy)
   ) {
-    return { kind: "denied", reason: "person-required" };
+    return { kind: "denied", reason: "person-or-agent-required" };
   }
   if (!sdk.available) return { kind: "denied", reason: "toolchain-unavailable" };
   const emulator = emulators.find((candidate) => candidate.emulatorId === request.emulatorId);

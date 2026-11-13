@@ -15,6 +15,7 @@ import { ImageArtifactId, ImageJobId } from "./imageGeneration";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
+import { ThreadExportToolCall } from "./threadToolCallRecords";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
@@ -132,6 +133,12 @@ export const ThreadExportEvidence = Schema.Struct({
   attachments: Schema.Array(ThreadExportAttachment),
   citations: Schema.Array(ThreadExportCitation),
   completion: Schema.optional(ThreadExportCompletion),
+  /**
+   * The thread's kept tool-call records, oldest first. Absent on a bundle cut
+   * before they existed, for a thread that kept none, and on an export a
+   * paired device asked for.
+   */
+  toolCalls: Schema.optional(Schema.Array(ThreadExportToolCall)),
 }).annotations(strict);
 export type ThreadExportEvidence = typeof ThreadExportEvidence.Type;
 

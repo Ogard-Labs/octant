@@ -92,6 +92,10 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     autoReviewer: AutoReviewer | undefined,
   ) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; the switch is then not shown. */
+  readonly onAgentMemoryWritesChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  /** Drops the image model the Project's agents use without asking; absent hides the row. */
+  readonly onImageGenerationAskAgain?: (projectId: ProjectId) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the brand kit is then not shown. */
   readonly onBrandKitChange?: (
     projectId: ProjectId,
@@ -118,6 +122,11 @@ export interface ProjectOverviewProps {
   readonly windowCapability?: string;
   /** Absent when the host cannot accept the change; the setting is then not shown. */
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  /**
+   * Runs this Code Project's language services from its own toolchain. The
+   * host accepts it only from a window on its own machine.
+   */
+  readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the switch is then not shown. */
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
@@ -533,6 +542,21 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             ) : null}
+            {props.onAgentMemoryWritesChange === undefined ? null : (
+              <AgentMemoryWritesSetting
+                disabled={archived || connectionStale}
+                enabled={props.project.agentMemoryWrites === "enabled"}
+                onChange={(enabled) => props.onAgentMemoryWritesChange?.(props.project.id, enabled)}
+              />
+            )}
+            {props.onImageGenerationAskAgain === undefined ||
+            props.project.imageGenerationChoice === undefined ? null : (
+              <KeptImageGenerationChoice
+                disabled={archived || connectionStale}
+                modelId={String(props.project.imageGenerationChoice.modelId)}
+                onAskAgain={() => props.onImageGenerationAskAgain?.(props.project.id)}
+              />
+            )}
             {props.project.type === "work" && props.onWorkDeveloperToolsChange !== undefined ? (
               <WorkDeveloperToolsSetting
                 disabled={archived || connectionStale}
@@ -595,6 +619,13 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   project={props.project}
                 />
               </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onOwnToolchainChange !== undefined ? (
+              <OwnToolchainSetting
+                disabled={archived || connectionStale}
+                enabled={props.project.ownToolchain === "enabled"}
+                onChange={(enabled) => props.onOwnToolchainChange?.(props.project.id, enabled)}
+              />
             ) : null}
             {props.project.type === "code" && props.onDesktopRecipeChange !== undefined ? (
               <ProjectOverviewInspector
@@ -670,6 +701,127 @@ function WorkStatusFileSetting(props: {
           describedBy={descriptionId}
           disabled={props.disabled || pending}
           label="Keep a status file"
+          onCheckedChange={(enabled) => {
+            setPending(true);
+            void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));
+          }}
+        />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Whether this Project's agents write its memory without the person confirming
+ * each change. Full access never asks and Plan never writes, so the text says
+ * the switch covers the levels between.
+ */
+function AgentMemoryWritesSetting(props: {
+  readonly disabled: boolean;
+  readonly enabled: boolean;
+  readonly onChange: (enabled: boolean) => Promise<boolean> | undefined;
+}) {
+  // As for the other switches: a second flip before the first returns would
+  // be refused as a version conflict, so the switch waits.
+  const [pending, setPending] = useState(false);
+  const descriptionId = useId();
+  return (
+    <section className="project-overview-inspector">
+      <div className="project-overview-inspector__row">
+        <div>
+          <h3>Agent memory writes</h3>
+          <p id={descriptionId}>
+            Below Full access, an agent asks before each change to this Project&apos;s memory. Turn
+            this on to let agents write it without asking; each entry is marked as written by an
+            agent. At Full access agents never ask, and Plan never writes.
+          </p>
+        </div>
+        <OctantSwitch
+          checked={props.enabled}
+          describedBy={descriptionId}
+          disabled={props.disabled || pending}
+          label="Agents may write Project memory without asking"
+          onCheckedChange={(enabled) => {
+            setPending(true);
+            void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));
+          }}
+        />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The image model a person told a thread of this Project to keep using
+ * ("Don't ask again" on the image card). It is shown only while one is kept,
+ * because the card is where a model is chosen; here the person takes the
+ * standing permission back.
+ */
+function KeptImageGenerationChoice(props: {
+  readonly disabled: boolean;
+  readonly modelId: string;
+  readonly onAskAgain: () => Promise<boolean> | undefined;
+}) {
+  const [pending, setPending] = useState(false);
+  return (
+    <section className="project-overview-inspector">
+      <div className="project-overview-inspector__row">
+        <div>
+          <h3>Image generation</h3>
+          <p>
+            Agents in this Project generate images with {props.modelId} without asking, in routines
+            too. Each image is billed to your image provider. Plan never generates.
+          </p>
+        </div>
+        <OctantButton
+          disabled={props.disabled || pending}
+          onClick={() => {
+            setPending(true);
+            void Promise.resolve(props.onAskAgain()).finally(() => setPending(false));
+          }}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          Ask again
+        </OctantButton>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A Code Project's choice to run language services from its own copy of a
+ * toolchain. The description says what that costs, because the Project's copy
+ * is a program the repository supplies and each checkout then asks before it
+ * runs.
+ */
+function OwnToolchainSetting(props: {
+  readonly disabled: boolean;
+  readonly enabled: boolean;
+  readonly onChange: (enabled: boolean) => Promise<boolean> | undefined;
+}) {
+  // Each command asserts the Project version it read, so the switch waits
+  // for one change before it takes the next.
+  const [pending, setPending] = useState(false);
+  const descriptionId = useId();
+  return (
+    <section className="project-overview-inspector">
+      <div className="project-overview-inspector__row">
+        <div>
+          <h3>Language services toolchain</h3>
+          <p id={descriptionId}>
+            Type errors and go to definition use the TypeScript this Project installs instead of the
+            one bundled with Octant. That runs code from the repository, so each checkout asks you
+            to allow it first, it never runs in Plan, and it can write the checkout and reach the
+            hosts this Project's network rules allow. Only this computer can change this.
+          </p>
+        </div>
+        <OctantSwitch
+          checked={props.enabled}
+          describedBy={descriptionId}
+          disabled={props.disabled || pending}
+          label="Use the Project's own toolchain"
           onCheckedChange={(enabled) => {
             setPending(true);
             void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));

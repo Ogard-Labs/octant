@@ -67,6 +67,7 @@ import {
   type SideChatFileSource,
 } from "../chat/sideChatSourceTools";
 import { createThreadMentionRouteHandler } from "../threadMentionRoutes";
+import { threadToolCallRecorders } from "../threadToolCallRecorder";
 import {
   createExtensionChatResolver,
   createStoredExtensionMaterialLoader,
@@ -80,6 +81,7 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
+import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -132,7 +134,10 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
-  Pick<WorkspaceWiring, "contextHarness" | "projectMemoryAccess" | "shellService"> &
+  Pick<
+    WorkspaceWiring,
+    "contextHarness" | "keptImageChoices" | "projectMemoryAccess" | "shellService"
+  > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<CodeWiring, "environmentService"> &
   Pick<
@@ -147,6 +152,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "imageJobService"
     | "reviewedModelManifest"
     | "skillDiscoveryService"
+    | "verifyModelToolsOnFirstUse"
   > &
   Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
   Pick<CanvasWiring, "canvasAgentToolPort"> &
@@ -215,6 +221,7 @@ export function wireChat(deps: ChatDependencies) {
     workTurnService,
     workRequestRuntime,
     personMemoryAccess,
+    keptImageChoices,
     projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
@@ -389,8 +396,25 @@ export function wireChat(deps: ChatDependencies) {
       return hidden;
     };
     const chatService = new ChatService({
+      stalledTurnLimitMs: () =>
+        stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+      providerToolCallPauseLimitMs: () =>
+        providerToolCallPauseLimitMs(
+          persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+        ),
+      verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
       conversationInputTransfer,
       liveTurns,
+      toolCallRecorders: threadToolCallRecorders({
+        connection: persistence.connection,
+        // The host setting, read at each write.
+        enabled: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).keepToolCallRecords,
+        clock: () => new Date().toISOString(),
+      }),
+      // The host setting, read when each attempt starts.
+      toolStepsPerTurn: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).toolStepsPerTurn,
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "chat",
@@ -519,6 +543,7 @@ export function wireChat(deps: ChatDependencies) {
                       threadKind: "chat-thread",
                       scopeId: decodeImageGenerationScopeId(String(thread.id)),
                       offers: imageGenerationOffers,
+                      kept: keptImageChoices,
                       jobs: imageJobService,
                       listInstances: () => persistence.readProviderInstances(),
                       readImageGenerationCustomSources: () =>

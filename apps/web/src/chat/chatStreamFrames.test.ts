@@ -129,7 +129,72 @@ function appendedFrame(
   });
 }
 
+function toolStepFrame(
+  sequence: number,
+  change: { readonly toolStep?: Record<string, unknown>; readonly toolStepsTruncated?: true },
+): ChatEventFrame {
+  return decodeChatEventFrame({
+    threadId,
+    sequence,
+    event: {
+      kind: "attempt-tool-step",
+      threadId,
+      turnId,
+      attemptId: "00000000-0000-4000-8000-000000000903",
+      ...change,
+      updatedAt: "2026-07-19T12:00:02.000Z",
+    },
+  });
+}
+
 describe("applyChatAttemptFrame", () => {
+  it("puts a streamed tool step on its attempt by tool call id, without asking for the thread", () => {
+    const current = view([attempt("streaming", [first])], [first]);
+    const started = applyChatAttemptFrame(
+      current,
+      toolStepFrame(5, {
+        toolStep: { toolCallId: "call-1", toolName: "Web search", state: "started" },
+      }),
+    );
+    expect(started?.lastSequence).toBe(5);
+    expect(started?.turns[0]?.attempts[0]?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Web search", state: "started" },
+    ]);
+    const second = applyChatAttemptFrame(
+      started,
+      toolStepFrame(6, {
+        toolStep: { toolCallId: "call-2", toolName: "Fetch page", state: "started" },
+      }),
+    );
+    const done = applyChatAttemptFrame(
+      second,
+      toolStepFrame(7, {
+        toolStep: {
+          toolCallId: "call-1",
+          toolName: "Web search",
+          state: "completed",
+          summary: "3 results",
+        },
+        toolStepsTruncated: true,
+      }),
+    );
+    expect(done?.turns[0]?.attempts[0]?.toolSteps?.map((step) => step.state)).toEqual([
+      "completed",
+      "started",
+    ]);
+    expect(done?.turns[0]?.attempts[0]?.toolStepsTruncated).toBe(true);
+    expect(done?.turns[0]?.attempts[0]?.responseRefs).toHaveLength(1);
+    // A frame the view already covers changes nothing.
+    expect(
+      applyChatAttemptFrame(
+        done,
+        toolStepFrame(6, {
+          toolStep: { toolCallId: "call-2", toolName: "Fetch page", state: "started" },
+        }),
+      ),
+    ).toBe(done);
+  });
+
   it("grows a streaming reply from the body its frame carries", () => {
     const current = view([attempt("streaming", [first])], [first]);
     const grown = applyChatAttemptFrame(

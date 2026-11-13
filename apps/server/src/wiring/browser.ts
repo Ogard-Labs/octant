@@ -6,6 +6,7 @@ import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "../appr
 import {
   currentRoutineBrowserTarget,
   routineBrowserExecutionIsCurrent,
+  routineBrowserToolLevel,
 } from "../browser/browserRoutineSessions";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
 import type {
@@ -24,11 +25,17 @@ import {
   decodeCodeThreadId,
   LOCAL_HOST_ID,
   type ProjectId,
+  type RememberedBrowserTransfer,
   type StoredBrowserProfile,
   sameToolActionAuthority,
   type WindowId,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import { createHostPersonScopes, createPersonProjectReach } from "../hostPersonScope";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
 import { createProductFeedbackRouteHandler } from "../productFeedbackRoutes";
 import {
   decodeBrowserContextId,
@@ -62,10 +69,16 @@ import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRunt
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
 import {
+  browserToolTransport,
   isToolAllowedByAllowlist,
+  browserTransferLimits,
+  browserTransferRemembered,
   defaultShellSettings,
   enabledModes,
+  browserProfileSiteListed,
   isBrowserProfileSiteRemembered,
+  workThreadAccessOf,
+  type AppToolThreadLevel,
 } from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { createBrowserDownloadJournal } from "../browser/browserDownloadJournal";
@@ -84,16 +97,21 @@ import {
   BrowserDelegatedChildren,
   currentManagedChildBrowserTarget,
 } from "../browser/browserDelegatedChildren";
-import { browserSessionGrantJournal } from "../browser/browserSessionGrantJournal";
+import {
+  browserSessionGrantJournal,
+  heldBrowserSessionGrants,
+} from "../browser/browserSessionGrantJournal";
 import type { TerminalBrowserGrantId, ProviderExecutionPolicy } from "@octant/contracts";
 import type { BrowserSessionGrantee } from "@octant/contracts/browser-session-grants";
-import { decodeAgentRunId, type AgentRun } from "@octant/contracts";
+import { decodeAgentRunId, decodeWorkThreadId, type AgentRun } from "@octant/contracts";
 
 export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
     | "browserCaptures"
     | "machineChangeFeed"
+    | "onThreadArchived"
+    | "onWaitingAsk"
     | "onWindowRevoked"
     | "processAuthorityTime"
     | "windowAuthorityStore"
@@ -120,6 +138,8 @@ export function wireBrowser(deps: BrowserDependencies) {
     externalContentIngestionStore,
     localPluginImportReceipts,
     machineChangeFeed,
+    onThreadArchived,
+    onWaitingAsk,
     onWindowRevoked,
     options,
     persistence,
@@ -177,9 +197,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const stored = persistence.readShellSettings();
         const current = stored?.settings ?? defaultShellSettings();
-        if (
-          isBrowserProfileSiteRemembered(current.rememberedBrowserProfileSites, origin, profile)
-        ) {
+        if (browserProfileSiteListed(current.rememberedBrowserProfileSites, origin, profile)) {
           return;
         }
         try {
@@ -193,6 +211,32 @@ export function wireBrowser(deps: BrowserDependencies) {
           if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
             console.warn(
               `Octant could not remember a signed-in site approval: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return;
+          }
+        }
+      }
+    };
+    // The same journaled path again, for an "Always allow" answer to an upload
+    // or a download save.
+    const rememberBrowserTransfer = (windowId: WindowId, transfer: RememberedBrowserTransfer) => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const stored = persistence.readShellSettings();
+        const current = stored?.settings ?? defaultShellSettings();
+        if (browserTransferRemembered(current.rememberedBrowserTransfers, transfer)) return;
+        try {
+          shellService.rememberBrowserTransfers({
+            windowId,
+            expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+            transfers: [transfer],
+          });
+          return;
+        } catch (error) {
+          if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
+            console.warn(
+              `Octant could not remember a Browser ${transfer.direction} approval: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -223,6 +267,13 @@ export function wireBrowser(deps: BrowserDependencies) {
         profile === undefined
           ? rememberedBrowserOrigins().includes(origin)
           : isBrowserProfileSiteRemembered(rememberedProfileSites(), origin, profile),
+      rememberTransfer: (transfer, windowId) => rememberBrowserTransfer(windowId, transfer),
+      isTransferRemembered: (transfer) =>
+        browserTransferRemembered(
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .rememberedBrowserTransfers,
+          transfer,
+        ),
       isHostScope: isRoutineHostScope,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       extensionsEnabledIn: (profile) => extensionFoldersFor(profile).length,
@@ -236,8 +287,10 @@ export function wireBrowser(deps: BrowserDependencies) {
         )?.label;
       },
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+      onAsked: onWaitingAsk,
     });
     onWindowRevoked((windowId) => browserToolApprovalService.revokeWindow(windowId));
+    onThreadArchived((threadId) => browserToolApprovalService.withdrawThread(threadId));
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),
     });
@@ -281,16 +334,16 @@ export function wireBrowser(deps: BrowserDependencies) {
       currentManagedChildBrowserTarget(run, {
         canReview: (candidate) => agentRunInteractions.canReviewSession(candidate),
         resolveParent: (threadId, mode) => browserAuthority.resolve(threadId, mode),
-        supportsTools: (providerInstanceId, modelId) => {
-          const observed = providerRuntimeRegistry.observedState(providerInstanceId);
-          return (
-            observed?.capabilities.appManagedTools === "supported" ||
-            observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) === true
-          );
-        },
+        supportsTools: (providerInstanceId, modelId, level) =>
+          browserToolTransport(
+            providerRuntimeRegistry.observedState(providerInstanceId),
+            String(modelId),
+            level,
+          ) === true,
       });
     const routineSessionTarget = (
       routineId: AutomationId,
+      turnLevel?: AppToolThreadLevel,
     ): CurrentBrowserSessionTarget | undefined => {
       const definition = persistence.automationProjection.getDefinition(routineId);
       if (definition === undefined) return undefined;
@@ -316,10 +369,11 @@ export function wireBrowser(deps: BrowserDependencies) {
         toolHostId: deriveToolHostId(persistence.dataDirectory),
         providerEligible:
           provider?.enabled === true &&
-          (observed?.capabilities.appManagedTools === "supported" ||
-            observed?.verifiedToolModelIds?.some(
-              (id) => String(id) === String(definition.executionProfile.modelId),
-            ) === true),
+          browserToolTransport(
+            observed,
+            String(definition.executionProfile.modelId),
+            routineBrowserToolLevel(definition, turnLevel),
+          ) === true,
         executionProfileCurrent:
           profile !== undefined &&
           isToolAllowedByAllowlist(profile.toolConstraints, "octant_browser") &&
@@ -340,15 +394,32 @@ export function wireBrowser(deps: BrowserDependencies) {
           approvedWorkingFolderRoot(project, folderId),
       };
     };
+    // Session, upload and download permissions are reviewed by the host's own
+    // person: at a live window, or on a device that person paired, whose
+    // record then names the device.
+    const hostPersonScopes = createHostPersonScopes({
+      localWindows: () => windowAuthorityStore.listWindowIds(),
+      devices: () => readDeviceRegistrations(persistence.connection),
+      approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+    });
+    const personHoldsProject = createPersonProjectReach<ProjectId, "work" | "code">({
+      windowHoldsProject: (scopeId, projectId, mode) =>
+        windowHoldsProject(scopeId, projectId, mode),
+      isPersonPairedDevice: (scopeId) => hostPersonScopes.deviceActor(scopeId) !== undefined,
+      isActiveProject: (projectId, mode) => {
+        const project = persistence.readProject(projectId);
+        return project !== undefined && project.type === mode && project.lifecycle === "active";
+      },
+    });
     // Upload and download permissions live only in this process, so their
     // review windows and their minutes run on the authority clock.
     const browserUploadPermissions = new BrowserUploadPermissions({
       now: processAuthorityTime,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
-        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+        personHoldsProject(windowId, target.authority.projectId, target.authority.mode),
       current: transferRecipient,
       targets: () =>
         persistence.automationProjection.listDefinitions().flatMap((definition) => {
@@ -362,16 +433,17 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => browserUploadPermissions.close()));
     const browserDownloadPermissions = new BrowserDownloadPermissions({
       now: processAuthorityTime,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
-        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+        personHoldsProject(windowId, target.authority.projectId, target.authority.mode),
       current: transferRecipient,
       targets: () =>
         persistence.automationProjection.listDefinitions().flatMap((definition) => {
@@ -385,6 +457,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => browserDownloadPermissions.close()));
@@ -413,23 +486,33 @@ export function wireBrowser(deps: BrowserDependencies) {
           : { status: "disabled" },
       now: processAuthorityTime,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       localWindows: () => windowAuthorityStore.listWindowIds(),
       canReview: (windowId, target) => {
         if (target.grantee.kind === "routine" || target.grantee.kind === "terminal")
           return (
             target.authority.mode !== "chat" &&
-            windowHoldsProject(windowId, target.authority.projectId, target.authority.mode)
+            personHoldsProject(windowId, target.authority.projectId, target.authority.mode)
           );
         if (target.grantee.kind !== "child") return false;
         const run = persistence.agentRunProjection.getById(target.grantee.runId);
+        if (run === undefined) return false;
+        const parentThreadId = decodeBrowserThreadId(String(run.parentThreadId));
+        if (browserAuthority.canAccessWindow(windowId, parentThreadId, target.authority.mode))
+          return true;
+        // A device the person paired has no workspace for the window check to
+        // read; it reviews a child's page where the parent thread's Project
+        // is one it reaches.
+        const projectId = browserAuthority.resolve(
+          parentThreadId,
+          target.authority.mode,
+        )?.projectId;
         return (
-          run !== undefined &&
-          browserAuthority.canAccessWindow(
-            windowId,
-            decodeBrowserThreadId(String(run.parentThreadId)),
-            target.authority.mode,
-          )
+          target.authority.mode !== "chat" &&
+          projectId !== undefined &&
+          projectId !== null &&
+          hostPersonScopes.deviceActor(windowId) !== undefined &&
+          personHoldsProject(windowId, projectId, target.authority.mode)
         );
       },
       targets: () => [
@@ -454,7 +537,9 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
+      held: heldBrowserSessionGrants(persistence.journal),
       onRevoked: (grantId) => {
         void delegatedChildren?.revoke(grantId);
         machineChangeFeed.publish(["tool-approvals"]);
@@ -511,14 +596,16 @@ export function wireBrowser(deps: BrowserDependencies) {
       readonly threadId: BrowserThreadId;
       readonly currentAuthority: () => ToolActionAuthority | undefined;
       readonly currentModelId: () => string | undefined;
+      /** The level the routine's running turn holds. */
+      readonly turnLevel: AppToolThreadLevel;
     }) => {
-      const initial = routineSessionTarget(input.routineRun.automationId);
+      const initial = routineSessionTarget(input.routineRun.automationId, input.turnLevel);
       if (initial === undefined) return undefined;
       const current = () => {
         const definition = persistence.automationProjection.getDefinition(
           input.routineRun.automationId,
         );
-        const target = routineSessionTarget(input.routineRun.automationId);
+        const target = routineSessionTarget(input.routineRun.automationId, input.turnLevel);
         if (String(input.currentModelId()) !== String(target?.target.modelId)) return undefined;
         return routineBrowserExecutionIsCurrent({
           run: persistence.automationProjection.getRun(input.routineRun.runId),
@@ -670,11 +757,18 @@ export function wireBrowser(deps: BrowserDependencies) {
       runtime: browserRuntime,
       pageScriptPolicy: (windowId, threadId, mode) => {
         if (
-          mode !== "code" ||
+          mode === "chat" ||
           isRoutineHostScope(windowId) ||
           !windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId))
         )
           return undefined;
+        if (mode === "work") {
+          // Work has no scoped script permission, so only its Full access admits one.
+          const work = workThreadProjection.read(decodeWorkThreadId(String(threadId)));
+          return work?.lifecycle === "active"
+            ? workThreadAccessOf(work.access).executionPolicy
+            : undefined;
+        }
         const thread = persistence.readCodeThread(decodeCodeThreadId(String(threadId)));
         return thread?.lifecycle === "active"
           ? codeSessionAuthority.effectiveThread(windowId, thread).executionPolicy
@@ -705,6 +799,8 @@ export function wireBrowser(deps: BrowserDependencies) {
       // lives in shell settings, which only a local window writes.
       agentDownloadsEnabled: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
+      transferLimits: () =>
+        browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
       downloads: createBrowserDownloadJournal({
         journal: persistence.journal,
         connection: persistence.connection,

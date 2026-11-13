@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
 import {
   access,
   chmod,
@@ -263,6 +264,25 @@ export class ManagedAttachmentStore {
       throw new Error(`Attachment corrupt: size mismatch for ${attachmentId}`);
     }
     return attachmentBytes;
+  }
+
+  /**
+   * The attachment ids that have a directory in one scope, from one
+   * synchronous listing. An owner whose journal names an attachment uses it
+   * to leave out one whose bytes were already removed, without opening each.
+   * A scope that cannot be listed has none.
+   */
+  attachmentIdsInScope(scopeId: string): ReadonlySet<string> {
+    try {
+      const scopeDir = join(this.#root, this.#options.decodeScopeId(scopeId));
+      return new Set(
+        readdirSync(scopeDir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => String(entry.name)),
+      );
+    } catch {
+      return new Set();
+    }
   }
 
   remove(scopeId: string, attachmentId: string): Promise<void> {

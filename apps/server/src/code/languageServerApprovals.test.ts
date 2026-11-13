@@ -49,6 +49,19 @@ function store(source: Pick<Journal, "append" | "replayAggregateType">) {
 }
 
 describe("language server approvals", () => {
+  it("journals an approval a paired device gave with the device as actor, and a local window's as the local person", () => {
+    const shared = journal();
+    const approvals = store(shared);
+    const deviceId = "71000000-0000-4000-8000-0000000000d3";
+    const device = decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId });
+    const subject = { projectId: project, checkoutId: checkout, component, scope: "checkout" };
+    expect(approvals.record({ ...subject, scope: "checkout" }, device)).toBe("recorded");
+    expect(approvals.record({ ...subject, scope: "project" })).toBe("recorded");
+    expect(
+      shared.replay({ afterSequence: 0 as never, limit: 10 } as never).map((event) => event.actor),
+    ).toEqual([device, expect.objectContaining({ kind: "local-user" })]);
+  });
+
   it("covers one checkout, or every checkout of one Project, for the package state approved, and survives a restart", () => {
     const shared = journal();
     const approvals = store(shared);

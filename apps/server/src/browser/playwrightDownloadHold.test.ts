@@ -156,6 +156,26 @@ describe("PlaywrightDownloadHold", () => {
     for (const id of ["d2", "d3", "d4", "d5", "d6"]) expect(hold.claim(id)).toBeDefined();
   });
 
+  it("holds to the limits the person set in Settings instead of the defaults", async () => {
+    const hold = new PlaywrightDownloadHold();
+    hold.begin({ maxFileBytes: 4, maxHeldDownloads: 2 });
+    const downloads = [
+      await fakeDownload("a.txt", "x"),
+      await fakeDownload("b.txt", "x"),
+      await fakeDownload("c.txt", "x"),
+      await fakeDownload("over.txt", "12345"),
+    ];
+    for (const download of downloads) hold.onDownload(download);
+    await hold.finish();
+    expect(hold.takeReports()).toContainEqual({
+      state: "refused",
+      name: "over.txt",
+      reason: "too-large",
+    });
+    expect(["d1", "d2", "d3", "d4"].filter((id) => hold.claim(id) !== undefined)).toHaveLength(2);
+    await hold.dispose();
+  });
+
   it("deletes a held file when it is discarded or the context closes", async () => {
     const hold = new PlaywrightDownloadHold();
     hold.begin();

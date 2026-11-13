@@ -143,7 +143,7 @@ import { ResearchRouter } from "./research/researchRouter";
 import { ThreadWorkService } from "./threadWorkService";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { createChatAgentResultDeliveryPort } from "./chatAgentResultDeliveryPort";
-import { ChatService, ChatServiceError } from "./chatService";
+import { ChatService, ChatServiceError, type ChatServiceOptions } from "./chatService";
 import { createCheckpointChatPort } from "../checkpoint/threadCheckpointPorts";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
@@ -243,6 +243,7 @@ function withProbe(
 
 function openFixture(options?: {
   readonly responseFragments?: ReadonlyArray<string>;
+  readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
@@ -718,6 +719,9 @@ function openFixture(options?: {
     actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }),
   });
   const service = new ChatService({
+    ...(options?.verifyModelToolsOnFirstUse === undefined
+      ? {}
+      : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
     ...(options?.inputTransfer === undefined
       ? {}
       : { conversationInputTransfer: options.inputTransfer(dataDirectory) }),
@@ -1276,6 +1280,37 @@ function genericChatStream(text: string): Response {
 }
 
 describe("ChatService", () => {
+  it("checks the thread's model for tools by itself before each sent turn, and sends the turn when the check fails", async () => {
+    const order: Array<string> = [];
+    const verifyModelToolsOnFirstUse = vi.fn(async () => {
+      order.push("check");
+      throw new Error("The endpoint did not answer.");
+    });
+    const { service, fakeDriver } = openFixture({ verifyModelToolsOnFirstUse });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "First use",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(verifyModelToolsOnFirstUse).not.toHaveBeenCalled();
+
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    order.push(`sent:${String(fakeDriver.sentTurns.length)}`);
+
+    expect(sent).toMatchObject({ kind: "turn-created" });
+    expect(verifyModelToolsOnFirstUse).toHaveBeenCalledExactlyOnceWith(
+      created.thread.providerInstanceId,
+      created.thread.modelId,
+    );
+    expect(order[0]).toBe("check");
+  });
+
   it("ignores a Browser selection from an older draft and sends the Chat turn without Browser", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000010");
     const { service, fakeDriver } = openFixture();
@@ -10212,6 +10247,40 @@ function streamedReplyDriver(deltas: ReadonlyArray<string>): ProviderDriver {
   } as unknown as ProviderDriver;
 }
 
+/** A provider whose reply calls one tool of its own before it answers. */
+function toolCallingDriver(): ProviderDriver {
+  return {
+    acquire: () =>
+      Effect.sync(() => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        let sessionId = "";
+        const emit = (event: Record<string, unknown>) =>
+          Queue.offer(queue, { sessionId, ...event } as never);
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              sessionId = input.sessionId;
+              return { sessionId: input.sessionId };
+            }),
+          send: () =>
+            Effect.gen(function* () {
+              yield* emit({ kind: "tool-start", toolCallId: "call-1", toolName: "Web search" });
+              yield* emit({ kind: "tool-success", toolCallId: "call-1", summary: "3 results" });
+              yield* emit({ kind: "text-delta", text: "Found it." });
+              yield* emit({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+              yield* emit({ kind: "completed" });
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      }),
+  } as unknown as ProviderDriver;
+}
+
 /** Journal appends that carry at least one streamed appended-delta event. */
 function appendedCommits(append: {
   readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> };
@@ -10402,6 +10471,69 @@ describe("ChatService streamed delta bodies", () => {
         frame.event.kind === "attempt-response-appended" ? [frame.contents?.[0]?.body] : [],
       ),
     ).toEqual(deltas.slice(1));
+  });
+});
+
+describe("ChatService tool steps", () => {
+  it("journals each tool event as the step it changed and streams it so to a subscriber that asked", async () => {
+    const { service, persistence } = openFixture({ driver: toolCallingDriver() });
+    const append = vi.spyOn(persistence.journal, "append");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Tool call",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const journaled = append.mock.calls.flatMap(
+      ([request]) =>
+        (request as { events?: ReadonlyArray<{ eventName: string; payload: unknown }> }).events ??
+        [],
+    );
+    const steps = journaled.filter((event) => event.eventName === "chat.attempt-tool-step@1");
+    expect(
+      steps.map((event) => (event.payload as { toolStep?: { state: string } }).toolStep?.state),
+    ).toEqual(["started", "completed"]);
+    // A step event carries the one step, never the attempt.
+    expect(steps.every((event) => !("attempt" in (event.payload as object)))).toBe(true);
+    const completedStep = { toolCallId: "call-1", toolName: "Web search", state: "completed" };
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.toolSteps).toEqual([
+      { ...completedStep, summary: "3 results" },
+    ]);
+
+    // A strict reader is never sent the kind: it reads the whole attempt.
+    const strict = [];
+    for await (const frame of service.subscribe(created.thread.id, 0)) strict.push(frame);
+    expect(strict.some((frame) => frame.event.kind === "attempt-tool-step")).toBe(false);
+    expect(
+      strict.some(
+        (frame) =>
+          frame.event.kind === "attempt-updated" &&
+          frame.event.attempt.toolSteps?.[0]?.state === "completed",
+      ),
+    ).toBe(true);
+
+    const optedIn = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      toolSteps: true,
+    })) {
+      optedIn.push(frame);
+    }
+    expect(
+      optedIn.flatMap((frame) =>
+        frame.event.kind === "attempt-tool-step" ? [frame.event.toolStep?.state] : [],
+      ),
+    ).toEqual(["started", "completed"]);
   });
 });
 

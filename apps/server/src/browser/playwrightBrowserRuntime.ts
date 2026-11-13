@@ -4,7 +4,7 @@ import {
   awaitQuietPage,
   BrowserRecordingFrames,
   browserRecordingFrameKept,
-  BROWSER_DIALOG_POLICY,
+  answerBrowserDialog,
   BROWSER_SETTLE_CAP_MS,
   BROWSER_SHADOW_HOP,
   browserFrameAdmitted,
@@ -34,6 +34,8 @@ import { isAbsolute } from "node:path";
 import type {
   BrowserContextId,
   BrowserContextPolicy,
+  BrowserDialogAnswer,
+  BrowserDialogReport,
   BrowserEmulationReport,
 } from "@octant/contracts/browser-automation";
 import {
@@ -107,7 +109,7 @@ export interface PlaywrightPagePort {
     listener: (dialog: {
       type(): string;
       message(): string;
-      accept(): Promise<void>;
+      accept(promptText?: string): Promise<void>;
       dismiss(): Promise<void>;
     }) => void,
   ): void;
@@ -284,12 +286,14 @@ interface OwnedRuntimeContext {
   httpErrors: Array<{ url: string; method?: string; status: number; seq: number }>;
   /** The last diagnostic entry's number; every kind shares the count. */
   diagnosticSeq: number;
-  /** The pages' own dialogs since the last action, answered by the fixed policy. */
-  dialogs: Array<{
-    type: "alert" | "confirm" | "prompt" | "beforeunload";
-    message: string;
-    answer: "accepted" | "dismissed";
-  }>;
+  /** The pages' own dialogs since the last action, and how each was answered. */
+  dialogs: BrowserDialogReport[];
+  /**
+   * The agent's answer for the first dialog the running action raises. Taken
+   * by that dialog and cleared when the action ends, so it never reaches a
+   * dialog of a later action.
+   */
+  dialogAnswer: BrowserDialogAnswer | undefined;
   failedRequests: Array<{ url: string; method?: string; failure: string; seq: number }>;
   /**
    * Pages already carrying diagnostic listeners.
@@ -421,6 +425,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       httpErrors: [],
       diagnosticSeq: 0,
       dialogs: [],
+      dialogAnswer: undefined,
       failedRequests: [],
       instrumentedPages: new WeakSet(),
       downloads: new PlaywrightDownloadHold(this.#downloadWatch),
@@ -588,16 +593,18 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const owned = this.#contexts.get(contextId);
     // A download is held only while an agent action that was allowed to
     // download runs; at any other time the context cancels it.
-    if (request.downloads === "hold") owned?.downloads.begin();
+    if (request.downloads === "hold") owned?.downloads.begin(request.downloadLimits);
+    if (owned !== undefined) owned.dialogAnswer = request.dialog;
     let observed: BrowserRuntimeObservation;
     try {
       observed = await this.#act(contextId, request, signal);
     } finally {
+      if (owned !== undefined) owned.dialogAnswer = undefined;
       // The reports wait for the next answer if this action failed.
       if (request.downloads === "hold") await owned?.downloads.finish();
     }
     // Every dialog the page raised since the last action is reported once,
-    // with how the fixed policy answered it.
+    // with how it was answered.
     const dialogs = owned?.dialogs.splice(0) ?? [];
     const downloads = owned?.downloads.takeReports() ?? [];
     return {
@@ -1348,10 +1355,14 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     page.on?.("download", (download) => owned.downloads.onDownload(download));
     page.on?.("dialog", (dialog) => {
       const type = dialogType(dialog.type());
-      const answer = BROWSER_DIALOG_POLICY[type];
+      const message = dialog.message();
+      const { promptText, ...decision } = answerBrowserDialog(type, message, owned.dialogAnswer);
+      owned.dialogAnswer = undefined;
       if (owned.dialogs.length >= 8) owned.dialogs.shift();
-      owned.dialogs.push({ type, message: bounded(dialog.message(), 512), answer });
-      void (answer === "accepted" ? dialog.accept() : dialog.dismiss()).catch(() => undefined);
+      owned.dialogs.push({ type, message: bounded(message, 512), ...decision });
+      void (decision.answer === "accepted" ? dialog.accept(promptText) : dialog.dismiss()).catch(
+        () => undefined,
+      );
     });
     page.on?.("requestfailed", (request) => {
       const url = bounded(redactedBrowserUrl(request.url()), 4096);

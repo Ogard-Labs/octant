@@ -5,19 +5,27 @@ import type {
   BrowserDownloadSaveDecision,
 } from "./browserDownloadSave";
 import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
+import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
+import type { BrowserPageScriptInput } from "./browserAutomationService";
 import type { BrowserUploadPermissions } from "./browserUploadPermissions";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
+import { askBrowserTransfer } from "./browserTransferAsk";
 import {
+  browserCallOrigin,
   browserDownloadSavedResult,
+  browserPageScriptToolResult,
   browserOperationRefusedInPlan,
+  browserPageReach,
   browserToolAction,
   browserToolResult,
+  landHeldDownloads,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
+  askWhilePageLives,
   handBrowserToPerson,
   heldForPersonAnswer,
   heldWhileQueued,
@@ -42,7 +50,11 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
+import {
+  ANY_BROWSER_ORIGIN,
+  MAX_BROWSER_TABS_PER_CONTEXT,
+  sameToolActionAuthority,
+} from "@octant/contracts";
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
@@ -76,6 +88,12 @@ export interface BrowserAppManagedToolsOptions {
     mode: ToolActionAuthority["mode"],
   ) => ToolActionAuthority | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /**
+   * Whether the thread's turn runs at Full access now, where a Private page
+   * needs no site approval. A Work turn's level is its `access`, which the
+   * composed `executionPolicy` does not carry; absent, that policy decides.
+   */
+  readonly fullAccess?: () => boolean;
   readonly toolConstraints?: ReadonlyArray<string>;
   readonly browser: {
     readonly inspectThread: (
@@ -88,6 +106,8 @@ export interface BrowserAppManagedToolsOptions {
       readonly action: ToolActionRequest;
       readonly policy: BrowserContextPolicy;
       readonly profileCaller?: "terminal-grant";
+      /** The agent's own open at Full access; only it may ask for every site. */
+      readonly fullAccessAgent?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
@@ -103,6 +123,8 @@ export interface BrowserAppManagedToolsOptions {
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
+      /** The turn runs at Full access, where a download is held whatever the switch says. */
+      readonly fullAccess?: true;
     }) => Promise<BrowserAutomationSnapshot>;
     /**
      * Saves a download the thread's Browser holds into the workspace once
@@ -120,6 +142,8 @@ export interface BrowserAppManagedToolsOptions {
       ) => BrowserDownloadSaveDecision;
       readonly workspaceRoot: string | undefined;
       readonly signal?: AbortSignal;
+      /** The turn runs at Full access, where a program or installer may be saved. */
+      readonly fullAccess?: true;
       readonly ask: (
         facts: {
           readonly name: string;
@@ -128,6 +152,7 @@ export interface BrowserAppManagedToolsOptions {
           readonly source?: BrowserDownloadSource;
         },
         origin: string,
+        signal: AbortSignal,
       ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
     }) => Promise<
       | {
@@ -150,10 +175,32 @@ export interface BrowserAppManagedToolsOptions {
       windowId: WindowId,
       threadId: BrowserThreadId,
     ) => (() => void) | undefined;
+    /** Keeps the page while an upload question about it waits; see the service. */
+    /**
+     * Keeps the page while a question about it waits, and gives the page's
+     * own lifetime: closing or stopping the page withdraws the question.
+     */
+    readonly holdForAsk?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => { readonly release: () => void; readonly signal?: AbortSignal };
+  };
+  /**
+   * Lent only to a Work thread's own tool: the bounded script runner, and the
+   * level the thread holds now (undefined once it differs from the level this
+   * turn began with). Chat has no Full access, and terminal, routine and
+   * delegated-child tools are lent none, so `run-script` is refused there.
+   */
+  readonly pageScript?: {
+    readonly level: () => ProviderExecutionPolicy | undefined;
+    readonly run: (input: BrowserPageScriptInput) => Promise<BrowserPageScriptReceipt>;
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
     Partial<
-      Pick<BrowserToolApprovalService, "isRemembered" | "isUnattendedScope" | "isPairedDevice">
+      Pick<
+        BrowserToolApprovalService,
+        "isRemembered" | "isTransferRemembered" | "isUnattendedScope" | "isPairedDevice"
+      >
     >;
   /**
    * Set for a CLI the person typed into a thread terminal. It may drive the
@@ -176,6 +223,10 @@ export interface BrowserAppManagedToolsOptions {
    * folder. Absent, both are refused.
    */
   readonly uploadRoot?: () => string | undefined;
+  /** The person's per-file upload limit in bytes, read for each upload; absent, the default. */
+  readonly uploadFileLimitBytes?: () => number;
+  /** The person's files-per-upload count, read for each upload; absent, the default. */
+  readonly uploadFileCountLimit?: () => number;
   readonly downloadPermission?: (input: {
     readonly permissionId: string;
     readonly profile: StoredBrowserProfile;
@@ -227,13 +278,55 @@ export function createBrowserAppManagedTools(
   ): Promise<BrowserToolAnswer> => {
     const authority = options.resolveAuthority(options.threadId, options.mode);
     if (authority === undefined) return failure("browser-authority-unavailable");
+    // Every question about the open page is withdrawn when that page ends.
+    const pageHold = () => options.browser.holdForAsk?.(options.windowId, options.threadId);
     if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
       return failure("browser-authority-stale");
     }
     if (input.operation === "run-script") {
-      // The Work/terminal adapter has no live Full-access script admission yet.
-      return failure(
-        options.executionPolicy === "plan" ? "plan-mode-read-only" : "script-unavailable",
+      if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+      const script = options.pageScript;
+      if (script === undefined || options.mode !== "work") return failure("script-unavailable");
+      if (signInRefusal(options) !== undefined) return failure("script-needs-a-local-person");
+      // Work has no one-use script permission: below Full access it is refused.
+      if (script.level() !== "full-access") return failure("script-needs-full-access");
+      if (!modelIsCurrent(options)) return failure("browser-model-stale");
+      const opened = options.browser.inspectThread(options.windowId, options.threadId);
+      if (opened.waitingForPerson !== undefined) {
+        return heldForPersonAnswer(opened.waitingForPerson);
+      }
+      const context = opened.context;
+      if (context?.state !== "active" || context.presentation !== "native-live")
+        return failure("script-needs-the-app-browser");
+      const profileKey = JSON.stringify(context.policy.profile ?? null);
+      const callerIsCurrent = () => {
+        const latest = options.browser.inspectThread(options.windowId, options.threadId);
+        const held = options.resolveAuthority(options.threadId, options.mode);
+        return (
+          held !== undefined &&
+          sameToolActionAuthority(authority, held) &&
+          modelIsCurrent(options) &&
+          script.level() === "full-access" &&
+          signInRefusal(options) === undefined &&
+          String(latest.context?.contextId) === String(context.contextId) &&
+          JSON.stringify(latest.context?.policy.profile ?? null) === profileKey &&
+          latest.waitingForPerson === undefined
+        );
+      };
+      const receipt = await script.run({
+        windowId: options.windowId,
+        threadId: options.threadId,
+        contextId: context.contextId,
+        source: input.source,
+        expectedObservationRevision: input.expectedObservationRevision,
+        turnExecutionPolicy: "full-access",
+        callerIsCurrent,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      return browserPageScriptToolResult(
+        callerIsCurrent() && !signal?.aborted
+          ? receipt
+          : { status: "refused", effect: receipt.effect, reason: "stale" },
       );
     }
     if (input.operation === "stop") {
@@ -287,16 +380,35 @@ export function createBrowserAppManagedTools(
       const refusal = signInRefusal(options) ?? signInPageRefusal(snapshot);
       if (refusal !== undefined) return failure(refusal);
     }
-    const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
+    const fullAccess = options.fullAccess?.() ?? options.executionPolicy === "full-access";
+    const defaultChoice = options.resolveTaskProfile?.();
+    let existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
     if (existing === undefined && snapshot.context !== undefined) {
       options.modelBindings.delete(String(snapshot.context.contextId));
     }
-    const origin =
-      existing === undefined
-        ? input.operation === "navigate"
-          ? allowedOrigin(input.url)
-          : undefined
-        : existing.policy.allowedOrigins.join(", ");
+    if (existing !== undefined) {
+      const reach = browserPageReach({
+        existing,
+        fullAccess,
+        plan: options.executionPolicy === "plan",
+        privateNavigation:
+          input.operation === "navigate" &&
+          (input.profile ?? defaultChoice ?? "private") === "private"
+            ? input.url
+            : undefined,
+      });
+      if (reach !== "kept") {
+        if (reach === "navigation-required" && input.operation !== "navigate") {
+          return failure("browser-navigation-required");
+        }
+        // The same stop and navigate the refusal would have asked the agent for.
+        options.modelBindings.delete(String(existing.contextId));
+        snapshot = await options.browser.releaseThread(options.windowId, options.threadId);
+        if (signal?.aborted) return failure("tool-interrupted");
+        existing = undefined;
+      }
+    }
+    const origin = browserCallOrigin(input, existing, snapshot.observation?.url);
     if (origin === undefined) {
       return failure(
         input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
@@ -315,7 +427,6 @@ export function createBrowserAppManagedTools(
     ) {
       return failure("browser-profile-differs-stop-first");
     }
-    const defaultChoice = options.resolveTaskProfile?.();
     const choice = input.operation === "navigate" ? (input.profile ?? defaultChoice) : undefined;
     const profile: StoredBrowserProfile | undefined =
       existing !== undefined
@@ -361,16 +472,27 @@ export function createBrowserAppManagedTools(
     const remembered =
       (existing === undefined || (identityMatches && existingBinding?.approval === "pending")) &&
       options.approvals?.isRemembered?.(origin, profile) === true;
-    if ((existing === undefined || !contextApproved) && !remembered) {
+    // At Full access a Private page needs no site approval; a page in a
+    // signed-in profile keeps its own at every level.
+    const needsNoSiteApproval = fullAccess && profile === undefined;
+    if ((existing === undefined || !contextApproved) && !remembered && !needsNoSiteApproval) {
       if (options.approvals === undefined) return failure("browser-approval-required");
-      const outcome = await options.approvals.request({
-        windowId: options.windowId,
-        threadId: String(options.threadId),
-        authority,
-        origin,
-        ...(profile === undefined ? {} : { profile }),
-        ...(signal === undefined ? {} : { signal }),
-      });
+      const approvals = options.approvals;
+      // The first navigate's question has no page yet, so only the call's
+      // signal withdraws it.
+      const outcome = await askWhilePageLives(
+        existing === undefined ? undefined : pageHold,
+        signal,
+        (askSignal) =>
+          approvals.request({
+            windowId: options.windowId,
+            threadId: String(options.threadId),
+            authority,
+            origin,
+            ...(profile === undefined ? {} : { profile }),
+            ...(askSignal === undefined ? {} : { signal: askSignal }),
+          }),
+      );
       if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
       if (signal?.aborted) return failure("tool-interrupted");
       const refreshed = options.resolveAuthority(options.threadId, options.mode);
@@ -385,7 +507,7 @@ export function createBrowserAppManagedTools(
         });
       }
     }
-    if (remembered && existing !== undefined)
+    if ((remembered || needsNoSiteApproval) && existing !== undefined)
       rememberModelBinding(options.modelBindings, String(existing.contextId), {
         modelId: options.modelId,
         authority,
@@ -398,9 +520,10 @@ export function createBrowserAppManagedTools(
         policy: {
           ...hostPolicy,
           ...(profile === undefined ? {} : { profile }),
-          allowedOrigins: [origin],
+          allowedOrigins: [needsNoSiteApproval ? ANY_BROWSER_ORIGIN : origin],
         },
         ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
+        ...(needsNoSiteApproval ? { fullAccessAgent: true as const } : {}),
       });
       snapshot = created;
       if (created.context?.state === "active") {
@@ -422,14 +545,17 @@ export function createBrowserAppManagedTools(
       sameToolActionAuthority(binding.authority, authority);
     if (!bindingMatches && existing !== undefined) {
       if (options.approvals === undefined) return failure("browser-approval-required");
-      const outcome = await options.approvals.request({
-        windowId: options.windowId,
-        threadId: String(options.threadId),
-        authority,
-        origin,
-        ...(profile === undefined ? {} : { profile }),
-        ...(signal === undefined ? {} : { signal }),
-      });
+      const approvals = options.approvals;
+      const outcome = await askWhilePageLives(pageHold, signal, (askSignal) =>
+        approvals.request({
+          windowId: options.windowId,
+          threadId: String(options.threadId),
+          authority,
+          origin,
+          ...(profile === undefined ? {} : { profile }),
+          ...(askSignal === undefined ? {} : { signal: askSignal }),
+        }),
+      );
       if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
       if (signal?.aborted) return failure("tool-interrupted");
       const refreshed = options.resolveAuthority(options.threadId, options.mode);
@@ -449,15 +575,17 @@ export function createBrowserAppManagedTools(
         hold: () =>
           options.browser.holdForPerson?.(options.windowId, options.threadId) ?? (() => undefined),
         ask: () =>
-          approvals.request({
-            windowId: options.windowId,
-            threadId: String(options.threadId),
-            authority,
-            origin,
-            ...(profile === undefined ? {} : { profile }),
-            signIn: input.reason === undefined ? {} : { reason: input.reason },
-            ...(signal === undefined ? {} : { signal }),
-          }),
+          askWhilePageLives(pageHold, signal, (askSignal) =>
+            approvals.request({
+              windowId: options.windowId,
+              threadId: String(options.threadId),
+              authority,
+              origin,
+              ...(profile === undefined ? {} : { profile }),
+              signIn: input.reason === undefined ? {} : { reason: input.reason },
+              ...(askSignal === undefined ? {} : { signal: askSignal }),
+            }),
+          ),
         snapshotAfter: () => runOne({ operation: "snapshot" }, signal, true),
       });
     }
@@ -478,7 +606,10 @@ export function createBrowserAppManagedTools(
             });
       if (input.downloadPermissionId !== undefined && permission === undefined)
         return failure("download-permission-unavailable");
-      if (permission === undefined && approvals === undefined)
+      // At Full access an ordinary save is not asked; a routine's manifest
+      // keeps its own review at every level.
+      const savesUnasked = fullAccess && permission === undefined;
+      if (permission === undefined && approvals === undefined && !savesUnasked)
         return failure("browser-approval-required");
       if (options.browser.saveDownload === undefined) return failure("download-unavailable");
       if (signal?.aborted) return failure("tool-interrupted");
@@ -487,6 +618,7 @@ export function createBrowserAppManagedTools(
         threadId: options.threadId,
         downloadId: input.downloadId,
         workspaceRoot: permission === undefined ? options.uploadRoot?.() : undefined,
+        ...(savesUnasked ? { fullAccess: true as const } : {}),
         ...(permission === undefined
           ? signal === undefined
             ? {}
@@ -500,18 +632,23 @@ export function createBrowserAppManagedTools(
               destination: permission.destination,
               finalAdmission: permission.reserve,
             }),
-        ask: async (facts, pageOrigin) =>
-          permission === undefined
-            ? (approvals?.request({
-                windowId: options.windowId,
-                threadId: String(options.threadId),
-                authority,
-                origin: pageOrigin,
-                ...(profile === undefined ? {} : { profile }),
-                download: facts,
-                ...(signal === undefined ? {} : { signal }),
-              }) ?? "denied")
-            : permission.inspect(facts, pageOrigin),
+        ask: async (facts, pageOrigin, pageSignal) =>
+          savesUnasked
+            ? "approved"
+            : permission === undefined
+              ? askBrowserTransfer(approvals, {
+                  direction: "download",
+                  windowId: options.windowId,
+                  threadId: String(options.threadId),
+                  authority,
+                  origin: pageOrigin,
+                  profile,
+                  workspaceRoot: options.uploadRoot?.(),
+                  file: facts,
+                  // The page's own end withdraws the question with the call's.
+                  signal: pageSignal,
+                })
+              : permission.inspect(facts, pageOrigin),
       });
       return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
     }
@@ -526,7 +663,6 @@ export function createBrowserAppManagedTools(
       // A CLI in a terminal is not the person who would be asked.
       if (options.profileCaller === "terminal-grant") return failure("upload-needs-a-person");
       const approvals = options.approvals;
-      if (approvals === undefined) return failure("browser-approval-required");
       const permission =
         input.uploadPermissionId === undefined || profile === undefined
           ? undefined
@@ -538,22 +674,42 @@ export function createBrowserAppManagedTools(
             });
       if (input.uploadPermissionId !== undefined && permission === undefined)
         return failure("upload-permission-required");
+      // At Full access an ordinary upload is not asked; the path checks in
+      // the admission below hold at every level, and a routine's manifest
+      // keeps its own review.
+      const uploadsUnasked = fullAccess && permission === undefined;
+      if (approvals === undefined && !uploadsUnasked) return failure("browser-approval-required");
       uploadSignal = permission?.signal;
       uploadIsCurrent = permission?.isCurrent;
       const admitted = await admitBrowserUpload({
         workspaceRoot: permission?.workspaceRoot ?? options.uploadRoot?.(),
         files: input.files,
-        ask: (files) =>
-          permission?.approve(files) ??
-          approvals.request({
-            windowId: options.windowId,
-            threadId: String(options.threadId),
-            authority,
-            origin,
-            ...(profile === undefined ? {} : { profile }),
-            upload: files,
-            ...(signal === undefined ? {} : { signal }),
-          }),
+        // A routine's manifest keeps the default limit it was reviewed under.
+        ...(permission !== undefined || options.uploadFileLimitBytes === undefined
+          ? {}
+          : { maxFileBytes: options.uploadFileLimitBytes() }),
+        ...(permission !== undefined || options.uploadFileCountLimit === undefined
+          ? {}
+          : { maxFiles: options.uploadFileCountLimit() }),
+        ask: async (files) => {
+          if (permission !== undefined) return permission.approve(files);
+          if (uploadsUnasked) return "approved" as const;
+          // Withdrawn with its page, as a download question is; otherwise
+          // the turn stays parked and the admitted copies are kept.
+          return askWhilePageLives(pageHold, signal, (askSignal) =>
+            askBrowserTransfer(approvals, {
+              direction: "upload",
+              windowId: options.windowId,
+              threadId: String(options.threadId),
+              authority,
+              origin,
+              profile,
+              workspaceRoot: options.uploadRoot?.(),
+              files,
+              signal: askSignal,
+            }),
+          );
+        },
       });
       if (admitted.status === "refused") return failure(admitted.reason);
       uploadFiles = admitted.paths;
@@ -602,7 +758,7 @@ export function createBrowserAppManagedTools(
       options.approvals?.isPairedDevice?.(options.windowId) === true ||
       (options.uploadRoot?.() === undefined && options.downloadPermission === undefined)
         ? {}
-        : { holdDownloads: true }),
+        : { holdDownloads: true, ...(fullAccess ? { fullAccess: true as const } : {}) }),
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
       ...(uploadSignal === undefined ? {} : { uploadSignal }),
       ...(uploadIsCurrent === undefined ? {} : { uploadIsCurrent }),
@@ -619,13 +775,36 @@ export function createBrowserAppManagedTools(
     ) {
       return failure("browser-screenshot-unavailable");
     }
+    // A routine's manifest names its own destination, so only an ordinary
+    // turn's downloads land without a second call.
+    const saveDownload = options.browser.saveDownload;
+    const landsIn = options.uploadRoot?.();
+    const arrived =
+      fullAccess &&
+      saveDownload !== undefined &&
+      landsIn !== undefined &&
+      options.downloadPermission === undefined &&
+      options.approvals?.isPairedDevice?.(options.windowId) !== true
+        ? await landHeldDownloads(acted, (downloadId) =>
+            saveDownload({
+              windowId: options.windowId,
+              threadId: options.threadId,
+              downloadId,
+              workspaceRoot: landsIn,
+              fullAccess: true,
+              ...(signal === undefined ? {} : { signal }),
+              ask: () => Promise.resolve("approved" as const),
+            }),
+          )
+        : { snapshot: acted, landed: [] };
     return browserToolResult(
       afterSignIn &&
-        acted.failure?.category === "policy-denied" &&
-        acted.failure.reason === "origin-not-approved"
-        ? { ...acted, failure: browserSignInOriginRefusal() }
-        : acted,
+        arrived.snapshot.failure?.category === "policy-denied" &&
+        arrived.snapshot.failure.reason === "origin-not-approved"
+        ? { ...arrived.snapshot, failure: browserSignInOriginRefusal() }
+        : arrived.snapshot,
       browserToolWantsScreenshot(input),
+      arrived.landed,
     );
   };
   const activeContextId = (): string | undefined => {
@@ -770,15 +949,6 @@ function actionRequest(
     intent: "Operate the thread-owned isolated browser.",
     approval: { kind: "not-required" },
   };
-}
-
-function allowedOrigin(value: string): string | undefined {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function failure(reason: string) {

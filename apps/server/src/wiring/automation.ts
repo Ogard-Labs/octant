@@ -81,9 +81,14 @@ import {
 } from "../remote/privateListenerHostIdentity";
 import { createPushGatewaySetting } from "../remote/pushGatewaySetting";
 import type { HostSigningPort } from "../remote/remoteProtocolService";
-import { readDeviceRegistrations } from "../persistence/remoteAccessProjection";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
+import { createHostPersonScopes } from "../hostPersonScope";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
+  clampTurnAccessPosture,
   defaultPermissionModeFor,
   defaultShellSettings,
   isAutomationRunLifecycleActive,
@@ -827,7 +832,14 @@ export function wireAutomation(deps: AutomationDependencies) {
       createRoutineProposalTools({
         ...turn,
         proposals: routineProposalService,
-        readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
+        // The running posture and the journaled level are both read and the
+        // stricter wins, so a thread lowered mid-turn stops skipping the card.
+        readPosture: () =>
+          clampTurnAccessPosture({
+            requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+            thread:
+              persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
+          }),
       }),
       createRoutineTools({
         ...turn,
@@ -948,6 +960,13 @@ export function wireAutomation(deps: AutomationDependencies) {
     projects: projectService,
     hostId: String(LOCAL_HOST_ID),
     historyAvailable: () => automationHistoryAvailable,
+    personPairedDeviceCurrent: (scopeId) =>
+      createHostPersonScopes({
+        localWindows: () => windowAuthorityStore.listWindowIds(),
+        devices: () => readDeviceRegistrations(persistence.connection),
+        approvedByPerson: (deviceId) =>
+          readDeviceApprovedByPerson(persistence.connection, deviceId),
+      }).deviceActor(scopeId) !== undefined,
     prepareFileRearm: (input) => automationFileSources.prepareRearm(input),
     prepareFileSource: async ({ command, current, signal }) => {
       const previous = persistence.automationProjection.getDefinition(command.automationId);

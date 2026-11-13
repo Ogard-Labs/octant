@@ -14,11 +14,9 @@ describe("remote forward list vs route classifier", () => {
     expect(compareRemoteForwardListToClassifier()).toEqual([]);
   });
 
-  it("does not forward host-wide usage purges, diagnostics export, or host export", () => {
+  it("does not forward diagnostics export or host export", () => {
     const policy = createRemoteRoutePolicy({ origin });
     for (const probe of [
-      { path: "/api/usage/reset", method: "POST" },
-      { path: "/api/usage/retain", method: "POST" },
       { path: "/api/diagnostics/export", method: "POST" },
       { path: "/api/host-control/export", method: "GET" },
     ]) {
@@ -37,7 +35,7 @@ describe("remote forward list vs route classifier", () => {
     }
   });
 
-  it("forwards the benchmark reads and the stars write to a paired device and refuses every other benchmark write", () => {
+  it("forwards the benchmark reads, the stars write, and the suite and run writes, and classifies only the reads and stars for a hub-introduced device", () => {
     const policy = createRemoteRoutePolicy({ origin });
     const decide = (path: string) =>
       policy.inspect(
@@ -68,7 +66,12 @@ describe("remote forward list vs route classifier", () => {
       "runs/cancel",
       "runs/purge",
     ]) {
-      expect(decide(`/api/benchmarks/${path}`)).toBe("reject");
+      // Forwarded for a device the host's own person paired; no catalogued
+      // action, so the product dispatch refuses every other device session.
+      expect(decide(`/api/benchmarks/${path}`)).toBe("allow");
+      expect(
+        classifyProductAction(new Request(`${origin}/api/benchmarks/${path}`, { method: "POST" })),
+      ).toBeUndefined();
     }
   });
 

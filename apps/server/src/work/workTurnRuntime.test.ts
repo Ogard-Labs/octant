@@ -1218,6 +1218,292 @@ describe("WorkTurnRuntime", () => {
     );
   });
 
+  it("hands a tool call's input and output to the turn's record and keeps them off its tool steps", async () => {
+    const observed: ProviderRuntimeEvent[] = [];
+    const appTool = vi.fn();
+    const stepUpdates: unknown[] = [];
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const base = {
+      instanceId: ids.provider,
+      correlationId: decodeCorrelationId(String(ids.project)),
+      occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+      sessionId: ids.session as never,
+    };
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      send: () =>
+        Queue.offerAll(queue, [
+          { ...base, sequence: 1, kind: "tool-start", toolCallId: "call-1", toolName: "Bash" },
+          {
+            ...base,
+            sequence: 2,
+            kind: "tool-call-content",
+            toolCallId: "call-1",
+            part: "input",
+            text: "ls -la",
+          },
+          {
+            ...base,
+            sequence: 3,
+            kind: "tool-call-content",
+            toolCallId: "call-1",
+            part: "output",
+            text: "README.md",
+          },
+          {
+            ...base,
+            sequence: 4,
+            kind: "tool-success",
+            toolCallId: "call-1",
+            summary: "Tool completed.",
+          },
+          {
+            ...base,
+            sequence: 5,
+            kind: "tool-request",
+            requestId: "work-tool-1",
+            toolName: "work_tool",
+            inputJson: '{"query":"a"}',
+          },
+          { ...base, sequence: 6, kind: "completed" },
+        ]),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const driver: ProviderDriver = {
+      kind: "claude",
+      probe: () => Effect.die("unused"),
+      acquire: () => Effect.succeed(connection),
+    };
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 1_000 }).run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Use the tools",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      appManagedTools: {
+        definitions: [{ name: "work_tool", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: { status: "ok" }, isError: false }) as const,
+      },
+      onToolSteps: (steps) => stepUpdates.push(steps),
+      toolCallRecords: { observe: (event) => observed.push(event), appTool },
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "" });
+    expect(
+      observed.flatMap((event) =>
+        event.kind === "tool-call-content" ? [[event.toolCallId, event.part, event.text]] : [],
+      ),
+    ).toEqual([
+      ["call-1", "input", "ls -la"],
+      ["call-1", "output", "README.md"],
+    ]);
+    expect(observed.some((event) => event.kind === "tool-start")).toBe(true);
+    expect(appTool).toHaveBeenCalledExactlyOnceWith({
+      toolCallId: "work-tool-1",
+      toolName: "work_tool",
+      inputJson: '{"query":"a"}',
+      resultJson: '{"status":"ok"}',
+    });
+    // The journaled step stays the id, name, state and message it was, and a
+    // runtime that announces its own calls gets no second row for the request.
+    expect(stepUpdates.at(-1)).toEqual({
+      steps: [
+        { toolCallId: "call-1", toolName: "Bash", state: "completed", summary: "Tool completed." },
+      ],
+      truncated: false,
+    });
+    expect(JSON.stringify(stepUpdates)).not.toContain("README.md");
+  });
+
+  it("gives an Octant Harness turn's tool call a row that opens its record, started and then completed or failed", async () => {
+    const appTool = vi.fn();
+    const stepUpdates: Array<{ readonly steps: ReadonlyArray<unknown> }> = [];
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const base = {
+      instanceId: ids.provider,
+      correlationId: decodeCorrelationId(String(ids.project)),
+      occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+      sessionId: ids.session as never,
+    };
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      // The Octant Harness announces no tool start: the request is all there is.
+      send: () =>
+        Queue.offerAll(queue, [
+          {
+            ...base,
+            sequence: 1,
+            kind: "tool-request",
+            requestId: "call-1",
+            toolName: "read-file",
+            inputJson: '{"path":"notes.md"}',
+          },
+          {
+            ...base,
+            sequence: 2,
+            kind: "tool-request",
+            requestId: "call-2",
+            toolName: "run-command",
+            inputJson: '{"command":"false"}',
+          },
+          { ...base, sequence: 3, kind: "completed" },
+        ]),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () => Effect.succeed(connection),
+    };
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 1_000 }).run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Use the tools",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      appManagedTools: {
+        definitions: [
+          { name: "read-file", inputSchema: { type: "object" } },
+          { name: "run-command", inputSchema: { type: "object" } },
+        ],
+        execute: async ({ name }) =>
+          name === "read-file"
+            ? ({ result: { text: "hello" }, isError: false } as const)
+            : ({ result: { error: "exit 1" }, isError: true } as const),
+      },
+      onToolSteps: (steps) => stepUpdates.push(steps),
+      toolCallRecords: { observe: () => undefined, appTool },
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "" });
+    // The row shows while the tool runs, under the id its record is kept by.
+    expect(stepUpdates[0]).toEqual({
+      steps: [{ toolCallId: "call-1", toolName: "read-file", state: "started" }],
+      truncated: false,
+    });
+    expect(stepUpdates.at(-1)).toEqual({
+      steps: [
+        { toolCallId: "call-1", toolName: "read-file", state: "completed" },
+        { toolCallId: "call-2", toolName: "run-command", state: "failed" },
+      ],
+      truncated: false,
+    });
+    expect(appTool.mock.calls.map(([call]) => call.toolCallId)).toEqual(["call-1", "call-2"]);
+  });
+
+  it("keeps as many tool calls as the turn's limit, and every call when the limit is off", async () => {
+    const stepsKept = async (toolStepLimit: number | "off" | undefined) => {
+      let kept: { readonly steps: ReadonlyArray<unknown>; readonly truncated: boolean } = {
+        steps: [],
+        truncated: false,
+      };
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const base = {
+        instanceId: ids.provider,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+        sessionId: ids.session as never,
+      };
+      const connection: ProviderConnection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+        resume: () => Effect.die("unused"),
+        send: () =>
+          Queue.offerAll(queue, [
+            ...Array.from({ length: 70 }, (_unused, index) => ({
+              ...base,
+              sequence: index + 1,
+              kind: "tool-start" as const,
+              toolCallId: `call-${String(index)}`,
+              toolName: "Read",
+            })),
+            { ...base, sequence: 71, kind: "completed" as const },
+          ]),
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      await new WorkTurnRuntime({ timeoutMs: 1_000 }).run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Read everything",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver: {
+          kind: "claude",
+          probe: () => Effect.die("unused"),
+          acquire: () => Effect.succeed(connection),
+        },
+        signal: new AbortController().signal,
+        ...(toolStepLimit === undefined ? {} : { toolStepLimit }),
+        onToolSteps: (steps) => {
+          kept = steps;
+        },
+      });
+      return { count: kept.steps.length, truncated: kept.truncated };
+    };
+    expect(await stepsKept(undefined)).toEqual({ count: 64, truncated: true });
+    expect(await stepsKept(10)).toEqual({ count: 10, truncated: true });
+    expect(await stepsKept("off")).toEqual({ count: 70, truncated: false });
+  });
+
   it("records the routine an app-managed call created on that call's tool step", async () => {
     const routine = {
       routineId: "20000000-0000-4000-8000-0000000000a1",
@@ -1480,7 +1766,7 @@ describe("WorkTurnRuntime", () => {
     });
   });
 
-  it("still times out when the provider stays silent", async () => {
+  it("still times out when the provider stays silent past the host's stalled-turn limit", async () => {
     const driver: ProviderDriver = {
       kind: "openai-compatible",
       probe: () => Effect.die("unused"),
@@ -1497,7 +1783,7 @@ describe("WorkTurnRuntime", () => {
           answerTool: () => Effect.void,
         } as never),
     };
-    const outcome = await new WorkTurnRuntime({ timeoutMs: 10 }).run({
+    const outcome = await new WorkTurnRuntime({ stalledTurnLimitMs: () => 10 }).run({
       command: decodeStartWorkThreadTurnCommand({
         kind: "start-work-thread-turn",
         requestId: ids.request,
@@ -1521,6 +1807,60 @@ describe("WorkTurnRuntime", () => {
     });
     expect(outcome.kind).toBe("waiting");
     if (outcome.kind === "waiting") expect(outcome.failure?.message).toMatch(/timed out/i);
+  });
+
+  it("reports the prompt sent only once the provider accepts it, so carried messages survive a refused send", async () => {
+    async function promptSentAfter(sendRefused: boolean): Promise<number> {
+      let reported = 0;
+      const driver: ProviderDriver = {
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: () =>
+          Effect.succeed({
+            subscribe: Effect.succeed(Stream.never),
+            start: () => Effect.void,
+            send: () =>
+              sendRefused
+                ? Effect.fail({ category: "provider-failed", message: "Session is not active." })
+                : Effect.void,
+            resume: () => Effect.void,
+            interrupt: () => Effect.void,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          } as never),
+      };
+      await new WorkTurnRuntime({ timeoutMs: 10 }).run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Read the carried message",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver,
+        signal: new AbortController().signal,
+        onPromptSent: () => {
+          reported += 1;
+        },
+      });
+      return reported;
+    }
+
+    expect(await promptSentAfter(true)).toBe(0);
+    expect(await promptSentAfter(false)).toBe(1);
   });
 
   it("keeps a turn alive while the provider streams only liveness past the idle window", async () => {

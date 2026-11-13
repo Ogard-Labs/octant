@@ -32,7 +32,7 @@ function sink() {
 }
 
 describe("octant agent-access", () => {
-  it("parses a grant's scope and refuses Full access as a level", () => {
+  it("parses a grant's scope, takes Full access when the person names it, and refuses an unknown level", () => {
     expect(
       resolveAgentAccessCliCommand(["create", "Home bot"], {
         project: "repo,site",
@@ -51,6 +51,9 @@ describe("octant agent-access", () => {
     });
     expect(
       resolveAgentAccessCliCommand(["create", "Bot"], { project: "repo", access: "full-access" }),
+    ).toMatchObject({ action: "create", level: "full-access" });
+    expect(
+      resolveAgentAccessCliCommand(["create", "Bot"], { project: "repo", access: "everything" }),
     ).toBeUndefined();
     expect(resolveAgentAccessCliCommand(["revoke", "Bot"], { "stop-turns": true })).toEqual({
       action: "revoke",

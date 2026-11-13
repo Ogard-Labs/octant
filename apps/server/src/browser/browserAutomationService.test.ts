@@ -113,6 +113,7 @@ function harness(
     >[0]["recordExternalContentIngestion"];
     readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
     readonly agentDownloadsEnabled?: boolean;
+    readonly transferLimits?: { readonly maxFileBytes: number; readonly maxHeldDownloads: number };
     readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
     readonly unattended?: boolean;
@@ -200,6 +201,9 @@ function harness(
     ...(options.agentDownloadsEnabled === undefined
       ? {}
       : { agentDownloadsEnabled: () => options.agentDownloadsEnabled === true }),
+    ...(options.transferLimits === undefined
+      ? {}
+      : { transferLimits: () => options.transferLimits as never }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
     ...(options.delegatedProfileIsCurrent === undefined
@@ -1665,6 +1669,45 @@ describe("BrowserAutomationService", () => {
       );
     });
 
+    it("tells the runtime the limits the person set in Settings for the downloads it holds", async () => {
+      const limits = { maxFileBytes: 100 * 1024 * 1024, maxHeldDownloads: 9 };
+      const on = harness({ agentDownloadsEnabled: true, transferLimits: limits });
+      await on.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await on.service.act({
+        windowId,
+        request: click(),
+        capturedBy: "agent",
+        holdDownloads: true,
+      });
+      expect(on.runtime.act).toHaveBeenLastCalledWith(
+        contextOne,
+        expect.objectContaining({ downloads: "hold", downloadLimits: limits }),
+        expect.anything(),
+      );
+    });
+
+    it("holds an agent's download at Full access with the switch off, and never a person's own action", async () => {
+      const off = harness({ agentDownloadsEnabled: false });
+      await off.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await off.service.act({
+        windowId,
+        request: click(),
+        capturedBy: "agent",
+        holdDownloads: true,
+        fullAccess: true,
+      });
+      expect(off.runtime.act).toHaveBeenLastCalledWith(
+        contextOne,
+        expect.objectContaining({ downloads: "hold" }),
+        expect.anything(),
+      );
+      await off.service.act({ windowId, request: click(), fullAccess: true });
+      await off.service.act({ windowId, request: click(), capturedBy: "agent", fullAccess: true });
+      for (const call of vi.mocked(off.runtime.act).mock.calls.slice(1)) {
+        expect(call[1]).not.toHaveProperty("downloads");
+      }
+    });
+
     it.each(["revoked", "cancelled"])(
       "refuses the final save after approval when the caller is %s",
       async (change) => {
@@ -1728,6 +1771,71 @@ describe("BrowserAutomationService", () => {
       },
     );
 
+    it("keeps the page while a download question waits a day, and releases the held file when the page closes under it", async () => {
+      const fixture = harness({
+        agentDownloadsEnabled: true,
+        claimDownload: vi.fn(async () => "/private/held-fixture"),
+        discardDownload: vi.fn(async () => undefined),
+        observed: {
+          downloads: [
+            {
+              state: "held",
+              downloadId: "d1",
+              name: "report.txt",
+              sizeBytes: 4,
+              mediaType: "text/plain",
+            },
+          ],
+        },
+      });
+      await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await fixture.service.act({
+        windowId,
+        request: click(),
+        capturedBy: "agent",
+        holdDownloads: true,
+      });
+      const facts = { name: "report.txt", sizeBytes: 4, mediaType: "text/plain" };
+      let asked: (() => void) | undefined;
+      const waiting = new Promise<void>((resolve) => (asked = resolve));
+      const save = vi
+        .spyOn(downloadSave, "saveBrowserDownload")
+        .mockImplementationOnce(async (input) => {
+          const answer = await input.ask(facts);
+          return {
+            status: "refused",
+            error: `browser-download-${answer}`,
+            reason: answer === "approved" ? "unavailable" : answer,
+            facts,
+          };
+        });
+      try {
+        const saving = fixture.service.saveDownload({
+          windowId,
+          threadId: threadOne,
+          downloadId: "d1",
+          workspaceRoot: "/workspace",
+          // The question ends only when the page it is about goes away.
+          ask: (_facts, _origin, pageSignal) =>
+            new Promise((resolve) => {
+              pageSignal?.addEventListener("abort", () => resolve("cancelled"), { once: true });
+              asked?.();
+            }),
+        });
+        await waiting;
+        fixture.advance(24 * 60 * 60_000);
+        fixture.expire();
+        expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+        expect(fixture.runtime.discardDownload).not.toHaveBeenCalled();
+        await fixture.service.releaseThread(windowId, threadOne);
+        expect(await saving).toEqual({ status: "refused", error: "browser-download-cancelled" });
+        expect(fixture.runtime.discardDownload).toHaveBeenCalledWith(contextOne, "d1");
+      } finally {
+        save.mockRestore();
+        await fixture.service.close();
+      }
+    });
+
     it("reports what the runtime holds, journals a stopped file, and saves only an id it reported", async () => {
       const refused = vi.fn();
       const { service } = harness({
@@ -1779,14 +1887,16 @@ describe("BrowserAutomationService", () => {
     });
   });
 
-  it("keeps a page open while the person signs in past its session limit, one hand-off at a time", async () => {
+  it("keeps a page open for as long as its sign-in card waits, one hand-off at a time", async () => {
     const fixture = harness();
     await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
     const release = fixture.service.holdForPerson(windowId, threadOne);
     expect(release).toBeDefined();
     expect(fixture.service.holdForPerson(windowId, threadOne)).toBeUndefined();
     expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("sign-in");
-    fixture.advance(400_000);
+    // The card has no expiry, so the page it asks the person to use has none
+    // either while the card waits.
+    fixture.advance(24 * 60 * 60_000);
     fixture.expire();
     expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
     release?.();
@@ -2857,6 +2967,48 @@ describe("BrowserAutomationService", () => {
       await f.service.close();
     });
 
+    it("keeps the page open through a wait as long as the idle interval, then lets it expire", async () => {
+      const f = harness();
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, sessionTimeoutMs: 600_000 },
+      });
+      let finish!: () => void;
+      vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { url: "https://example.com", title: "Still waiting" };
+      });
+      const waiting = f.service.act({
+        windowId,
+        capturedBy: "agent",
+        request: request({
+          kind: "wait",
+          waitFor: {
+            conditions: [{ kind: "text", text: "Deployed", present: true }],
+            match: "all",
+            timeoutMs: 600_000,
+          },
+        }),
+      });
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      // The wait's own limit and the idle interval end at the same instant;
+      // the page must outlive the wait so its answer is not lost to expiry.
+      f.advance(600_000);
+      f.expire();
+      expect(f.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+      // The hold is the wait's limit and a short margin, never open-ended.
+      f.advance(60_000);
+      f.expire();
+      await vi.waitFor(() => expect(f.contexts.size).toBe(0));
+      finish();
+      expect((await waiting).failure?.category).toBe("context-expired");
+      await f.service.close();
+    });
+
     it.each(["stale", "credential"] as const)("does not renew for a %s refusal", async (reason) => {
       const f = harness();
       await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
@@ -3627,6 +3779,61 @@ describe("BrowserAutomationService", () => {
     });
   });
 
+  it("opens a page that admits every site only for the agent at Full access, and never in a profile", async () => {
+    const everySite = { ...policy, allowedOrigins: ["*"] };
+    const denied = {
+      category: "policy-denied",
+      message: "Browser context policy exceeds host limits.",
+    };
+    // A window's own create names no Full access agent.
+    const fromWindow = harness();
+    expect(
+      (
+        await fromWindow.service.create({
+          windowId,
+          threadId: threadOne,
+          action: action(),
+          policy: everySite,
+        })
+      ).failure,
+    ).toEqual(denied);
+
+    const inProfile = harness();
+    expect(
+      (
+        await inProfile.service.create({
+          windowId,
+          threadId: threadOne,
+          action: action(),
+          policy: { ...everySite, profile: { kind: "personal" } },
+          fullAccessAgent: true,
+        })
+      ).failure,
+    ).toEqual(denied);
+
+    const agent = harness();
+    const opened = await agent.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy: everySite,
+      fullAccessAgent: true,
+    });
+    expect(opened.context?.state).toBe("active");
+    const context = opened.context;
+    if (context === undefined) throw new Error("Missing context");
+    const moved = await agent.service.act({
+      windowId,
+      request: {
+        ...action(),
+        contextId: context.contextId,
+        kind: "navigate",
+        target: "https://elsewhere.example/page",
+      } as never,
+    });
+    expect(moved.failure).toBeUndefined();
+  });
+
   it("explains a new site's approval without navigating outside the existing origin", async () => {
     const fixture = harness();
     await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
@@ -3885,7 +4092,11 @@ it("carries the held download's source receipt to its per-file review without su
         ask,
       }),
     ).toMatchObject({ status: "refused", error: "browser-download-denied" });
-    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ source }), "https://example.com");
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({ source }),
+      "https://example.com",
+      expect.any(AbortSignal),
+    );
   } finally {
     await f.service.close();
     await rm(heldFolder, { recursive: true, force: true });

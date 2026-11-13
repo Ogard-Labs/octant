@@ -646,6 +646,35 @@ describe("createAgentRunSessionRuntime", () => {
     }
   });
 
+  it("never cuts off a turn the person gave no working-time limit, and records no limit", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = fakeProvider();
+      const limits: Array<number | "none"> = [];
+      const runtime = createAgentRunSessionRuntime(
+        runtimeOptions(provider, {
+          workingTimeLimitMs: () => "none",
+          onSessionStarted: ({ workingTimeLimitMs }) => limits.push(workingTimeLimitMs),
+        }),
+      );
+      let outcome: AgentRunSessionOutcome | undefined;
+      runtime.start(agentRun()).onSettled((value) => {
+        outcome = value;
+      });
+      await vi.advanceTimersByTimeAsync(10 * 60 * 60_000);
+      expect(outcome).toBeUndefined();
+      expect(limits).toEqual(["none"]);
+      await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+      await provider.emit({ kind: "completed", sessionId });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toMatchObject({ kind: "completed" });
+      expect(outcome?.evidence?.workingTime).toMatchObject({ activeMs: 10 * 60 * 60_000 });
+      expect(outcome?.evidence?.workingTime?.limitMs).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps provider startup bounded when the person allows a longer working window", async () => {
     vi.useFakeTimers();
     try {
@@ -1898,6 +1927,37 @@ describe("createAgentRunSessionRuntime", () => {
 
     expect(provider.turns[0]?.tools.map((tool) => tool.name)).toContain("octant_canvas");
     expect(provider.acquired).toHaveLength(1);
+  });
+
+  it("asks whether the transport carries a child's tools at the level the child's session runs at", async () => {
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({ kind: "completed", sessionId });
+      },
+    });
+    const appManagedToolTransport = vi.fn(() => "supported" as const);
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        appManagedTools: () => ({
+          definitions: [
+            {
+              name: "octant_canvas",
+              description: "Author a Canvas in this run's workspace.",
+              inputSchema: { type: "object" },
+            },
+          ],
+          execute: async () => ({ result: { ok: true } }),
+        }),
+        appManagedToolTransport,
+      }),
+    );
+    const run = agentRun();
+
+    await settled(runtime.start(run));
+
+    expect(appManagedToolTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ executionPolicy: run.authority.executionPolicy }),
+    );
   });
 
   it("closes child-owned tools before publishing a failed acquisition outcome", async () => {

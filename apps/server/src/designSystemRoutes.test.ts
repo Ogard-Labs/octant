@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decodeProjectId, decodeWindowId } from "@octant/contracts";
 import { createDesignSystemRouteHandler } from "./designSystemRoutes";
+import { classifyProductAction } from "./authenticatedProductRoutes";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
+import { createRemoteRoutePolicy } from "./remoteRoutePolicy";
 import { DesignSystemFiles } from "./designSystems/designSystemFiles";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -194,6 +197,78 @@ describe("design system routes", () => {
 
   it("offers nothing for a Chat Project, which has no folder", async () => {
     expect((await get(`/api/design-systems?projectId=${chatProjectId}`))?.status).toBe(404);
+  });
+
+  it("lists and saves a design system for a device the host's own person paired, and for no other device", async () => {
+    const deviceId = "55000000-0000-4000-8000-000000000901";
+    const fromDevice = (
+      admittedBy: "host-person" | "hub-roster" | undefined,
+      init?: RequestInit,
+    ) => {
+      const request = new Request(
+        init === undefined
+          ? `http://127.0.0.1/api/design-systems?projectId=${projectId}`
+          : "http://127.0.0.1/api/design-systems/file",
+        init,
+      );
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          hostId: "11111111-1111-4111-8111-111111111111",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "55000000-0000-4000-8000-0000000009aa",
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        } as never,
+        scopeId: deviceId as never,
+      });
+      return route()(request);
+    };
+    const saving = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        folder: root,
+        path: "DESIGN.md",
+        text: "---\nname: Acme\n---\n",
+      }),
+    };
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      expect((await fromDevice(admittedBy))?.status).toBe(403);
+      expect((await fromDevice(admittedBy, saving))?.status).toBe(403);
+    }
+    await expect(readFile(join(root, "DESIGN.md"), "utf8")).rejects.toThrow();
+
+    expect((await fromDevice("host-person", saving))?.status).toBe(200);
+    expect(await readFile(join(root, "DESIGN.md"), "utf8")).toContain("name: Acme");
+    const listed = await fromDevice("host-person");
+    expect(listed?.status).toBe(200);
+
+    // The private listener forwards both paths with the Project named in the
+    // query; the product dispatch holds every other device to the catalogue,
+    // which names no action for them.
+    const origin = "https://octant.example:8443";
+    const policy = createRemoteRoutePolicy({ origin });
+    for (const [path, method] of [
+      [`/api/design-systems?projectId=${projectId}`, "GET"],
+      ["/api/design-systems/file", "POST"],
+    ] as const) {
+      const forwarded = new Request(`${origin}${path}`, {
+        method,
+        headers: {
+          host: "octant.example:8443",
+          origin,
+          "sec-fetch-site": "same-origin",
+          ...(method === "POST" ? { "content-type": "application/json" } : {}),
+        },
+      });
+      expect(policy.inspect(forwarded).kind).toBe("allow");
+      expect(classifyProductAction(forwarded)).toBeUndefined();
+    }
   });
 
   it("refuses a request without the window's capability", async () => {

@@ -149,6 +149,10 @@ export type ShellActions = {
   readonly openCoordinatorDraftInProject: (projectId: ProjectId) => Promise<void>;
   /** Turns a New coordinator draft back into an ordinary one. */
   readonly cancelCoordinatorDraft: () => void;
+  /** The workers' level and bounds a New coordinator draft sets on its thread. */
+  readonly setCoordinatorDraftChoices: (
+    choices: import("../shell/DraftThreadWorkspace").CoordinatorDraftChoices,
+  ) => void;
   readonly openDraftThread: ShellController["openDraftThread"];
   readonly openGithubIssues: () => void;
   readonly openImageLibrary: () => void;
@@ -210,6 +214,7 @@ export type ShellActions = {
   readonly renameCodeThread: (threadId: string, title: string) => void;
   readonly renameProject: ProjectController["rename"];
   readonly reopenChatThread: ChatController["reopenThread"];
+  readonly markCodeThreadDone: CodeController["markThreadDone"];
   readonly reopenCodeThread: CodeController["reopenThread"];
   readonly resetNewTaskDraft: (mode: OctantMode, paneId?: PaneId) => void;
   readonly retryActiveModeThreads: () => void;
@@ -254,6 +259,8 @@ export type ShellActions = {
   readonly setCodeNewThreadWorkspace: ProjectController["setCodeNewThreadWorkspace"];
   readonly setCodePullRequestBackgroundRefresh: ProjectController["setCodePullRequestBackgroundRefresh"];
   readonly setCodeAgentMerge: ProjectController["setCodeAgentMerge"];
+  readonly setCodeAgentPullRequestComments: ProjectController["setCodeAgentPullRequestComments"];
+  readonly setCodeAgentDefaultBranchPush: ProjectController["setCodeAgentDefaultBranchPush"];
   readonly setCodePullRequestsOpen: Dispatch<SetStateAction<boolean>>;
   readonly setDockSidecarsByThread: Dispatch<
     SetStateAction<ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>>
@@ -289,11 +296,14 @@ export type ShellActions = {
   readonly setProjectNativeProviders: ProjectController["setNativeProviders"];
   readonly setProjectPermissionMode: ProjectController["setCodePermissionMode"];
   readonly setProjectAutoReviewer: ProjectController["setCodeAutoReviewer"];
+  readonly setProjectAgentMemoryWrites: ProjectController["setAgentMemoryWrites"];
+  readonly askAgainForProjectImageGeneration: ProjectController["askAgainForImageGeneration"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectDesignSystem: ProjectController["setDesignSystem"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
   readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
+  readonly setProjectOwnToolchain: ProjectController["setCodeOwnToolchain"];
   readonly setProjectWorkDeveloperTools: ProjectController["setWorkDeveloperTools"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<
@@ -321,6 +331,10 @@ export type ShellActions = {
     >
   >;
   readonly setCodeThreadCoordinator: CodeController["setThreadCoordinator"];
+  /** Opens the limits of a running coordinator for a person to change. */
+  readonly editCodeThreadCoordinatorBounds: (
+    threadId: Parameters<CodeController["setThreadCoordinator"]>[0],
+  ) => void;
   readonly setCodeThreadCoordinatorWake: CodeController["setThreadCoordinatorWake"];
   readonly setCodeThreadMessageWake: CodeController["setThreadMessageWake"];
   readonly setCodeThreadRestartContinuation: CodeController["setThreadRestartContinuation"];

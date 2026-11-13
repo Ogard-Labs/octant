@@ -280,6 +280,7 @@ function createHarness(
   parentSessions?: AgentRunParentSessionPort,
   parentAuthority?: AgentRunParentAuthorityPort,
   workBinding?: AgentRunWorkBindingPort,
+  providerSlotWaitLimitMs?: () => number,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-orch-"));
   directories.push(directory);
@@ -334,6 +335,7 @@ function createHarness(
     ...(processes === undefined ? {} : { processes }),
     ...(parentSessions === undefined ? {} : { parentSessions }),
     ...(workBinding === undefined ? {} : { workBinding }),
+    ...(providerSlotWaitLimitMs === undefined ? {} : { providerSlotWaitLimitMs }),
     // Most tests are not about the parent's grant, so by default it covers
     // whatever the child was admitted with.
     parentAuthority: parentAuthority ?? { current: () => everythingTheParentMayGrant },
@@ -1543,6 +1545,8 @@ describe("managed child waiting for a provider slot", () => {
       readonly spend?: SpendCeilingService;
       /** How many children one thread may run at once; the default leaves it open. */
       readonly perThread?: number;
+      /** The person's setting for how long a helper waits for a full provider. */
+      readonly waitLimitMs?: () => number;
     } = {},
   ) {
     const startedAt = Date.now();
@@ -1635,6 +1639,8 @@ describe("managed child waiting for a provider slot", () => {
             parentLiveAuthority: () => parent.grant,
           }),
       },
+      undefined,
+      options.waitLimitMs,
     );
     const slots = new AgentRunProviderSlotScheduler({
       orchestration: harness.orchestration,
@@ -1782,7 +1788,7 @@ describe("managed child waiting for a provider slot", () => {
     const ended = provider.persistence.getById(helper.id);
     expect(ended?.lifecycleStatus).toBe("interrupted");
     expect(ended?.recoveryReason).toMatch(
-      /^capacity-unavailable: Waited 5 minutes for a free request slot\. Other turns are using every request/,
+      /^capacity-unavailable: Waited 30 minutes for a free request slot\. Other turns are using every request/,
     );
     expect(provider.acquire).not.toHaveBeenCalled();
 
@@ -1791,6 +1797,26 @@ describe("managed child waiting for a provider slot", () => {
     expect(retried).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
     await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce());
     await provider.supervisor.stop(helper.id);
+  });
+
+  it("ends a waiting helper at the wait a person chose, read again at every check", () => {
+    let waitLimitMs = 60 * 60_000;
+    const provider = fullProvider({ waitLimitMs: () => waitLimitMs });
+    const helper = provider.delegate();
+    const parkedAt = Date.parse(helper.updatedAt);
+
+    // Past the default half hour, inside the hour the person chose.
+    provider.orchestration.retryProviderSlotWaiters(parkedAt + 45 * 60_000);
+    expect(provider.status(helper.id)).toBe("waiting");
+
+    waitLimitMs = 40 * 60_000;
+    provider.orchestration.retryProviderSlotWaiters(parkedAt + 45 * 60_000);
+    const ended = provider.persistence.getById(helper.id);
+    expect(ended?.lifecycleStatus).toBe("interrupted");
+    expect(ended?.recoveryReason).toMatch(
+      /^capacity-unavailable: Waited 40 minutes for a free request slot\./,
+    );
+    expect(provider.acquire).not.toHaveBeenCalled();
   });
 
   it("does not let a lead that waits for its helper keep the helper from ever starting", async () => {

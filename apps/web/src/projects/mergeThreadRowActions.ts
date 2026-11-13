@@ -89,6 +89,20 @@ export function mergeThreadRowActions(
           canMoveToProject: (id: string) => pick(id).onMoveToProject !== undefined,
         }
       : {}),
+    ...(either("onSetRestartContinuation")
+      ? {
+          onSetRestartContinuation: (id: string, continueAfterRestart: boolean) =>
+            pick(id).onSetRestartContinuation?.(id, continueAfterRestart),
+        }
+      : {}),
+    // Work has the message wake and Chat does not, so a Chat row hides the
+    // switch the same way it hides Move to Project.
+    ...(either("onSetMessageWake")
+      ? {
+          onSetMessageWake: (id: string, wake: boolean) => pick(id).onSetMessageWake?.(id, wake),
+          canSetMessageWake: (id: string) => pick(id).onSetMessageWake !== undefined,
+        }
+      : {}),
     ...(either("onStartRenameThread")
       ? { onStartRenameThread: (id: string) => pick(id).onStartRenameThread?.(id) }
       : {}),

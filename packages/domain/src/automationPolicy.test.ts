@@ -16,6 +16,7 @@ import {
   canExhaustOnceAutomation,
   decideAutomationFollowUp,
   decideRoutineChangeRequest,
+  decideRoutineFromAgent,
   decideRoutineRunResultReport,
   intersectAutomationAuthority,
   isAutomationMutationAllowed,
@@ -663,9 +664,20 @@ describe("follow-up fire-time decision", () => {
     ).toMatchObject({ reason: "thread-unavailable" });
   });
 
-  it("refuses a thread marked done and skips one already running a turn", () => {
+  it("refuses a thread marked done", () => {
     expect(decide({ done: true })).toMatchObject({ reason: "thread-done" });
-    expect(decide({ busy: true })).toMatchObject({ reason: "thread-busy" });
+  });
+
+  it("waits for a thread that is running a turn instead of skipping the follow-up", () => {
+    expect(decide({ busy: true })).toEqual({ kind: "waiting" });
+  });
+
+  it("refuses a busy thread that has also moved on, rather than waiting on it", () => {
+    expect(decide({ busy: true, archived: true })).toMatchObject({ reason: "thread-unavailable" });
+    expect(decide({ busy: true, done: true })).toMatchObject({ reason: "thread-done" });
+    expect(decide({ busy: true }, "2026-11-02T09:01:00.000Z")).toMatchObject({
+      reason: "follow-up-missed",
+    });
   });
 
   it("refuses when the thread's provider, model, or posture no longer matches", () => {
@@ -816,5 +828,33 @@ describe("what a thread's agent may do with routines", () => {
     expect(
       decideRoutineRunResultReport({ threadId: thread, dispatchedRun, run: undefined }),
     ).toMatchObject({ reason: "run-unavailable" });
+  });
+});
+
+describe("a routine a thread's agent sets up", () => {
+  const suggestion = { requestedByPerson: false, followUp: false } as const;
+
+  it("is created paused with no card at Full access, and waits for the person's card below it", () => {
+    expect(decideRoutineFromAgent({ ...suggestion, posture: "full-access" })).toBe("create-paused");
+    for (const posture of ["approval-gated", "auto-accept-edits", undefined] as const) {
+      expect(decideRoutineFromAgent({ ...suggestion, posture })).toBe("ask-on-card");
+    }
+  });
+
+  it("is created paused at any writing level when the person asked for it", () => {
+    for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      expect(decideRoutineFromAgent({ ...suggestion, requestedByPerson: true, posture })).toBe(
+        "create-paused",
+      );
+    }
+  });
+
+  it("waits for the card in Plan, and for a follow-up at every level", () => {
+    expect(
+      decideRoutineFromAgent({ ...suggestion, requestedByPerson: true, posture: "plan" }),
+    ).toBe("ask-on-card");
+    expect(decideRoutineFromAgent({ ...suggestion, followUp: true, posture: "full-access" })).toBe(
+      "ask-on-card",
+    );
   });
 });

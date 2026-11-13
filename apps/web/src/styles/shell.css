@@ -2025,14 +2025,16 @@ html[data-octant-native-host="true"]
   font-size: var(--oct-text-xs);
 }
 
-/* Thread menus are action palettes, not generic context popups. A bounded
-   width keeps long titles from widening the menu, while the shared menu item
-   semantics still own keyboard highlight and disabled states. */
+/* Thread menus are action palettes, not generic context popups. The menu is
+   as wide as its longest row up to a bound, so a checked switch's tick widens
+   the menu instead of cutting its label (a fixed 248px showed "Wake when a
+   message arr..." once checked). The positioner's available width keeps a
+   submenu on screen when neither side of its parent has room. */
 .thread-row-context-menu {
   display: grid;
-  width: min(248px, calc(100vw - 24px));
+  width: max-content;
   min-width: min(224px, calc(100vw - 24px));
-  max-width: calc(100vw - 24px);
+  max-width: min(320px, var(--available-width, 100vw), calc(100vw - 24px));
   gap: 0;
   padding: var(--oct-space-1);
   overflow: hidden;

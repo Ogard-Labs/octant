@@ -8,6 +8,7 @@ import { createUsageRouteHandler } from "./usageRoutes";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
+import { readUsageAuditEvents } from "./persistence/usageProjection";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
 import { USAGE_PROJECTION_SCHEMA_VERSION } from "./persistence/usagePersistenceSchema";
@@ -782,6 +783,47 @@ describe("usage reset routes", () => {
     const query = await handler(makeRequest("/api/usage/query", { body: {}, capability }));
     const body = (await query!.json()) as UsageQueryResponse;
     expect(body.records.length).toBeGreaterThan(0);
+  });
+
+  it("resets and trims the ledger for a device the host's own person paired, and records which device did", async () => {
+    const { handler, journal, connection } = setup();
+    seedUsageData(journal);
+    const deviceId = "22222222-2222-4222-8222-222222222222";
+    const fromDevice = (path: string, body: unknown) => {
+      const request = makeRequest(path, { body });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "11111111-1111-4111-8111-111111111111" as never,
+          deviceId: deviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "33333333-3333-4333-8333-333333333333" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: deviceId as never,
+      });
+      return handler(request);
+    };
+
+    const reset = await fromDevice("/api/usage/reset", { confirm: true });
+    expect(reset?.status).toBe(200);
+    expect(await reset?.json()).toMatchObject({ purgedCount: 1 });
+    const retained = await fromDevice("/api/usage/retain", {
+      olderThan: "2026-01-01T00:00:00.000Z",
+      confirm: true,
+    });
+    expect(retained?.status).toBe(200);
+    expect(
+      readUsageAuditEvents(connection).map((event) => ({
+        action: event.action,
+        deviceId: (JSON.parse(event.details_json) as { deviceId?: string }).deviceId,
+      })),
+    ).toEqual([
+      { action: "reset", deviceId },
+      { action: "purge", deviceId },
+    ]);
   });
 
   it("resets usage records with confirmation and reports the purged count", async () => {

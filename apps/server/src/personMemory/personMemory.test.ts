@@ -517,6 +517,35 @@ describe("benchmark threads and person memory", () => {
   });
 });
 
+describe("who a memory change is journaled as", () => {
+  it("journals a paired device's memory changes with the device as their actor, and a local window's as the local user", () => {
+    const deviceId = "00000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const actorsOf = (actor?: never) => {
+      const h = harness([]);
+      const before = h.journal.headSequence();
+      h.store.change(
+        decodePersonMemoryCommand({
+          kind: "change-person-memory-settings",
+          expectedVersion: h.store.view().version,
+          settings: { ...h.store.settings(), enabled: false },
+        }),
+        actor,
+      );
+      h.store.change(
+        decodePersonMemoryCommand({ kind: "forget-person-memory", confirmed: true }),
+        actor,
+      );
+      return h.journal
+        .replay({ afterSequence: before as never, limit: 100 } as never)
+        .map((event) => event.actor);
+    };
+
+    expect(actorsOf(device)).toEqual([device, device]);
+    expect(actorsOf().map((actor) => actor.kind)).toEqual(["local-user", "local-user"]);
+  });
+});
+
 describe("what person memory does not learn back", () => {
   it("does not learn again what the person forgot, or what ended while memory was off", async () => {
     const threads: FakeThread[] = [

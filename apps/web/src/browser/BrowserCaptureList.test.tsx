@@ -75,6 +75,21 @@ describe("BrowserCaptureList", () => {
     await waitFor(() => expect(screen.getAllByRole("img", { name: /Capture of/ })).toHaveLength(2));
   });
 
+  it("draws the newest 32 captures of a long thread and the rest when asked", async () => {
+    const many = Array.from({ length: 40 }, (_, index) =>
+      capture(index, {
+        captureId: `c2000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}` as never,
+      }),
+    );
+    const { client, readCapture } = clientWith(many);
+    render(<BrowserCaptureList client={client} threadId={threadId} />);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(32));
+    await waitFor(() => expect(readCapture).toHaveBeenCalledTimes(32));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show all 40 captures" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(40);
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+  });
+
   it("names the profile of a capture taken in a signed-in page, and none for a Private page", async () => {
     const { client } = clientWith([capture(2, { profile: { kind: "personal" } }), capture(1)]);
     render(<BrowserCaptureList client={client} threadId={threadId} />);

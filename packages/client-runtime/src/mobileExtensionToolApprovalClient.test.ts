@@ -60,6 +60,36 @@ describe("MCP tool prompts on a paired device", () => {
     });
   });
 
+  it("sends an approval to be remembered when asked, and never a remembered denial", async () => {
+    const fetch = vi.fn(async (_input: { readonly body?: unknown }) =>
+      Response.json({ accepted: true }),
+    );
+    const transport = {
+      hostId: "66000000-0000-4000-8000-0000000000ff",
+      authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+    };
+    await decideMobileExtensionToolApproval({
+      transport,
+      approvalId: "66000000-0000-4000-8000-000000000010",
+      decision: "approved",
+      remember: true,
+    });
+    await decideMobileExtensionToolApproval({
+      transport,
+      approvalId: "66000000-0000-4000-8000-000000000010",
+      decision: "denied",
+    });
+    expect(fetch.mock.calls.map((call) => JSON.parse(String(call[0].body)))).toEqual([
+      {
+        kind: "decide",
+        approvalId: "66000000-0000-4000-8000-000000000010",
+        decision: "approved",
+        remember: true,
+      },
+      { kind: "decide", approvalId: "66000000-0000-4000-8000-000000000010", decision: "denied" },
+    ]);
+  });
+
   it("reports a refused answer, and fails the read when the host refuses the list", async () => {
     const transport = {
       hostId: "66000000-0000-4000-8000-0000000000ff",

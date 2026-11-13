@@ -73,21 +73,40 @@ describe("provider usage limit routes", () => {
     expect(response?.headers.get("access-control-allow-origin")).toBe("null");
   });
 
-  it("refuses a paired remote principal even when it rewrites the URL to loopback", async () => {
-    const route = fixture({
-      snapshot: vi.fn(() => snapshot),
-      refresh: vi.fn(async () => snapshot),
-    });
+  it("answers a device the host's own person paired, and refuses a hub-introduced device and an unproved pairing whatever the URL says", async () => {
+    const refresh = vi.fn(async () => snapshot);
+    const route = fixture({ snapshot: vi.fn(() => snapshot), refresh });
     // URL rewriting to loopback must not turn a bound remote principal into a
-    // local-window principal.
-    const loopback = new Request("http://127.0.0.1/api/provider-usage-limits", {
-      headers: { origin: "null", "x-octant-window-capability": capability },
-    });
-    bindPrincipalRouteContext(loopback, {
-      principal: { kind: "remote-device" } as never,
-      scopeId: windowId,
-    });
-    expect((await route(loopback))?.status).toBe(403);
+    // local-window principal: only the host's own approval record does.
+    const fromDevice = (path: string, admittedBy?: "host-person" | "hub-roster") => {
+      const loopback = new Request(`http://127.0.0.1${path}`, {
+        method: path.endsWith("/refresh") ? "POST" : "GET",
+        headers: { origin: "null", "x-octant-window-capability": capability },
+      });
+      bindPrincipalRouteContext(loopback, {
+        principal: {
+          kind: "remote-device",
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        } as never,
+        scopeId: windowId,
+      });
+      return loopback;
+    };
+    for (const restricted of [undefined, "hub-roster"] as const) {
+      expect((await route(fromDevice("/api/provider-usage-limits", restricted)))?.status).toBe(403);
+      expect(
+        (await route(fromDevice("/api/provider-usage-limits/refresh", restricted)))?.status,
+      ).toBe(403);
+    }
+    expect(refresh).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice("/api/provider-usage-limits", "host-person")))?.status).toBe(
+      200,
+    );
+    expect(
+      (await route(fromDevice("/api/provider-usage-limits/refresh", "host-person")))?.status,
+    ).toBe(200);
+    expect(refresh).toHaveBeenCalledOnce();
   });
 });
 

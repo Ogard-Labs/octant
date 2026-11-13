@@ -57,6 +57,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "update updates upgrade version release automatic check download install relaunch privacy signed notarized what's new notes",
         },
         {
+          id: settingId("quit-shortcut-second-press"),
+          label: "Press ⌘Q twice to quit",
+          scope: "app",
+          keywords:
+            "quit quitting exit close shortcut command q cmd twice double press again guard",
+        },
+        {
           id: settingId("default-folder"),
           label: "Default folder",
           scope: "host",
@@ -639,6 +646,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "language services language server typescript javascript type errors diagnostics problems go to definition lsp editor bundled",
         },
         {
+          id: settingId("code-android-snapshot-boot"),
+          label: "Android snapshot boot",
+          scope: "mode",
+          keywords: "android emulator snapshot quickboot cold boot avd device start",
+        },
+        {
           id: settingId("code-coordinator-starting"),
           label: "Starting workers",
           scope: "mode",
@@ -747,6 +760,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "automatic model calls second opinion decisions review independent model account api key provider off needs you card disagree",
         },
         {
+          id: settingId("stalled-turn-limit"),
+          label: "Stalled-turn limit",
+          scope: "host",
+          keywords:
+            "stalled turn limit silent silence no provider event inactivity idle timeout timed out cut off stop minutes hours off never long tool call",
+        },
+        {
+          id: settingId("provider-tool-call-pause-limit"),
+          label: "Tool-call pause limit",
+          scope: "host",
+          keywords:
+            "longest tool call pause stalled turn limit provider tool started never finished running hung stuck build test cap bound two hours off",
+        },
+        {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
           scope: "host",
@@ -821,6 +848,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "run as itself own setup native subagents web search fetch skills mcp servers plugins hooks settings home folder claude code codex opencode mistral vibe trusted project",
         },
+        {
+          id: settingId("provider-own-memory"),
+          label: "Use the provider's own memory",
+          scope: "host",
+          keywords:
+            "provider own memory memories remember auto-memory claude code codex account across projects work code plan chat off telemetry self-update",
+        },
       ],
     },
     {
@@ -875,6 +909,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords:
             "helper agents subagents working time minutes limit budget retry resume approval question waits",
+        },
+        {
+          id: settingId("subagent-no-limit-full-access"),
+          label: "No helper time limit at Full access",
+          scope: "app",
+          keywords: "helper agents subagents working time limit none unlimited full access",
+        },
+        {
+          id: settingId("subagent-provider-wait-minutes"),
+          label: "Minutes a helper waits for a full provider",
+          scope: "app",
+          keywords:
+            "helper agents subagents provider full capacity wait minutes request slot limit",
         },
         {
           id: settingId("default-model"),
@@ -1072,6 +1119,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "disposable desktop cloud billed spend cap budget money monthly limit cost",
         },
+        {
+          id: settingId("desktop-confirm-billed"),
+          label: "Confirm each billed desktop",
+          scope: "host",
+          keywords:
+            "disposable desktop cloud billed confirm ask approve start transfer off machine",
+        },
+        {
+          id: settingId("desktop-leases-per-thread"),
+          label: "Desktops per thread",
+          scope: "host",
+          keywords: "disposable desktop lease limit count thread how many",
+        },
+        {
+          id: settingId("desktop-leases-on-host"),
+          label: "Desktops on this host",
+          scope: "host",
+          keywords: "disposable desktop lease limit count host local how many",
+        },
       ],
     },
     {
@@ -1183,6 +1249,52 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "browser downloads agents download files save workspace downloads folder allow block switch",
+        },
+        {
+          id: settingId("browser-captures-per-thread"),
+          label: "Browser captures kept per thread",
+          scope: "host",
+          keywords:
+            "browser captures screenshots recordings kept per thread limit retention storage",
+        },
+        {
+          id: settingId("tool-call-records"),
+          label: "Keep tool inputs and outputs",
+          scope: "host",
+          keywords:
+            "tool calls records inputs outputs keep store inspect what an agent ran returned chat work purge privacy switch",
+        },
+        {
+          id: settingId("tool-steps-per-turn"),
+          label: "Tool steps kept per turn",
+          scope: "host",
+          keywords:
+            "tool steps calls kept per turn limit count rows chat work transcript truncated more",
+        },
+        {
+          id: settingId("tool-steps-per-turn-full-access"),
+          label: "Tool steps kept per turn at Full access",
+          scope: "host",
+          keywords:
+            "tool steps calls kept per turn full access no limit off unlimited spend ceiling work",
+        },
+        {
+          id: settingId("browser-transfer-file-limit"),
+          label: "Largest file",
+          scope: "host",
+          keywords: "browser upload download largest file size limit megabytes cap agents transfer",
+        },
+        {
+          id: settingId("browser-held-download-limit"),
+          label: "Downloads kept waiting",
+          scope: "host",
+          keywords: "browser downloads kept waiting held files limit count cap agents page",
+        },
+        {
+          id: settingId("browser-upload-file-count-limit"),
+          label: "Files per upload",
+          scope: "host",
+          keywords: "browser upload files per upload count limit cap agents send page how many",
         },
         {
           id: settingId("tool-approvals"),
@@ -1570,6 +1682,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "hub owner unlock merge pull request phone browser paired client passkey fresh unlock off by default",
+        },
+        {
+          id: settingId("hub-owner-approval-answer-unlock"),
+          label: "Owner unlock for each approval answer",
+          scope: "host",
+          keywords:
+            "hub owner device unlock approval answer allow once deny session five minutes fresh unlock per answer off by default",
         },
         {
           id: settingId("hub-confirm-new-members"),

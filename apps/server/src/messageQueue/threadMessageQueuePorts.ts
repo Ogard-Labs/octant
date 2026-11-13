@@ -88,7 +88,37 @@ function tailOf(id: string, status: string): ThreadMessageQueueTail {
     id,
     status: tailStatus(status),
     ...(status === "ambiguous" ? { unconfirmed: true as const } : {}),
+    ...ordinaryFailure(status),
   };
+}
+
+/**
+ * The queue passes one ordinary failure by itself, so the boundary is the
+ * mode's own word: only an outcome of exactly `failed` qualifies. `interrupted`
+ * covers a person's stop and a turn a restart cut off, `ambiguous` an end the
+ * host never learned, and `cancelled` the person's own cancel; each may leave
+ * a delivery or an effect unsettled, and the queue holds on them.
+ */
+function ordinaryFailure(status: string): { readonly ordinaryFailure?: true } {
+  return status === "failed" ? { ordinaryFailure: true } : {};
+}
+
+/**
+ * Work has no `interrupted` status: a turn a restart cut off, or one the
+ * runtime interrupted, is `failed` with that failure category.
+ */
+function workOutcome(turn: WorkTurnState): string {
+  return turn.status === "failed" && turn.failure?.category === "interrupted"
+    ? "interrupted"
+    : turn.status;
+}
+
+function settledAs(source: string): {
+  readonly status: "accepted" | "completed" | "failed" | "cancelled";
+  readonly ordinaryFailure?: true;
+} {
+  const status = tailStatus(source);
+  return status === "active" ? { status: "accepted" } : { status, ...ordinaryFailure(source) };
 }
 
 function readFacts(
@@ -134,7 +164,7 @@ function readFacts(
         workingDirectory: thread.workingDirectory,
         access: thread.access,
       },
-      ...(turn === undefined ? {} : { tail: tailOf(String(turn.turnId), turn.status) }),
+      ...(turn === undefined ? {} : { tail: tailOf(String(turn.turnId), workOutcome(turn)) }),
       markedDone: thread.completionConfirmed === true,
     };
   }
@@ -191,7 +221,7 @@ export function createThreadMessageQueuePort(
         (facts.thread.projectId !== undefined && project?.lifecycle !== "active") ||
         ("checkoutAvailable" in facts && !facts.checkoutAvailable) ||
         // A Work thread a person marked Done takes no new message: the queue
-        // keeps what it holds, shown as held, until the thread is reactivated.
+        // keeps what it holds, shown as held, until the thread is reopened.
         ("markedDone" in facts && facts.markedDone))
     )
       return { status: "held", reason: "thread-unavailable" };
@@ -243,8 +273,7 @@ export function createThreadMessageQueuePort(
         (candidate) => String(candidate.submissionId) === String(messageId),
       );
       if (turn === undefined) return { status: "not-admitted" };
-      const status = tailStatus(turn.attempts.at(-1)?.outcome ?? "queued");
-      return { status: status === "active" ? "accepted" : status };
+      return settledAs(turn.attempts.at(-1)?.outcome ?? "queued");
     }
     if (scope.mode === "work") {
       const id = decodeWorkThreadId(scope.threadId);
@@ -253,8 +282,7 @@ export function createThreadMessageQueuePort(
         .listTurns(id)
         .find((candidate) => String(candidate.requestId) === String(messageId));
       if (turn === undefined) return { status: "not-admitted" };
-      const status = tailStatus(turn.status);
-      return { status: status === "active" ? "accepted" : status };
+      return settledAs(workOutcome(turn));
     }
     const id = decodeCodeThreadId(scope.threadId);
     const operationId = codeOperationId ?? messageId;
@@ -288,10 +316,7 @@ export function createThreadMessageQueuePort(
     const work = deps.persistence
       .readCodeRuntimeWorks(id)
       .find(({ work }) => String(work.id) === String(operationId))?.work;
-    if (work !== undefined) {
-      const status = tailStatus(work.state);
-      return { status: status === "active" ? "accepted" : status };
-    }
+    if (work !== undefined) return settledAs(work.state);
     if (result?.kind === "operation-result") {
       if (result.result.kind === "operation-failed") return { status: "failed" };
       if (result.result.kind === "provider-turn-state") {

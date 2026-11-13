@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeAutomationCommand,
   decodeAutomationId,
@@ -359,6 +359,45 @@ describe("routine proposals from a thread", () => {
     });
   });
 
+  it("creates a paused routine with no card, and a receipt for the thread, when the agent suggests one at Full access", async () => {
+    const h = harness({ mode: "code" });
+    const outcome = await h
+      .tools(windowId, false, "full-access")
+      .execute({ name: "octant_propose_routine", inputJson: weeklyInput });
+    expect(outcome).toMatchObject({ result: { status: "created", paused: true } });
+    expect(outcome.routine).toMatchObject({ name: "Monday report", paused: true });
+    expect(await listed(h.handler)).toEqual([]);
+    const items = h.projection.listSummaries({
+      hostId: "local" as never,
+      mode: "all",
+      limit: 10,
+    }).items;
+    expect(items).toHaveLength(1);
+    const routine = h.projection.getDefinition(items[0]?.id as never);
+    expect(routine).toMatchObject({ lifecycle: "paused", originThreadId: THREAD });
+    // The thread's level reaches none of the routine: its runs still ask first.
+    expect(routine?.authorityProfile.effective).toMatchObject({
+      executionPolicy: "approval-gated",
+    });
+  });
+
+  it("still asks on a card for a follow-up the agent suggests at Full access", async () => {
+    const h = harness({ mode: "code" });
+    const followUp = h.tools(windowId, false, "full-access").execute({
+      name: "octant_propose_routine",
+      inputJson: JSON.stringify({
+        name: "Check back",
+        prompt: "Check whether the reply arrived.",
+        trigger: "follow-up",
+        at: "2026-11-01T09:00:00Z",
+      }),
+    });
+    const card = await cardAppears(h.handler);
+    expect(card).toHaveLength(1);
+    await decide(h.handler, String(card[0]?.proposalId), "decline");
+    expect(await followUp).toMatchObject({ result: { status: "declined" } });
+  });
+
   it("still asks on a card when the agent suggests the routine itself", async () => {
     const h = harness();
     const { call, proposal } = await propose(h);
@@ -533,23 +572,36 @@ describe("routine proposals from a thread", () => {
     ).toEqual([]);
   });
 
-  it("creates nothing when the proposal expires", async () => {
-    const proposals = new RoutineProposalService({ uuid, now: () => NOW_MS, ttlMs: 1_000 });
-    const outcome: Promise<RoutineProposalOutcome> = proposals.propose({
-      windowId,
-      proposal: {
-        threadId: THREAD as never,
-        mode: "work",
-        projectId: PROJECT as never,
-        displayName: "Soon",
-        taskPrompt: "Check.",
-        trigger: { kind: "once", scheduledAt: "2026-11-01T09:00:00.000Z" as never },
-        missedRunPolicy: "skip",
-        firstRunAt: "2026-11-01T09:00:00.000Z" as never,
-      },
-    });
-    expect(await outcome).toEqual({ status: "expired" });
-    expect(proposals.list(windowId)).toEqual([]);
+  it("keeps a proposal waiting a day later, and gives it up when its thread is archived", async () => {
+    vi.useFakeTimers();
+    try {
+      const proposals = new RoutineProposalService({ uuid, now: () => NOW_MS });
+      const outcome: Promise<RoutineProposalOutcome> = proposals.propose({
+        windowId,
+        proposal: {
+          threadId: THREAD as never,
+          mode: "work",
+          projectId: PROJECT as never,
+          displayName: "Soon",
+          taskPrompt: "Check.",
+          trigger: { kind: "once", scheduledAt: "2026-11-01T09:00:00.000Z" as never },
+          missedRunPolicy: "skip",
+          firstRunAt: "2026-11-01T09:00:00.000Z" as never,
+        },
+      });
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(proposals.list(windowId)).toHaveLength(1);
+      // Nothing is left behind to fire later: the wait holds no timer.
+      expect(vi.getTimerCount()).toBe(0);
+
+      proposals.withdrawThread("00000000-0000-4000-8000-00000000dead");
+      expect(proposals.list(windowId)).toHaveLength(1);
+      proposals.withdrawThread(THREAD);
+      expect(await outcome).toEqual({ status: "cancelled" });
+      expect(proposals.list(windowId)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rebuilds the link from the journal after a restart", async () => {

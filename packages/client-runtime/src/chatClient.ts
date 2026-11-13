@@ -224,6 +224,8 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
       url.searchParams.set("compaction", "1");
       // Take streamed deltas as append-only frames; the client understands the kind.
       url.searchParams.set("appended", "1");
+      // Take each tool event as the one step it changed, not the whole attempt.
+      url.searchParams.set("toolSteps", "1");
       return parseNdjsonFrames(
         requestRaw(fetch, url.toString(), { method: "GET", headers, signal }),
         threadId,

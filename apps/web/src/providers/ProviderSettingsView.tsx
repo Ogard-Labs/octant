@@ -39,7 +39,7 @@ import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OpenCodeManagedUpdate } from "./OpenCodeManagedUpdate";
-import type { OctantHostBridge } from "../shell/hostBridge";
+import type { ProviderKeyHost } from "./providerKeyHost";
 import {
   ProviderCreateForm,
   type ProviderCreateProviderType,
@@ -74,7 +74,7 @@ export interface ProviderSettingsViewProps {
   readonly busy: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
-  readonly hostBridge?: OctantHostBridge;
+  readonly hostBridge?: ProviderKeyHost;
   /** Open provider-owned sign-in pages through the desktop host bridge. */
   readonly onOpenExternalUrl?: (url: string) => void;
   readonly onCreate: (
@@ -252,6 +252,11 @@ export interface ProviderSettingsViewProps {
   ) => Promise<boolean>;
   /** Lets one key provider account run as itself, or turns that off. */
   readonly onSetProviderNativeSetup?: (
+    instanceId: ProviderInstanceId,
+    enabled: boolean,
+  ) => Promise<boolean>;
+  /** Turns one Claude Code or Codex account's own memory on or off. */
+  readonly onSetProviderOwnMemory?: (
     instanceId: ProviderInstanceId,
     enabled: boolean,
   ) => Promise<boolean>;
@@ -514,6 +519,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         {...(props.onSetProviderNativeSetup === undefined
           ? {}
           : { onSetProviderNativeSetup: props.onSetProviderNativeSetup })}
+        {...(props.onSetProviderOwnMemory === undefined
+          ? {}
+          : { onSetProviderOwnMemory: props.onSetProviderOwnMemory })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined

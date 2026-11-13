@@ -93,7 +93,6 @@ import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueu
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -168,6 +167,7 @@ import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
 import { toolStepsActivity } from "../transcript/turnActivity";
+import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -423,8 +423,17 @@ function WorkTurnHeader(props: {
 function WorkToolGroup(props: {
   readonly turn: WorkTurnState;
   readonly canvasClient?: CanvasClient;
+  readonly serverUrl?: string | undefined;
+  readonly windowCapability?: string | undefined;
 }) {
   const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
+  const toolCallRecords = useToolCallRecordsReader({
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    mode: "work",
+    threadId: String(props.turn.threadId),
+    turnId: String(props.turn.requestId),
+  });
   if (activity === undefined) return null;
   const status = props.turn.status;
   const canvasClient = props.canvasClient;
@@ -437,6 +446,7 @@ function WorkToolGroup(props: {
       }
       running={status === "accepted" || status === "running"}
       settled={status === "completed" || status === "failed" || status === "cancelled"}
+      {...(toolCallRecords === undefined ? {} : { toolCallRecords })}
     />
   );
 }
@@ -615,6 +625,26 @@ function applyWorkTurnStreamFrame(
     next[index] = {
       ...current,
       toolSteps: frame.toolSteps,
+      ...(frame.toolStepsTruncated ? { toolStepsTruncated: true } : {}),
+    };
+    return next;
+  }
+  if (frame.kind === "turn-tool-step") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    // One step a frame, put in the turn's list by its tool call id.
+    const toolSteps = (current.toolSteps ?? []).slice();
+    const changed = frame.toolStep;
+    if (changed !== undefined) {
+      const stepIndex = toolSteps.findIndex((step) => step.toolCallId === changed.toolCallId);
+      if (stepIndex === -1) toolSteps.push(changed);
+      else toolSteps[stepIndex] = changed;
+    }
+    const next = turns.slice();
+    next[index] = {
+      ...current,
+      ...(toolSteps.length === 0 ? {} : { toolSteps }),
       ...(frame.toolStepsTruncated ? { toolStepsTruncated: true } : {}),
     };
     return next;
@@ -835,7 +865,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [creating, setCreating] = useState(false);
   const [providerChanging, setProviderChanging] = useState(false);
   const [completing, setCompleting] = useState(false);
-  const [completionFormOpen, setCompletionFormOpen] = useState(false);
   const changeDriven = props.changeRevision !== undefined;
   const transcriptGeneration = useRef(0);
   const initialThread = useRef(props.initialThread);
@@ -1640,7 +1669,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   );
 
   const pendingBrowserApproval = browserApprovals[0];
-  const decideBrowserApproval = async (decision: "approved" | "denied", remember?: boolean) => {
+  const decideBrowserApproval = async (
+    decision: "approved" | "denied",
+    remember?: "site" | "profile",
+  ) => {
     if (
       pendingBrowserApproval === undefined ||
       props.browserAutomationClient?.decideApproval === undefined ||
@@ -1654,7 +1686,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       await props.browserAutomationClient.decideApproval({
         approvalId: pendingBrowserApproval.approvalId,
         decision,
-        ...(remember === true ? { remember: true } : {}),
+        ...(remember === "site" ? { remember: true } : {}),
+        ...(remember === "profile" ? { rememberProfile: true } : {}),
       });
       setBrowserApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
@@ -1662,7 +1695,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       // An always-allow grant is journaled by the server, outside this
       // window's shell commands — the shell controller re-reads on the signal
       // so its next settings edit does not conflict on a stale version.
-      if (decision === "approved" && remember === true) announceShellSettingsWritten();
+      if (decision === "approved" && remember !== undefined) announceShellSettingsWritten();
     } catch {
       setBrowserApprovalMessage(
         "Browser approval could not be sent. Keep this request open and retry.",
@@ -2074,12 +2107,34 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       }
       setThread(result.thread);
       props.onThreadUpdated?.(result.thread);
-      setStatus("Marked Done.");
     } catch {
       setErrorMessage("This task could not be marked Done. Try again.");
     } finally {
       setCompleting(false);
-      setCompletionFormOpen(false);
+    }
+  }, [completing, props.threadClient, thread]);
+
+  const reopenCompleted = useCallback(async () => {
+    if (thread === undefined || completing || thread.completionConfirmed !== true) return;
+    setCompleting(true);
+    setErrorMessage(undefined);
+    setStatus(undefined);
+    try {
+      const result = await props.threadClient.execute({
+        kind: "reopen-work-thread",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+      });
+      if (!("kind" in result) || result.kind !== "thread-updated") {
+        setErrorMessage("This task could not be reopened.");
+        return;
+      }
+      setThread(result.thread);
+      props.onThreadUpdated?.(result.thread);
+    } catch {
+      setErrorMessage("This task could not be reopened. Try again.");
+    } finally {
+      setCompleting(false);
     }
   }, [completing, props.threadClient, thread]);
 
@@ -2301,7 +2356,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             label: "Mark done",
             icon: <Check aria-hidden="true" size={14} />,
             disabled: completing || providerChanging || creating,
-            onSelect: () => setCompletionFormOpen(true),
+            onSelect: () => void confirmCompletion(),
           },
           ...(thread.documentDelivery === "native-artifacts"
             ? [
@@ -2340,21 +2395,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               onConfirm={() => void changeDocumentDelivery("native-artifacts")}
               pending={deliveryChanging}
             />
-          ) : null}
-        </OctantDialogPresence>
-
-        <OctantDialogPresence>
-          {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-            <OctantConfirmDialog
-              confirmLabel="Mark done"
-              onCancel={() => setCompletionFormOpen(false)}
-              onConfirm={() => void confirmCompletion()}
-              pending={completing}
-              title="Mark this task Done?"
-            >
-              {thread.title} moves to Done on the board. Its composer and provider lock until you
-              archive and reactivate it.
-            </OctantConfirmDialog>
           ) : null}
         </OctantDialogPresence>
 
@@ -2512,7 +2552,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                             events={workRetryEvents(retries, String(row.head.requestId))}
                           />
                           <WorkToolGroup
+                            serverUrl={props.serverUrl}
                             turn={row.head}
+                            windowCapability={props.windowCapability}
                             {...(props.canvasClient === undefined
                               ? {}
                               : { canvasClient: props.canvasClient })}
@@ -2553,7 +2595,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       events={workRetryEvents(retries, String(row.turn.requestId))}
                     />
                     <WorkToolGroup
+                      serverUrl={props.serverUrl}
                       turn={row.turn}
+                      windowCapability={props.windowCapability}
                       {...(props.canvasClient === undefined
                         ? {}
                         : { canvasClient: props.canvasClient })}
@@ -2778,6 +2822,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         <ImageGenerationOfferPrompt
           className="thread-column"
           client={props.imageGenerationClient}
+          keptIn="project"
           profiles={props.imageGenerationProfiles ?? []}
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}
           threadKind="work-thread"
@@ -2801,20 +2846,37 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? "Approve once"
                         : "Upload once"}
                 </OctantButton>
-                {/* An upload's, a download's, or a sign-in's answer is never remembered. */}
-                {pendingBrowserApproval.upload === undefined &&
-                pendingBrowserApproval.download === undefined &&
-                pendingBrowserApproval.signIn === undefined &&
+                {/*
+                  A sign-in's or a script's answer is never remembered. An upload's
+                  or a download's is remembered for that site and this thread's
+                  workspace, never for a whole profile.
+                */}
+                {pendingBrowserApproval.signIn === undefined &&
                 pendingBrowserApproval.script === undefined ? (
-                  <OctantButton
-                    disabled={browserApprovalBusy}
-                    onClick={() => void decideBrowserApproval("approved", true)}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Always allow
-                  </OctantButton>
+                  <>
+                    <OctantButton
+                      disabled={browserApprovalBusy}
+                      onClick={() => void decideBrowserApproval("approved", "site")}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Always allow
+                    </OctantButton>
+                    {pendingBrowserApproval.profile === undefined ||
+                    pendingBrowserApproval.upload !== undefined ||
+                    pendingBrowserApproval.download !== undefined ? null : (
+                      <OctantButton
+                        disabled={browserApprovalBusy}
+                        onClick={() => void decideBrowserApproval("approved", "profile")}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Allow all sites in this profile
+                      </OctantButton>
+                    )}
+                  </>
                 ) : null}
                 <OctantButton
                   disabled={browserApprovalBusy}
@@ -3225,13 +3287,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               ? []
               : [{ key: "handoff", tone: "neutral" as const, text: handoffNotice }]),
             // A locked task is a fact the person acts on: it stays until
-            // they reactivate it.
+            // they reopen it, which is one click from here.
             ...(completionLocked
               ? [
                   {
                     key: "locked",
                     tone: "neutral" as const,
-                    text: "Reactivate this task before creating another file or changing its provider.",
+                    text: "This task is marked Done.",
+                    action: (
+                      <OctantButton
+                        disabled={completing}
+                        onClick={() => void reopenCompleted()}
+                        size="sm"
+                        type="button"
+                      >
+                        Reopen
+                      </OctantButton>
+                    ),
                   },
                 ]
               : []),

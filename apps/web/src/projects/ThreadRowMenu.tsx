@@ -1,10 +1,12 @@
-import type { ThreadBoardPullRequestIdentity } from "@octant/contracts";
+import type { CoordinatorWorkerLevel, ThreadBoardPullRequestIdentity } from "@octant/contracts";
+import { COORDINATOR_WORKER_LEVELS } from "./coordinatorChoices";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { threadRowPullRequestDestinations } from "./threadRowPullRequests";
 import {
   Archive,
   BellRing,
   Check,
+  CircleCheck,
   Clock,
   Copy,
   Download,
@@ -12,6 +14,7 @@ import {
   EyeOff,
   Flag,
   Forward,
+  Gauge,
   GitPullRequest,
   FolderInput,
   Hash,
@@ -31,6 +34,7 @@ import {
   OctantContextMenuContent,
   OctantContextMenuGroup,
   OctantContextMenuItem,
+  OctantContextMenuLabel,
   OctantContextMenuSeparator,
   OctantContextMenuSub,
   OctantContextMenuSubContent,
@@ -56,6 +60,12 @@ export interface ThreadRowActions {
    */
   readonly onCompleteThread?: (threadId: string) => void;
   readonly onReopenThread?: (threadId: string) => void;
+  /**
+   * Marks a Code thread Done as the person's override of its delivery target;
+   * {@link onReopenThread} undoes it. Absent where the host has no such mark
+   * to set from a row, such as Chat and Work rows.
+   */
+  readonly onMarkThreadDone?: (threadId: string) => void;
   /**
    * Hides the thread until the ISO wake time. Paired with
    * {@link onWakeThread} the same way. Absent when the host cannot snooze.
@@ -132,9 +142,18 @@ export interface ThreadRowActions {
    * Never offered on a worker, which the host refuses as a coordinator. Absent
    * where the host has no coordinators, such as Chat and Work rows.
    */
-  readonly onSetCoordinator?: (threadId: string, coordinator: boolean) => void;
-  /** The thread's Wake when a message arrives switch. Absent outside Code. */
+  readonly onSetCoordinator?: (
+    threadId: string,
+    coordinator: boolean,
+    /** Fixes every worker's level; read only while making a coordinator. */
+    workerLevel?: CoordinatorWorkerLevel,
+  ) => void;
+  /** Opens a running coordinator's limits. Absent where the host has no coordinators. */
+  readonly onEditCoordinatorBounds?: (threadId: string) => void;
+  /** The thread's Wake when a message arrives switch, in Code and Work. Absent in Chat. */
   readonly onSetMessageWake?: (threadId: string, wake: boolean) => void;
+  /** Whether this row's kind has the message wake, in a list that mixes kinds. */
+  readonly canSetMessageWake?: (threadId: string) => boolean;
   /** A worker's Wake for coordinator switch, offered only on a worker. */
   readonly onSetCoordinatorWake?: (threadId: string, wake: boolean) => void;
   /** The thread's Continue after restart switch, in every mode. */
@@ -147,6 +166,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onArchiveThread === undefined &&
     actions.onCompleteThread === undefined &&
     actions.onReopenThread === undefined &&
+    actions.onMarkThreadDone === undefined &&
     actions.onSnoozeThread === undefined &&
     actions.onWakeThread === undefined &&
     actions.onCompleteFollowUp === undefined &&
@@ -164,6 +184,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onStartRenameThread === undefined &&
     actions.onMoveToProject === undefined &&
     actions.onSetCoordinator === undefined &&
+    actions.onEditCoordinatorBounds === undefined &&
     actions.onSetMessageWake === undefined &&
     actions.onSetCoordinatorWake === undefined &&
     actions.onSetRestartContinuation === undefined
@@ -193,10 +214,12 @@ export function ThreadRowMenu(props: {
     props.actions.onCompleteFollowUp !== undefined ||
     props.actions.onMarkFollowUp !== undefined;
   const hasCoordinatorActions = threadCoordinatorMenuOffers(props.thread, props.actions);
+  // Reopen undoes either way a person closed the thread: put away, or
+  // marked Done.
+  const closed = props.thread.completedAt !== undefined || props.thread.markedDone === true;
   const hasLifecycleActions =
-    (props.thread.completedAt === undefined
-      ? props.actions.onCompleteThread
-      : props.actions.onReopenThread) !== undefined ||
+    (closed ? props.actions.onReopenThread : props.actions.onCompleteThread) !== undefined ||
+    (props.thread.markedDone !== true && props.actions.onMarkThreadDone !== undefined) ||
     (props.thread.snooze === undefined
       ? props.actions.onSnoozeThread
       : props.actions.onWakeThread) !== undefined;
@@ -298,7 +321,17 @@ export function ThreadRowMenu(props: {
         <>
           <OctantContextMenuSeparator />
           <OctantContextMenuGroup>
-            {props.thread.completedAt !== undefined ? (
+            {props.thread.markedDone === true ||
+            props.actions.onMarkThreadDone === undefined ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label="Mark done"
+                onClick={() => props.actions.onMarkThreadDone?.(threadId)}
+              >
+                <MenuContent icon={CircleCheck}>Mark done</MenuContent>
+              </OctantContextMenuItem>
+            )}
+            {closed ? (
               props.actions.onReopenThread === undefined ? null : (
                 <OctantContextMenuItem
                   className="thread-row-context-menu__item"
@@ -473,7 +506,11 @@ export function ThreadRowMenu(props: {
 
 export type ThreadCoordinatorActions = Pick<
   ThreadRowActions,
-  "onSetCoordinator" | "onSetMessageWake" | "onSetCoordinatorWake" | "onSetRestartContinuation"
+  | "onSetCoordinator"
+  | "onEditCoordinatorBounds"
+  | "onSetMessageWake"
+  | "onSetCoordinatorWake"
+  | "onSetRestartContinuation"
 >;
 
 /**
@@ -486,12 +523,21 @@ export type ThreadCoordinatorActions = Pick<
  */
 function coordinatorMenuChoices(
   thread: ChatThreadNavigationItem,
-  actions: ThreadCoordinatorActions,
+  actions: ThreadCoordinatorActions & Pick<ThreadRowActions, "canSetMessageWake">,
 ) {
   const worker = thread.coordinatorThreadId !== undefined;
   return {
     role: worker || thread.planner === true ? undefined : actions.onSetCoordinator,
-    messageWake: actions.onSetMessageWake,
+    // The designated planner holds no bounds of its own: it is not a
+    // coordinator on its record, and the host refuses bounds for it.
+    bounds:
+      thread.coordinator === true && thread.planner !== true
+        ? actions.onEditCoordinatorBounds
+        : undefined,
+    messageWake:
+      actions.canSetMessageWake?.(thread.navigationId ?? thread.threadId) === false
+        ? undefined
+        : actions.onSetMessageWake,
     coordinatorWake: worker ? actions.onSetCoordinatorWake : undefined,
     restartContinuation: actions.onSetRestartContinuation,
   };
@@ -499,11 +545,12 @@ function coordinatorMenuChoices(
 
 export function threadCoordinatorMenuOffers(
   thread: ChatThreadNavigationItem,
-  actions: ThreadCoordinatorActions,
+  actions: ThreadCoordinatorActions & Pick<ThreadRowActions, "canSetMessageWake">,
 ): boolean {
   const choices = coordinatorMenuChoices(thread, actions);
   return (
     choices.role !== undefined ||
+    choices.bounds !== undefined ||
     choices.messageWake !== undefined ||
     choices.coordinatorWake !== undefined ||
     choices.restartContinuation !== undefined
@@ -512,25 +559,59 @@ export function threadCoordinatorMenuOffers(
 
 export function ThreadCoordinatorMenuItems(props: {
   readonly thread: ChatThreadNavigationItem;
-  readonly actions: ThreadCoordinatorActions;
+  readonly actions: ThreadCoordinatorActions & Pick<ThreadRowActions, "canSetMessageWake">;
 }) {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
-  const { role, messageWake, coordinatorWake, restartContinuation } = coordinatorMenuChoices(
-    props.thread,
-    props.actions,
-  );
+  const { role, bounds, messageWake, coordinatorWake, restartContinuation } =
+    coordinatorMenuChoices(props.thread, props.actions);
   const coordinator = props.thread.coordinator === true;
   return (
     <OctantContextMenuGroup>
-      {role === undefined ? null : (
+      {role === undefined ? null : coordinator ? (
         <OctantContextMenuItem
           className="thread-row-context-menu__item"
-          label={coordinator ? "Stop coordinating" : "Make coordinator"}
-          onClick={() => role(threadId, !coordinator)}
+          label="Stop coordinating"
+          onClick={() => role(threadId, false)}
         >
-          <MenuContent icon={Network}>
-            {coordinator ? "Stop coordinating" : "Make coordinator"}
-          </MenuContent>
+          <MenuContent icon={Network}>Stop coordinating</MenuContent>
+        </OctantContextMenuItem>
+      ) : (
+        // The level its workers start at is fixed only while the thread is
+        // made a coordinator, so the choice the New coordinator draft offers
+        // is offered here too.
+        <OctantContextMenuSub>
+          <OctantContextMenuSubTrigger
+            className="thread-row-context-menu__item"
+            label="Make coordinator"
+          >
+            <MenuContent icon={Network}>Make coordinator</MenuContent>
+          </OctantContextMenuSubTrigger>
+          {/* The full sentences overran a submenu at 420px, so the shared
+              start of each choice is the group's heading. */}
+          <OctantContextMenuSubContent className="thread-row-context-menu">
+            <OctantContextMenuGroup>
+              <OctantContextMenuLabel>Workers start at</OctantContextMenuLabel>
+              {COORDINATOR_WORKER_LEVELS.map((choice) => (
+                <OctantContextMenuItem
+                  className="thread-row-context-menu__item"
+                  key={choice.id}
+                  label={choice.label}
+                  onClick={() => role(threadId, true, choice.level)}
+                >
+                  <span className="thread-row-context-menu__item-label">{choice.menuLabel}</span>
+                </OctantContextMenuItem>
+              ))}
+            </OctantContextMenuGroup>
+          </OctantContextMenuSubContent>
+        </OctantContextMenuSub>
+      )}
+      {bounds === undefined ? null : (
+        <OctantContextMenuItem
+          className="thread-row-context-menu__item"
+          label="Coordinator limits…"
+          onClick={() => bounds(threadId)}
+        >
+          <MenuContent icon={Gauge}>Coordinator limits…</MenuContent>
         </OctantContextMenuItem>
       )}
       {messageWake === undefined ? null : (

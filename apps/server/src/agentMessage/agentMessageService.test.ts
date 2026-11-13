@@ -723,6 +723,53 @@ describe("the agent message delivery service", () => {
     },
   );
 
+  it("delivers between two Work threads of one Project, marks the recipient, and takes its receipt", async () => {
+    const { service, endpoints, ingested } = fixture();
+    const work = { mode: "work" as const, projectId: PROJECT_A, terminal: false };
+    endpoints.set(String(senderThreadId), work);
+    endpoints.set(String(recipientThreadId), work);
+    const [sent] = await service.send({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      body: handoff,
+    });
+    expect(sent).toMatchObject({ status: "sent" });
+    const messageId = String(sent?.messageId);
+    const carried = await service.carryIntoTurn(String(recipientThreadId));
+    expect(carried.map((message) => message.messageId)).toEqual([messageId]);
+    expect(ingested.map((entry) => String(entry.threadId))).toEqual([String(recipientThreadId)]);
+    await service.confirmDelivered([messageId]);
+    expect(
+      await service.acknowledge({ messageId, recipientThreadId: String(recipientThreadId) }),
+    ).toMatchObject({ status: "ok", receipt: { state: "acknowledged" } });
+    expect(
+      service.statusForSender({ senderThreadId: String(senderThreadId), messageIds: [messageId] }),
+    ).toMatchObject([{ status: "ok", receipt: { state: "acknowledged" } }]);
+  });
+
+  it("refuses a Work thread messaging a Code thread, even one recorded in its own Project", async () => {
+    const { service, endpoints, projection } = fixture();
+    endpoints.set(String(senderThreadId), { mode: "work", projectId: PROJECT_A, terminal: false });
+    const [sent] = await service.send({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      body: handoff,
+    });
+    expect(sent).toMatchObject({ status: "refused", reason: "unauthorized" });
+    expect(projection.inFlight()).toEqual([]);
+  });
+
+  it("gives a Chat thread no receipts", async () => {
+    const { service, endpoints } = fixture();
+    endpoints.set(String(senderThreadId), { mode: "chat", projectId: PROJECT_A, terminal: false });
+    expect(
+      service.statusForSender({
+        senderThreadId: String(senderThreadId),
+        messageIds: ["10000000-0000-4000-8000-000000000001"],
+      }),
+    ).toMatchObject([{ status: "refused" }]);
+  });
+
   it("refuses a receipt claimed by the sender instead of its actual recipient", async () => {
     const { service, events } = fixture();
     const [sent] = await service.send({

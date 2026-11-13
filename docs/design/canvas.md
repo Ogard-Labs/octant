@@ -857,8 +857,11 @@ against that Project, so a Canvas owned by a Chat thread outside every
 Project takes no Project share: the share overview answers no authority for it, and a
 share request is refused `scope-mismatch` with the reason. The person can
 share it through the export destinations instead, which need no Project
-(maintainer request, 2026-11-12). Not built yet: today it leaves only as a
-folder export.
+(maintainer request, 2026-11-12): **Export…** offers a window in Chat the same
+destinations for it as for any Canvas (the folder, which is the host's export
+folder, and the link destinations such as a gist or a sharehtml.org page), each
+behind the same approval card, and the export is journaled with the Canvas. A
+window in another mode is offered none, as it cannot open the Canvas.
 
 A public link carries the same blocks without host, Project, thread, or
 source identity; its rules are in [Canvas public links](canvas-public-links.md).
@@ -1008,7 +1011,7 @@ does not, and the only drawing on a surface with no runtime.
 
 The block reads only, listing its questions and options with one line saying
 why, wherever it cannot send: a window without a message queue for the thread
-(a paired or remote client, whose queue commands the host also refuses), a
+(a paired or remote client), a
 Canvas the host gave no workspace scope for (its thread cannot be reached from
 here), a version older than the head on screen, and every surface that draws a
 Canvas without its thread: the thread itself (a Canvas holding a choice is a
@@ -1701,8 +1704,8 @@ gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
 wait the stalled-turn limit for a provider event before cutting a turn off, as Code does.
 The limit is a setting in Settings › Providers & Models, 30 minutes by default,
-which may be turned off (maintainer request, 2026-11-12). Not built yet: today
-it is a fixed five minutes.
+which may be turned off (maintainer request, 2026-11-12); see
+[Provider runtimes](provider-runtimes.md).
 Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer.

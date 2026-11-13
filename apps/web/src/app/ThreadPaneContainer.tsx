@@ -69,6 +69,7 @@ export interface ThreadPaneContainerProps {
   readonly actions: Pick<
     ShellActions,
     | "setCodeThreadCoordinator"
+    | "editCodeThreadCoordinatorBounds"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
     | "setCodeThreadRestartContinuation"
@@ -136,6 +137,7 @@ export interface ThreadPaneContainerProps {
     | "setGithubIssuesOpen"
     | "setPendingDraftBranch"
     | "cancelCoordinatorDraft"
+    | "setCoordinatorDraftChoices"
     | "setPendingDraftPrompt"
     | "setPendingIssue"
     | "setPendingUsageFilter"
@@ -145,11 +147,14 @@ export interface ThreadPaneContainerProps {
     | "setProjectNativeProviders"
     | "setProjectPermissionMode"
     | "setProjectAutoReviewer"
+    | "setProjectAgentMemoryWrites"
+    | "askAgainForProjectImageGeneration"
     | "setProjectBrandKit"
     | "setProjectDesignSystem"
     | "setProjectDesktopRecipe"
     | "setProjectActions"
     | "setProjectWorkStatusFile"
+    | "setProjectOwnToolchain"
     | "setProjectWorkDeveloperTools"
     | "setUsageOpen"
     | "setWorkComposerSelection"
@@ -225,6 +230,8 @@ export interface ThreadPaneContainerProps {
   readonly pendingDraftBranch?: string;
   /** The Project whose draft New coordinator opened. */
   readonly pendingDraftCoordinator?: ProjectId;
+  /** The workers' level and bounds the person chose in that draft. */
+  readonly pendingDraftCoordinatorChoices: import("../shell/DraftThreadWorkspace").CoordinatorDraftChoices;
   readonly pendingDraftPrompt?: string;
   readonly pendingIssue?: RepositoryIssueRow;
   readonly presentedLayout: NonNullable<ShellController["presentedLayout"]>;
@@ -319,6 +326,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     navigation,
     pendingDraftBranch,
     pendingDraftCoordinator,
+    pendingDraftCoordinatorChoices,
     pendingDraftPrompt,
     pendingIssue,
     presentedLayout,
@@ -405,6 +413,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setGithubIssuesOpen,
     setPendingDraftBranch,
     cancelCoordinatorDraft,
+    setCoordinatorDraftChoices,
     setPendingDraftPrompt,
     setPendingIssue,
     setPendingUsageFilter,
@@ -414,11 +423,14 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectNativeProviders,
     setProjectPermissionMode,
     setProjectAutoReviewer,
+    setProjectAgentMemoryWrites,
+    askAgainForProjectImageGeneration,
     setProjectBrandKit,
     setProjectDesignSystem,
     setProjectDesktopRecipe,
     setProjectActions,
     setProjectWorkStatusFile,
+    setProjectOwnToolchain,
     setProjectWorkDeveloperTools,
     setUsageOpen,
     setWorkComposerSelection,
@@ -787,12 +799,17 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   onNativeProvidersChange={setProjectNativeProviders}
                   onProjectPermissionModeChange={setProjectPermissionMode}
                   onProjectAutoReviewerChange={setProjectAutoReviewer}
+                  onAgentMemoryWritesChange={setProjectAgentMemoryWrites}
+                  onImageGenerationAskAgain={askAgainForProjectImageGeneration}
                   onBrandKitChange={setProjectBrandKit}
                   onDesignSystemChange={setProjectDesignSystem}
                   onDesktopRecipeChange={setProjectDesktopRecipe}
                   onActionsChange={setProjectActions}
                   onWorkStatusFileChange={(projectId, enabled) =>
                     setProjectWorkStatusFile(projectId, enabled ? "enabled" : "disabled")
+                  }
+                  onOwnToolchainChange={(projectId, enabled) =>
+                    setProjectOwnToolchain(projectId, enabled ? "enabled" : "disabled")
                   }
                   onWorkDeveloperToolsChange={setProjectWorkDeveloperTools}
                   onSplitPane={(paneId, orientation, placement) =>
@@ -877,6 +894,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                         draftCoordinator: {
                           projectId: pendingDraftCoordinator,
                           onCancel: cancelCoordinatorDraft,
+                          choices: pendingDraftCoordinatorChoices,
+                          onChoicesChange: setCoordinatorDraftChoices,
                         },
                       })}
                   {...(effectiveDraftProviderInstanceId === undefined

@@ -426,15 +426,74 @@ export type PendingRequest = typeof PendingRequest.Type;
 
 export const MAX_PENDING_REQUESTS = 128;
 
+/** One line a row shows for a waiting ask. */
+export const MAX_WAITING_ASK_TEXT_LENGTH = 300;
+/** What the ask's own card shows under that line, when all of it fits. */
+export const MAX_WAITING_ASK_DETAIL_LENGTH = 4_000;
+
+/**
+ * Which host service holds the ask, and so which of its own routes answers
+ * it: an MCP or connector tool approval, a Project memory proposal, a routine
+ * proposal or change request, an image generation or save offer, a Browser
+ * site, upload, download or script approval, or the Browser sign-in card.
+ */
+export const WaitingAskKind = Schema.Literal(
+  "tool-approval",
+  "memory-proposal",
+  "routine-proposal",
+  "image-offer",
+  "browser-approval",
+  "browser-sign-in",
+);
+export type WaitingAskKind = typeof WaitingAskKind.Type;
+
+/**
+ * An ask a thread's agent raised outside its provider's own approvals and
+ * questions, waiting on the person with no expiry. The row finds it and names
+ * its thread; `askId` is the id the ask's own decide route takes, and that
+ * route alone checks who may answer. Listing an ask grants nothing.
+ *
+ * `text` and `detail` are the host's own words about the ask, built from the
+ * view the ask's card in the thread already shows the same reader, so a row
+ * holds nothing its thread does not. `inPlace` says `text` and `detail`
+ * together are everything that card shows, so a list may offer the card's
+ * plain approve and decline; without it the person must open the thread,
+ * because approving from less than the ask means is never offered.
+ */
+export const WaitingAsk = Schema.Struct({
+  kind: WaitingAskKind,
+  askId: Schema.UUID,
+  mode: Schema.Literal("chat", "work", "code"),
+  /** Absent for a Chat thread filed under no Project. */
+  projectId: Schema.optional(ProjectId),
+  threadId: Schema.UUID,
+  threadTitle: Schema.NonEmptyTrimmedString,
+  requestedAt: UtcTimestamp,
+  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_WAITING_ASK_TEXT_LENGTH)),
+  detail: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_WAITING_ASK_DETAIL_LENGTH)),
+  ),
+  inPlace: Schema.optional(Schema.Literal(true)),
+})
+  .annotations(strict)
+  .annotations(personDecides);
+export type WaitingAsk = typeof WaitingAsk.Type;
+
 /**
  * Every pending request the window can answer, oldest waiting first. A
  * decision waits from the moment its turn ended. A host
  * holding more than the bound returns the oldest ones and says so with
  * `truncated`, so a reader never mistakes a cut list for the whole.
+ *
+ * `asks` is every other waiting ask the reader could answer, oldest first. It
+ * is its own optional field, not more members of `requests`, so a client
+ * built before it keeps decoding the list and simply shows no such rows. The
+ * services that hold asks cap them at 32 each, well inside the bound.
  */
 export const PendingRequestList = Schema.Struct({
   requests: Schema.Array(PendingRequest).pipe(Schema.maxItems(MAX_PENDING_REQUESTS)),
   truncated: Schema.Boolean,
+  asks: Schema.optional(Schema.Array(WaitingAsk).pipe(Schema.maxItems(MAX_PENDING_REQUESTS))),
 }).annotations(strict);
 export type PendingRequestList = typeof PendingRequestList.Type;
 
@@ -446,6 +505,7 @@ export type PendingRequestFailure = typeof PendingRequestFailure.Type;
 
 export const decodePendingRequest = Schema.decodeUnknownSync(PendingRequest);
 export const decodePendingRequestList = Schema.decodeUnknownSync(PendingRequestList);
+export const decodeWaitingAsk = Schema.decodeUnknownSync(WaitingAsk);
 export const decodePendingRequestFailure = Schema.decodeUnknownSync(PendingRequestFailure);
 
 /** Attention only. No answer, authority or question text is journaled here. */

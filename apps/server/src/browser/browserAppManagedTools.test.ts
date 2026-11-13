@@ -1,5 +1,8 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
-import { browserAgentAvailability } from "@octant/domain";
+import { browserAgentAvailability, browserTransferRemembered } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,
@@ -7,7 +10,7 @@ import {
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
-import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
+import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import { BrowserFlowRecorder, browserToolInputRecord, flowDecision } from "./browserFlows";
 import {
   BROWSER_OPERATION_EFFECT,
@@ -1032,15 +1035,51 @@ describe("octant_browser profile argument", () => {
       readonly profileCaller?: "terminal-grant";
       readonly inspect?: BrowserAutomationSnapshot;
       readonly modelBindings?: Map<string, BrowserModelBinding>;
+      readonly fullAccess?: boolean;
+      readonly plan?: boolean;
+      readonly uploadRoot?: string;
+      readonly page?: AbortSignal;
+      readonly rememberedTransfers?: ReadonlyArray<{
+        readonly direction: string;
+        readonly origin: string;
+        readonly workspaceRoot: string;
+        readonly profile?: unknown;
+        readonly privatePage?: true;
+      }>;
     } = {},
   ) {
-    const create = vi.fn(async (input: { policy: { profile?: unknown } }) =>
-      activeContext(input.policy.profile),
+    const create = vi.fn(
+      async (input: {
+        policy: { profile?: unknown; allowedOrigins: ReadonlyArray<string> };
+        fullAccessAgent?: true;
+      }) => activeContext(input.policy.profile),
     );
-    const act = vi.fn(async () =>
-      snapshot({ status: "running", observation: { revision: 3 } as never }),
+    const page = options.page;
+    const releaseThread = vi.fn(async () => snapshot());
+    const act = vi.fn(
+      async (_input: { readonly holdDownloads?: boolean; readonly fullAccess?: true }) =>
+        snapshot({ status: "running", observation: { revision: 3 } as never }),
     );
     const request = vi.fn(async (_input: unknown) => "approved" as const);
+    const saveDownload = vi.fn(
+      async (input: {
+        readonly fullAccess?: true;
+        readonly ask: (facts: never, origin: string) => Promise<string>;
+      }) => {
+        const answer = await input.ask(
+          { name: "report.pdf", sizeBytes: 4, mediaType: "application/pdf" } as never,
+          "https://example.com",
+        );
+        return answer === "approved"
+          ? {
+              status: "saved" as const,
+              path: "downloads/report.pdf",
+              sizeBytes: 4,
+              mediaType: "application/pdf",
+            }
+          : { status: "refused" as const, error: `browser-download-${answer}` };
+      },
+    );
     const tools = createBrowserAppManagedTools({
       windowId,
       threadId,
@@ -1049,18 +1088,28 @@ describe("octant_browser profile argument", () => {
       resolveModelId: () => modelId,
       modelBindings: options.modelBindings ?? new Map(),
       resolveTaskProfile: () => options.defaultProfile,
-      executionPolicy: "approval-gated",
+      ...(options.uploadRoot === undefined ? {} : { uploadRoot: () => options.uploadRoot }),
+      executionPolicy: options.plan === true ? "plan" : "approval-gated",
+      ...(options.fullAccess === undefined
+        ? {}
+        : { fullAccess: () => options.fullAccess === true }),
       resolveAuthority: () => workAuthority,
       browser: {
         inspectThread: () => options.inspect ?? snapshot(),
         create: create as never,
-        act,
-        releaseThread: vi.fn(async () => snapshot()),
+        act: act as never,
+        releaseThread,
+        saveDownload: saveDownload as never,
+        ...(page === undefined
+          ? {}
+          : { holdForAsk: () => ({ release: () => undefined, signal: page }) }),
       },
       approvals: {
         request,
         isRemembered: (origin: string, profile: unknown) =>
           options.remembered?.(origin, profile) === true,
+        isTransferRemembered: (transfer: never) =>
+          browserTransferRemembered((options.rememberedTransfers ?? []) as never, transfer),
         isUnattendedScope: () => options.unattended === true,
         isPairedDevice: () => options.paired === true,
       } as never,
@@ -1069,8 +1118,560 @@ describe("octant_browser profile argument", () => {
     });
     const run = (input: Record<string, unknown>) =>
       tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
-    return { create, act, request, run };
+    return { create, act, request, releaseThread, saveDownload, run };
   }
+
+  /** A Project folder holding one file, beside a file that is outside it. */
+  async function projectFolder() {
+    const folder = await realpath(await mkdtemp(join(tmpdir(), "octant-work-upload-")));
+    const workspace = join(folder, "workspace");
+    await mkdir(workspace);
+    await writeFile(join(workspace, "report.txt"), "report");
+    await writeFile(join(folder, "outside.txt"), "outside");
+    return { folder, workspace };
+  }
+  const openPage = (profile?: unknown) => {
+    const open = activeContext(profile);
+    return {
+      ...open,
+      observation: { url: "https://example.com/a", revision: 3 },
+    } as never as BrowserAutomationSnapshot;
+  };
+  const boundPage = () =>
+    new Map([["50000000-0000-4000-8000-000000000001", { modelId, authority: workAuthority }]]);
+
+  it("uploads a Project file unasked at Full access", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const { run, act, request } = fixture({
+        fullAccess: true,
+        uploadRoot: workspace,
+        inspect: openPage(),
+        modelBindings: boundPage(),
+      });
+
+      const result = await run({ operation: "upload", ref: "e1", files: ["report.txt"] });
+
+      expect(result.isError).toBe(false);
+      expect(request).not.toHaveBeenCalled();
+      expect(act).toHaveBeenCalledWith(
+        expect.objectContaining({ uploadFiles: [expect.stringMatching(/report\.txt$/u)] }),
+      );
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an upload from outside the Project's folder at Full access without asking or sending", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const { run, act, request } = fixture({
+        fullAccess: true,
+        uploadRoot: workspace,
+        inspect: openPage(),
+        modelBindings: boundPage(),
+      });
+
+      for (const outside of ["../outside.txt", join(folder, "outside.txt")]) {
+        expect(await run({ operation: "upload", ref: "e1", files: [outside] })).toEqual({
+          result: { error: "upload-outside-workspace" },
+          isError: true,
+        });
+      }
+      expect(request).not.toHaveBeenCalled();
+      expect(act).not.toHaveBeenCalled();
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("still asks about each upload below Full access, and sends nothing the person denies", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const { run, act, request } = fixture({
+        uploadRoot: workspace,
+        inspect: openPage(),
+        modelBindings: boundPage(),
+      });
+      request.mockResolvedValueOnce("denied" as never);
+
+      expect(await run({ operation: "upload", ref: "e1", files: ["report.txt"] })).toEqual({
+        result: { error: "browser-upload-denied" },
+        isError: true,
+      });
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origin: "https://example.com",
+          upload: [expect.objectContaining({ name: "report.txt", sizeBytes: 6 })],
+        }),
+      );
+      expect(act).not.toHaveBeenCalled();
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  // Browser questions have no expiry, so the page's own end must withdraw one;
+  // otherwise it stays listed and a late Approve only meets a stale page.
+  const closesWhileAsked = (page: AbortController) => async (input: unknown) => {
+    page.abort();
+    const signal = (input as { readonly signal?: AbortSignal }).signal;
+    return (signal?.aborted === true ? "cancelled" : "approved") as never;
+  };
+
+  it("withdraws a site approval for the open page when the page closes", async () => {
+    const page = new AbortController();
+    const { run, act, request } = fixture({ inspect: openPage(), page: page.signal });
+    request.mockImplementationOnce(closesWhileAsked(page));
+
+    expect(await run({ operation: "snapshot" })).toEqual({
+      result: { error: "browser-approval-cancelled" },
+      isError: true,
+    });
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("withdraws a sign-in hand-off when its page closes", async () => {
+    const page = new AbortController();
+    const open = openPage();
+    const { run, request } = fixture({
+      inspect: {
+        ...open,
+        context: { ...open.context, presentation: "native-live" },
+      } as never as BrowserAutomationSnapshot,
+      modelBindings: boundPage(),
+      page: page.signal,
+    });
+    request.mockImplementationOnce(closesWhileAsked(page));
+
+    expect(await run({ operation: "sign-in" })).toEqual({
+      result: { error: "browser-sign-in-cancelled" },
+      isError: true,
+    });
+  });
+
+  it("withdraws an upload question when its page closes, and sends nothing", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const page = new AbortController();
+      const { run, act, request } = fixture({
+        uploadRoot: workspace,
+        inspect: openPage(),
+        modelBindings: boundPage(),
+        page: page.signal,
+      });
+      request.mockImplementationOnce(async (input: unknown) => {
+        page.abort();
+        const signal = (input as { readonly signal?: AbortSignal }).signal;
+        return (signal?.aborted === true ? "cancelled" : "approved") as never;
+      });
+
+      expect(await run({ operation: "upload", ref: "e1", files: ["report.txt"] })).toMatchObject({
+        isError: true,
+      });
+      expect(act).not.toHaveBeenCalled();
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("saves a download unasked at Full access and holds downloads whatever the switch says", async () => {
+    const { run, act, request, saveDownload } = fixture({
+      fullAccess: true,
+      uploadRoot: "/workspace",
+      inspect: openPage(),
+      modelBindings: boundPage(),
+    });
+
+    expect(await run({ operation: "download-save", downloadId: "d1" })).toMatchObject({
+      isError: false,
+      result: { saved: "downloads/report.pdf" },
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(saveDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceRoot: "/workspace", fullAccess: true }),
+    );
+
+    await run({ operation: "click", ref: "e1" });
+    expect(act).toHaveBeenCalledWith(
+      expect.objectContaining({ holdDownloads: true, fullAccess: true }),
+    );
+  });
+
+  it("saves a download an action started straight into the workspace at Full access, and reports where it landed", async () => {
+    const { run, act, request, saveDownload } = fixture({
+      fullAccess: true,
+      uploadRoot: "/workspace",
+      inspect: openPage(),
+      modelBindings: boundPage(),
+    });
+    act.mockResolvedValueOnce(
+      snapshot({
+        status: "running",
+        observation: {
+          revision: 3,
+          downloads: [
+            {
+              state: "held",
+              downloadId: "d1",
+              name: "report.pdf",
+              sizeBytes: 4,
+              mediaType: "application/pdf",
+            },
+            { state: "refused", name: "huge.bin", reason: "too-large" },
+          ],
+        } as never,
+      }),
+    );
+
+    const answer = await run({ operation: "click", ref: "e1" });
+    expect(answer).toMatchObject({
+      isError: false,
+      result: {
+        page: {
+          downloads: [
+            { state: "refused", name: "huge.bin", reason: "too-large" },
+            {
+              state: "saved",
+              name: "report.pdf",
+              path: "downloads/report.pdf",
+              sizeBytes: 4,
+              mediaType: "application/pdf",
+            },
+          ],
+        },
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(saveDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ downloadId: "d1", workspaceRoot: "/workspace", fullAccess: true }),
+    );
+  });
+
+  it("keeps a download held for the agent's own save below Full access", async () => {
+    const { run, act, saveDownload } = fixture({
+      uploadRoot: "/workspace",
+      inspect: openPage(),
+      modelBindings: boundPage(),
+    });
+    const held = {
+      state: "held",
+      downloadId: "d1",
+      name: "report.pdf",
+      sizeBytes: 4,
+      mediaType: "application/pdf",
+    };
+    act.mockResolvedValueOnce(
+      snapshot({ status: "running", observation: { revision: 3, downloads: [held] } as never }),
+    );
+
+    expect(await run({ operation: "click", ref: "e1" })).toMatchObject({
+      result: { page: { downloads: [held] } },
+    });
+    expect(saveDownload).not.toHaveBeenCalled();
+  });
+
+  it("asks before saving a download below Full access, where the service still refuses a program", async () => {
+    const { run, act, request, saveDownload } = fixture({
+      uploadRoot: "/workspace",
+      inspect: openPage(),
+      modelBindings: boundPage(),
+    });
+    request.mockResolvedValueOnce("denied" as never);
+
+    expect(await run({ operation: "download-save", downloadId: "d1" })).toEqual({
+      result: { error: "browser-download-denied" },
+      isError: true,
+    });
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ download: expect.objectContaining({ name: "report.pdf" }) }),
+    );
+    expect(saveDownload.mock.calls[0]?.[0].fullAccess).toBeUndefined();
+
+    await run({ operation: "click", ref: "e1" });
+    expect(act.mock.calls[0]?.[0]).toMatchObject({ holdDownloads: true });
+    expect(act.mock.calls[0]?.[0].fullAccess).toBeUndefined();
+  });
+
+  it("uploads without asking below Full access once the person always allows that site for this Project folder, and still asks for any other", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const page = { inspect: openPage(), modelBindings: boundPage(), uploadRoot: workspace };
+      const upload = { operation: "upload", ref: "e1", files: ["report.txt"] };
+
+      const remembered = fixture({
+        ...page,
+        rememberedTransfers: [
+          { direction: "upload", origin: "https://example.com", workspaceRoot: workspace },
+        ],
+      });
+      expect((await remembered.run(upload)).isError).toBe(false);
+      expect(remembered.request).not.toHaveBeenCalled();
+      // The path checks are not part of what was remembered.
+      expect(
+        await remembered.run({ operation: "upload", ref: "e1", files: ["../outside.txt"] }),
+      ).toEqual({ result: { error: "upload-outside-workspace" }, isError: true });
+
+      for (const other of [
+        { direction: "download", origin: "https://example.com", workspaceRoot: workspace },
+        { direction: "upload", origin: "https://other.example", workspaceRoot: workspace },
+        { direction: "upload", origin: "https://example.com", workspaceRoot: folder },
+      ]) {
+        const asked = fixture({ ...page, rememberedTransfers: [other] });
+        await asked.run(upload);
+        expect(asked.request).toHaveBeenCalledWith(
+          expect.objectContaining({ upload: expect.anything(), workspaceRoot: workspace }),
+        );
+      }
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("asks again for an upload on a page in another Browser profile than the one the person always allowed", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const personal = { kind: "personal" };
+      const page = {
+        inspect: openPage(personal),
+        modelBindings: boundPage(),
+        uploadRoot: workspace,
+        defaultProfile: "personal" as const,
+      };
+      const upload = { operation: "upload", ref: "e1", files: ["report.txt"] };
+      const answer = {
+        direction: "upload",
+        origin: "https://example.com",
+        workspaceRoot: workspace,
+      };
+
+      const remembered = fixture({
+        ...page,
+        rememberedTransfers: [{ ...answer, profile: personal }],
+      });
+      expect((await remembered.run(upload)).isError).toBe(false);
+      expect(remembered.request).not.toHaveBeenCalled();
+
+      // The same site and folder, answered on a Private page.
+      const asked = fixture({
+        ...page,
+        rememberedTransfers: [{ ...answer, privatePage: true as const }],
+      });
+      await asked.run(upload);
+      expect(asked.request).toHaveBeenCalledWith(
+        expect.objectContaining({ upload: expect.anything(), profile: personal }),
+      );
+
+      // An answer remembered before the page was recorded was given for the
+      // site and folder on any page, and still covers this one.
+      const older = fixture({ ...page, rememberedTransfers: [answer] });
+      expect((await older.run(upload)).isError).toBe(false);
+      expect(older.request).not.toHaveBeenCalled();
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("saves a download without asking below Full access once the person always allows that site for this workspace", async () => {
+    const page = { inspect: openPage(), modelBindings: boundPage(), uploadRoot: "/workspace" };
+    const remembered = fixture({
+      ...page,
+      rememberedTransfers: [
+        { direction: "download", origin: "https://example.com", workspaceRoot: "/workspace" },
+      ],
+    });
+    expect(await remembered.run({ operation: "download-save", downloadId: "d1" })).toMatchObject({
+      isError: false,
+    });
+    expect(remembered.request).not.toHaveBeenCalled();
+    // Still below Full access: the service keeps refusing a program.
+    expect(remembered.saveDownload.mock.calls[0]?.[0].fullAccess).toBeUndefined();
+
+    const asked = fixture({
+      ...page,
+      rememberedTransfers: [
+        { direction: "upload", origin: "https://example.com", workspaceRoot: "/workspace" },
+      ],
+    });
+    await asked.run({ operation: "download-save", downloadId: "d1" });
+    expect(asked.request).toHaveBeenCalledWith(
+      expect.objectContaining({ download: expect.anything(), workspaceRoot: "/workspace" }),
+    );
+  });
+
+  it("saves nothing for a paired device's turn at Full access", async () => {
+    const { run, request, saveDownload } = fixture({
+      fullAccess: true,
+      paired: true,
+      uploadRoot: "/workspace",
+      inspect: openPage(),
+      modelBindings: boundPage(),
+    });
+
+    expect(await run({ operation: "download-save", downloadId: "d1" })).toEqual({
+      result: { error: "download-needs-this-computer" },
+      isError: true,
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(saveDownload).not.toHaveBeenCalled();
+  });
+
+  const everySiteContext = () => {
+    const open = activeContext();
+    return {
+      ...open,
+      context: {
+        ...open.context,
+        policy: { ...open.context?.policy, allowedOrigins: ["*"] },
+      },
+      observation: { url: "https://example.com/a", revision: 3 },
+    } as never as BrowserAutomationSnapshot;
+  };
+
+  it("opens a Private page at Full access without asking, free to navigate across origins", async () => {
+    const { run, create, request } = fixture({ fullAccess: true });
+
+    const result = await run({ operation: "navigate", url: "https://example.com/a" });
+
+    expect(result.isError).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      policy: { allowedOrigins: ["*"] },
+      fullAccessAgent: true,
+    });
+    expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
+  });
+
+  it("navigates an open Private page to another origin at Full access without asking or reopening", async () => {
+    const { run, act, request, create, releaseThread } = fixture({
+      fullAccess: true,
+      inspect: everySiteContext(),
+    });
+
+    const result = await run({ operation: "navigate", url: "https://elsewhere.example/b" });
+
+    expect(result.isError).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect(releaseThread).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          kind: "navigate",
+          target: "https://elsewhere.example/b",
+        }),
+      }),
+    );
+  });
+
+  it("reopens a one-site Private page at Full access when the agent navigates elsewhere", async () => {
+    const { run, request, create, releaseThread } = fixture({
+      fullAccess: true,
+      inspect: activeContext(),
+    });
+
+    await run({ operation: "navigate", url: "https://elsewhere.example/b" });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(releaseThread).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["*"]);
+  });
+
+  it("still asks about the site and the profile on a signed-in page at Full access", async () => {
+    const { run, create, request } = fixture({ fullAccess: true });
+
+    await run({ operation: "navigate", url: "https://example.com/a", profile: "personal" });
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "https://example.com", profile: { kind: "personal" } }),
+    );
+    expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["https://example.com"]);
+    expect(create.mock.calls[0]?.[0].fullAccessAgent).toBeUndefined();
+  });
+
+  it("opens nothing in a signed-in profile at Full access when the person declines the site", async () => {
+    const { run, create, request } = fixture({ fullAccess: true });
+    request.mockResolvedValueOnce("denied" as never);
+
+    const result = await run({
+      operation: "navigate",
+      url: "https://example.com/a",
+      profile: "personal",
+    });
+
+    expect(result).toMatchObject({ isError: true, result: { error: "browser-approval-denied" } });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("still asks for each origin on a Private page below Full access, and holds it to that origin", async () => {
+    const { run, create, request } = fixture({ fullAccess: false });
+
+    await run({ operation: "navigate", url: "https://example.com/a" });
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "https://example.com" }),
+    );
+    expect(create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["https://example.com"]);
+    expect(create.mock.calls[0]?.[0].fullAccessAgent).toBeUndefined();
+  });
+
+  it("does not reopen a one-site Private page below Full access to reach another origin", async () => {
+    const contextId = "50000000-0000-4000-8000-000000000001";
+    const { run, act, create, releaseThread } = fixture({
+      fullAccess: false,
+      inspect: activeContext(),
+      modelBindings: new Map([[contextId, { modelId, authority: workAuthority }]]),
+    });
+
+    await run({ operation: "navigate", url: "https://elsewhere.example/b" });
+
+    // The service refuses the navigation as `origin-not-approved`; the tool
+    // neither widens the page nor opens another.
+    expect(releaseThread).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(act).toHaveBeenCalledOnce();
+  });
+
+  it("stops using a page that admits every site once the thread is below Full access", async () => {
+    const contextId = "50000000-0000-4000-8000-000000000001";
+    const bound = () => new Map([[contextId, { modelId, authority: workAuthority }]]);
+    const reading = fixture({
+      fullAccess: false,
+      inspect: everySiteContext(),
+      modelBindings: bound(),
+    });
+    expect(await reading.run({ operation: "snapshot" })).toMatchObject({
+      isError: true,
+      result: { error: "browser-navigation-required" },
+    });
+    expect(reading.act).not.toHaveBeenCalled();
+
+    const navigating = fixture({
+      fullAccess: false,
+      inspect: everySiteContext(),
+      modelBindings: bound(),
+    });
+    await navigating.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+    expect(navigating.releaseThread).toHaveBeenCalledOnce();
+    expect(navigating.request).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "https://elsewhere.example" }),
+    );
+    expect(navigating.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual([
+      "https://elsewhere.example",
+    ]);
+  });
+
+  it("keeps reading a page that admits every site in Plan, where it cannot move", async () => {
+    const contextId = "50000000-0000-4000-8000-000000000001";
+    const { run, act } = fixture({
+      plan: true,
+      inspect: everySiteContext(),
+      modelBindings: new Map([[contextId, { modelId, authority: workAuthority }]]),
+    });
+
+    expect((await run({ operation: "snapshot" })).isError).toBe(false);
+    expect(act).toHaveBeenCalledOnce();
+  });
 
   it("keeps a page Private when no profile is asked for", async () => {
     const { run, create, request } = fixture();
@@ -1531,6 +2132,30 @@ describe("octant_browser resize and device emulation", () => {
   });
 });
 
+describe("how long octant_browser may wait", () => {
+  const parse = (input: unknown) =>
+    parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
+  const wait = (timeoutMs: number) => ({ operation: "wait", selector: "#done", timeoutMs });
+
+  it("lets one wait last up to ten minutes and refuses a longer one", () => {
+    expect(parse(wait(600_000))).toMatchObject({
+      operation: "wait",
+      waitFor: { timeoutMs: 600_000 },
+    });
+    expect(parse(wait(600_001))).toBeUndefined();
+    expect(BROWSER_TOOL_DEFINITION.inputSchema.properties.timeoutMs.maximum).toBe(600_000);
+    expect(BROWSER_TOOL_HELP[BROWSER_TOOL_DEFINITION.name]).toContain("timeoutMs up to 600000");
+  });
+
+  it("refuses a batch whose waits together would outlast ten minutes", () => {
+    const steps = (...waits: ReadonlyArray<object>) => ({ operation: "steps", steps: waits });
+    expect(parse(steps(wait(300_000), wait(300_000)))?.operation).toBe("steps");
+    expect(parse(steps(wait(300_000), wait(300_001)))).toBeUndefined();
+    // A wait that names no limit counts as its ten-second default.
+    expect(parse(steps(wait(595_000), { operation: "wait", selector: "#done" }))).toBeUndefined();
+  });
+});
+
 describe("octant_browser flow operations", () => {
   const parse = (input: unknown) =>
     parseBrowserToolInput(JSON.stringify(input), { allowProfile: true });
@@ -1667,6 +2292,153 @@ describe("bounded page script input", () => {
       },
     ])
       expect(parse(input)).toBeUndefined();
+  });
+});
+
+describe("a Work thread's bounded page script", () => {
+  const workAuthority = { ...authority, mode: "work" } as unknown as ToolActionAuthority;
+  const context = {
+    contextId: "50000000-0000-4000-8000-000000000001" as never,
+    threadId,
+    actionId: "60000000-0000-4000-8000-000000000001" as never,
+    correlationId: "70000000-0000-4000-8000-000000000001" as never,
+    authority: workAuthority,
+    policy: {
+      profileMode: "isolated" as const,
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true as const,
+      maxConcurrentTabs: 8,
+      sessionTimeoutMs: 600_000,
+    },
+    state: "active" as const,
+    presentation: "native-live" as const,
+    createdAt: "2026-09-09T10:00:00.000Z" as never,
+  };
+  const call = {
+    name: "octant_browser",
+    inputJson: JSON.stringify({
+      operation: "run-script",
+      source: "document.title",
+      expectedObservationRevision: 3,
+    }),
+  };
+  function scriptTools(
+    overrides: {
+      readonly level?: () => "full-access" | "approval-gated" | undefined;
+      readonly lent?: boolean;
+      readonly presentation?: "native-live" | "headless";
+      readonly approvals?: Record<string, unknown>;
+      readonly profileCaller?: "terminal-grant";
+      readonly mode?: "work" | "chat";
+    } = {},
+  ) {
+    const run = vi.fn(
+      async (
+        _input: import("./browserAutomationService").BrowserPageScriptInput,
+      ): Promise<import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt> => ({
+        status: "completed",
+        effect: "possible",
+        valueJson: '"Shop"',
+      }),
+    );
+    const request = vi.fn(async () => "approved" as const);
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: overrides.mode ?? "work",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => workAuthority,
+      browser: {
+        inspectThread: () =>
+          snapshot({
+            status: "running",
+            context: { ...context, presentation: overrides.presentation ?? "native-live" },
+            observation: { revision: 3, url: "https://example.com/" } as never,
+          }),
+        create: vi.fn(),
+        act: vi.fn(),
+        releaseThread: vi.fn(),
+      },
+      ...(overrides.lent === false
+        ? {}
+        : { pageScript: { level: overrides.level ?? (() => "full-access" as const), run } }),
+      approvals: { request, ...overrides.approvals } as never,
+      ...(overrides.profileCaller === undefined ? {} : { profileCaller: overrides.profileCaller }),
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    return { tools, run, request };
+  }
+
+  it("runs unasked on the thread's open app Browser page at Full access", async () => {
+    const { tools, run, request } = scriptTools();
+    expect(await tools.execute(call)).toMatchObject({
+      isError: false,
+      result: { script: { status: "completed", valueJson: '"Shop"' } },
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        windowId,
+        threadId,
+        contextId: context.contextId,
+        source: "document.title",
+        expectedObservationRevision: 3,
+        turnExecutionPolicy: "full-access",
+      }),
+    );
+    // No scoped permission exists for Work, so none is claimed.
+    expect(run.mock.calls[0]?.[0].scriptPermissionIsCurrent).toBeUndefined();
+  });
+
+  it.each([
+    ["below Full access", { level: () => "approval-gated" as const }, "script-needs-full-access"],
+    [
+      "when the level changed since the turn began",
+      { level: () => undefined },
+      "script-needs-full-access",
+    ],
+    [
+      "on a paired device",
+      { approvals: { isPairedDevice: () => true } },
+      "script-needs-a-local-person",
+    ],
+    [
+      "on an unattended turn",
+      { approvals: { isUnattendedScope: () => true } },
+      "script-needs-a-local-person",
+    ],
+    [
+      "from a terminal grant",
+      { profileCaller: "terminal-grant" as const },
+      "script-needs-a-local-person",
+    ],
+    ["on a headless page", { presentation: "headless" as const }, "script-needs-the-app-browser"],
+    ["where the host lends no script runner", { lent: false }, "script-unavailable"],
+    ["in Chat, which has no Full access", { mode: "chat" as const }, "script-unavailable"],
+  ])("refuses %s and runs nothing", async (_name, overrides, error) => {
+    const { tools, run, request } = scriptTools(overrides);
+    expect(await tools.execute(call)).toEqual({ isError: true, result: { error } });
+    expect(run).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("withholds a result that arrives after the thread left Full access", async () => {
+    let level: "full-access" | "approval-gated" = "full-access";
+    const { tools, run } = scriptTools({ level: () => level });
+    run.mockImplementation(async (input) => {
+      level = "approval-gated";
+      expect(input.callerIsCurrent()).toBe(false);
+      return { status: "completed", effect: "possible", valueJson: '"late-private-result"' };
+    });
+    const result = await tools.execute(call);
+    expect(result).toMatchObject({
+      isError: true,
+      result: { script: { status: "refused", effect: "possible", reason: "stale" } },
+    });
+    expect(JSON.stringify(result)).not.toContain("late-private-result");
   });
 });
 

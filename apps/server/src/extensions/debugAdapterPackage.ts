@@ -15,6 +15,7 @@ import {
   type ExtensionArchiveEntry,
   type ResolvedExtensionPackage,
 } from "./packageInspector";
+import { readPackagePublisherSignature } from "./outsideDriverSignature";
 
 /**
  * A folder holding a debug adapter a person adds, as the local folder
@@ -54,11 +55,17 @@ export function readDebugAdapterPackage(
   if (!isRecord(document) || !isRecord(document.manifest)) return refused("document-invalid");
   const reading = readDebugAdapterPackageDocument(document);
   if (reading.status === "refused") return reading;
+  const signature = readPackagePublisherSignature(input.entries, {
+    name: reading.document.manifest.slug,
+    version: reading.document.manifest.version,
+  });
+  if (signature.status === "invalid") return refused("signature-invalid");
   const manifest = hostStatedManifest(
     "octant.debug-adapter-package",
     input.source,
     document.manifest,
     reading.document.manifest.slug,
+    signature.status === "signed" ? signature.publisherKey : undefined,
   );
   const filesRefusal = binaryOnlyFilesRefusal(
     input.entries,
@@ -121,6 +128,8 @@ export function debugAdapterPackageRefusalMessage(
       return "This debug adapter's binary is not in its package, or is not executable.";
     case "ships-other-program":
       return "This debug adapter ships a program besides its own binary.";
+    case "signature-invalid":
+      return "This debug adapter's signature does not match its files, name, or version, or does not verify.";
   }
 }
 

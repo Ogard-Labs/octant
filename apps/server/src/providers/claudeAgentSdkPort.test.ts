@@ -1,4 +1,7 @@
 import type { ProviderFailure } from "@octant/contracts";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Chunk, Effect, Stream } from "effect";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
@@ -246,6 +249,7 @@ describe("Claude Agent SDK port", () => {
   );
 
   test("connects only the app-owned tool server before delivering a tool-enabled prompt", async () => {
+    const calls: Array<ReadonlyArray<unknown>> = [];
     const name = "mcp__octant__octant_browser";
     const harness = makeHarness([
       {
@@ -261,11 +265,34 @@ describe("Claude Agent SDK port", () => {
           yield* query.send({
             text: "Inspect the browser",
             appManagedTools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
-            onAppToolCall: async () => ({ resultJson: "{}", isError: false }),
+            onAppToolCall: async (...call) => {
+              calls.push(call.slice(0, 2).concat(call.slice(3)));
+              return { resultJson: "{}", isError: false };
+            },
           });
           expect(harness.query.setMcpServers).toHaveBeenCalledWith({
             octant: expect.objectContaining({ type: "sdk", name: "octant" }),
           });
+          const connected = harness.query.setMcpServers.mock.calls[0]?.[0]["octant"];
+          const server =
+            typeof connected === "object" && connected !== null && "instance" in connected
+              ? connected.instance
+              : undefined;
+          if (!(server instanceof McpServer)) throw new Error("Expected the tool server");
+          const client = new Client({ name: "runtime", version: "1" });
+          const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+          yield* Effect.promise(() => server.connect(serverTransport));
+          yield* Effect.promise(() => client.connect(clientTransport));
+          yield* Effect.promise(() =>
+            client.callTool({
+              name: "octant_browser",
+              arguments: {},
+              _meta: { "claudecode/toolUseId": "toolu-1" },
+            }),
+          );
+          yield* Effect.promise(() => client.close());
+          // The tool_use id rides along, so the call answers under its row.
+          expect(calls).toEqual([["octant_browser", "{}", "toolu-1"]]);
           const messages = yield* Stream.runCollect(query.messages);
           expect(Chunk.toReadonlyArray(messages)[0]).toMatchObject({ kind: "initialized" });
         }),
@@ -1805,7 +1832,7 @@ describe("Claude Agent SDK port", () => {
     });
   });
 
-  test("does not emit replayed prompts or raw tool-result payloads", async () => {
+  test("does not emit replayed prompts, and carries of a tool result only its text for the thread's record", async () => {
     const messages = await collectMessages([
       safeRuntimeInitialization,
       {
@@ -1819,7 +1846,7 @@ describe("Claude Agent SDK port", () => {
         type: "user",
         session_id: "session-1",
         parent_tool_use_id: null,
-        tool_use_result: { commandOutput: "private command output" },
+        tool_use_result: { commandOutput: "private structured output" },
         message: {
           role: "user",
           content: [
@@ -1827,7 +1854,7 @@ describe("Claude Agent SDK port", () => {
               type: "tool_result",
               tool_use_id: "tool-1",
               is_error: false,
-              content: "private command output",
+              content: "command output",
             },
           ],
         },
@@ -1839,11 +1866,11 @@ describe("Claude Agent SDK port", () => {
       {
         kind: "tool-results",
         sessionId: "session-1",
-        results: [{ toolUseId: "tool-1", isError: false }],
+        results: [{ toolUseId: "tool-1", isError: false, text: "command output" }],
       },
     ]);
     expect(JSON.stringify(messages)).not.toContain("private replayed prompt");
-    expect(JSON.stringify(messages)).not.toContain("private command output");
+    expect(JSON.stringify(messages)).not.toContain("private structured output");
   });
 
   test("protocol-fails unsupported assistant payload variants without reflecting payload content", async () => {

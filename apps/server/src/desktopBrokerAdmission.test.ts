@@ -147,6 +147,7 @@ describe("Native main admission to brokered host routes", () => {
     for (const path of [
       "/api/desktop/hub/status",
       "/api/desktop/hub/paired-merge-unlock",
+      "/api/desktop/hub/owner-approval-answer-unlock",
       "/api/desktop/private-listener/enable",
       "/api/desktop/private-listener/host-identity-fingerprint",
       "/api/desktop/remote/pairing-tickets",

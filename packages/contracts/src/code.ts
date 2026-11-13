@@ -9,9 +9,11 @@ import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
 import {
+  CoordinatorBounds,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
+  CoordinatorWorkerLevel,
 } from "./coordinator";
 import { AutoReviewer, ShieldModelChoice } from "./shield";
 import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
@@ -343,6 +345,17 @@ export const CodeThread = Schema.Struct({
    */
   coordinator: Schema.optional(Schema.Literal(true)),
   /**
+   * A coordinator's wake, round and start bounds as a person set them. Absent
+   * is the defaults, which is also how a coordinator journaled before the
+   * bounds were settable reads.
+   */
+  coordinatorBounds: Schema.optional(CoordinatorBounds),
+  /**
+   * The level a person fixed for this coordinator's workers when making it.
+   * Absent, a worker starts at the level named, never above the coordinator's.
+   */
+  coordinatorWorkerLevel: Schema.optional(CoordinatorWorkerLevel),
+  /**
    * The coordinator that started this worker thread, recorded by the host at
    * creation and never changed. No wire command can set it.
    */
@@ -366,6 +379,13 @@ export const CodeThread = Schema.Struct({
   restartContinuationOff: Schema.optional(Schema.Literal(true)),
   /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
+  /**
+   * The person's override: when a person marked this thread Done whatever its
+   * delivery target says. It never touches `deliveryTarget`, so a thread whose
+   * target was objectively satisfied and one a person closed stay apart in
+   * the journal. Absent on every thread nobody marked.
+   */
+  markedDoneAt: Schema.optional(UtcTimestamp),
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -517,6 +537,15 @@ export const CodeSettings = Schema.Struct({
    * unless the thread says otherwise. Absent is off: Full access stays open.
    */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * Whether an Android emulator Octant boots may load and save a quickboot
+   * snapshot. Absent is off: every boot is cold, which is what a store
+   * persisted before the switch existed did. Cold is the default because a
+   * snapshot saved at power-off loaded "successfully" and then left `adb`
+   * showing the emulator offline for minutes, so the boot timed out
+   * (docs/design/device-workbench.md, Boot from the Android pane).
+   */
+  androidEmulatorSnapshotBoot: Schema.optional(Schema.Boolean),
   /**
    * Who answers prompts at Auto, as an account default a Code Project may
    * override. Absent means the provider's own reviewer where it has one and
@@ -770,6 +799,8 @@ export const CodeCommand = Schema.Union(
     /** Absent keeps the stored choice. */
     defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
+    androidEmulatorSnapshotBoot: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
     autoReviewer: Schema.optional(AutoReviewer),
     /** Absent keeps the stored choice; null returns to each thread's own provider. */
     shieldModel: Schema.optional(Schema.NullOr(ShieldModelChoice)),
@@ -803,6 +834,18 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("set-code-thread-coordinator"),
     ...CodeThreadCommandFields,
     coordinator: Schema.Boolean,
+    /** Fixes every worker's level; accepted only while making the coordinator. */
+    workerLevel: Schema.optional(CoordinatorWorkerLevel),
+  }).annotations(strict),
+  /**
+   * A coordinator's wake, round and start bounds; only a person at a local
+   * window. The bounds replace the stored ones, so a field left out returns
+   * to its default.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-coordinator-bounds"),
+    ...CodeThreadCommandFields,
+    bounds: CoordinatorBounds,
   }).annotations(strict),
   /** The Wake when a message arrives switch; only a person at a local window. */
   Schema.Struct({
@@ -831,8 +874,18 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("complete-code-thread"),
     ...CodeThreadCommandFields,
   }).annotations(strict),
+  /** Brings a put-away thread back, and clears a person's Done mark. */
   Schema.Struct({
     kind: Schema.Literal("reopen-code-thread"),
+    ...CodeThreadCommandFields,
+  }).annotations(strict),
+  /**
+   * A person marks the Code thread Done whatever its delivery target says.
+   * Only a person may send it: the host refuses it from a routine or anything
+   * else acting as the host, and no provider tool can send it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("mark-code-thread-done"),
     ...CodeThreadCommandFields,
   }).annotations(strict),
   /**

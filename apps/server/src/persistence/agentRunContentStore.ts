@@ -73,7 +73,7 @@ export function agentRunContentSubject(run: AgentRun): ContextSubjectRef {
   });
 }
 
-function isDeletingOrPurgedSubject(
+export function isDeletingOrPurgedSubject(
   connection: SqliteConnection,
   subject: ContextSubjectRef,
 ): boolean {

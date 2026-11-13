@@ -53,12 +53,9 @@ import { providerWithheldReason } from "./providerSettingsPresentation";
 import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { isKeyringAdvice } from "@octant/domain/keyring-advice";
 import { failureMessage } from "../lib/failureMessage";
-import {
-  getInjectedHostBridge,
-  type OctantHostBridge,
-  type ProviderCredentialStatus,
-} from "../shell/hostBridge";
+import { getInjectedHostBridge, type ProviderCredentialStatus } from "../shell/hostBridge";
 
+import type { ProviderKeyHost } from "./providerKeyHost";
 const PROVIDER_UNAVAILABLE = "Octant Provider service is unavailable.";
 // A browser never holds the host's bridge secret, so only the host-local
 // command or the desktop's own window can put a key in the credential store.
@@ -69,7 +66,7 @@ export type ProviderControllerStatus = "loading" | "ready" | "disconnected";
 
 export interface ProviderControllerOptions {
   readonly client?: ProviderClient;
-  readonly hostBridge?: OctantHostBridge;
+  readonly hostBridge?: ProviderKeyHost;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -2172,6 +2169,21 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const setProviderOwnMemory = useCallback(
+    (instanceId: ProviderInstanceId, enabled: boolean) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-provider-own-memory",
+              instanceId,
+              expectedVersion: instance.version,
+              enabled,
+            };
+      }),
+    [execute],
+  );
   const threadNativeSetup = useMemo(
     () =>
       client?.threadNativeSetup === undefined
@@ -2631,6 +2643,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     setEnabled,
     setClaudeArtifactDelivery,
     setProviderNativeSetup,
+    setProviderOwnMemory,
     threadNativeSetup,
     setDataTags,
     setModelDataTags,

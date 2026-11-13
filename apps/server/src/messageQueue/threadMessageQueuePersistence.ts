@@ -9,6 +9,7 @@ import {
   ThreadMessageQueueRequestId,
   ThreadQueueMessageId,
   CodeOperationId,
+  WindowId,
   THREAD_RETENTION_EVENT_NAMES,
   decodeChatDeleted,
   decodeThreadRetentionThreadPurged,
@@ -32,12 +33,31 @@ export const THREAD_MESSAGE_QUEUE_CHANGED = "thread.message-queue-changed@1";
 const MetadataItem = Schema.Struct({
   ...ThreadMessageQueueItem.omit("payload").fields,
   codeOperationId: Schema.optional(CodeOperationId),
+  /**
+   * The window or paired device whose authority this message waits under: the
+   * one that queued it, or the one that last resumed the queue. Absent on a
+   * message queued before this was recorded, which never continues by itself.
+   */
+  queuedBy: Schema.optional(WindowId),
 });
+/** What the queue names as the thing it already continued past after a restart. */
+export const CONTINUED_PAST_RESTART = "host-restart";
 const QueueState = Schema.Struct({
   scope: ThreadMessageQueueScope,
   version: AggregateVersion,
   paused: Schema.Boolean,
   holdReason: Schema.optional(ThreadMessageQueueHoldReason),
+  /**
+   * The one failed turn, or the restart, this queue already continued past by
+   * itself. While it is set a second failure or restart holds the queue; a
+   * completed turn or a person's resume clears it.
+   */
+  continuedPast: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+  /**
+   * Set at start-up on a queue the restart cut nothing from. Its restart hold
+   * lifts by itself once the windows that queued its messages are back.
+   */
+  liftsAfterRestart: Schema.optional(Schema.Literal(true)),
   items: Schema.Array(MetadataItem).pipe(Schema.maxItems(MAX_THREAD_MESSAGE_QUEUE_ITEMS)),
 });
 export type QueueState = typeof QueueState.Type;
@@ -299,12 +319,16 @@ export class ThreadMessageQueuePersistence {
     };
   }
   snapshot(scope: ThreadMessageQueueScope): ThreadMessageQueueSnapshot {
-    const state = this.state(scope);
+    const {
+      continuedPast: _continuedPast,
+      liftsAfterRestart: _liftsAfterRestart,
+      ...state
+    } = this.state(scope);
     return decodeThreadMessageQueueSnapshot({
       ...state,
       items: state.items.map((item) => {
         const content = this.content(item.messageId);
-        const { codeOperationId: _codeOperationId, ...visible } = item;
+        const { codeOperationId: _codeOperationId, queuedBy: _queuedBy, ...visible } = item;
         return { ...visible, ...(content === undefined ? {} : { payload: content.payload }) };
       }),
     });

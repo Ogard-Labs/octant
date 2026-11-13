@@ -51,6 +51,18 @@ export const ExtensionLifecycleEventPayload = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("update-committed"), ...preparedPackage }).annotations(
     strict,
   ),
+  /**
+   * The host took an unsigned package's update from the source the person
+   * trusted, so the trust and the approvals given to `previousVersion` hold
+   * for this version too. Journaled after the update's own commit; it is
+   * what the Updated notice and its roll back read.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("update-kept-from-source"),
+    ...versionedPackage,
+    previousVersion: ExtensionPackageVersion,
+    previousDigest: ExtensionContentDigest,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rollback-selected"),
     ...versionedPackage,
@@ -81,9 +93,9 @@ export const ExtensionLifecycleEventPayload = Schema.Union(
     trusted: Schema.Boolean,
   }).annotations(strict),
   /**
-   * An outside provider driver's publisher key, pinned for its package name
-   * and source when the person first trusts a signed version. Journaled with
-   * that trust, in the same append.
+   * A signed package's publisher key, pinned for its package name and source
+   * when the person first trusts a signed version. Journaled with that
+   * trust, in the same append.
    */
   Schema.Struct({
     kind: Schema.Literal("publisher-pinned"),
@@ -198,6 +210,12 @@ export type BundledPluginSwitched = typeof BundledPluginSwitched.Type;
 export const decodeBundledPluginSwitched = Schema.decodeUnknownSync(BundledPluginSwitched);
 
 export const EXTENSION_TOOL_GRANT_AGGREGATE = "extension-tool-grant";
+/**
+ * The aggregate that holds grants remembered for the account, which a Chat
+ * thread outside a Project records and uses. A Project's grants live on the
+ * aggregate with that Project's id.
+ */
+export const EXTENSION_TOOL_GRANT_ACCOUNT_AGGREGATE_ID = "e7700000-0000-4000-8000-000000000001";
 export const EXTENSION_TOOL_GRANT_EVENT_NAMES = {
   recorded: "extension.tool-grant-recorded@1",
   revoked: "extension.tool-grant-revoked@1",
@@ -214,29 +232,54 @@ export type ExtensionToolDefinitionDigest = typeof ExtensionToolDefinitionDigest
 export const ExtensionMcpToolName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
 
 /**
- * One MCP tool in one Project. The provider-facing tool name is left out on
- * purpose: it embeds the thread, and a grant holds across a Project's threads.
+ * One MCP tool, or every tool of one MCP server, in one Project or for the
+ * account. `projectId` is absent on a grant for the account, which a Chat
+ * thread outside a Project records. `mcpToolName` is absent on a grant for
+ * the whole server. The provider-facing tool name is left out on purpose: it
+ * embeds the thread, and a grant holds across threads.
+ *
+ * `threadId` is present only on the answer a person gave a server's prompt on
+ * a thread that had taken in outside content. That answer covers the server
+ * on that thread alone, so it names no tool, and it is journaled here so it
+ * ends with the package's grants and outlives a host restart.
  */
 const toolGrantSubject = {
-  projectId: ProjectId,
+  projectId: Schema.optional(ProjectId),
+  threadId: Schema.optional(Schema.UUID),
   extensionId: ToolExtensionId,
   packageId: ExtensionPackageId,
   componentId: ExtensionComponentId,
-  mcpToolName: ExtensionMcpToolName,
+  mcpToolName: Schema.optional(ExtensionMcpToolName),
 };
-/** What the person saw when they answered: any difference asks again. */
+/**
+ * What the person saw when they answered: any difference asks again. A grant
+ * for the whole server has no `definitionDigest`, because it covers tools
+ * whose listings the person never saw; it binds the package alone.
+ */
 const toolGrantBinding = {
   version: ExtensionPackageVersion,
   digest: ExtensionContentDigest,
-  definitionDigest: ExtensionToolDefinitionDigest,
+  definitionDigest: Schema.optional(ExtensionToolDefinitionDigest),
 };
 
-/** Identifiers and digests only: never the arguments or result of a call. */
-export const ExtensionToolGrantRecorded = Schema.Struct({
+/** The fields of a recorded grant, for a schema that lists grants. */
+export const extensionToolGrantRecordedFields = {
   grantId: ExtensionToolGrantId,
   ...toolGrantSubject,
   ...toolGrantBinding,
-}).annotations(strict);
+};
+
+/** Identifiers and digests only: never the arguments or result of a call. */
+export const ExtensionToolGrantRecorded = Schema.Struct(extensionToolGrantRecordedFields)
+  .annotations(strict)
+  .pipe(
+    // A tool's grant names the tool and its listing; a server's names neither.
+    Schema.filter(
+      (grant) =>
+        (grant.mcpToolName === undefined) === (grant.definitionDigest === undefined) &&
+        (grant.threadId === undefined || grant.mcpToolName === undefined),
+    ),
+  );
 export type ExtensionToolGrantRecorded = typeof ExtensionToolGrantRecorded.Type;
 
 export const ExtensionToolGrantRevocationReason = Schema.Literal(
@@ -249,7 +292,8 @@ export type ExtensionToolGrantRevocationReason = typeof ExtensionToolGrantRevoca
 
 export const ExtensionToolGrantRevoked = Schema.Struct({
   grantId: ExtensionToolGrantId,
-  projectId: ProjectId,
+  /** Absent for a grant remembered for the account. */
+  projectId: Schema.optional(ProjectId),
   reason: ExtensionToolGrantRevocationReason,
 }).annotations(strict);
 export type ExtensionToolGrantRevoked = typeof ExtensionToolGrantRevoked.Type;

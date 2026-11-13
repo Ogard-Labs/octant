@@ -219,6 +219,7 @@ function harness(
     readonly configDirectory?: string;
     readonly runtimeVersion?: string;
     readonly artifactDelivery?: () => boolean;
+    readonly ownMemory?: () => boolean;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
     readonly makeEnvironmentScope?: (
@@ -356,6 +357,7 @@ function harness(
       ...(options.artifactDelivery === undefined
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
+      ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
       process,
@@ -599,6 +601,81 @@ describe("Claude execution policy", () => {
           ),
         );
         expect(replay._tag).toBe("Failure");
+      } finally {
+        await Effect.runPromise(Scope.close(subscriptionScope, Exit.void));
+      }
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("asks for an app-owned tool under the step id of the row Claude's tool use opened", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const definition = { name: "octant_browser", inputSchema: { type: "object" } };
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "Read the browser",
+          attachments: [],
+          tools: [definition],
+        }),
+      );
+      const query = f.queries[0];
+      const call = query?.send.mock.calls[0]?.[0].onAppToolCall;
+      if (query === undefined || call === undefined) throw new Error("Expected a tool callback");
+      const subscriptionScope = await Effect.runPromise(Scope.make());
+      try {
+        const stream = await Effect.runPromise(
+          acquired.connection.subscribe.pipe(Effect.provideService(Scope.Scope, subscriptionScope)),
+        );
+        const seen = Effect.runPromise(
+          Stream.runCollect(
+            stream.pipe(
+              Stream.filter(
+                (event) => event.kind === "tool-start" || event.kind === "tool-request",
+              ),
+              Stream.take(2),
+            ),
+          ),
+        );
+        await query.emit({
+          kind: "stream-event",
+          sessionId: "sdk-session-1",
+          event: {
+            kind: "content-start",
+            index: 0,
+            content: {
+              kind: "tool-use",
+              toolUseId: "toolu-browser",
+              toolName: "mcp__octant__octant_browser",
+              input: { operation: "read-page" },
+            },
+          },
+        });
+        const answer = call(
+          "octant_browser",
+          '{"operation":"read-page"}',
+          new AbortController().signal,
+          "toolu-browser",
+        );
+        const [started, requested] = Array.from(await seen);
+        if (started?.kind !== "tool-start" || requested?.kind !== "tool-request")
+          throw new Error("Expected the tool row, then its request");
+        expect(requested.requestId).toBe(started.toolCallId);
+        await Effect.runPromise(
+          acquired.connection.answerTool({
+            sessionId,
+            requestId: requested.requestId,
+            resultJson: "{}",
+            isError: false,
+          }),
+        );
+        await answer;
       } finally {
         await Effect.runPromise(Scope.close(subscriptionScope, Exit.void));
       }
@@ -3312,9 +3389,11 @@ describe("Claude artifact delivery", () => {
     authentication: ClaudeAuthentication,
     artifactDelivery: () => boolean,
     hostEnvironment: NodeJS.ProcessEnv = { PATH: "/usr/bin", HOME: "/Users/someone" },
+    ownMemory?: () => boolean,
   ) {
     return harness(authentication, "current-session", {
       artifactDelivery,
+      ...(ownMemory === undefined ? {} : { ownMemory }),
       configDirectory: "/Users/someone/.claude-accounts/personal",
       makeEnvironmentScope: (selected, options) =>
         Effect.succeed({
@@ -3371,6 +3450,36 @@ describe("Claude artifact delivery", () => {
     const other = await launch(on, "work", "approval-gated", false);
     expect(other.tools).not.toContain("Artifact");
     expectEveryGuard(other.environment);
+  });
+
+  it("lifts only the auto-memory guard for a Work or Code launch outside Plan on an account whose person turned its memory on", async () => {
+    const memoryGuard = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+    const everyOtherGuard = Object.fromEntries(
+      Object.entries(REQUIRED_GUARDS).filter(([name]) => name !== memoryGuard),
+    );
+    let on = true;
+    const f = guardedHarness(
+      "subscription",
+      () => false,
+      undefined,
+      () => on,
+    );
+    for (const [mode, policy] of [
+      ["work", "approval-gated"],
+      ["code", "full-access"],
+    ] as const) {
+      const launched = await launch(f, mode, policy, false);
+      expect(launched.environment, `${mode} ${policy}`).not.toHaveProperty(memoryGuard);
+      expect(launched.environment).toMatchObject(everyOtherGuard);
+    }
+    // Plan may write nothing a later session would load, and Chat is confined
+    // the same way, so both keep the guard with the setting on.
+    expectEveryGuard((await launch(f, "code", "plan", false)).environment);
+    expectEveryGuard((await launch(f, "chat", "approval-gated", false)).environment);
+    // The next launch after the person turns it off is guarded again, and
+    // Full access alone never lifts it.
+    on = false;
+    expectEveryGuard((await launch(f, "code", "full-access", false)).environment);
   });
 
   it("keeps every guard for a turn the tool is not offered to", async () => {

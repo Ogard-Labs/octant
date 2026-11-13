@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { readLocalUsageHistoryDashboard } from "./providers/localUsageHistoryService";
 import type { LocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
@@ -27,7 +28,12 @@ export interface LocalUsageHistoryRouteDependencies {
   readonly clock?: () => string;
 }
 
-/** Local-window-only read route for bounded provider history aggregates. */
+/**
+ * Read route for bounded provider history aggregates, for the host's own
+ * person: a local window or a device that person paired (maintainer decision,
+ * 2026-11-13). It reads provider history files in the home folder, so every
+ * other device session is refused.
+ */
 export function createLocalUsageHistoryRouteHandler(
   dependencies: LocalUsageHistoryRouteDependencies,
 ): (request: Request) => Promise<Response | undefined> {
@@ -51,8 +57,8 @@ export function createLocalUsageHistoryRouteHandler(
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
-      if (context.principal.kind !== "local-window")
-        return failure("Usage history is local-window only.", 403, origin);
+      if (!principalActsAsHostPerson(context.principal))
+        return failure("Usage history is read only by the host's own person.", 403, origin);
     } catch (error) {
       return failure(
         "Usage history request is unauthorized.",

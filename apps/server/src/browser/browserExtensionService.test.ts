@@ -377,7 +377,7 @@ describe("Browser extension service", () => {
   });
 
   it("disables per profile and removes everywhere, deleting its copy", async () => {
-    const { root, install, service, syncs } = harness();
+    const { root, install, service, syncs, live } = harness();
     const first = await install(extensionFolder(root, manifest(), { "popup.html": "1" }));
     if (first.kind !== "browser-extension-installed") throw new Error("not installed");
     const { id, contentHash } = first.extension;
@@ -390,19 +390,41 @@ describe("Browser extension service", () => {
       });
     }
 
-    await service.execute(windowId, "local-window", {
-      kind: "disable",
-      extensionId: id,
-      profile: personal,
-    });
+    const deviceId = "a0000000-0000-4000-8000-0000000000d2";
+    const device = decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId });
+    await service.execute(
+      windowId,
+      "local-window",
+      { kind: "disable", extensionId: id, profile: personal },
+      device,
+    );
     expect(service.list()[0]?.enabledIn).toEqual([projectProfile]);
 
-    const removed = await service.execute(windowId, "local-window", {
-      kind: "remove",
-      extensionId: id,
-    });
+    const removed = await service.execute(
+      windowId,
+      "local-window",
+      { kind: "remove", extensionId: id },
+      device,
+    );
     expect(removed).toEqual({ kind: "browser-extension-removed", extensionId: id });
     expect(service.list()).toEqual([]);
+    // Each change is journaled as whoever the route named; with nobody named
+    // it is the local person's.
+    expect(
+      live
+        .replayAggregateType({
+          aggregateType: "browser-extension",
+          afterSequence: 0,
+          limit: 10,
+        })
+        .map((event) => [event.eventName, event.actor.kind]),
+    ).toEqual([
+      ["browser.extension-installed@1", "local-user"],
+      ["browser.extension-enabled@1", "local-user"],
+      ["browser.extension-enabled@1", "local-user"],
+      ["browser.extension-disabled@1", "remote-device"],
+      ["browser.extension-removed@1", "remote-device"],
+    ]);
     expect(existsSync(join(root, "browser-extensions", String(id)))).toBe(false);
     expect(syncs.at(-1)?.extensions).toEqual([]);
   });

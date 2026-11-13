@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { decodeThreadToolStep, decodeThreadToolStepList } from "./threadToolStepList";
-import { MAX_THREAD_TOOL_STEPS_PER_TURN } from "./threadToolSteps";
 
 const step = { toolCallId: "call-1", toolName: "Read", state: "completed" } as const;
 
@@ -17,15 +16,12 @@ describe("the thread tool step contract", () => {
     expect(() => decodeThreadToolStep({ ...step, summary: "x".repeat(2_049) })).toThrow();
   });
 
-  it("refuses more tool calls than one turn may keep", () => {
-    expect(() =>
-      decodeThreadToolStepList(
-        Array.from({ length: MAX_THREAD_TOOL_STEPS_PER_TURN + 1 }, (_unused, index) => ({
-          ...step,
-          toolCallId: `call-${String(index)}`,
-        })),
-      ),
-    ).toThrow();
+  it("holds as many tool calls as the turn's limit let it keep, which is off at Full access", () => {
+    const steps = Array.from({ length: 5_000 }, (_unused, index) => ({
+      ...step,
+      toolCallId: `call-${String(index)}`,
+    }));
+    expect(decodeThreadToolStepList(steps)).toHaveLength(5_000);
   });
 });
 

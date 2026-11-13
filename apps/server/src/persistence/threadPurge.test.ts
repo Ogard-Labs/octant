@@ -55,6 +55,7 @@ import {
 import { GeneratedImageStore } from "../image/generatedImageStore";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
 import { writeChatContent } from "./chatProjection";
+import { readThreadToolCallRecords, writeThreadToolCallPart } from "./threadToolCallRecordStore";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
@@ -210,6 +211,14 @@ describe("thread purge sweep", () => {
     });
     expect(unexplained.map(formatHit)).toEqual([]);
     expect(readControl(harness.connection)).toBe(controlMarker);
+    // Another thread's tool-call records are not the purged threads' to take.
+    expect(
+      readThreadToolCallRecords(harness.connection, {
+        mode: "chat",
+        threadId: controlThreadId,
+        turnId: toolCallTurnId,
+      }).map((record) => record.output?.text),
+    ).toEqual([controlMarker]);
     expect(sharedWorktreeRemains(harness.directory)).toBe(true);
     // De-linked usage rows keep their aggregates but carry no thread identity.
     expect(usageRowsByThread(harness.connection)).toBe(0);
@@ -554,6 +563,7 @@ describe("thread purge sweep", () => {
     const entryId = "c3630000-0000-4000-8000-0000000000e1";
     const successorId = "c3630000-0000-4000-8000-0000000000e2";
     const otherEntryId = "c3630000-0000-4000-8000-0000000000e3";
+    const retractedEntryId = "c3630000-0000-4000-8000-0000000000e4";
     const author = { kind: "local-user", actorId };
     const entry = (id: string, content: string, provenance: unknown, version: number) => ({
       id,
@@ -599,6 +609,38 @@ describe("thread purge sweep", () => {
       "memory.entry-created@1",
       3,
     );
+    // The person's own entry, retracted by the purged thread's agent with
+    // nobody asked: the retraction names the thread beside the provenance.
+    insertEvent(
+      harness.connection,
+      "project-memory",
+      projectId,
+      {
+        entry: {
+          ...entry(retractedEntryId, "Tabs.", { kind: "user-authored" }, 4),
+          status: "active",
+        },
+      },
+      "memory.entry-created@1",
+      4,
+    );
+    insertEvent(
+      harness.connection,
+      "project-memory",
+      projectId,
+      {
+        entry: {
+          ...entry(retractedEntryId, "Tabs.", { kind: "user-authored" }, 5),
+          status: "retracted",
+          retractionReason: "No longer true.",
+          retractedBy: author,
+          retractedAt: now,
+          retractionOrigin: { ...fromPurged, unconfirmed: true },
+        },
+      },
+      "memory.entry-retracted@1",
+      5,
+    );
     const projects = createPhase1RuntimeRegistries().projections.get("projects");
     if (projects === undefined) throw new Error("project projection is not registered");
     const rebuild = () =>
@@ -631,9 +673,12 @@ describe("thread purge sweep", () => {
       { kind: "agent-authored", mode: "code" },
       fromKept,
     ]);
-    expect(memory.history.map((old) => old.provenance)).toEqual([
-      { kind: "agent-authored", mode: "code" },
+    expect(memory.history.filter((old) => old.status === "superseded")).toMatchObject([
+      { provenance: { kind: "agent-authored", mode: "code" } },
     ]);
+    expect(
+      memory.history.flatMap((old) => (old.status === "retracted" ? [old.retractionOrigin] : [])),
+    ).toEqual([{ kind: "agent-authored", mode: "code", unconfirmed: true }]);
     const journaled = harness.connection
       .prepare(
         `SELECT COUNT(*) AS count FROM event_journal
@@ -1075,6 +1120,7 @@ function seedThreadTraces(harness: Harness, thread: SeededThread): void {
   seedGeneratedImage(harness.directory, thread);
   seedBrowserCapture(harness, thread);
   seedAgentRun(harness, thread);
+  if (thread.mode !== "code") seedToolCallRecord(harness, thread.mode, thread.id, thread.marker);
   seedCheckpoint(harness, thread);
   seedFollowUp(harness, thread);
   seedHarnessSession(harness, thread);
@@ -1543,6 +1589,33 @@ function seedUsage(connection: SqliteConnection, thread: SeededThread): void {
 
 function seedControlThread(harness: Harness): void {
   seedChatProjection(harness, controlThreadId, controlMarker);
+  seedToolCallRecord(harness, "chat", controlThreadId, controlMarker);
+}
+
+const toolCallTurnId = "c3630000-0000-4000-8000-0000000000d1";
+
+/** What a tool call was given and returned is thread content held outside the journal. */
+function seedToolCallRecord(
+  harness: Harness,
+  mode: "chat" | "work",
+  threadId: string,
+  marker: string,
+): void {
+  for (const part of ["input", "output"] as const) {
+    const outcome = writeThreadToolCallPart(harness.connection, {
+      mode,
+      threadId,
+      turnId: toolCallTurnId,
+      callsPerTurn: 64,
+      toolCallId: "call-1",
+      toolName: "Bash",
+      part,
+      text: marker,
+      recordedAt: now,
+      redact: (text) => text,
+    });
+    if (outcome.status !== "kept") throw new Error("the tool-call record was not seeded");
+  }
 }
 
 function insertEvent(

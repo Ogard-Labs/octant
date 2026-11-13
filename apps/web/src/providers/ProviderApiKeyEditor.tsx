@@ -4,11 +4,8 @@ import type {
   ProviderInstanceId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import {
-  getInjectedHostBridge,
-  type OctantHostBridge,
-  type ProviderApiKeySummary,
-} from "../shell/hostBridge";
+import { getInjectedHostBridge, type ProviderApiKeySummary } from "../shell/hostBridge";
+import type { ProviderKeyHost } from "./providerKeyHost";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -20,7 +17,7 @@ export interface ProviderApiKeyEditorProps {
   /** Reports the stored state after a change, so the credential line stays current. */
   readonly onChanged?: ((status: ProviderCredentialStatus) => void) | undefined;
   /** The host bridge. Defaults to the injected host; absent in a browser. */
-  readonly bridge?: OctantHostBridge | undefined;
+  readonly bridge?: ProviderKeyHost | undefined;
 }
 
 type Pending =
@@ -48,7 +45,7 @@ export function acceptsApiKeyPool(instance: ProviderInstance): boolean {
  * Labels come from the host; secrets go to the host and are never read back.
  */
 export function ProviderApiKeyEditor(props: ProviderApiKeyEditorProps) {
-  const bridge: OctantHostBridge | undefined = props.bridge ?? getInjectedHostBridge();
+  const bridge: ProviderKeyHost | undefined = props.bridge ?? getInjectedHostBridge();
   const [keys, setKeys] = useState<readonly ProviderApiKeySummary[]>([]);
   const [loaded, setLoaded] = useState<"loading" | "ready" | "failed">("loading");
   const [pending, setPending] = useState<Pending>({ kind: "idle" });
@@ -116,14 +113,14 @@ export function ProviderApiKeyEditor(props: ProviderApiKeyEditorProps) {
       return;
     }
     const label = newLabel.trim();
+    // The key leaves the field as it is sent, so a refused or failed send
+    // leaves none on screen either.
+    if (newSecret.current !== null) newSecret.current.value = "";
     void change(
       async () => {
         await bridge.addProviderApiKey(instanceId, secret, label === "" ? undefined : label);
       },
-      () => {
-        if (newSecret.current !== null) newSecret.current.value = "";
-        setNewLabel("");
-      },
+      () => setNewLabel(""),
     );
   };
 
@@ -142,14 +139,12 @@ export function ProviderApiKeyEditor(props: ProviderApiKeyEditorProps) {
       setMessage("Enter the replacement key first.");
       return;
     }
+    if (replacementSecret.current !== null) replacementSecret.current.value = "";
     void change(
       async () => {
         await bridge.replaceProviderApiKey(instanceId, keyId, secret);
       },
-      () => {
-        if (replacementSecret.current !== null) replacementSecret.current.value = "";
-        setPending({ kind: "idle" });
-      },
+      () => setPending({ kind: "idle" }),
     );
   };
 

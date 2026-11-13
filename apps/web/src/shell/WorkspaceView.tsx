@@ -478,6 +478,8 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     autoReviewer: import("@octant/contracts/shield").AutoReviewer | undefined,
   ) => Promise<boolean>;
+  readonly onAgentMemoryWritesChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onImageGenerationAskAgain?: (projectId: ProjectId) => Promise<boolean>;
   readonly onBrandKitChange?: (
     projectId: ProjectId,
     brandKit: CanvasDesignBrand,
@@ -487,6 +489,7 @@ export interface WorkspaceViewProps {
     designSystem: import("@octant/contracts/design-systems").DesignSystemChoice | null,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
     enabled: boolean,
@@ -542,10 +545,7 @@ export interface WorkspaceViewProps {
   readonly draftProjectRoot?: string;
   readonly draftBranchName?: string;
   /** Present while the Code draft was opened with New coordinator. */
-  readonly draftCoordinator?: {
-    readonly projectId: import("@octant/contracts/projects").ProjectId;
-    readonly onCancel: () => void;
-  };
+  readonly draftCoordinator?: import("./DraftThreadWorkspace").CoordinatorDraft;
   readonly draftApprovalLabel?: string;
   readonly draftSelectedProviderInstanceId?: import("@octant/contracts/providers").ProviderInstanceId;
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;
@@ -2522,6 +2522,12 @@ function renderNonCodeTab(
         {...(props.onProjectAutoReviewerChange === undefined
           ? {}
           : { onAutoReviewerChange: props.onProjectAutoReviewerChange })}
+        {...(props.onAgentMemoryWritesChange === undefined
+          ? {}
+          : { onAgentMemoryWritesChange: props.onAgentMemoryWritesChange })}
+        {...(props.onImageGenerationAskAgain === undefined
+          ? {}
+          : { onImageGenerationAskAgain: props.onImageGenerationAskAgain })}
         {...(props.onBrandKitChange === undefined
           ? {}
           : { onBrandKitChange: props.onBrandKitChange })}
@@ -2531,6 +2537,9 @@ function renderNonCodeTab(
         {...(props.onWorkStatusFileChange === undefined
           ? {}
           : { onWorkStatusFileChange: props.onWorkStatusFileChange })}
+        {...(props.onOwnToolchainChange === undefined
+          ? {}
+          : { onOwnToolchainChange: props.onOwnToolchainChange })}
         {...(props.onWorkDeveloperToolsChange === undefined
           ? {}
           : { onWorkDeveloperToolsChange: props.onWorkDeveloperToolsChange })}

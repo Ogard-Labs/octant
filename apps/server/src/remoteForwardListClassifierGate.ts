@@ -9,25 +9,18 @@ const GATE_ORIGIN = "https://octant.example:8443";
  * diagnostics export, and local-only administration.
  */
 const LOCAL_ONLY_PROBES = [
-  { path: "/api/benchmarks/suites/save", method: "POST" },
-  { path: "/api/benchmarks/suites/delete", method: "POST" },
-  { path: "/api/benchmarks/runs/start", method: "POST" },
-  { path: "/api/benchmarks/runs/cancel", method: "POST" },
-  { path: "/api/benchmarks/runs/purge", method: "POST" },
-  { path: "/api/usage/reset", method: "POST" },
-  { path: "/api/usage/retain", method: "POST" },
   { path: "/api/diagnostics/export", method: "POST" },
   { path: "/api/diagnostics/journal-growth", method: "GET" },
   { path: "/api/diagnostics/bundle", method: "POST" },
   { path: "/api/diagnostics/bundle/preview", method: "GET" },
   { path: "/api/diagnostics/bundle/save", method: "POST" },
-  { path: "/api/host-control/status", method: "GET" },
-  { path: "/api/host-control/data-map", method: "GET" },
   { path: "/api/host-control/export", method: "GET" },
-  { path: "/api/host-control/lifecycle", method: "POST" },
-  { path: "/api/extensions/lifecycle", method: "POST" },
-  { path: "/api/extensions/npm", method: "POST" },
-  { path: "/api/extensions/tool-grants", method: "POST" },
+  { path: "/api/extensions/skill-folder-selection", method: "POST" },
+  { path: "/api/extensions/import-local", method: "POST" },
+  { path: "/api/shell/bootstrap", method: "POST" },
+  { path: "/api/shell/commands", method: "POST" },
+  { path: "/api/shell/launch-session", method: "POST" },
+  { path: "/api/shell/local-session", method: "POST" },
   { path: "/api/desktop/window-authorities", method: "GET" },
   { path: "/api/desktop/provider-credentials/set", method: "POST" },
   { path: "/api/desktop/provider-sign-in/begin", method: "POST" },
@@ -36,11 +29,15 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/secret-stores/commands", method: "POST" },
   { path: "/api/secret-stores/settings", method: "GET" },
   { path: "/api/provider-cloud", method: "POST" },
+  { path: "/api/server-projects", method: "POST" },
+  { path: "/api/server-project-preview", method: "POST" },
+  { path: "/api/remote-setup-check", method: "POST" },
+  { path: "/api/providers/discovery/locate-binary", method: "POST" },
+  { path: "/api/providers/discovery/binary-receipts", method: "POST" },
   { path: "/api/secret-stores/command-bindings", method: "GET" },
   { path: "/api/secret-stores/command-bindings", method: "POST" },
   { path: "/api/replica-membership/commands", method: "POST" },
   { path: "/api/replica-membership/state", method: "GET" },
-  { path: "/api/thread-external-content", method: "POST" },
   { path: "/api/speech/synthesis", method: "POST" },
   { path: "/api/desktop/agent-access", method: "GET" },
   { path: "/api/desktop/agent-access/commands", method: "POST" },
@@ -114,6 +111,11 @@ const PRODUCT_PROBES = [
   { path: "/api/canvas/html-file", method: "POST" },
   { path: "/api/agent-profiles", method: "GET" },
   { path: "/api/replica-sync/status", method: "GET" },
+  {
+    path: "/api/thread-message-queue?mode=chat&threadId=00000000-0000-4000-8000-000000000001",
+    method: "GET",
+  },
+  { path: "/api/thread-message-queue/commands", method: "POST" },
 ] as const;
 
 export interface ForwardListClassifierMismatch {
@@ -129,9 +131,12 @@ export interface ForwardListClassifierMismatch {
 /**
  * Compare the default remote forward list with the product route classifier.
  *
- * A forwarded path must never classify as local-host-required. A local-only
- * path must never be forwarded. A classified remote-approvable product path
- * in the probe set must be forwarded, or the two lists have drifted.
+ * The classifier is what holds a hub-introduced device and an agent grant: a
+ * forwarded path must never classify as local-host-required for them. A
+ * local-only path must never be forwarded. A classified remote-approvable
+ * product path in the probe set must be forwarded, or the two lists have
+ * drifted. A device the host's own person paired is not judged by the
+ * classifier; it reaches every forwarded route, as a local window does.
  */
 export function compareRemoteForwardListToClassifier(): ReadonlyArray<ForwardListClassifierMismatch> {
   const policy = createRemoteRoutePolicy({ origin: GATE_ORIGIN });

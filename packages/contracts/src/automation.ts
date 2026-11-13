@@ -314,6 +314,10 @@ const AutomationRemoteDevicePrincipal = Schema.Struct({
   protocolVersion: positiveInteger,
   capabilityDigest: AutomationDigest,
   sessionId: AutomationOpaqueReference,
+  // Who let the device onto the host, as the remote gateway marks every
+  // device principal. A command carries the authenticated principal whole, so
+  // a strict struct without this refused every paired device's command.
+  admittedBy: Schema.optional(Schema.Literal("host-person", "hub-roster")),
 }).annotations(strict);
 
 /** Authenticated principals accepted on mutation commands. */
@@ -504,9 +508,11 @@ export const AutomationBlockReason = Schema.Literal(
   "unsupported-mode",
   "automation-recursion",
   // A follow-up's own thread at fire time: gone, archived, or in another
-  // Project; marked Done or Complete; or already running a turn.
+  // Project; or marked Done or Complete.
   "thread-unavailable",
   "thread-done",
+  // No longer recorded: a follow-up now waits for a busy thread. Kept so
+  // journals written while a busy thread was skipped still decode.
   "thread-busy",
   // A follow-up the host could not run within its missed window.
   "follow-up-missed",

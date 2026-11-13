@@ -174,6 +174,30 @@ describe("SettingsView", () => {
     },
   );
 
+  it("offers the quit shortcut's second press as a switch in the desktop app only, on by default", () => {
+    const onSettingsChange = vi.fn();
+    const platform = Object.getOwnPropertyDescriptor(window.navigator, "platform");
+    Object.defineProperty(window.navigator, "platform", { value: "MacIntel", configurable: true });
+    try {
+      const { rerender, props } = renderSettings({
+        hostBridge: { setQuitShortcutSecondPress: vi.fn() } as never,
+        onSettingsChange,
+      });
+
+      const guard = screen.getByRole("switch", { name: "Press ⌘Q twice to quit" });
+      expect(guard).toBeChecked();
+      fireEvent.click(guard);
+      expect(onSettingsChange).toHaveBeenCalledWith({ quitShortcutNeedsSecondPress: false });
+
+      const { hostBridge: _bridge, ...remote } = props;
+      rerender(<SettingsView {...remote} />);
+      expect(screen.queryByRole("switch", { name: "Press ⌘Q twice to quit" })).toBeNull();
+    } finally {
+      if (platform === undefined) Reflect.deleteProperty(window.navigator, "platform");
+      else Object.defineProperty(window.navigator, "platform", platform);
+    }
+  });
+
   it("lets the reader choose to wait for finished replies from Chat settings", async () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
@@ -720,6 +744,42 @@ describe("SettingsView", () => {
     await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
   });
 
+  it("cuts a silent turn off after 30 minutes by default and saves the limit or Off the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings({
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "providers" },
+    });
+    const limit = await screen.findByRole("combobox", { name: "Stalled-turn limit" });
+    expect(limit).toHaveTextContent("30 minutes");
+    await user.click(limit);
+    await user.click(await screen.findByRole("option", { name: "2 hours" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ stalledTurnLimitMinutes: 120 });
+    await user.click(limit);
+    await user.click(await screen.findByRole("option", { name: "Off" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ stalledTurnLimitMinutes: null });
+  });
+
+  it("pauses the stalled-turn limit for a tool call for 2 hours at most by default and saves the pause or Off the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings({
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "providers" },
+    });
+    const pause = await screen.findByRole("combobox", { name: "Tool-call pause limit" });
+    expect(pause).toHaveTextContent("2 hours");
+    await user.click(pause);
+    await user.click(await screen.findByRole("option", { name: "8 hours" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerToolCallPauseLimitMinutes: 480 });
+    await user.click(pause);
+    await user.click(await screen.findByRole("option", { name: "Off" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({
+      providerToolCallPauseLimitMinutes: null,
+    });
+  });
+
   it("lists the provider catalog on Providers & Models and opens a driver's setup without another scan", async () => {
     const providerController = providerControllerFixture();
     const discoveryController = discoveryControllerFixture();
@@ -1243,13 +1303,15 @@ describe("SettingsView", () => {
     for (const selector of [
       "\\.settings-view__select",
       "\\.settings-font-picker",
-      "\\.octant-number-stepper",
+      "\\.setrow-control > \\.octant-number-stepper",
     ]) {
       expect(styles).toMatch(
         new RegExp(`${selector}[^{}]*\\{[^}]*width:\\s*var\\(--oct-settings-control`),
       );
     }
-    expect(styles).toMatch(
+    // The stepper's own rules load with the app, outside the lazy Settings sheet.
+    const components = readFileSync(resolve(process.cwd(), "src/styles/components.css"), "utf8");
+    expect(components).toMatch(
       /\.octant-number-stepper \{[^}]*grid-template-columns:\s*30px minmax\(0, 1fr\) auto 30px;/,
     );
   });
@@ -1919,12 +1981,129 @@ describe("SettingsView", () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
     navigateTo("Permissions");
-    expect(screen.getByRole("heading", { name: "Browser downloads" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Browser uploads and downloads" }),
+    ).toBeInTheDocument();
     const control = screen.getByRole("switch", { name: "Let agents download files" });
     expect(control).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText(/Downloads you start yourself stay blocked/)).toBeVisible();
+    expect(
+      screen.getByText(/a download you start yourself goes to your Downloads folder/),
+    ).toBeVisible();
     await userEvent.setup().click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ agentBrowserDownloads: true });
+  });
+
+  it("keeps 200 Browser captures a thread until the person chooses another number", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Browser captures" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Captures kept per thread" })).toHaveValue(200);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Decrease Captures kept per thread" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserCapturesPerThread: 199 });
+  });
+
+  it("keeps tool-call records until the person turns the switch off", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Tool-call records" })).toBeInTheDocument();
+    const control = screen.getByRole("switch", { name: "Keep tool inputs and outputs" });
+    expect(control).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/removed when its thread is purged/)).toBeVisible();
+    await userEvent.setup().click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ keepToolCallRecords: false });
+  });
+
+  it("keeps 64 tool steps a turn below Full access and every step at Full access until the person sets a number", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    expect(screen.getByRole("heading", { name: "Tool steps" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Tool steps kept per turn" })).toHaveValue(64);
+    const fullAccess = screen.getByRole("spinbutton", {
+      name: "Tool steps kept per turn at Full access",
+    });
+    expect(fullAccess).toHaveValue(0);
+    expect(screen.getByText(/0 means no limit/)).toBeVisible();
+    // The fixed stop that guards against a runaway turn is said where the limit is set.
+    expect(
+      screen.getByText(/still stops after 4,096 runtime events, whatever this is set to/),
+    ).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Decrease Tool steps kept per turn" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ toolStepsPerTurn: 63 });
+    await user.click(
+      screen.getByRole("button", { name: "Increase Tool steps kept per turn at Full access" }),
+    );
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ fullAccessToolStepsPerTurn: 1 });
+  });
+
+  it("lets the person change the largest file and the downloads kept waiting from their defaults", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    const user = userEvent.setup();
+    const largest = screen.getByRole("combobox", { name: "Largest file" });
+    expect(largest).toHaveTextContent("25 MB");
+    await user.click(largest);
+    await user.click(await screen.findByRole("option", { name: "100 MB" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserTransferFileLimitMegabytes: 100 });
+    const waiting = screen.getByRole("combobox", { name: "Downloads kept waiting" });
+    expect(waiting).toHaveTextContent("5 per page");
+    await user.click(waiting);
+    await user.click(await screen.findByRole("option", { name: "10 per page" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserHeldDownloadLimit: 10 });
+  });
+
+  it("lets the person change how many files one upload may send from the default five", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    const user = userEvent.setup();
+    const files = screen.getByRole("combobox", { name: "Files per upload" });
+    expect(files).toHaveTextContent("5 files");
+    await user.click(files);
+    await user.click(await screen.findByRole("option", { name: "20 files" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserUploadFileCountLimit: 20 });
+  });
+
+  it("lists each always-allowed Browser upload and download with its site and folder, and forgets the one the person picks", async () => {
+    const onSettingsChange = vi.fn();
+    const upload = {
+      direction: "upload" as const,
+      origin: "https://example.com",
+      workspaceRoot: "/projects/brief",
+      privatePage: true as const,
+    };
+    // Remembered before the page was recorded, so it names none and covers any.
+    const download = {
+      direction: "download" as const,
+      origin: upload.origin,
+      workspaceRoot: upload.workspaceRoot,
+    };
+    renderSettings({
+      onSettingsChange,
+      settings: { ...defaultShellSettings(), rememberedBrowserTransfers: [upload, download] },
+    });
+    navigateTo("Permissions");
+    expect(
+      screen.getByText(
+        "Agents upload files from /projects/brief to this site on Private pages without asking.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Agents save downloads from this site on any page into /projects/brief without asking.",
+      ),
+    ).toBeVisible();
+    // The rows are listed in the order remembered: the upload, then the download.
+    const forget = screen.getAllByRole("button", { name: "Forget" });
+    expect(forget).toHaveLength(2);
+    await userEvent.setup().click(forget[1] as HTMLElement);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ rememberedBrowserTransfers: [upload] });
   });
 
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {

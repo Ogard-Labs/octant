@@ -35,6 +35,7 @@ import {
   normalizeEnvironmentPresentationState,
   removeEnvironmentPresentation,
   replaceEnvironmentPresentation,
+  browserTransferRemembered,
   replaceShellSettings,
   resolveFirstRunOnboarding,
   resolveEffectivePresentation,
@@ -207,6 +208,7 @@ describe("shell settings policy", () => {
       // Automatic update checks start off: an unrecorded preference decodes
       // to no update traffic, so the switch is a real opt-in.
       automaticUpdateChecks: false,
+      quitShortcutNeedsSecondPress: true,
       marketplaceFetchesEnabled: true,
       // A completed thread rests a week before the host archives it.
       completedThreadArchiveAfterDays: 7,
@@ -214,6 +216,8 @@ describe("shell settings policy", () => {
       autoCompactRuntimeWindowPercent: null,
       autoCompactIdleMinutes: null,
       autoCompactLimitPercent: null,
+      stalledTurnLimitMinutes: 30,
+      providerToolCallPauseLimitMinutes: 120,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.
@@ -231,6 +235,14 @@ describe("shell settings policy", () => {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      browserCapturesPerThread: 200,
+      keepToolCallRecords: true,
+      toolStepsPerTurn: 64,
+      fullAccessToolStepsPerTurn: 0,
+      browserTransferFileLimitMegabytes: 25,
+      browserHeldDownloadLimit: 5,
+      browserUploadFileCountLimit: 5,
+      rememberedBrowserTransfers: [],
       persistentBrowserOwner: false,
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
@@ -243,6 +255,14 @@ describe("shell settings policy", () => {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      browserCapturesPerThread: 200,
+      keepToolCallRecords: true,
+      toolStepsPerTurn: 64,
+      fullAccessToolStepsPerTurn: 0,
+      browserTransferFileLimitMegabytes: 25,
+      browserHeldDownloadLimit: 5,
+      browserUploadFileCountLimit: 5,
+      rememberedBrowserTransfers: [],
       persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);
@@ -262,6 +282,64 @@ describe("shell settings policy", () => {
       replaceShellSettings(current, { ...replacement, workspaceMaterial: "system" })
         .workspaceMaterial,
     ).toBe("system");
+  });
+
+  it("remembers a Browser upload or download for its site, folder and profile, and for no other profile", () => {
+    const transfer = {
+      direction: "upload",
+      origin: "https://example.com",
+      workspaceRoot: "/projects/brief",
+    } as const;
+    const personal = { kind: "personal" } as const;
+    const project = {
+      kind: "project",
+      projectId: "30000000-0000-4000-8000-000000000001",
+    } as never;
+    const inPersonal = [{ ...transfer, profile: personal }];
+
+    expect(browserTransferRemembered(inPersonal, { ...transfer, profile: personal })).toBe(true);
+    expect(browserTransferRemembered(inPersonal, { ...transfer, profile: project })).toBe(false);
+    // An answer given on a Private page says so, and stays there.
+    const onPrivate = { ...transfer, privatePage: true } as const;
+    expect(browserTransferRemembered(inPersonal, onPrivate)).toBe(false);
+    expect(browserTransferRemembered([onPrivate], { ...transfer, profile: personal })).toBe(false);
+    expect(browserTransferRemembered([onPrivate], onPrivate)).toBe(true);
+    // An answer remembered before the page was recorded names neither. It
+    // was given for the site and the folder on any page, and still covers
+    // that: the same site and folder, in any profile and on a Private page.
+    expect(browserTransferRemembered([transfer], { ...transfer, profile: personal })).toBe(true);
+    expect(browserTransferRemembered([transfer], { ...transfer, profile: project })).toBe(true);
+    expect(browserTransferRemembered([transfer], onPrivate)).toBe(true);
+    expect(
+      browserTransferRemembered([transfer], { ...onPrivate, origin: "https://other.example" }),
+    ).toBe(false);
+    expect(
+      browserTransferRemembered(inPersonal, {
+        ...transfer,
+        profile: personal,
+        workspaceRoot: "/projects/other",
+      }),
+    ).toBe(false);
+  });
+
+  it("lets Settings forget a remembered transfer and never widen one to every page", () => {
+    const settings = defaultShellSettings();
+    const entry = {
+      direction: "upload",
+      origin: "https://example.com",
+      workspaceRoot: "/projects/brief",
+      profile: { kind: "personal" },
+    } as const;
+    const current: ShellSettings = { ...settings, rememberedBrowserTransfers: [entry] };
+
+    expect(
+      replaceShellSettings(current, { ...current, rememberedBrowserTransfers: [] })
+        .rememberedBrowserTransfers,
+    ).toEqual([]);
+    const { profile: _profile, ...anyPage } = entry;
+    expect(() =>
+      replaceShellSettings(current, { ...current, rememberedBrowserTransfers: [anyPage] }),
+    ).toThrow();
   });
 
   it("resolves first-run onboarding once and never reopens it", () => {

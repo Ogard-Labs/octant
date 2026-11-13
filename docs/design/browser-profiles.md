@@ -293,8 +293,7 @@ thread made.
   [the Full access rule](../architecture.md#security-and-authority), where a
   Private page needs no site approval. An unanswered approval waits in Needs
   you instead of expiring (maintainer request, 2026-11-12). Not built yet:
-  today an unanswered approval expires, and a Private page at Full access
-  still asks per origin.
+  today an unanswered approval expires.
 - **Remembered per profile.** "Always allow" on that approval remembers the pair
   (origin, profile) in the shell settings
   (`rememberedBrowserProfileSites`), journaled like today's remembered origins:
@@ -308,8 +307,15 @@ thread made.
   in this profile", which remembers the profile itself, so no later origin in
   that profile asks. Only the person's answer at the approval sets it, it
   covers no other profile, and it is listed and forgotten in the same Settings
-  list (maintainer request, 2026-11-12). Not built yet: today every origin in
-  a profile asks or is remembered one at a time.
+  list (maintainer request, 2026-11-12). Built: the answer is stored in
+  `rememberedBrowserProfileSites` as the profile with the site `*`, so it is
+  journaled, grows only through the approval answer, and is forgotten like a
+  pair; a settings write can add neither it nor a pair it would cover. A
+  Project profile is one Project's by construction; the Personal profile and a
+  named account are allowed in every Project that uses them, as their
+  remembered pairs are. The answer changes no open page: a page already open
+  in the profile keeps the one site it was approved for, and the agent reaches
+  another site by `stop` and `navigate`, which then does not ask.
 - **Rebinding to a different model or authority still asks**: a remembered pair
   covers the page, not a new controller. A person-switched replacement for the
   same live task/model/authority uses the ordinary site/profile approval policy,
@@ -517,8 +523,37 @@ confirmed, because replaying history cannot otherwise distinguish a committed
 grant from a later revocation whose write failed; a grant whose revocation
 state cannot be proved after a restart is not restored.
 Journal records retain permission and revocation metadata, never cookies or
-credential values. Not built yet: today a host restart restores no session
-permission, routine permissions included, and the person must review again.
+credential values. Built, with one part remaining:
+
+- The review states whether the permission survives a restart, and the host
+  sets that for a routine or a managed child only. A permission journaled
+  without it, a terminal's included, is never restored.
+- A clean host close journals `browser.session-held@1` for each surviving
+  grant still live at that moment. A restart restores only a grant whose
+  history is the person's `browser.session-granted@1` followed by nothing but
+  held and resumed records, the newest one a held record, and it journals
+  `browser.session-resumed@1` before the grant authorizes anything. A grant
+  with no revocation on record is not proof: a revocation whose write failed
+  and a host that was killed leave the same history, so only the clean-close
+  record restores. A host that crashed or was killed, a record that does not
+  decode, a gap in the history and an unreadable journal therefore restore
+  nothing, and the person reviews again.
+- Revoke is confirmed only after its record is journaled. When that write
+  fails the grant is still withdrawn for the running host, the person is told
+  the record was not saved, and the grant is not restored.
+- A restored grant keeps the expiry the person reviewed (a routine's seven
+  days, 30 at most; a child's 15 minutes, one hour or eight hours) and is
+  checked against the caller as it is now. A changed routine definition
+  revision, execution profile or model, Project binding or effective
+  authority, a changed child run, workspace or authority, a caller that is no
+  longer eligible, a profile that no longer exists and a passed expiry lapse
+  it instead, and the lapse is journaled so that changing back restores
+  nothing. Restoring waits for the host's providers to finish warming,
+  because a routine's eligibility reads what its provider supports; a
+  provider that is not available then lapses the grant.
+- Not built yet: a restored grant takes no lease on the background native
+  owner. It runs only while a local window that holds its Project is open,
+  until the person reviews it again.
 
 Credential fill/submit, sign-in, page scripts, uploads and download saves retain
 their separate gates. A delegated session permission authorizes none of them. A named routine may

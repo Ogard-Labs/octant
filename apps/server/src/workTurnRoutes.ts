@@ -9,6 +9,7 @@ import {
   decodeWorkThreadTranscriptWindow,
   decodeWorkThreadTranscriptWindowRequest,
   decodeWorkTurnStreamFrame,
+  MAX_WORK_TURN_STREAM_FRAME_BYTES,
   decodeWorkTurnCancelResult,
   decodeWorkThreadRewindResult,
   decodeWorkTurnLookupResult,
@@ -379,9 +380,31 @@ function workTurnStreamResponse(
           controller.close();
           return;
         }
-        controller.enqueue(
-          encoder.encode(`${JSON.stringify(decodeWorkTurnStreamFrame(next.value))}\n`),
-        );
+        const frame = decodeWorkTurnStreamFrame(next.value);
+        const line = encoder.encode(JSON.stringify(frame));
+        if (line.byteLength > MAX_WORK_TURN_STREAM_FRAME_BYTES) {
+          // A client refuses a heavier line and would ask for the same one at
+          // every reconnect. A settled turn that kept thousands of tool steps
+          // weighs this much, so the view reads the transcript instead and
+          // subscribes again from the cursor that read gives it.
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify(
+                decodeWorkTurnStreamFrame({
+                  kind: "snapshot-required",
+                  sequence: frame.sequence,
+                  threadId: frame.threadId,
+                }),
+              )}\n`,
+            ),
+          );
+          controller.close();
+          signal.removeEventListener("abort", abort);
+          abort();
+          return;
+        }
+        controller.enqueue(line);
+        controller.enqueue(encoder.encode("\n"));
       } catch {
         controller.close();
       }

@@ -109,6 +109,7 @@ export interface SidebarContainerProps {
     | "pinWorkThreadInPane"
     | "renameCodeThread"
     | "reopenChatThread"
+    | "markCodeThreadDone"
     | "reopenCodeThread"
     | "retryActiveModeThreads"
     | "retryChat"
@@ -123,6 +124,7 @@ export interface SidebarContainerProps {
     | "setProjectArchived"
     | "setProjectColor"
     | "setCodeThreadCoordinator"
+    | "editCodeThreadCoordinatorBounds"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
     | "setCodeThreadRestartContinuation"
@@ -422,6 +424,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         void actions.completeCodeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
       onReopenThread: (threadId) =>
         void actions.reopenCodeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
+      onMarkThreadDone: (threadId) =>
+        void actions.markCodeThreadDone(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
       onSnoozeThread: (threadId, until) =>
         void actions.snoozeCodeThread(decodeCodeThreadId(threadId), until).then(noteCodeThreadRest),
       onWakeThread: (threadId) =>
@@ -509,6 +513,13 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           threadId: decodeWorkThreadId(threadId),
           expectedVersion,
           continueAfterRestart,
+        })),
+      onSetMessageWake: (threadId, wake) =>
+        void actions.runWorkRestCommand(threadId, (expectedVersion) => ({
+          kind: "set-work-thread-message-wake",
+          threadId: decodeWorkThreadId(threadId),
+          expectedVersion,
+          wake,
         })),
       onPinInPane: actions.pinWorkThreadInPane,
       onAttachAsContext: (threadId) => {

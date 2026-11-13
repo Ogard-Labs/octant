@@ -93,12 +93,15 @@ const settings = {
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
+  quitShortcutNeedsSecondPress: true,
   marketplaceFetchesEnabled: true,
   completedThreadArchiveAfterDays: 7,
   autoCompactOctantWindowPercent: 85,
   autoCompactRuntimeWindowPercent: null,
   autoCompactIdleMinutes: null,
   autoCompactLimitPercent: null,
+  stalledTurnLimitMinutes: 30,
+  providerToolCallPauseLimitMinutes: 120,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },
@@ -108,6 +111,14 @@ const settings = {
   rememberedBrowserOrigins: [],
   rememberedBrowserProfileSites: [],
   agentBrowserDownloads: false,
+  browserCapturesPerThread: 200,
+  keepToolCallRecords: true,
+  toolStepsPerTurn: 64,
+  fullAccessToolStepsPerTurn: 0,
+  browserTransferFileLimitMegabytes: 25,
+  browserHeldDownloadLimit: 5,
+  browserUploadFileCountLimit: 5,
+  rememberedBrowserTransfers: [],
   persistentBrowserOwner: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
@@ -193,9 +204,88 @@ describe("default folder paths", () => {
 });
 
 describe("shell bootstrap contracts", () => {
+  it("keeps 200 Browser captures a thread for a store saved before the setting, and lets a person choose 1 to 500", () => {
+    const { browserCapturesPerThread: _omitted, ...saved } = settings;
+    expect(decodeShellSettings(saved).browserCapturesPerThread).toBe(200);
+    expect(
+      decodeShellSettings({ ...settings, browserCapturesPerThread: 500 }).browserCapturesPerThread,
+    ).toBe(500);
+    for (const value of [0, 501, 1.5]) {
+      expect(() => decodeShellSettings({ ...settings, browserCapturesPerThread: value })).toThrow();
+    }
+  });
+
+  it("keeps tool-call records for a store saved before the setting, until a person turns them off", () => {
+    const { keepToolCallRecords: _omitted, ...saved } = settings;
+    expect(decodeShellSettings(saved).keepToolCallRecords).toBe(true);
+    expect(
+      decodeShellSettings({ ...settings, keepToolCallRecords: false }).keepToolCallRecords,
+    ).toBe(false);
+  });
+
+  it("keeps 64 tool steps a turn below Full access and no limit at Full access for a store saved before the settings", () => {
+    const {
+      toolStepsPerTurn: _steps,
+      fullAccessToolStepsPerTurn: _fullAccessSteps,
+      ...saved
+    } = settings;
+    expect(decodeShellSettings(saved).toolStepsPerTurn).toBe(64);
+    // Zero is how the setting says off: no step limit at Full access.
+    expect(decodeShellSettings(saved).fullAccessToolStepsPerTurn).toBe(0);
+    const chosen = decodeShellSettings({
+      ...settings,
+      toolStepsPerTurn: 512,
+      fullAccessToolStepsPerTurn: 4_096,
+    });
+    expect(chosen.toolStepsPerTurn).toBe(512);
+    expect(chosen.fullAccessToolStepsPerTurn).toBe(4_096);
+    for (const value of [0, 4_097, 1.5]) {
+      expect(() => decodeShellSettings({ ...settings, toolStepsPerTurn: value })).toThrow();
+    }
+    for (const value of [-1, 4_097, 1.5]) {
+      expect(() =>
+        decodeShellSettings({ ...settings, fullAccessToolStepsPerTurn: value }),
+      ).toThrow();
+    }
+  });
+
   it("defaults transcript text to the compact reading size", () => {
     const { transcriptTextSize: _omitted, ...withoutTranscriptTextSize } = settings;
     expect(decodeShellSettings(withoutTranscriptTextSize).transcriptTextSize).toBe("small");
+  });
+
+  it("reads settings saved before the Browser transfer limits as the former fixed limits", () => {
+    const {
+      browserTransferFileLimitMegabytes: _megabytes,
+      browserHeldDownloadLimit: _held,
+      ...before
+    } = settings;
+    expect(decodeShellSettings(before)).toMatchObject({
+      browserTransferFileLimitMegabytes: 25,
+      browserHeldDownloadLimit: 5,
+    });
+    expect(
+      decodeShellSettings({
+        ...settings,
+        browserTransferFileLimitMegabytes: 1024,
+        browserHeldDownloadLimit: 50,
+      }),
+    ).toMatchObject({ browserTransferFileLimitMegabytes: 1024, browserHeldDownloadLimit: 50 });
+    expect(() =>
+      decodeShellSettings({ ...settings, browserTransferFileLimitMegabytes: 1025 }),
+    ).toThrow();
+    expect(() => decodeShellSettings({ ...settings, browserHeldDownloadLimit: 0 })).toThrow();
+  });
+
+  it("reads settings saved before the files-per-upload setting as the former five, and holds it to 1 through 50", () => {
+    const { browserUploadFileCountLimit: _count, ...before } = settings;
+    expect(decodeShellSettings(before).browserUploadFileCountLimit).toBe(5);
+    expect(
+      decodeShellSettings({ ...settings, browserUploadFileCountLimit: 50 })
+        .browserUploadFileCountLimit,
+    ).toBe(50);
+    expect(() => decodeShellSettings({ ...settings, browserUploadFileCountLimit: 0 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, browserUploadFileCountLimit: 51 })).toThrow();
   });
 
   it("draws the usage bars smooth unless someone chose the pixelated cells", () => {
@@ -260,6 +350,31 @@ describe("shell bootstrap contracts", () => {
     expect(() => decodeShellSettings({ ...settings, showThreadStats: "off" })).toThrow();
   });
 
+  it("reads a store from before the stalled-turn limit at thirty minutes, and keeps Off and a bounded choice", () => {
+    const { stalledTurnLimitMinutes: _omitted, ...withoutLimit } = settings;
+    expect(decodeShellSettings(withoutLimit).stalledTurnLimitMinutes).toBe(30);
+    expect(
+      decodeShellSettings({ ...settings, stalledTurnLimitMinutes: null }).stalledTurnLimitMinutes,
+    ).toBeNull();
+    expect(
+      decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 120 }).stalledTurnLimitMinutes,
+    ).toBe(120);
+    expect(() => decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 4 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 481 })).toThrow();
+  });
+
+  it("reads a store from before the longest tool-call pause at two hours, and keeps Off and a bounded choice", () => {
+    const { providerToolCallPauseLimitMinutes: _omitted, ...withoutLimit } = settings;
+    expect(decodeShellSettings(withoutLimit).providerToolCallPauseLimitMinutes).toBe(120);
+    const decode = (providerToolCallPauseLimitMinutes: number | null) =>
+      decodeShellSettings({ ...settings, providerToolCallPauseLimitMinutes })
+        .providerToolCallPauseLimitMinutes;
+    expect(decode(null)).toBeNull();
+    expect(decode(480)).toBe(480);
+    expect(() => decode(4)).toThrow();
+    expect(() => decode(1441)).toThrow();
+  });
+
   it("decodes a store from before the start-screen cards to the registry defaults", () => {
     const { homeCards: _predatesTheCards, ...predatesTheCards } = settings;
     expect(decodeShellSettings(predatesTheCards).homeCards).toEqual({ order: [], visibility: [] });
@@ -271,6 +386,18 @@ describe("shell bootstrap contracts", () => {
     expect(
       decodeShellSettings({ ...settings, automaticUpdateChecks: true }).automaticUpdateChecks,
     ).toBe(true);
+  });
+
+  it("decodes a store that never recorded the quit-shortcut choice to needing a second press", () => {
+    const { quitShortcutNeedsSecondPress: _omitted, ...withoutQuitChoice } = {
+      ...settings,
+      quitShortcutNeedsSecondPress: false,
+    };
+    expect(decodeShellSettings(withoutQuitChoice).quitShortcutNeedsSecondPress).toBe(true);
+    expect(
+      decodeShellSettings({ ...settings, quitShortcutNeedsSecondPress: false })
+        .quitShortcutNeedsSecondPress,
+    ).toBe(false);
   });
 
   it("keeps a start-screen card order and choice, and refuses a card named twice", () => {

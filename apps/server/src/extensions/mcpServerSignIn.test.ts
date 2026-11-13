@@ -350,7 +350,12 @@ describe("signing in to a hosted MCP server", () => {
       clientAuthentication: { method: "client_secret_post", tokenEndpoint },
     });
     await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
-    await service.signOut(EXTENSION, COMPONENT, "local-window");
+    // A device the person paired is judged as a local window; the sign-out
+    // record still names the device.
+    const deviceId = "66000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    await service.signOut(EXTENSION, COMPONENT, "local-window", device);
+    expect(oauth.signOut).toHaveBeenLastCalledWith(expect.objectContaining({ actor: device }));
     const restarted = new McpServerSignIn({
       statePath,
       oauth,

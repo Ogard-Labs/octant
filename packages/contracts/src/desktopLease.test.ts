@@ -6,6 +6,7 @@ import {
   decodeDesktopArtifactSent,
   decodeDesktopLeaseOperated,
   decodeDesktopLeaseRequested,
+  decodeDesktopLeaseSettingsChanged,
   decodeLeasableDesktopProvider,
   decodeDesktopLeaseTransitioned,
   decodeDesktopPaneAnswer,
@@ -311,6 +312,35 @@ describe("desktop lease contract", () => {
         credential: "e2b_abc",
       }),
     ).toThrow();
+  });
+
+  it("changes the lease settings one field at a time, with counts from one to eight and no person in the request", () => {
+    const change = { kind: "set-lease-settings", confirmBilledDesktops: false };
+    expect(decodeDesktopPaneRequest(change)).toEqual(change);
+    expect(decodeDesktopPaneRequest({ kind: "set-lease-settings", leasesPerThread: 8 })).toEqual({
+      kind: "set-lease-settings",
+      leasesPerThread: 8,
+    });
+    for (const invalid of [
+      { leasesPerThread: 0 },
+      { hostLocalLeasesPerHost: 9 },
+      { leasesPerThread: 1.5 },
+      { confirmBilledDesktops: "no" },
+      { actor: { kind: "local-user", actorId: threadId } },
+    ]) {
+      expect(() => decodeDesktopPaneRequest({ kind: "set-lease-settings", ...invalid })).toThrow();
+    }
+    const settings = { confirmBilledDesktops: true, leasesPerThread: 2, hostLocalLeasesPerHost: 2 };
+    expect(decodeDesktopPaneAnswer({ status: "lease-settings", settings })).toEqual({
+      status: "lease-settings",
+      settings,
+    });
+    expect(
+      decodeDesktopLeaseSettingsChanged({
+        previous: settings,
+        settings: { ...settings, confirmBilledDesktops: false },
+      }),
+    ).toMatchObject({ settings: { confirmBilledDesktops: false } });
   });
 
   it("answers a view refusal apart from the lease's own refusals", () => {

@@ -211,6 +211,31 @@ describe("Project read contracts", () => {
     ).toMatchObject({ codeAccessPersistence: "project-default" });
   });
 
+  it("reads a Code Project stored before agents could be let to comment or push to the default branch", () => {
+    const stored = decodeProject(codeProject);
+    expect(stored).not.toHaveProperty("agentPullRequestComments");
+    expect(stored).not.toHaveProperty("agentDefaultBranchPush");
+    expect(
+      decodeProject({
+        ...codeProject,
+        agentPullRequestComments: "enabled",
+        agentDefaultBranchPush: "disabled",
+      }),
+    ).toMatchObject({ agentPullRequestComments: "enabled", agentDefaultBranchPush: "disabled" });
+    expect(() => decodeProject({ ...codeProject, agentPullRequestComments: "always" })).toThrow();
+    expect(() => decodeProject({ ...workProject, agentDefaultBranchPush: "enabled" })).toThrow();
+    for (const setting of [
+      {
+        kind: "change-code-project-agent-pull-request-comments",
+        agentPullRequestComments: "enabled",
+      },
+      { kind: "change-code-project-agent-default-branch-push", agentDefaultBranchPush: "enabled" },
+    ] as const) {
+      const command = { ...setting, projectId: ids.project, expectedVersion: 1 };
+      expect(decodeProjectCommand(command)).toMatchObject(command);
+    }
+  });
+
   it("keeps binding audit history out of compact Project summaries", () => {
     const { bindingHistory: _, ...summary } = workProject;
     expect(decodeProjectSummary({ ...summary, bindingRevisionId: ids.revision })).toMatchObject({
@@ -409,6 +434,26 @@ describe("Project command contracts", () => {
 });
 
 describe("Project memory contracts", () => {
+  it("names the paired device that wrote an entry, bound a folder or added one, and still reads records that name the local user", () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000db";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as const;
+    expect(decodeMemoryEntry({ ...userMemory, author: device })).toMatchObject({
+      author: device,
+    });
+    expect(
+      decodeProject({
+        ...workProject,
+        bindingHistory: [{ ...initialBindingRevision, actor: device }],
+      }),
+    ).toMatchObject({ bindingHistory: [{ actor: device }] });
+    expect(decodeMemoryEntry(userMemory)).toMatchObject({ author: actor });
+    // A device is named by its id; an actor that only claims the kind is refused.
+    expect(() =>
+      decodeMemoryEntry({ ...userMemory, author: { kind: "remote-device", actorId: deviceId } }),
+    ).toThrow();
+    expect(() => decodeMemoryEntry({ ...userMemory, author: { ...actor, deviceId } })).toThrow();
+  });
+
   it.each(["decision", "fact", "preference", "summary", "outcome"] as const)(
     "decodes active %s memory",
     (kind) => expect(decodeMemoryEntry({ ...userMemory, kind })).toMatchObject({ kind }),
@@ -470,6 +515,12 @@ describe("Project memory contracts", () => {
       decodeMemoryEntry({ ...userMemory, provenance: { kind: "agent-authored", mode: "work" } })
         .provenance,
     ).toEqual({ kind: "agent-authored", mode: "work" });
+    // A write nobody was asked about says so, and only as `true`.
+    const unasked = { ...provenance, unconfirmed: true } as const;
+    expect(decodeMemoryEntry({ ...userMemory, provenance: unasked }).provenance).toEqual(unasked);
+    expect(() =>
+      decodeMemoryEntry({ ...userMemory, provenance: { ...provenance, unconfirmed: false } }),
+    ).toThrow();
     expect(() =>
       decodeMemoryEntry({ ...userMemory, provenance: { ...provenance, mode: "plan" } }),
     ).toThrow();

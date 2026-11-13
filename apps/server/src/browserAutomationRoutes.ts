@@ -1,3 +1,6 @@
+import type { EventActor } from "@octant/contracts";
+import { eventActorForPrincipal } from "./principalEventActor";
+import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
   decodeBrowserDownloadPermissionsCommand,
   decodeBrowserDownloadPermissionsResult,
@@ -79,7 +82,7 @@ import {
   decodeBrowserProfilesResult,
 } from "@octant/contracts/browser-profiles";
 import { storedBrowserProfile } from "@octant/domain";
-import { authenticateRoutePrincipal, readPrincipalRouteContext } from "./principalRouteContext";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import {
   decodeBrowserCredentialCommand,
@@ -238,6 +241,9 @@ export function createBrowserAutomationRouteHandler(
 
     let windowId;
     let callerKind: "local-window" | "remote-device";
+    // Who the journal names for what this request changes: the device, when a
+    // device asked.
+    let actor: EventActor;
     try {
       const principal = authenticateRoutePrincipal({
         request,
@@ -246,6 +252,7 @@ export function createBrowserAutomationRouteHandler(
       });
       windowId = principal.scopeId;
       callerKind = principal.principal.kind;
+      actor = eventActorForPrincipal(principal.principal);
     } catch {
       return failure(
         { category: "unauthorized", message: "Window authority is invalid." },
@@ -460,6 +467,7 @@ export function createBrowserAutomationRouteHandler(
               windowId,
               callerKind === "local-window" ? "local-window" : "remote-device",
               command,
+              actor,
             ),
           ),
           origin,
@@ -479,6 +487,7 @@ export function createBrowserAutomationRouteHandler(
             await dependencies.profiles.execute(
               callerKind === "local-window" ? "local-window" : "remote-device",
               command,
+              actor,
             ),
           ),
           origin,
@@ -541,7 +550,7 @@ export function createBrowserAutomationRouteHandler(
         }
         return success(
           decodeBrowserFlowsResult(
-            dependencies.flows.delete(command.projectId, command.name)
+            dependencies.flows.delete(command.projectId, command.name, actor)
               ? { kind: "browser-flow-deleted", projectId: command.projectId, name: command.name }
               : {
                   kind: "browser-flows-refused",
@@ -552,8 +561,13 @@ export function createBrowserAutomationRouteHandler(
           origin,
         );
       }
+      // Download, upload and session permissions are reviewed by the host's
+      // own person: at a window on this host or on a device that person paired
+      // (maintainer decision, 2026-11-12). Each service checks the scope it is
+      // handed against the host's own record again, and its journal names the
+      // device.
       if (url.pathname === "/api/browser/download-permissions") {
-        if (callerKind !== "local-window")
+        if (boundPrincipalIsRestricted(request))
           return success(
             decodeBrowserDownloadPermissionsResult({
               kind: "download-permission-refused",
@@ -579,7 +593,7 @@ export function createBrowserAutomationRouteHandler(
         );
       }
       if (url.pathname === "/api/browser/upload-permissions") {
-        if (callerKind !== "local-window")
+        if (boundPrincipalIsRestricted(request))
           return success(
             decodeBrowserUploadPermissionsResult({
               kind: "upload-permission-refused",
@@ -605,7 +619,7 @@ export function createBrowserAutomationRouteHandler(
         );
       }
       if (url.pathname === "/api/browser/session-grants") {
-        if (callerKind !== "local-window")
+        if (boundPrincipalIsRestricted(request))
           return success(
             decodeBrowserSessionGrantsResult({
               kind: "browser-session-refused",
@@ -806,6 +820,7 @@ export function createBrowserAutomationRouteHandler(
               windowId,
               request: input.request,
               capturedBy: "person",
+              capturedByActor: actor,
             }),
           ),
           origin,
@@ -896,7 +911,7 @@ export function createBrowserAutomationRouteHandler(
         // already admitted this route for a remote principal; the kind it may
         // carry is decided here, where the principal is known, so a companion
         // client can never navigate, type, or close a tab on the host.
-        if (readPrincipalRouteContext(request)?.principal.kind === "remote-device") {
+        if (boundPrincipalIsRestricted(request)) {
           const reach = remoteBrowserActionReach(input.kind);
           if (reach.kind === "denied") {
             return failure({ category: "unauthorized", message: reach.reason }, 403, origin);

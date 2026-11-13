@@ -610,6 +610,10 @@ export class TerminalBrowserGrantService {
             ...(refuseStaleRevision === undefined ? {} : { refuseStaleRevision }),
           }),
         releaseThread: lent.automation.releaseThread,
+        // A question about the page the CLI drives is withdrawn when it ends.
+        ...(lent.automation.holdForAsk === undefined
+          ? {}
+          : { holdForAsk: lent.automation.holdForAsk }),
       },
       approvals: {
         request: async (request) => {

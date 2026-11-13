@@ -5,6 +5,7 @@ import {
   type ExtensionArchiveEntry,
   type ResolvedExtensionPackage,
 } from "./packageInspector";
+import { readPackagePublisherSignature } from "./outsideDriverSignature";
 
 const semverPattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -93,6 +94,13 @@ export function normalizeCodexPluginPackage(
   const canonicalUrl = repository ?? homepage;
   if (canonicalUrl === undefined) fail("provenance-missing", "Plugin provenance URL is required.");
   const license = requiredString(manifest.license, "license-missing");
+  const signature = readPackagePublisherSignature(input.entries, { name, version });
+  if (signature.status === "invalid") {
+    fail(
+      "signature-invalid",
+      "Plugin signature does not match its files, name, or version, or does not verify.",
+    );
+  }
   const entries = [...input.entries];
   const components: Array<Record<string, unknown>> = [];
   const packageCapabilities = new Set<string>();
@@ -153,6 +161,7 @@ export function normalizeCodexPluginPackage(
     provenance: {
       canonicalUrl,
       publisher,
+      ...(signature.status === "signed" ? { publisherKey: signature.publisherKey } : {}),
       ...(isReviewed && binding ? { sourceCommit: binding.sourceCommit } : {}),
       reviewed: isReviewed,
       ...(isReviewed && binding ? { reviewedAt: binding.reviewedAt } : {}),

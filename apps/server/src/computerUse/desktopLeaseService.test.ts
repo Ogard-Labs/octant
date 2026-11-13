@@ -104,6 +104,8 @@ interface HostState {
   answer: "approved" | "declined";
   readonly asked: Array<string>;
   readonly askedTransfers: Array<DesktopTransferConfirmation>;
+  /** The in-thread transfer answers the service asked the host to keep. */
+  readonly transferAnswers: Array<{ readonly threadId: string; readonly threadMarked: boolean }>;
   /** Runs while a person is deciding on a transfer. */
   whileDeciding: () => void | Promise<void>;
   readonly roots: Map<string, string>;
@@ -162,6 +164,16 @@ function serviceOver(connection: SqliteConnection, state: HostState): DesktopLea
       await state.whileDeciding();
       return state.answer;
     },
+    transferAnswers: {
+      covers: (owner, markedNow) =>
+        state.transferAnswers.some(
+          (answer) =>
+            answer.threadId === String(owner.threadId) && (answer.threadMarked || !markedNow),
+        ),
+      record: (owner, threadMarked) => {
+        state.transferAnswers.push({ threadId: String(owner.threadId), threadMarked });
+      },
+    },
     systemActor: system,
     now: () => state.now,
     uuid: randomUUID,
@@ -192,6 +204,7 @@ function host(
     answer: "approved",
     asked: [],
     askedTransfers: [],
+    transferAnswers: [],
     whileDeciding: () => undefined,
     roots: new Map([threadA, threadB, threadC].map((threadId) => [threadId, checkout])),
     threads: new Map(
@@ -517,6 +530,48 @@ describe("desktop lease service", () => {
     ).resolves.toEqual({ status: "refused", reason: "lease-limit" });
   });
 
+  it("holds as many leases as a person sets for a thread and the host, and keeps the counts across a restart", async () => {
+    const { service, connection, restart } = host();
+    await acquired(service, threadA);
+    await acquired(service, threadA);
+    expect(
+      service.setLeaseSettings({
+        actor: person,
+        change: { leasesPerThread: 3, hostLocalLeasesPerHost: 3 },
+      }),
+    ).toEqual({
+      status: "lease-settings",
+      settings: { confirmBilledDesktops: true, leasesPerThread: 3, hostLocalLeasesPerHost: 3 },
+    });
+    expect(spendEvents(connection, "desktop.lease-settings-changed@1")).toEqual([
+      {
+        actor: "local-user",
+        payload: {
+          previous: { confirmBilledDesktops: true, leasesPerThread: 2, hostLocalLeasesPerHost: 2 },
+          settings: { confirmBilledDesktops: true, leasesPerThread: 3, hostLocalLeasesPerHost: 3 },
+        },
+      },
+    ]);
+    await acquired(service, threadA);
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "lease-limit" });
+
+    // Lowering a count ends nothing running; it only refuses the next one.
+    const restarted = restart();
+    expect(restarted.leaseSettings({ actor: person })).toMatchObject({
+      settings: { leasesPerThread: 3, hostLocalLeasesPerHost: 3 },
+    });
+    restarted.setLeaseSettings({ actor: person, change: { hostLocalLeasesPerHost: 1 } });
+    await acquired(restarted, threadB);
+    await expect(
+      restarted.acquire({ owner: code(threadC), actor: agentOf(threadC) }),
+    ).resolves.toEqual({ status: "refused", reason: "lease-limit" });
+    // Setting what is already set journals nothing.
+    restarted.setLeaseSettings({ actor: person, change: { hostLocalLeasesPerHost: 1 } });
+    expect(spendEvents(connection, "desktop.lease-settings-changed@1")).toHaveLength(2);
+  });
+
   it("destroys and verifies a lease when it expires", async () => {
     const { service, state, backend } = host();
     const leaseId = await acquired(service, threadA);
@@ -691,14 +746,133 @@ describe("desktop lease service", () => {
     expect(runningDesktops(backend)).toBe(0);
   });
 
-  it("extends only for a person, only to the recipe maximum, and only once the driver confirms", async () => {
+  it("lets an agent extend its own host-local lease under Full access, journaled as the agent's, and never past the recipe maximum", async () => {
+    const { service, connection } = host();
+    const leaseId = await acquired(service, threadA);
+    const fromAgent = { owner: code(threadA), actor: agentOf(threadA), leaseId };
+
+    const extended = await service.extend({ ...fromAgent, byMinutes: 30 });
+    expect(extended.status === "extended" ? extended.lease.expiresAt : undefined).toBe(
+      decodeUtcTimestamp(new Date(START + 60 * MINUTE).toISOString()),
+    );
+    expect(
+      connection
+        .prepare("SELECT actor_kind FROM event_journal WHERE event_name = ?")
+        .all("desktop.lease-extended@1"),
+    ).toEqual([{ actor_kind: "agent" }]);
+    await expect(service.extend({ ...fromAgent, byMinutes: 181 })).resolves.toEqual({
+      status: "refused",
+      reason: "beyond-maximum",
+    });
+    // Another thread's agent reaches no lease but its own thread's.
+    await expect(
+      service.extend({ owner: code(threadB), actor: agentOf(threadB), leaseId, byMinutes: 30 }),
+    ).resolves.toEqual({ status: "refused", reason: "leased-by-another-thread" });
+  });
+
+  it("asks in the thread before an agent's extension below Full access, and refuses one in Plan", async () => {
+    const { service, state, backend } = host({ executionPolicy: "approval-gated" });
+    const leaseId = await acquired(service, threadA);
+    const fromAgent = { owner: code(threadA), actor: agentOf(threadA), leaseId, byMinutes: 30 };
+    const asked: Array<unknown> = [];
+    let answer: "approved" | "declined" = "declined";
+    const confirm = async (request: unknown) => {
+      asked.push(request);
+      return answer;
+    };
+
+    // With nowhere to ask, nothing is extended.
+    await expect(service.extend(fromAgent)).resolves.toEqual({
+      status: "refused",
+      reason: "declined",
+    });
+    await expect(service.extend({ ...fromAgent, confirm })).resolves.toEqual({
+      status: "refused",
+      reason: "declined",
+    });
+    expect(asked).toEqual([
+      {
+        owner: code(threadA),
+        leaseId,
+        provider: {
+          providerId: "fake-desktop",
+          displayName: "Fake desktop",
+          locality: "host-local",
+          billed: false,
+        },
+        byMinutes: 30,
+        expiresAt: new Date(START + 60 * MINUTE).toISOString(),
+      },
+    ]);
+    expect(backend.calls()).not.toContain("extend");
+
+    answer = "approved";
+    await expect(service.extend({ ...fromAgent, confirm })).resolves.toMatchObject({
+      status: "extended",
+    });
+    // A turn running below its Full access thread asks as that turn does.
+    state.threads.set(threadA, { active: true, executionPolicy: "full-access" });
+    await service.extend({ ...fromAgent, confirm, turn: { executionPolicy: "approval-gated" } });
+    expect(asked).toHaveLength(3);
+
+    state.threads.set(threadA, { active: true, executionPolicy: "plan" });
+    await expect(service.extend({ ...fromAgent, confirm })).resolves.toEqual({
+      status: "refused",
+      reason: "plan-mode",
+    });
+    expect(asked).toHaveLength(3);
+  });
+
+  it("refuses an approved extension whose end time moved while the person decided", async () => {
+    const { service } = host({ executionPolicy: "approval-gated" });
+    const leaseId = await acquired(service, threadA);
+    const lease = { owner: code(threadA), leaseId, byMinutes: 30 };
+
+    await expect(
+      service.extend({
+        ...lease,
+        actor: agentOf(threadA),
+        confirm: async () => {
+          await service.extend({ ...lease, actor: person });
+          return "approved";
+        },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+  });
+
+  it("refuses an agent's extension of a billed lease and of one off this machine, Full access included", async () => {
+    for (const billed of [true, false]) {
+      const cloud = createFakeDesktopProvider({ id: "cloud.example", locality: "cloud", billed });
+      const { service, state } = host({ providers: [cloud] });
+      // The person turned the confirmation off, which still gives an agent no more time.
+      service.setLeaseSettings({ actor: person, change: { confirmBilledDesktops: false } });
+      const leaseId = await acquired(service, threadA);
+      const confirm = async () => "approved" as const;
+      for (const executionPolicy of ["full-access", "approval-gated"] as const) {
+        state.threads.set(threadA, { active: true, executionPolicy });
+        await expect(
+          service.extend({
+            owner: code(threadA),
+            actor: agentOf(threadA),
+            leaseId,
+            byMinutes: 30,
+            confirm,
+          }),
+        ).resolves.toEqual({ status: "refused", reason: "agent-cannot-extend" });
+      }
+      expect(cloud.backend.calls()).not.toContain("extend");
+      // The person still extends it.
+      await expect(
+        service.extend({ owner: code(threadA), actor: person, leaseId, byMinutes: 30 }),
+      ).resolves.toMatchObject({ status: "extended" });
+    }
+  });
+
+  it("extends for a person only to the recipe maximum, and only once the driver confirms", async () => {
     const { service, state, backend } = host();
     const leaseId = await acquired(service, threadA);
     const lease = { owner: code(threadA), leaseId };
 
-    await expect(
-      service.extend({ ...lease, actor: agentOf(threadA), byMinutes: 30 }),
-    ).resolves.toEqual({ status: "refused", reason: "agent-cannot-extend" });
     await expect(service.extend({ ...lease, actor: paired, byMinutes: 211 })).resolves.toEqual({
       status: "refused",
       reason: "beyond-maximum",
@@ -1521,7 +1695,47 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
     expect(state.askedTransfers).toEqual([]);
   });
 
-  it("asks an agent's transfer on a Full access thread when its turn runs lower or the thread read outside content", async () => {
+  it("asks an agent's transfer once per thread below Full access, and again once the thread has read outside content", async () => {
+    const { service, state, checkout } = host({ executionPolicy: "approval-gated" });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    const asked: Array<boolean> = [];
+    const fromAgent = (externalContentIngested: boolean, answer: "approved" | "declined") => ({
+      owner: code(threadA),
+      actor: agentOf(threadA),
+      leaseId,
+      path: "app.bin",
+      turn: { executionPolicy: "approval-gated" as const, externalContentIngested },
+      confirm: async () => {
+        asked.push(externalContentIngested);
+        return answer;
+      },
+    });
+
+    // A refusal is not remembered: the next send asks again.
+    await expect(service.transfer(fromAgent(false, "declined"))).resolves.toMatchObject({
+      status: "refused",
+    });
+    await expect(service.transfer(fromAgent(false, "approved"))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    await expect(service.transfer(fromAgent(false, "declined"))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    expect(asked).toEqual([false, false]);
+    expect(state.transferAnswers).toEqual([{ threadId: threadA, threadMarked: false }]);
+
+    // An answer from before the mark does not cover the marked thread.
+    await expect(service.transfer(fromAgent(true, "approved"))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    await expect(service.transfer(fromAgent(true, "declined"))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    expect(asked).toEqual([false, false, true]);
+  });
+
+  it("asks an agent's transfer on a Full access thread only when its turn runs lower, outside content or not", async () => {
     const { service, checkout, connection } = host({ executionPolicy: "full-access" });
     writeFileSync(join(checkout, "app.bin"), "built app");
     const leaseId = await acquired(service, threadA);
@@ -1543,8 +1757,7 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
 
     for (const [executionPolicy, tainted] of [
       ["approval-gated", false],
-      ["auto-accept-edits", false],
-      ["full-access", true],
+      ["auto-accept-edits", true],
     ] as const) {
       await expect(service.transfer(fromAgent(executionPolicy, tainted))).resolves.toEqual({
         status: "refused",
@@ -1555,13 +1768,15 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
       status: "refused",
       reason: "plan-mode",
     });
-    expect(asked).toEqual(["approval-gated false", "auto-accept-edits false", "full-access true"]);
+    expect(asked).toEqual(["approval-gated false", "auto-accept-edits true"]);
     expect(sentEvents(connection)).toEqual([]);
 
-    await expect(service.transfer(fromAgent("full-access", false))).resolves.toMatchObject({
-      status: "delivered",
-    });
-    expect(asked).toHaveLength(3);
+    for (const tainted of [false, true]) {
+      await expect(service.transfer(fromAgent("full-access", tainted))).resolves.toMatchObject({
+        status: "delivered",
+      });
+    }
+    expect(asked).toHaveLength(2);
   });
 
   it("always asks before a file leaves the machine for a cloud desktop, Full access included", async () => {
@@ -1582,6 +1797,61 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
       "off-machine",
       "off-machine",
     ]);
+  });
+
+  it("sends a file to a cloud desktop without asking once a person turns the confirmation off, and Plan still refuses", async () => {
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const { service, state, checkout } = host({ providers: [cloud] });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    service.setLeaseSettings({ actor: person, change: { confirmBilledDesktops: false } });
+    const send = (actor: EventActor) =>
+      service.transfer({ owner: code(threadA), actor, leaseId, path: "app.bin" });
+
+    for (const actor of [agentOf(threadA), person]) {
+      await expect(send(actor)).resolves.toMatchObject({ status: "delivered" });
+    }
+    expect(state.askedTransfers).toEqual([]);
+
+    // Below Full access the agent's send asks in its thread, as on this machine.
+    state.threads.set(threadA, { active: true, executionPolicy: "approval-gated" });
+    await send(agentOf(threadA));
+    expect(state.askedTransfers.map((request) => request.asks)).toEqual(["in-thread"]);
+
+    state.threads.set(threadA, { active: true, executionPolicy: "plan" });
+    for (const actor of [agentOf(threadA), person]) {
+      await expect(send(actor)).resolves.toEqual({ status: "refused", reason: "plan-mode" });
+    }
+    expect(state.askedTransfers).toHaveLength(1);
+  });
+
+  it("refuses a send nobody was asked about when the person turns the confirmation back on meanwhile", async () => {
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const { service, state, checkout } = host({
+      providers: [cloud],
+      executionPolicy: "approval-gated",
+    });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    state.threads.set(threadA, { active: true, executionPolicy: "full-access" });
+    const leaseId = await acquired(service, threadA);
+    state.threads.set(threadA, { active: true, executionPolicy: "approval-gated" });
+    service.setLeaseSettings({ actor: person, change: { confirmBilledDesktops: false } });
+    state.whileDeciding = () => {
+      service.setLeaseSettings({ actor: person, change: { confirmBilledDesktops: true } });
+    };
+
+    await expect(
+      service.transfer({ owner: code(threadA), actor: agentOf(threadA), leaseId, path: "app.bin" }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+    expect(cloud.backend.calls()).not.toContain("deliver");
   });
 
   it("delivers the bytes that were approved even when the file changes while a person decides", async () => {
@@ -2538,6 +2808,103 @@ describe("desktop lease service spend cap for billed desktops", () => {
       status: "spend",
       summary: { month: "2026-11", spentUsdCents: ESTIMATE, monthlyCapUsdCents: 400 },
     });
+  });
+
+  it("starts a billed desktop and one off this machine without asking once a person turns the confirmation off, inside the cap", async () => {
+    for (const billed of [true, false]) {
+      const cloud = createFakeDesktopProvider({ id: "cloud.example", locality: "cloud", billed });
+      const { service, state, connection } = host({ providers: [cloud], spendCap: 2_000 });
+      const fromPerson = { owner: code(threadA), actor: person, scopeId: "window-1" };
+
+      // On, the default: the person's own Start is offered as one to confirm, and unconfirmed it is declined.
+      expect(await service.overview(fromPerson)).toMatchObject({
+        start: { status: "available", asks: billed ? "billed" : "off-machine" },
+      });
+      await expect(service.acquire(fromPerson)).resolves.toEqual({
+        status: "refused",
+        reason: "declined",
+      });
+
+      service.setLeaseSettings({ actor: person, change: { confirmBilledDesktops: false } });
+      expect(spendEvents(connection, "desktop.lease-settings-changed@1").at(-1)).toMatchObject({
+        actor: "local-user",
+        payload: { settings: { confirmBilledDesktops: false } },
+      });
+      const overview = await service.overview(fromPerson);
+      expect(overview).toMatchObject({ start: { status: "available" } });
+      expect(overview.status === "overview" && "asks" in overview.start).toBe(false);
+      await expect(service.acquire(fromPerson)).resolves.toMatchObject({ status: "acquired" });
+      // An agent on a Full access thread proceeds as it does on a host-local desktop.
+      await expect(
+        service.acquire({ owner: code(threadB), actor: agentOf(threadB) }),
+      ).resolves.toMatchObject({ status: "acquired" });
+      expect(state.asked).toEqual([]);
+
+      // Below Full access an agent's lease asks in the thread; Plan still refuses.
+      state.threads.set(threadC, { active: true, executionPolicy: "approval-gated" });
+      state.answer = "declined";
+      await expect(
+        service.acquire({ owner: code(threadC), actor: agentOf(threadC) }),
+      ).resolves.toEqual({ status: "refused", reason: "declined" });
+      expect(state.asked).toEqual(["in-thread"]);
+      state.threads.set(threadC, { active: true, executionPolicy: "plan" });
+      await expect(service.acquire({ ...fromPerson, owner: code(threadC) })).resolves.toEqual({
+        status: "refused",
+        reason: "plan-mode",
+      });
+    }
+  });
+
+  it("refuses a billed lease over the cap, and one with no cap, with the confirmation off", async () => {
+    const cloud = billedCloud();
+    const { service, state, connection } = host({ providers: [cloud], spendCap: 2 * ESTIMATE });
+    service.setLeaseSettings({ actor: person, change: { confirmBilledDesktops: false } });
+
+    await acquired(service, threadA);
+    await acquired(service, threadB);
+    for (const actor of [agentOf(threadC), person]) {
+      await expect(
+        service.acquire({ owner: code(threadC), actor, scopeId: "window-1" }),
+      ).resolves.toEqual({ status: "refused", reason: "spend-cap-reached" });
+    }
+    expect(spendEvents(connection, "desktop.billed-lease-refused@1")).toHaveLength(2);
+    expect(cloud.backend.calls().filter((call) => call === "acquire")).toHaveLength(2);
+
+    service.setSpendCap({ actor: person, monthlyCapUsdCents: undefined });
+    await expect(
+      service.acquire({ owner: code(threadC), actor: agentOf(threadC) }),
+    ).resolves.toEqual({ status: "refused", reason: "spend-cap-unset" });
+    expect(state.asked).toEqual([]);
+    // Clearing the cap leaves the confirmation as the person set it.
+    expect(service.leaseSettings({ actor: person })).toMatchObject({
+      settings: { confirmBilledDesktops: false },
+    });
+  });
+
+  it("refuses a paired device, an agent, and the host itself that try to change or read the lease settings, journaling nothing", async () => {
+    const cloud = billedCloud();
+    const { service, state, connection } = host({ providers: [cloud], spendCap: 1_000 });
+
+    for (const actor of [paired, agentOf(threadA), system]) {
+      expect(
+        service.setLeaseSettings({
+          actor,
+          change: { confirmBilledDesktops: false, leasesPerThread: 8, hostLocalLeasesPerHost: 8 },
+        }),
+      ).toEqual({ status: "refused", reason: "not-permitted" });
+      expect(service.leaseSettings({ actor })).toEqual({
+        status: "refused",
+        reason: "not-permitted",
+      });
+    }
+    expect(spendEvents(connection, "desktop.lease-settings-changed@1")).toEqual([]);
+    expect(service.leaseSettings({ actor: person })).toEqual({
+      status: "lease-settings",
+      settings: { confirmBilledDesktops: true, leasesPerThread: 2, hostLocalLeasesPerHost: 2 },
+    });
+    // The billed lease therefore still asks.
+    await acquired(service, threadA);
+    expect(state.asked).toEqual(["billed"]);
   });
 
   it("refuses an agent, a paired device, and the host itself that try to change or read the cap, journaling nothing", async () => {

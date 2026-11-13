@@ -16,10 +16,31 @@ export interface ExtensionToolBinding {
   readonly version: string;
   readonly digest: string;
   readonly definitionDigest: string;
+  /**
+   * The publisher key whose signature of this package version the host
+   * verified. Absent for an unsigned version.
+   */
+  readonly publisherKey?: string;
+  /**
+   * The unbroken run of updates this unsigned version belongs to, each taken
+   * from the source the person trusted, as the host journaled them. Absent
+   * for a version outside any such run.
+   */
+  readonly updateLine?: string;
 }
 
+/** The package a whole-server answer was given to. */
+export type ExtensionToolPackageBinding = Pick<
+  ExtensionToolBinding,
+  "version" | "digest" | "publisherKey" | "updateLine"
+>;
+
 export interface ExtensionToolGrantFacts {
-  /** A thread with no Project has nowhere to remember an approval. */
+  /**
+   * Whether the thread stands in a Project. A Chat thread outside one keeps
+   * its remembered approvals for the account instead, and has no Full access
+   * level.
+   */
   readonly inProject: boolean;
   /**
    * The host started this turn as itself: a routine, a goal-loop round, a
@@ -29,6 +50,11 @@ export interface ExtensionToolGrantFacts {
   /** A paired device sent this turn, from its own scope rather than a local window's. */
   readonly pairedDeviceTurn: boolean;
   readonly planTurn: boolean;
+  /**
+   * The turn's thread runs at Full access, where no approval is asked. Plan
+   * on such a thread still asks.
+   */
+  readonly fullAccessTurn: boolean;
   /** The thread has taken in outside content: a tool result or external text. */
   readonly threadTainted: boolean;
   readonly reach: ExtensionToolReach;
@@ -39,16 +65,42 @@ export interface ExtensionToolGrantFacts {
   readonly askEveryCall?: boolean;
   /** The tool as its server lists it for this call. */
   readonly offered: ExtensionToolBinding;
-  /** The Project's stored grant for this tool, when one was ever recorded. */
+  /**
+   * The stored grant for this tool, when one was ever recorded: the Project's,
+   * or the account's for a thread outside a Project.
+   */
   readonly grant: (ExtensionToolBinding & { readonly revoked: boolean }) | undefined;
+  /**
+   * The stored grant for every tool of this tool's server, in the same place.
+   * It binds the package alone, because it covers tools whose listings the
+   * person never saw.
+   */
+  readonly serverGrant: (ExtensionToolPackageBinding & { readonly revoked: boolean }) | undefined;
+  /**
+   * The approval a person gave this server's prompt on this thread after the
+   * thread took in outside content, when one was ever journaled. It binds
+   * the package as a whole-server grant does, and ends with the package's
+   * grants.
+   */
+  readonly markedThreadAnswer:
+    | (ExtensionToolPackageBinding & { readonly revoked: boolean })
+    | undefined;
 }
+
+/**
+ * What an approving answer to a prompt lets run afterwards. `server` is every
+ * tool of the tool's server, in the Project or for the account; the person
+ * is asked once, the first time any tool of a server is used.
+ * `server-on-thread` is every tool of that server for the rest of this
+ * thread alone. `call` is the one call that asked.
+ */
+export type ExtensionToolAnswerCoverage = "call" | "server" | "server-on-thread";
 
 export type ExtensionToolGrantDecision =
   | { readonly kind: "covered" }
   | {
       readonly kind: "ask";
       readonly reason:
-        | "no-project"
         | "plan-turn"
         | "network-tool-on-tainted-thread"
         | "ask-every-call-tool"
@@ -56,56 +108,113 @@ export type ExtensionToolGrantDecision =
         | "revoked"
         | "package-changed"
         | "tool-definition-changed";
-      /** Whether the person may answer "always allow in this Project". */
-      readonly rememberable: boolean;
+      readonly answerCovers: ExtensionToolAnswerCoverage;
     };
 
 /**
- * Whether a remembered approval covers this MCP tool call, or a person must
- * be asked. A grant never widens what a call may do: it only spares the
- * prompt for the exact tool, package, and listing the person already approved.
+ * Whether this MCP tool call runs unasked, because the thread is at Full
+ * access or a remembered approval covers it, or a person must be asked. Below
+ * Full access a server asks once, the first time any of its tools is used,
+ * and that answer covers the server's tools. A grant never widens what a
+ * call may do: it only spares the prompt for the tools of the server and
+ * package the person allowed, or for the exact tool, package, and listing
+ * they approved alone.
  */
 export function decideExtensionToolGrant(
   facts: ExtensionToolGrantFacts,
 ): ExtensionToolGrantDecision {
-  if (!facts.inProject) return { kind: "ask", reason: "no-project", rememberable: false };
   // Plan is the read-only posture: nothing runs unasked under it, and an
   // answer given there approves that call alone.
-  if (facts.planTurn) return { kind: "ask", reason: "plan-turn", rememberable: false };
+  if (facts.planTurn) return { kind: "ask", reason: "plan-turn", answerCovers: "call" };
+  // Full access rule. The person chose a level where nothing prompts, and the
+  // same agent already holds an unwrapped shell and an open network, so an
+  // ask here protects nothing that level does not already reach. A tool is
+  // only offered from a trusted and enabled server, and outside content is
+  // recorded on the thread without gating the call. This branch is the whole
+  // rule.
+  if (facts.fullAccessTurn && facts.inProject) return { kind: "covered" };
   // A tool the catalog marks ask-every-call (it publishes or deletes) is never
-  // covered by a grant, whatever the thread has read.
+  // covered by a grant or by an answer given for its server, whatever the
+  // thread has read. It sits below the Full access rule because that level is
+  // not a grant: nothing asks there, publishing included.
   if (facts.askEveryCall === true) {
-    return { kind: "ask", reason: "ask-every-call-tool", rememberable: false };
-  }
-  // Taint rule. Outside content on the thread may be steering the model, and
-  // a network tool can carry what the thread has read out in its arguments,
-  // so each such call is confirmed and the answer is single use. A confined
-  // stdio server has no network to carry anything out, so its grant holds.
-  // This branch is the whole rule.
-  if (facts.threadTainted && facts.reach !== "confined-stdio") {
-    return { kind: "ask", reason: "network-tool-on-tainted-thread", rememberable: false };
+    return { kind: "ask", reason: "ask-every-call-tool", answerCovers: "call" };
   }
   // Nobody chose to send a host-owned turn, so the prompt it raises is not a
-  // person asking for this tool. It may use a grant a person already made,
+  // person asking for this tool. It may use an answer a person already gave,
   // but its own prompt approves one call, whoever answers. Host ownership is
   // never why a call asks, so it adds no reason of its own.
-  // A paired device's turn is approved once the same way: "always allow in
-  // this Project" is a local window's answer, and the person who sent the
-  // turn is not at one, so nobody who answers it may remember it.
-  const rememberable = !facts.hostOwnedTurn && !facts.pairedDeviceTurn;
+  // A paired device's turn is approved once the same way: an answer that is
+  // kept is a local window's, and the person who sent the turn is not at one.
+  const answerKept = !facts.hostOwnedTurn && !facts.pairedDeviceTurn;
+  // Taint rule. Outside content on the thread may be steering the model, and
+  // a network tool can carry what the thread has read out in its arguments.
+  // The person is asked once for the server on that thread, after the mark;
+  // their answer says they accept that for this server there, so it holds
+  // for the rest of the thread and for no other thread. A confined stdio
+  // server has no network to carry anything out, so its grant holds. This
+  // branch is the whole rule.
+  if (facts.threadTainted && facts.reach !== "confined-stdio") {
+    const answer = facts.markedThreadAnswer;
+    if (answer !== undefined && !answer.revoked && approvedPackage(answer, facts.offered)) {
+      return { kind: "covered" };
+    }
+    return {
+      kind: "ask",
+      reason: "network-tool-on-tainted-thread",
+      answerCovers: answerKept ? "server-on-thread" : "call",
+    };
+  }
+  const answerCovers = answerKept ? "server" : "call";
+  // Whole-server rule. The person allowed every tool of this server, so the
+  // tool's own listing is not compared; the package still is.
+  const serverGrant = facts.serverGrant;
+  if (
+    serverGrant !== undefined &&
+    !serverGrant.revoked &&
+    approvedPackage(serverGrant, facts.offered)
+  ) {
+    return { kind: "covered" };
+  }
   const grant = facts.grant;
-  if (grant === undefined) return { kind: "ask", reason: "not-granted", rememberable };
-  if (grant.revoked) return { kind: "ask", reason: "revoked", rememberable };
-  // Update rule. A grant is for the package the person approved; an update
-  // is different code under the same name, so it asks again. This branch is
-  // the whole rule.
-  if (grant.version !== facts.offered.version || grant.digest !== facts.offered.digest) {
-    return { kind: "ask", reason: "package-changed", rememberable };
+  if (grant === undefined) {
+    if (serverGrant === undefined) return { kind: "ask", reason: "not-granted", answerCovers };
+    return {
+      kind: "ask",
+      reason: serverGrant.revoked ? "revoked" : "package-changed",
+      answerCovers,
+    };
+  }
+  if (grant.revoked) return { kind: "ask", reason: "revoked", answerCovers };
+  if (!approvedPackage(grant, facts.offered)) {
+    return { kind: "ask", reason: "package-changed", answerCovers };
   }
   if (grant.definitionDigest !== facts.offered.definitionDigest) {
-    return { kind: "ask", reason: "tool-definition-changed", rememberable };
+    return { kind: "ask", reason: "tool-definition-changed", answerCovers };
   }
   return { kind: "covered" };
+}
+
+/**
+ * Update rule. A grant is for the package the person approved. An update is
+ * different code under the same name, so it asks again, unless the key that
+ * signed the approved version signed the update too: the person's answer was
+ * given to that publisher's server, and the host verified both signatures.
+ * An update with a new key asks again. An unsigned update keeps the answer
+ * only inside one run of updates the host took from the source the person
+ * trusted (maintainer decision, 2026-11-13): no key vouches for it, so the
+ * source is what the answer was given to, and the person is shown the update
+ * and can roll it back. This is the whole rule.
+ */
+function approvedPackage(
+  granted: ExtensionToolPackageBinding,
+  offered: ExtensionToolPackageBinding,
+): boolean {
+  if (granted.version === offered.version && granted.digest === offered.digest) return true;
+  if (granted.publisherKey !== undefined || offered.publisherKey !== undefined) {
+    return granted.publisherKey === offered.publisherKey;
+  }
+  return granted.updateLine !== undefined && granted.updateLine === offered.updateLine;
 }
 
 /**
@@ -113,7 +222,7 @@ export function decideExtensionToolGrant(
  * package's tools, or `undefined` when the grants stay stored. Uninstall,
  * withdrawn trust, and rollback revoke, so installing or trusting again
  * restores nothing. Disabling a plugin or a component only leaves the grants
- * unused, and an update is caught by the package digest at the next call.
+ * unused, and an update is judged against the grant at the next call.
  */
 export function extensionToolGrantRevocationReason(change: {
   readonly kind: string;

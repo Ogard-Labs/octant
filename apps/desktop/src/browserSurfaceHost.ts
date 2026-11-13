@@ -57,6 +57,7 @@ import {
   awaitQuietPage,
   BrowserRecordingFrames,
   browserRecordingFrameKept,
+  answerBrowserDialog,
   BROWSER_DIALOG_POLICY,
   BROWSER_SETTLE_CAP_MS,
   BROWSER_SETTLE_QUIET_MS,
@@ -83,6 +84,7 @@ import {
   MAX_BROWSER_AUDIT_TIMELINE_ENTRIES,
   type BrowserPageAuditReading,
   type BrowserPageCounters,
+  type BrowserTransferLimits,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
@@ -98,6 +100,7 @@ import {
   type SurfaceProtocolSend,
 } from "./browserSurfaceFrames";
 import {
+  ANY_BROWSER_ORIGIN,
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
@@ -108,6 +111,8 @@ import {
   type BrowserActionRequest,
   type BrowserContextId,
   type BrowserContextPolicy,
+  type BrowserDialogAnswer,
+  type BrowserDialogReport,
   type BrowserDownloadReport,
   type BrowserEmulationReport,
   type BrowserRecordingTruncation,
@@ -317,9 +322,14 @@ export interface BrowserSurfaceViewPort {
 export interface BrowserSurfaceHostOptions {
   /**
    * The host's private folder for files held for the agent, emptied at start.
-   * Absent, every download stays blocked, as it is for the person's own pane.
+   * Absent, no download is held for an agent.
    */
   readonly downloadRoot?: string;
+  /**
+   * The person's Downloads folder, where a download they start in the pane is
+   * saved at every access level. Absent, their download is refused.
+   */
+  readonly personDownloadsFolder?: string;
   readonly createView: (options: {
     readonly owner: BrowserSurfaceOwner;
     readonly partition: string;
@@ -577,6 +587,7 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "diagnosticsSince"
       | "diagnosticsWarnings"
       | "auditKind"
+      | "dialog"
     >
   > & {
     /**
@@ -585,6 +596,8 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
      * while the action runs is held for the agent.
      */
     readonly downloads?: "hold";
+    /** The person's limits for the downloads this action holds; absent, the defaults. */
+    readonly downloadLimits?: BrowserTransferLimits;
     /** The role and name a snapshot ref recorded; the target must still match. */
     readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
     /** The same for a drag's drop target. */
@@ -1246,12 +1259,19 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (!guardedSessions.has(view.webContents.session)) {
       guardedSessions.add(view.webContents.session);
       // The page that started a download decides who may hold it: the agent's
-      // context while one of its actions runs, and nobody otherwise.
+      // context while one of its actions runs. Otherwise it is the person's own
+      // when they were the last to drive the pane (`control` is "user" from
+      // their key or click until an agent action begins), and nobody's when a
+      // page starts one on its own after an agent action.
       view.webContents.session.on("will-download", (event, item, contents) => {
         const target =
           contents?.id === undefined ? undefined : surfaceByWebContents.get(contents.id);
         if (target === undefined || item === undefined) return event.preventDefault?.();
-        target.downloads.accept(event, item);
+        target.downloads.accept(
+          event,
+          item,
+          target.control === "user" ? options.personDownloadsFolder : undefined,
+        );
       });
     }
     // `policy.acceptsLocalCertificate` relaxes nothing here. That acceptance
@@ -1673,8 +1693,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       heldDialog = undefined;
       if (held === undefined || popups.read()?.kind !== "dialog") return;
       const answer = BROWSER_DIALOG_POLICY[held.type];
-      if (reports.length < 8)
-        reports.push({ type: held.type, message: held.message.slice(0, 512), answer });
+      if (reports.length < 8) {
+        reports.push({
+          type: held.type,
+          message: held.message.slice(0, 512),
+          answer,
+          answeredBy: "rule",
+        });
+      }
       popups.retire("dialog");
       void held.handle(answer === "accepted");
     });
@@ -2668,8 +2694,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         publish(contextId, owned);
         // Dialogs an earlier action answered before it failed come first.
         const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
-        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs);
-        if (request.downloads === "hold") owned.downloads.begin();
+        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs, request.dialog);
+        if (request.downloads === "hold") owned.downloads.begin(request.downloadLimits);
         try {
           checkObservation();
           throwIfAborted(signal);
@@ -3590,7 +3616,11 @@ function normalizeUrl(value: string): string {
 function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
   if (target === "about:blank") return true;
   try {
-    return sameSiteOriginAllowed(normalizeUrl(target), allowedOrigins.map(normalizeUrl));
+    return sameSiteOriginAllowed(
+      normalizeUrl(target),
+      // The any-site entry is not an address; it passes through as it is.
+      allowedOrigins.map((entry) => (entry === ANY_BROWSER_ORIGIN ? entry : normalizeUrl(entry))),
+    );
   } catch {
     return false;
   }
@@ -4819,22 +4849,21 @@ function dropRecording(owned: OwnedSurface): void {
   endScreencast(owned, recording);
 }
 
-interface DialogReport {
-  readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
-  readonly message: string;
-  readonly answer: "accepted" | "dismissed";
-}
+type DialogReport = BrowserDialogReport;
 
 /**
- * Answer the page's own dialogs by the fixed policy for as long as an agent's
- * action runs, and record each one. A dialog left open would hold the page,
- * and the agent behind it, until a person found it. A debugger someone else
+ * Answer the page's own dialogs for as long as an agent's action runs, and
+ * record each one: the first by the answer the agent stated with the action,
+ * every other by the fixed policy. A dialog left open would hold the page, and
+ * the agent behind it, until a person found it. A debugger someone else
  * attached (developer tools) is left alone and the page's dialogs stay theirs.
  */
 async function guardDialogs(
   view: BrowserSurfaceViewPort,
   reports: DialogReport[],
+  agentAnswer?: BrowserDialogAnswer,
 ): Promise<() => Promise<void>> {
+  let stated = agentAnswer;
   const client = view.webContents.debugger;
   // A page that has not loaded yet is guarded too: its first load is when a
   // dialog most often opens.
@@ -4860,16 +4889,15 @@ async function guardDialogs(
       readonly message?: unknown;
     };
     const type = dialogType(typeof opened.type === "string" ? opened.type : "alert");
-    const answer = BROWSER_DIALOG_POLICY[type];
-    if (reports.length < 8) {
-      reports.push({
-        type,
-        message: (typeof opened.message === "string" ? opened.message : "").slice(0, 512),
-        answer,
-      });
-    }
+    const message = typeof opened.message === "string" ? opened.message : "";
+    const { promptText, ...decision } = answerBrowserDialog(type, message, stated);
+    stated = undefined;
+    if (reports.length < 8) reports.push({ type, message: message.slice(0, 512), ...decision });
     void client
-      .sendCommand("Page.handleJavaScriptDialog", { accept: answer === "accepted" })
+      .sendCommand("Page.handleJavaScriptDialog", {
+        accept: decision.answer === "accepted",
+        ...(promptText === undefined ? {} : { promptText }),
+      })
       .catch(() => undefined);
   };
   client.on("message", listener);

@@ -1,5 +1,6 @@
 import { notifyWindowRevocations } from "../windowRevocations";
 import { randomUUID } from "node:crypto";
+import { defaultShellSettings } from "@octant/domain";
 import {
   type AgentRun,
   decodeChatThreadId,
@@ -23,7 +24,10 @@ import {
   threadWithActiveTurnPosture,
 } from "../code/codeOperationRuntime";
 import { ProcessAuthorityClock } from "../processAuthorityClock";
-import { readDeviceRegistration } from "../persistence/remoteAccessProjection";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistration,
+} from "../persistence/remoteAccessProjection";
 import { AgentRunEventStore } from "../agentRun/agentRunEventStore";
 import { AgentRunPersistenceService } from "../agentRun/agentRunPersistenceService";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
@@ -54,6 +58,7 @@ import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import { BrowserCaptureService } from "../browser/browserCaptureService";
 import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
+import { threadsArchivedBy } from "../threadArchiveWatch";
 import type { ServerStart } from "./serverShape";
 import type { FoundationsWiring } from "./foundations";
 import { ToolEffectLedger } from "../toolEffects/toolEffectLedger";
@@ -138,14 +143,28 @@ export function wireAuthority(deps: AuthorityDependencies) {
       readDeviceRegistration(persistence.connection, String(scopeId)),
       Date.now(),
     );
+  // A device the host's own person paired is that person, so its turns are not
+  // held to what a hub-introduced device's turns are: its prompts may be
+  // remembered and its turns carry the person's memory, as a local window's do.
+  const isRestrictedDeviceScope = (scopeId: WindowId): boolean =>
+    isPairedDeviceScope(scopeId) &&
+    !readDeviceApprovedByPerson(persistence.connection, String(scopeId));
   const personMemoryAccess = createPersonMemoryAccess({
     store: personMemory,
-    isPairedDeviceScope,
+    isPairedDeviceScope: isRestrictedDeviceScope,
     isHostScope: isRoutineHostScope,
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
   });
+  // The asks these services hold are not journaled when raised, so each says
+  // so here and the paired phones' notifications, wired later, listen.
+  const waitingAskAnnouncement: {
+    notify?: (ask: { readonly threadId: string; readonly askId: string }) => void;
+  } = {};
+  const onWaitingAsk = (ask: { readonly threadId: string; readonly askId: string }): void =>
+    waitingAskAnnouncement.notify?.(ask);
   const extensionToolApprovalService = new ExtensionToolApprovalService({
     uuid: randomUUID,
+    onAsked: onWaitingAsk,
     now: processAuthorityTime,
     isPairedDeviceScope,
     // The thread must still be active and in the Project the prompt
@@ -195,6 +214,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // whose turn raised them. A prompt like the tool approvals above, so it
   // rides the same change topic.
   const routineProposalService = new RoutineProposalService({
+    onAsked: onWaitingAsk,
     uuid: randomUUID,
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
@@ -203,9 +223,32 @@ export function wireAuthority(deps: AuthorityDependencies) {
   // card in the thread. A prompt like the routine proposals above, so it
   // rides the same change topic.
   const imageGenerationOffers = new ImageGenerationOfferService({
+    onAsked: onWaitingAsk,
     uuid: randomUUID,
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+  });
+  // An ask waits with no expiry, so a thread archived while its turn is
+  // still parked on one must give it up here. Later areas register the asks
+  // they hold, as they register window revocations below.
+  const threadArchivals: Array<(threadId: string) => void> = [
+    (id) => extensionToolApprovalService.withdrawThread(id),
+    (id) => routineProposalService.withdrawThread(id),
+    (id) => imageGenerationOffers.withdrawThread(id),
+  ];
+  const onThreadArchived = (withdraw: (threadId: string) => void): void => {
+    threadArchivals.push(withdraw);
+  };
+  const unsubscribeThreadArchivals = persistence.journal.subscribeCommitted((append) => {
+    for (const threadId of threadsArchivedBy(append)) {
+      for (const withdraw of threadArchivals) {
+        try {
+          withdraw(threadId);
+        } catch {
+          // One area that cannot give up its asks does not keep the others'.
+        }
+      }
+    }
   });
   // One Automation event store for the host: the Automation area writes
   // definitions and runs through it, and a Work or Code run's own turn
@@ -263,6 +306,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
     personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
+    capturesPerThread: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .browserCapturesPerThread,
   });
   const browserModelBindings = new Map<string, BrowserModelBinding>();
   // Each area that holds per-window state registers its revocation here when
@@ -347,6 +393,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     routineProposalService,
     imageGenerationOffers,
     isPairedDeviceScope,
+    isRestrictedDeviceScope,
     liveTurns,
     machineChangeFeed,
     onAgentRunExecutionAccepted,
@@ -357,6 +404,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
         : undefined;
     },
     processAuthorityNow,
+    onThreadArchived,
+    onWaitingAsk,
+    waitingAskAnnouncement,
     processAuthorityTime,
     onWindowRevoked,
     personMemory,
@@ -365,6 +415,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     protectedFilesRoutes,
     simulatorInputGrants,
     unsubscribeMachineChanges,
+    unsubscribeThreadArchivals,
     windowAuthorityStore,
   };
 }

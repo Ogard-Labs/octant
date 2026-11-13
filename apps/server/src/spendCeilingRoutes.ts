@@ -1,3 +1,6 @@
+import { principalAuthorityKind } from "./clientPrincipal";
+import { principalActsAsHostPerson } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import {
   decodeSpendCeilingCommand,
   decodeSpendCeilingSnapshot,
@@ -79,7 +82,7 @@ export function createSpendCeilingRouteHandler(dependencies: SpendCeilingRouteDe
         return failure("Thread type is invalid.", 400, origin);
       }
       const snapshot = dependencies.service.snapshot({
-        principalKind: principal.kind,
+        principalKind: principalAuthorityKind(principal),
         ...(threadId === undefined ? {} : { threadId }),
         ...(threadType === undefined ? {} : { threadType }),
         ...(projectId === undefined ? {} : { projectId }),
@@ -94,7 +97,7 @@ export function createSpendCeilingRouteHandler(dependencies: SpendCeilingRouteDe
     }
 
     if (url.pathname === COMMAND_PATH && request.method === "POST") {
-      if (principal.kind !== "local-window") {
+      if (!principalActsAsHostPerson(principal)) {
         return failure(
           "Setting a spend ceiling is a host owner command. Open this host locally to raise or clear it.",
           403,
@@ -117,7 +120,11 @@ export function createSpendCeilingRouteHandler(dependencies: SpendCeilingRouteDe
       }
       let result: SpendCeilingCommandResult;
       try {
-        result = dependencies.service.execute(principal.kind, command);
+        result = dependencies.service.execute(
+          principalAuthorityKind(principal),
+          command,
+          eventActorForPrincipal(principal),
+        );
       } catch (error) {
         if (error instanceof ConcurrencyConflict) {
           return failure("Spend ceiling changed; reload and retry.", 409, origin);

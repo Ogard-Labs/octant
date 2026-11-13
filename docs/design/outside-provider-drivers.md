@@ -190,8 +190,18 @@ trust and enable: the person reads one review and confirms once, and the host
 then runs steps 1 to 4 in order, each journaled through the existing extension
 lifecycle, stopping at the first that refuses. Digest-bound trust and the
 driver's confinement are unchanged, and each step stays available on its own
-(maintainer request, 2026-11-12). Not built yet: today each step is its own
-action and none implies the next.
+(maintainer request, 2026-11-12). Built: the review of a package that holds a
+provider driver (publisher, source, signing key, digest, components) is the
+one confirmation, and **Install and trust** on it sends `install-package`
+with `trust` and `enable`. The host runs install, `set-source-trust`,
+`set-plugin-desired` and `set-component-desired` for the driver component
+through the same lifecycle methods the separate actions use, so each is
+journaled and refused exactly as it is alone. A refused step ends the flow
+with the earlier steps standing, and the result names the step (`stoppedAt`:
+`trust` or `enable`) so the window says what is and is not done. The host
+refuses `enable` for a package that holds no provider driver before it
+installs anything, and without `trust`; **Confirm install** remains step 2 on
+its own.
 
 1. **Inspect** a source with an expected digest (`inspect-package`). The review
    shows the package identity, digest, publisher and signature state, protocol
@@ -652,8 +662,10 @@ implementation; each takes the fail-closed option.
   every endpoint's. The host also runs it by itself the first time a model is
   used, from whatever turn uses it: it is a capability probe, not a grant, so
   it needs no local window, and the manual button stays as it is (maintainer
-  request, 2026-11-12). Not built yet: today only the button runs it, and an
-  unverified model is refused tools until the person presses it.
+  request, 2026-11-12). A first-use run that fails, or a model that does not
+  call the echo tool, leaves the model without tools and never blocks the
+  turn; [Architecture: Native harness](../architecture.md#native-harness)
+  owns when it is tried again and where its reason is shown.
 - **Digest-bound records.** An instance's observation, Verify tools record,
   and conformance belong to the digest it binds. A package that selects
   another digest leaves the instance `driver-not-admitted` with no models,
@@ -683,7 +695,9 @@ the fail-closed option.
   added from, and the selection's version or digest differs from the bound
   one (`resolveOutsideDriverRebind` in `@octant/plugin-host`). Every install,
   update, and rollback clears trust and holds the package, so none of them
-  moves an instance by itself, and no command, route, or remote client can
+  moves an instance by itself (the one exception is an update the pinned
+  publisher key signed, under [Provenance and updates](#provenance-and-updates),
+  which keeps the trust), and no command, route, or remote client can
   ask for a move. Withdrawn trust moves nothing. A package whose new version
   drops or renames the component, or that is another package, never moves
   the instance; it stays `superseded` until the person removes it.
@@ -747,7 +761,14 @@ the fail-closed option.
   it, so the next use starts a new process, and clears their Verify tools
   records. Rollback uses the existing `rollback-package`, is held the same
   way, and moving back on trust also clears them
-  ([Rebind rules](#rebind-rules)). _Rationale: an earlier draft of this
+  ([Rebind rules](#rebind-rules)). An update signed by the publisher key
+  pinned for the package keeps the trust and the on switch the package had
+  (maintainer decision, 2026-11-12): the host journals the trust, and the on
+  switch when it was on, again after the update's own commit, so the journal
+  shows why the new version runs (`outsideDriverUpdateKeepsTrust` in
+  `@octant/domain`). A new key, a missing signature, a package with no pinned
+  key, and an update that widens what the package may do stay held and ask
+  again. _Rationale: an earlier draft of this
   bullet kept the trusted version serving while an update was held; the
   admission rules built in slice 5 hold the package whenever its selection
   changes, which is the fail-closed reading, and this bullet follows them._
@@ -832,7 +853,12 @@ raw key>` that the host sets and a document that states it is refused, so
 - **Signing.** The author kit's signing tool
   (`@octant/provider-sdk/outside-driver-sign`, plain `.mjs`) writes the file.
   It reads a PKCS #8 Ed25519 private key from a file or from standard input,
-  never writes or prints it, and prints only the key's fingerprint.
+  never writes or prints it, and prints only the key's fingerprint. The same
+  file and check now cover every package kind that can carry a signature
+  ([Architecture: Extensions and skills](../architecture.md#extensions-and-skills));
+  a package that is not a driver has no driver document, so it is signed with
+  `--name` and `--version` as Octant shows them, and its signature lists no
+  protocol version.
 
 _Rationale: a file beside the driver document is the one place every source
 can carry unchanged, so a local folder and an npm package are checked

@@ -2,6 +2,7 @@ import { NativeHarnessAskUserArguments, type Questionnaire } from "@octant/contr
 import { validateQuestionnaireAnswer } from "@octant/domain";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import { boundedToolResultJson } from "../providers/toolResultJson";
+import type { ThreadToolCallRecorder } from "../threadToolCallRecorder";
 import {
   decodeChatAttemptQuestion,
   decodeChatFailure,
@@ -32,14 +33,20 @@ import {
   type TurnStopReason,
   type TurnUsage,
   type ThreadTaskProgress,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   MAX_THREAD_TASKS_PER_TURN,
+  MAX_TURN_RUNTIME_EVENTS,
   restateThreadTaskList,
   upsertThreadTaskProgress,
+  type ThreadToolStep,
 } from "@octant/contracts";
 import {
   accumulateTurnUsage,
+  changedThreadToolStep,
+  isNativeHarnessDriverKind,
   markThreadToolStepOutsideContent,
   observeTurnMetrics,
+  recordThreadAppToolStep,
   recordThreadToolStep,
   startTurnMetrics,
   type ThreadToolSteps,
@@ -70,6 +77,8 @@ import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
+  DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
+  DEFAULT_STALLED_TURN_LIMIT_MS,
   makeEventLoopShare,
   makeIdleTimeout,
   makeStreamedOutputBudget,
@@ -83,13 +92,11 @@ import type { ResearchRouteDecision, ResearchRouter } from "./research/researchR
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const DEFAULT_MAX_EVENTS = 4_096;
-// Inactivity window: a turn is cut off after this long without any provider
-// event, not after this much total wall time. A provider can stay silent while
-// the model writes one long tool call: Codex sent nothing for over two minutes
-// while a model wrote a three-screen Canvas design, so Chat waits as long as
-// Code does.
-const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_MAX_EVENTS = MAX_TURN_RUNTIME_EVENTS;
+// How long one app-managed tool call may run before the turn fails. It is the
+// call's own deadline, apart from the stalled-turn limit, which is paused
+// while the call runs and may be turned off.
+const APP_MANAGED_TOOL_DEADLINE_MS = 5 * 60_000;
 // A question record holds at most this many options, matching the attempt
 // contract; longer option lists are cut, not refused.
 const MAX_ATTEMPT_QUESTION_OPTIONS = 8;
@@ -213,6 +220,22 @@ export interface ChatTurnRunnerOptions {
   readonly researchRouter: ResearchRouter;
   readonly maxEvents?: number;
   readonly maxStreamedOutputBytes?: number;
+  /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off.
+   * Read as each turn starts, so a changed setting applies to the next turn
+   * and a running turn keeps the limit it started with.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off. Read as each turn starts,
+   * like the limit. Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
+  /**
+   * A fixed stalled-turn limit and app-managed tool deadline, for a caller
+   * with no host setting to read.
+   */
   readonly timeoutMs?: number;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
@@ -278,6 +301,21 @@ export interface ChatTurnRunnerInput {
     responseRef: ChatContentReference,
   ) => Effect.Effect<void, ChatFailure>;
   /**
+   * Journals one tool event as only the step it changed (none when the list
+   * only became truncated). The attempt was journaled whole at every tool
+   * event, so the bytes grew with the square of the step limit. Absent, the
+   * attempt is journaled whole, as a caller that keeps no step events does.
+   */
+  readonly persistToolStep?: (
+    attempt: ChatAttempt,
+    step: ThreadToolStep | undefined,
+  ) => Effect.Effect<void, ChatFailure>;
+  /**
+   * How many tool calls the attempt keeps: the person's setting. Chat has no
+   * Full access, so there is always a number; absent reads as the default.
+   */
+  readonly toolStepLimit?: number;
+  /**
    * Atomically persists a terminal provider failure and its support anchor.
    * The runner supplies the already-transitioned attempt so the caller never
    * has to commit the failure and diagnostics incident in separate writes.
@@ -305,6 +343,8 @@ export interface ChatTurnRunnerInput {
   /** The endpoint is sending the request again. The same event the stats line counts. */
   readonly onHarnessRetry?: (notice: HarnessRetryNotice) => void;
   readonly onHarnessRetryCleared?: () => void;
+  /** Keeps each tool call's input and output outside the journal; absent keeps none. */
+  readonly toolCallRecords?: ThreadToolCallRecorder;
   /** Tells the navigation read what the running turn is doing, from its start to its end. */
   readonly liveTurn?: LiveTurnTracker;
   /**
@@ -321,8 +361,10 @@ export class ChatTurnRunner {
   readonly #capacityScheduler: ProviderCapacityScheduler;
   readonly #contextHarness: ContextHarnessService;
   readonly #maxEvents: number;
+  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #providerToolCallPauseLimitMs: () => number | null;
+  readonly #appManagedToolDeadlineMs: number;
   readonly #maxStreamedOutputBytes: number;
-  readonly #timeoutMs: number;
   readonly #spendCeiling: ChatTurnRunnerOptions["spendCeiling"];
   readonly #openQuestions = new Map<string, OpenChatQuestion>();
   /** Kills one live attempt's own runtime process; present only for a connection that offers it. */
@@ -333,8 +375,12 @@ export class ChatTurnRunner {
     this.#spendCeiling = options.spendCeiling;
     this.#contextHarness = options.contextHarness;
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+    const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
+    this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
+    this.#providerToolCallPauseLimitMs =
+      options.providerToolCallPauseLimitMs ?? (() => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS);
+    this.#appManagedToolDeadlineMs = options.timeoutMs ?? APP_MANAGED_TOOL_DEADLINE_MS;
     this.#maxStreamedOutputBytes = options.maxStreamedOutputBytes ?? MAX_TURN_STREAMED_OUTPUT_BYTES;
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
 
   /**
@@ -381,8 +427,10 @@ export class ChatTurnRunner {
     const capacityScheduler = this.#capacityScheduler;
     const contextHarness = this.#contextHarness;
     const maxEvents = this.#maxEvents;
+    const stalledTurnLimitMs = this.#stalledTurnLimitMs;
+    const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
+    const appManagedToolDeadlineMs = this.#appManagedToolDeadlineMs;
     const streamedOutput = makeStreamedOutputBudget(this.#maxStreamedOutputBytes);
-    const timeoutMs = this.#timeoutMs;
     const spendCeiling = this.#spendCeiling;
     const openQuestions = this.#openQuestions;
     const forceStops = this.#forceStops;
@@ -488,12 +536,16 @@ export class ChatTurnRunner {
           },
           decodeChatFailure({ category: "failed", message: RUNTIME_OUTSIDE_CONTENT_REFUSAL }),
         );
-      // The row of a call whose result brought outside content carries the
-      // Watcher's tag, with what it found, on the attempt's own tool steps.
-      const markToolRow = (
-        toolCallId: string,
-        toolName: string,
-        labels: ReadonlyArray<ShieldWatcherLabel>,
+      const stepLimit = input.toolStepLimit ?? DEFAULT_THREAD_TOOL_STEPS_PER_TURN;
+      // An Octant Harness attempt's runtime announces no tool call of its
+      // own: every tool it has is one Octant runs for it, so the request is
+      // the only sign of the call and the host gives it its row.
+      const announcesNoCall = isNativeHarnessDriverKind(input.driver.kind);
+      // One step per tool call id on the attempt, journaled as the step that
+      // changed. A name, a state, and a bounded message; never the tool's
+      // input or output. Every whole attempt journaled later carries the list.
+      const foldToolSteps = (
+        fold: (before: ThreadToolSteps | undefined) => ThreadToolSteps | undefined,
       ) =>
         Effect.gen(function* () {
           const before: ThreadToolSteps | undefined =
@@ -503,11 +555,7 @@ export class ChatTurnRunner {
                   steps: currentAttempt.toolSteps,
                   truncated: currentAttempt.toolStepsTruncated === true,
                 };
-          const after = markThreadToolStepOutsideContent(before, {
-            toolCallId,
-            toolName,
-            mark: { labels },
-          });
+          const after = fold(before);
           if (after === undefined || after === before) return;
           currentAttempt = {
             ...currentAttempt,
@@ -515,8 +563,38 @@ export class ChatTurnRunner {
             ...(after.truncated ? { toolStepsTruncated: true } : {}),
             updatedAt: updatedAt(),
           };
-          yield* input.persistAttempt(currentAttempt);
+          if (input.persistToolStep === undefined) yield* input.persistAttempt(currentAttempt);
+          else yield* input.persistToolStep(currentAttempt, changedThreadToolStep(before, after));
         });
+      // The row of a call whose result brought outside content carries the
+      // Watcher's tag, with what it found, on the attempt's own tool steps.
+      const markToolRow = (
+        toolCallId: string,
+        toolName: string,
+        labels: ReadonlyArray<ShieldWatcherLabel>,
+      ) =>
+        foldToolSteps((before) =>
+          markThreadToolStepOutsideContent(
+            before,
+            { toolCallId, toolName, mark: { labels } },
+            stepLimit,
+          ),
+        );
+      // Keyed by the request id, which the call's record is kept under, so
+      // the row opens that record.
+      const showAppTool = (
+        call: { readonly requestId: string; readonly toolName: string },
+        state: "started" | "completed" | "failed",
+      ) =>
+        announcesNoCall
+          ? foldToolSteps((before) =>
+              recordThreadAppToolStep(
+                before,
+                { toolCallId: call.requestId, toolName: call.toolName, state },
+                stepLimit,
+              ),
+            )
+          : Effect.void;
       // An earlier attempt's read that could not be marked is still in the
       // session this attempt would resume.
       if (outsideContentMarks.settleOwed(String(input.thread.id)).status === "refused") {
@@ -968,7 +1046,7 @@ export class ChatTurnRunner {
               }),
             );
 
-      const idle = yield* makeIdleTimeout(timeoutMs);
+      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
       const shareEventLoop = makeEventLoopShare();
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(
@@ -1011,7 +1089,7 @@ export class ChatTurnRunner {
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 yield* shareEventLoop;
-                yield* idle.touch;
+                yield* idle.observe(event);
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
                 input.toolEffects?.observe(event, input.appManagedTools);
@@ -1112,6 +1190,9 @@ export class ChatTurnRunner {
                     }),
                   );
                 }
+                input.toolCallRecords?.observe(event);
+                // Kept in the record above; never a step or part of the attempt.
+                if (event.kind === "tool-call-content") return;
                 if (streamedOutput(event) === "exceeded") {
                   // The reply kept so far stays, and ends in words that say
                   // Octant stopped keeping it rather than looking finished.
@@ -1340,10 +1421,11 @@ export class ChatTurnRunner {
                     executionSignal === undefined
                       ? toolAbort.signal
                       : AbortSignal.any([executionSignal, toolAbort.signal]);
-                  // App-owned work suspends the idle timeout, so the call gets
-                  // the same window as its own deadline: a tool that never
-                  // returns ends the turn with a named cause instead of
-                  // hanging it past the point the provider went silent.
+                  yield* showAppTool(event, "started");
+                  // App-owned work suspends the stalled-turn limit, so the call
+                  // gets a deadline of its own: a tool that never returns ends
+                  // the turn with a named cause instead of hanging it, whatever
+                  // the limit is set to and when it is Off.
                   const execution = yield* idle.during(
                     Effect.raceFirst(
                       Effect.tryPromise({
@@ -1381,7 +1463,7 @@ export class ChatTurnRunner {
                         ),
                       ),
                       Effect.andThen(
-                        Effect.sleep(timeoutMs),
+                        Effect.sleep(appManagedToolDeadlineMs),
                         Effect.gen(function* () {
                           toolAbort.abort();
                           return yield* failTurn(
@@ -1404,11 +1486,19 @@ export class ChatTurnRunner {
                       execution.outsideContent.labels,
                     );
                   }
+                  yield* showAppTool(event, execution.isError === true ? "failed" : "completed");
+                  const resultJson = boundedToolResultJson(execution.result);
+                  input.toolCallRecords?.appTool({
+                    toolCallId: event.requestId,
+                    toolName: event.toolName,
+                    inputJson: event.inputJson,
+                    resultJson,
+                  });
                   yield* callProvider(
                     connection.answerTool({
                       sessionId: input.attempt.providerSessionId,
                       requestId: event.requestId,
-                      resultJson: boundedToolResultJson(execution.result),
+                      resultJson,
                       ...(execution.images === undefined ? {} : { images: execution.images }),
                       isError: execution.isError === true,
                     }),
@@ -1477,26 +1567,7 @@ export class ChatTurnRunner {
                   event.kind === "tool-success" ||
                   event.kind === "tool-failure"
                 ) {
-                  // One step per provider tool call id, restated whole on the
-                  // attempt like the task list, so a replayed attempt-updated
-                  // is the full state. A name, a state, and a bounded message;
-                  // never the tool's input or output.
-                  const before: ThreadToolSteps | undefined =
-                    currentAttempt.toolSteps === undefined
-                      ? undefined
-                      : {
-                          steps: currentAttempt.toolSteps,
-                          truncated: currentAttempt.toolStepsTruncated === true,
-                        };
-                  const after = recordThreadToolStep(before, event);
-                  if (after === undefined || after === before) return;
-                  currentAttempt = {
-                    ...currentAttempt,
-                    toolSteps: after.steps,
-                    ...(after.truncated ? { toolStepsTruncated: true } : {}),
-                    updatedAt: updatedAt(),
-                  };
-                  yield* input.persistAttempt(currentAttempt);
+                  yield* foldToolSteps((before) => recordThreadToolStep(before, event, stepLimit));
                   return;
                 }
                 if (event.kind === "waiting") {

@@ -2,10 +2,12 @@ import {
   ActorId,
   CorrelationId,
   EventId,
+  type EventActor,
   UtcTimestamp,
   decodeProviderFailure,
   decodeProviderCatalogSnapshot,
   decodeProviderInstanceId,
+  decodeProviderModelToolCheck,
   decodeProviderObservedState,
   decodeProviderProbeResult,
   decodeProviderRegistryCommand,
@@ -30,6 +32,7 @@ import {
   type ProviderSessionId,
   type ProviderModel,
   type ProviderModelId,
+  type ProviderModelToolCheck,
   type ProviderExecutionPolicy,
   type OctantMode,
 } from "@octant/contracts";
@@ -83,6 +86,7 @@ import {
   renameProvider,
   setClaudeArtifactDelivery,
   setProviderNativeSetup,
+  setProviderOwnMemory,
   isKeyProviderDriverKind,
   setProviderEnabled,
   setProviderDataTags,
@@ -166,9 +170,15 @@ const unavailableCapabilities = {
 
 export interface ProviderServiceApi {
   readonly bootstrap: (authenticatedWindowId: WindowId) => Promise<ProviderRegistrySnapshot>;
+  /**
+   * `actor` is who asked, as the route resolved it from the authenticated
+   * principal: a paired device's provider change is journaled as that device.
+   * Absent means the person at this host.
+   */
   readonly execute: (
     authenticatedWindowId: WindowId,
     command: unknown,
+    actor?: EventActor,
   ) => Promise<ProviderRegistryCommandResult>;
   readonly probe: (
     authenticatedWindowId: WindowId,
@@ -269,6 +279,14 @@ export class ProviderService implements ProviderServiceApi {
   readonly #runtime: ProviderRuntimeRegistry;
   readonly #probeProvider: NonNullable<ProviderServiceOptions["probe"]>;
   readonly #instanceOperationTails = new Map<ProviderInstanceId, Promise<void>>();
+  /**
+   * The last Verify tools run that left a model without tools, by instance and
+   * model. Host memory only: a restart forgets it, so a model's next use
+   * checks once more, which costs one request and can only add a model the
+   * endpoint now proves.
+   */
+  readonly #toolChecks = new Map<string, Map<string, ProviderModelToolCheck>>();
+  readonly #firstUseToolChecksInFlight = new Map<string, Promise<void>>();
   #claudeAccountClaimTail: Promise<void> = Promise.resolve();
   #codexAccountClaimTail: Promise<void> = Promise.resolve();
   readonly #probesInFlight = new Map<
@@ -389,7 +407,7 @@ export class ProviderService implements ProviderServiceApi {
               ? unavailable
               : withRuntimeIntegration(instance.driverKind, unavailable);
           }
-          return withRuntimeIntegration(instance.driverKind, {
+          return this.#reportedRuntime(instance.driverKind, {
             ...state,
             models: orderProviderModels(
               state.models,
@@ -637,6 +655,7 @@ export class ProviderService implements ProviderServiceApi {
   async execute(
     authenticatedWindowId: WindowId,
     input: unknown,
+    actor?: EventActor,
   ): Promise<ProviderRegistryCommandResult> {
     let command: ReturnType<typeof decodeProviderRegistryCommand>;
     try {
@@ -824,7 +843,7 @@ export class ProviderService implements ProviderServiceApi {
             aggregateId: PROVIDER_DEFAULTS_AGGREGATE_ID,
           },
           expectedVersion: command.expectedVersion,
-          events: [this.#pendingEvent("provider.defaults-updated@1", { defaults })],
+          events: [this.#pendingEvent("provider.defaults-updated@1", { defaults }, actor)],
         });
         const authoritative = this.#persistence.readProviderDefaults();
         if (authoritative.version !== defaults.version) throw this.#unavailable();
@@ -1024,7 +1043,12 @@ export class ProviderService implements ProviderServiceApi {
                 break;
             }
             this.#assertDriverPluginEffective(instance);
-            this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
+            this.#appendInstance(
+              command.expectedVersion,
+              "provider.instance-created@1",
+              instance,
+              actor,
+            );
             const authoritative = this.#authoritativeInstance(instance);
             this.#publishSelectedAuthenticationObservation(authoritative);
             return decodeProviderRegistryCommandResult({
@@ -1062,10 +1086,14 @@ export class ProviderService implements ProviderServiceApi {
               aggregate: { aggregateType: "provider-instance", aggregateId: current.id },
               expectedVersion: command.expectedVersion,
               events: [
-                this.#pendingEvent("provider.instance-removed@1", {
-                  instanceId: current.id,
-                  version: removed.version,
-                }),
+                this.#pendingEvent(
+                  "provider.instance-removed@1",
+                  {
+                    instanceId: current.id,
+                    version: removed.version,
+                  },
+                  actor,
+                ),
               ],
             });
             if (this.#persistence.readProviderInstance(current.id) !== undefined) {
@@ -1121,7 +1149,7 @@ export class ProviderService implements ProviderServiceApi {
             this.#persistence.journal.append({
               aggregate: { aggregateType: "provider-catalog", aggregateId: current.id },
               expectedVersion: catalog.version,
-              events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
+              events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot }, actor)],
             });
             const authoritative = this.#persistence.readProviderCatalog(current.id);
             if (authoritative?.version !== snapshot.version) throw this.#unavailable();
@@ -1162,6 +1190,17 @@ export class ProviderService implements ProviderServiceApi {
             // stay as they are; the next turn starts with the new setup.
             keepsRuntime = true;
             eventName = "provider.instance-native-setup-changed@1";
+          } else if (command.kind === "set-provider-own-memory") {
+            if (current.driverKind !== "claude" && current.driverKind !== "codex") {
+              throw this.#unsupported(
+                "Only a Claude Code or Codex account has a memory of its own to turn on.",
+              );
+            }
+            instance = setProviderOwnMemory(current, { enabled: command.enabled, updatedAt });
+            // Each driver reads the switch when it launches a process, so a
+            // running one, its sign-in, and its models stay as they are.
+            keepsRuntime = true;
+            eventName = "provider.instance-own-memory-changed@1";
           } else if (command.kind === "rename-provider") {
             instance = renameProvider(current, {
               displayName: command.displayName,
@@ -1431,7 +1470,7 @@ export class ProviderService implements ProviderServiceApi {
           if (credentialBinding(current) !== credentialBinding(instance)) {
             await this.#forgetCredentialForOldEndpoint(current.id);
           }
-          this.#appendInstance(command.expectedVersion, eventName, instance);
+          this.#appendInstance(command.expectedVersion, eventName, instance, actor);
           const authoritative = this.#authoritativeInstance(instance);
           if (
             command.kind === "set-claude-artifact-delivery" &&
@@ -1661,7 +1700,7 @@ export class ProviderService implements ProviderServiceApi {
         }
         const withFacts = this.#runtime.observedState(instanceId) ?? observed;
         this.#persistCatalog(withFacts);
-        return withRuntimeIntegration(instance.driverKind, withFacts);
+        return this.#reportedRuntime(instance.driverKind, withFacts);
       } catch (error) {
         const failedObservation = this.#failedProbeObservation(instanceId, error);
         if (failedObservation !== undefined) this.#runtime.setObservedState(failedObservation);
@@ -1670,8 +1709,104 @@ export class ProviderService implements ProviderServiceApi {
     });
   }
 
-  async verifyModelTools(
+  /**
+   * Runs Verify tools for a model the first time it is used, with nobody
+   * asking. It is the same host-run check the button starts and writes the
+   * same record, so it is a capability probe and never a grant: a model that
+   * does not call the test tool, or a run that fails, leaves the model exactly
+   * as unverified as before. It never throws, so the use that triggered it
+   * goes on without tools. Uses that arrive together share one request.
+   *
+   * A model that answered without calling the tool is not asked again until
+   * its endpoint's configuration changes, the host restarts, or a person
+   * presses Verify tools: asking on every use would bill a request per turn
+   * for an answer that does not change. A run that did not finish is tried
+   * again at the next use. Callers call this once where a turn starts, so one
+   * turn sends at most one check.
+   *
+   * The request is not counted against spend ceilings, as the button's is
+   * not: a ceiling's window sums recorded turn usage, and this request
+   * belongs to no turn.
+   */
+  verifyModelToolsOnFirstUse(
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ): Promise<void> {
+    const key = `${String(instanceId)}\n${String(modelId)}`;
+    const running = this.#firstUseToolChecksInFlight.get(key);
+    if (running !== undefined) return running;
+    const check = this.#checkToolsOnFirstUse(instanceId, modelId)
+      .catch(() => undefined)
+      .finally(() => {
+        this.#firstUseToolChecksInFlight.delete(key);
+      });
+    this.#firstUseToolChecksInFlight.set(key, check);
+    return check;
+  }
+
+  async #checkToolsOnFirstUse(
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ): Promise<void> {
+    const instance = this.#persistence.readProviderInstance(instanceId);
+    if (
+      instance === undefined ||
+      !instance.enabled ||
+      !isNativeHarnessDriverKind(instance.driverKind)
+    ) {
+      return;
+    }
+    const verified = this.#runtime
+      .observedState(instanceId)
+      ?.verifiedToolModelIds?.some((id) => String(id) === String(modelId));
+    if (verified === true) return;
+    if (this.#toolChecks.get(String(instanceId))?.get(String(modelId))?.outcome === "unsupported") {
+      return;
+    }
+    await this.#verifyModelTools(instanceId, modelId);
+  }
+
+  verifyModelTools(
     _authenticatedWindowId: WindowId,
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ): Promise<"supported" | "unsupported"> {
+    return this.#verifyModelTools(instanceId, modelId);
+  }
+
+  /** What a reported runtime says of the Verify tools runs that left a model without tools. */
+  #noteToolCheck(
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    left: Pick<ProviderModelToolCheck, "outcome" | "message"> | undefined,
+  ): void {
+    const checks = this.#toolChecks.get(String(instanceId)) ?? new Map();
+    if (left === undefined) checks.delete(String(modelId));
+    else {
+      checks.set(
+        String(modelId),
+        decodeProviderModelToolCheck({
+          modelId,
+          outcome: left.outcome,
+          message: left.message.trim().slice(0, 1024),
+          checkedAt: this.#clock(),
+        }),
+      );
+    }
+    if (checks.size === 0) this.#toolChecks.delete(String(instanceId));
+    else this.#toolChecks.set(String(instanceId), checks);
+  }
+
+  #reportedRuntime(
+    driverKind: ProviderDriverKind,
+    observed: ProviderObservedState,
+  ): ProviderObservedState {
+    const reported = withRuntimeIntegration(driverKind, observed);
+    const checks = this.#toolChecks.get(String(observed.instanceId));
+    return checks === undefined ? reported : { ...reported, toolChecks: [...checks.values()] };
+  }
+
+  async #verifyModelTools(
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
   ): Promise<"supported" | "unsupported"> {
@@ -1735,8 +1870,20 @@ export class ProviderService implements ProviderServiceApi {
       const driver = this.#driverProvider(instance);
       if (driver.verifyToolCapability === undefined) throw this.#unavailable();
       try {
-        const result = await Effect.runPromise(
+        // Unwrapped, so the endpoint's own refusal (401, 429, a protocol it
+        // does not speak) is the reason kept and shown, not a generic one.
+        const result = await runProviderEffect(
           Effect.scoped(driver.verifyToolCapability({ instanceId, modelId })),
+        );
+        this.#noteToolCheck(
+          instanceId,
+          modelId,
+          result.appManagedTools === "supported"
+            ? undefined
+            : {
+                outcome: "unsupported",
+                message: `${String(modelId)} did not call the test tool, so it stays Chat only.`,
+              },
         );
         // Re-read the current observed state AFTER the driver call so we merge
         // only verifiedToolModelIds into the latest observation. The driver call
@@ -1773,7 +1920,12 @@ export class ProviderService implements ProviderServiceApi {
         // Map the raw ProviderFailure (401, 403, 429, unsupported protocol,
         // etc.) to a ProviderServiceError so providerRoutes serializes the
         // actionable diagnostic instead of returning a generic 503.
-        throw this.#mapFailure(error);
+        const mapped = this.#mapFailure(error);
+        this.#noteToolCheck(instanceId, modelId, {
+          outcome: "failed",
+          message: mapped.failure.message,
+        });
+        throw mapped;
       }
     });
   }
@@ -2027,6 +2179,9 @@ export class ProviderService implements ProviderServiceApi {
     reason: string,
     invalidatedAt: UtcTimestamp,
   ): void {
+    // A changed endpoint may answer differently, so what its models answered
+    // before says nothing: each is checked again at its next use.
+    this.#toolChecks.delete(String(instanceId));
     if (this.#persistence.readProviderCatalog === undefined) return;
     const current = this.#persistence.readProviderCatalog(instanceId);
     if (current === undefined) return;
@@ -2334,11 +2489,16 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
-  #appendInstance(expectedVersion: number, eventName: string, instance: ProviderInstance): void {
+  #appendInstance(
+    expectedVersion: number,
+    eventName: string,
+    instance: ProviderInstance,
+    actor?: EventActor,
+  ): void {
     this.#persistence.journal.append({
       aggregate: { aggregateType: "provider-instance", aggregateId: instance.id },
       expectedVersion: expectedVersion as never,
-      events: [this.#pendingEvent(eventName, { instance })],
+      events: [this.#pendingEvent(eventName, { instance }, actor)],
     });
   }
 
@@ -2395,13 +2555,18 @@ export class ProviderService implements ProviderServiceApi {
     return authoritative;
   }
 
-  #pendingEvent(eventName: string, payload: unknown) {
+  // A catalog the host observed or invalidated names nobody and keeps the
+  // local user it always recorded; a person's command names who asked.
+  #pendingEvent(eventName: string, payload: unknown, actor?: EventActor) {
     return {
       eventId: decodeEventId(this.#uuid()),
       eventName,
       eventVersion: 1,
       correlationId: decodeCorrelationId(this.#uuid()),
-      actor: { kind: "local-user" as const, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+      actor: actor ?? {
+        kind: "local-user" as const,
+        actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
+      },
       occurredAt: decodeTimestamp(this.#clock()),
       payload,
     };

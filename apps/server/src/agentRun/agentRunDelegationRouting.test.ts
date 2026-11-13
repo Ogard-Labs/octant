@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_NATIVE_HARNESS_ROUTING_SETTINGS,
   MAX_PROVIDER_TOOL_RESULT_BYTES,
@@ -62,6 +62,7 @@ function delegationPair(
     excludedChild?: boolean;
     foreignDependency?: boolean;
     tainted?: boolean;
+    askMarkedDelegation?: () => Promise<boolean>;
     paused?: boolean;
     posture?: "off" | "ask" | "automatic";
     unauthorized?: boolean;
@@ -297,6 +298,9 @@ function delegationPair(
     uuid: () => "00000000-0000-4000-8000-000000000098",
     listTargets,
     isTainted: () => options.tainted === true,
+    ...(options.askMarkedDelegation === undefined
+      ? {}
+      : { askMarkedDelegation: options.askMarkedDelegation }),
   };
   const managed = createAgentsManagedTools({
     ...common,
@@ -351,6 +355,13 @@ function delegationPair(
         await managed.execute({
           name: "octant_agents",
           inputJson: JSON.stringify({ operation: "status" }),
+        })
+      ).result,
+    capabilities: async () =>
+      (
+        await managed.execute({
+          name: "octant_agents",
+          inputJson: JSON.stringify({ operation: "capabilities" }),
         })
       ).result,
   };
@@ -511,6 +522,24 @@ describe("octant_agents delegation routing", () => {
       message: expect.stringContaining("a helper's reply counts"),
     });
     expect(pair.commands).toEqual([]);
+  });
+  it(`octant_agents asks the person before a thread that has read outside content starts a helper, and starts none they deny`, async () => {
+    const askMarkedDelegation = vi.fn(async () => false);
+    const denied = delegationPair({ tainted: true, askMarkedDelegation });
+    expect(await denied.capabilities()).toMatchObject({ delegationBlocked: false });
+    expect(await denied.start({ role: "research", task: "Look" })).toMatchObject({
+      status: "error",
+      error: "delegate-tainted",
+    });
+    expect(askMarkedDelegation).toHaveBeenCalledTimes(1);
+    expect(denied.commands).toEqual([]);
+
+    askMarkedDelegation.mockResolvedValue(true);
+    const allowed = delegationPair({ tainted: true, askMarkedDelegation });
+    expect(await allowed.start({ role: "research", task: "Look" })).toMatchObject({
+      status: "accepted",
+    });
+    expect(allowed.commands).toHaveLength(1);
   });
   it(`octant_agents refuses unsupported reasoning and a Project-excluded explicit target`, async () => {
     for (const options of [{}, { excludedChild: true }]) {

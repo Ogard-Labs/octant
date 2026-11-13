@@ -794,6 +794,7 @@ describe("desktop preload bridge", () => {
       "previewHandoff",
       "projectWindowCapability",
       "providerCredentialStatus",
+      "providerDeviceSignIn",
       "readBackgroundHost",
       "readBundledWhatsNew",
       "readNightlyInstall",
@@ -833,6 +834,7 @@ describe("desktop preload bridge", () => {
       "setManagedToolAutomaticUpdates",
       "setMenuBarOpenThread",
       "setProviderCredential",
+      "setQuitShortcutSecondPress",
       "setSidebarMaterialPreference",
       "setSidebarVibrancyMode",
       "settlePairedComputer",
@@ -1486,6 +1488,22 @@ describe("desktop preload bridge", () => {
     expect(listener).toHaveBeenCalledOnce();
     expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.openSettings, registered);
     expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.openSettings, registered);
+  });
+
+  it("tells the main process whether the quit shortcut needs a second press, as a plain boolean", () => {
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(async () => undefined),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const bridge = createHostBridge(ipc, projectWindowCapability);
+
+    bridge.setQuitShortcutSecondPress(false);
+    bridge.setQuitShortcutSecondPress("no" as never);
+
+    expect(ipc.invoke).toHaveBeenNthCalledWith(1, IPC_CHANNELS.quitShortcutSecondPress, false);
+    // Anything but an explicit false keeps the guard: the safe reading.
+    expect(ipc.invoke).toHaveBeenNthCalledWith(2, IPC_CHANNELS.quitShortcutSecondPress, true);
   });
 
   it("forwards the quit shortcut hint through its fixed channel", () => {

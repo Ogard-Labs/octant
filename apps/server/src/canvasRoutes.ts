@@ -1,3 +1,5 @@
+import { principalActsAsHostPerson } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { DesignSystemList } from "@octant/contracts/design-systems";
 import type { CanvasDesignSystem } from "@octant/contracts/canvas";
@@ -1633,7 +1635,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         if (route === "public-link-settings" && request.method === "POST") {
           // Turning public links on or pointing them at another service is
           // the person's choice at this Mac, never a paired device's.
-          if (principal.kind !== "local-window") {
+          if (!principalActsAsHostPerson(principal)) {
             return jsonResponse(
               decodeCanvasPublicLinkSettingsResult({
                 kind: "canvas-public-link-settings-refused",
@@ -1660,7 +1662,11 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               origin,
             );
           }
-          return jsonResponse(links.changeSettings(command), 200, origin);
+          return jsonResponse(
+            links.changeSettings(command, eventActorForPrincipal(principal)),
+            200,
+            origin,
+          );
         }
         if (route === "public-shares" && request.method === "GET") {
           if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
@@ -1694,7 +1700,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               origin,
             );
           // Revoking is recorded as the owner's act, like an authenticated share's.
-          if (principal.kind !== "local-window") {
+          if (!principalActsAsHostPerson(principal)) {
             return refusedRevoke(
               "unauthorized",
               "A public link can be revoked only from a window on this computer.",
@@ -1717,7 +1723,11 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             return refusedRevoke("unauthorized", "Public links are not available for this canvas.");
           }
           return jsonResponse(
-            await links.revoke(revokeRequest.canvasId, revokeRequest.publicShareId),
+            await links.revoke(
+              revokeRequest.canvasId,
+              revokeRequest.publicShareId,
+              eventActorForPrincipal(principal),
+            ),
             200,
             origin,
           );

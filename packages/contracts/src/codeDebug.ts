@@ -8,6 +8,7 @@ import {
 } from "./extensionIdentity";
 import { ExtensionComponentQualifiedId, ExtensionDebugRuntimeId } from "./extensions";
 import { ProjectId } from "./projects";
+import type { ProviderToolDefinition } from "./providers";
 
 /**
  * Debug configurations for a Code thread: Octant's own record of what a debug
@@ -413,6 +414,13 @@ const refused = Schema.Struct({
   reason: CodeDebugRefusalReason,
 }).annotations(strict);
 
+/** A running session as a listing names it: its id and its configuration's name. */
+export const CodeDebugRunningSession = Schema.Struct({
+  sessionId: CodeDebugSessionId,
+  name: CodeDebugConfigurationName,
+}).annotations(strict);
+export type CodeDebugRunningSession = typeof CodeDebugRunningSession.Type;
+
 export const CodeDebugConfigurationsResult = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("listed"),
@@ -421,6 +429,12 @@ export const CodeDebugConfigurationsResult = Schema.Union(
       Schema.maxItems(MAX_CODE_DEBUG_APPROVED_CONFIGURATIONS),
     ),
     launchFile: CodeDebugLaunchFileReading,
+    /**
+     * The thread's running session, whoever started it, so a window that did
+     * not press Start (the thread's agent did, or another window) shows it and
+     * can stop it.
+     */
+    session: Schema.optional(CodeDebugRunningSession),
   }).annotations(strict),
   refused,
 );
@@ -757,3 +771,159 @@ export const decodeCodeDebugStartRequest = Schema.decodeUnknownSync(CodeDebugSta
 export const decodeCodeDebugStartResult = Schema.decodeUnknownSync(CodeDebugStartResult);
 export const decodeCodeDebugSessionCall = Schema.decodeUnknownSync(CodeDebugSessionCall);
 export const decodeCodeDebugSessionResult = Schema.decodeUnknownSync(CodeDebugSessionResult);
+
+/**
+ * The agent's debug tool, `octant_debug`. Canonical:
+ * docs/design/language-services.md § Debugger authority (decision DB8).
+ *
+ * One tool with a closed set of operations on the thread's one session. A
+ * start names a configuration by the digest `configurations` listed, so the
+ * agent runs what the Project already holds and never a command line of its
+ * own. Every read is cut to the bounds below, tighter than the panel's,
+ * because a tool result has to fit the provider's result budget whole.
+ */
+export const CODE_DEBUG_TOOL_NAME = "octant_debug";
+
+export const MAX_CODE_DEBUG_AGENT_CONFIGURATIONS = 32;
+export const MAX_CODE_DEBUG_AGENT_BREAKPOINT_FILES = 16;
+export const MAX_CODE_DEBUG_AGENT_BREAKPOINT_LINES = 64;
+export const MAX_CODE_DEBUG_AGENT_THREADS = 50;
+export const MAX_CODE_DEBUG_AGENT_FRAMES = 20;
+export const MAX_CODE_DEBUG_AGENT_SCOPES = 20;
+/** One call lists one level of one reference; a nested value is another call. */
+export const MAX_CODE_DEBUG_AGENT_VARIABLES = 50;
+export const MAX_CODE_DEBUG_AGENT_VALUE_LENGTH = 1_024;
+export const MAX_CODE_DEBUG_AGENT_OUTPUT_ENTRIES = 64;
+export const MAX_CODE_DEBUG_AGENT_OUTPUT_TEXT_LENGTH = 2_048;
+/** How long `state` may wait for the program to stop or end. */
+export const MAX_CODE_DEBUG_AGENT_WAIT_SECONDS = 30;
+
+const AgentFileBreakpoints = {
+  path: CodeProjectFilePath,
+  /** Every line of the file that holds a breakpoint; an empty list clears the file. */
+  lines: Schema.Array(DebugLine).pipe(Schema.maxItems(MAX_CODE_DEBUG_AGENT_BREAKPOINT_LINES)),
+};
+
+/** Every operation but `evaluate`, which runs code the agent wrote and is decided apart. */
+export const CodeDebugSessionToolArguments = Schema.Union(
+  Schema.Struct({ operation: Schema.Literal("configurations") }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("start"),
+    configuration: CodeDebugConfigurationDigest,
+    breakpoints: Schema.optional(
+      Schema.Array(Schema.Struct(AgentFileBreakpoints).annotations(strict)).pipe(
+        Schema.maxItems(MAX_CODE_DEBUG_AGENT_BREAKPOINT_FILES),
+      ),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("breakpoints"),
+    ...AgentFileBreakpoints,
+  }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("continue", "step-over", "step-in", "step-out", "pause"),
+    /** The program's thread; absent, the one that is stopped. */
+    thread: Schema.optional(DebugReference),
+  }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("state"),
+    afterOutput: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+    waitSeconds: Schema.optional(
+      Schema.Int.pipe(Schema.between(0, MAX_CODE_DEBUG_AGENT_WAIT_SECONDS)),
+    ),
+  }).annotations(strict),
+  Schema.Struct({ operation: Schema.Literal("threads") }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("stack"),
+    thread: Schema.optional(DebugReference),
+  }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("scopes"),
+    frame: DebugReference,
+  }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("variables"),
+    reference: DebugReference,
+    start: Schema.optional(DebugReference),
+  }).annotations(strict),
+  Schema.Struct({ operation: Schema.Literal("stop") }).annotations(strict),
+);
+export type CodeDebugSessionToolArguments = typeof CodeDebugSessionToolArguments.Type;
+
+export const CodeDebugEvaluateToolArguments = Schema.Struct({
+  operation: Schema.Literal("evaluate"),
+  expression: boundedBytes(MAX_CODE_DEBUG_EXPRESSION_BYTES).pipe(Schema.minLength(1)),
+  frame: Schema.optional(DebugReference),
+}).annotations(strict);
+export type CodeDebugEvaluateToolArguments = typeof CodeDebugEvaluateToolArguments.Type;
+
+export type CodeDebugToolArguments = CodeDebugSessionToolArguments | CodeDebugEvaluateToolArguments;
+
+export const decodeCodeDebugSessionToolArguments = Schema.decodeUnknownSync(
+  CodeDebugSessionToolArguments,
+);
+export const decodeCodeDebugEvaluateToolArguments = Schema.decodeUnknownSync(
+  CodeDebugEvaluateToolArguments,
+);
+export const decodeCodeDebugToolArguments = Schema.decodeUnknownSync(
+  Schema.Union(CodeDebugSessionToolArguments, CodeDebugEvaluateToolArguments),
+);
+
+export const CODE_DEBUG_TOOL_DEFINITION: ProviderToolDefinition = {
+  name: CODE_DEBUG_TOOL_NAME,
+  description: `Debug a program of this checkout in this thread's one debug session, which the person also sees and can stop. configurations: what can be started, each with its digest, and whether a session runs. start: run one configuration by digest, with breakpoints set first. breakpoints: replace one file's breakpoint lines (an empty list clears them). continue, step-over, step-in, step-out, pause: control the program, then answer its state once it stops. state: running, stopped or ended, with new program output; waitSeconds waits for a stop. threads, stack, scopes, variables: read a stopped program, one level and at most ${MAX_CODE_DEBUG_AGENT_VARIABLES} variables per call. evaluate: run an expression in the stopped program. stop: end the session. Lines are one-based. Below Full access the person is asked before a session starts. Refused in Plan.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      operation: {
+        type: "string",
+        enum: [
+          "configurations",
+          "start",
+          "breakpoints",
+          "continue",
+          "step-over",
+          "step-in",
+          "step-out",
+          "pause",
+          "state",
+          "threads",
+          "stack",
+          "scopes",
+          "variables",
+          "evaluate",
+          "stop",
+        ],
+      },
+      configuration: { type: "string", description: "For start: a digest configurations listed." },
+      breakpoints: {
+        type: "array",
+        description: "For start: files and their breakpoint lines.",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            lines: { type: "array", items: { type: "integer", minimum: 1 } },
+          },
+          required: ["path", "lines"],
+        },
+      },
+      path: {
+        type: "string",
+        description: "For breakpoints: a file of the checkout, relative to its root.",
+      },
+      lines: { type: "array", items: { type: "integer", minimum: 1 } },
+      thread: {
+        type: "integer",
+        description: "A thread id from threads; default the stopped one.",
+      },
+      frame: { type: "integer", description: "A frame id from stack." },
+      reference: { type: "integer", description: "A variablesReference from scopes or variables." },
+      start: { type: "integer", description: "For variables: skip this many." },
+      expression: { type: "string" },
+      afterOutput: { type: "integer", description: "For state: the last output sequence seen." },
+      waitSeconds: { type: "integer", minimum: 0, maximum: MAX_CODE_DEBUG_AGENT_WAIT_SECONDS },
+    },
+    required: ["operation"],
+  },
+};

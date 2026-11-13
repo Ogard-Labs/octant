@@ -6,7 +6,10 @@ import { decodeUtcTimestamp, decodeWorkThreadId, type WorkThread } from "@octant
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { memo, useMemo } from "react";
 import { buildAutomationEditorCatalog } from "../automation/automationEditorCatalog";
-import { isChildPendingRequest } from "../pendingRequests/pendingRequests";
+import {
+  isChildPendingRequest,
+  type WaitingAskAnswerClients,
+} from "../pendingRequests/pendingRequests";
 import type { InboxDecisionSource } from "../inbox/InboxView";
 import type { buildInboxAttentionItems } from "../inbox/inboxModel";
 import { inboxThreadProjectId } from "../inbox/inboxModel";
@@ -64,6 +67,8 @@ export interface ReaderPagesContainerProps {
     | "setCodeBoardOpen"
     | "setCodePullRequestBackgroundRefresh"
     | "setCodeAgentMerge"
+    | "setCodeAgentPullRequestComments"
+    | "setCodeAgentDefaultBranchPush"
     | "setCodePullRequestsOpen"
     | "setGithubIssuesOpen"
     | "setImageLibraryOpen"
@@ -91,6 +96,8 @@ export interface ReaderPagesContainerProps {
   readonly availabilityByProject: ProjectController["availabilityByProject"];
   readonly boundCodeProjectId: ShellController["boundCodeProjectId"];
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
+  /** The clients the Inbox answers a host-held ask through, kept by identity. */
+  readonly needsYouAskClients: WaitingAskAnswerClients;
   readonly codeBoardOpen: boolean;
   /** Off when the Board plugin is switched off. */
   readonly threadBoardAvailable: boolean;
@@ -227,13 +234,20 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     [codeNavigationRows],
   );
   // The Inbox answers the decisions finished turns asked with the same
-  // reader and send clients as the Needs you card; a remote window has none.
+  // reader and send clients as the Needs you card.
   const inboxDecisions = useMemo<InboxDecisionSource | undefined>(
     () =>
       pendingRequestClient === undefined
         ? undefined
         : {
             answerClients,
+            askClients: props.needsYouAskClients,
+            onOpenAsk: (ask) => {
+              actions.setInboxOpen(false);
+              if (ask.mode === "work") actions.selectWorkThread(ask.threadId);
+              else if (ask.mode === "code") actions.selectCodeThread(ask.threadId);
+              else actions.selectChatThread(ask.threadId);
+            },
             coordinatorTitles: workerCoordinatorTitles,
             feedRevision: navigationRevision,
             modes: DECISION_MODES,
@@ -253,6 +267,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     [
       actions,
       answerClients,
+      props.needsYouAskClients,
       navigationRevision,
       now,
       workerCoordinatorTitles,
@@ -505,6 +520,30 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
             ),
           setEnabled: (projectId, enabled) =>
             actions.setCodeAgentMerge(projectId, enabled ? "enabled" : "disabled"),
+        }}
+        agentForgeChoices={{
+          comments: {
+            enabledFor: (projectId) =>
+              projects.some(
+                (project) =>
+                  String(project.id) === String(projectId) &&
+                  project.type === "code" &&
+                  project.agentPullRequestComments === "enabled",
+              ),
+            setEnabled: (projectId, enabled) =>
+              actions.setCodeAgentPullRequestComments(projectId, enabled ? "enabled" : "disabled"),
+          },
+          defaultBranchPush: {
+            enabledFor: (projectId) =>
+              projects.some(
+                (project) =>
+                  String(project.id) === String(projectId) &&
+                  project.type === "code" &&
+                  project.agentDefaultBranchPush === "enabled",
+              ),
+            setEnabled: (projectId, enabled) =>
+              actions.setCodeAgentDefaultBranchPush(projectId, enabled ? "enabled" : "disabled"),
+          },
         }}
         {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         onCloseWorkBoard={() => actions.setWorkBoardOpen(false)}

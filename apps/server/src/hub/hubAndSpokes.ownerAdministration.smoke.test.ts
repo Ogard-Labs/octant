@@ -170,40 +170,134 @@ async function startWorld(approvals?: import("./ownerApprovalHost").OwnerApprova
   return { network, hub, a, b, phone, authenticator, unlock, asPhone, openSession };
 }
 
-describe("fresh exact owner approval answers", () => {
-  it("requires a separate fresh unlock for private reads and every answer, refusing sessions, replay, changed body and another owner", async () => {
-    const list = vi.fn(() => ({ targets: [], unavailable: 1 }));
-    const answer = vi.fn(
-      async (
-        _request: import("@octant/contracts/owner-approvals").OwnerApprovalAnswer,
-        _authority: {
-          readonly principal: import("@octant/contracts").AuditActingPrincipal;
-          readonly current: () => boolean;
-        },
-      ) => ({ status: "delivered" as const }),
-    );
-    const { a, b, phone, asPhone, unlock, openSession } = await startWorld({ list, answer });
+const approvalHost = () => ({
+  list: vi.fn(() => ({ targets: [], unavailable: 1 })),
+  answer: vi.fn(
+    async (
+      _request: import("@octant/contracts/owner-approvals").OwnerApprovalAnswer,
+      _authority: {
+        readonly principal: import("@octant/contracts").AuditActingPrincipal;
+        readonly current: () => boolean;
+      },
+    ) => ({ status: "delivered" as const }),
+  ),
+});
+const approvalAnswerBody = (phone: HubTestHost, host: HubTestHost) => ({
+  ownerMemberId: phone.hostId,
+  hostMemberId: host.hostId,
+  mode: "code",
+  threadId: "00000000-0000-4000-8000-000000000921",
+  projectId: "00000000-0000-4000-8000-000000000922",
+  requestId: "00000000-0000-4000-8000-000000000923",
+  targetVersion: "a".repeat(64),
+  actionDigest: "b".repeat(64),
+  approved: true,
+});
+
+describe("owner approval answers under the five-minute session", () => {
+  it("lets one open session read the private approval facts and answer more than one approval", async () => {
+    const { list, answer } = approvalHost();
+    const { a, phone, asPhone, openSession } = await startWorld({ list, answer });
     const session = await openSession(a);
-    for (const route of [HUB_OWNER_ROUTES.approvalRead, HUB_OWNER_ROUTES.approvalAnswer]) {
-      expect((await asPhone(a, route, {}, { session })).status).toBe(403);
-      expect((await asPhone(a, route, {})).status).toBe(403);
-    }
+    const body = approvalAnswerBody(phone, a);
+
+    const read = await asPhone(a, HUB_OWNER_ROUTES.approvalRead, {}, { session });
+    const first = await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, body, { session });
+    const second = await asPhone(
+      a,
+      HUB_OWNER_ROUTES.approvalAnswer,
+      { ...body, approved: false },
+      { session },
+    );
+
+    expect([read.status, first.status, second.status]).toEqual([200, 200, 200]);
+    expect(list).toHaveBeenCalledOnce();
+    expect(answer).toHaveBeenCalledTimes(2);
+    expect(answer.mock.calls[0]?.[1].principal).toEqual({
+      kind: "owner-unlock",
+      memberId: phone.hostId,
+    });
+    // One unlock opened the session; no answer asked the host for another.
+    expect(a.requests.filter((line) => line === "POST /api/hub/owner/challenge")).toHaveLength(1);
+  });
+
+  it("refuses an answer with no unlock, after the session's five minutes, with another device's session, and on a host that does not list the device", async () => {
+    const { list, answer } = approvalHost();
+    const { network, hub, a, phone, asPhone, openSession } = await startWorld({ list, answer });
+    const body = approvalAnswerBody(phone, a);
+    const tablet = await startHubTestHost({
+      name: "Tablet",
+      address: "100.101.102.107",
+      network,
+      cleanups,
+    });
+    await joinHub(hub, tablet, { owner: false });
+    await vi.waitFor(() => {
+      const held = a.spoke.status();
+      if (held.membership !== "member") throw new Error("Not a member.");
+      expect(held.roster.roster.members.map((member) => member.name)).toContain("Tablet");
+    });
+    const session = await openSession(a);
+
+    const none = await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, body);
+    const unlisted = await ownerCall({
+      device: tablet,
+      network,
+      target: a,
+      route: HUB_OWNER_ROUTES.approvalAnswer,
+      body,
+      session,
+    });
+    a.clock.offset += 5 * MINUTE + 1_000;
+    const expired = await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, body, { session });
+    const expiredRead = await asPhone(a, HUB_OWNER_ROUTES.approvalRead, {}, { session });
+
+    expect(none.json).toEqual({ status: "refused", kind: "unlock-required" });
+    expect(unlisted.json).toEqual({ status: "refused", kind: "not-an-owner" });
+    expect(expired.json).toEqual({ status: "refused", kind: "session-expired" });
+    expect(expiredRead.status).toBe(403);
+    expect(list).not.toHaveBeenCalled();
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it("refuses a session on a spoke whose person unticked Owners", async () => {
+    const { list, answer } = approvalHost();
+    const { a, phone, asPhone, openSession } = await startWorld({ list, answer });
+    const session = await openSession(a);
+    a.spoke.setGrant({ items: ["roster", "introduce"], actProjects: [] }, window);
+
+    const answered = await asPhone(
+      a,
+      HUB_OWNER_ROUTES.approvalAnswer,
+      approvalAnswerBody(phone, a),
+      {
+        session,
+      },
+    );
+
+    expect(answered.json).toEqual({ status: "refused", kind: "owners-not-honored" });
+    expect(answer).not.toHaveBeenCalled();
+  });
+});
+
+describe("fresh exact owner approval answers when the host asks for an unlock per answer", () => {
+  it("requires a separate fresh unlock for every answer, refusing sessions, replay, changed body and another owner", async () => {
+    const { list, answer } = approvalHost();
+    const { a, b, phone, asPhone, unlock, openSession } = await startWorld({ list, answer });
+    expect(a.ownerApprovalAnswerUnlock.required()).toBe(false);
+    a.ownerApprovalAnswerUnlock.setRequired(true, window);
+    expect(changes(a, "owner-approval-answer-unlock-on").at(-1)?.actingPrincipal).toEqual(window);
+    const session = await openSession(a);
+    const refusedSession = await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, {}, { session });
+    expect(refusedSession.json).toEqual({ status: "refused", kind: "own-unlock-required" });
+    expect((await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, {})).status).toBe(403);
+    expect((await asPhone(a, HUB_OWNER_ROUTES.approvalRead, {})).status).toBe(403);
     expect(list).not.toHaveBeenCalled();
     expect(answer).not.toHaveBeenCalled();
     const read = await asPhone(a, HUB_OWNER_ROUTES.approvalRead, {}, { unlock });
     expect(read.status).toBe(200);
     expect(list).toHaveBeenCalledOnce();
-    const body = {
-      ownerMemberId: phone.hostId,
-      hostMemberId: a.hostId,
-      mode: "code",
-      threadId: "00000000-0000-4000-8000-000000000921",
-      projectId: "00000000-0000-4000-8000-000000000922",
-      requestId: "00000000-0000-4000-8000-000000000923",
-      targetVersion: "a".repeat(64),
-      actionDigest: "b".repeat(64),
-      approved: true,
-    };
+    const body = approvalAnswerBody(phone, a);
     expect(
       (
         await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, body, {

@@ -1,3 +1,5 @@
+import type { EventActor } from "@octant/contracts";
+import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
   decodeContextCommand,
   decodeContextInspectorRequest,
@@ -16,6 +18,7 @@ import {
 import { resolveLocalWindowPrincipal } from "./clientPrincipal";
 import { ContextHarnessError } from "./context/contextHarnessService";
 import type { ContextCompactionRefusal } from "./context/sessionCompaction";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { readPrincipalRouteContext } from "./principalRouteContext";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -47,6 +50,8 @@ export interface ContextRouteService {
     command: ContextCommand,
     principal: ContextRoutePrincipal,
     windowId: WindowId,
+    /** The paired device that sent the command, when one did. */
+    deviceActor?: EventActor,
   ) => ContextCommandResult | ContextCompactionRefusal;
   /** Whether the caller may compact the thread now, and its latest compaction. */
   readonly compactionState: (
@@ -287,7 +292,19 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
           origin,
         );
       }
-      const result = dependencies.service.execute(command, principal, windowId);
+      // The ledger journals its own actor for a local window. A device the
+      // host's own person paired is judged as one, so it is named here and the
+      // journal still tells the two apart; any other device is refused.
+      const sender = readPrincipalRouteContext(request)?.principal;
+      const result =
+        principal === "local-window" && sender?.kind === "remote-device"
+          ? dependencies.service.execute(
+              command,
+              principal,
+              windowId,
+              eventActorForPrincipal(sender),
+            )
+          : dependencies.service.execute(command, principal, windowId);
       if (result.kind === "compaction-refused") {
         return response(
           {
@@ -311,9 +328,8 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
 }
 
 function requestPrincipal(request: Request): ContextRoutePrincipal {
-  return readPrincipalRouteContext(request)?.principal.kind === "remote-device"
-    ? "remote-device"
-    : "local-window";
+  // A device the host's own person paired is judged as a local window is.
+  return boundPrincipalIsRestricted(request) ? "remote-device" : "local-window";
 }
 
 /** The thread a compaction read names, from exactly two query parameters. */

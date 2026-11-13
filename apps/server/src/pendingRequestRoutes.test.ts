@@ -6,7 +6,11 @@ import {
   type PendingRequest,
   type ProductSurfaceSettings,
 } from "@octant/contracts";
-import { TurnDecisionReview } from "@octant/contracts/pending-requests";
+import {
+  decodeWaitingAsk,
+  TurnDecisionReview,
+  type WaitingAsk,
+} from "@octant/contracts/pending-requests";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import { defaultShellSettings } from "@octant/domain";
 import { Schema } from "effect";
@@ -60,6 +64,27 @@ const chatQuestion = decodePendingRequest({
     attemptId: "00000000-0000-4000-8000-000000000909",
     requestId: "q-first",
   },
+});
+
+const toolAsk = decodeWaitingAsk({
+  kind: "tool-approval",
+  askId: "00000000-0000-4000-8000-000000000911",
+  mode: "work",
+  projectId,
+  threadId: "00000000-0000-4000-8000-000000000902",
+  threadTitle: "Quarterly report",
+  requestedAt: "2026-10-06T08:05:00.000Z",
+  text: "Run search_issues from Linear?",
+  inPlace: true,
+});
+const chatSignIn = decodeWaitingAsk({
+  kind: "browser-sign-in",
+  askId: "00000000-0000-4000-8000-000000000912",
+  mode: "chat",
+  threadId: "00000000-0000-4000-8000-000000000907",
+  threadTitle: "Trip plan",
+  requestedAt: "2026-10-06T08:04:00.000Z",
+  text: "Sign in at https://example.com",
 });
 
 const workChildApproval = decodePendingRequest({
@@ -162,7 +187,7 @@ describe("pending request route", () => {
     ]);
     expect(body.requests[0]).not.toHaveProperty("answer");
     expect(body.requests[0]).not.toHaveProperty("options");
-    expect(sources.children).toHaveBeenCalledWith(windowId);
+    expect(sources.children).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
   });
 
   it("lists the agent's own approval beside the requests it works under, without a way to answer it, and not for a mode that is switched off", async () => {
@@ -203,8 +228,9 @@ describe("pending request route", () => {
     ]);
   });
 
-  it("gives a paired device no decision", async () => {
-    const { route, sources } = fixture({ code: [codeDecision] });
+  it("lists for a device the host's own person paired what its own scope could answer, asks included", async () => {
+    const { route, sources } = fixture({ code: [codeDecision], asks: [toolAsk] });
+    const deviceScope = decodeWindowId("22222222-2222-4222-8222-222222222222");
     const remote = new Request("http://127.0.0.1/api/pending-requests");
     bindPrincipalRouteContext(remote, {
       principal: createRemoteDevicePrincipal({
@@ -215,13 +241,43 @@ describe("pending request route", () => {
         protocolVersion: 1,
         capabilityDigest: "b".repeat(64),
         sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+        admittedBy: "host-person",
       }),
-      scopeId: decodeWindowId("22222222-2222-4222-8222-222222222222"),
+      scopeId: deviceScope,
     });
     const response = await route(remote);
-    expect(response?.status).toBe(403);
-    expect(JSON.stringify(await response?.json())).not.toContain("Open the pull request");
-    expect(sources.code).not.toHaveBeenCalled();
+    expect(response?.status).toBe(200);
+    const body = await response?.json();
+    expect(body.requests.map((entry: PendingRequest) => entry.kind)).toContain("decision");
+    expect(body.asks).toEqual([toolAsk]);
+    // Each source is asked as the device, never as a window of the host.
+    expect(sources.work).toHaveBeenCalledWith(deviceScope);
+    expect(sources.code).toHaveBeenCalledWith(deviceScope);
+    expect(sources.asks).toHaveBeenCalledWith({
+      kind: "person-paired-device",
+      scopeId: deviceScope,
+    });
+    expect(sources.children).toHaveBeenCalledWith({
+      kind: "person-paired-device",
+      scopeId: deviceScope,
+    });
+  });
+
+  it("lists every other waiting ask oldest first, and none from a mode that is off", async () => {
+    const { route, sources } = fixture({ asks: [toolAsk, chatSignIn] });
+    const body = await (await route(request()))?.json();
+    expect(body.asks).toEqual([chatSignIn, toolAsk]);
+    expect(sources.asks).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    const workOff = fixture({
+      asks: [toolAsk, chatSignIn],
+      settings: { ...defaultShellSettings(), workEnabled: false },
+    });
+    expect((await (await workOff.route(request()))?.json()).asks).toEqual([chatSignIn]);
+  });
+
+  it("says nothing of asks when none wait, so the list reads as it always did", async () => {
+    const { route } = fixture();
+    expect(await (await route(request()))?.json()).not.toHaveProperty("asks");
   });
 
   it("lists the window's Work, Code, and Chat requests, oldest waiting first", async () => {
@@ -278,26 +334,35 @@ describe("pending request route", () => {
     expect(response?.status).toBe(400);
   });
 
-  it("refuses a paired device even when its request reaches the route", async () => {
+  it("lists for a device the host's own person paired under the device's own scope, and refuses a hub-introduced device and an unproved pairing", async () => {
     const { route, sources } = fixture();
-    const remote = new Request("http://127.0.0.1/api/pending-requests");
-    bindPrincipalRouteContext(remote, {
-      principal: createRemoteDevicePrincipal({
-        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
-        deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
-        credentialGeneration: 1,
-        origin: "https://octant.example",
-        protocolVersion: 1,
-        capabilityDigest: "b".repeat(64),
-        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
-      }),
-      scopeId: decodeWindowId("22222222-2222-4222-8222-222222222222"),
-    });
-    const response = await route(remote);
-    expect(response?.status).toBe(403);
+    const deviceScope = decodeWindowId("22222222-2222-4222-8222-222222222222");
+    const fromDevice = (admittedBy?: "host-person" | "hub-roster") => {
+      const remote = new Request("http://127.0.0.1/api/pending-requests");
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+          deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        }),
+        scopeId: deviceScope,
+      });
+      return remote;
+    };
+    for (const restricted of [undefined, "hub-roster"] as const) {
+      expect((await route(fromDevice(restricted)))?.status).toBe(403);
+    }
     expect(sources.work).not.toHaveBeenCalled();
     expect(sources.code).not.toHaveBeenCalled();
     expect(sources.chat).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice("host-person")))?.status).toBe(200);
+    expect(sources.code).toHaveBeenCalledWith(deviceScope);
   });
 
   it("refuses a caller that names a window or any other parameter", async () => {
@@ -344,6 +409,7 @@ function fixture(
     readonly code?: ReadonlyArray<PendingRequest> | (() => Promise<ReadonlyArray<PendingRequest>>);
     readonly chat?: ReadonlyArray<PendingRequest>;
     readonly children?: ReadonlyArray<PendingRequest>;
+    readonly asks?: ReadonlyArray<WaitingAsk>;
   } = {},
 ) {
   const store = new WindowAuthorityStore();
@@ -357,6 +423,7 @@ function fixture(
     code: vi.fn(typeof code === "function" ? code : async () => code ?? [codeApproval]),
     chat: vi.fn(() => options.chat ?? [chatQuestion]),
     children: vi.fn(async () => options.children ?? []),
+    asks: vi.fn(() => options.asks ?? []),
   } satisfies PendingRequestSources;
   const route = createPendingRequestRouteHandler({
     service: new PendingRequestService(sources),
@@ -426,7 +493,29 @@ it("authenticates question deferral, refuses approval keys and never calls an an
   expect((await send({ ...change, key: "a".repeat(64) }))?.status).toBe(409);
   expect(record).not.toHaveBeenCalled();
   expect((await send(change))?.status).toBe(200);
-  expect(record).toHaveBeenCalledExactlyOnceWith(change);
+  expect(record).toHaveBeenCalledExactlyOnceWith(change, {
+    kind: "local-user",
+    actorId: "00000000-0000-4000-8000-000000000002",
+  });
+
+  // A device the host's own person paired defers as a local window does, and
+  // the journal names the device.
+  const deviceId = "00000000-0000-4000-8000-0000000008d1";
+  const paired = new Request("http://127.0.0.1/api/pending-requests/defer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(change),
+  });
+  bindPrincipalRouteContext(paired, {
+    principal: { kind: "remote-device", deviceId, admittedBy: "host-person" } as never,
+    scopeId: deviceId as never,
+  });
+  expect((await route(paired))?.status).toBe(200);
+  expect(record).toHaveBeenLastCalledWith(change, {
+    kind: "remote-device",
+    actorId: deviceId,
+    deviceId,
+  });
 });
 
 it("keeps deferral bound to the current choices and access in every answerable mode", async () => {

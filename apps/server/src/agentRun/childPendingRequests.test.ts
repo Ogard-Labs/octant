@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeAgentRun,
   decodeAgentRunId,
@@ -142,7 +142,7 @@ function agentRun(
 
 const childRun = agentRun();
 
-function fixture(options: { readonly timeoutMs?: number } = {}) {
+function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "octant-child-pending-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -164,13 +164,11 @@ function fixture(options: { readonly timeoutMs?: number } = {}) {
     sessions,
     uuid,
     clock: () => now,
-    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
   const questions = new NativeHarnessQuestionStore({
     sessions,
     uuid,
     clock: () => now,
-    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
   const askApproval = (input: { readonly child: boolean; readonly summary?: string }) =>
     approvals.ask({
@@ -210,9 +208,30 @@ function fixture(options: { readonly timeoutMs?: number } = {}) {
           return overrides.authorize ?? true;
         },
       },
-      windowId,
+      { kind: "local-window", windowId },
     );
-  return { approvals, questions, sessions, askApproval, askQuestion, list };
+  const listForDevice = (
+    mayAnswer: (input: {
+      readonly runId: string;
+      readonly parentThreadId: string;
+      readonly deviceId: string;
+    }) => boolean,
+  ) =>
+    listChildPendingRequests(
+      {
+        approvals,
+        questions,
+        readSession: (threadId) => sessions.read(threadId),
+        getRun: () => childRun,
+        parentThreadTitle: () => "Quarterly report",
+        authorizeThread: () => {
+          throw new Error("a paired device has no window workspace to check");
+        },
+        mayAnswerFromDevice: mayAnswer,
+      },
+      { kind: "remote-device", deviceId: "phone-a" },
+    );
+  return { approvals, questions, sessions, askApproval, askQuestion, list, listForDevice };
 }
 
 describe("subagent pending requests", () => {
@@ -256,15 +275,18 @@ describe("subagent pending requests", () => {
     expect(await list()).toEqual([]);
   });
 
-  it("does not list a subagent request that expired", async () => {
-    const { sessions, askApproval, askQuestion, list } = fixture({ timeoutMs: 5 });
-    const approval = askApproval({ child: true });
-    const question = askQuestion();
-    expect(await list()).toHaveLength(2);
-    await approval;
-    await question;
-    expect(sessions.read(parentThread)?.approvals?.[0]?.status).toBe("expired");
-    expect(await list()).toEqual([]);
+  it("still lists a subagent request a day after it was asked", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sessions, askApproval, askQuestion, list } = fixture();
+      void askApproval({ child: true });
+      void askQuestion();
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(sessions.read(parentThread)?.approvals?.[0]?.status).toBe("pending");
+      expect(await list()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not list a subagent request once the person decided it", async () => {
@@ -293,7 +315,7 @@ describe("subagent pending requests", () => {
           parentThreadTitle: () => "Quarterly report",
           authorizeThread: () => true,
         },
-        windowId,
+        { kind: "local-window", windowId },
       ),
     ).toEqual([]);
   });
@@ -303,6 +325,24 @@ describe("subagent pending requests", () => {
     void askApproval({ child: true });
     void askQuestion();
     expect(await list({ authorize: false })).toEqual([]);
+  });
+
+  it("lists for a paired device the subagent requests that device may answer, and no others", async () => {
+    const { askApproval, askQuestion, listForDevice } = fixture();
+    void askApproval({ child: true });
+    void askQuestion();
+    const asked: Array<unknown> = [];
+    const mine = await listForDevice((input) => {
+      asked.push(input);
+      return input.deviceId === "phone-a";
+    });
+    expect(mine.map((request) => request.kind)).toEqual(["child-approval", "child-question"]);
+    expect(asked).toContainEqual({
+      runId: childRunId,
+      parentThreadId: parentThread,
+      deviceId: "phone-a",
+    });
+    expect(await listForDevice(() => false)).toEqual([]);
   });
 
   it("keeps Chat subagents outside the Work and Code pending-request projection", async () => {

@@ -154,7 +154,7 @@ export function providerCapability(provider: LeasableDesktopProvider): string {
     return "Runs on this host. No account and no cost.";
   }
   return provider.billed
-    ? `Runs on your own ${provider.displayName} account with an API key kept on this computer. It bills you, and Octant asks before every start.`
+    ? `Runs on your own ${provider.displayName} account with an API key kept on this computer. It bills you, and Octant asks before every start unless you turn that off in Settings.`
     : `Runs on your own ${provider.displayName} account with an API key kept on this computer.`;
 }
 
@@ -210,7 +210,7 @@ export function startRefusalMessage(
     case "lease-ended":
       return "That desktop has ended.";
     case "agent-cannot-extend":
-      return "Only a person can extend a desktop.";
+      return "Only a person can extend a desktop that bills you or runs off this computer.";
     case "beyond-maximum":
       return "The desktop can't run longer than its recipe allows.";
     case "extension-unconfirmed":

@@ -2,7 +2,13 @@ import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
 import { hostDefaultFolder } from "../defaultFolder";
 import { join } from "node:path";
-import { ReplayCursor, type WindowId } from "@octant/contracts";
+import {
+  decodeChatThreadId,
+  decodeCodeThreadId,
+  decodeWorkThreadId,
+  ReplayCursor,
+  type WindowId,
+} from "@octant/contracts";
 import { Effect, Schema } from "effect";
 import { hydrateWorkSettingsFromJournal } from "../work/workThreadProjection";
 import { createThemeRouteHandler } from "../theme/themeRoutes";
@@ -30,11 +36,13 @@ import { createProjectBindingRouteHandler } from "../projectBindingRoutes";
 import { ProjectService } from "../projectService";
 import { createProjectMemoryAccess } from "../projectMemory/projectMemoryAccess";
 import { readApprovalOutsideContent } from "../context/externalContentTaintProjection";
-import { isRoutineHostScope } from "../routineHostScope";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { createKeptImageGenerationChoices } from "../image/keptImageGenerationChoices";
 import { ProjectRootPort } from "../projectRootPort";
 import { WorkProjectStatusFiles } from "../work/workProjectStatusFiles";
 import { WorkProjectStatusReader } from "../work/workProjectStatusReader";
 import { createShellRouteHandler } from "../shellRoutes";
+import { createShellSettingsRouteHandler } from "../shellSettingsRoutes";
 import { createReplyDetailRouteHandler } from "../replyDetailRoutes";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
@@ -54,8 +62,11 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<
     AuthorityWiring,
     | "bindingReceiptStore"
+    | "imageGenerationOffers"
     | "isPairedDeviceScope"
     | "machineChangeFeed"
+    | "onThreadArchived"
+    | "onWaitingAsk"
     | "onWindowRevoked"
     | "windowAuthorityStore"
   > &
@@ -75,9 +86,12 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     desktopRecipeKeys,
     githubCapabilityService,
     githubIntegrationIsEffective,
+    imageGenerationOffers,
     isPairedDeviceScope,
     machineChangeFeed,
     offeredDesktopProviders,
+    onThreadArchived,
+    onWaitingAsk,
     onWindowRevoked,
     options,
     persistence,
@@ -181,11 +195,14 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     });
     onWindowRevoked((windowId) => shellService.revokeWindow(windowId));
     const allowedRendererHttpOrigin = options.allowedRendererHttpOrigin;
-    const shellRoutes = createShellRouteHandler(shellService, {
+    const windowShellRoutes = createShellRouteHandler(shellService, {
       windowAuthorityStore,
       now: Date.now,
       ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
     });
+    const shellSettingsRoutes = createShellSettingsRouteHandler(shellService);
+    const shellRoutes = async (request: Request) =>
+      (await shellSettingsRoutes(request)) ?? windowShellRoutes(request);
     const replyDetailRoutes = createReplyDetailRouteHandler({
       readShellSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       windowAuthorityStore,
@@ -386,14 +403,38 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         persistence.readProject(projectId) === undefined
           ? undefined
           : persistence.readProjectMemory(projectId),
+      agentsWriteWithoutAsking: (projectId) =>
+        persistence.readProject(projectId)?.agentMemoryWrites === "enabled",
       isHostScope: isRoutineHostScope,
       isPairedDeviceScope,
       outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
       uuid: randomUUID,
       now: Date.now,
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+      onAsked: onWaitingAsk,
     });
     onWindowRevoked((windowId) => projectMemoryAccess.proposals.revokeWindow(windowId));
+    onThreadArchived((threadId) => projectMemoryAccess.proposals.withdrawThread(threadId));
+    // "Don't ask again" on the image card. The host journals it on the
+    // thread's Project as itself: the answer route has already checked that
+    // the answering window may open the thread that asked.
+    const keptImageChoices = createKeptImageGenerationChoices({
+      threadChoices: imageGenerationOffers,
+      projectOf: ({ threadKind, scopeId }) => {
+        const threadId = String(scopeId);
+        if (threadKind === "chat-thread") {
+          return persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;
+        }
+        if (threadKind === "work-thread") {
+          return workThreadProjection.read(decodeWorkThreadId(threadId))?.projectId;
+        }
+        return persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
+      },
+      readProject: (projectId) => persistence.readProject(projectId),
+      changeProject: async (command) => {
+        await projectService.executeProject(ROUTINE_HOST_SCOPE_ID, command);
+      },
+    });
     return {
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
@@ -404,6 +445,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       githubRepositoryObservationPort,
       goalRoutes,
       goalService,
+      keptImageChoices,
       managedCloneProcessPort,
       managedCloneService,
       planRoutes,

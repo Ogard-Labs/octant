@@ -1,12 +1,12 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
-import { browserToolTransport } from "@octant/domain";
+import { appToolThreadLevel, browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
-import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
+import { projectForgeChoicesFor, standingMergeAllowanceFor } from "../code/standingMergeAllowance";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
@@ -92,6 +92,7 @@ import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import {
   clampTurnAccessPosture,
+  browserTransferLimits,
   defaultShellSettings,
   isNativeHarnessDriverKind,
   projectExtraFolderRoots,
@@ -113,6 +114,7 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
+import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 
 export function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -156,7 +158,7 @@ export function withCodeOperationRuntime(
           readOperationContents: (windowId, input, admissionCurrent) =>
             readEvidenceBatch(windowId, input, admissionCurrent),
         }),
-    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
       ? {}
@@ -201,7 +203,7 @@ function withCodeBoard(
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
-    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.readGitHistory === undefined
       ? {}
@@ -289,6 +291,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "imageGenerationOffers"
     | "liveTurns"
     | "machineChangeFeed"
+    | "onThreadArchived"
     | "onWindowRevoked"
     | "simulatorInputGrants"
     | "personMemoryAccess"
@@ -314,7 +317,10 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools" | "threadDesktopDestination"> &
-  Pick<WorkspaceWiring, "codeBoardPlanProgressSource" | "contextHarness" | "projectService"> &
+  Pick<
+    WorkspaceWiring,
+    "codeBoardPlanProgressSource" | "contextHarness" | "keptImageChoices" | "projectService"
+  > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
   Pick<
@@ -348,6 +354,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerDataDirectory"
+    | "verifyModelToolsOnFirstUse"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
     | "worktreePreparation"
@@ -452,6 +459,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     onHarnessQuestionSettled,
     onHarnessRecoveryLifted,
     onPullRequestSnapshotRefreshed,
+    onThreadArchived,
     onWindowRevoked,
     nativeHarnessTranscripts,
     options,
@@ -463,6 +471,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     projectPullRequestActionService,
     projectPullRequestCadence,
     projectPullRequestService,
+    keptImageChoices,
     projectService,
     providerDataDirectory,
     providerRuntimeRegistry,
@@ -501,15 +510,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeToolContributors.push(contributor);
     };
     // A routine's turn has nobody at a window to answer the image card, so it
-    // is not offered the tool.
+    // is offered the tool only where its Project keeps a choice.
     contributeCodeTools(({ windowId, thread, readThread, folders }) => {
-      if (isRoutineHostScope(windowId)) return undefined;
       const checkoutRoot = folders[0];
+      // The journaled level and the running one are both read and the
+      // stricter wins, as for the save below.
+      const level = () =>
+        clampTurnAccessPosture({
+          requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+          thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
+        });
       return createThreadImageAgentTools({
         windowId,
+        unattended: isRoutineHostScope(windowId),
         threadKind: "code-thread",
         scopeId: decodeImageGenerationScopeId(String(thread.id)),
         offers: imageGenerationOffers,
+        kept: keptImageChoices,
+        fullAccess: () => level() === "full-access",
         jobs: imageJobService,
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>
@@ -521,21 +539,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ?.models.find((candidate) => String(candidate.id) === String(thread.modelId))
             ?.inputModalities.includes("image") === true,
         // A file edit at the turn's level, under the checkout the turn
-        // works in. The journaled posture and the running one are both
-        // read and the stricter wins, so a session-only grant never lets
-        // this write through without asking.
+        // works in. The stricter of the journaled and running postures
+        // decides, so a session-only grant never lets this write through
+        // without asking.
         ...(checkoutRoot === undefined
           ? {}
           : {
               save: {
                 posture: () => {
-                  const level = clampTurnAccessPosture({
-                    requested: readThread()?.executionPolicy ?? thread.executionPolicy,
-                    thread:
-                      persistence.readCodeThread(thread.id)?.executionPolicy ??
-                      thread.executionPolicy,
-                  });
-                  return level === "plan" ? "refuse" : level === "approval-gated" ? "ask" : "allow";
+                  const current = level();
+                  return current === "plan"
+                    ? "refuse"
+                    : current === "approval-gated"
+                      ? "ask"
+                      : "allow";
                 },
                 write: (relativePath: string, bytes: Uint8Array) =>
                   saveGeneratedImageUnder({ root: checkoutRoot, relativePath, bytes }),
@@ -631,6 +648,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             act: (input) => browserAutomationService.act(input),
             releaseThread: (windowId, threadId) =>
               browserAutomationService.releaseThread(windowId, threadId),
+            holdForAsk: (windowId, threadId) =>
+              browserAutomationService.holdForAsk(windowId, threadId),
           },
           approvals: browserToolApprovalService,
         },
@@ -648,6 +667,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       yield* Effect.addFinalizer(() => Effect.sync(unbindTerminalSessions));
       onWindowRevoked((windowId) => grants.revokeWindow(windowId));
       onWindowRevoked((windowId) => codeOperationRuntime?.revokeTerminalStreams(windowId));
+      onThreadArchived((threadId) => codeOperationRuntime?.withdrawThreadAsks?.(threadId));
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
         for (const event of append.events) {
           if (
@@ -680,7 +700,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        stalledTurnLimitMs: () =>
+          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        providerToolCallPauseLimitMs: () =>
+          providerToolCallPauseLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ),
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
+        verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
           if (checkout?.kind !== "managed-worktree") return undefined;
@@ -756,6 +783,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               ...(destination === undefined ? {} : { leaseId: destination.leaseId }),
             }),
             ask,
+            appToolThreadLevel(thread),
           ),
         spendCeiling,
         terminalProcessPort,
@@ -866,6 +894,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             parentThreadId: String(input.thread.id),
             mode: "code",
             projectId: input.thread.projectId,
+            ...(input.ask === undefined ? {} : { ask: input.ask }),
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
@@ -967,7 +996,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
-          return browserToolTransport(observed, String(thread.modelId)) === true;
+          return (
+            browserToolTransport(observed, String(thread.modelId), appToolThreadLevel(thread)) ===
+            true
+          );
         },
         supportsAcpClientCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
@@ -1037,6 +1069,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         routineBrowserTools: ({ thread, readThread, routineRun }) =>
           routineBrowserTools({
             routineRun,
+            turnLevel: appToolThreadLevel(thread),
             threadId: decodeBrowserThreadId(String(thread.id)),
             currentAuthority: () =>
               readThread() === undefined
@@ -1061,6 +1094,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             browserAutomationService.releaseThread(windowId, threadId),
           holdForPerson: (windowId, threadId) =>
             browserAutomationService.holdForPerson(windowId, threadId),
+          holdForAsk: (windowId, threadId) =>
+            browserAutomationService.holdForAsk(windowId, threadId),
           snapshotRefs: (windowId, threadId) =>
             browserAutomationService.snapshotRefs(windowId, threadId),
         },
@@ -1075,6 +1110,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           },
         },
         isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
+        browserTransferApprovals: browserToolApprovalService,
+        browserUploadFileCountLimit: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .browserUploadFileCountLimit,
+        browserUploadFileLimitBytes: () =>
+          browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .maxFileBytes,
         // A paired device is not at the computer a saved download would land on.
         browserDownloadRefusal: (windowId) =>
           browserToolApprovalService.isPairedDevice(windowId)
@@ -1503,6 +1545,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 : persistence.automationProjection.getDefinition(run.automationId),
           });
         },
+        projectForgeChoices: (thread) =>
+          projectForgeChoicesFor(persistence.readProject(thread.projectId)),
         // The switch service wakes threads through this runtime, so it is
         // built after it; a watch asked for before then is unavailable.
         pullRequestWatch: {
@@ -1989,9 +2033,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
       readPlanner: (windowId, projectId) => codePlannerService.readView(windowId, projectId),
-      executePlanner: (windowId, command) => codePlannerService.execute(windowId, command),
-      executePlannerProposal: (windowId, command, signal) =>
-        codePlannerService.resolveProposal(windowId, command, signal),
+      executePlanner: (windowId, command, actor) =>
+        codePlannerService.execute(windowId, command, actor),
+      executePlannerProposal: (windowId, command, signal, actor) =>
+        codePlannerService.resolveProposal(windowId, command, signal, actor),
       queryProjectPullRequests: (windowId, query) =>
         projectPullRequestService.query(windowId, query),
       refreshProjectPullRequests: async (windowId, command, signal) => {
@@ -2019,25 +2064,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // A paired phone or web client merges under the same head and
       // required-check rules as the desktop window; it must also carry the
       // person's confirmation, which the service enforces.
-      mergeProjectPullRequest: (windowId, command, signal, caller) =>
+      mergeProjectPullRequest: (windowId, command, signal, caller, actor) =>
         projectPullRequestService.merge(
           windowId,
           command,
           signal ?? new AbortController().signal,
           caller,
+          actor,
         ),
-      mergeProjectPullRequestStack: (windowId, command, signal, caller) =>
-        projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
-      actOnProjectPullRequest: (windowId, command, signal, caller) =>
-        projectPullRequestActionService.act(windowId, command, signal, caller),
+      mergeProjectPullRequestStack: (windowId, command, signal, caller, actor) =>
+        projectPullRequestActionService.mergeStack(windowId, command, signal, caller, actor),
+      actOnProjectPullRequest: (windowId, command, signal, caller, actor) =>
+        projectPullRequestActionService.act(windowId, command, signal, caller, actor),
       readProjectPullRequestActionContext: (windowId, query, signal, caller) =>
         projectPullRequestActionService.readContext(windowId, query, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>
         pullRequestSwitchService.query(windowId, target),
-      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller) =>
-        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal),
-      setProjectPullRequestAutoFix: (windowId, command, initiator) =>
-        pullRequestSwitchService.setAutoFix(windowId, command, initiator),
+      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller, actor) =>
+        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal, actor),
+      setProjectPullRequestAutoFix: (windowId, command, initiator, actor) =>
+        pullRequestSwitchService.setAutoFix(windowId, command, initiator, actor),
       noteComposerActivity: (_windowId, activity) =>
         pullRequestSwitchService.noteComposerActivity(activity.threadId),
     };

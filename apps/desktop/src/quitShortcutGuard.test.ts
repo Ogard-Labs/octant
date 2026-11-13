@@ -3,11 +3,20 @@ import { QUIT_SHORTCUT_WINDOW_MS, createQuitShortcutGuard } from "./quitShortcut
 
 function setup(showsNotice = true) {
   let clock = 10_000;
+  let secondPress = true;
   const showNotice = vi.fn(() => showsNotice);
   const quit = vi.fn();
-  const guard = createQuitShortcutGuard({ now: () => clock, showNotice, quit });
+  const guard = createQuitShortcutGuard({
+    now: () => clock,
+    needsSecondPress: () => secondPress,
+    showNotice,
+    quit,
+  });
   return {
     guard,
+    setSecondPress: (needed: boolean) => {
+      secondPress = needed;
+    },
     showNotice,
     quit,
     advance: (ms: number) => {
@@ -55,6 +64,19 @@ describe("quit shortcut guard", () => {
     guard.request({ viaShortcut: false });
     expect(quit).toHaveBeenCalledOnce();
     expect(showNotice).not.toHaveBeenCalled();
+  });
+
+  it("quits on the first shortcut press while the person has the second press turned off, and guards again once it is back on", () => {
+    const { guard, showNotice, quit, setSecondPress } = setup();
+    setSecondPress(false);
+    guard.request({ viaShortcut: true });
+    expect(quit).toHaveBeenCalledOnce();
+    expect(showNotice).not.toHaveBeenCalled();
+
+    setSecondPress(true);
+    guard.request({ viaShortcut: true });
+    expect(quit).toHaveBeenCalledOnce();
+    expect(showNotice).toHaveBeenCalledOnce();
   });
 
   it("quits on the first press when no window can show the notice", () => {

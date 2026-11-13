@@ -19,6 +19,7 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ServerProject } from "@octant/contracts/server-projects";
 import {
+  ANY_BROWSER_ORIGIN,
   type ProjectId,
   type ProviderInstanceId,
   type SettingsDeepLink,
@@ -38,10 +39,7 @@ import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
 import { resolveEffectiveThemeMode } from "@octant/domain/theme-policy";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController, LocateBinaryOutcome } from "../providers/useDiscoveryController";
-import {
-  ProviderSettingsView,
-  type ProviderSettingsViewProps,
-} from "../providers/ProviderSettingsView";
+import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
 import { ProviderSettingsList } from "../providers/ProviderSettingsList";
@@ -54,6 +52,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
 import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   isSettingsSectionAvailable,
@@ -159,6 +158,7 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
+import { DesktopLeaseSettings } from "../settings/DesktopLeaseSettings";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
@@ -195,7 +195,14 @@ import {
   type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { LOCAL_HOST_ID } from "@octant/contracts";
+import {
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  LOCAL_HOST_ID,
+  MAX_BROWSER_CAPTURES_PER_THREAD,
+  MAX_THREAD_TOOL_STEPS_SETTING,
+  MAX_TURN_RUNTIME_EVENTS,
+} from "@octant/contracts";
 import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
 import type { PickerGroup } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
@@ -217,7 +224,7 @@ import {
   agentAccessAdministrationOf,
   type OctantHostBridge,
 } from "./hostBridge";
-import { openExternalUrl } from "./openExternalUrl";
+import { providerSettingsViewProps } from "../providers/providerSettingsViewProps";
 import { ApplicationIdentity } from "./ApplicationIdentity";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import "../styles/settings.css";
@@ -1192,10 +1199,16 @@ function ActiveSectionContent({
             {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
           />
           {props.desktopPaneClient === undefined ? null : (
-            <DesktopSpendCapSettings
-              client={props.desktopPaneClient}
-              focusedSetting={focusedSetting}
-            />
+            <>
+              <DesktopSpendCapSettings
+                client={props.desktopPaneClient}
+                focusedSetting={focusedSetting}
+              />
+              <DesktopLeaseSettings
+                client={props.desktopPaneClient}
+                focusedSetting={focusedSetting}
+              />
+            </>
           )}
         </>
       );
@@ -1233,6 +1246,40 @@ function ActiveSectionContent({
               providerSnapshot={props.providerController.snapshot}
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
+          </div>
+          <div hidden={harnessEndpointOpen} id="settings-stalled-turns">
+            <SettingsSection title="Stalled turns">
+              <div className="setgroup">
+                <SettingRow
+                  description="Cuts a turn off when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
+                  focused={focusedSetting === settingId("stalled-turn-limit")}
+                  label="Stalled-turn limit"
+                  scope="host"
+                  settingId="stalled-turn-limit"
+                >
+                  <StalledTurnLimitSelect
+                    minutes={props.settings.stalledTurnLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ stalledTurnLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  description="Pauses the stalled-turn limit for at most this long while one tool call the provider reports as running has not finished, from the next turn."
+                  focused={focusedSetting === settingId("provider-tool-call-pause-limit")}
+                  label="Tool-call pause limit"
+                  scope="host"
+                  settingId="provider-tool-call-pause-limit"
+                >
+                  <ProviderToolCallPauseLimitSelect
+                    minutes={props.settings.providerToolCallPauseLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ providerToolCallPauseLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
           </div>
           <ProviderCatalogSection
             discoveryController={props.discoveryController}
@@ -1537,12 +1584,12 @@ function ActiveSectionContent({
             }
           />
           <SettingsSection
-            description="Off, every download in the agent's Browser is blocked."
-            title="Browser downloads"
+            description="Files an agent sends to a page or saves from one. A thread at Full access downloads and uploads without asking; a download you start yourself goes to your Downloads folder."
+            title="Browser uploads and downloads"
           >
             <div className="setgroup">
               <SettingRow
-                description="Octant asks before saving a file a page starts downloading while an agent drives it, every time. Downloads you start yourself stay blocked."
+                description="Below Full access, lets a page an agent drives start a download, and Octant asks before saving it. Off, those downloads are blocked."
                 focused={focusedSetting === settingId("browser-agent-downloads")}
                 label="Let agents download files"
                 scope="host"
@@ -1554,6 +1601,163 @@ function ActiveSectionContent({
                   onCheckedChange={(checked) =>
                     props.onSettingsChange({ agentBrowserDownloads: checked })
                   }
+                />
+              </SettingRow>
+              <SettingRow
+                description="The largest file an agent may upload through a page or save from one."
+                focused={focusedSetting === settingId("browser-transfer-file-limit")}
+                label="Largest file"
+                scope="host"
+                settingId="browser-transfer-file-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_TRANSFER_FILE_LIMIT_CHOICES}
+                  id="browser-transfer-file-limit"
+                  label="Largest file"
+                  onChange={(megabytes) =>
+                    props.onSettingsChange({ browserTransferFileLimitMegabytes: megabytes })
+                  }
+                  optionLabel={(megabytes) =>
+                    megabytes >= 1024 ? `${String(megabytes / 1024)} GB` : `${String(megabytes)} MB`
+                  }
+                  value={props.settings.browserTransferFileLimitMegabytes}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How many downloads a page keeps waiting for an agent to save. A newer one replaces the oldest."
+                focused={focusedSetting === settingId("browser-held-download-limit")}
+                label="Downloads kept waiting"
+                scope="host"
+                settingId="browser-held-download-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES}
+                  id="browser-held-download-limit"
+                  label="Downloads kept waiting"
+                  onChange={(count) => props.onSettingsChange({ browserHeldDownloadLimit: count })}
+                  optionLabel={(count) => `${String(count)} per page`}
+                  value={props.settings.browserHeldDownloadLimit}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How many files an agent may send to a page in one upload."
+                focused={focusedSetting === settingId("browser-upload-file-count-limit")}
+                label="Files per upload"
+                scope="host"
+                settingId="browser-upload-file-count-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES}
+                  id="browser-upload-file-count-limit"
+                  label="Files per upload"
+                  onChange={(count) =>
+                    props.onSettingsChange({ browserUploadFileCountLimit: count })
+                  }
+                  optionLabel={(count) => (count === 1 ? "1 file" : `${String(count)} files`)}
+                  value={props.settings.browserUploadFileCountLimit}
+                />
+              </SettingRow>
+              {props.settings.rememberedBrowserTransfers.map((transfer) => (
+                <SettingRow
+                  description={
+                    transfer.direction === "upload"
+                      ? `Agents upload files from ${transfer.workspaceRoot} to this site ${rememberedTransferProfile(transfer)} without asking.`
+                      : `Agents save downloads from this site ${rememberedTransferProfile(transfer)} into ${transfer.workspaceRoot} without asking.`
+                  }
+                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}\0${transfer.profile === undefined && transfer.privatePage !== true ? "any" : browserProfileKey(transfer.profile)}`}
+                  label={`${transfer.direction === "upload" ? "Uploads to" : "Downloads from"} ${transfer.origin}`}
+                  scope="host"
+                  settingId="browser-agent-downloads"
+                >
+                  <OctantButton
+                    onClick={() =>
+                      void props.onSettingsChange({
+                        rememberedBrowserTransfers:
+                          props.settings.rememberedBrowserTransfers.filter(
+                            (entry) => entry !== transfer,
+                          ),
+                      })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Forget
+                  </OctantButton>
+                </SettingRow>
+              ))}
+            </div>
+          </SettingsSection>
+          <SettingsSection title="Browser captures">
+            <div className="setgroup">
+              <SettingRow
+                description={`How many screenshots and recordings each thread keeps, newest first. Default ${DEFAULT_BROWSER_CAPTURES_PER_THREAD}. A smaller number drops a thread's older captures, and a larger one never brings them back.`}
+                focused={focusedSetting === settingId("browser-captures-per-thread")}
+                label="Captures kept per thread"
+                scope="host"
+                settingId="browser-captures-per-thread"
+              >
+                <OctantNumberStepper
+                  label="Captures kept per thread"
+                  max={MAX_BROWSER_CAPTURES_PER_THREAD}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ browserCapturesPerThread: value })}
+                  value={props.settings.browserCapturesPerThread}
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
+          <SettingsSection title="Tool-call records">
+            <div className="setgroup">
+              <SettingRow
+                description="Chat and Work keep a bounded copy of what each tool call was given and what it returned, so you can open a tool row and see it. Kept on this computer outside the journal, with keys redacted, and removed when its thread is purged. Off keeps no new records; the ones already kept stay until their threads go."
+                focused={focusedSetting === settingId("tool-call-records")}
+                label="Keep tool inputs and outputs"
+                scope="host"
+                settingId="tool-call-records"
+              >
+                <OctantSwitch
+                  checked={props.settings.keepToolCallRecords}
+                  label="Keep tool inputs and outputs"
+                  onCheckedChange={(checked) =>
+                    props.onSettingsChange({ keepToolCallRecords: checked })
+                  }
+                />
+              </SettingRow>
+            </div>
+          </SettingsSection>
+          <SettingsSection title="Tool steps">
+            <div className="setgroup">
+              <SettingRow
+                description={`How many tool calls a Chat or Work turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row.`}
+                focused={focusedSetting === settingId("tool-steps-per-turn")}
+                label="Tool steps kept per turn"
+                scope="host"
+                settingId="tool-steps-per-turn"
+              >
+                <OctantNumberStepper
+                  label="Tool steps kept per turn"
+                  max={MAX_THREAD_TOOL_STEPS_SETTING}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ toolStepsPerTurn: value })}
+                  value={props.settings.toolStepsPerTurn}
+                />
+              </SettingRow>
+              <SettingRow
+                description={`The same limit for a Work turn that runs at Full access. 0 means no limit: every call is kept, and the spend ceiling is what bounds the turn. A turn still stops after ${MAX_TURN_RUNTIME_EVENTS.toLocaleString("en-US")} runtime events, whatever this is set to.`}
+                focused={focusedSetting === settingId("tool-steps-per-turn-full-access")}
+                label="Tool steps kept per turn at Full access"
+                scope="host"
+                settingId="tool-steps-per-turn-full-access"
+              >
+                <OctantNumberStepper
+                  label="Tool steps kept per turn at Full access"
+                  max={MAX_THREAD_TOOL_STEPS_SETTING}
+                  min={0}
+                  onChange={(value) =>
+                    props.onSettingsChange({ fullAccessToolStepsPerTurn: value })
+                  }
+                  value={props.settings.fullAccessToolStepsPerTurn}
                 />
               </SettingRow>
             </div>
@@ -1707,7 +1911,7 @@ function RememberedBrowserOriginsPanel(props: {
               ? "1 site always allowed"
               : `${props.origins.length + props.profileSites.length} sites always allowed`,
       }}
-      description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
+      description="Granted with “Always allow” or “Allow all sites in this profile” on a thread’s Browser approval; forgetting one makes the next open ask again."
       title="Remembered websites"
     >
       {props.origins.length === 0 && props.profileSites.length === 0 ? (
@@ -1722,11 +1926,17 @@ function RememberedBrowserOriginsPanel(props: {
                 : site.profile.kind === "account"
                   ? `Account ${String(site.profile.profileId).slice(0, 8)} profile`
                   : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
+            // "Allow all sites in this profile" is stored as the any-site entry.
+            const everySite = site.origin === ANY_BROWSER_ORIGIN;
             return (
               <SettingRow
-                description={`Browser acts as you on this site in the ${profileName}, without asking.`}
+                description={
+                  everySite
+                    ? `Browser acts as you on every site in the ${profileName}, without asking.`
+                    : `Browser acts as you on this site in the ${profileName}, without asking.`
+                }
                 key={key}
-                label={`${site.origin} · ${profileName}`}
+                label={`${everySite ? "All sites" : site.origin} · ${profileName}`}
                 scope="host"
                 settingId="browser-site-approvals"
               >
@@ -1993,80 +2203,6 @@ function ProviderCatalogSection(props: {
  * instances shares: Providers & Models lists agent runtimes and Octant
  * Harness lists model endpoints, over the same controller.
  */
-function providerSettingsViewProps(
-  controller: ProviderController,
-  hostBridge: OctantHostBridge | undefined,
-): Omit<ProviderSettingsViewProps, "discovery" | "discoverySnapshot"> {
-  return {
-    busy: controller.busy,
-    credentialManagementAvailable: controller.credentialManagementAvailable,
-    defaults: controller.defaults,
-    instances: controller.instances,
-    ...(controller.message === undefined ? {} : { message: controller.message }),
-    observedByInstance: controller.observedByInstance,
-    presentationObservedByInstance: controller.presentationObservedByInstance,
-    onOpenExternalUrl: (url) => openExternalUrl(hostBridge, url),
-    ...(hostBridge === undefined ? {} : { hostBridge: hostBridge }),
-    onChangeBinary: controller.changeBinary,
-    onChangeClaudeConfiguration: controller.changeClaudeConfiguration,
-    onChangeCodexConfiguration: controller.changeCodexConfiguration,
-    onChangeAcpAgentConfiguration: controller.changeAcpAgentConfiguration,
-    onChangePiConfiguration: controller.changePiConfiguration,
-    onChangeOhMyPiConfiguration: controller.changeOhMyPiConfiguration,
-    onChangeOllamaConfiguration: controller.changeOllamaConfiguration,
-    onChangeOutsideHarnessEndpointConfiguration:
-      controller.changeOutsideHarnessEndpointConfiguration,
-    onChangeOpenAiCompatibleConfiguration: controller.changeOpenAiCompatibleConfiguration,
-    onChangeOpenAiImageConfiguration: controller.changeOpenAiImageConfiguration,
-    onChangeGeminiImageConfiguration: controller.changeGeminiImageConfiguration,
-    onChangeBflImageConfiguration: controller.changeBflImageConfiguration,
-    onChangeIdeogramImageConfiguration: controller.changeIdeogramImageConfiguration,
-    onChangeAnthropicCompatibleConfiguration: controller.changeAnthropicCompatibleConfiguration,
-    onChangeAzureFoundryConfiguration: controller.changeAzureFoundryConfiguration,
-    onChangeAmazonBedrockConfiguration: controller.changeAmazonBedrockConfiguration,
-    onClearProviderCredential: controller.clearProviderCredential,
-    ...(controller.providerOAuth === undefined
-      ? {}
-      : { onProviderOAuth: controller.providerOAuth }),
-    onBeginProviderAuthentication: controller.beginProviderAuthentication,
-    onCompleteProviderAuthentication: controller.completeProviderAuthentication,
-    onUpdateProviderCli: controller.updateProviderCli,
-    onCreate: controller.create,
-    onCreateClaude: controller.createClaude,
-    onCreateAcpAgent: controller.createAcpAgent,
-    onCreateOllama: controller.createOllama,
-    onCreateOpenAiCompatible: controller.createOpenAiCompatible,
-    onCreateAnthropicCompatible: controller.createAnthropicCompatible,
-    onCreateAzureFoundry: controller.createAzureFoundry,
-    onCreateAmazonBedrock: controller.createAmazonBedrock,
-    onCreateOpenAiImage: controller.createOpenAiImage,
-    onCreateGeminiImage: controller.createGeminiImage,
-    onCreateBflImage: controller.createBflImage,
-    onCreateIdeogramImage: controller.createIdeogramImage,
-    onPermissionPersistenceChange: controller.updatePermissionPersistence,
-    onProbe: controller.probe,
-    onProviderOrderChange: controller.updateProviderOrder,
-    onAgentEligibleModelsChange: controller.updateAgentEligibleModels,
-    onHiddenModelsChange: controller.updateHiddenModels,
-    onVerifyModelTools: controller.verifyModelTools,
-    onProviderCredentialStatus: controller.providerCredentialStatus,
-    onRemove: controller.remove,
-    onRename: controller.rename,
-    onRetry: controller.retry,
-    onSetEnabled: controller.setEnabled,
-    onSetClaudeArtifactDelivery: controller.setClaudeArtifactDelivery,
-    onSetProviderNativeSetup: controller.setProviderNativeSetup,
-    onDataTagsChange: controller.setDataTags,
-    onModelDataTagsChange: controller.setModelDataTags,
-    onModelContextWindowChange: controller.setModelContextWindow,
-    probingIds: controller.probingIds,
-    updatingIds: controller.updatingIds,
-    latestVersions: controller.latestVersions,
-    onCheckLatestVersions: controller.checkLatestVersions,
-    status: controller.status,
-  };
-}
-
 interface SectionProps {
   readonly focusedSetting: SettingsSettingId | undefined;
   readonly props: SettingsViewProps;
@@ -2169,6 +2305,108 @@ function AutoCompactIdleSelect(props: {
       value={props.minutes === null ? "off" : String(props.minutes)}
     />
   );
+}
+
+const STALLED_TURN_LIMIT_CHOICES: ReadonlyArray<number> = [5, 15, 30, 60, 120, 240, 480];
+
+/** How long a turn may go without a provider event before it is cut off, plus Off. */
+function StalledTurnLimitSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || STALLED_TURN_LIMIT_CHOICES.includes(props.minutes)
+      ? STALLED_TURN_LIMIT_CHOICES
+      : [...STALLED_TURN_LIMIT_CHOICES, props.minutes].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Stalled-turn limit"
+      id="stalled-turn-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
+        { id: "off", label: "Off" },
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
+const BROWSER_TRANSFER_FILE_LIMIT_CHOICES: ReadonlyArray<number> = [
+  10, 25, 50, 100, 250, 500, 1024,
+];
+const BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES: ReadonlyArray<number> = [5, 10, 20, 50];
+const BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES: ReadonlyArray<number> = [1, 5, 10, 20, 50];
+
+/** One of the Browser transfer limits; a stored value outside the choices stays selectable. */
+/** Where a remembered upload or download answer applies: the profile the page was in. */
+function rememberedTransferProfile(
+  transfer: SettingsViewProps["settings"]["rememberedBrowserTransfers"][number],
+): string {
+  const profile = transfer.profile;
+  // Remembered before the page was recorded: it covered every page then and still does.
+  if (profile === undefined && transfer.privatePage !== true) return "on any page";
+  if (profile === undefined) return "on Private pages";
+  if (profile.kind === "personal") return "in the Personal profile";
+  return profile.kind === "project" ? "in a Project profile" : "in an added account profile";
+}
+
+function BrowserTransferLimitSelect(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly choices: ReadonlyArray<number>;
+  readonly value: number;
+  readonly optionLabel: (value: number) => string;
+  readonly onChange: (value: number) => void;
+}) {
+  const choices = props.choices.includes(props.value)
+    ? props.choices
+    : [...props.choices, props.value].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label={props.label}
+      id={props.id}
+      onValueChange={(value) => props.onChange(Number(value))}
+      options={choices.map((choice) => ({ id: String(choice), label: props.optionLabel(choice) }))}
+      value={String(props.value)}
+    />
+  );
+}
+
+const PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES: ReadonlyArray<number> = [30, 60, 120, 240, 480, 1440];
+
+/** How long one provider tool call may pause the stalled-turn limit, plus Off. */
+function ProviderToolCallPauseLimitSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES.includes(props.minutes)
+      ? PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES
+      : [...PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES, props.minutes].sort(
+          (left, right) => left - right,
+        );
+  return (
+    <OctantSelectField
+      aria-label="Tool-call pause limit"
+      id="provider-tool-call-pause-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
+        { id: "off", label: "Off" },
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
+/** A turn limit's choice, read as the length it allows; both turn limits share it. */
+function durationChoiceLabel(minutes: number): string {
+  return minutes < 60
+    ? `${String(minutes)} minutes`
+    : minutes === 60
+      ? "1 hour"
+      : `${String(minutes / 60)} hours`;
 }
 
 const AUTO_COMPACT_LIMIT_CHOICES: ReadonlyArray<number> = [75, 80, 85, 90, 95];
@@ -2284,6 +2522,28 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           />
         </div>
       </SettingsSection>
+      {/* Only the Mac app has the ⌘Q menu accelerator the second press guards. */}
+      {props.hostBridge?.setQuitShortcutSecondPress === undefined || !isApplePlatform() ? null : (
+        <SettingsSection title="Quitting">
+          <div className="setgroup">
+            <SettingRow
+              description="The first ⌘Q shows a notice and the second, within a moment, quits. Off, one press quits. Choosing Quit from a menu always quits at once, and Octant still asks before stopping running work."
+              focused={focusedSetting === settingId("quit-shortcut-second-press")}
+              label="Press ⌘Q twice to quit"
+              scope="app"
+              settingId="quit-shortcut-second-press"
+            >
+              <OctantSwitch
+                checked={props.settings.quitShortcutNeedsSecondPress}
+                label="Press ⌘Q twice to quit"
+                onCheckedChange={(checked) =>
+                  props.onSettingsChange({ quitShortcutNeedsSecondPress: checked })
+                }
+              />
+            </SettingRow>
+          </div>
+        </SettingsSection>
+      )}
       <SettingsSection title="Files">
         <div className="setgroup">
           <SettingRow

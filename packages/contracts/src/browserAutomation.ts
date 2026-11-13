@@ -16,6 +16,17 @@ export const MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS = 54 * 1024;
  * the same navigation admission as the first.
  */
 export const MAX_BROWSER_TABS_PER_CONTEXT = 8;
+
+/**
+ * The entry that stands for every http and https site. In a context's
+ * `allowedOrigins` it is the Private page an agent opened at Full access,
+ * which needs no site approval and may navigate across origins; the host
+ * admits it from no other caller and never beside a stored profile. As the
+ * `origin` of a remembered profile site it is the person's "Allow all sites
+ * in this profile" answer. `*` is not an origin a URL can have, so it never
+ * collides with a real site.
+ */
+export const ANY_BROWSER_ORIGIN = "*";
 /** How many contexts one thread inspect may name. Stopping windows can pile up. */
 export const MAX_BROWSER_THREAD_CONTEXTS = 8;
 
@@ -200,16 +211,52 @@ export type BrowserObservationPart = typeof BrowserObservationPart.Type;
 export const BrowserTabId = Schema.String.pipe(Schema.pattern(/^t[1-9][0-9]{0,3}$/));
 export type BrowserTabId = typeof BrowserTabId.Type;
 
-/** How many files one upload may send. */
+/**
+ * How many files one upload may send unless the person chose another count in
+ * Settings (`browserUploadFileCountLimit`). A recurring manifest keeps this
+ * bound whatever the setting says.
+ */
 export const MAX_BROWSER_UPLOAD_FILES = 5;
-/** The largest file an upload may send. */
-export const MAX_BROWSER_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
+/**
+ * The most files per upload a person may choose. It is fixed because every
+ * file is copied to a private folder before the page gets it, and a context
+ * keeps the copies of its last uploads until it closes.
+ */
+export const MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT = 50;
+/**
+ * The largest file an upload or an agent's download may carry unless the
+ * person chose another limit in Settings (`browserTransferFileLimitMegabytes`).
+ * A recurring manifest keeps this bound whatever the setting says.
+ */
+export const DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES = 25;
+export const MAX_BROWSER_UPLOAD_FILE_BYTES =
+  DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES * 1024 * 1024;
+/**
+ * The largest per-file limit a person may choose. It is fixed because a save
+ * reads the whole held file into memory to digest it, and journaled receipts
+ * bound their size by it.
+ */
+export const MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES = 1024;
 
-/** How many downloads one browsing context holds at once; the oldest is discarded. */
+/**
+ * How many downloads one browsing context holds at once, the oldest discarded
+ * first, unless the person chose another limit in Settings
+ * (`browserHeldDownloadLimit`).
+ */
 export const MAX_BROWSER_HELD_DOWNLOADS = 5;
+/** The most held downloads a person may choose; each is a file on the host's disk. */
+export const MAX_BROWSER_HELD_DOWNLOAD_LIMIT = 50;
 
-/** The longest any wait may last; a wait names its own limit up to this. */
-export const MAX_BROWSER_WAIT_MS = 30_000;
+/**
+ * The longest any wait may last; a wait names its own limit up to this.
+ *
+ * Ten minutes, because a build, a deploy or an upload a page reports on
+ * routinely outlasts the earlier 30 seconds, and an agent then polled with
+ * repeated waits. It is not longer because one tool call must answer inside
+ * the eleven minutes the Claude runtime allows an app-managed call, and a
+ * page's idle interval is ten minutes.
+ */
+export const MAX_BROWSER_WAIT_MS = 600_000;
 /** How long a wait lasts when it names no limit. */
 export const DEFAULT_BROWSER_WAIT_MS = 10_000;
 
@@ -288,11 +335,31 @@ export const BrowserEmulationReport = Schema.Struct({
 }).annotations(strict);
 export type BrowserEmulationReport = typeof BrowserEmulationReport.Type;
 
-/** How a page's own dialog was answered; see the fixed policy in the spec. */
+export const MAX_BROWSER_DIALOG_ANSWER_TEXT = 1_024;
+
+/**
+ * The agent's answer to the first dialog its action raises. It is stated with
+ * the action, before any dialog opens, so a dialog never waits on a model turn.
+ * `text` is what an accepted prompt receives.
+ */
+export const BrowserDialogAnswer = Schema.Struct({
+  action: Schema.Literal("accept", "dismiss"),
+  text: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_BROWSER_DIALOG_ANSWER_TEXT))),
+}).annotations(strict);
+export type BrowserDialogAnswer = typeof BrowserDialogAnswer.Type;
+
+/**
+ * How a page's own dialog was answered, and by whom: the agent's stated answer
+ * or the fixed rule. Optional so a Browser that predates agent answers still
+ * decodes; absent means the rule.
+ */
 export const BrowserDialogReport = Schema.Struct({
   type: Schema.Literal("alert", "confirm", "prompt", "beforeunload"),
   message: Schema.String.pipe(Schema.maxLength(512)),
   answer: Schema.Literal("accepted", "dismissed"),
+  answeredBy: Schema.optional(Schema.Literal("agent", "rule")),
+  /** The agent's prompt text was not typed because the prompt asked for a credential. */
+  textWithheld: Schema.optional(Schema.Literal("credential-protected")),
 }).annotations(strict);
 export type BrowserDialogReport = typeof BrowserDialogReport.Type;
 
@@ -530,7 +597,7 @@ export const BrowserActionRequest = Schema.Struct({
   files: Schema.optional(
     Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))).pipe(
       Schema.minItems(1),
-      Schema.maxItems(MAX_BROWSER_UPLOAD_FILES),
+      Schema.maxItems(MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT),
     ),
   ),
   /** The tab a `tab-select` or `tab-close` names. */
@@ -557,6 +624,8 @@ export const BrowserActionRequest = Schema.Struct({
   diagnosticsWarnings: Schema.optional(Schema.Boolean),
   /** Which audit an `audit` action reads. */
   auditKind: Schema.optional(BrowserAuditKind),
+  /** The answer for the first dialog this action raises; absent, the fixed rule. */
+  dialog: Schema.optional(BrowserDialogAnswer),
   value: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))),
   point: Schema.optional(BrowserViewportPoint),
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),

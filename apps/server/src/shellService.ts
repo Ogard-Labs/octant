@@ -14,9 +14,11 @@ import {
   decodeShellCommand,
   type ProjectId,
   type RememberedBrowserProfileSite,
+  type RememberedBrowserTransfer,
   type ShellBootstrap,
   type ShellCommandResult,
   type ShellFailure,
+  type EventActor,
   type ShellSettings,
   type WindowWorkspace,
   type WorkspaceContextKey,
@@ -34,7 +36,8 @@ import {
   defaultShellSettings,
   defaultWindowWorkspace,
   enabledModes,
-  isBrowserProfileSiteRemembered,
+  browserProfileSiteListed,
+  browserTransferRemembered,
   normalizeEnvironmentPresentationState,
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
@@ -218,6 +221,47 @@ export class ShellService implements ShellServiceApi {
   }
 
   /**
+   * The upload and download counterpart of {@link rememberBrowserOrigins}:
+   * remembers an "Always allow" answer for one direction, site and workspace.
+   */
+  rememberBrowserTransfers(input: {
+    readonly windowId: WindowId;
+    readonly expectedVersion: AggregateVersion;
+    readonly transfers: ReadonlyArray<RememberedBrowserTransfer>;
+  }): ShellCommandResult {
+    this.#assertReady();
+    try {
+      if (!this.#registeredWindowIds.has(input.windowId)) {
+        throw new ShellServiceError({
+          category: "invalid",
+          message: "Shell command window is not registered with this server session.",
+        });
+      }
+      const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      const merged = current.rememberedBrowserTransfers.concat(
+        input.transfers.filter(
+          (transfer) => !browserTransferRemembered(current.rememberedBrowserTransfers, transfer),
+        ),
+      );
+      const settings = this.#withJudgedDefaultFolder(
+        { ...current, rememberedBrowserTransfers: merged },
+        current,
+      );
+      const committed = this.#persistence.journal.append({
+        aggregate: {
+          aggregateType: "shell-settings",
+          aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
+        },
+        expectedVersion: input.expectedVersion,
+        events: [this.#pendingEvent("shell.settings-replaced", { settings })],
+      });
+      return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
    * The signed-in counterpart of {@link rememberBrowserOrigins}: remembers a site
    * for one stored Browser profile, never for the site alone.
    */
@@ -238,7 +282,7 @@ export class ShellService implements ShellServiceApi {
       const merged = current.rememberedBrowserProfileSites.concat(
         input.sites.filter(
           (site) =>
-            !isBrowserProfileSiteRemembered(
+            !browserProfileSiteListed(
               current.rememberedBrowserProfileSites,
               site.origin,
               site.profile,
@@ -261,6 +305,83 @@ export class ShellService implements ShellServiceApi {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /**
+   * The settings a window's bootstrap carries, with the version a replacement
+   * must name, for a device the host's own person paired: it has no window
+   * here, so nothing is registered and no workspace is read or made.
+   */
+  readSettings(): { readonly settings: ShellSettings; readonly version: AggregateVersion } {
+    this.#assertReady();
+    try {
+      const projected = this.#persistence.readShellSettings();
+      const stored = projected?.settings ?? defaultShellSettings();
+      return {
+        settings:
+          stored.defaultFolder === undefined
+            ? { ...stored, defaultFolder: hostDefaultFolder(this.#home) }
+            : stored,
+        version: projected?.aggregateVersion ?? decodeAggregateVersion(0),
+      };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
+   * A paired device's replacement of the shell settings, under the rules a
+   * window's `replace-settings` runs under, journaled with the device as its
+   * actor. The device holds no workspace, so only the live windows' active
+   * modes can stand in the way of disabling a mode.
+   */
+  replaceSettings(input: {
+    readonly settings: ShellSettings;
+    readonly expectedVersion: AggregateVersion;
+    readonly actor: EventActor;
+  }): ShellCommandResult {
+    this.#assertReady();
+    try {
+      return this.#replaceSettings(input.settings, input.expectedVersion, [], input.actor);
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  #storedSettings(): ShellSettings {
+    return this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
+  }
+
+  #replaceSettings(
+    replacement: ShellSettings,
+    expectedVersion: AggregateVersion,
+    callerWorkspaces: ReadonlyArray<WindowWorkspace>,
+    actor?: EventActor,
+  ): ShellCommandResult {
+    const current = this.#storedSettings();
+    const settings = this.#withJudgedDefaultFolder(
+      replaceShellSettings(current, replacement),
+      current,
+    );
+    const disabledActiveWorkspace = [
+      ...callerWorkspaces,
+      ...this.#persistence
+        .readWindowWorkspaces()
+        .map(({ workspace }) => reconcileWorkspaceWithSettings(workspace, current))
+        .filter((workspace) => this.#registeredWindowIds.has(workspace.windowId)),
+    ].find((workspace) => !enabledModes(settings).includes(workspace.activeMode));
+    if (disabledActiveWorkspace !== undefined) {
+      throw new ShellServiceError({
+        category: "unsupported",
+        message: `Switch away from the active ${disabledActiveWorkspace.activeMode} workspace before disabling it.`,
+      });
+    }
+    const committed = this.#persistence.journal.append({
+      aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
+      expectedVersion,
+      events: [this.#pendingEvent("shell.settings-replaced", { settings }, actor)],
+    });
+    return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
   }
 
   /**
@@ -410,36 +531,13 @@ export class ShellService implements ShellServiceApi {
         });
       }
       if (command.kind === "replace-settings") {
-        const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
-        const replaced = replaceShellSettings(current, command.settings);
-        const settings = this.#withJudgedDefaultFolder(replaced, current);
-        const activeWorkspace = reconcileWorkspaceWithSettings(
-          this.#persistence.readWindowWorkspace(command.windowId)?.workspace ??
-            defaultWindowWorkspace(command.windowId),
-          current,
-        );
-        const disabledActiveWorkspace = [
-          activeWorkspace,
-          ...this.#persistence
-            .readWindowWorkspaces()
-            .map(({ workspace }) => reconcileWorkspaceWithSettings(workspace, current))
-            .filter((workspace) => this.#registeredWindowIds.has(workspace.windowId)),
-        ].find((workspace) => !enabledModes(settings).includes(workspace.activeMode));
-        if (disabledActiveWorkspace !== undefined) {
-          throw new ShellServiceError({
-            category: "unsupported",
-            message: `Switch away from the active ${disabledActiveWorkspace.activeMode} workspace before disabling it.`,
-          });
-        }
-        const committed = this.#persistence.journal.append({
-          aggregate: {
-            aggregateType: "shell-settings",
-            aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
-          },
-          expectedVersion: command.expectedVersion,
-          events: [this.#pendingEvent("shell.settings-replaced", { settings })],
-        });
-        return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+        return this.#replaceSettings(command.settings, command.expectedVersion, [
+          reconcileWorkspaceWithSettings(
+            this.#persistence.readWindowWorkspace(command.windowId)?.workspace ??
+              defaultWindowWorkspace(command.windowId),
+            this.#storedSettings(),
+          ),
+        ]);
       }
 
       if (command.kind === "set-environment-presentation") {
@@ -590,13 +688,15 @@ export class ShellService implements ShellServiceApi {
     };
   }
 
-  #pendingEvent(eventName: string, payload: unknown) {
+  #pendingEvent(eventName: string, payload: unknown, actor?: EventActor) {
     return {
       eventId: decodeEventId(this.#uuid()),
       eventName,
       eventVersion: 1,
       correlationId: decodeCorrelationId(this.#uuid()),
-      actor: { kind: "system" as const, actorId: OCTANT_LOCAL_ACTOR_ID },
+      // A window's change keeps the host's actor it always had; a paired
+      // device's names the device.
+      actor: actor ?? { kind: "system" as const, actorId: OCTANT_LOCAL_ACTOR_ID },
       occurredAt: decodeTimestamp(this.#clock()),
       payload,
     };

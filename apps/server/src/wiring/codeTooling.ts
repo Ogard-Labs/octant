@@ -41,6 +41,10 @@ import {
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
+import {
+  createCodeDebugAgentSessionApprovals,
+  createCodeDebugAgentTools,
+} from "../code/codeDebugAgentTools";
 import { CodeDebugService } from "../code/codeDebugService";
 import { DebugAdapterProcessPort } from "../code/debugAdapterProcess";
 import { DebugConfigurationApprovalStore } from "../code/debugConfigurationApprovals";
@@ -54,6 +58,7 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { LanguageServerProcessPort } from "../code/languageServerProcess";
 import { managedTargetPath } from "../code/managedWorktreeService";
 import { installedLanguageServerComponents } from "../code/installedLanguageServers";
+import { projectTypeScriptServerBinary } from "../code/projectTypeScriptToolchain";
 import { isExtensionCompatibilityCompatible } from "../extensions/packageInspector";
 import { EXTENSION_AGGREGATE_TYPE } from "../persistence/extensionProjection";
 import {
@@ -110,7 +115,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     AuthorityWiring,
     "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore" | "onWindowRevoked"
   > &
-  Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
+  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
     CodeWiring,
@@ -150,6 +155,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     codeWorkingDirectoryProbePath,
     extensionLifecycleService,
     extensionPackageStore,
+    externalContentIngestionStore,
     managedWorktreeReceipts,
     onWindowRevoked,
     options,
@@ -635,6 +641,12 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       threadTainted: (threadId) => toolEgressRules.threadTainted(String(threadId)),
       components: () => [...bundledLanguageServers("effective"), ...installedLanguageServers()],
       turnedOffComponents: () => bundledLanguageServers("turned-off"),
+      // Read on every request, so the Project's choice holds from the event
+      // that journals it.
+      usesProjectToolchain: (projectId) => {
+        const project = persistence.readProject(projectId);
+        return project?.type === "code" && project.ownToolchain === "enabled";
+      },
       processes: languageServerProcesses,
       platform: languageServerHostPlatform(process.platform),
       cacheRoot: join(persistence.dataDirectory, "code", "language-server-cache"),
@@ -644,8 +656,9 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     yield* Effect.promise(() => languageServerProcesses.reconcile().catch(() => undefined));
     languageService.startSweeping();
     // An archived or completed thread, a checkout that went away, the Settings
-    // switch turned off, or a server whose trust or switch was withdrawn stops
-    // at once rather than at the next timed sweep.
+    // switch turned off, a Project's toolchain setting changed, or a server
+    // whose trust or switch was withdrawn stops at once rather than at the
+    // next timed sweep.
     const unsubscribeLanguageServerAuthority = persistence.journal.subscribeCommitted((append) => {
       if (
         append.events.some(
@@ -653,6 +666,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             event.aggregateType === "code-thread" ||
             event.aggregateType === "code-checkout" ||
             event.aggregateType === "code-settings" ||
+            event.eventName === "project.code-own-toolchain-changed@1" ||
             event.aggregateType === EXTENSION_AGGREGATE_TYPE,
         )
       ) {
@@ -663,7 +677,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     yield* Effect.addFinalizer(() => Effect.promise(() => languageService.close()));
     // Debug sessions (docs/design/language-services.md, Debugger addendum):
     // adapters a person installed and reviewed, configurations a person at a
-    // local window confirmed, and sessions only that person starts. Below Full
+    // local window confirmed, and sessions that person or the thread's agent
+    // starts. Below Full
     // access a session's program reaches the network through its own proxy
     // under its thread's rules, the proxy harness commands use; a host with
     // no proxy refuses such a session.
@@ -760,7 +775,30 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         externalContentIngested: () =>
           readThreadExternalContentTaint(persistence.connection, String(thread.id))
             .externalContentIngested,
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
         language: languageService,
+        uuid: randomUUID,
+      }),
+    );
+    // The debugger as one app-managed tool on each Code turn outside Plan
+    // whose provider carries them, on a host where a session could start
+    // (decision DB8). It reaches the debug service through the same calls a
+    // window's routes make, as the thread's agent, and asks the person in the
+    // thread below Full access.
+    const debugAgentSessionApprovals = createCodeDebugAgentSessionApprovals();
+    contributeCodeTools(({ windowId, thread, readThread, askPerson }) =>
+      createCodeDebugAgentTools({
+        windowId,
+        thread,
+        readThread,
+        authority: () => browserAuthority.resolve(decodeBrowserThreadId(String(thread.id)), "code"),
+        externalContentIngested: () =>
+          readThreadExternalContentTaint(persistence.connection, String(thread.id))
+            .externalContentIngested,
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+        debug: debugService,
+        approvals: debugAgentSessionApprovals,
+        askPerson,
         uuid: randomUUID,
       }),
     );
@@ -1101,6 +1139,10 @@ function bundledLanguageServerComponents(
         args: ["--lsp", "--stdio"],
         installRoot: dirname(typeScriptBinary),
         sourceLabel: "typescript",
+        projectToolchain: {
+          executable: (serverRoot) =>
+            projectTypeScriptServerBinary(serverRoot, process.platform, process.arch),
+        },
       },
     ];
   };

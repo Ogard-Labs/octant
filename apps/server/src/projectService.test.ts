@@ -696,6 +696,53 @@ describe("ProjectService", () => {
     });
   });
 
+  it("says the paired device wrote a memory entry and added a folder, where a local window's still say the local user", async () => {
+    const deviceId = "92000000-0000-4000-8000-0000000000d6";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const namedBy = async (actor?: never) => {
+      const memory = fixtureService({ projects: [chatProject()] });
+      const created = await memory.service.executeMemory(
+        {
+          kind: "create-memory-entry",
+          projectId: chatId,
+          entryId: successorId,
+          memoryKind: "fact",
+          content: "Releases ship from main only.",
+          expectedVersion: 0,
+        },
+        actor,
+      );
+      const receipts = new BindingReceiptStore(() => Buffer.alloc(32, 3));
+      const receipt = receipts.issue({
+        windowId,
+        projectType: "work",
+        canonicalBinding: { canonicalRoot: "/canonical/notes" },
+        now: 0,
+      });
+      const folders = fixtureService({ projects: [workProject()], receipts, nowMs: 1 });
+      const added = await folders.service.executeProject(
+        windowId,
+        {
+          kind: "add-project-extra-folder",
+          projectId: workId,
+          expectedVersion: 1,
+          receiptId: receipt.receiptId,
+        },
+        actor,
+      );
+      return [
+        created.kind === "memory-entry-created" ? created.entry.author : undefined,
+        added.kind === "project-extra-folder-added"
+          ? added.project.extraFolders?.[0]?.addedBy
+          : undefined,
+      ];
+    };
+    const local = { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID };
+
+    expect(await namedBy(device)).toEqual([device, device]);
+    expect(await namedBy()).toEqual([local, local]);
+  });
+
   it("creates every explicit memory kind and returns active history separately", async () => {
     const fixture = fixtureService({ projects: [chatProject()] });
     const kinds = ["decision", "fact", "preference", "summary", "outcome"] as const;
@@ -1108,6 +1155,128 @@ describe("ProjectService", () => {
     );
   });
 
+  it("journals one event when a Code Project turns on its own toolchain and refuses a Chat Project", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-own-toolchain",
+        projectId: chatId,
+        expectedVersion: 1,
+        ownToolchain: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-code-project-own-toolchain",
+      projectId: workId,
+      expectedVersion: 1,
+      ownToolchain: "enabled",
+    });
+    expect(result).toMatchObject({
+      kind: "code-project-own-toolchain-changed",
+      project: { ownToolchain: "enabled", version: 2 },
+    });
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.code-own-toolchain-changed@1",
+    );
+  });
+
+  it("journals one event when a Project keeps an image generation choice and one when it drops it", async () => {
+    const fixture = fixtureService({ projects: [chatProject()] });
+    const imageGenerationChoice = {
+      profileInstanceId: "a3000000-0000-4000-8000-000000000001",
+      modelId: "gpt-image-2",
+    };
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-project-image-generation-choice",
+        projectId: chatId,
+        expectedVersion: 1,
+        imageGenerationChoice,
+      }),
+    ).resolves.toMatchObject({
+      kind: "project-image-generation-choice-changed",
+      project: { imageGenerationChoice, version: 2 },
+    });
+    const dropped = await fixture.service.executeProject(windowId, {
+      kind: "change-project-image-generation-choice",
+      projectId: chatId,
+      expectedVersion: 2,
+    });
+    expect(dropped).toMatchObject({ kind: "project-image-generation-choice-changed" });
+    expect("imageGenerationChoice" in dropped.project).toBe(false);
+    expect(fixture.append.mock.calls.map((call) => call[0]?.events?.[0]?.eventName)).toEqual([
+      "project.image-generation-choice-changed@1",
+      "project.image-generation-choice-changed@1",
+    ]);
+  });
+
+  it("journals one event when a Project of any mode lets agents write its memory without asking", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    for (const [index, id] of [chatId, workId].entries()) {
+      await expect(
+        fixture.service.executeProject(windowId, {
+          kind: "change-project-agent-memory-writes",
+          projectId: id,
+          expectedVersion: 1,
+          agentMemoryWrites: "enabled",
+        }),
+      ).resolves.toMatchObject({
+        kind: "project-agent-memory-writes-changed",
+        project: { agentMemoryWrites: "enabled", version: 2 },
+      });
+      expect(fixture.append.mock.calls[index]?.[0]?.events?.[0]?.eventName).toBe(
+        "project.agent-memory-writes-changed@1",
+      );
+    }
+    expect(fixture.append).toHaveBeenCalledTimes(2);
+  });
+
+  it("journals one event when a Code Project lets agents comment on pull requests or push to the default branch", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-pull-request-comments",
+        projectId: chatId,
+        expectedVersion: 1,
+        agentPullRequestComments: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+
+    expect(
+      await fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-pull-request-comments",
+        projectId: workId,
+        expectedVersion: 1,
+        agentPullRequestComments: "enabled",
+      }),
+    ).toMatchObject({
+      kind: "code-project-agent-pull-request-comments-changed",
+      project: { agentPullRequestComments: "enabled", version: 2 },
+    });
+    expect(
+      await fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-default-branch-push",
+        projectId: workId,
+        expectedVersion: 2,
+        agentDefaultBranchPush: "enabled",
+      }),
+    ).toMatchObject({
+      kind: "code-project-agent-default-branch-push-changed",
+      project: {
+        agentPullRequestComments: "enabled",
+        agentDefaultBranchPush: "enabled",
+        version: 3,
+      },
+    });
+    expect(fixture.append.mock.calls.map((call) => call[0]?.events?.[0]?.eventName)).toEqual([
+      "project.code-agent-pull-request-comments-changed@1",
+      "project.code-agent-default-branch-push-changed@1",
+    ]);
+  });
+
   it("saves a Code Project's terminal actions as one journaled event and refuses a Work Project", async () => {
     const fixture = fixtureService({ projects: [codeProject()] });
     const actions = [
@@ -1323,6 +1492,43 @@ describe("ProjectService", () => {
         enabled: true,
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("journals a paired device's Project changes with the device as their actor, and a local window's as the local user", async () => {
+    const deviceId = "92000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const local = { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" };
+    const commands = [
+      {
+        kind: "change-work-project-permission-mode",
+        projectId: workId,
+        expectedVersion: 1,
+        permissionMode: "full-access",
+      },
+      {
+        kind: "change-work-project-developer-tools",
+        projectId: workId,
+        expectedVersion: 1,
+        enabled: true,
+      },
+    ];
+    const actorsBy = async (actor?: never) => {
+      const actors: Array<unknown> = [];
+      for (const command of commands) {
+        const fixture = fixtureService({ projects: [workProject()] });
+        const result = await fixture.service.executeProject(windowId, command as never, actor);
+        for (const call of fixture.append.mock.calls) actors.push(call[0]?.events?.[0]?.actor);
+        if (result.kind === "work-project-developer-tools-changed") {
+          actors.push(result.project.developerTools?.changedBy);
+        }
+      }
+      return actors;
+    };
+
+    // The level change, its lowering record, the switch, and who the Project
+    // itself says turned the switch.
+    expect(await actorsBy(device)).toEqual([device, device, device, device]);
+    expect(await actorsBy()).toEqual([local, local, local, local]);
   });
 
   it("saves a Work Project's actions as one journaled event, since Work has the shell", async () => {

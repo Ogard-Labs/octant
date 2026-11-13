@@ -248,3 +248,50 @@ describe("retained Code admission for a held stream", () => {
     });
   });
 });
+
+describe("a paired device's queued message", () => {
+  it("is admitted while the device stays paired and the Project active, and holds nothing once its dispatch returns", async () => {
+    let paired = true;
+    let active = true;
+    const access = new CodeProjectAccess({
+      readWorkspace: () => undefined,
+      hasActiveCodeProject: () => active,
+      isWindowLive: () => false,
+      isPairedDevice: (id) => paired && String(id) === String(scopeId),
+    });
+    const other = decodeWindowId("00000000-0000-4000-8000-00000000c004");
+    let deferred = () => true;
+    await access.runQueuedDeviceDispatch(scopeId, async () => {
+      await Promise.resolve();
+      expect(access.canAccessProject(scopeId, projectId)).toBe(true);
+      expect(access.canAccessProject(other, projectId)).toBe(false);
+      // A tool call of the turn is judged on the device's standing reach,
+      // which is none, exactly as for a turn the device sent itself.
+      expect(access.standingAuthority(() => access.canAccessProject(scopeId, projectId))).toBe(
+        false,
+      );
+      // Nothing is kept for a stream: a queued dispatch has no connection.
+      expect(access.retain(scopeId)).toBeUndefined();
+      active = false;
+      expect(access.canAccessProject(scopeId, projectId)).toBe(false);
+      active = true;
+      paired = false;
+      expect(access.canAccessProject(scopeId, projectId)).toBe(false);
+      paired = true;
+      deferred = () => access.canAccessProject(scopeId, projectId);
+    });
+    expect(deferred()).toBe(false);
+    expect(access.canAccessProject(scopeId, projectId)).toBe(false);
+  });
+
+  it("gives a scope that is not a paired device no admission", async () => {
+    const access = new CodeProjectAccess({
+      readWorkspace: () => undefined,
+      hasActiveCodeProject: () => true,
+      isWindowLive: () => true,
+    });
+    await access.runQueuedDeviceDispatch(scopeId, async () => {
+      expect(access.canAccessProject(scopeId, projectId)).toBe(false);
+    });
+  });
+});

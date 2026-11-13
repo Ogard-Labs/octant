@@ -191,15 +191,20 @@ export class CodeThreadMetadataService {
       : (previous?.lastMeaningfulActivityAt ?? null);
     const investigationDelivered = historyFresh ? hasCompletedProviderTurn(history.frames) : false;
 
-    const satisfaction = this.#evaluateSatisfaction({
-      outcomeKind: deliveryTarget.outcomeKind,
-      changedFiles,
-      linkedPullRequest,
-      childAgents,
-      githubFreshness,
-      historyFresh,
-      investigationDelivered,
-    });
+    // A person's mark is their override: it stands whatever the evidence
+    // for the delivery target says, including stale or missing evidence.
+    const satisfaction: CodeDeliverySatisfaction =
+      thread.markedDoneAt !== undefined
+        ? "done"
+        : this.#evaluateSatisfaction({
+            outcomeKind: deliveryTarget.outcomeKind,
+            changedFiles,
+            linkedPullRequest,
+            childAgents,
+            githubFreshness,
+            historyFresh,
+            investigationDelivered,
+          });
 
     const recovery = buildRecovery({
       projectProjectionPresent: entry.projectProjectionPresent,

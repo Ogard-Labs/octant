@@ -13,6 +13,7 @@ import {
 import { ExtensionNpmSource } from "./extensionIdentity";
 import { OctantMode } from "./modes";
 import { ThreadPublishedPage } from "./threadToolSteps";
+import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "./threadToolCallRecords";
 import {
   ACP_AGENT_KINDS,
   AcpAgentAuthentication,
@@ -981,6 +982,30 @@ const KeyProviderInstanceFields = {
   nativeSetup: Schema.optional(Schema.Literal(true)),
 } as const;
 
+/**
+ * The key providers whose runtime keeps a memory of its own behind a switch
+ * Octant sets at launch: Claude Code's auto-memory and Codex's memories.
+ * OpenCode and Mistral Vibe have no such memory, so their accounts carry no
+ * setting for one.
+ */
+export const OWN_MEMORY_PROVIDER_DRIVER_KINDS = [
+  "claude",
+  "codex",
+] as const satisfies ReadonlyArray<KeyProviderDriverKind>;
+export type OwnMemoryProviderDriverKind = (typeof OWN_MEMORY_PROVIDER_DRIVER_KINDS)[number];
+
+/**
+ * A Claude Code or Codex account the person let keep the provider's own
+ * memory: the runtime reads and writes it by its own rules, across Projects
+ * and outside Octant's journal, in the account's Work and Code sessions
+ * outside Plan. Absent is off. Only `set-provider-own-memory`, sent from a
+ * window on this host, changes it; "Run as itself" and Full access never do.
+ */
+const OwnMemoryProviderInstanceFields = {
+  ...KeyProviderInstanceFields,
+  ownMemory: Schema.optional(Schema.Literal(true)),
+} as const;
+
 export const OpenCodeProviderInstance = Schema.Struct({
   ...KeyProviderInstanceFields,
   driverKind: Schema.Literal("opencode"),
@@ -988,13 +1013,13 @@ export const OpenCodeProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type OpenCodeProviderInstance = typeof OpenCodeProviderInstance.Type;
 export const CodexProviderInstance = Schema.Struct({
-  ...KeyProviderInstanceFields,
+  ...OwnMemoryProviderInstanceFields,
   driverKind: Schema.Literal("codex"),
   configuration: CodexProviderConfiguration,
 }).annotations(strict);
 export type CodexProviderInstance = typeof CodexProviderInstance.Type;
 export const ClaudeProviderInstance = Schema.Struct({
-  ...KeyProviderInstanceFields,
+  ...OwnMemoryProviderInstanceFields,
   driverKind: Schema.Literal("claude"),
   configuration: ClaudeProviderConfiguration,
 }).annotations(strict);
@@ -1275,6 +1300,11 @@ export const ProviderInstanceNativeSetupChanged = Schema.Struct({
   ),
 }).annotations(strict);
 export type ProviderInstanceNativeSetupChanged = typeof ProviderInstanceNativeSetupChanged.Type;
+/** A person turned a Claude Code or Codex account's own memory on or off from a local window. */
+export const ProviderInstanceOwnMemoryChanged = Schema.Struct({
+  instance: Schema.Union(CodexProviderInstance, ClaudeProviderInstance),
+}).annotations(strict);
+export type ProviderInstanceOwnMemoryChanged = typeof ProviderInstanceOwnMemoryChanged.Type;
 export const ProviderInstanceRemoved = Schema.Struct({
   instanceId: ProviderInstanceId,
   version: AggregateVersion,
@@ -1295,6 +1325,7 @@ export const PROVIDER_EVENT_NAMES = [
   "provider.instance-data-tags-changed@1",
   "provider.instance-enabled-changed@1",
   "provider.instance-native-setup-changed@1",
+  "provider.instance-own-memory-changed@1",
   "provider.instance-removed@1",
   "provider.defaults-updated@1",
   "provider.catalog-updated@1",
@@ -1509,6 +1540,14 @@ export const ProviderCapabilities = Schema.Struct({
   nativeAttachments: ProviderCapabilitySupport,
   nativeWebResearch: ProviderCapabilitySupport,
   appManagedTools: ProviderCapabilitySupport,
+  /**
+   * Reported by a runtime that Full access launches where it cannot prove
+   * Octant's tools are the only ones entering it: a Full access thread is
+   * still offered them, labelled as mixed with tools Octant did not supply.
+   * `appManagedTools` keeps answering for every guarded level. Absent means
+   * Full access changes nothing for this runtime.
+   */
+  appManagedToolsAtFullAccess: Schema.optional(Schema.Literal("mixed")),
   /**
    * The driver natively serves ACP client filesystem and terminal methods
    * (`fs/read_text_file`, `fs/write_text_file`, `terminal/*`) over its own
@@ -1949,6 +1988,22 @@ export const ProviderAccountAuthentication = Schema.Literal(
 );
 export type ProviderAccountAuthentication = typeof ProviderAccountAuthentication.Type;
 
+/**
+ * A Verify tools run that left a model without Octant's tools, and why: the
+ * model answered without calling the test tool (`unsupported`), or the run
+ * did not finish (`failed`: the endpoint refused, timed out, or was
+ * interrupted). The host runs the check when a person presses Verify tools
+ * and by itself the first time a model is used, so this is where the result
+ * of a run nobody was watching is read.
+ */
+export const ProviderModelToolCheck = Schema.Struct({
+  modelId: ProviderModelId,
+  outcome: Schema.Literal("unsupported", "failed"),
+  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
+  checkedAt: UtcTimestamp,
+}).annotations(strict);
+export type ProviderModelToolCheck = typeof ProviderModelToolCheck.Type;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -1971,6 +2026,13 @@ export const ProviderObservedState = Schema.Struct({
   // flag, so one verified model does not unlock tools for the other models
   // of the same profile.
   verifiedToolModelIds: Schema.optional(Schema.Array(ProviderModelId)),
+  /**
+   * Attached by the server when it reports a runtime to a client; a driver
+   * never sets it. The models whose last Verify tools run left them without
+   * tools, each with its reason. It grants and withholds nothing: admission
+   * reads `verifiedToolModelIds` alone.
+   */
+  toolChecks: Schema.optional(Schema.Array(ProviderModelToolCheck)),
   /**
    * Attached by the server when it reports a runtime to a client; a driver
    * never sets it. Absent for image profiles, which run no turns.
@@ -2297,6 +2359,15 @@ export const ProviderRegistryCommand = Schema.Union(
    */
   Schema.Struct({
     kind: Schema.Literal("set-provider-native-setup"),
+    ...ProviderInstanceCommandFields,
+    enabled: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * Turns the provider's own memory on or off for one Claude Code or Codex
+   * account. Only a person at the Octant window on this host sends it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-provider-own-memory"),
     ...ProviderInstanceCommandFields,
     enabled: Schema.Boolean,
   }).annotations(strict),
@@ -2752,6 +2823,22 @@ export const ProviderRuntimeEvent = Schema.Union(
     source: Schema.Literal("web-search", "web-fetch", "hosted-tool", "remote-command"),
     text: Schema.NonEmptyString.pipe(Schema.maxLength(OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS)),
   }).annotations(strict),
+  /**
+   * What one tool call was given, or what it returned, as far as the adapter
+   * can see it: text, cut to the bound here with `truncated` set when it was
+   * longer. It exists only for a Chat or Work thread's tool-call record,
+   * which lives in purgeable storage: it is never journaled, never part of a
+   * tool step, and never handed to a model. Every other consumer drops it. An
+   * adapter whose runtime exposes neither sends none.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("tool-call-content"),
+    toolCallId: Schema.NonEmptyTrimmedString,
+    part: Schema.Literal("input", "output"),
+    text: Schema.NonEmptyString.pipe(Schema.maxLength(MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS)),
+    truncated: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("tool-progress"),
@@ -3100,6 +3187,9 @@ export const decodeProviderInstanceEnabledChanged = Schema.decodeUnknownSync(
 export const decodeProviderInstanceNativeSetupChanged = Schema.decodeUnknownSync(
   ProviderInstanceNativeSetupChanged,
 );
+export const decodeProviderInstanceOwnMemoryChanged = Schema.decodeUnknownSync(
+  ProviderInstanceOwnMemoryChanged,
+);
 export const decodeProviderNativeSetup = Schema.decodeUnknownSync(ProviderNativeSetup);
 export const decodeProviderInstanceDataTagsChanged = Schema.decodeUnknownSync(
   ProviderInstanceDataTagsChanged,
@@ -3113,6 +3203,7 @@ export const decodeProviderModelOptionValues = Schema.decodeUnknownSync(Provider
 export const decodeProviderModel = Schema.decodeUnknownSync(ProviderModel);
 export const decodeProviderCapabilities = Schema.decodeUnknownSync(ProviderCapabilities);
 export const decodeProviderObservedState = Schema.decodeUnknownSync(ProviderObservedState);
+export const decodeProviderModelToolCheck = Schema.decodeUnknownSync(ProviderModelToolCheck);
 export const decodeProviderRegistrySnapshot = Schema.decodeUnknownSync(ProviderRegistrySnapshot);
 export const decodeProviderAuthenticationAttempt = Schema.decodeUnknownSync(
   ProviderAuthenticationAttempt,

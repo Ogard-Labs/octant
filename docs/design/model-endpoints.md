@@ -136,7 +136,7 @@ Octant Harness lists its model endpoints differently: as rows in one list, never
 
 ### Endpoint detail
 
-Opening a row replaces the page with the endpoint's detail sub-page (a Back control and Escape), whose h1 is the endpoint's name; Back returns focus to the row. The sub-page leads with the state, Check now, and Use, then the one fix, then Sign-in or API key, Models (search, a Shown / Hidden / All filter, a switch per model, and the plain tags "Reads images" and "Chat only · Verify tools"), Where your data goes (two labelled checkboxes the person sets, with per-model overrides in a disclosure), Name and address, Diagnostics (a disclosure that opens by itself only while the endpoint is failing, holding the address, protocol, authentication, last check with the host's precise answer, tool use, and capabilities), and Remove last, confirmed in a dialog that starts on Keep and names the model roles that lose a model. Precise terms (protocol names, bearer, capability names) appear only in Diagnostics.
+Opening a row replaces the page with the endpoint's detail sub-page (a Back control and Escape), whose h1 is the endpoint's name; Back returns focus to the row. The sub-page leads with the state, Check now, and Use, then the one fix, then Sign-in or API key, Models (search, a Shown / Hidden / All filter, a switch per model, and the plain tags "Reads images" and "Chat only · Verify tools", with a line under a Chat only model giving the reason its last tool check left it so, whether a person ran that check or the host ran it at the model's first use), Where your data goes (two labelled checkboxes the person sets, with per-model overrides in a disclosure), Name and address, Diagnostics (a disclosure that opens by itself only while the endpoint is failing, holding the address, protocol, authentication, last check with the host's precise answer, tool use, and capabilities), and Remove last, confirmed in a dialog that starts on Keep and names the model roles that lose a model. Precise terms (protocol names, bearer, capability names) appear only in Diagnostics.
 
 ### Subscription sign-in lifecycle
 
@@ -184,8 +184,11 @@ on the host itself: in the terminal that ran the command, or in a local
 desktop window, never in a paired or remote client; the sign-in panel
 otherwise signs in through the browser
 ([Enterprise provider identity](enterprise-provider-identity.md) owns the
-rule; maintainer request, 2026-11-12; not built yet: today the code appears
-only in the terminal). Diagnostics adds "Signed in for", the tenant, client, and origin the
+rule; maintainer request, 2026-11-12). Built: in a local desktop window a
+signed-out endpoint that opted in shows "Sign in with a code" under the
+browser sign-in; it shows the terms, then the code, its page, and a line
+saying to enter a code only because the person just started the sign-in
+there. Diagnostics adds "Signed in for", the tenant, client, and origin the
 last check bound to.
 
 Row states read the host's reason: Sign in to use (no sign-in), Sign in again
@@ -238,9 +241,10 @@ hub, peer or agent grant begins one or shows a code. Not built yet: today a
 paired or remote client never begins one or shows a code. The card also offers
 the
 opt-in "Use my AWS profile", off by default, which reads the person's existing
-cloud profile in place of the portal sign-in (maintainer request, 2026-11-12;
-not built yet: today the sign-in begins only in a terminal and no cloud
-profile is read). Add endpoint's Amazon Bedrock card opens its
+cloud profile in place of the portal sign-in (maintainer request, 2026-11-12).
+Built: a local desktop window's card shows "Sign in with a code" beside the
+terminal command, and a paired or remote client keeps the command alone. Not
+built yet: "Use my AWS profile"; no cloud profile is read. Add endpoint's Amazon Bedrock card opens its
 own Connect: Name, Region (where the models run), Access portal, Portal
 region, Account ID, Role (the permission set), and Model IDs (1 to 64, since
 Bedrock lists none a role may use), each with a one-line hint, and no key or

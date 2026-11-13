@@ -103,6 +103,11 @@ export function evaluateAppleBuildRequest(
   return { kind: "allowed" };
 }
 
+/** Whether a device effect was asked for by someone in the thread, not by the host itself. */
+export function isPersonOrAgent(actor: AppleSimulatorRequest["requestedBy"]): boolean {
+  return actor?.kind === "local-user" || actor?.kind === "remote-device" || actor?.kind === "agent";
+}
+
 export function isAppleScreenRecordingKind(kind: AppleSimulatorRequest["kind"]): boolean {
   return kind === "start-recording" || kind === "stop-recording";
 }
@@ -137,18 +142,18 @@ export function evaluateAppleSimulatorRequest(
   ) {
     return { kind: "denied", reason: "actor-required" };
   }
-  // Open URL, Rotate and screen recording are offered only in the pane. Only a
-  // person may ask for any of them; an agent or the host never does it for
-  // them. Repair input is not among them: it is input, so the Allow input
-  // grant or an approval decides it, as for a tap.
+  // Open URL, Rotate and screen recording act outside the device's own input.
+  // A person or the thread's agent may ask for any of them, under the posture
+  // and approval checked above; the host never starts one on its own, because
+  // nobody in the thread asked for it. Repair input is not among them: it is
+  // input, so the Allow input grant or an approval decides it, as for a tap.
   if (
     (request.kind === "open-url" ||
       request.kind === "rotate" ||
       isAppleScreenRecordingKind(request.kind)) &&
-    request.requestedBy?.kind !== "local-user" &&
-    request.requestedBy?.kind !== "remote-device"
+    !isPersonOrAgent(request.requestedBy)
   ) {
-    return { kind: "denied", reason: "person-required" };
+    return { kind: "denied", reason: "person-or-agent-required" };
   }
   if (request.kind === "open-url" && request.url === undefined) {
     return { kind: "denied", reason: "url-required" };

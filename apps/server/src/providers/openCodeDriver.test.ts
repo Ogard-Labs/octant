@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Exit, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   adaptBetaOpenCodeEvent,
@@ -291,6 +291,68 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.slice(probeCallCount).some((call) => call.startsWith("mcp.add:"))).toBe(
       false,
     );
+  });
+
+  it("offers a Full access thread app tools on a runtime that can inherit external configuration", async () => {
+    const fixture = driverFixture({ isolatedConfiguration: false });
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection
+              .start({
+                sessionId,
+                modelId,
+                executionPolicy: "full-access",
+                tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              })
+              .pipe(
+                Effect.flatMap(() =>
+                  Effect.exit(
+                    connection.send({
+                      sessionId,
+                      prompt: "use the tool",
+                      attachments: [],
+                      tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+                    }),
+                  ),
+                ),
+              ),
+          ),
+        ),
+      ),
+    );
+    expect(Exit.isSuccess(result)).toBe(true);
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+    expect(fixture.calls).toContain("session.promptAsync");
+  });
+
+  it("reports app tools as mixed at Full access when the runtime accepts them without proving exclusivity", () => {
+    const unproved = normalizeOpenCodeProbe(
+      instanceId,
+      { version: "1.18.0" },
+      providerList(),
+      now,
+      {
+        accepted: true,
+        exclusive: false,
+      },
+    );
+    expect(unproved.capabilities.appManagedTools).toBe("unsupported");
+    expect(unproved.capabilities.appManagedToolsAtFullAccess).toBe("mixed");
+    // Full access launches this runtime outside the sandbox the proof rests on.
+    const proved = normalizeOpenCodeProbe(instanceId, { version: "1.18.0" }, providerList(), now, {
+      accepted: true,
+      exclusive: true,
+    });
+    expect(proved.capabilities.appManagedTools).toBe("supported");
+    expect(proved.capabilities.appManagedToolsAtFullAccess).toBe("mixed");
+    const refused = normalizeOpenCodeProbe(instanceId, { version: "1.18.0" }, providerList(), now, {
+      accepted: false,
+      exclusive: true,
+    });
+    expect(refused.capabilities.appManagedTools).toBe("unsupported");
+    expect(refused.capabilities.appManagedToolsAtFullAccess).toBeUndefined();
   });
 
   it("reports that a model reasons without offering a variant it cannot send", () => {

@@ -3593,7 +3593,11 @@ function observation(patch: Partial<ProviderObservedState> = {}): ProviderObserv
       ].map((key) => [key, "supported"]),
     ) as Omit<
       Awaited<ReturnType<ProviderClient["probe"]>>["capabilities"],
-      "sessionCompaction" | "nativeArtifacts" | "nativeSetup" | "reviewVerdicts"
+      | "sessionCompaction"
+      | "nativeArtifacts"
+      | "nativeSetup"
+      | "reviewVerdicts"
+      | "appManagedToolsAtFullAccess"
     >,
     observedAt: "2026-07-14T10:00:00.000Z" as never,
     ...patch,
@@ -3611,7 +3615,11 @@ function failureObservation(
       Object.keys(observation().capabilities).map((key) => [key, "unavailable"]),
     ) as Omit<
       ProviderObservedState["capabilities"],
-      "sessionCompaction" | "nativeArtifacts" | "nativeSetup" | "reviewVerdicts"
+      | "sessionCompaction"
+      | "nativeArtifacts"
+      | "nativeSetup"
+      | "reviewVerdicts"
+      | "appManagedToolsAtFullAccess"
     >,
     message: "Provider probe failed.",
   });

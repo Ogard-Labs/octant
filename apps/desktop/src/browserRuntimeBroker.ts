@@ -21,10 +21,13 @@ import {
   BrowserActionKind,
   BrowserAuditKind,
   BrowserColorScheme,
+  BrowserDialogAnswer,
   BrowserObservationPart,
   decodeBrowserWaitFor,
   decodeImportedCookie,
-  MAX_BROWSER_UPLOAD_FILES,
+  MAX_BROWSER_HELD_DOWNLOAD_LIMIT,
+  MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+  MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
   decodeStoredBrowserProfile,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_COOKIES_PER_IMPORT_BATCH,
@@ -677,6 +680,8 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "diagnosticsWarnings",
     "auditKind",
     "downloads",
+    "dialog",
+    "downloadLimits",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
@@ -695,11 +700,13 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     (value.files === undefined ||
       (Array.isArray(value.files) &&
         value.files.length >= 1 &&
-        value.files.length <= MAX_BROWSER_UPLOAD_FILES &&
+        value.files.length <= MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT &&
         value.files.every(
           (file) => typeof file === "string" && file.length <= 4096 && file.startsWith("/"),
         ))) &&
     (value.downloads === undefined || value.downloads === "hold") &&
+    (value.dialog === undefined || Schema.is(BrowserDialogAnswer)(value.dialog)) &&
+    (value.downloadLimits === undefined || isDownloadLimits(value.downloadLimits)) &&
     (value.waitFor === undefined || isWaitFor(value.waitFor)) &&
     (value.diagnosticsSince === undefined ||
       (Number.isSafeInteger(value.diagnosticsSince) && (value.diagnosticsSince as number) >= 0)) &&
@@ -796,4 +803,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function failure(error: string, status: number): Response {
   return Response.json({ error }, { status });
+}
+
+/** The person's download limits as the server sends them, inside what Settings allows. */
+function isDownloadLimits(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const { maxFileBytes, maxHeldDownloads, ...rest } = value as Record<string, unknown>;
+  return (
+    Object.keys(rest).length === 0 &&
+    typeof maxFileBytes === "number" &&
+    Number.isSafeInteger(maxFileBytes) &&
+    maxFileBytes >= 1 &&
+    maxFileBytes <= MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES * 1024 * 1024 &&
+    typeof maxHeldDownloads === "number" &&
+    Number.isSafeInteger(maxHeldDownloads) &&
+    maxHeldDownloads >= 1 &&
+    maxHeldDownloads <= MAX_BROWSER_HELD_DOWNLOAD_LIMIT
+  );
 }

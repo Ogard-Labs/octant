@@ -5,6 +5,8 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderKeyReference } from "./credentialBrokerClient";
 import type { ProviderKeyJournal } from "./providerKeyJournal";
 import { createProviderCredentialRouteHandler } from "./providerCredentialRoutes";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 
 const windowId = decodeWindowId("33333333-3333-4333-8333-333333333333");
 const capability = "A".repeat(43);
@@ -67,7 +69,12 @@ function setup(
     request: (request) => {
       if (input.journalFails === true) throw new Error("journal unavailable");
       const common = { instanceId: request.instanceId, action: request.action };
-      records.push({ name: "requested", ...common, windowId: request.windowId });
+      records.push({
+        name: "requested",
+        ...common,
+        windowId: request.windowId,
+        ...(request.actor === undefined ? {} : { actor: request.actor }),
+      });
       return {
         complete: (outcome) => records.push({ name: "completed", ...common, outcome }),
         fail: (reason) => records.push({ name: "failed", ...common, reason }),
@@ -734,5 +741,138 @@ describe("host-local provider key pool routes", () => {
       ),
     );
     expect(response?.status).toBe(401);
+  });
+});
+
+describe("provider key routes for a paired device", () => {
+  const deviceId = "73000000-0000-4000-8000-000000000060";
+  const DEVICE_SET = "/api/providers/credentials/set";
+
+  /** The request as the product dispatch hands it on: loopback-shaped, with the device bound. */
+  function fromDevice(
+    path: string,
+    body: unknown,
+    admittedBy?: "host-person" | "hub-roster",
+  ): Request {
+    const request = new Request(`http://127.0.0.1${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+      body: JSON.stringify(body),
+    });
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: deviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "73000000-0000-4000-8000-000000000061" as never,
+        ...(admittedBy === undefined ? {} : { admittedBy }),
+      }),
+      scopeId: deviceId as never,
+    });
+    return request;
+  }
+
+  it("stores and replaces a key from a device the host's own person paired, journaled as that device, and never answers with it", async () => {
+    const { handle, stored, records } = setup();
+    const first = await json(
+      await handle(
+        fromDevice(
+          DEVICE_SET,
+          { instance: GATEWAY_ID, credential: KEY, replace: false },
+          "host-person",
+        ),
+      ),
+    );
+    expect(first).toEqual({
+      status: 200,
+      body: { outcome: "stored", instanceId: GATEWAY_ID, displayName: "Private gateway" },
+    });
+    expect(stored.get(GATEWAY_ID)).toBe(KEY);
+
+    const replaced = await json(
+      await handle(
+        fromDevice(
+          DEVICE_SET,
+          { instance: GATEWAY_ID, credential: `${KEY}-next`, replace: true },
+          "host-person",
+        ),
+      ),
+    );
+    expect(replaced.status).toBe(200);
+    expect(stored.get(GATEWAY_ID)).toBe(`${KEY}-next`);
+
+    expect(records[0]).toEqual({
+      name: "requested",
+      instanceId: GATEWAY_ID,
+      action: "set",
+      windowId: deviceId,
+      actor: { kind: "remote-device", actorId: deviceId, deviceId },
+    });
+    expect(JSON.stringify([first.body, replaced.body, records])).not.toContain(KEY);
+  });
+
+  it("answers a person-paired device whether a key is stored and its pool's labels, never a key", async () => {
+    const { handle } = setup();
+    await handle(
+      fromDevice(
+        DEVICE_SET,
+        { instance: GATEWAY_ID, credential: KEY, replace: false },
+        "host-person",
+      ),
+    );
+    const status = await json(
+      await handle(
+        fromDevice("/api/providers/credentials/status", { instance: GATEWAY_ID }, "host-person"),
+      ),
+    );
+    const list = await json(
+      await handle(
+        fromDevice("/api/providers/credentials/keys/list", { instance: GATEWAY_ID }, "host-person"),
+      ),
+    );
+    expect(status.body).toMatchObject({ outcome: "stored" });
+    expect(list.status).toBe(200);
+    expect(JSON.stringify([status.body, list.body])).not.toContain(KEY);
+  });
+
+  it("refuses a key from a hub-introduced device, an unproved pairing, and a caller with no paired device", async () => {
+    const { handle, stored, records } = setup();
+    const body = { instance: GATEWAY_ID, credential: KEY, replace: false };
+    for (const request of [
+      fromDevice(DEVICE_SET, body, "hub-roster"),
+      fromDevice(DEVICE_SET, body),
+      // A browser on the host itself, and the host-local command on the device path.
+      new Request(`http://127.0.0.1${DEVICE_SET}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: JSON.stringify(body),
+      }),
+      hostLocal(DEVICE_SET, body),
+    ]) {
+      const refused = await json(await handle(request));
+      expect(refused.status).toBe(401);
+    }
+    expect(stored.size).toBe(0);
+    expect(records).toEqual([]);
+  });
+
+  it("keeps the desktop bridge's own routes, and removing a provider with its key, away from every device", async () => {
+    const { handle, stored, instances } = setup();
+    const body = { instance: GATEWAY_ID, credential: KEY, replace: false };
+    expect((await handle(fromDevice(SET, body, "host-person")))?.status).toBe(401);
+    expect(
+      await handle(
+        fromDevice(
+          "/api/providers/credentials/remove-provider",
+          { instance: GATEWAY_ID },
+          "host-person",
+        ),
+      ),
+    ).toBeUndefined();
+    expect(stored.size).toBe(0);
+    expect(instances).toHaveLength(1);
   });
 });

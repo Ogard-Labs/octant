@@ -2,9 +2,11 @@ import { createEditorDraftStore } from "../editor/editorDraftStore";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type {
   CodeReviewFindingReference,
+  CoordinatorBounds,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
+  CoordinatorWorkerLevel,
   SideChatDraftReturnReference,
 } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
@@ -118,8 +120,10 @@ import {
   findCodeThread,
   pinCodeThread,
   renameCodeThread,
+  markCodeThreadDone,
   reopenCodeThread,
   setCodeThreadCoordinator,
+  setCodeThreadCoordinatorBounds,
   setCodeThreadCoordinatorWake,
   setCodeThreadMessageWake,
   setCodeThreadRestartContinuation,
@@ -192,6 +196,8 @@ export interface CodeThreadNavigationItem {
   readonly completedAt?: NonNullable<CodeThread["completedAt"]>;
   /** The host's record of the thread's snooze; absent while it is awake. */
   readonly snooze?: NonNullable<CodeThread["snooze"]>;
+  /** A person marked the thread Done as their own override. */
+  readonly markedDone?: true;
   /**
    * The visible thread this one was forked from. Absent when the thread
    * started on its own.
@@ -2079,6 +2085,7 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(thread.pinned === true ? { pinned: true } : {}),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+            ...(thread.markedDoneAt === undefined ? {} : { markedDone: true as const }),
             ...(thread.forkedFrom === undefined
               ? {}
               : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
@@ -2534,6 +2541,10 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, reopenCodeThread),
     [restCommand],
   );
+  const markThreadDone = useCallback(
+    (threadId: CodeThreadId) => restCommand(threadId, markCodeThreadDone),
+    [restCommand],
+  );
   const snoozeThread = useCallback(
     (threadId: CodeThreadId, until: string) =>
       restCommand(threadId, (thread) => snoozeCodeThread(thread, decodeUtcTimestamp(until))),
@@ -2552,8 +2563,15 @@ export function useCodeController(options: CodeControllerOptions) {
   // local window; the host refuses the rest (a worker, a fifth coordinator)
   // and the refusal comes back in its words, like a rest command's.
   const setThreadCoordinator = useCallback(
-    (threadId: CodeThreadId, coordinator: boolean) =>
-      restCommand(threadId, (thread) => setCodeThreadCoordinator(thread, coordinator)),
+    (threadId: CodeThreadId, coordinator: boolean, workerLevel?: CoordinatorWorkerLevel) =>
+      restCommand(threadId, (thread) =>
+        setCodeThreadCoordinator(thread, coordinator, coordinator ? workerLevel : undefined),
+      ),
+    [restCommand],
+  );
+  const setThreadCoordinatorBounds = useCallback(
+    (threadId: CodeThreadId, bounds: CoordinatorBounds) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinatorBounds(thread, bounds)),
     [restCommand],
   );
   const setThreadMessageWake = useCallback(
@@ -2677,6 +2695,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly requireGitRepository?: boolean;
       readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
       readonly bundledLanguageServer?: boolean;
+      readonly androidEmulatorSnapshotBoot?: boolean;
       readonly defaultAutoApprove?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly shieldModel?: ShieldModelChoice | null;
@@ -3264,6 +3283,7 @@ export function useCodeController(options: CodeControllerOptions) {
     archiveThread,
     completeThread,
     reopenThread,
+    markThreadDone,
     snoozeThread,
     wakeThread,
     moveThread,
@@ -3297,6 +3317,7 @@ export function useCodeController(options: CodeControllerOptions) {
     purgeThreadDraft: composerDraft.purge,
     pinThread,
     setThreadCoordinator,
+    setThreadCoordinatorBounds,
     setThreadCoordinatorWake,
     setThreadMessageWake,
     setThreadRestartContinuation,

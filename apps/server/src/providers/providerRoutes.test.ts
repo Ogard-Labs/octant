@@ -39,7 +39,10 @@ describe("ProviderRoutes", () => {
       }),
     );
     expect(response?.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith(windowId, command);
+    expect(execute).toHaveBeenCalledWith(windowId, command, {
+      kind: "local-user",
+      actorId: "00000000-0000-4000-8000-000000000002",
+    });
     expect(JSON.stringify(await response?.json())).not.toMatch(/password|token|serverUrl/i);
 
     const forged = await route(
@@ -126,47 +129,50 @@ describe("ProviderRoutes", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a paired device letting a provider run as itself before the service runs", async () => {
-    const execute = vi.fn(() => ({ kind: "provider-updated", instance: provider() }));
-    const route = routeFixture({ execute });
-    const body = JSON.stringify({
-      kind: "set-provider-native-setup",
-      instanceId,
-      expectedVersion: 1,
-      enabled: true,
-    });
-    const remote = new Request("http://127.0.0.1/api/providers/commands", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body,
-    });
-    const pairedDeviceId = "80000000-0000-4000-8000-000000000042";
-    bindPrincipalRouteContext(remote, {
-      principal: {
-        kind: "remote-device",
-        hostId: "local",
-        deviceId: pairedDeviceId,
-        credentialGeneration: 1,
-        origin: "https://remote.example",
-        protocolVersion: 1,
-        capabilityDigest: "a".repeat(64),
-        sessionId: "80000000-0000-4000-8000-000000000043",
-      } as never,
-      scopeId: pairedDeviceId as never,
-    });
-    expect((await route(remote))?.status).toBe(401);
-    expect(execute).not.toHaveBeenCalled();
-
-    const local = await route(
-      new Request("http://127.0.0.1/api/providers/commands", {
+  it.each(["set-provider-native-setup", "set-provider-own-memory"] as const)(
+    "refuses a paired device sending %s before the service runs",
+    async (kind) => {
+      const execute = vi.fn(() => ({ kind: "provider-updated", instance: provider() }));
+      const route = routeFixture({ execute });
+      const body = JSON.stringify({
+        kind,
+        instanceId,
+        expectedVersion: 1,
+        enabled: true,
+      });
+      const remote = new Request("http://127.0.0.1/api/providers/commands", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        headers: { "content-type": "application/json" },
         body,
-      }),
-    );
-    expect(local?.status).toBe(200);
-    expect(execute).toHaveBeenCalledTimes(1);
-  });
+      });
+      const pairedDeviceId = "80000000-0000-4000-8000-000000000042";
+      bindPrincipalRouteContext(remote, {
+        principal: {
+          kind: "remote-device",
+          hostId: "local",
+          deviceId: pairedDeviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "80000000-0000-4000-8000-000000000043",
+        } as never,
+        scopeId: pairedDeviceId as never,
+      });
+      expect((await route(remote))?.status).toBe(401);
+      expect(execute).not.toHaveBeenCalled();
+
+      const local = await route(
+        new Request("http://127.0.0.1/api/providers/commands", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+          body,
+        }),
+      );
+      expect(local?.status).toBe(200);
+      expect(execute).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("lets a local window set a thread's native setup, refuses a paired device, and refuses a thread whose provider cannot", async () => {
     const threadId = "80000000-0000-4000-8000-000000000050";

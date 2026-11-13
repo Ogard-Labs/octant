@@ -1,5 +1,14 @@
-import { decodeThreadWorkingDirectory, type ThreadWorkingFolderChoice } from "@octant/contracts";
+import {
+  decodeThreadWorkingDirectory,
+  type CoordinatorBounds,
+  type CoordinatorWorkerLevel,
+  type ThreadWorkingFolderChoice,
+} from "@octant/contracts";
 import { ApprovedWorkingFolderControl } from "../environment/ApprovedWorkingFolderControl";
+import {
+  COORDINATOR_BOUND_FIELDS,
+  COORDINATOR_WORKER_LEVELS,
+} from "../projects/coordinatorChoices";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import type { AutoReview } from "../code/autoReview";
@@ -100,7 +109,9 @@ import {
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -158,7 +169,7 @@ export interface DraftThreadWorkspaceProps {
    * Present while this Code draft was opened with New coordinator. It applies
    * only while that Project stays selected.
    */
-  readonly coordinator?: { readonly projectId: ProjectId; readonly onCancel: () => void };
+  readonly coordinator?: CoordinatorDraft;
   readonly approvalLabel?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedHostId?: HostId;
@@ -894,7 +905,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(props.coordinator === undefined ||
         String(props.coordinator.projectId) !== String(selectedProjectId)
           ? {}
-          : { heading: <CoordinatorDraftHeading onCancel={props.coordinator.onCancel} /> })}
+          : { heading: <CoordinatorDraftHeading coordinator={props.coordinator} /> })}
         newThreadWorkspace={newThreadWorkspace}
         {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
         defaultPermissionMode={props.defaultPermissionMode ?? "ask-first"}
@@ -1588,19 +1599,76 @@ function CreateFromIssueControl(props: {
  * (docs/design/coordinator-threads.md), and the way back to an ordinary
  * thread stays one click away.
  */
-function CoordinatorDraftHeading(props: { readonly onCancel: () => void }) {
+function CoordinatorDraftHeading(props: { readonly coordinator: CoordinatorDraft }) {
+  const { onCancel, onChoicesChange } = props.coordinator;
+  const choices = props.coordinator.choices ?? {};
   return (
     <>
       <Network aria-hidden="true" className="welcome__mark" size={20} />
       <h1 className="oct-title oct-title--hero welcome__question">New coordinator</h1>
       <p className="oct-row-detail welcome__status">
         Describe the line of work. This thread reads the Project and starts worker threads for it.{" "}
-        <OctantButton onClick={props.onCancel} type="button" variant="link">
+        <OctantButton onClick={onCancel} type="button" variant="link">
           Start an ordinary thread instead
         </OctantButton>
       </p>
+      {onChoicesChange === undefined ? null : (
+        <div className="draft-thread__context-strip">
+          <OctantSelectField
+            aria-label="Workers start at"
+            onValueChange={(value) => {
+              const { workerLevel: _previous, ...rest } = choices;
+              const level = COORDINATOR_WORKER_LEVELS.find((entry) => entry.id === value)?.level;
+              onChoicesChange(level === undefined ? rest : { ...rest, workerLevel: level });
+            }}
+            options={COORDINATOR_WORKER_LEVELS}
+            value={choices.workerLevel ?? ""}
+          />
+          {COORDINATOR_BOUND_FIELDS.map((field) => (
+            <OctantInput
+              aria-label={field.label}
+              key={field.bound}
+              max={field.max}
+              min={1}
+              onChange={(event) => {
+                const { [field.bound]: _previous, ...rest } = choices.bounds ?? {};
+                const value = Number(event.currentTarget.value);
+                // A cleared or out-of-range field returns that bound to its default.
+                const bounds =
+                  Number.isInteger(value) && value >= 1 && value <= field.max
+                    ? { ...rest, [field.bound]: value }
+                    : rest;
+                const { bounds: _bounds, ...others } = choices;
+                onChoicesChange(Object.keys(bounds).length === 0 ? others : { ...others, bounds });
+              }}
+              placeholder={`${field.label}: ${String(field.default)}`}
+              title={field.label}
+              type="number"
+              value={choices.bounds?.[field.bound] ?? ""}
+            />
+          ))}
+        </div>
+      )}
     </>
   );
+}
+
+/**
+ * What a person may set while creating a coordinator: the level fixed for
+ * its workers, which the host accepts only while the thread is made a
+ * coordinator, and its wake, round and start bounds.
+ */
+export interface CoordinatorDraftChoices {
+  readonly workerLevel?: CoordinatorWorkerLevel;
+  readonly bounds?: CoordinatorBounds;
+}
+
+/** A draft opened with New coordinator: its Project and the way back to an ordinary thread. */
+export interface CoordinatorDraft {
+  readonly projectId: ProjectId;
+  readonly onCancel: () => void;
+  readonly choices?: CoordinatorDraftChoices;
+  readonly onChoicesChange?: (choices: CoordinatorDraftChoices) => void;
 }
 
 /** Compact context strip showing Project, environment, provider/model, and permission state. */

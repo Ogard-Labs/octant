@@ -32,16 +32,15 @@ read-only gate is a maintainer live check.
   that is one from the start, or with **Make coordinator** in an existing
   thread's header or row menu. **Stop coordinating** in the same menus makes it
   an ordinary thread again. Only a person does any of this, from a local window
-  on the host or a paired device (maintainer decision, 2026-11-12; not built
-  yet: today a paired device cannot); an agent, a routine, or a peer cannot. The
-  role
+  on the host or a device the host's own person paired (maintainer decision, 2026-11-12); an agent, a routine, or a peer cannot. The role
   is a field on the thread's own record: each change is journaled as
   `code.thread-updated@1` under the thread's expected version (commands
-  `set-code-thread-coordinator`, `set-code-thread-message-wake`, and
-  `set-code-thread-coordinator-wake`), a stale version is refused, and the
-  Code commands route today refuses all three from anything but a local window.
-  A
-  new thread's creation command may not carry the role, lineage, or switches.
+  `set-code-thread-coordinator`, `set-code-thread-coordinator-bounds`,
+  `set-code-thread-message-wake`, and `set-code-thread-coordinator-wake`), a
+  stale version is refused, and the Code commands route refuses all four from
+  anything but a local window or a device the host's own person paired. A new
+  thread's creation command may not carry the role, lineage, switches, bounds,
+  or workers' level.
 - **Several per Project.** A Code Project may have up to four coordinators at
   once, for separate lines of work (one for the backlog, one for a dependency
   audit). Each coordinator has its own workers.
@@ -58,10 +57,13 @@ read-only gate is a maintainer live check.
   since the board leaves coordinators out, that read no longer lists the
   planner's own card.
 - **Code only.** A Work thread may message a sibling (maintainer request,
-  2026-11-12). Not built yet: today Work threads neither send nor receive
-  messages, because only Code turns carry them, so a Work coordinator could
-  start workers but never follow up with them. Work coordinators wait until a
-  Work turn carries a message.
+  2026-11-12), a Work turn carries the messages left for it, and a message
+  wakes an idle Work thread whose **Wake when a message arrives** switch is
+  on, under the same bounds as Code (maintainer decision, 2026-11-13;
+  [Architecture: modes](../architecture.md#modes-chat-work-and-code)). That
+  removes what kept a Work coordinator from hearing back while idle. The
+  role itself (`start`, the roster, the read-only gate, state notices) is
+  still Code's: Work coordinators are not built.
 
 Rationale: a role on an existing thread, rather than a fourth thread kind, keeps
 the mode's authority and the thread's posture exactly as they were, which
@@ -136,9 +138,16 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   maintainer request, 2026-11-12). With no fixed level, the worker's guardrail
   level is the one named, or the coordinator's level when none is named, and
   never higher than the coordinator's, and a worker started by a marked
-  coordinator never starts at Full access. Not built yet: today no level can
-  be fixed, so the unfixed rule always applies. After creation the worker's level is the person's to change, as on any
-  thread.
+  coordinator never starts at Full access. The person picks the fixed level
+  in the New coordinator draft (**Workers start at**); the host accepts it
+  only on the command that makes the thread a coordinator, journals it on the
+  thread (`coordinatorWorkerLevel`), refuses a later change to it, and drops
+  it at **Stop coordinating**. With a fixed level a level named in the call
+  is not read, and a proposal carries the fixed level. **Make coordinator**
+  offers the same choice in a submenu (this thread's level or lower, or
+  always one named level), sent on the same command (maintainer decision,
+  2026-11-13). After creation
+  the worker's level is the person's to change, as on any thread.
 - **Lineage.** A worker belongs to the coordinator that started it. The host
   records that on the worker at creation and never changes it. When the
   coordinator stops coordinating, is archived, or is deleted, its workers stay
@@ -165,9 +174,7 @@ restrict that can do it for the whole host or for one Project.
 - A Code Project's overview has the same choice with a third value, **Use
   Settings**, which is that Project's default. A Project choice wins over
   Settings.
-- Only a person changes either, from a local window on the host or a paired
-  device (maintainer decision, 2026-11-12; not built yet: today a paired device
-  cannot); an agent, a routine, or a peer cannot. Each change is journaled with
+- Only a person changes either, from a local window on the host or a device the host's own person paired (maintainer decision, 2026-11-12); an agent, a routine, or a peer cannot. Each change is journaled with
   its
   principal. The host reads the setting at every `start` call, so a change
   applies to the next call, a running turn included.
@@ -185,10 +192,7 @@ restrict that can do it for the whole host or for one Project.
   on the requested provider and model when the window can select them, starts
   its mode at the requested level, and offers no mode above it. A paired browser
   or phone reviews and answers the same proposals as a window does (maintainer
-  decision, 2026-11-12). Not built yet: today it shows them read-only (title,
-  intent, requested level) with "Approve at a window on this computer", through
-  the planner read the remote session already has, and the proposal routes
-  refuse every caller but a local window.
+  decision, 2026-11-12). Built on the server: the proposal routes take an answer from a local window or a device the host's own person paired. Not built yet: a paired browser or phone still shows them read-only (title, intent, requested level) with "Approve at a window on this computer", through the planner read the remote session already has.
 
 Rationale: the person who enables a coordinator asked for work to happen without
 a click per thread, and a worker can do nothing a person could not have started
@@ -204,9 +208,20 @@ approval flow with one switch.
   Done, put away, archived, nor deleted) by default. A person sets this from 1 to
   16 in Settings › Code › Coordinators; an agent cannot.
 - **Starts per hour.** At most 60 `start` calls per coordinator in any hour by
-  default, admitted or proposed. A person sets the bound per coordinator; an
-  agent cannot (maintainer request, 2026-11-12). Not built yet: today the bound
-  is a constant twelve. The host records each call in its own store, beside the
+  default, admitted or proposed. A person sets the bound per coordinator, from
+  1 to 600; an agent cannot (maintainer request, 2026-11-12). It is one of the
+  coordinator's three bounds, with the wakes per hour and the rounds in
+  [Talking to workers](#talking-to-workers): the command
+  `set-code-thread-coordinator-bounds` replaces all three, a bound left out
+  returns to its default, and they are journaled on the coordinator's own
+  record (`coordinatorBounds`) and dropped at **Stop coordinating**. A
+  coordinator journaled before the bounds existed has none stored and takes the
+  defaults. The New coordinator draft sets them, and **Coordinator limits…**
+  in a coordinator's row menu and pane header menu opens the three numbers
+  for a running coordinator and saves them with that command (maintainer
+  decision, 2026-11-13); a bound left at its default is not sent. The
+  designated planner holds no bounds of its own and is not offered the item.
+  The host records each call in its own store, beside the
   wake turns and each thread's latest host turn with its hop, so the count holds
   across a restart; it never reads fewer than the workers the coordinator's
   lineage shows created in that hour, so starts made before the record existed
@@ -251,15 +266,12 @@ capped ([Starting workers](#starting-workers)).
   wakes the worker only when its switch is on. A person can stop a worker from
   waking for its coordinator with **Wake for coordinator** in the worker's
   row menu or pane header menu, journaled with its principal.
-- **From a paired device.** Any paired device sets these switches as a local
-  window does (maintainer decision, 2026-11-12). Not built yet: today only an
-  owner device may set **Wake when a message
+- **From a paired device.** A device the host's own person paired sets these switches as a local window does (maintainer decision, 2026-11-12; built on the server). A device the host knows only through the hub's roster sets them only as an owner device, which may set **Wake when a message
   arrives** and **Wake for coordinator** (never the coordinator role) through
   the owner routes `code-threads/wake/read` and `code-threads/wake/change`. Each
   change needs its own fresh unlock, is checked against a digest of the current
   thread and Project, and is journaled as the owner device; refusals are
-  `not-found`, `not-a-worker`, `wake-stale`, and `refused`. Today a plain paired
-  device cannot set them, and an agent never can. The owner access recovery
+  `not-found`, `not-a-worker`, `wake-stale`, and `refused`. A roster member that is not an owner device cannot set them, and an agent never can. The owner access recovery
   screen
   on the phone and in a browser's owner section shows them for a chosen Code
   thread: **Read wake switches** (covered by an open administration session),
@@ -280,8 +292,11 @@ capped ([Starting workers](#starting-workers)).
   thread, an hourly count per thread, and the hop count. The hourly count and
   the rounds are settings a person changes per coordinator, with defaults of
   30 wakes per thread in any hour and 10 rounds; an agent cannot change them
-  (maintainer request, 2026-11-12). Not built yet: today they are constants,
-  six wakes and three rounds. A state notice
+  (maintainer request, 2026-11-12). A person sets the wakes from 1 to 600 and
+  the rounds from 1 to 100 ([Bounds](#bounds)). A coordinator's bounds apply
+  to its own wakes and to its workers' while it holds the role; every other
+  thread, a worker whose coordinator stopped included, takes the defaults. A
+  state notice
   takes the hop count of the worker turn that caused it, so a coordinator and a
   worker answering each other stop waking each other after the round bound and
   continue when a person runs a turn on either. The wake turns and hops are

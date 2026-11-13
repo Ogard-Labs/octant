@@ -72,6 +72,7 @@ describe("Code language reads offered to agents", () => {
     // The Settings switch removes the bundled server from the effective set.
     expect(service([]).servesAgentsIn([typed])).toBe(false);
     // An agent's read never starts or reads through a `repo-tooling` server.
+    // A `repo-tooling` server counts only once it runs, and none does here.
     expect(service([server(["python"], "repo-tooling")]).servesAgentsIn([python])).toBe(false);
     expect(service([typescript], "windows").servesAgentsIn([typed])).toBe(false);
   });

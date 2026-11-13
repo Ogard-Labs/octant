@@ -87,11 +87,20 @@ export function ExtensionToolApprovalPrompt(props: {
   }, [client, pendingPackageId]);
 
   if (pending === undefined || client === undefined) return null;
-  // Remembering an answer is a local window's authority; the host refuses it
-  // from a paired device, so it is not offered there at all.
-  const canRemember = pending.rememberable && client.toolGrantsAvailable;
+  // The host says what approving lets run afterwards. A server is asked about
+  // once, so approving there covers all its tools; a marked thread's network
+  // server is asked about once more, for that thread.
+  const covers = pending.answerCovers ?? "call";
+  // Narrowing the answer to one tool is recorded as a grant, which the host
+  // takes from a local window and a device its own person paired, so it is
+  // not offered to any other session.
+  const canNarrow = covers === "server" && client.toolGrantsAvailable;
+  // A thread outside a Project has no Project to remember in: the host keeps
+  // its answer for the account, where only such threads use it.
+  const where =
+    pending.projectId !== undefined ? "in this Project" : "in Chat threads outside a Project";
 
-  async function decide(decision: "approved" | "denied", remember?: true) {
+  async function decide(decision: "approved" | "denied", remember?: "tool") {
     if (pending === undefined || client === undefined || busy) return;
     setBusy(true);
     setMessage(undefined);
@@ -99,7 +108,7 @@ export function ExtensionToolApprovalPrompt(props: {
       await client.decideToolApproval({
         approvalId: pending.approvalId,
         decision,
-        ...(remember === undefined ? {} : { remember }),
+        ...(remember === undefined ? {} : { remember: true }),
       });
       setApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pending.approvalId),
@@ -124,17 +133,21 @@ export function ExtensionToolApprovalPrompt(props: {
             size="sm"
             type="button"
           >
-            Approve once
+            {covers === "server"
+              ? "Allow all tools of this server"
+              : covers === "server-on-thread"
+                ? "Allow this server in this thread"
+                : "Approve once"}
           </OctantButton>
-          {canRemember ? (
+          {canNarrow ? (
             <OctantButton
               disabled={busy}
-              onClick={() => void decide("approved", true)}
+              onClick={() => void decide("approved", "tool")}
               size="sm"
               type="button"
               variant="secondary"
             >
-              Always allow in this Project
+              Allow only this tool
             </OctantButton>
           ) : null}
           <OctantButton
@@ -155,9 +168,11 @@ export function ExtensionToolApprovalPrompt(props: {
         )
       }
       detail={
-        canRemember
-          ? `${server} Always allow means Octant will run this tool in this Project without asking.`
-          : server
+        covers === "server"
+          ? `${server} Octant asks about a server once: allowing lets every tool of this server run ${where} without asking, until an update comes from a different publisher or source, asks for more, or is rolled back.`
+          : covers === "server-on-thread"
+            ? `${server} This thread has read outside content, and this server can send what the thread has read over the network. Allowing lets its tools run for the rest of this thread without asking.`
+            : server
       }
       error={message}
       label="Extension tool approval"

@@ -1,5 +1,9 @@
 import type { PendingRequestClient } from "@octant/client-runtime/pending-request-client";
-import type { PendingRequest, PendingRequestList } from "@octant/contracts/pending-requests";
+import type {
+  PendingRequest,
+  PendingRequestList,
+  WaitingAsk,
+} from "@octant/contracts/pending-requests";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -8,7 +12,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * this window can answer for). Each is only compared, never read.
  */
 export interface PendingRequestFreshness {
-  /** Bumps on the Machine change feed's Chat, Work, and Code navigation topics. */
+  /**
+   * Bumps on the Machine change feed's Chat, Work, and Code navigation topics,
+   * and on its tool-approvals topic, which every ask a host service holds
+   * moves when it starts or stops waiting.
+   */
   readonly feedRevision: number;
   readonly settings: unknown;
   readonly workspace: unknown;
@@ -19,6 +27,8 @@ export type PendingRequestRead =
   | {
       readonly status: "ready";
       readonly requests: ReadonlyArray<PendingRequest>;
+      /** Every other waiting ask; empty from a host that lists none. */
+      readonly asks: ReadonlyArray<WaitingAsk>;
       /** Counts completed reads, so a caller can tell a fresh answer from the last one. */
       readonly read: number;
     };
@@ -56,6 +66,7 @@ export function usePendingRequests(
       setRead((current) => ({
         status: "ready",
         requests: list.requests,
+        asks: list.asks ?? [],
         read: current.status === "ready" ? current.read + 1 : 1,
       })),
     );

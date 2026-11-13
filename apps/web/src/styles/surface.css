@@ -242,9 +242,12 @@
   display: flex;
   /* Actions wrap to their own row before the title shrinks to a word. */
   flex: 1 1 160px;
+  /* The line of state drops under the title rather than losing its end: at
+     420px the Inbox read "2 threads are waiting o…" beside its title. */
+  flex-wrap: wrap;
   min-width: 0;
   align-items: baseline;
-  gap: var(--oct-space-2);
+  gap: 0 var(--oct-space-2);
 }
 
 /* A display header opens a page as a place: the title keeps its own size and

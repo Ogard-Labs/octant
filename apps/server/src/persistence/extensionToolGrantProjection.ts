@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { EventEnvelope } from "@octant/contracts/events";
 import {
+  EXTENSION_TOOL_GRANT_ACCOUNT_AGGREGATE_ID,
   EXTENSION_TOOL_GRANT_AGGREGATE,
   EXTENSION_TOOL_GRANT_EVENT_NAMES,
   decodeExtensionToolGrantRecorded,
@@ -13,13 +14,24 @@ import type { SqliteConnection } from "./sqlitePort";
 
 export const EXTENSION_TOOL_GRANT_PROJECTION = "extension-tool-grants";
 
-/** One MCP tool in one Project: what a grant is for, whatever version it binds. */
+/**
+ * What a grant is for, whatever version it binds: one MCP tool, or every tool
+ * of one server when `mcpToolName` is absent, in one Project, or for the
+ * account when `projectId` is absent. With `threadId` it is the answer for
+ * one server on one thread that had taken in outside content.
+ */
 export interface ExtensionToolGrantSubject {
-  readonly projectId: string;
+  readonly projectId?: string | undefined;
+  readonly threadId?: string | undefined;
   readonly extensionId: string;
   readonly packageId: string;
   readonly componentId: string;
-  readonly mcpToolName: string;
+  readonly mcpToolName?: string | undefined;
+}
+
+/** The aggregate a grant is journaled on: its Project's, or the account's. */
+export function extensionToolGrantAggregateId(projectId: string | undefined): string {
+  return projectId ?? EXTENSION_TOOL_GRANT_ACCOUNT_AGGREGATE_ID;
 }
 
 export interface ProjectedExtensionToolGrant extends ExtensionToolGrant {
@@ -30,14 +42,15 @@ export interface ProjectedExtensionToolGrant extends ExtensionToolGrant {
 
 interface GrantRow {
   readonly grant_id: string;
-  readonly project_id: string;
+  readonly project_id: string | null;
+  readonly thread_id: string | null;
   readonly extension_id: string;
   readonly package_id: string;
   readonly component_id: string;
-  readonly mcp_tool_name: string;
+  readonly mcp_tool_name: string | null;
   readonly package_version: string;
   readonly package_digest: string;
-  readonly definition_digest: string;
+  readonly definition_digest: string | null;
   readonly revocation_reason: ExtensionToolGrantRevocationReason | null;
   readonly granted_at: string;
   readonly last_sequence: number;
@@ -46,15 +59,20 @@ interface GrantRow {
 /**
  * The same tool in the same Project always has the same grant id, so a second
  * answer replaces the first row instead of standing beside it, and replaying
- * the journal twice cannot grow the table.
+ * the journal twice cannot grow the table. An absent Project or tool is
+ * written as null, which no id or tool name can equal, so a grant for the
+ * account or for a whole server has an id of its own. A thread is added
+ * only when the answer is for one, so every id journaled before a thread
+ * could be named stays the id of the same grant.
  */
 export function extensionToolGrantId(subject: ExtensionToolGrantSubject): string {
   const identity = JSON.stringify([
-    subject.projectId,
+    subject.projectId ?? null,
     subject.extensionId,
     subject.packageId,
     subject.componentId,
-    subject.mcpToolName,
+    subject.mcpToolName ?? null,
+    ...(subject.threadId === undefined ? [] : [subject.threadId]),
   ]);
   return `sha256:${createHash("sha256").update(identity).digest("hex")}`;
 }
@@ -79,7 +97,7 @@ export class ExtensionToolGrantProjection implements Projection {
     if (event.eventName === EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded) {
       const grant = decodeExtensionToolGrantRecorded(event.payload);
       if (
-        String(grant.projectId) !== String(event.aggregateId) ||
+        extensionToolGrantAggregateId(grant.projectId) !== String(event.aggregateId) ||
         grant.grantId !== extensionToolGrantId(grant)
       ) {
         throw new Error("Extension tool grant does not match its Project and tool.");
@@ -87,10 +105,10 @@ export class ExtensionToolGrantProjection implements Projection {
       connection
         .prepare(
           `INSERT INTO extension_tool_grant_projection (
-            grant_id, project_id, extension_id, package_id, component_id, mcp_tool_name,
-            package_version, package_digest, definition_digest, revocation_reason, granted_at,
-            aggregate_version, last_sequence
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+            grant_id, project_id, thread_id, extension_id, package_id, component_id,
+            mcp_tool_name, package_version, package_digest, definition_digest,
+            revocation_reason, granted_at, aggregate_version, last_sequence
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
           ON CONFLICT (grant_id) DO UPDATE SET
             package_version = excluded.package_version,
             package_digest = excluded.package_digest,
@@ -103,14 +121,15 @@ export class ExtensionToolGrantProjection implements Projection {
         )
         .run(
           grant.grantId,
-          String(grant.projectId),
+          grant.projectId ?? null,
+          grant.threadId ?? null,
           String(grant.extensionId),
           String(grant.packageId),
           String(grant.componentId),
-          grant.mcpToolName,
+          grant.mcpToolName ?? null,
           grant.version,
           grant.digest,
-          grant.definitionDigest,
+          grant.definitionDigest ?? null,
           event.occurredAt,
           event.aggregateVersion,
           event.globalSequence,
@@ -119,28 +138,28 @@ export class ExtensionToolGrantProjection implements Projection {
     }
     if (event.eventName === EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked) {
       const revoked = decodeExtensionToolGrantRevoked(event.payload);
-      if (String(revoked.projectId) !== String(event.aggregateId)) {
+      if (extensionToolGrantAggregateId(revoked.projectId) !== String(event.aggregateId)) {
         throw new Error("Extension tool grant revocation does not match its Project.");
       }
       connection
         .prepare(
           `UPDATE extension_tool_grant_projection
            SET revocation_reason = ?, aggregate_version = ?, last_sequence = ?
-           WHERE grant_id = ? AND project_id = ? AND aggregate_version < ?`,
+           WHERE grant_id = ? AND project_id IS ? AND aggregate_version < ?`,
         )
         .run(
           revoked.reason,
           event.aggregateVersion,
           event.globalSequence,
           revoked.grantId,
-          String(revoked.projectId),
+          revoked.projectId ?? null,
           event.aggregateVersion,
         );
     }
   }
 }
 
-const GRANT_COLUMNS = `grant_id, project_id, extension_id, package_id, component_id,
+const GRANT_COLUMNS = `grant_id, project_id, thread_id, extension_id, package_id, component_id,
   mcp_tool_name, package_version, package_digest, definition_digest, revocation_reason,
   granted_at, last_sequence`;
 
@@ -183,14 +202,15 @@ function projectGrant(row: GrantRow): ProjectedExtensionToolGrant {
   return {
     ...decodeExtensionToolGrant({
       grantId: row.grant_id,
-      projectId: row.project_id,
+      ...(row.project_id === null ? {} : { projectId: row.project_id }),
+      ...(row.thread_id === null ? {} : { threadId: row.thread_id }),
       extensionId: row.extension_id,
       packageId: row.package_id,
       componentId: row.component_id,
-      mcpToolName: row.mcp_tool_name,
+      ...(row.mcp_tool_name === null ? {} : { mcpToolName: row.mcp_tool_name }),
       version: row.package_version,
       digest: row.package_digest,
-      definitionDigest: row.definition_digest,
+      ...(row.definition_digest === null ? {} : { definitionDigest: row.definition_digest }),
       grantedAt: row.granted_at,
     }),
     revocationReason: row.revocation_reason ?? undefined,

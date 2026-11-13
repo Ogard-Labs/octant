@@ -2,12 +2,12 @@ import {
   decodeWorkTurnStreamFrame,
   type ContextCompactionSettledRecord,
   type ThreadTaskProgressList,
+  type ThreadToolStep,
   type WorkThreadId,
   type WorkTurnRequestId,
   type WorkTurnState,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
-import type { ThreadToolSteps } from "@octant/domain";
 
 interface ThreadFrames {
   nextSequence: number;
@@ -134,23 +134,27 @@ export class WorkTurnLiveStore {
     );
   }
 
-  /** Publishes the turn's tool calls whole, so a late subscriber reads current state. */
-  appendToolSteps(
+  /**
+   * Publishes the one tool step that changed, or that the turn's list became
+   * truncated. A subscriber that joins late, or falls behind the feed, reads
+   * the whole list from the transcript snapshot it is sent back to.
+   */
+  appendToolStep(
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
-    toolSteps: ThreadToolSteps,
+    change: { readonly step?: ThreadToolStep; readonly truncated: boolean },
   ): void {
-    if (this.#closed || toolSteps.steps.length === 0) return;
+    if (this.#closed) return;
     const state = this.#state(threadId);
     this.#publish(
       threadId,
       decodeWorkTurnStreamFrame({
-        kind: "turn-tools",
+        kind: "turn-tool-step",
         sequence: state.nextSequence,
         threadId,
         requestId,
-        toolSteps: toolSteps.steps,
-        toolStepsTruncated: toolSteps.truncated,
+        ...(change.step === undefined ? {} : { toolStep: change.step }),
+        toolStepsTruncated: change.truncated,
       }),
     );
   }

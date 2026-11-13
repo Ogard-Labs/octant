@@ -12,6 +12,13 @@ import { pluginNameIn, serverNameIn, UNNAMED_PLUGIN } from "./toolGrantLabels";
 
 /** A Project that is no longer in the list still holds grants until they are revoked. */
 const UNKNOWN_PROJECT = "A Project that is no longer listed";
+/** Approvals remembered for the account, which only threads outside a Project use. */
+const ACCOUNT_GROUP = "Chat outside a Project";
+
+/** What a row calls its grant: the tool, or every tool of the server. */
+function grantLabel(grant: ExtensionToolGrant, server: string | undefined): string {
+  return grant.mcpToolName ?? `All tools of ${server ?? "one server"}`;
+}
 
 type Loaded =
   | { readonly kind: "loading" }
@@ -19,9 +26,9 @@ type Loaded =
   | { readonly kind: "ready"; readonly grants: ReadonlyArray<ExtensionToolGrant> };
 
 /**
- * MCP tools a person chose to always allow in a Project, from the "Always
- * allow in this Project" answer on a tool request. Revoking one makes the
- * next call of that tool ask again. Remembering is a local window's authority,
+ * MCP tools and whole servers a person chose to always allow, in a Project
+ * or for the account, from an "always allow" answer on a tool request.
+ * Revoking one makes the next call it covered ask again. Remembering is a local window's authority,
  * so a client that is not one draws nothing.
  */
 export function RememberedToolApprovalsPanel(props: {
@@ -63,23 +70,27 @@ export function RememberedToolApprovalsPanel(props: {
 
   const byProject = useMemo(() => {
     if (loaded.kind !== "ready") return [];
-    const groups = new Map<string, Array<ExtensionToolGrant>>();
+    const groups = new Map<string | undefined, Array<ExtensionToolGrant>>();
     for (const grant of loaded.grants) {
-      const key = String(grant.projectId);
+      const key = grant.projectId === undefined ? undefined : String(grant.projectId);
       groups.set(key, [...(groups.get(key) ?? []), grant]);
     }
     return [...groups.entries()]
       .map(([projectId, rows]) => ({
         projectId,
-        name: props.projectNames.get(projectId) ?? UNKNOWN_PROJECT,
-        rows: [...rows].sort((a, b) => a.mcpToolName.localeCompare(b.mcpToolName)),
+        name:
+          projectId === undefined
+            ? ACCOUNT_GROUP
+            : (props.projectNames.get(projectId) ?? UNKNOWN_PROJECT),
+        // A whole server's grant has no tool name and sorts ahead of its tools.
+        rows: [...rows].sort((a, b) => (a.mcpToolName ?? "").localeCompare(b.mcpToolName ?? "")),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [loaded, props.projectNames]);
 
   if (!available) return null;
 
-  async function revoke(grant: ExtensionToolGrant) {
+  async function revoke(grant: ExtensionToolGrant, label: string) {
     setRevoking(String(grant.grantId));
     setNotice(undefined);
     try {
@@ -95,12 +106,12 @@ export function RememberedToolApprovalsPanel(props: {
       );
       setNotice({
         kind: "success",
-        text: `${grant.mcpToolName} will ask again before it runs.`,
+        text: `${label} will ask again before it runs.`,
       });
     } catch {
       setNotice({
         kind: "error",
-        text: `Octant could not revoke ${grant.mcpToolName}. It is still allowed.`,
+        text: `Octant could not revoke ${label}. It is still allowed.`,
       });
     } finally {
       setRevoking(undefined);
@@ -122,11 +133,11 @@ export function RememberedToolApprovalsPanel(props: {
               : grantCount === 0
                 ? "None remembered"
                 : grantCount === 1
-                  ? "1 tool always allowed"
-                  : `${grantCount} tools always allowed`,
+                  ? "1 approval remembered"
+                  : `${grantCount} approvals remembered`,
       }}
       className="remembered-tool-approvals"
-      description="Tools you chose to always allow in a Project. Revoking one makes Octant ask again the next time that tool runs."
+      description="Tools and servers you chose to always allow, in a Project or for Chat outside a Project. Revoking one makes Octant ask again the next time it runs."
       title="Remembered tool approvals"
     >
       {notice === undefined ? null : (
@@ -141,12 +152,12 @@ export function RememberedToolApprovalsPanel(props: {
         </SettingsState>
       ) : byProject.length === 0 ? (
         <SettingsState kind="empty">
-          No remembered tool approvals. Choose “Always allow in this Project” on a tool request and
-          it appears here.
+          No remembered tool approvals. Choose “Always allow” or “Allow all tools of this server” on
+          a tool request and it appears here.
         </SettingsState>
       ) : (
         byProject.map((group, groupIndex) => (
-          <SettingGroup key={group.projectId} label={group.name}>
+          <SettingGroup key={group.projectId ?? "account"} label={group.name}>
             {group.rows.map((grant, rowIndex) => {
               const plugin = pluginNameIn(snapshot, String(grant.packageId)) ?? UNNAMED_PLUGIN;
               const server = serverNameIn(
@@ -154,22 +165,31 @@ export function RememberedToolApprovalsPanel(props: {
                 String(grant.packageId),
                 String(grant.componentId),
               );
+              const label = grantLabel(grant, server);
+              const place =
+                group.projectId === undefined
+                  ? "in Chat threads outside a Project"
+                  : "in this Project";
               return (
                 <SettingsCompactRow
-                  detail="Octant runs it in this Project without asking."
+                  detail={
+                    grant.mcpToolName === undefined
+                      ? `Octant runs every tool of this server ${place} without asking, until an update comes from a different publisher or source, asks for more, or is rolled back.`
+                      : `Octant runs it ${place} without asking.`
+                  }
                   focused={
                     props.focusedSetting === "tool-approvals" && groupIndex === 0 && rowIndex === 0
                   }
                   key={String(grant.grantId)}
-                  label={grant.mcpToolName}
+                  label={label}
                   metaWraps
                   meta={`Always allowed · From ${plugin}${server === undefined ? "" : `, server ${server}`}`}
                   settingId="tool-approvals"
                 >
                   <OctantButton
-                    aria-label={`Revoke ${grant.mcpToolName} in ${group.name}`}
+                    aria-label={`Revoke ${label} in ${group.name}`}
                     disabled={revoking === String(grant.grantId)}
-                    onClick={() => void revoke(grant)}
+                    onClick={() => void revoke(grant, label)}
                     size="sm"
                     type="button"
                     variant="secondary"

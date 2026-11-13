@@ -24,6 +24,7 @@ import type {
   AutomationEditorCatalog,
   AutomationThreadTarget,
 } from "../automation/automationCenterModel";
+import type { CodeProjectPullRequestsProps } from "../code/CodeProjectPullRequests";
 import type { CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import { resolveUnconfirmedStep } from "../code/resolveUnconfirmedStep";
 import type { CodeBoardCoordinators, CodeBoardProjectRef } from "../code/codeBoardGrouping";
@@ -122,6 +123,7 @@ export interface WorkspaceRailLayersProps {
     readonly enabledFor: (projectId: ProjectId) => boolean;
     readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   };
+  readonly agentForgeChoices?: CodeProjectPullRequestsProps["agentForgeChoices"];
   readonly onSelectBoardPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
@@ -130,7 +132,7 @@ export interface WorkspaceRailLayersProps {
   readonly providerLabels?: ReadonlyMap<string, string>;
   /** Driver kinds by provider instance id; the boards draw the provider mark from them. */
   readonly providerKinds?: ReadonlyMap<string, string>;
-  /** Lets a waiting Board card answer its thread's question; absent in a remote window. */
+  /** Lets a waiting Board card answer its thread's question; absent without a reader. */
   readonly boardPendingRequests?: BoardPendingRequestSource;
   readonly archiveOpen?: boolean;
   readonly archiveChatClient?: ChatClient;
@@ -175,7 +177,7 @@ export interface WorkspaceRailLayersProps {
   readonly inboxOpen: boolean;
   readonly onCloseInbox: () => void;
   readonly inboxAttentionItems: ReadonlyArray<InboxAttentionItem>;
-  /** Decisions finished turns asked, answered in the Inbox; absent in a remote window. */
+  /** Decisions finished turns asked, answered in the Inbox; absent without a reader. */
   readonly inboxDecisions?: InboxDecisionSource;
   readonly onOpenInboxThread: (signal: ThreadAttentionSignal) => void;
   /** The Review page, where finished threads are triaged with single keys. */
@@ -271,6 +273,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
                 ? {}
                 : { backgroundRefresh: props.pullRequestBackgroundRefresh })}
               {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+              {...(props.agentForgeChoices === undefined
+                ? {}
+                : { agentForgeChoices: props.agentForgeChoices })}
               {...(props.onSelectProjectPullRequest === undefined
                 ? {}
                 : { onSelectRow: props.onSelectProjectPullRequest })}

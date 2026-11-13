@@ -11,11 +11,13 @@ const threadId = "44000000-0000-4000-8000-000000000001";
 const approvalId = "44000000-0000-4000-8000-000000000010";
 const extensionId = "44000000-0000-4000-8000-000000000011";
 const packageId = "44000000-0000-4000-8000-000000000012";
+const projectId = "44000000-0000-4000-8000-000000000013";
 
 function approval(overrides: Partial<ExtensionToolApproval> = {}): ExtensionToolApproval {
   return {
     approvalId,
     threadId,
+    projectId,
     extensionId,
     packageId,
     componentId: "files-server",
@@ -25,6 +27,7 @@ function approval(overrides: Partial<ExtensionToolApproval> = {}): ExtensionTool
     inputJson: '{"path":"README.md"}',
     requestedAt: "2026-10-12T10:00:00.000Z",
     rememberable: true,
+    answerCovers: "server",
     ...overrides,
   } as ExtensionToolApproval;
 }
@@ -55,11 +58,12 @@ function renderPrompt(extensionClient: ExtensionClient) {
 }
 
 describe("ExtensionToolApprovalPrompt", () => {
-  it("says why a marked thread's call is approved once and names what marked it", async () => {
+  it("says why a marked thread's server is asked about again and names what marked it", async () => {
     renderPrompt(
       client([
         approval({
           rememberable: false,
+          answerCovers: "server-on-thread",
           outsideContent: decodeApprovalOutsideContent({
             sources: [
               {
@@ -81,7 +85,9 @@ describe("ExtensionToolApprovalPrompt", () => {
     ).toHaveTextContent("Results from connected tools");
     // The reason reads before the controls that answer it.
     const note = within(card).getByText(/This thread took in outside content/);
-    const approve = within(card).getByRole("button", { name: "Approve once" });
+    const approve = within(card).getByRole("button", {
+      name: "Allow this server in this thread",
+    });
     expect(note.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -111,35 +117,38 @@ describe("ExtensionToolApprovalPrompt", () => {
     expect(card).toHaveTextContent("A plugin");
   });
 
-  it("offers always allow in this Project only when the host says the call can be remembered", async () => {
-    const { unmount } = renderPrompt(client([approval({ rememberable: false })]));
+  it("says a server is asked about once and that allowing covers all its tools in the Project", async () => {
+    const { unmount } = renderPrompt(
+      client([approval({ rememberable: false, answerCovers: "call" })]),
+    );
     await screen.findByRole("button", { name: "Approve once" });
     expect(
-      screen.queryByRole("button", { name: "Always allow in this Project" }),
+      screen.queryByRole("button", { name: "Allow all tools of this server" }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow only this tool" })).not.toBeInTheDocument();
     unmount();
 
-    renderPrompt(client([approval({ rememberable: true })]));
+    renderPrompt(client([approval()]));
     expect(
-      await screen.findByRole("button", { name: "Always allow in this Project" }),
+      await screen.findByRole("button", { name: "Allow all tools of this server" }),
     ).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Approve once" })).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Extension tool approval" })).toHaveTextContent(
-      "Octant will run this tool in this Project without asking",
+      "allowing lets every tool of this server run in this Project without asking",
     );
   });
 
-  it("sends the decision with remember only when always allow is chosen", async () => {
+  it("sends a plain approval for the whole server, which the host keeps", async () => {
     const user = userEvent.setup();
     const extensionClient = client([approval()]);
     renderPrompt(extensionClient);
 
-    await user.click(await screen.findByRole("button", { name: "Always allow in this Project" }));
+    await user.click(await screen.findByRole("button", { name: "Allow all tools of this server" }));
 
     expect(extensionClient.decideToolApproval).toHaveBeenCalledTimes(1);
     expect(extensionClient.decideToolApproval).toHaveBeenCalledWith({
       approvalId,
       decision: "approved",
-      remember: true,
     });
     await waitFor(() =>
       expect(
@@ -148,9 +157,54 @@ describe("ExtensionToolApprovalPrompt", () => {
     );
   });
 
-  it("approves once and denies without asking to remember anything", async () => {
+  it("narrows the answer to one tool when the person asks for that", async () => {
     const user = userEvent.setup();
-    const approveClient = client([approval()]);
+    const extensionClient = client([approval()]);
+    renderPrompt(extensionClient);
+
+    await user.click(await screen.findByRole("button", { name: "Allow only this tool" }));
+
+    expect(extensionClient.decideToolApproval).toHaveBeenCalledWith({
+      approvalId,
+      decision: "approved",
+      remember: true,
+    });
+  });
+
+  it("says the answer is kept for the account on a thread outside a Project", async () => {
+    const { projectId: _projectId, ...outsideProject } = approval();
+    renderPrompt(client([outsideProject as ExtensionToolApproval]));
+
+    expect(
+      await screen.findByRole("button", { name: "Allow all tools of this server" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("group", { name: "Extension tool approval" })).toHaveTextContent(
+      "in Chat threads outside a Project without asking",
+    );
+  });
+
+  it("asks once for a network server on a thread that read outside content, for that thread", async () => {
+    const user = userEvent.setup();
+    const extensionClient = client([
+      approval({ rememberable: false, answerCovers: "server-on-thread" }),
+    ]);
+    renderPrompt(extensionClient);
+
+    const allow = await screen.findByRole("button", { name: "Allow this server in this thread" });
+    expect(screen.getByRole("group", { name: "Extension tool approval" })).toHaveTextContent(
+      "Allowing lets its tools run for the rest of this thread without asking",
+    );
+    expect(screen.queryByRole("button", { name: "Allow only this tool" })).not.toBeInTheDocument();
+    await user.click(allow);
+    expect(extensionClient.decideToolApproval).toHaveBeenCalledWith({
+      approvalId,
+      decision: "approved",
+    });
+  });
+
+  it("approves one call and denies without asking to remember anything", async () => {
+    const user = userEvent.setup();
+    const approveClient = client([approval({ rememberable: false, answerCovers: "call" })]);
     const { unmount } = renderPrompt(approveClient);
     await user.click(await screen.findByRole("button", { name: "Approve once" }));
     expect(approveClient.decideToolApproval).toHaveBeenCalledWith({
@@ -168,16 +222,11 @@ describe("ExtensionToolApprovalPrompt", () => {
     });
   });
 
-  it("offers no always allow to a client that is not a local window", async () => {
-    renderPrompt(client([approval({ rememberable: true })], { toolGrantsAvailable: false }));
+  it("offers no one-tool answer to a client that is not a local window", async () => {
+    renderPrompt(client([approval()], { toolGrantsAvailable: false }));
 
-    await screen.findByRole("button", { name: "Approve once" });
-    expect(
-      screen.queryByRole("button", { name: "Always allow in this Project" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Extension tool approval" })).not.toHaveTextContent(
-      "without asking",
-    );
+    await screen.findByRole("button", { name: "Allow all tools of this server" });
+    expect(screen.queryByRole("button", { name: "Allow only this tool" })).not.toBeInTheDocument();
   });
 
   it("keeps the request on screen and says so when the answer cannot be sent", async () => {
@@ -186,10 +235,10 @@ describe("ExtensionToolApprovalPrompt", () => {
     vi.mocked(extensionClient.decideToolApproval).mockRejectedValue(new Error("down"));
     renderPrompt(extensionClient);
 
-    await user.click(await screen.findByRole("button", { name: "Always allow in this Project" }));
+    await user.click(await screen.findByRole("button", { name: "Allow only this tool" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be sent");
-    expect(screen.getByRole("button", { name: "Approve once" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Allow all tools of this server" })).toBeEnabled();
   });
 
   it("keeps re-reading a running turn's approvals quickly even when change notices flow", async () => {
@@ -275,6 +324,8 @@ describe("ExtensionToolApprovalPrompt", () => {
     await waitFor(() =>
       expect(vi.mocked(extensionClient.listToolApprovals)).toHaveBeenCalledTimes(2),
     );
-    expect(await screen.findByRole("button", { name: "Approve once" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Allow all tools of this server" }),
+    ).toBeInTheDocument();
   });
 });

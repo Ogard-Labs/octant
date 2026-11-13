@@ -43,6 +43,33 @@ describe("Add MCP server", () => {
     });
   });
 
+  it("adds a server without trusting it or turning it on when Add only is pressed", async () => {
+    const user = userEvent.setup();
+    const addUserMcpServer = vi.fn(async () => ({ kind: "extension-state-updated" }) as never);
+    const onAdded = vi.fn();
+    render(
+      <AddMcpServerDialog
+        client={{ addUserMcpServer }}
+        onAdded={onAdded}
+        onClose={vi.fn()}
+        open
+        secretsAvailable
+      />,
+    );
+    const form = screen.getByRole("form", { name: "Add an MCP server" });
+    expect(form).toHaveTextContent("Add server also trusts it and turns it on");
+    await user.type(within(form).getByLabelText("Name"), "Docs search");
+    await user.type(within(form).getByLabelText("Command"), "npx");
+    await user.click(within(form).getByRole("button", { name: "Add only" }));
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+    expect(addUserMcpServer).toHaveBeenCalledWith({
+      name: "Docs search",
+      installOnly: true,
+      server: { type: "stdio", command: "npx", args: [], env: [] },
+    });
+  });
+
   it("sends a secret that comes from a linked store as an item reference with no value", async () => {
     const user = userEvent.setup();
     const addUserMcpServer = vi.fn(async () => ({ kind: "extension-state-updated" }) as never);

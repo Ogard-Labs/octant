@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentRunWorkingTimeLimitMinutes,
   DEFAULT_AGENT_RUN_POLICY_SETTINGS,
   decodeAgentRunPolicySettings,
   decodeUpdateAgentRunPolicySettings,
@@ -31,6 +32,26 @@ describe("AgentRunPolicySettings", () => {
   });
 });
 
+describe("a helper's working-time limit", () => {
+  const stored: { readonly workingTimeLimitMinutes?: number } = {};
+
+  it("is 120 minutes until a person chooses another", () => {
+    expect(agentRunWorkingTimeLimitMinutes(stored, { threadAtFullAccess: false })).toBe(120);
+    expect(
+      agentRunWorkingTimeLimitMinutes(
+        { ...stored, workingTimeLimitMinutes: 45 },
+        { threadAtFullAccess: true },
+      ),
+    ).toBe(45);
+  });
+
+  it("is none only when the person chose that and the thread has Full access", () => {
+    const lifted = { ...stored, noWorkingTimeLimitAtFullAccess: true };
+    expect(agentRunWorkingTimeLimitMinutes(lifted, { threadAtFullAccess: true })).toBe("none");
+    expect(agentRunWorkingTimeLimitMinutes(lifted, { threadAtFullAccess: false })).toBe(120);
+  });
+});
+
 describe("UpdateAgentRunPolicySettings", () => {
   it("accepts only a bounded person-chosen working-time limit", () => {
     expect(
@@ -49,6 +70,34 @@ describe("UpdateAgentRunPolicySettings", () => {
         }),
       ).toThrow();
   });
+  it("lets a person lift the working-time limit for Full access threads", () => {
+    expect(
+      decodeUpdateAgentRunPolicySettings({
+        creationPosture: "automatic",
+        expectedVersion: 0,
+        noWorkingTimeLimitAtFullAccess: true,
+      }),
+    ).toMatchObject({ noWorkingTimeLimitAtFullAccess: true });
+  });
+
+  it("accepts only a bounded person-chosen wait for a full provider", () => {
+    expect(
+      decodeUpdateAgentRunPolicySettings({
+        creationPosture: "automatic",
+        expectedVersion: 0,
+        providerSlotWaitMinutes: 45,
+      }),
+    ).toMatchObject({ providerSlotWaitMinutes: 45 });
+    for (const value of [0, 241, 1.5])
+      expect(() =>
+        decodeUpdateAgentRunPolicySettings({
+          creationPosture: "automatic",
+          expectedVersion: 0,
+          providerSlotWaitMinutes: value,
+        }),
+      ).toThrow();
+  });
+
   it("decodes a valid update command with an expected version", () => {
     const decoded = decodeUpdateAgentRunPolicySettings({
       creationPosture: "off",

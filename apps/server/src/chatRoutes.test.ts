@@ -179,7 +179,7 @@ describe("Chat routes", () => {
     expect(response?.status).toBe(200);
     expect(execute).toHaveBeenCalledWith(
       { kind: "create-chat-thread", title: "Browser thread" },
-      { windowId },
+      { windowId, actor: expect.objectContaining({ kind: "local-user" }) },
     );
   });
 
@@ -198,7 +198,7 @@ describe("Chat routes", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("refuses a paired device changing Continue after restart for a Chat thread or the Chat setting", async () => {
+  it("lets a device the host's own person paired change Continue after restart for a Chat thread or the Chat setting, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: threadFixture }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000050";
@@ -218,7 +218,7 @@ describe("Chat routes", () => {
         restartContinuation: false,
       },
     ];
-    for (const command of commands) {
+    const from = (command: unknown, admittedBy?: "host-person" | "hub-roster") => {
       const remote = request("/api/chat/commands", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -233,23 +233,31 @@ describe("Chat routes", () => {
           protocolVersion: 1,
           capabilityDigest: "b".repeat(64),
           sessionId: "73000000-0000-4000-8000-000000000051" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
         }),
         scopeId: remoteDeviceId as never,
       });
-      const refused = await route(remote);
-      expect(refused?.status).toBe(403);
-      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      return remote;
+    };
+    for (const command of commands) {
+      for (const restricted of [undefined, "hub-roster"] as const) {
+        const refused = await route(from(command, restricted));
+        expect(refused?.status).toBe(403);
+        expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      }
     }
     expect(execute).not.toHaveBeenCalled();
 
-    const local = await route(
-      request("/api/chat/commands", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(commands[0]),
-      }),
-    );
-    expect(local?.status).toBe(200);
+    for (const command of commands) {
+      expect((await route(from(command, "host-person")))?.status).toBe(200);
+      expect(execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: command.kind }),
+        expect.objectContaining({
+          actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+        }),
+      );
+    }
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it("rejects unsupported attachment media types", async () => {
@@ -335,6 +343,7 @@ describe("Chat routes", () => {
       contents: false,
       compaction: false,
       appended: false,
+      toolSteps: false,
     });
   });
 
@@ -350,6 +359,7 @@ describe("Chat routes", () => {
       contents: true,
       compaction: false,
       appended: false,
+      toolSteps: false,
     });
 
     const refused = await route(
@@ -366,7 +376,7 @@ describe("Chat routes", () => {
     await collectFrames(
       route(
         request(
-          `/api/chat/threads/${threadId}/events?afterSequence=41&contents=1&compaction=1&appended=1`,
+          `/api/chat/threads/${threadId}/events?afterSequence=41&contents=1&compaction=1&appended=1&toolSteps=1`,
         ),
       ),
     );
@@ -374,9 +384,15 @@ describe("Chat routes", () => {
       contents: true,
       compaction: true,
       appended: true,
+      toolSteps: true,
     });
 
-    for (const query of ["compaction=yes", "compaction=1&compaction=1", "appended=yes"]) {
+    for (const query of [
+      "compaction=yes",
+      "compaction=1&compaction=1",
+      "appended=yes",
+      "toolSteps=yes",
+    ]) {
       const refused = await route(
         request(`/api/chat/threads/${threadId}/events?afterSequence=41&${query}`),
       );
@@ -392,6 +408,7 @@ describe("Chat routes", () => {
       contents: false,
       compaction: false,
       appended: false,
+      toolSteps: false,
     });
   });
 

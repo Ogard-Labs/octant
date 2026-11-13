@@ -47,7 +47,7 @@ describe("BrowserToolApprovalService", () => {
     service.close();
   });
 
-  it("ends a prompt when its elapsed time is up even though the wall clock was set back", async () => {
+  it("keeps a prompt waiting however much time passes and states its request time from the authority clock", async () => {
     let wallClockMs = Date.parse("2026-09-09T10:00:00.000Z");
     let elapsedMs = 1_000;
     const clock = new ProcessAuthorityClock({
@@ -57,27 +57,29 @@ describe("BrowserToolApprovalService", () => {
     const service = new BrowserToolApprovalService({
       uuid: () => "40000000-0000-4000-8000-0000000000b1",
       now: clock.now(),
-      ttlMs: 60_000,
       authorityIsCurrent: () => true,
     });
+    elapsedMs += 60_000;
+    wallClockMs -= 60 * 60_000;
     const pending = service.request({
       windowId,
       threadId: "50000000-0000-4000-8000-000000000001",
       authority,
       origin: "https://example.com",
     });
-    expect(service.list(windowId)).toHaveLength(1);
-    elapsedMs += 60_000;
-    wallClockMs -= 60 * 60_000;
+    await Promise.resolve();
+    // The wall clock went back an hour; the request time still moved forward.
+    expect(service.list(windowId)[0]?.requestedAt).toBe("2026-09-09T10:01:00.000Z");
+    elapsedMs += 24 * 60 * 60_000;
 
-    expect(service.list(windowId)).toEqual([]);
+    expect(service.list(windowId)).toHaveLength(1);
     expect(
       service.decide(windowId, {
         approvalId: "40000000-0000-4000-8000-0000000000b1" as never,
         decision: "approved",
       }),
-    ).toBe(false);
-    await expect(pending).resolves.toBe("expired");
+    ).toBe(true);
+    await expect(pending).resolves.toBe("approved");
     service.close();
   });
 
@@ -156,7 +158,6 @@ describe("BrowserToolApprovalService", () => {
       const service = new BrowserToolApprovalService({
         uuid: () => crypto.randomUUID(),
         now: Date.now,
-        ttlMs: 1_000,
         authorityIsCurrent: () => true,
         onChanged: () => lists.push(service.list(windowId).length),
       });
@@ -185,8 +186,10 @@ describe("BrowserToolApprovalService", () => {
       expect(lists).toEqual([1, 0, 1, 0]);
 
       const third = ask("https://three.example");
-      await vi.advanceTimersByTimeAsync(1_000);
-      await expect(third).resolves.toBe("expired");
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(service.list(windowId)).toHaveLength(1);
+      service.withdrawThread(threadId);
+      await expect(third).resolves.toBe("cancelled");
       expect(lists).toEqual([1, 0, 1, 0, 1, 0]);
 
       const fourth = ask("https://four.example");
@@ -201,6 +204,53 @@ describe("BrowserToolApprovalService", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("remembers the whole profile when the person allows all its sites, and only on a profile page", async () => {
+    const remembered: Array<unknown> = [];
+    let next = 0;
+    const service = new BrowserToolApprovalService({
+      uuid: () => `40000000-0000-4000-8000-00000000001${String(next++)}`,
+      now: () => Date.parse("2026-11-12T10:00:00.000Z"),
+      authorityIsCurrent: () => true,
+      rememberOrigin: (origin, _scope, profile) => remembered.push([origin, profile]),
+    });
+    const ask = (profile?: { readonly kind: "personal" }) =>
+      service.request({
+        windowId,
+        threadId: "50000000-0000-4000-8000-000000000002",
+        authority,
+        origin: "https://example.com",
+        ...(profile === undefined ? {} : { profile }),
+      });
+
+    const onProfile = ask({ kind: "personal" });
+    service.decide(windowId, {
+      approvalId: "40000000-0000-4000-8000-000000000010" as never,
+      decision: "approved",
+      rememberProfile: true,
+    });
+    await expect(onProfile).resolves.toBe("approved");
+    expect(remembered).toEqual([["*", { kind: "personal" }]]);
+
+    // A Private page has no profile: the wider answer remembers nothing there.
+    const onPrivate = ask();
+    service.decide(windowId, {
+      approvalId: "40000000-0000-4000-8000-000000000011" as never,
+      decision: "approved",
+      rememberProfile: true,
+    });
+    await expect(onPrivate).resolves.toBe("approved");
+    expect(remembered).toHaveLength(1);
+
+    const denied = ask({ kind: "personal" });
+    service.decide(windowId, {
+      approvalId: "40000000-0000-4000-8000-000000000012" as never,
+      decision: "denied",
+      rememberProfile: true,
+    });
+    await expect(denied).resolves.toBe("denied");
+    expect(remembered).toHaveLength(1);
   });
 
   it("a browser approval from a routine's Work turn reaches an open local window", async () => {
@@ -238,7 +288,7 @@ describe("BrowserToolApprovalService", () => {
     expect(remembered).toEqual([["https://example.com", windowId]]);
   });
 
-  it("never remembers an origin from the answer to a sign-in request, and waits longer for it", async () => {
+  it("never remembers an origin from the answer to a sign-in request, and waits for it a day later", async () => {
     vi.useFakeTimers();
     try {
       const remembered: Array<unknown> = [];
@@ -258,8 +308,7 @@ describe("BrowserToolApprovalService", () => {
       expect(service.list(windowId)).toEqual([
         expect.objectContaining({ signIn: { reason: "The dashboard needs your account." } }),
       ]);
-      // Past the ordinary five minutes, a sign-in is still waiting.
-      vi.advanceTimersByTime(6 * 60_000);
+      vi.advanceTimersByTime(24 * 60 * 60_000);
       expect(service.list(windowId)).toHaveLength(1);
       expect(
         service.decide(windowId, {
@@ -370,7 +419,7 @@ describe("BrowserToolApprovalService", () => {
     service.close();
   });
 
-  it("cancels pending approvals on abort and window revocation", async () => {
+  it("cancels pending approvals on abort, window revocation, and the thread's archive", async () => {
     const service = new BrowserToolApprovalService({
       uuid: () => crypto.randomUUID(),
       now: Date.now,
@@ -394,6 +443,17 @@ describe("BrowserToolApprovalService", () => {
     });
     service.revokeWindow(windowId);
     await expect(revoked).resolves.toBe("cancelled");
+    const archived = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+      signIn: {},
+    });
+    service.withdrawThread("50000000-0000-4000-8000-000000000009");
+    expect(service.list(windowId)).toHaveLength(1);
+    service.withdrawThread("50000000-0000-4000-8000-000000000001");
+    await expect(archived).resolves.toBe("cancelled");
   });
 
   it("denies a pending approval when its window loses Project scope", async () => {
@@ -420,28 +480,42 @@ describe("BrowserToolApprovalService", () => {
     await expect(pending).resolves.toBe("denied");
   });
 
-  it("expires an approval at decision time even when its timer has not fired", async () => {
+  it("keeps a site, an upload and a download approval waiting a day later and takes the answer then", async () => {
     let now = Date.parse("2026-09-09T10:00:00.000Z");
+    let next = 0;
+    const ids = [
+      "40000000-0000-4000-8000-000000000005",
+      "40000000-0000-4000-8000-000000000006",
+      "40000000-0000-4000-8000-000000000007",
+    ];
     const service = new BrowserToolApprovalService({
-      uuid: () => "40000000-0000-4000-8000-000000000005",
+      uuid: () => ids[next++] ?? crypto.randomUUID(),
       now: () => now,
-      ttlMs: 1_000,
       authorityIsCurrent: () => true,
     });
-    const pending = service.request({
+    const ask = {
       windowId,
       threadId: "50000000-0000-4000-8000-000000000001",
       authority,
       origin: "https://example.com",
-    });
-    now += 1_001;
-    expect(
-      service.decide(windowId, {
-        approvalId: "40000000-0000-4000-8000-000000000005" as never,
-        decision: "approved",
+    };
+    const waiting = [
+      service.request(ask),
+      service.request({ ...ask, upload: [{ name: "notes.txt", sizeBytes: 5 }] }),
+      service.request({
+        ...ask,
+        download: { name: "report.pdf", sizeBytes: 9, mediaType: "application/pdf" },
       }),
-    ).toBe(false);
-    await expect(pending).resolves.toBe("expired");
+    ];
+    await Promise.resolve();
+    now += 24 * 60 * 60_000;
+    expect(service.list(windowId)).toHaveLength(3);
+    for (const approvalId of ids) {
+      expect(
+        service.decide(windowId, { approvalId: approvalId as never, decision: "approved" }),
+      ).toBe(true);
+    }
+    await expect(Promise.all(waiting)).resolves.toEqual(["approved", "approved", "approved"]);
   });
 
   it("remembers an origin only when an approved answer asks to", async () => {
@@ -618,11 +692,12 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
   const phone = "60000000-0000-4000-8000-0000000000aa" as never;
   const personal = { kind: "personal" } as const;
 
-  function service() {
+  function service(rememberTransfer?: (transfer: unknown, windowId: unknown) => void) {
     return new BrowserToolApprovalService({
       uuid: () => "40000000-0000-4000-8000-000000000009",
       now: () => Date.parse("2026-10-31T10:00:00.000Z"),
       authorityIsCurrent: () => true,
+      ...(rememberTransfer === undefined ? {} : { rememberTransfer }),
       isHostScope: isRoutineHostScope,
       // Only the one window is a window of this computer; any other scope that is
       // not the host is a paired device.
@@ -652,6 +727,89 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
     expect(approvals.decide(windowId, decision)).toBe(true);
     await expect(pending).resolves.toBe("approved");
   });
+
+  it.each([
+    ["upload", { upload: [{ name: "notes.txt", sizeBytes: 5 }] }],
+    ["download", { download: { name: "report.pdf", sizeBytes: 4, mediaType: "application/pdf" } }],
+  ] as const)(
+    "remembers an Always allow answer to an %s for that site and workspace when a local window gives it, and never when a paired device does",
+    async (direction, ask) => {
+      const rememberTransfer = vi.fn();
+      const rememberOrigin = vi.fn();
+      const approvals = new BrowserToolApprovalService({
+        uuid: () => "40000000-0000-4000-8000-000000000009",
+        now: () => Date.parse("2026-10-31T10:00:00.000Z"),
+        authorityIsCurrent: () => true,
+        rememberTransfer,
+        rememberOrigin,
+        isHostScope: isRoutineHostScope,
+        isLocalWindow: (scope) => String(scope) === String(windowId),
+      });
+      const decision = {
+        approvalId: "40000000-0000-4000-8000-000000000009" as never,
+        decision: "approved" as const,
+        remember: true,
+      };
+      const request = (scope: never) =>
+        approvals.request({
+          windowId: scope,
+          threadId,
+          authority,
+          origin: "https://example.com",
+          workspaceRoot: "/projects/brief",
+          ...ask,
+        });
+
+      const fromPhone = request(phone);
+      expect(approvals.decide(phone, decision)).toBe(true);
+      await expect(fromPhone).resolves.toBe("approved");
+      expect(rememberTransfer).not.toHaveBeenCalled();
+
+      const once = request(windowId);
+      expect(approvals.decide(windowId, { ...decision, remember: false })).toBe(true);
+      await expect(once).resolves.toBe("approved");
+      expect(rememberTransfer).not.toHaveBeenCalled();
+
+      const always = request(windowId);
+      expect(approvals.decide(windowId, decision)).toBe(true);
+      await expect(always).resolves.toBe("approved");
+      expect(rememberTransfer).toHaveBeenCalledExactlyOnceWith(
+        {
+          direction,
+          origin: "https://example.com",
+          workspaceRoot: "/projects/brief",
+          // No profile was named, so the page is a Private one, and the answer says so.
+          privatePage: true,
+        },
+        windowId,
+      );
+      // The answer is about files, never a grant to open the site.
+      expect(rememberOrigin).not.toHaveBeenCalled();
+
+      // On a page in a profile the answer is kept for that profile.
+      const inProfile = approvals.request({
+        windowId,
+        threadId,
+        authority,
+        origin: "https://example.com",
+        workspaceRoot: "/projects/brief",
+        profile: personal,
+        ...ask,
+      });
+      await vi.waitFor(() => expect(approvals.list(windowId)).toHaveLength(1));
+      expect(approvals.decide(windowId, decision)).toBe(true);
+      await expect(inProfile).resolves.toBe("approved");
+      expect(rememberTransfer).toHaveBeenLastCalledWith(
+        {
+          direction,
+          origin: "https://example.com",
+          workspaceRoot: "/projects/brief",
+          profile: personal,
+        },
+        windowId,
+      );
+    },
+  );
 
   it("still lets the phone answer an approval for a page with no stored profile", () => {
     const approvals = service();

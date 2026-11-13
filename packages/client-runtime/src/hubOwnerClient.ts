@@ -502,6 +502,21 @@ export function createOwnerClient(
     (await underSession(path, body, signal)) ??
     unlocked((signer) => act(path, body, signer, signal));
 
+  const openSession = (): Promise<OwnerActionResult> =>
+    unlocked(async (signer) => {
+      const opened = await act(OWNER_ROUTES.session, "", signer);
+      if (opened.status !== "done") return opened;
+      try {
+        session = decodeOwnerAdministrationSession(
+          (opened.body as { session?: unknown } | undefined)?.session,
+        );
+      } catch {
+        return { status: "refused", kind: "invalid-answer" };
+      }
+      // The secret stays in this client; the caller learns only when it ends.
+      return { status: "done", body: { expiresAt: session.expiresAt } };
+    });
+
   return {
     browser: async (input, signal) => {
       const command = decodeOwnerBrowserRequest(input);
@@ -593,27 +608,30 @@ export function createOwnerClient(
       administration(OWNER_ROUTES.alertRemove, JSON.stringify({ alertId })),
     setConfirmNewMembers: (enabled) =>
       administration(OWNER_ROUTES.confirmNewMembers, JSON.stringify({ enabled })),
-    openSession: () =>
-      unlocked(async (signer) => {
-        const opened = await act(OWNER_ROUTES.session, "", signer);
-        if (opened.status !== "done") return opened;
-        try {
-          session = decodeOwnerAdministrationSession(
-            (opened.body as { session?: unknown } | undefined)?.session,
-          );
-        } catch {
-          return { status: "refused", kind: "invalid-answer" };
-        }
-        // The secret stays in this client; the caller learns only when it ends.
-        return { status: "done", body: { expiresAt: session.expiresAt } };
-      }),
+    openSession,
     endSession: () => {
       session = undefined;
     },
     hasSession: sessionLive,
-    readApprovals: () => unlocked((signer) => act(OWNER_ROUTES.approvalRead, "{}", signer)),
-    answerApproval: (request) =>
-      unlocked((signer) => act(OWNER_ROUTES.approvalAnswer, JSON.stringify(request), signer)),
+    readApprovals: async () => {
+      // The unlock a first reading asks for opens the session, so the Allow
+      // once or Deny that follows rides it instead of prompting again.
+      if (!sessionLive()) {
+        const opened = await openSession();
+        if (opened.status !== "done") return opened;
+      }
+      return administration(OWNER_ROUTES.approvalRead, "{}");
+    },
+    answerApproval: async (request) => {
+      const body = JSON.stringify(request);
+      const covered = await underSession(OWNER_ROUTES.approvalAnswer, body);
+      // A host whose window asked for an unlock per answer refuses the session
+      // before any effect, so the same answer goes again under its own unlock.
+      return covered === undefined ||
+        (covered.status === "refused" && covered.kind === "own-unlock-required")
+        ? unlocked((signer) => act(OWNER_ROUTES.approvalAnswer, body, signer))
+        : covered;
+    },
     listPostures: () => administration(OWNER_ROUTES.postureRead, "{}"),
     readPosture: (subject) => administration(OWNER_ROUTES.postureRead, JSON.stringify({ subject })),
     changePosture: (request) => {

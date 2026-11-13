@@ -1,5 +1,9 @@
 import { Schema } from "effect";
 import { BrowserContextPolicy } from "./browserAutomation";
+import {
+  decodeCodeDebugEvaluateToolArguments,
+  decodeCodeDebugSessionToolArguments,
+} from "./codeDebug";
 import { decodeCodeLanguageToolArguments } from "./codeLanguage";
 import { ComputerUsePolicy } from "./computerUse";
 import { ExtensionCapability } from "./extensions";
@@ -372,6 +376,42 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     resultTaintsThread: false,
     requiresAppManagedTools: true,
     decodeArguments: (value) => decodeCodeLanguageToolArguments(value),
+  }),
+  // The agent's debug tool. Starting a session runs the configuration's
+  // program in the thread's capsule, so it is policed as a shell command is:
+  // refused in Plan, asked below Full access, unasked at it. An approved
+  // session is then controlled and read without asking, on a marked thread
+  // too: stepping runs only the program the approval named. What a session
+  // shows is the program's own data, so every read marks the thread.
+  entry({
+    capabilityId: "code-debug",
+    version: 1,
+    owner: "core",
+    modes: ["code"],
+    requiredCapabilityClass: "shell",
+    approvalClass: "shell-commands",
+    irreversibleUnderTaint: false,
+    resultTaintsThread: true,
+    requiresAppManagedTools: true,
+    decodeArguments: (value) => decodeCodeDebugSessionToolArguments(value),
+  }),
+  // An expression is code the agent wrote, run inside the program, so it
+  // has its own entry and its own argument schema. The person's one answer
+  // for the session covers it, on a marked thread too (maintainer decision,
+  // 2026-11-13): every read of a session marks the thread, so asking afresh
+  // after a mark asked at nearly every expression, and the program the
+  // expression runs in is the one the answer named, in the same capsule.
+  entry({
+    capabilityId: "code-debug-evaluate",
+    version: 1,
+    owner: "core",
+    modes: ["code"],
+    requiredCapabilityClass: "shell",
+    approvalClass: "shell-commands",
+    irreversibleUnderTaint: false,
+    resultTaintsThread: true,
+    requiresAppManagedTools: true,
+    decodeArguments: (value) => decodeCodeDebugEvaluateToolArguments(value),
   }),
   entry({
     capabilityId: "mcp-tool",

@@ -5,9 +5,26 @@ import { AppleProjectPath } from "./appleToolchain";
 import { ChatThreadId } from "./chat";
 import { CodeProjectFilePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
-import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
+import {
+  BrowserContextId,
+  BrowserThreadId,
+  DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+  MAX_BROWSER_HELD_DOWNLOADS,
+  MAX_BROWSER_HELD_DOWNLOAD_LIMIT,
+  MAX_BROWSER_UPLOAD_FILES,
+  MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
+  MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+} from "./browserAutomation";
+import {
+  DEFAULT_BROWSER_CAPTURES_PER_THREAD,
+  MAX_BROWSER_CAPTURES_PER_THREAD,
+} from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
-import { AggregateVersion } from "./events";
+import {
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  MAX_THREAD_TOOL_STEPS_SETTING,
+} from "./threadToolSteps";
+import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
@@ -514,6 +531,36 @@ export const CompletedThreadArchiveAfterDays = Schema.Int.pipe(
 );
 export type CompletedThreadArchiveAfterDays = typeof CompletedThreadArchiveAfterDays.Type;
 export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchiveAfterDays = 7;
+
+/**
+ * How long a turn may go without a provider event before the host cuts it
+ * off. The floor keeps a slow first token or a long silent tool-call write
+ * from ending a healthy turn; the ceiling is one working day.
+ */
+export const MIN_STALLED_TURN_LIMIT_MINUTES = 5;
+export const MAX_STALLED_TURN_LIMIT_MINUTES = 480;
+export const StalledTurnLimitMinutes = Schema.Int.pipe(
+  Schema.between(MIN_STALLED_TURN_LIMIT_MINUTES, MAX_STALLED_TURN_LIMIT_MINUTES),
+);
+export type StalledTurnLimitMinutes = typeof StalledTurnLimitMinutes.Type;
+export const DEFAULT_STALLED_TURN_LIMIT_MINUTES: StalledTurnLimitMinutes = 30;
+
+/**
+ * The longest one provider tool call may pause the stalled-turn clock. A
+ * runtime that reports a start and never the finish would otherwise hold its
+ * turn open until the person stops it. The floor matches the stalled-turn
+ * limit's; the ceiling is one day, past which Off is the honest choice.
+ */
+export const MIN_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES = 5;
+export const MAX_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES = 1440;
+export const ProviderToolCallPauseLimitMinutes = Schema.Int.pipe(
+  Schema.between(
+    MIN_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
+    MAX_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
+  ),
+);
+export type ProviderToolCallPauseLimitMinutes = typeof ProviderToolCallPauseLimitMinutes.Type;
+export const DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES: ProviderToolCallPauseLimitMinutes = 120;
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 
 /**
@@ -533,6 +580,18 @@ export const StandaloneSkillActivationState = Schema.Struct({
   reviewed: Schema.Boolean,
   trusted: Schema.Boolean,
   desiredEnabled: Schema.Boolean,
+  /**
+   * When a person last turned this skill on by hand. Absent for a skill that
+   * is on by default or by a file written before the field existed, so the
+   * host can tell a person's choice from a default when two same-named skills
+   * are both on.
+   */
+  chosenAt: Schema.optional(UtcTimestamp),
+  /**
+   * The Project's same-named skill the host turned this one off for. Kept
+   * until a person next switches either, so the notice survives a restart.
+   */
+  gaveWayTo: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
 }).annotations(strict);
 export type StandaloneSkillActivationState = typeof StandaloneSkillActivationState.Type;
 
@@ -571,6 +630,35 @@ export const RememberedBrowserProfileSite = Schema.Struct({
   profile: StoredBrowserProfile,
 }).annotations(strict);
 export type RememberedBrowserProfileSite = typeof RememberedBrowserProfileSite.Type;
+
+/**
+ * One "Always allow" answer to an agent's upload or download-save below Full
+ * access: later transfers in that direction between that site and that
+ * thread workspace, on a page in that Browser profile, do not ask. It never
+ * covers the other direction, another site, another workspace, or another
+ * profile, and it lifts no path, size or type check.
+ */
+export const RememberedBrowserTransfer = Schema.Struct({
+  direction: Schema.Literal("upload", "download"),
+  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  /** The thread workspace on this host: a Work Project folder or a Code checkout. */
+  workspaceRoot: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
+  /** The stored profile the page was in. Absent for a Private page. */
+  profile: Schema.optional(StoredBrowserProfile),
+  /**
+   * Set on an answer given on a Private page, which covers Private pages
+   * alone. An entry with neither this nor `profile` was remembered before
+   * the page was recorded: it was given for the site and the folder on any
+   * page, which is what it covered then, so it still covers every profile
+   * and Private pages until the person forgets it. Narrowing it would ask
+   * again for what they already answered, and no entry written since can be
+   * mistaken for one.
+   */
+  privatePage: Schema.optional(Schema.Literal(true)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((entry) => entry.profile === undefined || entry.privatePage !== true));
+export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
 
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
@@ -672,6 +760,12 @@ export const ShellSettings = Schema.Struct({
    * default). Turning the switch on records the choice explicitly.
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Whether the desktop app's quit keyboard shortcut needs a second press
+   * before it quits. On by default, including for a store from before the
+   * choice existed: the guard was always on then.
+   */
+  quitShortcutNeedsSecondPress: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   computerUse: Schema.optionalWith(ComputerUseSettings, {
     default: () => ({ enabled: true, automaticUpdates: false }),
   }),
@@ -730,6 +824,24 @@ export const ShellSettings = Schema.Struct({
   autoCompactLimitPercent: Schema.optionalWith(Schema.NullOr(AutoCompactLimitPercent), {
     default: () => null,
   }),
+  /**
+   * Cut a Chat, Work or Code turn off once its provider has sent no event for
+   * this many minutes. `null` means never: only the person stops such a turn.
+   * A store persisted before the setting existed decodes to the default.
+   */
+  stalledTurnLimitMinutes: Schema.optionalWith(Schema.NullOr(StalledTurnLimitMinutes), {
+    default: () => DEFAULT_STALLED_TURN_LIMIT_MINUTES,
+  }),
+  /**
+   * The longest a provider tool call that has reported a start and no finish
+   * pauses the stalled-turn clock, in minutes. `null` means no bound: such a
+   * call pauses the clock until it finishes or the person stops the turn. A
+   * store persisted before the setting existed decodes to the default.
+   */
+  providerToolCallPauseLimitMinutes: Schema.optionalWith(
+    Schema.NullOr(ProviderToolCallPauseLimitMinutes),
+    { default: () => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES },
+  ),
   /**
    * The release ring to follow, once someone has chosen one.
    *
@@ -858,7 +970,8 @@ export const ShellSettings = Schema.Struct({
    * Personal Browser profile. A pair, never an origin alone: a remembered
    * Private origin does not cover a signed-in page, and a pair for one profile
    * does not cover another. Grows only through the approval answer, like
-   * `rememberedBrowserOrigins`.
+   * `rememberedBrowserOrigins`. A pair whose origin is `ANY_BROWSER_ORIGIN` is
+   * the answer "Allow all sites in this profile".
    */
   rememberedBrowserProfileSites: Schema.optionalWith(
     Schema.Array(RememberedBrowserProfileSite).pipe(Schema.maxItems(1_024)),
@@ -874,6 +987,75 @@ export const ShellSettings = Schema.Struct({
    * decodes to off.
    */
   agentBrowserDownloads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * How many Browser captures each thread keeps, newest first. A host
+   * setting like the switch above. A store persisted before this shipped
+   * decodes to the default.
+   */
+  browserCapturesPerThread: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_CAPTURES_PER_THREAD)),
+    { default: () => DEFAULT_BROWSER_CAPTURES_PER_THREAD },
+  ),
+  /**
+   * Whether Chat and Work keep a bounded copy of each tool call's input and
+   * output in purgeable storage. A host setting. Turning it off stops new
+   * records and leaves the ones already kept, which go with their threads. A
+   * store persisted before this shipped decodes to on.
+   */
+  keepToolCallRecords: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * How many tool calls one Chat or Work turn keeps as steps, and so keeps
+   * records for, while it runs below Full access. A host setting. A turn
+   * that calls more still runs; its later calls have no row. A store
+   * persisted before this shipped decodes to the default.
+   */
+  toolStepsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_THREAD_TOOL_STEPS_SETTING)),
+    { default: () => DEFAULT_THREAD_TOOL_STEPS_PER_TURN },
+  ),
+  /**
+   * The same limit for a Work turn that runs at Full access. `0`, the
+   * default, is off: every call is kept, and the spend ceiling is what
+   * bounds the turn. A person may set a number here too.
+   */
+  fullAccessToolStepsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(0, MAX_THREAD_TOOL_STEPS_SETTING)),
+    { default: () => 0 },
+  ),
+  /**
+   * The largest file, in megabytes, an agent may upload through a page or have
+   * held and saved from one. A store persisted before this shipped decodes to
+   * the former fixed limit.
+   */
+  browserTransferFileLimitMegabytes: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES)),
+    { default: () => DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES },
+  ),
+  /**
+   * How many downloads one browsing context holds for the agent at once; the
+   * oldest is discarded first. Decodes to the former fixed limit when absent.
+   */
+  browserHeldDownloadLimit: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_HELD_DOWNLOAD_LIMIT)),
+    { default: () => MAX_BROWSER_HELD_DOWNLOADS },
+  ),
+  /**
+   * How many files an agent may send in one upload. Decodes to the former
+   * fixed count when absent.
+   */
+  browserUploadFileCountLimit: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT)),
+    { default: () => MAX_BROWSER_UPLOAD_FILES },
+  ),
+  /**
+   * Uploads and download saves the person answered "Always allow". Grows only
+   * through that approval answer, like `rememberedBrowserOrigins`; a settings
+   * replacement may only forget entries.
+   */
+  rememberedBrowserTransfers: Schema.optionalWith(
+    Schema.Array(RememberedBrowserTransfer).pipe(Schema.maxItems(1_024)),
+    { default: () => [] },
+  ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */
   persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);
@@ -1379,6 +1561,25 @@ export const decodeWorkspaceSurfaceDescriptor = Schema.decodeUnknownSync(
 );
 export const decodeWorkspaceSurfaceCatalog = Schema.decodeUnknownSync(WorkspaceSurfaceCatalog);
 export const decodeShellSettings = Schema.decodeUnknownSync(ShellSettings);
+
+/**
+ * The host's shell settings for a device the host's own person paired, which
+ * has no window on the host to bootstrap: the settings with the version a
+ * replacement must name, and the replacement itself.
+ */
+export const SHELL_SETTINGS_PATH = "/api/shell/settings";
+export const ShellSettingsReading = Schema.Struct({
+  settings: ShellSettings,
+  version: AggregateVersion,
+}).annotations(strict);
+export type ShellSettingsReading = typeof ShellSettingsReading.Type;
+export const decodeShellSettingsReading = Schema.decodeUnknownSync(ShellSettingsReading);
+export const ShellSettingsReplacement = Schema.Struct({
+  expectedVersion: AggregateVersion,
+  settings: ShellSettings,
+}).annotations(strict);
+export type ShellSettingsReplacement = typeof ShellSettingsReplacement.Type;
+export const decodeShellSettingsReplacement = Schema.decodeUnknownSync(ShellSettingsReplacement);
 export const decodeWorkspaceTab = Schema.decodeUnknownSync(WorkspaceTab);
 export const decodeWorkspaceLayoutNode = Schema.decodeUnknownSync(WorkspaceLayoutNode);
 export const decodeWindowWorkspace = Schema.decodeUnknownSync(WindowWorkspace);

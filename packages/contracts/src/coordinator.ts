@@ -30,7 +30,47 @@ export type CoordinatorStartingByProject = typeof CoordinatorStartingByProject.T
 export const DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT = 6;
 export const MAX_COORDINATOR_OPEN_WORKER_LIMIT = 16;
 export const MAX_COORDINATORS_PER_PROJECT = 4;
-export const MAX_COORDINATOR_STARTS_PER_HOUR = 12;
+
+/**
+ * A coordinator's hourly and round bounds when the person set none
+ * (docs/design/coordinator-threads.md, Bounds and Talking to workers).
+ */
+export const DEFAULT_COORDINATOR_WAKES_PER_HOUR = 30;
+export const DEFAULT_COORDINATOR_ROUNDS = 10;
+export const DEFAULT_COORDINATOR_STARTS_PER_HOUR = 60;
+/**
+ * The most a person may set. These bounds are what stops two agents waking
+ * each other without end and a coordinator filling a Project with threads, so
+ * each keeps a finite top.
+ */
+export const MAX_COORDINATOR_WAKES_PER_HOUR = 600;
+export const MAX_COORDINATOR_ROUNDS = 100;
+export const MAX_COORDINATOR_STARTS_PER_HOUR = 600;
+
+/**
+ * One coordinator's bounds as a person set them at a local window. A field
+ * left out uses its default, and so does every coordinator journaled before
+ * these fields existed.
+ */
+export const CoordinatorBounds = Schema.Struct({
+  /** Wake turns per thread in any hour, for the coordinator and its workers. */
+  wakesPerHour: Schema.optional(Schema.Int.pipe(Schema.between(1, MAX_COORDINATOR_WAKES_PER_HOUR))),
+  /** Rounds of agents answering each other before a message stops waking. */
+  rounds: Schema.optional(Schema.Int.pipe(Schema.between(1, MAX_COORDINATOR_ROUNDS))),
+  /** `start` calls in any hour, admitted or proposed. */
+  startsPerHour: Schema.optional(
+    Schema.Int.pipe(Schema.between(1, MAX_COORDINATOR_STARTS_PER_HOUR)),
+  ),
+}).annotations({ parseOptions: { onExcessProperty: "error" } });
+export type CoordinatorBounds = typeof CoordinatorBounds.Type;
+
+/** The level a person may fix for every worker a coordinator starts. */
+export const CoordinatorWorkerLevel = Schema.Literal(
+  "approval-gated",
+  "auto-accept-edits",
+  "full-access",
+);
+export type CoordinatorWorkerLevel = typeof CoordinatorWorkerLevel.Type;
 
 /** How many open workers one coordinator may have, set by a person. */
 export const CoordinatorOpenWorkerLimit = Schema.Int.pipe(

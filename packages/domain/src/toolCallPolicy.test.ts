@@ -642,6 +642,112 @@ describe("Code language reads", () => {
   });
 });
 
+describe("Code debug sessions", () => {
+  const thread = (overrides: Partial<ToolCallPolicyInput["thread"]> = {}) => ({
+    executionPolicy: "approval-gated" as const,
+    approvalSatisfied: false,
+    externalContentIngested: false,
+    ...overrides,
+  });
+  const debug = (args: unknown, overrides: Partial<ToolCallPolicyInput> = {}, id = "code-debug") =>
+    resolveToolCall(
+      baseInput({
+        capability: decodeToolActionCapability({ id, version: 1 }),
+        arguments: args,
+        ...overrides,
+      }),
+    );
+  const start = { operation: "start", configuration: `sha256:${"a".repeat(64)}` };
+  const evaluate = { operation: "evaluate", expression: "count + 1" };
+
+  it("refuses every debug operation in Plan, a read of the session included", () => {
+    for (const args of [start, { operation: "continue" }, { operation: "state" }]) {
+      expect(debug(args, { thread: thread({ executionPolicy: "plan" }) })).toMatchObject({
+        kind: "deny",
+        reason: "plan-mode-denied",
+      });
+    }
+    expect(
+      debug(evaluate, { thread: thread({ executionPolicy: "plan" }) }, "code-debug-evaluate"),
+    ).toMatchObject({ kind: "deny", reason: "plan-mode-denied" });
+  });
+
+  it("asks below Full access until the session is approved, then controls and reads it without asking", () => {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(debug(start, { thread: thread({ executionPolicy }) })).toMatchObject({
+        kind: "prompt",
+        approvalClass: "shell-commands",
+      });
+      for (const args of [
+        { operation: "step-over" },
+        { operation: "variables", reference: 7 },
+        { operation: "stop" },
+      ]) {
+        expect(
+          debug(args, { thread: thread({ executionPolicy, approvalSatisfied: true }) }),
+        ).toMatchObject({ kind: "allow" });
+        // What the session showed marks the thread; the approved session goes on.
+        expect(
+          debug(args, {
+            thread: thread({
+              executionPolicy,
+              approvalSatisfied: true,
+              externalContentIngested: true,
+            }),
+          }),
+        ).toMatchObject({ kind: "allow" });
+      }
+    }
+  });
+
+  it("runs unasked at Full access, a marked thread included", () => {
+    for (const externalContentIngested of [false, true]) {
+      const full = thread({ executionPolicy: "full-access", externalContentIngested });
+      expect(debug(start, { thread: full })).toMatchObject({ kind: "allow" });
+      expect(debug(evaluate, { thread: full }, "code-debug-evaluate")).toMatchObject({
+        kind: "allow",
+      });
+    }
+  });
+
+  it("covers an expression by the session's approval, after the thread read outside content too", () => {
+    const approved = thread({ approvalSatisfied: true });
+    expect(debug(evaluate, { thread: approved }, "code-debug-evaluate")).toMatchObject({
+      kind: "allow",
+    });
+    expect(debug(evaluate, { thread: thread() }, "code-debug-evaluate")).toMatchObject({
+      kind: "prompt",
+    });
+    expect(
+      debug(
+        evaluate,
+        { thread: { ...approved, externalContentIngested: true } },
+        "code-debug-evaluate",
+      ),
+    ).toMatchObject({ kind: "allow" });
+    expect(
+      debug(evaluate, { thread: thread({ externalContentIngested: true }) }, "code-debug-evaluate"),
+    ).toMatchObject({ kind: "prompt", approvalClass: "shell-commands" });
+  });
+
+  it("keeps an expression out of the session entry, refuses Chat and Work, and follows a profile by the tool's name", () => {
+    expect(debug(evaluate)).toMatchObject({ kind: "deny", step: "argument-schema" });
+    expect(debug(start, {}, "code-debug-evaluate")).toMatchObject({
+      kind: "deny",
+      step: "argument-schema",
+    });
+    expect(debug(start, { mode: "work" })).toMatchObject({ kind: "deny", step: "mode-policy" });
+    expect(debug(start, { mode: "chat" })).toMatchObject({ kind: "deny", step: "mode-policy" });
+    expect(debug(start, { thread: thread({ toolConstraints: ["octant_debug"] }) })).toMatchObject({
+      kind: "prompt",
+    });
+    expect(debug(start, { thread: thread({ toolConstraints: ["octant_code"] }) })).toMatchObject({
+      kind: "deny",
+      step: "profile-constraints",
+    });
+  });
+});
+
 describe("resolveNetworkEgressPolicy", () => {
   it("defaults Code approval-gated to provider-endpoints-only", () => {
     expect(resolveNetworkEgressPolicy({ mode: "code", executionPolicy: "approval-gated" })).toBe(

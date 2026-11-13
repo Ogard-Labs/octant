@@ -115,6 +115,8 @@ export interface ChatThreadNavigationSource {
   readonly snooze?: ChatThreadNavigationItem["snooze"] | undefined;
   /** A person turned off Continue after restart for this thread. */
   readonly restartContinuationOff?: boolean | undefined;
+  /** Work: the thread's Wake when a message arrives switch is on. */
+  readonly messageWake?: boolean | undefined;
 }
 
 /**
@@ -201,6 +203,11 @@ export interface ChatThreadNavigationItem {
   readonly updatedAt?: string;
   /** When the person completed the thread. Absent while it is in play. */
   readonly completedAt?: string;
+  /**
+   * A person marked this Code thread Done whatever its delivery target says.
+   * Reopen clears it. Absent on Chat and Work rows.
+   */
+  readonly markedDone?: boolean;
   /** The thread's snooze as the host recorded it. Absent while it is awake. */
   readonly snooze?: {
     readonly until: string;
@@ -231,7 +238,7 @@ export interface ChatThreadNavigationItem {
   readonly coordinatorThreadId?: string;
   /** The worker's coordinator's title, when that coordinator is still listed. */
   readonly coordinatorTitle?: string;
-  /** Code only: the Wake when a message arrives switch is on. */
+  /** Code and Work: the Wake when a message arrives switch is on. */
   readonly messageWake?: boolean;
   /** Code only: a person turned off this worker's Wake for coordinator. */
   readonly coordinatorWakeOff?: boolean;
@@ -308,6 +315,7 @@ export function buildChatThreadNavigation(
     ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
     ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
     ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
+    ...(thread.messageWake === true ? { messageWake: true } : {}),
   }));
 }
 

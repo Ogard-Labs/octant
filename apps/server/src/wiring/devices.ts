@@ -223,6 +223,8 @@ export function wireDevices(deps: DevicesDependencies) {
     const androidToolchainService = new AndroidToolchainService({
       execute: (input, signal) => androidProcess.execute(input, signal),
       spawnDetached: spawnDetachedProcess,
+      snapshotBoot: () =>
+        persistence.readCodeSettings()?.settings.androidEmulatorSnapshotBoot === true,
       ...(serveAvd === undefined ? {} : { serveAvd }),
       observeEmulators: (emulators) =>
         androidInputGrants.closeUnlessBooted(

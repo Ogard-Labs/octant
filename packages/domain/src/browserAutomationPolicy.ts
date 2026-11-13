@@ -6,7 +6,11 @@ import type {
   BrowserObservation,
   ToolActionAuthority,
 } from "@octant/contracts";
-import { BROWSER_RESIZE_BOUNDS, sameToolActionAuthority } from "@octant/contracts";
+import {
+  ANY_BROWSER_ORIGIN,
+  BROWSER_RESIZE_BOUNDS,
+  sameToolActionAuthority,
+} from "@octant/contracts";
 
 export type BrowserPolicyDecision =
   | { readonly kind: "allowed" }
@@ -233,6 +237,7 @@ function checkOriginAllowed(target: string, policy: BrowserContextPolicy): boole
   if (policy.allowedOrigins.length === 0) return false;
   const targetOrigin = normalizeOrigin(target);
   if (targetOrigin === undefined) return false;
+  if (policy.allowedOrigins.includes(ANY_BROWSER_ORIGIN)) return /^https?:/.test(targetOrigin);
   return policy.allowedOrigins.some((allowed) => {
     const allowedOrigin = normalizeOrigin(allowed);
     return allowedOrigin !== undefined && allowedOrigin === targetOrigin;
@@ -287,11 +292,13 @@ export function remoteBrowserActionReach(kind: BrowserActionKind): BrowserPolicy
  * `http:` origin upgraded to `https:` is where it was headed anyway. Every
  * other host, and every port, stays exact. A redirect from `vg.no` to
  * `www.vg.no` used to leave the page blank with a notice to open the address
- * the person had just typed.
+ * the person had just typed. A Private page an agent opened at Full access
+ * carries the any-site entry and admits every http and https address.
  */
 export function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
   const page = httpOrigin(target);
   if (page === undefined) return false;
+  if (allowedOrigins.includes(ANY_BROWSER_ORIGIN)) return true;
   return allowedOrigins.some((allowed) => {
     const entry = httpOrigin(allowed);
     if (entry === undefined || entry.port !== page.port) return false;

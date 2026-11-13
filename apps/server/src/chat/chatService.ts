@@ -28,8 +28,10 @@ import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNati
 import { createHash } from "node:crypto";
 import {
   ActorId,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   WEB_SEARCH_TOOL_DEFINITION,
   CONTEXT_COMPACTION_EVENT_NAMES,
+  type ThreadToolStep,
   CorrelationId,
   EventId,
   UtcTimestamp,
@@ -108,6 +110,7 @@ import {
   type ProviderModelId,
   type ProviderObservedState,
   type ProviderProbeResult,
+  type EventActor,
   type MentionableThreadId,
   type PendingRequest,
   type ProviderServiceLimits,
@@ -275,6 +278,7 @@ import type {
 import type { RestartContinuationReadiness } from "../harness/threadRestartContinuation";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
+import type { ThreadToolCallRecorders } from "../threadToolCallRecorder";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
 import {
@@ -360,6 +364,7 @@ const CHAT_EVENT_NAMES = new Set([
   "chat.turn-created@1",
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
+  "chat.attempt-tool-step@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -618,6 +623,11 @@ export interface ChatServiceExecutionContext {
    * (usage-limit recovery) that have no window to attach.
    */
   readonly windowId?: WindowId;
+  /**
+   * Who a thread or settings change is journaled as: the paired device the
+   * route resolved it for. Absent, the change is the local person's.
+   */
+  readonly actor?: EventActor;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -657,6 +667,13 @@ export interface ChatServiceOptions {
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
+  /** Keeps each attempt's tool-call input and output in purgeable storage; absent keeps none. */
+  readonly toolCallRecorders?: ThreadToolCallRecorders;
+  /**
+   * How many tool calls an attempt keeps: the person's setting, read when an
+   * attempt starts. Absent reads as the default.
+   */
+  readonly toolStepsPerTurn?: () => number;
   /**
    * Whether the agent's own harness approval is waiting on a person in this
    * thread. Its turn is parked then, not executing, so the navigation row says
@@ -691,6 +708,17 @@ export interface ChatServiceOptions {
   readonly threadWork: ThreadWorkService;
   readonly turnTimeoutMs?: number;
   /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off,
+   * read as each turn starts. Absent uses the default limit.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off, read as each turn starts.
+   * Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
+  /**
    * Deadline for the maintenance request that compacts a turn's dropped
    * conversation. The turn awaits it before dispatching the user's own
    * message, so it is bounded separately from the turn itself.
@@ -724,6 +752,15 @@ export interface ChatServiceOptions {
     readonly coordinationDepth?: number;
   }) => AppManagedToolSet | undefined;
   readonly resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
+  /**
+   * Runs Verify tools for a direct-endpoint model nobody has verified yet,
+   * where a turn starts. Never rejects: a model it could not verify takes the
+   * turn without tools.
+   */
+  readonly verifyModelToolsOnFirstUse?: (
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ) => Promise<void>;
   /**
    * The turn's Computer tool, offered on every eligible turn without a
    * composer selection; undefined when the turn cannot use it.
@@ -1083,6 +1120,12 @@ export interface ChatSubscribeOptions {
    * projection, because a strict event reader refuses a kind it does not know.
    */
   readonly appended?: boolean;
+  /**
+   * Receive each tool event as an `attempt-tool-step` frame, which carries
+   * only the step it changed. A subscriber that does not ask receives the
+   * whole attempt instead, for the same reason.
+   */
+  readonly toolSteps?: boolean;
 }
 
 export class ChatService {
@@ -1105,6 +1148,8 @@ export class ChatService {
   readonly #scratchStore: ChatScratchStore;
   readonly #turnRunner: ChatTurnRunner;
   readonly #liveTurns?: LiveTurnRegistry;
+  readonly #toolCallRecorders?: ThreadToolCallRecorders;
+  readonly #toolStepsPerTurn: () => number;
   readonly #awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly #researchRouter: ResearchRouter;
   readonly #contextMaintenanceTimeoutMs?: number;
@@ -1115,6 +1160,7 @@ export class ChatService {
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
+  readonly #verifyModelToolsOnFirstUse: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
@@ -1170,6 +1216,10 @@ export class ChatService {
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
+    this.#toolStepsPerTurn = options.toolStepsPerTurn ?? (() => DEFAULT_THREAD_TOOL_STEPS_PER_TURN);
+    if (options.toolCallRecorders !== undefined) {
+      this.#toolCallRecorders = options.toolCallRecorders;
+    }
     if (options.awaitsHarnessApproval !== undefined) {
       this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     }
@@ -1190,6 +1240,7 @@ export class ChatService {
     if (options.resolveExtensionSelectionContext !== undefined) {
       this.#resolveExtensionSelectionContext = options.resolveExtensionSelectionContext;
     }
+    this.#verifyModelToolsOnFirstUse = options.verifyModelToolsOnFirstUse;
     if (options.resolveComputerUseTools !== undefined)
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
     if (options.personMemoryBlock !== undefined)
@@ -1224,6 +1275,12 @@ export class ChatService {
       contextHarness: options.contextHarness,
       researchRouter: options.researchRouter,
       ...(options.turnTimeoutMs === undefined ? {} : { timeoutMs: options.turnTimeoutMs }),
+      ...(options.stalledTurnLimitMs === undefined
+        ? {}
+        : { stalledTurnLimitMs: options.stalledTurnLimitMs }),
+      ...(options.providerToolCallPauseLimitMs === undefined
+        ? {}
+        : { providerToolCallPauseLimitMs: options.providerToolCallPauseLimitMs }),
       ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     });
   }
@@ -1689,10 +1746,10 @@ export class ChatService {
         case "change-chat-instructions":
         case "set-chat-thread-restart-continuation":
           return await this.#withThreadAdmission(command.threadId, () =>
-            this.#updateThread(command),
+            this.#updateThread(command, executionContext?.actor),
           );
         case "update-chat-settings":
-          return await this.#updateThread(command);
+          return await this.#updateThread(command, executionContext?.actor);
         case "send-chat-turn":
           return await this.#sendTurn(command, executionContext);
         case "deliver-chat-agent-result":
@@ -1969,6 +2026,7 @@ export class ChatService {
           envelope,
           options?.contents === true,
           options?.appended === true,
+          options?.toolSteps === true,
         );
         if (frame === undefined) continue;
         yield frame;
@@ -2367,7 +2425,10 @@ export class ChatService {
     return { kind: "thread-created", thread };
   }
 
-  async #updateThread(command: ReturnType<typeof decodeChatCommand>): Promise<ChatCommandResult> {
+  async #updateThread(
+    command: ReturnType<typeof decodeChatCommand>,
+    actor?: EventActor,
+  ): Promise<ChatCommandResult> {
     this.#assertReady();
     const threadId = decodeChatThreadId(
       "threadId" in command ? command.threadId : CHAT_SETTINGS_AGGREGATE_ID,
@@ -2502,7 +2563,13 @@ export class ChatService {
       this.#persistence.journal.append({
         aggregate: { aggregateType: "chat-settings", aggregateId: CHAT_SETTINGS_AGGREGATE_ID },
         expectedVersion: command.expectedVersion,
-        events: [this.#pending("chat.settings-updated@1", { kind: "settings-updated", settings })],
+        events: [
+          this.#pending(
+            "chat.settings-updated@1",
+            { kind: "settings-updated", settings },
+            actor === undefined ? undefined : { actor },
+          ),
+        ],
       });
       return { kind: "settings-updated", settings };
     }
@@ -2729,7 +2796,13 @@ export class ChatService {
     this.#persistence.journal.append({
       aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
       expectedVersion: command.expectedVersion,
-      events: [this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: next })],
+      events: [
+        this.#pending(
+          "chat.thread-updated@1",
+          { kind: "thread-updated", thread: next },
+          actor === undefined ? undefined : { actor },
+        ),
+      ],
     });
     return { kind: "thread-updated", thread: next };
   }
@@ -2757,6 +2830,14 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "send-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
+    // Before the turn is admitted and its tools are chosen: one check at most
+    // per send, and a check that fails leaves the turn to run without tools.
+    const used = this.#persistence.readChatThread(command.threadId);
+    if (used !== undefined) {
+      await this.#verifyModelToolsOnFirstUse?.(used.providerInstanceId, used.modelId).catch(
+        () => undefined,
+      );
+    }
     const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#admitHarnessTurn(thread);
@@ -6488,6 +6569,30 @@ export class ChatService {
         pendingContent.delete(String(content.reference.contentId));
       }
     };
+    // One tool event, journaled as the step it changed. Deltas batched
+    // before it commit first, so the journal keeps the order they happened.
+    const persistToolStep = async (attempt: ChatAttempt, step: ThreadToolStep | undefined) => {
+      journalAppendedBatch();
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+        expectedVersion: readAggregateVersion(
+          this.#persistence.connection,
+          "chat-thread",
+          input.thread.id,
+        ),
+        events: [
+          this.#pending("chat.attempt-tool-step@1", {
+            kind: "attempt-tool-step",
+            threadId: attempt.threadId,
+            turnId: attempt.turnId,
+            attemptId: attempt.id,
+            ...(step === undefined ? {} : { toolStep: step }),
+            ...(attempt.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
+            updatedAt: attempt.updatedAt,
+          }),
+        ],
+      });
+    };
     const persistAppendedResponse = async (
       attempt: ChatAttempt,
       responseRef: ChatContentReference,
@@ -6539,6 +6644,9 @@ export class ChatService {
         turnId: String(input.attempt.id),
       });
       let endedTurn: TurnEndSummary | undefined;
+      // Chat has no Full access, so the attempt keeps the person's number
+      // for the levels below it.
+      const toolStepLimit = this.#toolStepsPerTurn();
       try {
         await Effect.runPromise(
           Effect.scoped(
@@ -6566,6 +6674,16 @@ export class ChatService {
                 ? {}
                 : {
                     liveTurn: this.#liveTurns.tracker(String(input.thread.id), "chat-navigation"),
+                  }),
+              ...(this.#toolCallRecorders === undefined
+                ? {}
+                : {
+                    toolCallRecords: this.#toolCallRecorders({
+                      mode: "chat",
+                      threadId: String(input.thread.id),
+                      turnId: String(input.attempt.id),
+                      callLimit: toolStepLimit,
+                    }),
                   }),
               onHarnessRetry: (notice) => {
                 this.#nativeHarness?.noteRetry?.(harnessScope, notice);
@@ -6634,6 +6752,16 @@ export class ChatService {
                       message: "Chat attempt persistence failed.",
                     }),
                 }),
+              persistToolStep: (attempt, step) =>
+                Effect.tryPromise({
+                  try: () => persistToolStep(attempt, step),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat attempt persistence failed.",
+                    }),
+                }),
+              toolStepLimit,
               persistProviderFailure: (attempt, failure) =>
                 Effect.tryPromise({
                   try: () => persistAttempt(attempt, failure, true),
@@ -6949,6 +7077,7 @@ export class ChatService {
     },
     withContents: boolean,
     withAppended: boolean,
+    withToolSteps: boolean,
   ): ChatEventFrame | undefined {
     try {
       let event = decodeChatPublicEvent(envelope.payload);
@@ -7020,6 +7149,14 @@ export class ChatService {
           if (withContents) contents = this.#appendedContent(attempt);
         } else if (withContents) {
           contents = this.#contentBody(event.responseRef, event.threadId);
+        }
+      } else if (event.kind === "attempt-tool-step") {
+        if (!withToolSteps) {
+          // As for an appended delta: a subscriber that did not ask gets the
+          // whole attempt, in the state the step left it in or later.
+          const attempt = this.#persistence.readChatAttempt(String(event.attemptId));
+          if (attempt === undefined) return undefined;
+          event = decodeChatAttemptUpdated({ kind: "attempt-updated", attempt });
         }
       } else if (withContents && event.kind === "attempt-updated") {
         contents = this.#appendedContent(event.attempt);
@@ -7374,6 +7511,8 @@ export class ChatService {
       // Everything a person asks for is theirs; only the host's own timer
       // writes as the system, so a journal reader can tell the two apart.
       readonly actorKind?: "local-user" | "system";
+      /** The paired device a person's change came from, in place of the local person. */
+      readonly actor?: EventActor;
     },
   ) {
     return {
@@ -7382,7 +7521,7 @@ export class ChatService {
       eventVersion: 1,
       hostId: LOCAL_HOST_ID,
       correlationId: options?.correlationId ?? decodeCorrelationId(this.#uuid()),
-      actor: {
+      actor: options?.actor ?? {
         kind: options?.actorKind ?? ("local-user" as const),
         actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
       },

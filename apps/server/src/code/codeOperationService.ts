@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import type { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { requiresLiveCodeReviewAuthority } from "./codeReviewAuthority";
 import {
@@ -105,6 +106,7 @@ import {
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
+  decidePullRequestComment,
   decidePushBranch,
   decideRemotePullRequestMerge,
   type PushBranchRefusal,
@@ -127,6 +129,7 @@ import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
 import { ReviewFindingServiceError } from "./reviewFindingService";
+import type { ProjectForgeChoices } from "./standingMergeAllowance";
 
 import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
 
@@ -989,6 +992,7 @@ export interface CodeOperationReviewFindingPort {
     windowId: WindowId,
     input: Omit<CodeReviewFinding, "state" | "version" | "createdAt" | "updatedAt">,
     admissionCurrent?: () => boolean,
+    actor?: EventActor,
   ) => Promise<CodeReviewFinding>;
   readonly changeState: (
     windowId: WindowId,
@@ -1000,6 +1004,7 @@ export interface CodeOperationReviewFindingPort {
       readonly state: CodeReviewFinding["state"];
     },
     admissionCurrent?: () => boolean,
+    actor?: EventActor,
   ) => Promise<CodeReviewFinding>;
 }
 
@@ -1167,6 +1172,12 @@ export type CodeOperationInitiator = "user" | "agent";
 export interface CodeOperationExecuteOptions {
   readonly initiator?: CodeOperationInitiator;
   /**
+   * Who the route resolved the request to. It names the person's own records
+   * an operation writes (a review finding); the operation's own events keep
+   * the runtime's actor. Host-only: the wire command cannot carry it.
+   */
+  readonly actor?: EventActor;
+  /**
    * Set by the host's own usage-limit recovery when it dispatches the
    * authorized continuation: the send is not the person re-engaging, so it
    * must not wake a snooze or reopen a completion. Host-only: the wire
@@ -1296,6 +1307,18 @@ export interface CodeOperationServiceOptions {
    * act.
    */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
+  /**
+   * The Project's stored choices for comments and default-branch pushes, read
+   * at each act. Absent reads neither, so a comment below Full access and a
+   * push to the default branch each need an approval for the act.
+   */
+  readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
+  /**
+   * Whether the thread has read outside content, read at each post. A marked
+   * thread's comment below Full access needs an approval for the act whatever
+   * the Project chose. Absent reads as marked.
+   */
+  readonly threadReadOutsideContent?: (thread: CodeThread) => boolean;
   readonly reviewFindings: CodeOperationReviewFindingPort;
   readonly recordReviewContent?: (
     input: RecordExternalContentIngestionInput,
@@ -1994,6 +2017,7 @@ export class CodeOperationService {
                         initiator,
                         options.routineRun,
                         initiator === "user" && options.limitRecovery !== true,
+                        options.actor,
                       );
               } catch (error) {
                 const category =
@@ -3574,6 +3598,15 @@ export class CodeOperationService {
         ? "allow"
         : "unauthorized";
     }
+    // The same holds for a comment on the Project's choice: it stands in for
+    // the per-post prompt only while the stored choice still says so, and
+    // only on a thread that has read no outside content.
+    if (command.kind === "comment-pull-request" && command.authorization.kind === "standing") {
+      return this.#options.projectForgeChoices?.(thread).comments === true &&
+        this.#pullRequestCommentDecision(thread) !== "ask"
+        ? "allow"
+        : "unauthorized";
+    }
     if (
       policy.decision === "prompt" &&
       this.#isApprovedTerminalContinuation(windowId, command, thread, checkout)
@@ -3612,6 +3645,19 @@ export class CodeOperationService {
     return "allow";
   }
 
+  /**
+   * `thread` carries the posture its active turn runs at (see
+   * `authority.effectiveThread`), so a Full-access thread running an
+   * approval-gated turn is decided as approval-gated.
+   */
+  #pullRequestCommentDecision(thread: CodeThread) {
+    return decidePullRequestComment({
+      fullAccess: thread.executionPolicy === "full-access",
+      projectAllowsComments: this.#options.projectForgeChoices?.(thread).comments === true,
+      readOutsideContent: this.#options.threadReadOutsideContent?.(thread) !== false,
+    });
+  }
+
   #standingMergeBacked(source: CodeMergeStandingSource, thread: CodeThread): boolean {
     return this.#options.standingMergeAllowance?.(thread).includes(source) === true;
   }
@@ -3648,6 +3694,7 @@ export class CodeOperationService {
     initiator: CodeOperationInitiator = "agent",
     routineRun?: AutomationRunReference,
     includeProductFeedback = false,
+    personActor?: EventActor,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     // A server thread's Git runs on its server; it never reaches this host's.
@@ -4143,6 +4190,8 @@ export class CodeOperationService {
           // The person's own click is their request; an agent's push needs an
           // approval for this act, which a standing Full access grant is not.
           approvedForThisAct: command.authorization.kind === "approved" || initiator === "user",
+          defaultBranchAllowedByProject:
+            this.#options.projectForgeChoices?.(thread).defaultBranchPush === true,
         });
         if (decision.decision === "refuse") {
           return this.#failed(
@@ -4189,7 +4238,7 @@ export class CodeOperationService {
       case "update-pull-request":
         return this.#updatePullRequest(command, root.checkoutRoot, git);
       case "comment-pull-request":
-        return this.#commentPullRequest(command, root.checkoutRoot, git);
+        return this.#commentPullRequest(command, thread, root.checkoutRoot, git);
       case "merge-pull-request":
         return this.#mergePullRequest(command, root.checkoutRoot, git);
       case "observe-pull-request":
@@ -4301,6 +4350,7 @@ export class CodeOperationService {
             provenance: { kind: "manual" },
           },
           admissionCurrent,
+          personActor,
         );
         return finding.id === command.findingId
           ? decodeCodeOperationResult({
@@ -4324,6 +4374,7 @@ export class CodeOperationService {
               state: command.state,
             },
             admissionCurrent,
+            personActor,
           ),
         });
       case "start-provider-turn":
@@ -5735,16 +5786,29 @@ export class CodeOperationService {
 
   async #commentPullRequest(
     command: Extract<CodeOperationCommand, { readonly kind: "comment-pull-request" }>,
+    thread: CodeThread,
     checkoutRoot: string,
     git: CodeOperationGitPort | undefined,
   ): Promise<CodeOperationResult> {
-    // A comment posts under the person's name, so only an approval for this
-    // act reaches GitHub; a standing Full access grant does not.
-    if (command.authorization.kind !== "approved") {
+    // A comment posts under the person's name. It reaches GitHub on an
+    // approval for this act, at Full access, or below Full access on the
+    // Project's stored choice while the thread has read no outside content,
+    // both of which the host reads here and not from the command.
+    // `#authorize` has already held a `full-access` claim to a
+    // thread that is at Full access; this states the rule where the post is
+    // made, so no other caller of the gate can widen it.
+    const decision = this.#pullRequestCommentDecision(thread);
+    const allowed =
+      command.authorization.kind === "approved" ||
+      (command.authorization.kind === "full-access" && decision === "post") ||
+      (command.authorization.kind === "standing" && decision !== "ask");
+    if (!allowed) {
       return this.#failed(
         command.operationId,
         "unauthorized",
-        "A comment posts under the person's name and needs their approval for this act.",
+        command.authorization.kind === "standing"
+          ? "This Project's choice does not cover this comment (it is off, or the thread has read outside content), so the comment needs the person's approval for this act."
+          : "A comment posts under the person's name and needs their approval for this act.",
       );
     }
     if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false)
@@ -6953,7 +7017,7 @@ function pushRefusalText(reason: PushBranchRefusal): string {
     case "not-own-branch":
       return "A thread pushes only its own branch. This branch is not this thread's, so nothing was pushed.";
     case "needs-the-persons-request":
-      return "A plain force-push, or a push to the default branch, needs the person's approval for this one act. A standing grant does not cover it, so nothing was pushed.";
+      return "A plain force-push needs the person's approval for this one act, and so does a push to the default branch unless this Project allows it. A standing grant does not cover either, so nothing was pushed.";
     case "lease-missing":
       return "A force-with-lease must name the remote head it replaces, so nothing was pushed.";
   }

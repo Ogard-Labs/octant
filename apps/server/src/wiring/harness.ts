@@ -592,8 +592,6 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: {
       read: (threadId) => {
-        nativeHarnessApprovals.expireOverdue();
-        nativeHarnessQuestions.expireOverdue();
         const read = nativeHarnessSessions.read(threadId);
         const view = read === undefined ? undefined : withSteerable(read, leadDeliversSteering);
         const suggestions = threadFollowUpSuggestions.read(threadId);
@@ -623,24 +621,30 @@ export function wireHarness(deps: HarnessDependencies) {
       }),
     recoveryBlockers: ({ threadId }) => recoveryBlockers(threadId),
     followUps: followUpActions,
-    answerQuestion: ({ threadId, questionId, answer }) =>
-      nativeHarnessQuestions.answer(threadId, questionId, answer),
+    answerQuestion: ({ threadId, questionId, answer, actor }) =>
+      nativeHarnessQuestions.answer(threadId, questionId, answer, actor),
     decideApproval: ({ threadId, approvalId, decision, answer }) =>
       nativeHarnessApprovals.decide(threadId, approvalId, decision, answer),
-    steer: ({ threadId, command }) => {
+    steer: ({ threadId, command, actor }) => {
       if (command.kind === "clear") {
-        nativeHarnessSessions.clearSteering(threadId, "all");
+        nativeHarnessSessions.clearSteering(threadId, "all", actor);
         return "cleared";
       }
       if (command.kind === "take") {
-        return { taken: nativeHarnessSessions.takeSteering(threadId) };
+        return { taken: nativeHarnessSessions.takeSteering(threadId, actor) };
       }
-      return queueSteeringWhereDelivered(nativeHarnessSessions, leadDeliversSteering, threadId, {
-        id: command.noteId ?? randomUUID(),
-        text: command.text,
-        status: "queued",
-        at: new Date().toISOString() as never,
-      });
+      return queueSteeringWhereDelivered(
+        nativeHarnessSessions,
+        leadDeliversSteering,
+        threadId,
+        {
+          id: command.noteId ?? randomUUID(),
+          text: command.text,
+          status: "queued",
+          at: new Date().toISOString() as never,
+        },
+        actor,
+      );
     },
     authorizeThread: authorizeFollowUpThread,
   });

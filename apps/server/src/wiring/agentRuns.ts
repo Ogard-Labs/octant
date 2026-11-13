@@ -17,7 +17,8 @@ import {
   decodeWorkThreadId,
   decodeUtcTimestamp,
   effectiveAgentRunConcurrency,
-  DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES,
+  agentRunWorkingTimeLimitMinutes,
+  DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES,
   LOCAL_HOST_ID,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
@@ -28,9 +29,11 @@ import {
   type ProviderContextBlock,
   type UtcTimestamp,
   type WindowId,
+  type WorkAccess,
 } from "@octant/contracts";
 import {
   authorizeAgentRunCreation,
+  type CodeParentActiveTurn,
   layoutContainsAgentRunThread,
 } from "../agentRun/authorizeAgentRunCreation";
 import { readChatThreadView } from "../chat/chatService";
@@ -91,8 +94,10 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { TurnMetricsStore } from "../metrics/turnMetricsStore";
 import { SpendCeilingService } from "../spendCeilingService";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { ThreadStandingAnswerStore } from "../context/threadStandingAnswerStore";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { outsideContentRefusesDelegation } from "@octant/domain/untrusted-content-policy";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSuggestionStore";
@@ -101,6 +106,7 @@ import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-polic
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
   activeChatTurns,
+  browserToolTransport,
   chatTurnAnsweredAttempt,
   modelCanTakeDelegatedWork,
 } from "@octant/domain";
@@ -110,6 +116,34 @@ import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { HarnessStateWiring } from "./harnessState";
+
+/**
+ * Whether the child's thread has Full access now. Read for each attempt, so
+ * a thread a person narrowed gives its next attempt a working-time limit
+ * again. An unreadable thread counts as not at Full access.
+ */
+function agentRunParentThreadAtFullAccess(
+  persistence: PersistenceService,
+  workThreadProjection: WorkThreadProjection,
+  run: AgentRun,
+): boolean {
+  try {
+    const threadId = String(run.parentThreadId);
+    switch (run.routingReceipt.mode) {
+      case "chat":
+        return false;
+      case "work":
+        return workThreadProjection.read(decodeWorkThreadId(threadId))?.access === "full-access";
+      case "code":
+        return (
+          persistence.readCodeThread(decodeCodeThreadId(threadId))?.executionPolicy ===
+          "full-access"
+        );
+    }
+  } catch {
+    return false;
+  }
+}
 
 /** The thread a child belongs to as it stands now, in whichever mode started it. */
 function readAgentRunParentThread(
@@ -443,6 +477,45 @@ export function createAgentRunControlWorkspace(
   };
 }
 
+/**
+ * Whether what a thread read from outside stops it from starting or keeping a
+ * helper. The level is the one the thread's running turn holds, which a
+ * routine or a narrowed turn may hold below the thread's own; with no turn
+ * running it is the thread's own as it stands now, so lowering a thread from
+ * Full access gates its next delegation.
+ */
+function outsideContentGatesHelpers(
+  persistence: PersistenceService,
+  workThreadProjection: WorkThreadProjection,
+  turnLevels: {
+    readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
+    readonly codeParentActiveTurn: CodeParentActiveTurn;
+  },
+  parentThreadId: string,
+): boolean {
+  const readLevel = (): boolean => {
+    try {
+      const work = workThreadProjection.read(decodeWorkThreadId(parentThreadId));
+      if (work !== undefined) {
+        return (turnLevels.runningWorkTurnAccess(parentThreadId) ?? work.access) === "full-access";
+      }
+      const code = persistence.readCodeThread(decodeCodeThreadId(parentThreadId));
+      return (
+        code !== undefined &&
+        turnLevels.codeParentActiveTurn(code).executionPolicy === "full-access"
+      );
+    } catch {
+      // An id neither mode decodes is a Chat thread, which has no Full access.
+      return false;
+    }
+  };
+  return outsideContentRefusesDelegation({
+    externalContentIngested: readThreadExternalContentTaint(persistence.connection, parentThreadId)
+      .externalContentIngested,
+    fullAccessThread: readLevel(),
+  });
+}
+
 async function resolveAgentRunParentCheckout(
   persistence: PersistenceService,
   receipts: ManagedWorktreeReceiptStore,
@@ -532,6 +605,8 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
   > & {
     /** Wired by wireProviders; read only after startup. */
     readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
+    /** The level a Work thread's running turn holds; wired later, read per call. */
+    readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
   };
 
 export function wireAgentRuns(deps: AgentRunsDependencies) {
@@ -552,6 +627,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     persistence,
     providerRuntimeRegistry,
     selectCodeConversation,
+    runningWorkTurnAccess,
     windowAuthorityStore,
     workThreadProjection,
     workTurnProjection,
@@ -666,6 +742,13 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     clock: () => new Date().toISOString(),
     actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  const threadStandingAnswers = new ThreadStandingAnswerStore({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const runtimeOutsideContentMarks = new RuntimeOutsideContentMarks((input) =>
     externalContentIngestionStore.record(input),
   );
@@ -693,9 +776,16 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         deps.toolEffectLedger.supersede(record);
         return deps.toolEffectLedger.forTurn(record);
       },
-      workingTimeLimitMs: () =>
-        (agentRunSettingsStore.current().workingTimeLimitMinutes ??
-          DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES) * 60_000,
+      workingTimeLimitMs: (run) => {
+        const minutes = agentRunWorkingTimeLimitMinutes(agentRunSettingsStore.current(), {
+          threadAtFullAccess: agentRunParentThreadAtFullAccess(
+            persistence,
+            workThreadProjection,
+            run,
+          ),
+        });
+        return minutes === "none" ? "none" : minutes * 60_000;
+      },
       reviewCapture: createAgentRunReviewCapture(),
       outsideContentMarks: runtimeOutsideContentMarks,
       canCaptureReview: (run) => {
@@ -784,13 +874,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         if (contributed.every((set) => set === undefined)) return undefined;
         return combineAppManagedToolSets(...contributed);
       },
-      appManagedToolTransport: ({ providerInstanceId, modelId }) => {
+      appManagedToolTransport: ({ providerInstanceId, modelId, executionPolicy }) => {
         const observed = providerRuntimeRegistry.observedState(providerInstanceId);
         const supported =
-          observed?.capabilities.appManagedTools === "supported" ||
-          observed?.verifiedToolModelIds?.some(
-            (candidate: unknown) => String(candidate) === String(modelId),
-          ) === true;
+          browserToolTransport(observed, String(modelId), { executionPolicy }) === true;
         if (supported) return "supported" as const;
         return observed === undefined ? ("unavailable" as const) : ("unsupported" as const);
       },
@@ -885,7 +972,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         agentRunLiveConversations.begin(runId, { resume: resumed });
         agentRunLiveConversations.appendStatus(
           runId,
-          `Working-time limit: ${workingTimeLimitMs / 60_000} minutes for this attempt. Waiting for your approval or answer does not count. Retry and Resume start a fresh window.`,
+          workingTimeLimitMs === "none"
+            ? "Working-time limit: none for this attempt, because its thread has Full access and Helper agents settings lift the limit there. It runs until it finishes or is cancelled."
+            : `Working-time limit: ${workingTimeLimitMs / 60_000} minutes for this attempt. Waiting for your approval or answer does not count. Retry and Resume start a fresh window.`,
           decodeUtcTimestamp(new Date().toISOString()),
         );
       },
@@ -942,14 +1031,21 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     },
     approvals: { isCurrent: () => true },
     processes: agentRunProcessSupervisor,
+    providerSlotWaitLimitMs: () =>
+      (agentRunSettingsStore.current().providerSlotWaitMinutes ??
+        DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES) * 60_000,
     parentAuthority: {
       current: (run) =>
         currentParentAuthorityForWaiter({
           run,
           startsHelpers: () => agentRunSettingsStore.current().creationPosture === "automatic",
           isTainted: (waiter) =>
-            readThreadExternalContentTaint(persistence.connection, String(waiter.parentThreadId))
-              .externalContentIngested,
+            outsideContentGatesHelpers(
+              persistence,
+              workThreadProjection,
+              { runningWorkTurnAccess, codeParentActiveTurn },
+              String(waiter.parentThreadId),
+            ) && !threadStandingAnswers.covers(String(waiter.parentThreadId), "delegation", true),
           parentThread: (waiter) =>
             readAgentRunParentThread(persistence, workThreadProjection, waiter),
           parentLiveAuthority: agentRunParentAuthority,
@@ -1145,6 +1241,13 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     readonly parentThreadId: string;
     readonly mode: OctantMode;
     readonly projectId?: ProjectId;
+    /**
+     * How the calling turn asks its person, in the thread, to allow one thing.
+     * Only a Code turn has one today, so only a Code thread below Full access
+     * asks before a helper once it has read outside content; elsewhere that
+     * delegation is still refused.
+     */
+    readonly ask?: (summary: string) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }): AppManagedToolSet =>
     createAgentsManagedTools({
       admission: agentRunAdmission,
@@ -1187,9 +1290,27 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           status === "recovery-required"
         );
       },
+      // The person's answer for the thread, journaled, lifts the gate for the
+      // rest of the thread; Full access never has one to lift.
       isTainted: () =>
-        readThreadExternalContentTaint(persistence.connection, input.parentThreadId)
-          .externalContentIngested,
+        outsideContentGatesHelpers(
+          persistence,
+          workThreadProjection,
+          { runningWorkTurnAccess, codeParentActiveTurn },
+          input.parentThreadId,
+        ) && !threadStandingAnswers.covers(input.parentThreadId, "delegation", true),
+      ...(input.ask === undefined
+        ? {}
+        : {
+            askMarkedDelegation: async () => {
+              const answer = await input.ask?.(
+                "Let this thread start helper agents? It has read outside content (a helper's reply counts), which may be steering what it asks a helper to do. Approving covers this thread's later helpers.",
+              );
+              if (answer !== "approved") return false;
+              threadStandingAnswers.record(input.parentThreadId, "delegation", true);
+              return true;
+            },
+          }),
       authorizeCancel: (run) =>
         authorizeAgentRunCancellation({
           persistence,
@@ -1373,6 +1494,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     contributeChildTools,
     coordinatorWorkersHolder,
     externalContentIngestionStore,
+    threadStandingAnswers,
     managedWorktreeReceipts,
     nativeHarnessRouter,
     nativeHarnessRoutingStore,

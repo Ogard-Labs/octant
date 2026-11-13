@@ -36,11 +36,22 @@ function reject(code: MemoryPolicyRejectionCode, message: string): never {
   throw new MemoryPolicyRejected(code, message);
 }
 
+/** A copy that names the same actor: a device keeps its id, and nothing else rides along. */
+function cloneActor(actor: ProjectActor): ProjectActor {
+  return actor.kind === "remote-device"
+    ? { kind: actor.kind, actorId: actor.actorId, deviceId: actor.deviceId }
+    : { kind: actor.kind, actorId: actor.actorId };
+}
+
+/**
+ * A memory change is a person's own act: at this host, or on a device they
+ * paired, which the entry then names. The host never writes one by itself.
+ */
 function requireUserActor(actor: ProjectActor): ProjectActor {
-  if (actor.kind !== "local-user") {
-    reject("invalid-actor", "Project memory changes require an explicit local user action");
+  if (actor.kind === "system") {
+    reject("invalid-actor", "Project memory changes require an explicit action by a person");
   }
-  return { kind: actor.kind, actorId: actor.actorId };
+  return cloneActor(actor);
 }
 
 function normalizeContent(content: string): string {
@@ -81,10 +92,7 @@ function cloneProvenance(provenance: MemoryProvenance): MemoryProvenance {
     sourceProjectId: provenance.sourceProjectId,
     sourceEntryId: provenance.sourceEntryId,
     destinationProjectId: provenance.destinationProjectId,
-    transferredBy: {
-      kind: provenance.transferredBy.kind,
-      actorId: provenance.transferredBy.actorId,
-    },
+    transferredBy: cloneActor(provenance.transferredBy),
     transferredAt: provenance.transferredAt,
     selectedContent: provenance.selectedContent,
   };
@@ -95,7 +103,28 @@ function agentProvenance(origin: AgentAuthoredMemoryProvenance): AgentAuthoredMe
     kind: "agent-authored",
     mode: origin.mode,
     ...(origin.threadId === undefined ? {} : { threadId: origin.threadId }),
+    ...(origin.unconfirmed === true ? { unconfirmed: true } : {}),
   };
+}
+
+/**
+ * What becomes of a write a thread's agent asks Project memory for. Plan
+ * refuses before anything else. Full access, or the Project's setting below
+ * it, writes with nobody asked. Otherwise the person confirms a card, and a
+ * turn with nobody at a window on the host has no one to show it to.
+ */
+export type AgentProjectMemoryWrite = "refuse-plan" | "write" | "ask" | "refuse-nobody-to-confirm";
+
+export function agentProjectMemoryWrite(input: {
+  readonly plan: boolean;
+  readonly fullAccess: boolean;
+  /** The Project's "Agents may write Project memory without asking" setting. */
+  readonly projectAllows: boolean;
+  readonly somebodyAtWindow: boolean;
+}): AgentProjectMemoryWrite {
+  if (input.plan) return "refuse-plan";
+  if (input.fullAccess || input.projectAllows) return "write";
+  return input.somebodyAtWindow ? "ask" : "refuse-nobody-to-confirm";
 }
 
 export interface CreateMemoryEntryInput {
@@ -159,7 +188,7 @@ export function supersedeMemoryEntry(
   const previousEntry: SupersededMemoryEntry = {
     ...predecessor,
     provenance: cloneProvenance(predecessor.provenance),
-    author: { kind: predecessor.author.kind, actorId: predecessor.author.actorId },
+    author: cloneActor(predecessor.author),
     status: "superseded",
     supersededBy: input.successorEntryId,
     version,
@@ -188,6 +217,8 @@ export interface RetractMemoryEntryInput {
   readonly actor: ProjectActor;
   readonly retractedAt: UtcTimestamp;
   readonly expectedVersion: AggregateVersion;
+  /** The thread whose agent retracted it; absent when the person did. */
+  readonly agentOrigin?: AgentAuthoredMemoryProvenance;
 }
 
 export function retractMemoryEntry(
@@ -199,11 +230,14 @@ export function retractMemoryEntry(
   return {
     ...active,
     provenance: cloneProvenance(active.provenance),
-    author: { kind: active.author.kind, actorId: active.author.actorId },
+    author: cloneActor(active.author),
     status: "retracted",
     retractionReason: normalizeReason(input.reason),
     retractedBy,
     retractedAt: input.retractedAt,
+    ...(input.agentOrigin === undefined
+      ? {}
+      : { retractionOrigin: agentProvenance(input.agentOrigin) }),
     version: nextVersion(input.expectedVersion),
     updatedAt: input.retractedAt,
   };
@@ -236,7 +270,7 @@ export function transferMemoryEntry(
       sourceProjectId: source.projectId,
       sourceEntryId: source.id,
       destinationProjectId: input.destinationProjectId,
-      transferredBy: { kind: transferredBy.kind, actorId: transferredBy.actorId },
+      transferredBy: cloneActor(transferredBy),
       transferredAt: input.transferredAt,
       selectedContent: source.content,
     },

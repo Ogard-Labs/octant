@@ -80,7 +80,12 @@ Plan's read-only rule, Chat's withheld filesystem and shell, and the
 provider's telemetry and self-update channels stay off at every
 level. The provider's own memory is off unless the person turns on its
 setting for that provider account, which is off by default (maintainer
-request, 2026-11-12; not built yet: today it is off with no setting). Work and Code share one capability set, so each runtime starts a Work
+request, 2026-11-12; built for Claude Code and Codex in Work and Code, with
+Plan kept off and Chat not built yet). With it on, Claude Code launches
+without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` and Codex's app-server starts
+without the `features.memories=false` override, on a process of its own;
+OpenCode and Mistral Vibe have no such memory and no setting
+([architecture](../architecture.md#modes-chat-work-and-code)). Work and Code share one capability set, so each runtime starts a Work
 session with its shell at the thread's level exactly as it starts a Code
 session, as the
 [architecture's Work rules](../architecture.md#modes-chat-work-and-code)
@@ -281,13 +286,46 @@ anything rather than one that is still writing. Every other consumer ignores
 it: it carries no content and reaches no transcript, journal, usage figure, or
 turn event budget. A session that goes fully silent still times out, at the
 stalled-turn limit: a setting in Settings › Providers & Models, 30 minutes by
-default, which may be turned off. A provider tool call the runtime reports as
-running pauses that clock, as an app-managed call does; a call that reports a
-start and never a finish pauses it for at most a setting, two hours by
-default, that may be turned off (maintainer decision, 2026-11-12). Force stop
-is unchanged (maintainer request, 2026-11-12). Not built yet: today the limit
-is a fixed five minutes, a running provider tool call does not pause it, and
-no bound on that pause exists.
+default, from 5 minutes to 8 hours, which may be turned off. A provider tool
+call the runtime reports as running pauses that clock, as an app-managed call
+does, for at most the tool-call pause limit: a second setting there, two
+hours by default, from 5 minutes to 24 hours, which may be turned off
+(maintainer decision, 2026-11-12). Force stop is unchanged (maintainer
+request, 2026-11-12).
+
+The limit is a host setting (`stalledTurnLimitMinutes`, `null` for Off),
+journaled with the other shell settings and changed at a local window or a
+paired device (maintainer decision, 2026-11-12; not built yet: today the shell
+route is local-only and a paired device cannot).
+Chat, Work and Code read it when a turn starts: a change applies from the
+next turn, and a running turn keeps the limit it started with. A turn cut off
+by the limit ends as it did under the fixed limit. With the setting Off, only
+Stop and Force stop end a silent turn. The tool-call pause limit
+(`providerToolCallPauseLimitMinutes`, `null` for Off) is stored, changed and
+read the same way.
+
+A provider tool call is running from its normalized `tool-start` until the
+`tool-success` or `tool-failure` with the same `toolCallId`. Claude Code,
+Codex, OpenCode, Pi and the ACP agents report these for their own tools.
+Octant Harness and the direct model endpoints run no tools of their own:
+their tools are app-managed calls, which already pause the clock. An outside
+driver gets the pause when it emits the same events. A tool the model's
+provider runs on its own servers is reported as outside content, not as a
+tool call, so the clock keeps running through it.
+
+One call pauses the clock for no longer than the tool-call pause limit,
+counted from its start. When that passes the clock runs again from that
+moment, so a turn whose provider stays silent is cut off one stalled-turn
+limit later; an event from the provider, the call's late finish included, is
+activity as usual, and another call that started later still pauses for its
+own time. With the pause Off a call pauses the clock until it finishes.
+Rationale: a runtime that reports a start and never the finish would hold its
+turn open until the person stops it. Two hours covers a long build or test
+run, and Off keeps the unbounded pause for work that runs longer; Stop and
+Force stop still end such a turn.
+
+An app-managed tool call in Chat keeps its own deadline of five minutes,
+apart from the stalled-turn limit; it does not follow the setting.
 
 Codex sends nothing while the model streams a tool call's arguments: the
 installed 0.163.0 app-server schema has no argument-delta notification, and
@@ -795,9 +833,26 @@ receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime. Ordinary inherited configuration does not supply that attestation and,
 below Full access, continues to report app tools as unsupported. At Full access
 such a runtime is still offered Octant's tools, labelled as mixed with tools
-Octant did not supply (maintainer request, 2026-11-12; not built yet: today
-it reports app tools as unsupported at every level). Process exit, stream failure,
-interruption, and scope cleanup retire pending tool requests.
+Octant did not supply (maintainer request, 2026-11-12). The adapter reports
+this as a separate capability, `appManagedToolsAtFullAccess: "mixed"`, beside
+`appManagedTools`, which keeps answering for every guarded level; the host
+resolves the two against the thread's level, and the thread's access details
+show "mixed with tools Octant did not supply". Full access launches the
+runtime outside the sandbox the receipt rests on, so a release that proves
+exclusivity below Full access is mixed there too, unless the thread keeps the
+opt-in sandbox. The capability is reported only when the connection check saw
+the runtime accept the tool endpoint's declaration; that check runs on macOS
+only, so on Linux nothing is reported as mixed. Every reader of the tool
+gate follows the level the turn runs at (maintainer decision, 2026-11-13): a
+child agent session reads the level its own session runs at; a routine's own
+Browser target reads its running turn's level; a saved flow, which runs
+between turns, reads the level its thread holds then. While a person reviews
+a routine's Browser permission no turn runs, so a routine opted into its
+Project's level is read at Full access there and stays reviewable; a review
+offers no tool, and each turn is still judged at its own level. Below Full
+access all three read `appManagedTools` alone, as before.
+Process exit, stream failure, interruption, and scope cleanup retire pending
+tool requests.
 
 ## Subscription sign-in dialects
 

@@ -18,6 +18,13 @@ export interface ThreadMessageQueueTail {
    * idle cannot take it for one.
    */
   readonly unconfirmed?: true;
+  /**
+   * The mode itself recorded this turn as failed: Chat's attempt outcome,
+   * Work's turn status, or Code's runtime work is exactly `failed`. A turn the
+   * host or a person interrupted, one a restart cut off, and one whose end is
+   * unconfirmed are not ordinary failures, and the queue holds on them.
+   */
+  readonly ordinaryFailure?: true;
 }
 export interface ThreadMessageQueueInspectionInput {
   readonly scope: ThreadMessageQueueScope;
@@ -97,6 +104,8 @@ export interface ThreadMessageQueueModePort {
     readonly codeOperationId?: CodeOperationId;
   }) => Promise<{
     readonly status: "not-admitted" | "accepted" | "completed" | "failed" | "cancelled" | "unknown";
+    /** With `failed`: the mode recorded the turn as failed, as the tail's field says. */
+    readonly ordinaryFailure?: true;
   }>;
 }
 

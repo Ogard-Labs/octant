@@ -1223,6 +1223,9 @@ export class SpokeLinkService {
       ...(current.ownerUnlockBeforePairedMerge === undefined
         ? {}
         : { ownerUnlockBeforePairedMerge: current.ownerUnlockBeforePairedMerge }),
+      ...(current.ownerUnlockPerApprovalAnswer === undefined
+        ? {}
+        : { ownerUnlockPerApprovalAnswer: current.ownerUnlockPerApprovalAnswer }),
     });
     this.#revokeGuestDevices(
       current.link?.guestDevices ?? link.guestDevices ?? [],

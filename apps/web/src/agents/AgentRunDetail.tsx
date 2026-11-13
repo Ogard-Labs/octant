@@ -1,4 +1,8 @@
-import type { AgentRunConversationEntry, AgentRunConversationResponse } from "@octant/contracts";
+import {
+  DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES,
+  type AgentRunConversationEntry,
+  type AgentRunConversationResponse,
+} from "@octant/contracts";
 import { agentRunRecoveryLabel } from "./agentsCenterModel";
 import { ArrowLeft } from "lucide-react";
 import { useId, useState } from "react";
@@ -136,19 +140,21 @@ export function AgentRunDetail(props: {
         ) : null}
         {row.executionKind !== "octant-managed" ? null : (
           <p className="agent-run-detail__fact">
-            Retry and Resume start a fresh working-time window using Helper agents settings (30
-            minutes by default). Waiting for your input does not count. Project and thread ceilings
-            still apply.
+            Retry and Resume start a fresh working-time window using Helper agents settings (
+            {DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES} minutes by default). Waiting for your input
+            does not count. Project and thread ceilings still apply.
           </p>
         )}
         {!managed ? null : latestTime === undefined ? (
           <p className="agent-run-detail__fact">Working time not recorded yet.</p>
         ) : (
           <p className="agent-run-detail__fact">
-            Latest recorded attempt: {Math.round(latestTime.activeMs / 1000)} seconds active of{" "}
-            {latestTime.limitMs / 60_000} minutes. Recorded total:{" "}
-            {Math.round(recordedTotalMs / 1000)} seconds across {recordedAttempts} attempts. Earlier
-            or lost attempts may be unavailable; this is not wall time.
+            Latest recorded attempt: {Math.round(latestTime.activeMs / 1000)} seconds active
+            {latestTime.limitMs === undefined
+              ? ", with no time limit"
+              : ` of ${latestTime.limitMs / 60_000} minutes`}
+            . Recorded total: {Math.round(recordedTotalMs / 1000)} seconds across {recordedAttempts}{" "}
+            attempts. Earlier or lost attempts may be unavailable; this is not wall time.
           </p>
         )}
       </header>

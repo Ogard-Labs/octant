@@ -247,7 +247,7 @@ import {
 } from "./browser/dedicatedBrowserContext";
 import { MarkdownLinkActionsContext } from "./markdown/Markdown";
 import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
-import { buildInboxAttentionItems } from "./inbox/inboxModel";
+import { buildInboxAttentionItems, inboxWaitingThreadIds } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
 import { nextWaitingThread } from "./notifications/nextWaitingThread";
@@ -312,6 +312,7 @@ import {
 import {
   readSidebarCollapsed,
   useAutomaticUpdateCheckSync,
+  useQuitShortcutSecondPressSync,
   useReleaseRingSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
@@ -359,6 +360,7 @@ import { OctantToast } from "./ui/base/OctantToast";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -485,7 +487,11 @@ import {
   useOpenCodeThreadProviderRequests,
 } from "./code/codeThreadControllers";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
-import { setCodeThreadCoordinator } from "./code/codeThreadCommands";
+import {
+  setCodeThreadCoordinator,
+  setCodeThreadCoordinatorBounds,
+} from "./code/codeThreadCommands";
+import type { CoordinatorDraftChoices } from "./shell/DraftThreadWorkspace";
 import {
   createPlannerProposalTask,
   type PlannerProposalReview,
@@ -542,11 +548,7 @@ import type {
   ApprovalPendingRequest,
   DecisionPendingRequest,
 } from "./palette/needsYouCommands";
-import {
-  answerPendingRequest,
-  isFindOnlyPendingRequest,
-  type ChildPendingRequest,
-} from "./pendingRequests/pendingRequests";
+import { answerPendingRequest, type ChildPendingRequest } from "./pendingRequests/pendingRequests";
 import { usePendingRequests } from "./palette/usePendingRequests";
 import { usePendingRequests as usePendingRequestRead } from "./pendingRequests/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
@@ -898,6 +900,10 @@ function LaunchedShell(
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
   useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
   useReleaseRingSync(props.hostBridge, controller.settings?.releaseRing);
+  useQuitShortcutSecondPressSync(
+    props.hostBridge,
+    controller.settings?.quitShortcutNeedsSecondPress,
+  );
   const sidebarBackgroundFetcher = useSidebarBackgroundFetcher(
     props.launch.serverUrl,
     props.projectWindowCapability,
@@ -1026,6 +1032,7 @@ function LaunchedShell(
       setDraftPermissionPersistence(undefined);
       setPendingDraftBranch(undefined);
       setPendingDraftCoordinator(undefined);
+      setPendingDraftCoordinatorChoices({});
     }
   }
   // The Project an unbound draft composer targets, per mode. The draft lives
@@ -1068,6 +1075,10 @@ function LaunchedShell(
   // creates becomes a coordinator before its first message is sent. It holds
   // only for that Project, so choosing another one in the draft drops it.
   const [pendingDraftCoordinator, setPendingDraftCoordinator] = useState<ProjectId>();
+  // What the person chose for that coordinator in the draft: a fixed level
+  // for its workers and its own bounds. Nothing chosen leaves the defaults.
+  const [pendingDraftCoordinatorChoices, setPendingDraftCoordinatorChoices] =
+    useState<CoordinatorDraftChoices>({});
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [githubPullRequestCapability, setGithubPullRequestCapability] =
     useState<PullRequestCardCapability>({ readable: false });
@@ -1807,6 +1818,9 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  // The running coordinator whose limits a person is changing, from its row
+  // menu or its pane's header menu.
+  const [coordinatorBoundsThreadId, setCoordinatorBoundsThreadId] = useState<CodeThreadId>();
   const [preparationTarget, setPreparationTarget] = useState<PreparationTarget>();
   const [projectActionRun, setProjectActionRun] = useState<{
     readonly target: ProjectActionTarget;
@@ -2498,11 +2512,14 @@ function LaunchedShell(
   // The row count mirrors the dock badge: distinct threads waiting, minus the
   // one the user is looking at, whose signal the open thread already answers.
   // A thread whose subagent, or whose agent itself, waits on the person counts
-  // too, once. A subagent's ask or settle and the agent's own approval move the
-  // Work and Code topics. Chat navigation moves on every streaming delta, so
+  // too, once, as does a thread holding an ask a host service keeps (a tool
+  // approval, a proposal, a Browser ask). A subagent's ask or settle and the
+  // agent's own approval move the Work and Code topics; an ask moves the
+  // tool-approvals topic. Chat navigation moves on every streaming delta, so
   // following it would re-read pending requests for every token.
   const subagentWaitRead = usePendingRequestRead(pendingRequestClient, {
-    feedRevision: machineChanges.workNavigation + machineChanges.codeNavigation,
+    feedRevision:
+      machineChanges.workNavigation + machineChanges.codeNavigation + machineChanges.toolApprovals,
     settings: controller.settings,
     workspace: controller.workspace,
   }).read;
@@ -2529,9 +2546,7 @@ function LaunchedShell(
   const waitingThreadIds = useMemo(
     () =>
       subagentWaitRead.status === "ready"
-        ? subagentWaitRead.requests
-            .filter(isFindOnlyPendingRequest)
-            .map((request) => String(request.threadId))
+        ? inboxWaitingThreadIds(subagentWaitRead.requests, subagentWaitRead.asks)
         : [],
     [subagentWaitRead],
   );
@@ -4852,6 +4867,7 @@ function LaunchedShell(
               : { lineageParentThreadId: thread.lineageParentThreadId }),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+            ...(thread.markedDone === true ? { markedDone: true } : {}),
             ...(thread.coordinator === true ? { coordinator: true } : {}),
             ...(thread.planner === true ? { planner: true } : {}),
             ...workerLineage(thread.coordinatorThreadId),
@@ -5290,7 +5306,11 @@ function LaunchedShell(
       openDraftInActiveProject,
       openDraftInProject,
       openCoordinatorDraftInProject,
-      cancelCoordinatorDraft: () => setPendingDraftCoordinator(undefined),
+      cancelCoordinatorDraft: () => {
+        setPendingDraftCoordinator(undefined);
+        setPendingDraftCoordinatorChoices({});
+      },
+      setCoordinatorDraftChoices: setPendingDraftCoordinatorChoices,
       openDraftThread: controller.openDraftThread,
       openGithubIssues,
       openImageLibrary,
@@ -5337,6 +5357,7 @@ function LaunchedShell(
       renameCodeThread,
       renameProject: projectController.rename,
       reopenChatThread: chatController.reopenThread,
+      markCodeThreadDone: codeController.markThreadDone,
       reopenCodeThread: codeController.reopenThread,
       resetNewTaskDraft,
       retryActiveModeThreads,
@@ -5373,6 +5394,8 @@ function LaunchedShell(
       setCodeNewThreadWorkspace: projectController.setCodeNewThreadWorkspace,
       setCodePullRequestBackgroundRefresh: projectController.setCodePullRequestBackgroundRefresh,
       setCodeAgentMerge: projectController.setCodeAgentMerge,
+      setCodeAgentPullRequestComments: projectController.setCodeAgentPullRequestComments,
+      setCodeAgentDefaultBranchPush: projectController.setCodeAgentDefaultBranchPush,
       setCodePullRequestsOpen,
       setDockSidecarsByThread,
       setDockStatesByThread,
@@ -5402,11 +5425,14 @@ function LaunchedShell(
       setProjectNativeProviders: projectController.setNativeProviders,
       setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectAutoReviewer: projectController.setCodeAutoReviewer,
+      setProjectAgentMemoryWrites: projectController.setAgentMemoryWrites,
+      askAgainForProjectImageGeneration: projectController.askAgainForImageGeneration,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesignSystem: projectController.setDesignSystem,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
+      setProjectOwnToolchain: projectController.setCodeOwnToolchain,
       setProjectWorkDeveloperTools: projectController.setWorkDeveloperTools,
       setProjectsListOpen,
       setRailPlaceholder,
@@ -5419,6 +5445,7 @@ function LaunchedShell(
       setWorkBoardOpen,
       setWorkComposerSelection,
       setCodeThreadCoordinator: codeController.setThreadCoordinator,
+      editCodeThreadCoordinatorBounds: setCoordinatorBoundsThreadId,
       setCodeThreadCoordinatorWake: codeController.setThreadCoordinatorWake,
       setCodeThreadMessageWake: codeController.setThreadMessageWake,
       setCodeThreadRestartContinuation: codeController.setThreadRestartContinuation,
@@ -5457,9 +5484,22 @@ function LaunchedShell(
       ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
       : undefined;
   // What moves the pending-request read: a thread raising or clearing a
-  // question journals on its own mode's navigation topic.
+  // question journals on its own mode's navigation topic, and an ask a host
+  // service holds (a tool approval, a proposal, a Browser ask) moves the
+  // tool-approvals topic when it starts or stops waiting.
   const pendingRequestFeedRevision =
-    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
+    machineChanges.chatNavigation +
+    machineChanges.workNavigation +
+    machineChanges.codeNavigation +
+    machineChanges.toolApprovals;
+  const needsYouProjectClient = projectController.client;
+  const needsYouAskClients = useMemo(
+    () => ({
+      extensionClient,
+      projectClient: needsYouProjectClient,
+    }),
+    [extensionClient, needsYouProjectClient],
+  );
   const homeStartHub = hubAdministrationOf(props.hostBridge);
   const homeStart = useHomeStart({
     ...(homeStartHub === undefined || props.hostBridge === undefined
@@ -5487,6 +5527,7 @@ function LaunchedShell(
     loadHomePullRequests,
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
+    needsYouAskClients,
     now: minuteNow.getTime(),
     openRunningServiceLive,
     pendingRequestClient,
@@ -6178,6 +6219,7 @@ function LaunchedShell(
   async function openCoordinatorDraftInProject(projectId: ProjectId) {
     await openDraftInProject(projectId);
     setPendingDraftCoordinator(projectId);
+    setPendingDraftCoordinatorChoices({});
   }
 
   async function openDraftInProject(projectId: ProjectId) {
@@ -6801,11 +6843,23 @@ function LaunchedShell(
         plannerReview === undefined
       ) {
         setPendingDraftCoordinator(undefined);
-        const made = await codeController.execute(setCodeThreadCoordinator(created.thread, true));
-        if (made?.kind !== "thread-updated") {
-          const refusal = `The thread was created, but it could not become a coordinator: ${
-            codeController.lastExecuteError.current?.message ?? "the host refused the change."
-          }`;
+        setPendingDraftCoordinatorChoices({});
+        const { workerLevel, bounds } = pendingDraftCoordinatorChoices;
+        const made = await codeController.execute(
+          setCodeThreadCoordinator(created.thread, true, workerLevel),
+        );
+        // The bounds are a second journaled change on the coordinator; a
+        // refusal leaves it coordinating under the defaults, prompt unsent.
+        const bounded =
+          made?.kind !== "thread-updated" || bounds === undefined
+            ? made
+            : await codeController.execute(setCodeThreadCoordinatorBounds(made.thread, bounds));
+        if (made?.kind !== "thread-updated" || bounded?.kind !== "thread-updated") {
+          const refusal = `${
+            made?.kind === "thread-updated"
+              ? "The coordinator was created with the default bounds"
+              : "The thread was created, but it could not become a coordinator"
+          }: ${codeController.lastExecuteError.current?.message ?? "the host refused the change."}`;
           await controller.openCodeThread(
             created.thread.id,
             created.thread.title,
@@ -7867,6 +7921,7 @@ function LaunchedShell(
                     loadAssignedGithubWork={loadAssignedGithubWork}
                     loadAssignedLinearIssues={loadAssignedLinearIssues}
                     navigationRevision={pendingRequestFeedRevision}
+                    needsYouAskClients={needsYouAskClients}
                     now={minuteNow.getTime()}
                     projectNames={workingNowProjectNames}
                     projects={projectController.projects}
@@ -7958,6 +8013,7 @@ function LaunchedShell(
                     navigation={navigationModel}
                     {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
                     {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
+                    pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                     {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
                     {...(pendingIssue === undefined ? {} : { pendingIssue })}
                     presentedLayout={controller.presentedLayout}
@@ -8217,6 +8273,20 @@ function LaunchedShell(
                     : undefined,
               });
             },
+            // Only the desktop app can check for its own updates. Where it
+            // keeps the preference itself the answer goes straight to it;
+            // otherwise the shell setting carries it and the sync above tells
+            // the host.
+            onSetUpdateChecks:
+              props.hostBridge?.setAutomaticAppUpdateChecks === undefined
+                ? undefined
+                : (allowed) =>
+                    props.hostBridge?.appUpdatePreferenceScope === "local"
+                      ? (props.hostBridge.setAutomaticAppUpdateChecks?.(allowed).then(
+                          () => true,
+                          () => false,
+                        ) ?? Promise.resolve(false))
+                      : controller.updateSettings({ automaticUpdateChecks: allowed }),
             workEnabled: controller.settings?.workEnabled ?? true,
             workModel:
               workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
@@ -8249,6 +8319,29 @@ function LaunchedShell(
         hostBridge={props.hostBridge}
         onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
       />
+      {(() => {
+        const coordinator = codeController.bootstrap?.threads.find(
+          (thread) => String(thread.id) === String(coordinatorBoundsThreadId),
+        );
+        // A thread that stopped coordinating, or left the list, has no limits to change.
+        if (coordinator === undefined || coordinator.coordinator !== true) return null;
+        return (
+          <CoordinatorBoundsDialog
+            bounds={coordinator.coordinatorBounds}
+            key={String(coordinator.id)}
+            onClose={() => setCoordinatorBoundsThreadId(undefined)}
+            onSave={(bounds) => {
+              setCoordinatorBoundsThreadId(undefined);
+              void codeController
+                .setThreadCoordinatorBounds(coordinator.id, bounds)
+                .then((outcome) => {
+                  if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+                });
+            }}
+            title={coordinator.title}
+          />
+        );
+      })()}
       {threadExportNotice !== undefined ||
       replyDetailNotice !== undefined ||
       updateReadyNotice ||

@@ -1,14 +1,25 @@
 import { createHash, randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { deriveHostRuntimeHostId, startCredentialBroker } from "@octant/host-runtime";
 import { CredentialStoreFailure, type CredentialStore } from "@octant/host-runtime";
 import {
   decodeHostOAuthDescriptor,
+  HostOAuthJournalRecord as HostOAuthJournalRecordSchema,
   type HostOAuthJournalRecord,
 } from "@octant/contracts/host-oauth";
 import { describe, expect, it, vi } from "vitest";
+import { AggregateHeadsProjection } from "../../persistence/aggregateHeadsProjection";
+import { EventRegistry } from "../../persistence/eventRegistry";
+import { Journal } from "../../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../../persistence/migrations";
+import { ProjectionRegistry } from "../../persistence/projection";
+import { openSqlite } from "../../persistence/sqlitePort";
 import { makeHostOAuthBrokerClient } from "./hostOAuthBrokerClient";
+import { hostOAuthEventJournal } from "./hostOAuthEventJournal";
 import { createHostOAuthService, extAgentHostIdFor } from "./hostOAuthService";
 
 const ACCESS = "access-token-must-not-reach-the-journal";
@@ -54,6 +65,184 @@ function chatGptPlan() {
 }
 
 describe("host OAuth service", () => {
+  it("journals a sign-in a paired device started as the device's, through the completion a later status read finds", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000da";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const journal: Array<readonly [string, unknown]> = [];
+    const attemptId = "71000000-0000-4000-8000-0000000000a1";
+    let consented = false;
+    const sample = descriptor("https://issuer.example/authorize", "https://issuer.example/token");
+    const service = createHostOAuthService({
+      journal: { append: (record, actor) => journal.push([record.name, actor]) },
+      broker: {
+        begin: async () => ({
+          kind: "awaiting-consent",
+          attemptId,
+          descriptorId: sample.descriptorId,
+          flow: "authorization-code-pkce",
+          authorizationUrl: "https://issuer.example/authorize?state=s",
+          expiresAt: "2026-11-12T13:00:00.000Z",
+        }),
+        status: async () =>
+          consented
+            ? {
+                kind: "signed-in",
+                attemptId,
+                descriptorId: sample.descriptorId,
+                credentialRef: "71000000-0000-4000-8000-0000000000c1",
+              }
+            : {},
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({}),
+      },
+    });
+    const from = {
+      principalKind: "person-paired-device",
+      actorId: deviceId,
+      descriptor: sample,
+    } as const;
+    expect(service.acknowledgeTerms({ ...from, actor: device }).kind).toBe("recorded");
+    expect((await service.begin({ ...from, actor: device })).kind).toBe("awaiting-consent");
+    consented = true;
+    // The read that finds the consent comes from a local window; the sign-in
+    // is still the device's.
+    const finished = await service.status({
+      principalKind: "local-window",
+      attemptId,
+      descriptor: sample,
+    });
+    expect(finished.kind).toBe("signed-in");
+    expect(journal).toEqual([
+      ["host-oauth.terms-acknowledged", device],
+      ["host-oauth.sign-in-started", device],
+      ["host-oauth.sign-in-completed", device],
+    ]);
+  });
+
+  it("journals a sign-in a paired device started as the device's when the consent is found after the host restarted", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000db";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const attemptId = "71000000-0000-4000-8000-0000000000a2";
+    const sample = descriptor("https://issuer.example/authorize", "https://issuer.example/token");
+    const now = "2026-11-13T12:00:00.000Z";
+    const directory = mkdtempSync(join(tmpdir(), "octant-host-oauth-"));
+    try {
+      const connection = openSqlite(join(directory, "events.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const journal = new Journal({
+        connection,
+        registry: new EventRegistry().register(
+          "host-oauth.recorded@1",
+          1,
+          HostOAuthJournalRecordSchema,
+        ),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => now,
+      });
+      const records = hostOAuthEventJournal({
+        journal,
+        connection,
+        uuid: randomUUID,
+        now: () => now,
+      });
+      // The broker outlives the server: it still holds the attempt a new
+      // server process has never heard of.
+      const broker = {
+        begin: async () => ({
+          kind: "awaiting-consent",
+          attemptId,
+          descriptorId: sample.descriptorId,
+          flow: "authorization-code-pkce",
+          authorizationUrl: "https://issuer.example/authorize?state=s",
+          expiresAt: "2026-11-13T13:00:00.000Z",
+        }),
+        status: async () => ({
+          kind: "signed-in",
+          attemptId,
+          descriptorId: sample.descriptorId,
+          credentialRef: "71000000-0000-4000-8000-0000000000c2",
+        }),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({}),
+      };
+      const beforeRestart = createHostOAuthService({ journal: records, broker });
+      const from = {
+        principalKind: "person-paired-device",
+        actorId: deviceId,
+        descriptor: sample,
+      } as const;
+      beforeRestart.acknowledgeTerms({ ...from, actor: device });
+      expect((await beforeRestart.begin({ ...from, actor: device })).kind).toBe("awaiting-consent");
+
+      const afterRestart = createHostOAuthService({ journal: records, broker });
+      const finished = await afterRestart.status({
+        principalKind: "local-window",
+        attemptId,
+        descriptor: sample,
+      });
+      expect(finished.kind).toBe("signed-in");
+      const completed = journal
+        .replayAggregateType({ aggregateType: "host-oauth", afterSequence: 0, limit: 10 })
+        .find(
+          (event) =>
+            (event.payload as { readonly name: string }).name === "host-oauth.sign-in-completed",
+        );
+      expect(completed?.actor).toEqual(device);
+      // An attempt nothing on this host began names whoever read it.
+      expect(records.startedBy("71000000-0000-4000-8000-0000000000a9")).toBeUndefined();
+      connection.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("journals a sign-out, and a refusal, as the device that asked", async () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000dc";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const journal: Array<readonly [string, unknown]> = [];
+    const sample = descriptor("https://issuer.example/authorize", "https://issuer.example/token");
+    const service = createHostOAuthService({
+      journal: { append: (record, actor) => journal.push([record.name, actor]) },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({}),
+      },
+    });
+    expect(
+      (
+        await service.signOut({
+          principalKind: "person-paired-device",
+          actor: device,
+          descriptor: sample,
+          credentialRef: "71000000-0000-4000-8000-0000000000c3",
+        })
+      ).kind,
+    ).toBe("signed-out");
+    // A restricted device's refused attempt is its own record too.
+    expect(
+      (
+        await service.begin({
+          principalKind: "remote-device",
+          actorId: deviceId,
+          actor: device,
+          descriptor: sample,
+        })
+      ).kind,
+    ).toBe("refused");
+    expect(journal).toEqual([
+      ["host-oauth.signed-out", device],
+      ["host-oauth.sign-in-refused", device],
+    ]);
+  });
+
   it.each(["revoked", "unavailable"])(
     "uses runtime retirement for MCP cleanup without claiming issuer revocation (%s)",
     async (kind) => {

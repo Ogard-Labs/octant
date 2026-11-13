@@ -1025,6 +1025,176 @@ describe("ChatProjection", () => {
     connection.close();
   });
 
+  it("puts a journaled tool step on its attempt, keeps the reply streamed so far, and replays it without a second row", () => {
+    const connection = openConnection();
+    const { projection } = chatRuntime();
+    const store = journal(connection);
+    const refA = { contentId: ids.content, digest: digest("a"), byteLength: 1 };
+    const refB = {
+      contentId: "82000000-0000-4000-8000-000000000071",
+      digest: digest("b"),
+      byteLength: 1,
+    };
+
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: refA,
+              attachmentIds: [],
+              attempts: [
+                {
+                  id: ids.attempt,
+                  turnId: ids.turn,
+                  threadId: ids.thread,
+                  providerInstanceId: ids.provider,
+                  providerSessionId: ids.session,
+                  modelId: "model-a",
+                  contextManifestId: ids.manifest,
+                  outcome: "queued",
+                  responseRefs: [],
+                  citationIds: [],
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "a",
+            digest: digest("a"),
+            byteLength: 1,
+          });
+        },
+      },
+    );
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [
+        pending("chat.attempt-updated@1", {
+          kind: "attempt-updated",
+          attempt: {
+            id: ids.attempt,
+            turnId: ids.turn,
+            threadId: ids.thread,
+            providerInstanceId: ids.provider,
+            providerSessionId: ids.session,
+            modelId: "model-a",
+            contextManifestId: ids.manifest,
+            outcome: "streaming",
+            responseRefs: [refA],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ],
+    });
+    const appended = pending("chat.attempt-response-appended@1", {
+      kind: "attempt-response-appended",
+      threadId: ids.thread,
+      turnId: ids.turn,
+      attemptId: ids.attempt,
+      responseRef: refB,
+      updatedAt: "2026-07-19T12:00:02.000Z",
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 3,
+        events: [appended],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: refB.contentId,
+            threadId: ids.thread,
+            role: "assistant",
+            body: "b",
+            digest: digest("b"),
+            byteLength: 1,
+          });
+        },
+      },
+    );
+
+    const step = (aggregateVersion: number, state: string, at: string) => {
+      store.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: aggregateVersion,
+        events: [
+          pending("chat.attempt-tool-step@1", {
+            kind: "attempt-tool-step",
+            threadId: ids.thread,
+            turnId: ids.turn,
+            attemptId: ids.attempt,
+            toolStep: { toolCallId: "call-1", toolName: "Web search", state },
+            updatedAt: at,
+          }),
+        ],
+      });
+    };
+    step(4, "started", "2026-07-19T12:00:03.000Z");
+    step(5, "completed", "2026-07-19T12:00:04.000Z");
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 6,
+      events: [
+        pending("chat.attempt-tool-step@1", {
+          kind: "attempt-tool-step",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          toolStepsTruncated: true,
+          updatedAt: "2026-07-19T12:00:05.000Z",
+        }),
+      ],
+    });
+    const envelopes = store
+      .replay({ afterSequence: 0, limit: 100 } as never)
+      .filter(
+        (entry) =>
+          entry.eventName === "chat.attempt-response-appended@1" ||
+          entry.eventName === "chat.attempt-tool-step@1",
+      );
+    // Applied twice, as a replay over a projection that is already ahead does.
+    for (const envelope of [...envelopes, ...envelopes]) projection.apply(connection, envelope);
+
+    const attempt = readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]
+      ?.attempts[0];
+    expect(attempt?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Web search", state: "completed" },
+    ]);
+    expect(attempt?.toolStepsTruncated).toBe(true);
+    expect(attempt?.updatedAt).toBe("2026-07-19T12:00:05.000Z");
+    expect(attempt?.responseRefs.map((reference) => reference.contentId)).toEqual([
+      ids.content,
+      "82000000-0000-4000-8000-000000000071",
+    ]);
+    connection.close();
+  });
+
   it("replays the same appended event without duplicating its reference", () => {
     const connection = openConnection();
     const { projection } = chatRuntime();

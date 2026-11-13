@@ -1,11 +1,14 @@
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { decodeBrowserThreadId } from "@octant/contracts";
-import { browserToolTransport } from "@octant/domain";
+import { appToolThreadLevel, browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
+import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
+import { WorkMessageWake } from "../work/workMessageWake";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { mkdirSync, rmSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
@@ -39,12 +42,14 @@ import {
 } from "../serverProjects/serverWorkThreads";
 import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
+import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
 import { startEventLoopLagDetector } from "../eventLoopLag";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkThreadService } from "../work/workThreadService";
+import { WorkTurnRuntime } from "../work/workTurnRuntime";
 import { WorkTurnService } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "../work/workflowEventStore";
@@ -72,6 +77,11 @@ import {
   createThreadHandOffRouteHandler,
 } from "../threadExportRoutes";
 import { ThreadExportService } from "../threadExportService";
+import { threadToolCallRecorders } from "../threadToolCallRecorder";
+import {
+  listThreadToolCallRecords,
+  readThreadToolCallRecords,
+} from "../persistence/threadToolCallRecordStore";
 import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
 import { ThreadHandOffService, type ThreadHandOffProviderPort } from "../threadHandOffService";
 import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
@@ -89,6 +99,7 @@ import { createRoutineProposalTools } from "../automation/routineProposalTools";
 import { createRoutineTools } from "../automation/routineTools";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
+  browserTransferLimits,
   defaultShellSettings,
   enabledModes,
   isAgentRunActiveStatus,
@@ -105,6 +116,7 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -133,6 +145,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "browserModelBindings"
     | "codeSessionAuthority"
     | "imageGenerationOffers"
+    | "isPairedDeviceScope"
     | "liveTurns"
     | "onWindowRevoked"
     | "routineProposalService"
@@ -159,6 +172,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkRequestStateWiring, "runningWorkTurns" | "workRequestRuntime" | "workRequestService"> &
   Pick<
     IntegrationsWiring,
+    | "agentMessageService"
     | "consumeCreateFromIssueFramed"
     | "githubIssueContextService"
     | "linearIssueContextService"
@@ -173,6 +187,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "authorizeWorkThreadForWindow"
     | "contextHarness"
     | "goalService"
+    | "keptImageChoices"
     | "projectMemoryAccess"
     | "projectService"
     | "workProjectStatusFiles"
@@ -182,6 +197,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     CodeWiring,
     | "canAccessCodeProject"
     | "codeAttachments"
+    | "codeProjectAccess"
     | "codeWorkingDirectoryProbePath"
     | "roots"
     | "workAttachments"
@@ -193,6 +209,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "imageJobService"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
+    | "verifyModelToolsOnFirstUse"
     | "resolveSelectedExtensions"
     | "pinnedExtensionIds"
   > &
@@ -251,6 +268,8 @@ export function wireWork(deps: WorkDependencies) {
     productFeedbackService,
     resolveFeedbackThread,
     canAccessCodeProject,
+    codeProjectAccess,
+    isPairedDeviceScope,
     canvasAgentToolPort,
     canvasService,
     chatAttachmentStore,
@@ -303,6 +322,7 @@ export function wireWork(deps: WorkDependencies) {
     routineProposalService,
     sideTasks,
     siblingThreadsService,
+    agentMessageService,
     spendCeiling,
     threadAwaitsHarnessApproval,
     threadAwaitsHarnessQuestion,
@@ -319,6 +339,7 @@ export function wireWork(deps: WorkDependencies) {
     workThreadProjection,
     workTurnProjection,
     personMemoryAccess,
+    keptImageChoices,
     projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
@@ -380,6 +401,7 @@ export function wireWork(deps: WorkDependencies) {
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
+      verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
       observeRuntime: (threadId) => ({
         ...observeWorkThreadRuntime(threadId),
         ...liveTurns.read(String(threadId)),
@@ -420,6 +442,26 @@ export function wireWork(deps: WorkDependencies) {
 
     const feedbackTurns = createProductFeedbackTurnPort({ service: productFeedbackService });
     const workTurnService = new WorkTurnService({
+      toolCallRecorders: threadToolCallRecorders({
+        connection: persistence.connection,
+        // The host setting, read at each write.
+        enabled: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).keepToolCallRecords,
+        clock: () => new Date().toISOString(),
+      }),
+      // The host setting, read when each turn starts.
+      toolStepSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
+      confirmAgentMessagesDelivered: (messageIds) =>
+        agentMessageService.confirmDelivered(messageIds),
+      turnRuntime: new WorkTurnRuntime({
+        stalledTurnLimitMs: () =>
+          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        providerToolCallPauseLimitMs: () =>
+          providerToolCallPauseLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ),
+      }),
       prepareProductFeedbackForTurn: (input) => {
         const scope = resolveFeedbackThread(input.windowId, input.threadId);
         if (scope?.mode !== "work") return undefined;
@@ -480,13 +522,18 @@ export function wireWork(deps: WorkDependencies) {
       resolveAppManagedTools: (input) => {
         const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
         const browserSupported =
-          browserToolTransport(observed, String(input.thread.modelId)) === true;
+          browserToolTransport(
+            observed,
+            String(input.thread.modelId),
+            appToolThreadLevel(input.thread),
+          ) === true;
         const native = nativeHarnessComposition?.forWork(input);
         const routineBrowser =
           input.routineRun === undefined
             ? undefined
             : routineBrowserTools({
                 routineRun: input.routineRun,
+                turnLevel: appToolThreadLevel(input.thread),
                 threadId: decodeBrowserThreadId(String(input.thread.id)),
                 currentAuthority: () =>
                   browserAuthority.resolve(decodeBrowserThreadId(String(input.thread.id)), "work"),
@@ -512,6 +559,9 @@ export function wireWork(deps: WorkDependencies) {
               resolveTaskProfile: () =>
                 workThreadProjection.read(input.thread.id)?.browserTaskProfile,
               executionPolicy: "approval-gated",
+              // The level the running turn has; with no turn running, none.
+              fullAccess: () =>
+                runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {
                 inspectThread: (ownerWindowId, threadId) =>
@@ -523,12 +573,35 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.releaseThread(ownerWindowId, threadId),
                 holdForPerson: (ownerWindowId, threadId) =>
                   browserAutomationService.holdForPerson(ownerWindowId, threadId),
+                holdForAsk: (ownerWindowId, threadId) =>
+                  browserAutomationService.holdForAsk(ownerWindowId, threadId),
                 snapshotRefs: (ownerWindowId, threadId) =>
                   browserAutomationService.snapshotRefs(ownerWindowId, threadId),
               },
               flows: browserFlows,
+              // A routine's turn is unattended, and its tool is lent no script runner.
+              ...(input.routineRun !== undefined
+                ? {}
+                : {
+                    pageScript: {
+                      level: () => {
+                        const current = workThreadProjection.read(input.thread.id);
+                        return current === undefined || current.access !== input.thread.access
+                          ? undefined
+                          : workThreadAccessOf(current.access).executionPolicy;
+                      },
+                      run: (command) => browserAutomationService.runScript(command),
+                    },
+                  }),
               approvals: browserToolApprovalService,
               uploadRoot: () => input.projectRoot,
+              uploadFileCountLimit: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .browserUploadFileCountLimit,
+              uploadFileLimitBytes: () =>
+                browserTransferLimits(
+                  persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+                ).maxFileBytes,
               uuid: randomUUID,
             });
         const browser =
@@ -562,14 +635,15 @@ export function wireWork(deps: WorkDependencies) {
           isAutomationOrigin: isRoutineHostScope(input.windowId),
           now: Date.now,
         };
-        // The other open Work threads of this Project, read-only: Work turns
-        // carry no agent messages, so a Work thread is offered no `send`.
+        // The other open Work threads of this Project, to read and to message:
+        // a Work turn carries the messages its siblings left it.
         const threadsTools = !browserSupported
           ? undefined
           : createThreadsTools({
               mode: "work",
               windowId: input.windowId,
               service: siblingThreadsService,
+              messaging: agentMessageService,
               source: workSiblingThreadSource(
                 {
                   threads: () => workThreadProjection.list(),
@@ -632,42 +706,47 @@ export function wireWork(deps: WorkDependencies) {
               },
               port: canvasAgentToolPort,
             });
-        // A routine's turn has nobody at a window to answer the card.
-        const imageTools =
-          !browserSupported || isRoutineHostScope(input.windowId)
-            ? undefined
-            : createThreadImageAgentTools({
-                windowId: input.windowId,
-                threadKind: "work-thread",
-                scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
-                offers: imageGenerationOffers,
-                jobs: imageJobService,
-                listInstances: () => persistence.readProviderInstances(),
-                readImageGenerationCustomSources: () =>
-                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                    .imageGeneration.customSources,
-                readsImages: () =>
-                  providerRuntimeRegistry
-                    .observedState(input.thread.providerInstanceId)
-                    ?.models.find(
-                      (candidate) => String(candidate.id) === String(input.thread.modelId),
-                    )
-                    ?.inputModalities.includes("image") === true,
-                // A file edit at the turn's level: Ask first and Auto ask the
-                // person, Accept edits and Full access write at once.
-                save: {
-                  posture: () => {
-                    const access = runningWorkTurns.get(String(input.thread.id))?.access;
-                    const level =
-                      access === undefined
-                        ? "approval-gated"
-                        : workThreadAccessOf(access).executionPolicy;
-                    return level === "approval-gated" ? "ask" : "allow";
-                  },
-                  write: (relativePath, bytes) =>
-                    saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
+        // A routine's turn has nobody at a window to answer the card, so it
+        // is offered the tool only where its Project keeps a choice.
+        const imageTools = !browserSupported
+          ? undefined
+          : createThreadImageAgentTools({
+              windowId: input.windowId,
+              unattended: isRoutineHostScope(input.windowId),
+              threadKind: "work-thread",
+              scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+              offers: imageGenerationOffers,
+              kept: keptImageChoices,
+              // The level the running turn has; with no turn running, none.
+              fullAccess: () =>
+                runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
+              jobs: imageJobService,
+              listInstances: () => persistence.readProviderInstances(),
+              readImageGenerationCustomSources: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .imageGeneration.customSources,
+              readsImages: () =>
+                providerRuntimeRegistry
+                  .observedState(input.thread.providerInstanceId)
+                  ?.models.find(
+                    (candidate) => String(candidate.id) === String(input.thread.modelId),
+                  )
+                  ?.inputModalities.includes("image") === true,
+              // A file edit at the turn's level: Ask first and Auto ask the
+              // person, Accept edits and Full access write at once.
+              save: {
+                posture: () => {
+                  const access = runningWorkTurns.get(String(input.thread.id))?.access;
+                  const level =
+                    access === undefined
+                      ? "approval-gated"
+                      : workThreadAccessOf(access).executionPolicy;
+                  return level === "approval-gated" ? "ask" : "allow";
                 },
-              });
+                write: (relativePath, bytes) =>
+                  saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
+              },
+            });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -676,7 +755,11 @@ export function wireWork(deps: WorkDependencies) {
           modelId: input.thread.modelId,
           executionPolicy: "approval-gated",
         });
-        const computer = computerToolsFor(computerOwner);
+        const computer = computerToolsFor(
+          computerOwner,
+          undefined,
+          appToolThreadLevel(input.thread),
+        );
         const pastThreads = !browserSupported
           ? undefined
           : personMemoryAccess.toolsFor({
@@ -686,8 +769,8 @@ export function wireWork(deps: WorkDependencies) {
               createdAt: input.thread.createdAt,
               windowId: input.windowId,
             });
-        // Work has no Plan posture, so nothing refuses its writes but the
-        // person's answer.
+        // Work has no Plan posture, so nothing refuses its writes; the turn's
+        // level and the Project's setting decide whether one asks first.
         const projectMemoryTools = !browserSupported
           ? undefined
           : projectMemoryAccess.toolsFor({
@@ -695,6 +778,8 @@ export function wireWork(deps: WorkDependencies) {
               mode: "work",
               threadId: String(input.thread.id),
               projectId: String(input.thread.projectId),
+              fullAccess: () =>
+                runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
             });
         if (
           pastThreads === undefined &&
@@ -922,6 +1007,12 @@ export function wireWork(deps: WorkDependencies) {
     const threadExportService = new ThreadExportService({
       hostId: LOCAL_HOST_ID,
       clock: () => new Date().toISOString(),
+      toolCalls: {
+        list: (mode, threadId) =>
+          listThreadToolCallRecords(persistence.connection, { mode, threadId }),
+        read: (mode, threadId, turnId) =>
+          readThreadToolCallRecords(persistence.connection, { mode, threadId, turnId }),
+      },
       chat: {
         read: (threadId) => {
           try {
@@ -1382,40 +1473,37 @@ export function wireWork(deps: WorkDependencies) {
         );
       },
     });
-    const threadMessageQueue = new ThreadMessageQueueService({
-      connection: persistence.connection,
+    const threadMessageQueuePort = createThreadMessageQueuePort({
+      persistence,
       journal: persistence.journal,
-      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-      clock: () => new Date().toISOString(),
-      port: createThreadMessageQueuePort({
-        persistence,
-        journal: persistence.journal,
-        chat: chatService,
-        work: {
-          readThread: (id) => workThreadProjection.read(id),
-          listTurns: (id) => workTurnProjection.listForThread(id),
-          startFirstTurn: (windowId, command, admissionOptions) =>
-            workTurnService.startFirstTurn(windowId, command, admissionOptions),
-        },
-        code: routeCodeService,
-        compacting: (scope) =>
-          contextHarness.compactionRunning(
-            decodeContextSubjectRef({
-              aggregateType: `${scope.mode}-thread`,
-              aggregateId: scope.threadId,
-            }),
-          ),
-        isModeEnabled: (mode) =>
-          enabledModes(
-            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-          ).includes(mode),
+      chat: chatService,
+      work: {
+        readThread: (id) => workThreadProjection.read(id),
+        listTurns: (id) => workTurnProjection.listForThread(id),
+        startFirstTurn: (windowId, command, admissionOptions) =>
+          workTurnService.startFirstTurn(windowId, command, admissionOptions),
+      },
+      code: routeCodeService,
+      compacting: (scope) =>
+        contextHarness.compactionRunning(
+          decodeContextSubjectRef({
+            aggregateType: `${scope.mode}-thread`,
+            aggregateId: scope.threadId,
+          }),
+        ),
+      isModeEnabled: (mode) =>
+        enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+          mode,
+        ),
+      ...createThreadMessageQueueAuthority({
         // The host's own scope is never a window. It reaches a queue only to
         // let a thread's queued messages follow the continuation it started
         // after a restart, in a Project of the thread's own mode.
-        isWindowLive: (windowId) =>
+        isLocalWindowLive: (windowId) =>
           isRoutineHostScope(windowId) ||
           windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
-        canAccess: (windowId, mode, projectId) => {
+        isPairedDevice: isPairedDeviceScope,
+        localWindowCanAccess: (windowId, mode, projectId) => {
           if (isRoutineHostScope(windowId) && mode === "work")
             return projectId !== undefined && persistence.readProject(projectId)?.type === "work";
           if (mode === "chat")
@@ -1425,12 +1513,33 @@ export function wireWork(deps: WorkDependencies) {
             ? canAccessCodeProject(windowId, projectId)
             : windowHoldsProject(windowId, projectId, mode);
         },
-        effectiveCodeThread: (windowId, thread) =>
-          codeSessionAuthority.effectiveThread(windowId, thread),
-        recoveryRequired: (threadId) =>
-          nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
-        attachments: queueAttachments,
+        projectType: (projectId) => persistence.readProject(projectId)?.type,
+        hasActiveCodeProject: (projectId) => codeProjectAccess.hasActiveCodeProject(projectId),
       }),
+      effectiveCodeThread: (windowId, thread) =>
+        codeSessionAuthority.effectiveThread(windowId, thread),
+      recoveryRequired: (threadId) =>
+        nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
+      attachments: queueAttachments,
+    });
+    const threadMessageQueue = new ThreadMessageQueueService({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+      isPairedDevice: isPairedDeviceScope,
+      port: {
+        ...threadMessageQueuePort,
+        // A Code turn checks the Project against the request that sent it. A
+        // message a paired device queued is dispatched with no request, so
+        // its admission runs as that device's, judged on its pairing now.
+        admit: (input) =>
+          isPairedDeviceScope(input.windowId)
+            ? codeProjectAccess.runQueuedDeviceDispatch(input.windowId, () =>
+                threadMessageQueuePort.admit(input),
+              )
+            : threadMessageQueuePort.admit(input),
+      },
     });
     yield* Effect.promise(() => threadMessageQueue.recover());
     const sideTaskForkPorts = {
@@ -1506,6 +1615,70 @@ export function wireWork(deps: WorkDependencies) {
         .onCommittedAppend(append)
         .catch(() => console.error("The message queue could not process a thread change."));
     });
+    // A message wakes a Work thread whose switch is on, as it wakes a Code
+    // thread, counted in the store Code's wakes use so a restart keeps the
+    // hourly and round bounds.
+    const workMessageWake = new WorkMessageWake({
+      readThread: (threadId) => {
+        let thread: ReturnType<typeof workThreadProjection.read>;
+        try {
+          thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        } catch {
+          return undefined;
+        }
+        return thread === undefined
+          ? undefined
+          : {
+              lifecycle: thread.lifecycle,
+              messageWake: thread.messageWake === true,
+              completed: thread.completedAt !== undefined,
+            };
+      },
+      turnActive: (threadId) => workTurnService.isTurnActive(decodeWorkThreadId(threadId)),
+      latestTurnId: (threadId) => {
+        const latest = workTurnProjection.latestForThread(decodeWorkThreadId(threadId));
+        return latest === undefined ? undefined : String(latest.requestId);
+      },
+      startHostTurn: async (threadId, prompt) => {
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        if (thread === undefined || thread.bindingRevisionId === undefined) {
+          return { status: "refused", message: "The Work thread is unavailable." };
+        }
+        const requestId = randomUUID();
+        // The host starts the turn as itself, as a routine's run is started;
+        // admission rechecks the thread, its Project and its authority, and
+        // the turn runs at the thread's own level.
+        const result = await workTurnService.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(requestId),
+          threadId: thread.id,
+          turnId: decodeWorkTurnId(randomUUID()),
+          prompt,
+          authority: {
+            hostId: LOCAL_HOST_ID,
+            projectId: thread.projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: thread.workingDirectory ?? ".",
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+        });
+        return result.kind === "accepted"
+          ? { status: "started", turnId: requestId }
+          : { status: "refused", message: "The turn was not admitted." };
+      },
+      counts: createCoordinatorCountStore(persistence.connection),
+      now: () => Date.now(),
+      onError: (message, error) => console.error(`[work-wake] ${message}`, error),
+    });
+    const unsubscribeWorkMessageWake = persistence.journal.subscribeCommitted((append) =>
+      workMessageWake.onCommittedEvents(append.events),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeWorkMessageWake()));
     const messageQueueTimer = setInterval(advanceMessageQueue, 1000);
     const stopEventLoopLagDetector = startEventLoopLagDetector();
     yield* Effect.addFinalizer(() =>

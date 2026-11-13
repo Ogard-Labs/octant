@@ -19,6 +19,7 @@ import {
   browserProfileChoiceOf,
   browserProfileFromChoice,
   storedBrowserProfile,
+  type AppToolThreadLevel,
 } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
@@ -514,9 +515,11 @@ export function currentManagedChildBrowserTarget(
       threadId: BrowserThreadId,
       mode: "work" | "code",
     ) => ToolActionAuthority | undefined;
+    /** Asked at the level the child's own session runs at. */
     readonly supportsTools: (
       providerInstanceId: ProviderInstanceId,
       modelId: ProviderModelId,
+      level: AppToolThreadLevel,
     ) => boolean;
   },
 ): CurrentBrowserSessionTarget | undefined {
@@ -539,7 +542,12 @@ export function currentManagedChildBrowserTarget(
   )
     return undefined;
   const execution = effectiveAgentRunExecutionTarget(run.routingReceipt);
-  if (!input.supportsTools(execution.providerInstanceId, execution.modelId)) return undefined;
+  if (
+    !input.supportsTools(execution.providerInstanceId, execution.modelId, {
+      executionPolicy: run.authority.executionPolicy,
+    })
+  )
+    return undefined;
   const authority: ToolActionAuthority = {
     hostId: parentAuthority.hostId,
     mode,
