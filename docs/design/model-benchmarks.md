@@ -116,6 +116,42 @@ A **Benchmarks** source joins Diagnostics in the Usage source switch:
   the old.
 - **Export**: the whole run as JSON or CSV for offline analysis.
 
+### Benchmarks in Usage
+
+Benchmarks is the fourth source in the same toggle group, offered where the host
+answers the benchmark routes, in Settings' Usage page as well. It compares
+models on the same prompts
+([model benchmarks](model-benchmarks.md)). Suites lists each suite
+with its case count and last run, and offers New suite, Import suite (a file or
+pasted JSON, read through the contract, a failure worded as one sentence), and
+per-row Edit, Export as JSON, and Delete. The editor holds the name and
+description; cases of kind prompt or Code (a Code case adds the Code Project and
+branch or tag), each with a title, prompt, reference answer, rubric line, and a
+checks list for every check kind; and an optional judge model with its rubric.
+A refusal names the case and check. A window on this Mac or a paired device writes
+(maintainer decision, 2026-11-12; not built yet: today only a window on this Mac), and when
+the host refuses a write the page says so in a sentence. The run builder
+picks contenders from the enabled provider accounts and their models, the same
+list the composer offers, then repetitions (1 to 5), a token or cost budget, and,
+only for a suite with Code cases, the execution level. It shows an estimated cost
+before Start (cells times each model's mean cost per turn from earlier turns),
+and reads No estimate yet when none has history. The live grid is cases by
+contenders with each cell's state as an icon and a word (queued, running,
+answered, failed, blocked, cancelled, skipped), its time and tokens, a Cancel run
+action, and an End reason line; it reads again every 3 seconds while the run
+runs and stops when it ends or the page closes. The leaderboard has one row per
+contender (check pass rate, judge score, stars, typical and slow first token and
+speed, tokens, cost, tool failures, failures), every column sorts with a missing
+figure always last, a row opens that contender's cells, and a headline names the
+best pass rate, the fastest first token, and the cheapest. Pass rate, speed, and
+cost also draw as Canvas ranked bars with their tables. A score no one gave
+reads as a dash, never zero. Case compare puts each contender's answer for one
+case side by side, read from the cell's own thread and never from a copy in the
+run, with its figures, check results, judge score and reason, and Open thread.
+The runs list shows the suite's runs newest first with their status, and Purge
+asks first, saying it erases the run's threads. Tables scroll inside their own
+container at a phone width.
+
 ## Storage
 
 - `benchmark-suite` aggregate: definitions (cases, checks, judge, rubric).

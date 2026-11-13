@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { providerOwnMemoryLaunches } from "@octant/domain";
 import {
   decodeProviderFailure,
   decodeProviderProbeResult,
@@ -437,6 +438,11 @@ export interface CodexDriverOptions {
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly clientFactory?: (connection: CodexAppServerConnection) => CodexClientPort;
   readonly permissionPersistence?: () => PermissionPersistence;
+  /**
+   * The person's current switch for this account's own memory, read when a
+   * process is leased. Absent is off.
+   */
+  readonly ownMemory?: () => boolean;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   /**
@@ -1116,7 +1122,15 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // can be exact for it.
       // A lease that runs Codex's own subagents is its own process: the flag
       // rides on the command line and cannot change on a running process, so
-      // it is part of the posture the key names.
+      // it is part of the posture the key names. So is the account's own
+      // memory, which rides there too: it is read from the person's switch
+      // here, so a lease started after they change it is a new process.
+      const keepsOwnMemory = (executionPolicy: ProviderExecutionPolicy) =>
+        providerOwnMemoryLaunches({
+          accountAllows: options.ownMemory?.() === true,
+          mode,
+          executionPolicy,
+        });
       const leaseKey = (
         executionPolicy: ProviderExecutionPolicy,
         ownSubagents = false,
@@ -1126,7 +1140,9 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           projectRoot,
           extraFolders,
           threadMode,
-          ownSubagents ? `${executionPolicy}+own-subagents` : executionPolicy,
+          `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
+            keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
+          }`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
         ]);
       const leaseFor = (
@@ -1145,6 +1161,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               mode: threadMode,
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
+              ...(keepsOwnMemory(executionPolicy) ? { ownMemory: true as const } : {}),
               ...(fullAccessSandbox ? { fullAccessSandbox: true as const } : {}),
             },
             leaseKey(executionPolicy, ownSubagents, fullAccessSandbox),

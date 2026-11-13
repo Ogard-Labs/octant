@@ -15,6 +15,7 @@ import {
   type CanvasProvenance,
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
+import { CANVAS_NETWORK_PROXY_PATH_PREFIX } from "@octant/contracts/canvas-network";
 import type { CanvasStaticExportDocument } from "@octant/contracts/canvas-share";
 import {
   DESIGN_FRAME_KIT,
@@ -42,11 +43,44 @@ import { getDefaultToken } from "@octant/theme";
 export const CANVAS_DESIGN_PAGE_POLICY =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
 
-/** Every response from the page route, a page or a refusal, carries these. */
-export function canvasDesignPageHeaders(contentType: string): Record<string, string> {
+/**
+ * The policy of a page whose Canvas has **Allow network** on: the same policy
+ * with three directives changed, each naming a path under the page's own
+ * token. `connect-src` names the proxy path through the token and the
+ * trailing slash, so a script's request can go there and to no other path on
+ * this host or anywhere else; `img-src` and `font-src` each gain the one path
+ * the host answers with an image or a font. Media, frames, forms, and the
+ * sandbox stay as they are, so the page still opens no WebSocket to anywhere
+ * else, plays nothing from the network, and navigates nowhere.
+ */
+export function canvasDesignPageNetworkPolicy(networkBase: string): string {
+  return CANVAS_DESIGN_PAGE_POLICY.replace("connect-src 'none'", `connect-src ${networkBase}`)
+    .replace("img-src data: blob:", `img-src data: blob: ${networkBase}image`)
+    .replace("font-src data:", `font-src data: ${networkBase}font`);
+}
+
+/**
+ * Where one page's requests go: this host's origin, as the frame reached it,
+ * and the page's token.
+ */
+export function canvasDesignPageNetworkBase(origin: string, token: string): string {
+  return `${origin}${CANVAS_NETWORK_PROXY_PATH_PREFIX}${token}/`;
+}
+
+/**
+ * Every response from the page route, a page or a refusal, carries these. A
+ * page is handed a `networkBase` only while its Canvas's switch is on.
+ */
+export function canvasDesignPageHeaders(
+  contentType: string,
+  networkBase?: string,
+): Record<string, string> {
   return {
     "content-type": contentType,
-    "content-security-policy": CANVAS_DESIGN_PAGE_POLICY,
+    "content-security-policy":
+      networkBase === undefined
+        ? CANVAS_DESIGN_PAGE_POLICY
+        : canvasDesignPageNetworkPolicy(networkBase),
     "referrer-policy": "no-referrer",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
@@ -70,6 +104,13 @@ export interface CanvasDesignRunGrant {
    * design read from a shared snapshot, which carries no image to resolve.
    */
   readonly provenance?: CanvasProvenance;
+  /**
+   * A local window asked for this page while its Canvas's **Allow network**
+   * switch was on. Only such a ticket can be served with a proxy path; a
+   * shared snapshot's, a published page's, and a paired device's never carry
+   * it.
+   */
+  readonly network?: true;
 }
 
 // A reader asks for a ticket just before it loads the page, so only a handful
@@ -208,6 +249,140 @@ const BRIDGE_SCRIPT = `(function () {
 })();`;
 
 /**
+ * Written after the bridge for a page whose Canvas has **Allow network** on.
+ * The page's policy admits three paths on this host, so a request of an
+ * address elsewhere would be refused by the browser; this sends each to its
+ * path, and the host fetches it under the destination rule. A design's own
+ * markup and style sheets name no remote address (the design policy refuses
+ * one), so everything here is what the page's script does: a `fetch`, an
+ * `img` element it gives a `src`, a `FontFace` it constructs, and a `url()`
+ * in a `style` element it adds (a font in `@font-face`, an image anywhere
+ * else). An image's `src` is sent to its path when it is assigned, by the
+ * property or by `setAttribute`, so an image a script preloads and never
+ * adds to the page loads too; watching the document alone left that one
+ * asking for the address as written, which the page's policy refuses. Read
+ * back, `src` is the proxied address, the one the element really loads and
+ * the one `getAttribute` and `currentSrc` report, so the three never
+ * disagree. `srcset` is not sent anywhere. It is a convenience, not a boundary: a page that replaces `fetch`
+ * again, or calls a path itself, reaches the same proxy and nothing more. A
+ * `fetch` may be a `GET`, or a `POST` whose body is a JSON string; none of
+ * the page's own headers are passed on, and the host declares the body as
+ * JSON whatever the page said.
+ */
+function networkScript(networkBase: string): string {
+  return `(function () {
+  "use strict";
+  var base = ${JSON.stringify(networkBase)};
+  var direct = window.fetch.bind(window);
+  var each = function (list, visit) { Array.prototype.forEach.call(list, visit); };
+  var elsewhere = function (value) {
+    var address;
+    try { address = new URL(value, document.baseURI); } catch (_) { return null; }
+    if ((address.protocol !== "http:" && address.protocol !== "https:") || address.origin === location.origin) return null;
+    return address.href.indexOf(base) === 0 ? null : address;
+  };
+  var through = function (resource, address) {
+    return base + resource + "?url=" + encodeURIComponent(address.href);
+  };
+  window.fetch = function (input, init) {
+    var address = elsewhere(typeof input === "string" ? input : input && input.url ? input.url : String(input));
+    if (address === null) return direct(input, init);
+    var method = String((init && init.method) || (input && input.method) || "GET").toUpperCase();
+    var request = {
+      method: "GET",
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: init && init.signal ? init.signal : undefined
+    };
+    if (method === "POST") {
+      if (!init || typeof init.body !== "string") {
+        return Promise.reject(new TypeError("Allow network sends a POST body only as a JSON string."));
+      }
+      request.method = "POST";
+      request.headers = { "content-type": "application/json" };
+      request.body = init.body;
+    } else if (method !== "GET") {
+      return Promise.reject(new TypeError("Allow network offers GET, and POST with a JSON body."));
+    }
+    return direct(through("fetch", address), request);
+  };
+  var loads = function (css, resource) {
+    return css.replace(/url\\(\\s*(["']?)(https?:[^"')]+)\\1\\s*\\)/gi, function (whole, quote, target) {
+      var address = elsewhere(target);
+      return address === null ? whole : 'url("' + through(resource, address) + '")';
+    });
+  };
+  var routed = function (value) {
+    var address = elsewhere(String(value) || "data:,");
+    return address === null ? value : through("image", address);
+  };
+  var image = function (element) {
+    var now = element.getAttribute("src") || "";
+    var next = routed(now);
+    if (next !== now) element.setAttribute("src", next);
+  };
+  if (typeof HTMLImageElement === "function") {
+    var prototype = HTMLImageElement.prototype;
+    var source = Object.getOwnPropertyDescriptor(prototype, "src");
+    var attribute = prototype.setAttribute;
+    if (source && source.set) {
+      Object.defineProperty(prototype, "src", {
+        configurable: true,
+        enumerable: source.enumerable,
+        get: source.get,
+        set: function (value) { source.set.call(this, routed(value)); }
+      });
+    }
+    prototype.setAttribute = function (name, value) {
+      return attribute.call(this, name, String(name).toLowerCase() === "src" ? routed(value) : value);
+    };
+  }
+  var rules = function (list) {
+    each(list, function (rule) {
+      if (rule.cssRules) rules(rule.cssRules);
+      var style = rule.style;
+      if (!style) return;
+      var font = typeof CSSFontFaceRule === "function" && rule instanceof CSSFontFaceRule;
+      (font ? ["src"] : Array.prototype.slice.call(style)).forEach(function (name) {
+        var value = style.getPropertyValue(name);
+        var next = loads(value, font ? "font" : "image");
+        if (next !== value) style.setProperty(name, next, style.getPropertyPriority(name));
+      });
+    });
+  };
+  var sheet = function (element) {
+    try { if (element.sheet) rules(element.sheet.cssRules); } catch (_) {}
+  };
+  var added = function (root) {
+    if (root.tagName === "IMG") image(root);
+    else if (root.tagName === "STYLE") sheet(root);
+    else if (root.querySelectorAll) {
+      each(root.querySelectorAll("img[src]"), image);
+      each(root.querySelectorAll("style"), sheet);
+    }
+  };
+  if (typeof MutationObserver === "function") {
+    new MutationObserver(function (changes) {
+      changes.forEach(function (change) {
+        if (change.type === "attributes") { added(change.target); return; }
+        if (change.target.tagName === "STYLE") sheet(change.target);
+        each(change.addedNodes, added);
+      });
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] });
+  }
+  if (typeof FontFace === "function") {
+    var Face = FontFace;
+    window.FontFace = function (family, source, descriptors) {
+      return new Face(family, typeof source === "string" ? loads(source, "font") : source, descriptors);
+    };
+    window.FontFace.prototype = Face.prototype;
+  }
+  document.addEventListener("DOMContentLoaded", function () { added(document); });
+})();`;
+}
+
+/**
  * One frame shown at a time on a device size, as in a static design: the one
  * the address names, the one holding the section it names, or else the start
  * frame. A document shows every frame in order and is measured by its body.
@@ -230,12 +405,14 @@ const UNTHEMED_PAGE = "html { color-scheme: light; background: white; color: bla
 /**
  * The page for one running design. Declared images the host resolved are
  * written in as `data:` images, and any other is a placeholder, so the page
- * requests nothing.
+ * requests nothing, unless it is handed a `networkBase`: then its script may
+ * ask the host to fetch through that path.
  */
 export function renderCanvasDesignPage(
   block: CanvasDesignBlock,
   startFrameId: string,
   assets: ReadonlyArray<CanvasDesignAssetResolution>,
+  networkBase?: string,
 ): string {
   const isDocument = block.size === "document";
   const viewportWidth =
@@ -263,6 +440,7 @@ export function renderCanvasDesignPage(
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
     `<script>${BRIDGE_SCRIPT}</script>`,
+    ...(networkBase === undefined ? [] : [`<script>${networkScript(networkBase)}</script>`]),
     `<meta name="viewport" content="width=${viewportWidth}">`,
     `<style>${isDocument ? DOCUMENT_FRAME_RULES : DEVICE_FRAME_RULES}</style>`,
     `<style>${UNTHEMED_PAGE}</style>`,

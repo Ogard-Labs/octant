@@ -20,6 +20,8 @@ import {
   BrowserSessionRevoked,
   BrowserSessionExpired,
   BrowserSessionChanged,
+  BrowserSessionHeld,
+  BrowserSessionResumed,
 } from "@octant/contracts/browser-session-grants";
 import {
   CHILD_WORKTREE_SOURCE_UPDATED,
@@ -63,7 +65,9 @@ import {
   CodeProjectNewThreadWorkspaceChanged,
   CodeProjectPermissionModeChanged,
   CodeProjectAutoReviewerChanged,
+  CodeProjectAgentDefaultBranchPushChanged,
   CodeProjectAgentMergeChanged,
+  CodeProjectAgentPullRequestCommentsChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
   CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
@@ -76,6 +80,8 @@ import {
   CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
   CodeProjectPullRequestWatchRecorded,
   WorkProjectStatusFileChanged,
+  ProjectAgentMemoryWritesChanged,
+  ProjectImageGenerationChoiceChanged,
   ProjectBrandKitChanged,
   ProjectDesignSystemChanged,
   WorkProjectDeveloperToolsChanged,
@@ -148,6 +154,7 @@ import {
   ProviderInstanceCreated,
   ProviderInstanceDataTagsChanged,
   ProviderInstanceNativeSetupChanged,
+  ProviderInstanceOwnMemoryChanged,
   ProviderInstanceEnabledChanged,
   ProviderInstanceRemoved,
   ProviderInstanceRenamed,
@@ -258,6 +265,8 @@ import {
   ContentClearedPayload,
   ContentIngestedPayload,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
+  THREAD_STANDING_ANSWER_RECORDED,
+  ThreadStandingAnswerRecorded,
   SIBLING_THREAD_EVENT_NAMES,
   SiblingThreadObserved,
   SPEND_CEILING_EVENT_NAMES,
@@ -428,6 +437,7 @@ import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
 import { registerMovedHistoryEvents } from "../hub/movedThreadHistory";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
+import { registerToolEffectEvents } from "../toolEffects/toolEffectLedger";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasChoiceAnswerEvents } from "../canvas/canvasChoiceAnswerService";
@@ -439,6 +449,7 @@ import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareServ
 import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
+import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
 import { createRuntimeHostIdentityMigrationRegistry } from "./hostIdentityTransforms";
@@ -508,6 +519,16 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
+    .register(
+      "project.code-agent-pull-request-comments-changed@1",
+      1,
+      CodeProjectAgentPullRequestCommentsChanged,
+    )
+    .register(
+      "project.code-agent-default-branch-push-changed@1",
+      1,
+      CodeProjectAgentDefaultBranchPushChanged,
+    )
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register(GUARDRAIL_LEVEL_LOWERED, 1, GuardrailLevelLowered)
     .register(PROVIDER_TOOLING_APPLIED, 1, ProviderToolingAppliedRecordSchema)
@@ -525,6 +546,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.work-developer-tools-changed@1", 1, WorkProjectDeveloperToolsChanged)
     .register("project.work-permission-mode-changed@1", 1, WorkProjectPermissionModeChanged)
     .register("project.work-actions-changed@1", 1, WorkProjectActionsChanged)
+    .register("project.agent-memory-writes-changed@1", 1, ProjectAgentMemoryWritesChanged)
+    .register("project.image-generation-choice-changed@1", 1, ProjectImageGenerationChoiceChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.design-system-changed@1", 1, ProjectDesignSystemChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
@@ -544,6 +567,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-data-tags-changed@1", 1, ProviderInstanceDataTagsChanged)
     .register("provider.instance-enabled-changed@1", 1, ProviderInstanceEnabledChanged)
     .register("provider.instance-native-setup-changed@1", 1, ProviderInstanceNativeSetupChanged)
+    .register("provider.instance-own-memory-changed@1", 1, ProviderInstanceOwnMemoryChanged)
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
@@ -793,6 +817,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(BROWSER_SESSION_EVENT_NAMES.revoked, 1, BrowserSessionRevoked)
     .register(BROWSER_SESSION_EVENT_NAMES.expired, 1, BrowserSessionExpired)
     .register(BROWSER_SESSION_EVENT_NAMES.changed, 1, BrowserSessionChanged)
+    .register(BROWSER_SESSION_EVENT_NAMES.held, 1, BrowserSessionHeld)
+    .register(BROWSER_SESSION_EVENT_NAMES.resumed, 1, BrowserSessionResumed)
     .register(BROWSER_FLOW_EVENT_NAMES.saved, 1, BrowserFlowSaved)
     .register(BROWSER_FLOW_EVENT_NAMES.deleted, 1, BrowserFlowDeleted)
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)
@@ -801,6 +827,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.cleared, 1, ContentClearedPayload)
+    .register(THREAD_STANDING_ANSWER_RECORDED, 1, ThreadStandingAnswerRecorded)
     .register(SIBLING_THREAD_EVENT_NAMES.observed, 1, SiblingThreadObserved)
     .register(SPEND_CEILING_EVENT_NAMES.set, 1, SpendCeilingSet)
     .register(SPEND_CEILING_EVENT_NAMES.raised, 1, SpendCeilingRaised)
@@ -817,6 +844,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerProtectedFilesEvents(events);
   registerPersonMemoryEvents(events);
   registerCanvasExportFolderEvents(events);
+  registerCanvasNetworkAccessEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);
   registerCanvasChoiceAnswerEvents(events);
@@ -826,6 +854,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCoordinatorWakeEvents(events);
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
+  registerToolEffectEvents(events);
   registerFollowUpSuggestionEvents(events);
   registerTerminalSessionEvents(events);
   registerThreadMoveEvents(events);

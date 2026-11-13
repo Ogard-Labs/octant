@@ -120,6 +120,85 @@ describe("ProjectOverview", () => {
     expect(screen.queryByRole("switch", { name: "Keep a status file" })).not.toBeInTheDocument();
   });
 
+  it("offers every Project a switch, off until chosen, that lets agents write its memory without asking", async () => {
+    const user = userEvent.setup();
+    const onAgentMemoryWritesChange = vi.fn(async () => true);
+    const chatProject = {
+      id: "20000000-0000-4000-8000-000000000004",
+      name: "Reading list",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "chat",
+    } as unknown as ProjectSummary;
+    const overview = (project: ProjectSummary) => (
+      <ProjectOverview
+        onAgentMemoryWritesChange={onAgentMemoryWritesChange}
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={project}
+      />
+    );
+    const { rerender } = render(overview(chatProject));
+
+    const toggle = screen.getByRole("switch", {
+      name: "Agents may write Project memory without asking",
+    });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toHaveAccessibleDescription(/At Full access agents never ask/);
+    await user.click(toggle);
+    expect(onAgentMemoryWritesChange).toHaveBeenCalledWith(chatProject.id, true);
+
+    rerender(overview({ ...chatProject, agentMemoryWrites: "enabled" } as ProjectSummary));
+    expect(
+      screen.getByRole("switch", { name: "Agents may write Project memory without asking" }),
+    ).toBeChecked();
+  });
+
+  it("names the image model a Project's agents use without asking, and lets the person have them ask again", async () => {
+    const user = userEvent.setup();
+    const onImageGenerationAskAgain = vi.fn(async () => true);
+    const chatProject = {
+      id: "20000000-0000-4000-8000-000000000004",
+      name: "Reading list",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "chat",
+    } as unknown as ProjectSummary;
+    const overview = (project: ProjectSummary) => (
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onImageGenerationAskAgain={onImageGenerationAskAgain}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={project}
+      />
+    );
+    const { rerender } = render(overview(chatProject));
+    expect(screen.queryByRole("button", { name: "Ask again" })).not.toBeInTheDocument();
+
+    rerender(
+      overview({
+        ...chatProject,
+        imageGenerationChoice: {
+          profileInstanceId: "20000000-0000-4000-8000-0000000000a1",
+          modelId: "gpt-image-2",
+        },
+      } as ProjectSummary),
+    );
+    expect(screen.getByText(/generate images with gpt-image-2 without asking/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Ask again" }));
+    expect(onImageGenerationAskAgain).toHaveBeenCalledWith(chatProject.id);
+  });
+
   it("keeps a Work Project's actions hidden until its Developer tools switch is turned on", async () => {
     const user = userEvent.setup();
     const onWorkDeveloperToolsChange = vi.fn(async () => true);

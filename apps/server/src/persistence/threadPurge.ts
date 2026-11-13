@@ -286,6 +286,8 @@ const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
   "canvas-action",
   "artifact-mirror",
   "canvas-outside-content",
+  // A person's "Allow network" choice for the Canvas, keyed by the Canvas.
+  "canvas-network-access",
   // A link's record goes with its Canvas; the owed revoke of that link is a
   // separate aggregate that names no Canvas, so it outlives the erase.
   "canvas-public-share",
@@ -313,6 +315,7 @@ export function collectCanvasFamilyAggregates(
   add("canvas-choice-answers", canvasId);
   add("artifact-mirror", canvasId);
   add("canvas-outside-content", canvasId);
+  add("canvas-network-access", canvasId);
   return [...keys.values()];
 }
 
@@ -458,6 +461,7 @@ function collectOwnedAggregates(
     add("canvas-choice-answers", canvasId);
     add("artifact-mirror", canvasId);
     add("canvas-outside-content", canvasId);
+    add("canvas-network-access", canvasId);
   }
   followLinkedAggregates(connection, keys, add, "agent-run", RUN_LINK_PATHS);
   for (const sessionId of [
@@ -696,7 +700,8 @@ function delinkUsageRecords(
  * stays; only the thread reference is removed, from the projection and from
  * the journaled memory events it is rebuilt from, so a replay cannot bring the
  * reference back. An agent-written entry is the only provenance that names a
- * thread; a superseded event carries it on both of its entries.
+ * thread, and an agent's retraction names one beside it; a superseded event
+ * carries it on both of its entries.
  */
 function delinkProjectMemoryProvenance(connection: SqliteConnection, threadId: string): void {
   const updateRow = connection.prepare(
@@ -743,12 +748,15 @@ function delinkProjectMemoryProvenance(connection: SqliteConnection, threadId: s
   }
 }
 
-/** Removes `provenance.threadId` when it names the thread; says whether it did. */
+/** Removes the thread from an entry's provenance and retraction origin; says whether it did. */
 function withoutThread(entry: Record<string, unknown>, threadId: string): boolean {
-  const provenance = entry.provenance;
-  if (!isObject(provenance) || provenance.threadId !== threadId) return false;
-  delete provenance.threadId;
-  return true;
+  let removed = false;
+  for (const origin of [entry.provenance, entry.retractionOrigin]) {
+    if (!isObject(origin) || origin.threadId !== threadId) continue;
+    delete origin.threadId;
+    removed = true;
+  }
+  return removed;
 }
 
 function parseObject(text: string): Record<string, unknown> | undefined {

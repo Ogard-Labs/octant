@@ -31,6 +31,7 @@ it.each(["child", "routine"] as const)(
     const grant = {
       ...seedGrant,
       continuesWithoutWindow: kind === "routine",
+      survivesRestart: true,
       target: {
         ...seedGrant.target,
         grantee:
@@ -88,10 +89,14 @@ it.each(["child", "routine"] as const)(
           : /This permission requires an open local window/,
       ),
     ).toBeVisible();
+    expect(
+      screen.getByText(/This permission survives a host restart and an app update/),
+    ).toBeVisible();
     expect(manageSessionGrants.mock.calls.some(([command]) => command.kind === "grant")).toBe(
       false,
     );
     await user.click(screen.getByRole("button", { name: "Grant session permission" }));
+    expect(await screen.findByText(/Kept across restarts/)).toBeVisible();
     const revoke = await screen.findByRole("button", {
       name: "Revoke permission for Read the daily report",
     });

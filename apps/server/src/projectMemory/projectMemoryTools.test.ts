@@ -62,6 +62,8 @@ function accessFor(persistence: PersistenceService, projects: ProjectService): P
     projects,
     readMemory: (id: ProjectId) =>
       persistence.readProject(id) === undefined ? undefined : persistence.readProjectMemory(id),
+    agentsWriteWithoutAsking: (id: ProjectId) =>
+      persistence.readProject(id)?.agentMemoryWrites === "enabled",
     isHostScope: (scope: WindowId) => String(scope) === String(hostScope),
     isPairedDeviceScope: (scope: WindowId) => String(scope) === String(deviceScope),
     outsideContent: (id) => (id === taintedThreadId ? marked : undefined),
@@ -114,6 +116,7 @@ function toolsFor(
     readonly windowId?: WindowId;
     readonly threadId?: string;
     readonly writeRefusal?: () => string | undefined;
+    readonly fullAccess?: () => boolean;
   } = {},
 ): AppManagedToolSet {
   const tools = access.toolsFor({
@@ -122,6 +125,7 @@ function toolsFor(
     threadId: scope.threadId ?? threadId,
     projectId: String(projectId),
     ...(scope.writeRefusal === undefined ? {} : { writeRefusal: scope.writeRefusal }),
+    ...(scope.fullAccess === undefined ? {} : { fullAccess: scope.fullAccess }),
   });
   if (tools === undefined) throw new Error("Expected the memory tool");
   return tools;
@@ -217,6 +221,168 @@ describe("octant_memory", () => {
       expect(access.proposals.list(windowId)).toEqual([]);
       await expect(call(tools, { operation: "list" })).resolves.toMatchObject({
         result: { entries: [] },
+      });
+      expect(persistence.readProjectMemory(projectId).active).toEqual([]);
+    });
+  });
+
+  it("writes at Full access without a card, marked as this thread's agent's with nobody asked", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-project-memory-tools-"));
+    try {
+      await withProject(
+        async ({ access }) => {
+          const tools = toolsFor(access, { fullAccess: () => true });
+          await expect(
+            call(tools, {
+              operation: "create",
+              memoryKind: "decision",
+              content: "Releases ship from main only.",
+            }),
+          ).resolves.toMatchObject({
+            result: { status: "written", content: "Releases ship from main only." },
+          });
+          expect(access.proposals.list(windowId)).toEqual([]);
+          await expect(call(tools, { operation: "list" })).resolves.toMatchObject({
+            result: { entries: [{ writtenBy: "an agent, with nobody asked" }] },
+          });
+        },
+        directory,
+        { keep: true },
+      );
+      await withProject(
+        async ({ persistence }) => {
+          expect(persistence.readProjectMemory(projectId).active).toMatchObject([
+            {
+              content: "Releases ship from main only.",
+              provenance: { kind: "agent-authored", mode: "code", threadId, unconfirmed: true },
+            },
+          ]);
+        },
+        directory,
+        { create: false },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("replaces and retracts at Full access without a card, and names the thread on the retraction", async () => {
+    await withProject(async ({ access, persistence, projects }) => {
+      const created = await projects.executeMemory({
+        kind: "create-memory-entry",
+        projectId,
+        entryId: "00000000-0000-4000-8000-000000000950",
+        memoryKind: "preference",
+        content: "Tabs.",
+        expectedVersion: 0,
+      });
+      const tools = toolsFor(access, { fullAccess: () => true });
+      const replaced = await call(tools, {
+        operation: "supersede",
+        entryId: String(created.entry.id),
+        content: "Spaces.",
+      });
+      expect(replaced).toMatchObject({ result: { status: "written", content: "Spaces." } });
+      const successorId = (replaced.result as { readonly entryId: string }).entryId;
+      await expect(
+        call(tools, { operation: "retract", entryId: successorId, reason: "Neither." }),
+      ).resolves.toMatchObject({ result: { status: "written" } });
+      expect(access.proposals.list(windowId)).toEqual([]);
+      expect(persistence.readProjectMemory(projectId)).toMatchObject({
+        active: [],
+        history: expect.arrayContaining([
+          expect.objectContaining({
+            content: "Spaces.",
+            status: "retracted",
+            retractionOrigin: { kind: "agent-authored", mode: "code", threadId, unconfirmed: true },
+          }),
+        ]),
+      });
+    });
+  });
+
+  it("asks below Full access while the Project's setting is off, and writes without a card once a person turns it on", async () => {
+    await withProject(async ({ access, persistence, projects }) => {
+      const tools = toolsFor(access, { fullAccess: () => false });
+      const pending = call(tools, { operation: "create", memoryKind: "fact", content: "Asked." });
+      const proposal = await waitingProposal(access);
+      expect(persistence.readProjectMemory(projectId).active).toEqual([]);
+      await access.proposals.decide(windowId, {
+        proposalId: proposal.proposalId,
+        decision: "decline",
+      });
+      await expect(pending).resolves.toMatchObject({ result: { status: "declined" } });
+
+      await projects.executeProject(windowId, {
+        kind: "change-project-agent-memory-writes",
+        projectId,
+        expectedVersion: 1,
+        agentMemoryWrites: "enabled",
+      });
+      await expect(
+        call(tools, { operation: "create", memoryKind: "fact", content: "Not asked." }),
+      ).resolves.toMatchObject({ result: { status: "written" } });
+      expect(access.proposals.list(windowId)).toEqual([]);
+      expect(persistence.readProjectMemory(projectId).active).toMatchObject([
+        { content: "Not asked.", provenance: { kind: "agent-authored", unconfirmed: true } },
+      ]);
+    });
+  });
+
+  it("refuses a write in Plan mode at Full access and with the Project's setting on", async () => {
+    await withProject(async ({ access, persistence, projects }) => {
+      await projects.executeProject(windowId, {
+        kind: "change-project-agent-memory-writes",
+        projectId,
+        expectedVersion: 1,
+        agentMemoryWrites: "enabled",
+      });
+      const tools = toolsFor(access, {
+        fullAccess: () => true,
+        writeRefusal: () => "Plan mode cannot change memory.",
+      });
+      await expect(
+        call(tools, { operation: "create", memoryKind: "fact", content: "Not in Plan." }),
+      ).resolves.toMatchObject({
+        isError: true,
+        result: { status: "refused", reason: "plan-mode" },
+      });
+      expect(persistence.readProjectMemory(projectId).active).toEqual([]);
+    });
+  });
+
+  it("writes at Full access from a turn with nobody at a window, because no card is needed", async () => {
+    await withProject(async ({ access, persistence }) => {
+      for (const scope of [hostScope, deviceScope]) {
+        await expect(
+          call(toolsFor(access, { windowId: scope, fullAccess: () => true }), {
+            operation: "create",
+            memoryKind: "fact",
+            content: `From ${String(scope)}.`,
+          }),
+        ).resolves.toMatchObject({ result: { status: "written" } });
+      }
+      expect(persistence.readProjectMemory(projectId).active).toHaveLength(2);
+    });
+  });
+
+  it("does not apply an unasked write to an archived Project", async () => {
+    await withProject(async ({ access, persistence, projects }) => {
+      await projects.executeProject(windowId, {
+        kind: "change-project-lifecycle",
+        projectId,
+        expectedVersion: 1,
+        lifecycle: "archived",
+      });
+      await expect(
+        call(toolsFor(access, { fullAccess: () => true }), {
+          operation: "create",
+          memoryKind: "fact",
+          content: "Too late.",
+        }),
+      ).resolves.toMatchObject({
+        isError: true,
+        result: { status: "not-applied", message: "Archived Projects are read-only." },
       });
       expect(persistence.readProjectMemory(projectId).active).toEqual([]);
     });

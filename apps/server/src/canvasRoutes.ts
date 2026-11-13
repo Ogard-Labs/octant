@@ -94,12 +94,38 @@ import {
 import { canvasExportEventActor } from "./canvas/canvasExportActor";
 import {
   canvasDesignPageHeaders,
+  canvasDesignPageNetworkBase,
   canvasDesignPagePath,
   canvasDesignPageRefusal,
   issueSharedDesignRun,
   renderCanvasDesignPage,
   type CanvasDesignRunTickets,
 } from "./canvas/canvasDesignPage";
+import type { CanvasNetworkAccessService } from "./canvas/canvasNetworkAccessService";
+import {
+  canvasNetworkPreflightResponse,
+  canvasNetworkProxyResponse,
+  readWithin,
+  type CanvasNetworkProxy,
+} from "./canvas/canvasNetworkProxy";
+import {
+  CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES,
+  type CanvasNetworkResource,
+} from "@octant/domain/canvas-network-policy";
+import {
+  CANVAS_NETWORK_PROXY_PATH_PREFIX,
+  CANVAS_NETWORK_TOKEN_HEADER,
+  CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX,
+  CANVAS_PROTOTYPE_SURFACE_HEADER,
+  decodeCanvasNetworkAccessCommand,
+  decodeCanvasNetworkAccessResult,
+  decodeCanvasNetworkAccessView,
+  decodeCanvasNetworkPageRenewalCommand,
+  decodeCanvasNetworkPageRenewalResult,
+  type CanvasNetworkAccessRefusalReason,
+  type CanvasNetworkPageRenewalResult,
+} from "@octant/contracts/canvas-network";
+import { admitDesktopBroker } from "./desktopBrokerAdmission";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
 import type { ClientPrincipal } from "./clientPrincipal";
@@ -179,6 +205,20 @@ export interface CanvasRouteDependencies {
    * not serve them, and a running design then answers that it cannot run here.
    */
   readonly designRunTickets?: CanvasDesignRunTickets;
+  /**
+   * The per-Canvas **Allow network** switch and the proxy a running page's
+   * requests go through. Absent, no Canvas has a switch and no page a proxy.
+   */
+  readonly canvasNetwork?: {
+    readonly access: CanvasNetworkAccessService;
+    readonly proxy: Pick<CanvasNetworkProxy, "fetch">;
+  };
+  /**
+   * The secret the desktop's main process proves itself with. With it, a
+   * network-capable design page the desktop asks for its prototype host is
+   * served with a token; absent, only a browser frame's page is.
+   */
+  readonly desktopBridgeSecret?: string;
   /**
    * The host's snapshot of a page a Work or Code thread published, when the
    * window may read that thread. Absent leaves published pages unrunnable.
@@ -284,7 +324,10 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "public-shares" &&
       route !== "public-share-revoke" &&
       route !== "public-link-settings" &&
-      route !== "thread-reference-cards"
+      route !== "thread-reference-cards" &&
+      route !== "network-access" &&
+      route !== "network-access/renew" &&
+      !route.startsWith(NETWORK_PROXY_ROUTE_PREFIX)
     ) {
       return undefined;
     }
@@ -297,6 +340,12 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
     // no window credential; the single-use ticket is the whole authority, and
     // it was issued only after the same read check as the Canvas itself.
     if (route === "design-page") return serveDesignPage(dependencies, request, url);
+    // A running page asks for a fetch the same way: its origin is opaque and
+    // it holds no window credential, so the token in the path is the whole
+    // authority, and nothing else the request carries is read.
+    if (route.startsWith(NETWORK_PROXY_ROUTE_PREFIX)) {
+      return serveNetworkRequest(dependencies, request, url, route);
+    }
     if (origin !== null && !isAllowedOrigin(origin)) {
       return failureResponse("Renderer origin is not allowed.", 400, null);
     }
@@ -1676,6 +1725,136 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         return failureResponse("Public links request is invalid.", 405, origin);
       }
 
+      if (route === "network-access" && (request.method === "GET" || request.method === "POST")) {
+        const access = dependencies.canvasNetwork?.access;
+        if (request.method === "GET") {
+          if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+            return failureResponse("Canvas network request is invalid.", 400, origin);
+          }
+          let canvasId;
+          try {
+            canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+          } catch {
+            return failureResponse("Canvas ID is invalid.", 400, origin);
+          }
+          const context = await resolveAuthorizedContext(
+            dependencies,
+            authenticatedWindowId,
+            canvasId,
+          );
+          if (context.kind !== "ok" || access === undefined) {
+            return failureResponse(
+              "Canvas network is not available for this canvas.",
+              context.kind === "unauthorized" ? 403 : 404,
+              origin,
+            );
+          }
+          return jsonResponse(
+            decodeCanvasNetworkAccessView({
+              kind: "canvas-network-access",
+              canvasId,
+              allowed: access.isAllowed(canvasId),
+            }),
+            200,
+            origin,
+          );
+        }
+
+        const refusedNetwork = (reason: CanvasNetworkAccessRefusalReason, message: string) =>
+          jsonResponse(
+            decodeCanvasNetworkAccessResult({
+              kind: "canvas-network-access-refused",
+              reason,
+              message,
+            }),
+            200,
+            origin,
+          );
+        // Letting a Canvas's pages send its content to the internet is a
+        // person's choice at this machine. A paired device and an agent grant
+        // are other principals, and no agent tool reaches this route.
+        if (principal.kind !== "local-window") {
+          return refusedNetwork(
+            "local-window-required",
+            "Only a person at this machine can change a Canvas's network.",
+          );
+        }
+        const body = await readJson(request);
+        if (body.kind !== "ok") {
+          return refusedNetwork("malformed", "Canvas network request is malformed.");
+        }
+        let command;
+        try {
+          command = decodeCanvasNetworkAccessCommand(body.value);
+        } catch {
+          return refusedNetwork("malformed", "Canvas network request is malformed.");
+        }
+        if (access === undefined) {
+          return refusedNetwork("unavailable", "This host does not offer a Canvas network.");
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          command.canvasId,
+        );
+        if (
+          context.kind !== "ok" ||
+          dependencies.canvasProjection.getById(command.canvasId) === undefined
+        ) {
+          return refusedNetwork(
+            "canvas-unavailable",
+            "That Canvas is not available in this workspace.",
+          );
+        }
+        access.set(command.canvasId, command.allowed);
+        return jsonResponse(
+          decodeCanvasNetworkAccessResult({
+            kind: "canvas-network-access",
+            canvasId: command.canvasId,
+            allowed: access.isAllowed(command.canvasId),
+          }),
+          200,
+          origin,
+        );
+      }
+
+      if (route === "network-access/renew" && request.method === "POST") {
+        const answerRenewal = (result: CanvasNetworkPageRenewalResult) =>
+          jsonResponse(decodeCanvasNetworkPageRenewalResult(result), 200, origin);
+        const refusedRenewal = (
+          reason: Extract<
+            CanvasNetworkPageRenewalResult,
+            { kind: "canvas-network-page-renewal-refused" }
+          >["reason"],
+        ) => answerRenewal({ kind: "canvas-network-page-renewal-refused", reason });
+        // A page's token is kept alive only by the window that ran the page,
+        // which proves itself as a window and names the page by the ticket it
+        // ran it with. Neither a paired device (whose pages hold no token)
+        // nor the token itself renews anything, so a token that leaked from a
+        // page dies with that page.
+        if (principal.kind !== "local-window") return refusedRenewal("local-window-required");
+        const body = await readJson(request);
+        let command;
+        try {
+          command = decodeCanvasNetworkPageRenewalCommand(body.kind === "ok" ? body.value : null);
+        } catch {
+          return refusedRenewal("malformed");
+        }
+        const access = dependencies.canvasNetwork?.access;
+        const pageCanvasId = access?.canvasForPage(command.ticket);
+        if (
+          access === undefined ||
+          pageCanvasId === undefined ||
+          dependencies.canvasProjection.getById(pageCanvasId) === undefined ||
+          (await resolveAuthorizedContext(dependencies, authenticatedWindowId, pageCanvasId))
+            .kind !== "ok" ||
+          access.renewPage(command.ticket) === undefined
+        ) {
+          return refusedRenewal("not-live");
+        }
+        return answerRenewal({ kind: "canvas-network-page-renewed" });
+      }
+
       if (route === "export-folder" && (request.method === "GET" || request.method === "POST")) {
         const folders = dependencies.canvasExportFolderService;
         // Reading where a Canvas exports to and choosing it are the same
@@ -2397,6 +2576,11 @@ async function issueDesignRun(
     startFrameId: String(startFrameId),
     block,
     provenance: definition.provenance,
+    // A paired device's page never carries the mark, whatever the switch says:
+    // the proxy answers on this machine's loopback host, for a frame here.
+    ...(reader.kind === "window" && dependencies.canvasNetwork?.access.isAllowed(input.canvasId)
+      ? { network: true as const }
+      : {}),
   });
   return {
     kind: "ready",
@@ -2490,10 +2674,169 @@ async function serveDesignPage(
     dependencies.resolveDesignAssets === undefined
       ? []
       : await dependencies.resolveDesignAssets(grant.block, grant.provenance);
-  return new Response(renderCanvasDesignPage(grant.block, grant.startFrameId, assets), {
-    status: 200,
-    headers: canvasDesignPageHeaders("text/html; charset=utf-8"),
+  // A token is minted for a frame a browser on this machine is loading, and
+  // for a page the desktop's main process asks for its prototype host. The
+  // switch is read again here, since it may have gone off after the ticket
+  // was issued.
+  const desktopSurface =
+    destination === null ? desktopPrototypeSurface(dependencies, request, url) : undefined;
+  const token =
+    grant.network === true &&
+    grant.canvasId !== undefined &&
+    (destination === "iframe" || desktopSurface !== undefined)
+      ? // The ticket names the page from here on: the window that ran it
+        // renews the token by it.
+        dependencies.canvasNetwork?.access.issueToken(grant.canvasId, ticket)
+      : undefined;
+  // A browser's page is told the proxy path under its token. A desktop page
+  // is told an address of the prototype host's own scheme, and the token goes
+  // to the main process in a header, so that page holds nothing to send out.
+  const networkBase =
+    token === undefined
+      ? undefined
+      : desktopSurface === undefined
+        ? canvasDesignPageNetworkBase(url.origin, token)
+        : `${CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX}${desktopSurface}/`;
+  return new Response(
+    renderCanvasDesignPage(grant.block, grant.startFrameId, assets, networkBase),
+    {
+      status: 200,
+      headers: {
+        ...canvasDesignPageHeaders("text/html; charset=utf-8", networkBase),
+        ...(token === undefined || desktopSurface === undefined
+          ? {}
+          : { [CANVAS_NETWORK_TOKEN_HEADER]: token }),
+      },
+    },
+  );
+}
+
+const PROTOTYPE_SURFACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The prototype-host surface a design page is asked for, when the desktop's
+ * own main process is asking: the request carries the desktop bridge secret,
+ * on the loopback address the desktop reaches this host at. The admission
+ * refuses a request with an `Origin` (a browser's script), one a session
+ * carried here (a paired device's), and a native window's main, which this
+ * route is not brokered to. Anything else is not the desktop.
+ */
+function desktopPrototypeSurface(
+  dependencies: CanvasRouteDependencies,
+  request: Request,
+  url: URL,
+): string | undefined {
+  const surface = request.headers.get(CANVAS_PROTOTYPE_SURFACE_HEADER);
+  if (surface === null || !PROTOTYPE_SURFACE_ID.test(surface)) return undefined;
+  if (dependencies.desktopBridgeSecret === undefined || url.hostname !== "127.0.0.1") {
+    return undefined;
+  }
+  const admission = admitDesktopBroker({
+    request,
+    desktopBridgeSecret: dependencies.desktopBridgeSecret,
+    now: Date.now(),
   });
+  return admission.status === "admitted" && admission.kind === "desktop-bridge"
+    ? surface
+    : undefined;
+}
+
+const NETWORK_PROXY_ROUTE_PREFIX = CANVAS_NETWORK_PROXY_PATH_PREFIX.slice("/api/canvas/".length);
+const NETWORK_PROXY_ROUTE = /^network\/([A-Za-z0-9_-]{43})\/(fetch|image|font)$/;
+/** What a browser says it is loading from each path; any other load is not answered. */
+const NETWORK_FETCH_DESTINATION: Readonly<Record<CanvasNetworkResource, string>> = {
+  fetch: "empty",
+  image: "image",
+  font: "font",
+};
+
+/**
+ * One fetch on behalf of a running page. The token names the Canvas and is
+ * live only while that Canvas's switch is on. The request's cookies, origin,
+ * and headers are not read and nothing of them is passed on; the page chooses
+ * the address, which the proxy holds to the destination rule, and for a
+ * `POST` a JSON body, which is bounded and read as JSON here.
+ */
+async function serveNetworkRequest(
+  dependencies: CanvasRouteDependencies,
+  request: Request,
+  url: URL,
+  route: string,
+): Promise<Response> {
+  const match = NETWORK_PROXY_ROUTE.exec(route);
+  const token = match?.[1];
+  const resource = match?.[2] as CanvasNetworkResource | undefined;
+  if (token === undefined || resource === undefined) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+  }
+  const network = dependencies.canvasNetwork;
+  // A page's request arrives by address alone. One a session carried here (a
+  // paired device's, forwarded by the remote gateway) is not a frame on this
+  // machine, whatever token it names.
+  const canvasId =
+    readPrincipalRouteContext(request) === undefined
+      ? network?.access.canvasForToken(token)
+      : undefined;
+  // A token outlives its Canvas for no request: one whose Canvas has been
+  // erased is refused here even if nothing told the switch.
+  if (
+    network === undefined ||
+    canvasId === undefined ||
+    dependencies.canvasProjection.getById(canvasId) === undefined
+  ) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "token-not-live" });
+  }
+  // An image or a font is only ever loaded; a script may also send JSON.
+  const posts = resource === "fetch" && request.method === "POST";
+  const preflight = resource === "fetch" && request.method === "OPTIONS";
+  if (request.method !== "GET" && !posts && !preflight) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "method-not-allowed" });
+  }
+  // A browser names what it is loading. Each path answers the one kind of
+  // load it is for, so a fetched page is never drawn as a document or a
+  // frame on this origin.
+  const destination = request.headers.get("sec-fetch-dest");
+  if (destination !== null && destination !== NETWORK_FETCH_DESTINATION[resource]) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "not-a-script-request" });
+  }
+  // A browser asks before a page's JSON `POST` from another origin. The
+  // answer admits that one request shape and no credential.
+  if (preflight) return canvasNetworkPreflightResponse();
+  const target = url.searchParams.get("url");
+  if (url.searchParams.size !== 1 || target === null) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+  }
+  if (!posts) {
+    return canvasNetworkProxyResponse(await network.proxy.fetch(canvasId, target, { resource }));
+  }
+  const declaredType = (request.headers.get("content-type") ?? "").split(";")[0] ?? "";
+  if (declaredType.trim().toLowerCase() !== "application/json") {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "request-type-not-allowed" });
+  }
+  if (
+    Number(request.headers.get("content-length") ?? "0") > CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES
+  ) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "request-too-large" });
+  }
+  let body: Uint8Array | undefined;
+  try {
+    body = await readWithin(request, CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES);
+  } catch {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+  }
+  if (body === undefined) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "request-too-large" });
+  }
+  // The host declares the body as JSON to the far side, so it sends only
+  // what reads as JSON.
+  try {
+    JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+  } catch {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+  }
+  return canvasNetworkProxyResponse(
+    await network.proxy.fetch(canvasId, target, { resource, body }),
+  );
 }
 
 function toInventoryEntry(

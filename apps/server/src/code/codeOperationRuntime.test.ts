@@ -86,6 +86,11 @@ import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
+import {
+  registerToolEffectEvents,
+  ToolEffectLedger,
+  uncertainToolCallHold,
+} from "../toolEffects/toolEffectLedger";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
@@ -266,6 +271,41 @@ describe("CodeOperationRuntime", () => {
         },
       }),
     ).resolves.toBeUndefined();
+    fixture.close();
+  });
+
+  it("checks the thread's model for tools by itself where a provider turn starts, whatever the check answers", async () => {
+    const verifyModelToolsOnFirstUse = vi.fn(async () => {
+      throw new Error("The endpoint did not answer.");
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      verifyModelToolsOnFirstUse,
+    });
+
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(21),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    // The check failed and the turn started all the same.
+    await vi.waitFor(() => expect(connection.start).toHaveBeenCalled());
+    expect(verifyModelToolsOnFirstUse).toHaveBeenCalledExactlyOnceWith(
+      thread().providerInstanceId,
+      thread().modelId,
+    );
+    await fixture.runtime.execute(windowId, {
+      kind: "cancel-provider-turn",
+      operationId: operationId(22),
+      threadId,
+      checkoutId,
+    });
     fixture.close();
   });
 
@@ -6926,7 +6966,13 @@ describe("CodeOperationRuntime", () => {
       overrides: Partial<CodeOperationPullRequestActions> & {
         readonly approved?: boolean;
         readonly standing?: ReadonlyArray<"project" | "routine">;
+        readonly projectForgeChoices?: {
+          readonly comments: boolean;
+          readonly defaultBranchPush: boolean;
+        };
         readonly nativeApproval?: boolean;
+        /** Whether the thread has read outside content; absent, the host cannot tell. */
+        readonly readOutsideContent?: boolean;
         readonly resolvePullRequestTarget?: Parameters<
           typeof createCodeOperationRuntime
         >[0]["resolvePullRequestTarget"];
@@ -6969,6 +7015,16 @@ describe("CodeOperationRuntime", () => {
           : { resolvePullRequestTarget: overrides.resolvePullRequestTarget }),
         approvalValidator: overrides.nativeApproval ? false : () => overrides.approved ?? true,
         ...(overrides.standing === undefined ? {} : { standingMergeAllowance: overrides.standing }),
+        ...(overrides.projectForgeChoices === undefined
+          ? {}
+          : { projectForgeChoices: overrides.projectForgeChoices }),
+        ...(overrides.readOutsideContent === undefined
+          ? {}
+          : {
+              readThreadExternalContentTaint: () => ({
+                externalContentIngested: overrides.readOutsideContent === true,
+              }),
+            }),
         pullRequestPort: {
           ensure: async () => ({ status: "unavailable" }),
           update: async () => ({ status: "none" }),
@@ -7079,19 +7135,177 @@ describe("CodeOperationRuntime", () => {
       fixture.close();
     });
 
-    it("posts a comment or a review reply only with an approval for that act", async () => {
-      const { fixture, actions } = actionFixture({});
-      const refused = await fixture.runtime.execute(windowId, {
+    it("posts a comment and a review reply unasked at Full access", async () => {
+      const { fixture, actions } = actionFixture({ approved: false });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "comment-pull-request",
+          ...scope(140),
+          body: "Looks right.",
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      await fixture.runtime.execute(windowId, {
         kind: "comment-pull-request",
-        ...scope(150),
-        body: "Looks right.",
+        ...scope(141),
+        body: "Fixed in the next commit.",
+        reviewThreadId: "PRRT_abc",
         authorization: { kind: "full-access" },
       });
-      expect(refused).toMatchObject({
-        kind: "operation-failed",
-        failure: { category: "unauthorized" },
+      expect(actions.comment).toHaveBeenCalledTimes(1);
+      expect(actions.replyToReviewThread).toHaveBeenCalledTimes(1);
+      fixture.close();
+    });
+
+    it.each(["approval-gated", "auto-accept-edits"] as const)(
+      "posts nothing from a %s thread that claims Full access, even where the Project lets agents comment",
+      async (executionPolicy) => {
+        // An approval validator that says yes to everything stands in for a
+        // gate that let the claim through; the post itself still checks the level.
+        for (const comments of [false, true]) {
+          const { fixture, actions } = actionFixture({
+            projectForgeChoices: { comments, defaultBranchPush: false },
+          });
+          fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
+          expect(
+            await fixture.runtime.execute(windowId, {
+              kind: "comment-pull-request",
+              ...scope(142),
+              body: "Looks right.",
+              authorization: { kind: "full-access" },
+            }),
+          ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+          expect(actions.comment).not.toHaveBeenCalled();
+          fixture.close();
+        }
+      },
+    );
+
+    it("posts a comment below Full access on the Project's choice only while that choice is still stored", async () => {
+      const base = {
+        kind: "comment-pull-request" as const,
+        body: "Looks right.",
+        authorization: { kind: "standing", allowedBy: "project" } as const,
+      };
+      const gated = decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" });
+      const allowed = actionFixture({
+        approved: false,
+        projectForgeChoices: { comments: true, defaultBranchPush: false },
+        readOutsideContent: false,
       });
-      expect(actions.comment).not.toHaveBeenCalled();
+      allowed.fixture.setThread(gated);
+      expect(
+        await allowed.fixture.runtime.execute(windowId, { ...base, ...scope(143) }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      expect(allowed.actions.comment).toHaveBeenCalledTimes(1);
+
+      // Switched off, or never stored: the command's word is not enough, and
+      // a merge choice or a default-branch choice is not a comment choice.
+      for (const off of [
+        actionFixture({ approved: false, readOutsideContent: false }),
+        actionFixture({
+          approved: false,
+          standing: ["project"],
+          projectForgeChoices: { comments: false, defaultBranchPush: true },
+          readOutsideContent: false,
+        }),
+      ]) {
+        off.fixture.setThread(gated);
+        expect(
+          await off.fixture.runtime.execute(windowId, { ...base, ...scope(144) }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+        expect(off.actions.comment).not.toHaveBeenCalled();
+        off.fixture.close();
+      }
+
+      // Plan stays read-only whatever the Project chose.
+      const plan = actionFixture({
+        projectForgeChoices: { comments: true, defaultBranchPush: false },
+      });
+      plan.fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+      for (const authorization of [base.authorization, { kind: "full-access" } as const]) {
+        expect(
+          await plan.fixture.runtime.execute(windowId, { ...base, ...scope(145), authorization }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+      }
+      expect(plan.actions.comment).not.toHaveBeenCalled();
+      allowed.fixture.close();
+      plan.fixture.close();
+    });
+
+    it("holds a comment on the Project's choice to a thread that has read no outside content, below Full access", async () => {
+      const standing = {
+        kind: "comment-pull-request" as const,
+        body: "Looks right.",
+        authorization: { kind: "standing", allowedBy: "project" } as const,
+      };
+      const choices = { comments: true, defaultBranchPush: false };
+      const gated = decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" });
+
+      // Marked, or a host that cannot tell: the stored choice does not stand
+      // in for the ask, so the command's word posts nothing.
+      for (const readOutsideContent of [true, undefined]) {
+        const marked = actionFixture({
+          approved: false,
+          projectForgeChoices: choices,
+          ...(readOutsideContent === undefined ? {} : { readOutsideContent }),
+        });
+        marked.fixture.setThread(gated);
+        expect(
+          await marked.fixture.runtime.execute(windowId, { ...standing, ...scope(146) }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+        expect(marked.actions.comment).not.toHaveBeenCalled();
+        marked.fixture.close();
+      }
+
+      // The same marked thread posts with the person's approval for the act.
+      const asked = actionFixture({ projectForgeChoices: choices, readOutsideContent: true });
+      asked.fixture.setThread(gated);
+      expect(
+        await asked.fixture.runtime.execute(windowId, {
+          ...standing,
+          ...scope(147),
+          authorization: approved(148),
+        }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      expect(asked.actions.comment).toHaveBeenCalledTimes(1);
+      asked.fixture.close();
+
+      // Unmarked posts unasked on the choice.
+      const unmarked = actionFixture({
+        approved: false,
+        projectForgeChoices: choices,
+        readOutsideContent: false,
+      });
+      unmarked.fixture.setThread(gated);
+      expect(
+        await unmarked.fixture.runtime.execute(windowId, { ...standing, ...scope(149) }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      expect(unmarked.actions.comment).toHaveBeenCalledTimes(1);
+      unmarked.fixture.close();
+
+      // Full access never asks, marked or not.
+      const full = actionFixture({
+        approved: false,
+        projectForgeChoices: choices,
+        readOutsideContent: true,
+      });
+      full.fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      expect(
+        await full.fixture.runtime.execute(windowId, {
+          ...standing,
+          ...scope(150),
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject({ kind: "pull-request-state", state: "existing" });
+      expect(full.actions.comment).toHaveBeenCalledTimes(1);
+      full.fixture.close();
+    });
+
+    it("posts a comment or a review reply below Full access with an approval for that act", async () => {
+      const { fixture, actions } = actionFixture({});
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }));
 
       await fixture.runtime.execute(windowId, {
         kind: "comment-pull-request",
@@ -7733,6 +7947,31 @@ describe("CodeOperationRuntime", () => {
             kind: "operation-failed",
             failure: { category: "unauthorized" },
           });
+        }
+        fixture.close();
+      });
+
+      it("lets an ordinary push reach the default branch when the Project allows it, never a force", async () => {
+        const fixture = runtimeFixture({
+          projectForgeChoices: { comments: false, defaultBranchPush: true },
+        });
+        const allowed = await fixture.runtime.execute(windowId, {
+          ...to("development"),
+          ...scope(196),
+          gitOperationId: operationId(197),
+          authorization: { kind: "full-access" },
+        } as never);
+        // The fixture's Git stub fails the push itself; the policy did not refuse it.
+        expect(allowed).not.toMatchObject({ failure: { category: "unauthorized" } });
+        for (const [index, force] of [{ mode: "plain" } as const, lease].entries()) {
+          expect(
+            await fixture.runtime.execute(windowId, {
+              ...to("development", force),
+              ...scope(198 + index * 2),
+              gitOperationId: operationId(199 + index * 2),
+              authorization: { kind: "full-access" },
+            } as never),
+          ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
         }
         fixture.close();
       });
@@ -10174,6 +10413,9 @@ function selectThreadConversation(
 }
 
 function runtimeFixture(options: {
+  verifyModelToolsOnFirstUse?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["verifyModelToolsOnFirstUse"];
   feedbackScope?: Parameters<typeof createProductFeedbackTurnPort>[0]["resolveScope"];
   onFeedbackDelivered?: () => void;
   inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
@@ -10229,6 +10471,8 @@ function runtimeFixture(options: {
   >[0]["resolvePullRequestTarget"];
   /** The standing merge permissions the stored choices give the thread. */
   standingMergeAllowance?: ReadonlyArray<"project" | "routine">;
+  /** The Project's stored choices for comments and default-branch pushes. */
+  projectForgeChoices?: { readonly comments: boolean; readonly defaultBranchPush: boolean };
   repositoryTestDiscovery?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["repositoryTestDiscovery"];
@@ -10530,6 +10774,9 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.verifyModelToolsOnFirstUse === undefined
+      ? {}
+      : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
     ...(options.stopConfirmationMs === undefined
       ? {}
       : { stopConfirmationMs: options.stopConfirmationMs }),
@@ -10677,6 +10924,12 @@ function runtimeFixture(options: {
     ...(options.standingMergeAllowance === undefined
       ? {}
       : { standingMergeAllowance: () => options.standingMergeAllowance ?? [] }),
+    ...(options.projectForgeChoices === undefined
+      ? {}
+      : {
+          projectForgeChoices: () =>
+            options.projectForgeChoices ?? { comments: false, defaultBranchPush: false },
+        }),
     resolvePullRequestTarget:
       options.resolvePullRequestTarget ??
       (async () =>
@@ -15734,6 +15987,7 @@ describe("continuing a Code turn a restart cut off", () => {
       readThread: (id) => (String(id) === String(threadId) ? thread() : undefined),
       runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
       enabled: () => true,
+      uncertainToolCall: () => undefined,
       attempts: createCodeRestartContinuationAttempts(host.connection),
       resumability: (current, continuation, cutOffOperationId) =>
         codeRestartResumability(
@@ -15929,6 +16183,89 @@ describe("continuing a Code turn a restart cut off", () => {
       });
       expect(last.connection.send).not.toHaveBeenCalled();
       expect(statuses(last.host).every(([, status]) => status !== "running")).toBe(true);
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  /**
+   * The host's record of tool calls, over the store that outlives a restart,
+   * and one call of a turn that the host stopped inside of.
+   */
+  function toolCallCutOff(
+    connection: ReturnType<typeof openSqlite>,
+    turnId: string,
+    toolName: string,
+  ) {
+    const ledger = new ToolEffectLedger({
+      journal: new Journal({
+        connection,
+        registry: registerToolEffectEvents(new EventRegistry()),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => now,
+      }),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: operationId(990) as never },
+      clock: () => now,
+    });
+    const tools = ledger.forTurn({ threadId: String(threadId), turnId }).tools({
+      definitions: [{ name: toolName, inputSchema: { type: "object" } }],
+      execute: () => new Promise(() => {}),
+    });
+    void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
+    return (turn: { readonly turnId: string }) =>
+      uncertainToolCallHold(ledger.certainty(turn.turnId));
+  }
+
+  it("holds a thread whose cut-off turn left a tool call nobody saw finish, and names the tool", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, {
+        uncertainToolCall: toolCallCutOff(next.host.connection, String(operationId(61)), "edit"),
+      });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toMatchObject({
+        continued: [],
+        held: [
+          {
+            threadId: String(threadId),
+            reason: "uncertain-tool-call",
+            detail:
+              'Octant stopped while the tool "edit" was running, so it may or may not have taken effect. Check it, then continue.',
+          },
+        ],
+      });
+      expect(next.connection.send).not.toHaveBeenCalled();
+      expect(recovery.releaseQueue).not.toHaveBeenCalled();
+      expect(statuses(next.host)).toEqual([[String(operationId(61)), "interrupted"]]);
+      // The person's own Resume is an ordinary turn and is admitted as before.
+      await expect(
+        next.host.runtime.execute(windowId, {
+          ...start(62),
+          prompt: continuationPrompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("continues a thread whose cut-off turn left only a reading tool call unfinished", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, {
+        uncertainToolCall: toolCallCutOff(next.host.connection, String(operationId(61)), "read"),
+      });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toMatchObject({
+        continued: [{ mode: "code", threadId: String(threadId) }],
+        held: [],
+      });
     } finally {
       for (const host of hosts) host.close();
     }

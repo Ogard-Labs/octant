@@ -22,8 +22,9 @@ export type ProjectMemoryProposalClient = Pick<
 /**
  * A change to Project memory this thread's agent asked for, waiting on the
  * host until the person answers. It shows exactly what would be written, and
- * nothing changes until Save; every write asks, so no answer here covers a
- * later one. The host lists only this window's proposals; the open thread's
+ * nothing changes until Save; no answer here covers a later write. A write at
+ * Full access, or in a Project that lets agents write its memory, never
+ * reaches this card. The host lists only this window's proposals; the open thread's
  * are shown, oldest first.
  */
 export function ProjectMemoryProposalPrompt(props: {

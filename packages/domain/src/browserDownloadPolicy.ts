@@ -1,4 +1,4 @@
-import type { BrowserDownloadSource } from "@octant/contracts";
+import type { BrowserDownloadSource, ShellSettings } from "@octant/contracts";
 /**
  * Pure rules for the files an agent's Browser may keep from a page. The page
  * decides nothing here: the name is reduced to a safe one, the type is read
@@ -23,6 +23,24 @@ const EXECUTABLE_EXTENSIONS: ReadonlyArray<string> = [
   ".rpm",
   ".appimage",
 ];
+
+/** The size and count limits one agent transfer is held to. */
+export interface BrowserTransferLimits {
+  /** The largest file an upload may send or a download may hold and save. */
+  readonly maxFileBytes: number;
+  /** How many downloads one browsing context holds at once. */
+  readonly maxHeldDownloads: number;
+}
+
+/** The limits the person's Settings name, as the host enforces them. */
+export function browserTransferLimits(
+  settings: Pick<ShellSettings, "browserTransferFileLimitMegabytes" | "browserHeldDownloadLimit">,
+): BrowserTransferLimits {
+  return {
+    maxFileBytes: settings.browserTransferFileLimitMegabytes * 1024 * 1024,
+    maxHeldDownloads: settings.browserHeldDownloadLimit,
+  };
+}
 
 const MAX_SAFE_NAME_CHARACTERS = 120;
 const SNIFF_BYTES = 4096;

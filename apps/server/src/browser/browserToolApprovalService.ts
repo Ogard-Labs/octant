@@ -5,7 +5,9 @@ import {
   type BrowserToolApprovalDecision,
 } from "@octant/contracts/browser-automation-rpc";
 import {
+  ANY_BROWSER_ORIGIN,
   decodeToolApprovalId,
+  type RememberedBrowserTransfer,
   type StoredBrowserProfile,
   type ToolActionAuthority,
   type WindowId,
@@ -44,6 +46,13 @@ interface BrowserToolApprovalServiceOptions {
     profile: StoredBrowserProfile | undefined,
   ) => boolean;
   /**
+   * Persist an "Always allow" answer to an upload or a download save, journaled
+   * like a remembered origin. Absent, such an answer approves once.
+   */
+  readonly rememberTransfer?: (transfer: RememberedBrowserTransfer, windowId: WindowId) => void;
+  /** Whether an upload or a download save already holds such an answer; read live. */
+  readonly isTransferRemembered?: (transfer: RememberedBrowserTransfer) => boolean;
+  /**
    * Whether a requesting scope is the host acting for a routine. Nobody sits at
    * that scope, so its approvals go to the windows that can see the thread.
    */
@@ -81,6 +90,8 @@ interface PendingApproval {
   readonly windowId: WindowId;
   readonly threadId: string;
   readonly authority: ToolActionAuthority;
+  /** The thread workspace an upload reads from or a download lands in. */
+  readonly workspaceRoot?: string;
   readonly resolve: (decision: BrowserToolApprovalOutcome) => void;
   readonly signal?: AbortSignal;
   readonly onAbort?: () => void;
@@ -122,6 +133,11 @@ export class BrowserToolApprovalService {
       readonly mediaType: string;
       readonly source?: BrowserDownloadSource;
     };
+    /**
+     * The thread workspace an upload or a download save is for. With it, the
+     * person's "Always allow" is remembered for this site and this workspace.
+     */
+    readonly workspaceRoot?: string;
     /** The agent asks the person to sign in here; see the contract. */
     readonly signIn?: { readonly reason?: string };
     readonly script?: { readonly source: string };
@@ -203,6 +219,7 @@ export class BrowserToolApprovalService {
         windowId: input.windowId,
         threadId: input.threadId,
         authority: input.authority,
+        ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
         resolve: settle,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(onAbort === undefined ? {} : { onAbort }),
@@ -231,19 +248,49 @@ export class BrowserToolApprovalService {
       return false;
     }
     pending.resolve(decision.decision);
-    // An upload's or a download's answer covers that file once; it never
-    // becomes a remembered grant for the origin.
+    // An upload's or a download's "Always allow" covers later transfers in that
+    // direction between this site and this workspace; it never becomes a
+    // remembered grant to open the origin. A paired device is not at this
+    // computer's files, so its answer covers this one transfer only.
+    const direction =
+      pending.view.upload !== undefined
+        ? "upload"
+        : pending.view.download !== undefined
+          ? "download"
+          : undefined;
     if (
       decision.decision === "approved" &&
       decision.remember === true &&
+      direction !== undefined &&
+      pending.workspaceRoot !== undefined &&
+      !this.#isPairedDevice(windowId)
+    ) {
+      this.#options.rememberTransfer?.(
+        { direction, origin: pending.view.origin, workspaceRoot: pending.workspaceRoot },
+        windowId,
+      );
+    }
+    if (
+      decision.decision === "approved" &&
       pending.view.upload === undefined &&
       pending.view.download === undefined &&
       pending.view.signIn === undefined &&
       pending.view.script === undefined
     ) {
+      // "Allow all sites in this profile" remembers the profile under the
+      // any-site entry; a Private page has no profile, so there it remembers
+      // nothing wider than the origin the prompt showed.
+      const origin =
+        decision.rememberProfile === true && pending.view.profile !== undefined
+          ? ANY_BROWSER_ORIGIN
+          : decision.remember === true && pending.view.origin !== ANY_BROWSER_ORIGIN
+            ? pending.view.origin
+            : undefined;
       // The answering window journals the grant: for a routine it is the
       // person who saw the prompt, not the host scope that raised it.
-      this.#options.rememberOrigin?.(pending.view.origin, windowId, pending.view.profile);
+      if (origin !== undefined) {
+        this.#options.rememberOrigin?.(origin, windowId, pending.view.profile);
+      }
     }
     return true;
   }
@@ -284,6 +331,11 @@ export class BrowserToolApprovalService {
    */
   isRemembered(origin: string, profile?: StoredBrowserProfile): boolean {
     return this.#options.isOriginRemembered?.(origin, profile) === true;
+  }
+
+  /** Whether an upload or a download save settles approved without a prompt. */
+  isTransferRemembered(transfer: RememberedBrowserTransfer): boolean {
+    return this.#options.isTransferRemembered?.(transfer) === true;
   }
 
   /** Whether a scope is a paired device rather than a window of this computer. */

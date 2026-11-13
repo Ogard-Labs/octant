@@ -163,6 +163,13 @@ export function classifyProductAction(request: Request): string | undefined {
     return undefined;
   }
   if (path.startsWith("/api/canvas/")) {
+    // A Canvas's "Allow network" switch is a person's choice at the host, and
+    // the proxy its pages fetch through answers a frame on the host's own
+    // machine. Neither is a read a paired device is given, although both are
+    // reached with GET: a device never fetches through the person's host.
+    if (path === "/api/canvas/network-access" || path.startsWith("/api/canvas/network/")) {
+      return undefined;
+    }
     // Opening a shared snapshot is a read, and it is POST because the request
     // carries the snapshot it is opening. Denying it here made the audience
     // check unreachable for the only caller it exists for: a paired device is

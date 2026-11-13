@@ -1973,12 +1973,13 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   desktopHostLaunch = launch;
   try {
     // Files held for the agent are cleared when the app starts; if the folder
-    // cannot be made private, downloads simply stay blocked.
+    // cannot be made private, an agent's downloads simply stay blocked.
     const browserDownloadRoot = await prepareBrowserDownloadHoldRoot("desktop").catch(
       () => undefined,
     );
     browserSurfaceHost ??= createBrowserSurfaceHost({
       ...(browserDownloadRoot === undefined ? {} : { downloadRoot: browserDownloadRoot }),
+      personDownloadsFolder: app.getPath("downloads"),
       isOwnerWindowAvailable: (windowId) =>
         desktopWindows.hasWindowId(windowId) || nightlyWindowLeases?.hasWindow(windowId) === true,
       isEmbeddedOwner: (windowId) => nightlyWindowLeases?.hasWindow(windowId) === true,
@@ -4604,6 +4605,7 @@ function desktopCanvasPrototypeSurface(): CanvasPrototypeSurface {
       }),
     serverUrl: () => activeServerUrl,
     fetch: globalThis.fetch,
+    brokerHeaders: desktopBrokerHeaders,
     platform: process.platform,
   });
   app.on("will-quit", () => surface.stop());

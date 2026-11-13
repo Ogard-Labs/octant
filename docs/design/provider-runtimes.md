@@ -80,7 +80,12 @@ Plan's read-only rule, Chat's withheld filesystem and shell, and the
 provider's telemetry and self-update channels stay off at every
 level. The provider's own memory is off unless the person turns on its
 setting for that provider account, which is off by default (maintainer
-request, 2026-11-12; not built yet: today it is off with no setting). Work and Code share one capability set, so each runtime starts a Work
+request, 2026-11-12; built for Claude Code and Codex in Work and Code, with
+Plan kept off and Chat not built yet). With it on, Claude Code launches
+without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` and Codex's app-server starts
+without the `features.memories=false` override, on a process of its own;
+OpenCode and Mistral Vibe have no such memory and no setting
+([architecture](../architecture.md#modes-chat-work-and-code)). Work and Code share one capability set, so each runtime starts a Work
 session with its shell at the thread's level exactly as it starts a Code
 session, as the
 [architecture's Work rules](../architecture.md#modes-chat-work-and-code)

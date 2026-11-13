@@ -42,6 +42,7 @@ import {
 } from "../context/runtimeOutsideContentMark";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
@@ -201,6 +202,13 @@ export interface CodeTurnRunnerInput {
   readonly context?: Parameters<ProviderConnection["send"]>[0]["context"];
   readonly attachments?: Parameters<ProviderConnection["send"]>[0]["attachments"];
   readonly appManagedTools?: AppManagedToolSet;
+  /**
+   * The turn's record of tool calls about to take effect: each call the host
+   * runs is journaled before it runs and settled after, and the runtime's own
+   * tool reports are recorded as they are read. A restart reads it to tell
+   * whether the turn it cut off left a call nobody saw finish.
+   */
+  readonly toolEffects?: TurnToolEffects;
   /**
    * What this turn sends inside its prompt and what the session already held,
    * counted for the window of a runtime that reports no categories.
@@ -494,6 +502,7 @@ export class CodeTurnRunner {
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
                 input.observeRemoteCommand?.(event);
+                input.toolEffects?.observe(event, input.appManagedTools);
                 timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (event.kind === "outside-content-result") {
@@ -655,7 +664,7 @@ export class CodeTurnRunner {
                     }
                     if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
                     answeredToolRequestIds.add(sanitizedEvent.requestId);
-                    const toolSet = input.appManagedTools;
+                    const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
                     const allowed = toolSet?.definitions.some(
                       (definition) => definition.name === sanitizedEvent.toolName,
                     );
@@ -692,6 +701,7 @@ export class CodeTurnRunner {
                           return await toolSet.execute({
                             name: sanitizedEvent.toolName,
                             inputJson: boundedEvent.inputJson,
+                            toolCallId: sanitizedEvent.requestId,
                             ...(executionSignal === undefined ? {} : { signal: executionSignal }),
                           });
                         } catch {

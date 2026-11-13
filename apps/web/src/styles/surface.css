@@ -5,7 +5,7 @@
    "surface". A surface has a one-row header (Back, title, actions), an
    optional toolbar, and sections separated by hairlines. Nothing here
    paints a control; adapters own controls. This file owns the
-   hierarchy the marketing site and the app share (DESIGN.md "Language").
+   hierarchy the marketing site and the app share (DESIGN.md "Voice").
    ───────────────────────────────────────────────────────────────────────── */
 
 :root {
@@ -131,7 +131,7 @@
 .oct-row-label {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   line-height: var(--oct-leading-label);
 }
 
@@ -476,7 +476,7 @@
   border-bottom: 2px solid transparent;
   border-radius: 0;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .surface-tabs > [aria-selected="true"],

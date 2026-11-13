@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { browserAgentAvailability } from "@octant/domain";
@@ -723,11 +726,13 @@ describe("Code app-managed tools", () => {
       expect.objectContaining({
         windowId,
         threadId,
+        // At Full access a Private page needs no site approval and admits every site.
         policy: expect.objectContaining({
           profileMode: "isolated",
-          allowedOrigins: ["https://example.com"],
+          allowedOrigins: ["*"],
           credentialFieldProtection: true,
         }),
+        fullAccessAgent: true,
       }),
     );
     expect(act).toHaveBeenCalledWith(
@@ -742,6 +747,106 @@ describe("Code app-managed tools", () => {
         status: "running",
         page: { title: "Example", text: "Readable page text", observationRevision: 7 },
       },
+    });
+  });
+
+  describe("a Private page and the thread's level", () => {
+    function fixture(executionPolicy: "full-access" | "approval-gated", everySite: boolean) {
+      const authority = browserAuthority();
+      const open = browserSnapshot(authority);
+      if (open.context === undefined) throw Error("Missing test context");
+      const active: BrowserAutomationSnapshot = everySite
+        ? {
+            ...open,
+            context: {
+              ...open.context,
+              policy: { ...open.context.policy, allowedOrigins: ["*"] },
+            },
+          }
+        : open;
+      let current: BrowserAutomationSnapshot = active;
+      const request = vi.fn(async () => "approved" as const);
+      const create = vi.fn(async (_input: { policy: { allowedOrigins: readonly string[] } }) => {
+        current = active;
+        return active;
+      });
+      const act = vi.fn(async () => active);
+      const releaseThread = vi.fn(async () => {
+        current = { status: "ready", threadId: active.threadId, evidence: [] };
+        return current;
+      });
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: thread({ executionPolicy }),
+        readThread: () => thread({ executionPolicy }),
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval: {
+          // The page was opened and approved by this thread before.
+          isApproved: () => true,
+          request,
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+        browser: {
+          resolveAuthority: () => authority,
+          inspectThread: () => current,
+          create,
+          act,
+          releaseThread,
+        },
+      });
+      const run = (input: Record<string, unknown>) =>
+        tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson: JSON.stringify(input) });
+      return { run, request, create, act, releaseThread };
+    }
+
+    it("navigates across origins at Full access without asking or reopening the page", async () => {
+      const f = fixture("full-access", true);
+      const result = await f.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(result.isError).toBe(false);
+      expect(f.request).not.toHaveBeenCalled();
+      expect(f.releaseThread).not.toHaveBeenCalled();
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.act).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.objectContaining({ target: "https://elsewhere.example/b" }),
+        }),
+      );
+    });
+
+    it("reopens a one-site page at Full access when the agent navigates elsewhere", async () => {
+      const f = fixture("full-access", false);
+      await f.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(f.request).not.toHaveBeenCalled();
+      expect(f.releaseThread).toHaveBeenCalledOnce();
+      expect(f.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual(["*"]);
+    });
+
+    it("leaves a one-site page as it is below Full access, so another origin stays refused", async () => {
+      const f = fixture("approval-gated", false);
+      await f.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(f.releaseThread).not.toHaveBeenCalled();
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.act).toHaveBeenCalledOnce();
+    });
+
+    it("stops using a page that admits every site once the thread is below Full access", async () => {
+      const reading = fixture("approval-gated", true);
+      expect(await reading.run({ operation: "snapshot" })).toMatchObject({
+        isError: true,
+        result: { error: "browser-navigation-required" },
+      });
+      expect(reading.act).not.toHaveBeenCalled();
+
+      const navigating = fixture("approval-gated", true);
+      await navigating.run({ operation: "navigate", url: "https://elsewhere.example/b" });
+      expect(navigating.releaseThread).toHaveBeenCalledOnce();
+      expect(navigating.request).toHaveBeenCalledWith("https://elsewhere.example", undefined);
+      expect(navigating.create.mock.calls[0]?.[0].policy.allowedOrigins).toEqual([
+        "https://elsewhere.example",
+      ]);
     });
   });
 
@@ -850,9 +955,12 @@ describe("Code app-managed tools", () => {
           expect.objectContaining({
             policy: expect.objectContaining({
               profile: expect.objectContaining({ kind: profile }),
+              // A signed-in page holds the one site the person approved.
+              allowedOrigins: ["https://example.com"],
             }),
           }),
         );
+        expect(f.create.mock.calls[0]?.[0]).not.toHaveProperty("fullAccessAgent");
       },
     );
     it("uses an explicitly selected account default while still asking for that account's site authority", async () => {
@@ -1399,8 +1507,8 @@ describe("Code app-managed tools", () => {
           remember: vi.fn(),
           forget: vi.fn(),
         },
-        browserUpload: { root: "/checkout", request: ask },
-        browserDownload: { root: "/checkout", request: ask },
+        browserUpload: { root: "/checkout", approvals: { request: ask } },
+        browserDownload: { root: "/checkout", approvals: { request: ask } },
         browserSignIn: { refusal: () => undefined, request: ask as never },
         browserFlows: {
           service: { list: () => [], get: () => undefined, save: save as never },
@@ -1530,16 +1638,20 @@ describe("Code app-managed tools", () => {
 
   describe("saving a download", () => {
     function downloadTools(options: {
-      readonly executionPolicy?: "plan";
+      readonly executionPolicy?: "plan" | "approval-gated";
       readonly source?: BrowserDownloadSource;
       readonly refusal?: string;
       readonly request?: ReturnType<typeof vi.fn>;
+      readonly remembered?: boolean;
+      /** What an action on the page answers with. */
+      readonly act?: BrowserAutomationSnapshot;
     }) {
       const current = thread(
         options.executionPolicy === undefined ? {} : { executionPolicy: options.executionPolicy },
       );
       const saveDownload = vi.fn(
         async (input: {
+          readonly fullAccess?: true;
           readonly ask: (
             facts: { name: string; sizeBytes: number; mediaType: string },
             origin: string,
@@ -1569,6 +1681,7 @@ describe("Code app-managed tools", () => {
         },
       );
       const request = options.request ?? vi.fn(async () => "approved" as const);
+      const isTransferRemembered = vi.fn(() => options.remembered === true);
       const tools = createCodeAppManagedTools({
         windowId,
         thread: current,
@@ -1585,18 +1698,18 @@ describe("Code app-managed tools", () => {
         browserDownload: {
           root: "/checkout",
           ...(options.refusal === undefined ? {} : { refusal: () => options.refusal }),
-          request: request as never,
+          approvals: { request: request as never, isTransferRemembered },
         },
         browser: {
           resolveAuthority: () => browserAuthority(),
           inspectThread: () => browserSnapshot(browserAuthority()),
           create: vi.fn(),
-          act: vi.fn(),
+          act: vi.fn(async () => options.act ?? browserSnapshot(browserAuthority())),
           saveDownload: saveDownload as never,
           releaseThread: vi.fn(),
         },
       });
-      return { tools, saveDownload, request };
+      return { tools, saveDownload, request, isTransferRemembered };
     }
     const save = (tools: ReturnType<typeof downloadTools>["tools"]) =>
       tools.execute({
@@ -1604,34 +1717,113 @@ describe("Code app-managed tools", () => {
         inputJson: JSON.stringify({ operation: "download-save", downloadId: "d1" }),
       });
 
-    it("asks the thread's tool approval, naming the file, its size, its type and the site", async () => {
-      const { tools, saveDownload, request } = downloadTools({});
+    it("asks on the Browser approval card with the file, the site and the checkout, so the answer can be remembered", async () => {
+      const { tools, saveDownload, request } = downloadTools({ executionPolicy: "approval-gated" });
       const result = await save(tools);
       expect(result).toMatchObject({ isError: false, result: { saved: "downloads/report.pdf" } });
       expect(saveDownload).toHaveBeenCalledWith(
         expect.objectContaining({ workspaceRoot: "/checkout", downloadId: "d1" }),
       );
       expect(request).toHaveBeenCalledWith(
-        "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: unverified.",
-        expect.any(AbortSignal),
+        expect.objectContaining({
+          windowId,
+          origin: "https://example.com",
+          workspaceRoot: "/checkout",
+          download: { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+          signal: expect.any(AbortSignal),
+        }),
       );
+      // Below Full access the service keeps refusing a program or installer.
+      expect(saveDownload.mock.calls[0]?.[0].fullAccess).toBeUndefined();
     });
 
-    it("refuses a source chain that cannot be reviewed in full without asking or saving", async () => {
-      const origins = Array.from(
-        { length: 16 },
-        (_, index) => `https://${"a".repeat(63)}.${"b".repeat(60)}${index}.example`,
-      );
-      const { tools, request } = downloadTools({ source: { kind: "https-origin-chain", origins } });
-      expect(await save(tools)).toEqual({
-        result: { error: "browser-download-cancelled" },
-        isError: true,
+    it("saves below Full access without asking once the person answered Always allow for the site and checkout", async () => {
+      const { tools, request, isTransferRemembered } = downloadTools({
+        executionPolicy: "approval-gated",
+        remembered: true,
+      });
+      expect(await save(tools)).toMatchObject({
+        isError: false,
+        result: { saved: "downloads/report.pdf" },
+      });
+      expect(isTransferRemembered).toHaveBeenCalledWith({
+        direction: "download",
+        origin: "https://example.com",
+        workspaceRoot: "/checkout",
       });
       expect(request).not.toHaveBeenCalled();
     });
 
-    it("keeps the Code turn cancellation signal through download preparation and approval", async () => {
+    it("saves a download an action started straight into the checkout at Full access, and keeps it held below", async () => {
+      const held = {
+        state: "held" as const,
+        downloadId: "d1",
+        name: "report.pdf",
+        sizeBytes: 1_258_291,
+        mediaType: "application/pdf",
+      };
+      const clicked = (tools: ReturnType<typeof downloadTools>["tools"]) =>
+        tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "click", ref: "e1" }),
+        });
+      const page = {
+        ...browserSnapshot(browserAuthority()),
+        observation: { revision: 4, downloads: [held] } as never,
+      };
+
+      const full = downloadTools({ act: page });
+      expect(await clicked(full.tools)).toMatchObject({
+        isError: false,
+        result: {
+          page: {
+            downloads: [{ state: "saved", name: "report.pdf", path: "downloads/report.pdf" }],
+          },
+        },
+      });
+      expect(full.request).not.toHaveBeenCalled();
+      expect(full.saveDownload).toHaveBeenCalledWith(
+        expect.objectContaining({ downloadId: "d1", workspaceRoot: "/checkout", fullAccess: true }),
+      );
+
+      const gated = downloadTools({ executionPolicy: "approval-gated", act: page });
+      expect(await clicked(gated.tools)).toMatchObject({
+        result: { page: { downloads: [held] } },
+      });
+      expect(gated.saveDownload).not.toHaveBeenCalled();
+    });
+
+    it("saves a download unasked at Full access, where the service may save a program", async () => {
       const { tools, saveDownload, request } = downloadTools({});
+      expect(await save(tools)).toMatchObject({
+        isError: false,
+        result: { saved: "downloads/report.pdf" },
+      });
+      expect(request).not.toHaveBeenCalled();
+      expect(saveDownload).toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceRoot: "/checkout", fullAccess: true }),
+      );
+    });
+
+    it("puts the whole attested source chain on the card, however long it is", async () => {
+      const origins = Array.from(
+        { length: 16 },
+        (_, index) => `https://${"a".repeat(63)}.${"b".repeat(60)}${index}.example`,
+      );
+      const { tools, request } = downloadTools({
+        executionPolicy: "approval-gated",
+        source: { kind: "https-origin-chain", origins },
+      });
+      expect(await save(tools)).toMatchObject({ isError: false });
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          download: expect.objectContaining({ source: { kind: "https-origin-chain", origins } }),
+        }),
+      );
+    });
+
+    it("keeps the Code turn cancellation signal through download preparation and approval", async () => {
+      const { tools, saveDownload, request } = downloadTools({ executionPolicy: "approval-gated" });
       const abort = new AbortController();
       await tools.execute({
         name: CODE_BROWSER_TOOL_NAME,
@@ -1639,7 +1831,7 @@ describe("Code app-managed tools", () => {
         signal: abort.signal,
       });
       expect(saveDownload).toHaveBeenCalledWith(expect.objectContaining({ signal: abort.signal }));
-      expect(request).toHaveBeenCalledWith(expect.any(String), abort.signal);
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ signal: abort.signal }));
     });
 
     it("refuses on a paired device's turn and in Plan mode, asking no one", async () => {
@@ -1649,12 +1841,148 @@ describe("Code app-managed tools", () => {
         isError: true,
       });
       expect(paired.saveDownload).not.toHaveBeenCalled();
+      expect(paired.request).not.toHaveBeenCalled();
       const plan = downloadTools({ executionPolicy: "plan" });
       expect(await save(plan.tools)).toEqual({
         result: { error: "plan-mode-read-only" },
         isError: true,
       });
       expect(plan.saveDownload).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("uploading a file", () => {
+    async function uploadTools(
+      executionPolicy: "full-access" | "approval-gated",
+      remembered = false,
+    ) {
+      const folder = await realpath(await mkdtemp(join(tmpdir(), "octant-code-upload-")));
+      const workspace = join(folder, "workspace");
+      await mkdir(workspace);
+      await writeFile(join(workspace, "report.txt"), "report");
+      await writeFile(join(folder, "outside.txt"), "outside");
+      const current = thread({ executionPolicy });
+      const act = vi.fn(async (_input: { readonly uploadFiles?: ReadonlyArray<string> }) =>
+        browserSnapshot(browserAuthority()),
+      );
+      const request = vi.fn(async (_input: unknown) => "approved" as const);
+      const isTransferRemembered = vi.fn(() => remembered);
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: current,
+        readThread: () => current,
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval: {
+          isApproved: () => true,
+          request: vi.fn(),
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+        browserUpload: {
+          root: workspace,
+          fileCountLimit: () => 1,
+          approvals: { request, isTransferRemembered },
+        },
+        browser: {
+          resolveAuthority: () => browserAuthority(),
+          inspectThread: () => browserSnapshot(browserAuthority()),
+          create: vi.fn(),
+          act: act as never,
+          releaseThread: vi.fn(),
+        },
+      });
+      const upload = (files: ReadonlyArray<string>) =>
+        tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "upload", ref: "e1", files }),
+        });
+      return { folder, workspace, act, request, upload, isTransferRemembered };
+    }
+
+    it("uploads below Full access without asking once the person answered Always allow for the site and checkout", async () => {
+      const { folder, workspace, act, request, upload, isTransferRemembered } = await uploadTools(
+        "approval-gated",
+        true,
+      );
+      try {
+        expect(await upload(["report.txt"])).toMatchObject({ isError: false });
+        expect(isTransferRemembered).toHaveBeenCalledWith({
+          direction: "upload",
+          origin: "https://example.com",
+          workspaceRoot: workspace,
+        });
+        expect(request).not.toHaveBeenCalled();
+        expect(act.mock.calls[0]?.[0].uploadFiles).toHaveLength(1);
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses more files in one upload than the person's setting allows, asking no one", async () => {
+      const { folder, workspace, act, request, upload } = await uploadTools("approval-gated");
+      try {
+        await writeFile(join(workspace, "second.txt"), "second");
+        expect(await upload(["report.txt", "second.txt"])).toEqual({
+          result: { error: "upload-invalid-files" },
+          isError: true,
+        });
+        expect(request).not.toHaveBeenCalled();
+        expect(act).not.toHaveBeenCalled();
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    it("uploads a file from the thread's workspace unasked at Full access", async () => {
+      const { folder, act, request, upload } = await uploadTools("full-access");
+      try {
+        expect(await upload(["report.txt"])).toMatchObject({ isError: false });
+        expect(request).not.toHaveBeenCalled();
+        expect(act.mock.calls[0]?.[0].uploadFiles).toHaveLength(1);
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses a file outside the thread's workspace at Full access without asking or sending", async () => {
+      const { folder, act, request, upload } = await uploadTools("full-access");
+      try {
+        expect(await upload(["../outside.txt"])).toEqual({
+          result: { error: "upload-outside-workspace" },
+          isError: true,
+        });
+        expect(await upload([join(folder, "outside.txt")])).toEqual({
+          result: { error: "upload-outside-workspace" },
+          isError: true,
+        });
+        expect(request).not.toHaveBeenCalled();
+        expect(act).not.toHaveBeenCalled();
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+    });
+
+    it("still asks below Full access, on the Browser approval card, and sends nothing a person denies", async () => {
+      const { folder, workspace, act, request, upload } = await uploadTools("approval-gated");
+      try {
+        request.mockResolvedValueOnce("denied" as never);
+        expect(await upload(["report.txt"])).toEqual({
+          result: { error: "browser-upload-denied" },
+          isError: true,
+        });
+        expect(request).toHaveBeenCalledWith(
+          expect.objectContaining({
+            origin: "https://example.com",
+            workspaceRoot: workspace,
+            upload: [expect.objectContaining({ name: "report.txt", sizeBytes: 6 })],
+          }),
+        );
+        expect(act).not.toHaveBeenCalled();
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
     });
   });
 
@@ -2557,6 +2885,73 @@ describe("the Apple capability as an agent tool", () => {
     });
   });
 
+  it("sends an agent's Repair input on a live Allow input grant, at Full access unasked, and never in Plan", async () => {
+    const request = vi.fn();
+    const granted = appleTools(
+      { inputGrantIsOpen: () => true },
+      { executionPolicy: "approval-gated" } as never,
+      { request },
+    );
+    const repair = {
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "repair-input", simulatorId }),
+    };
+
+    const repaired = await granted.tools.execute(repair);
+
+    expect(repaired.isError).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect(granted.execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "repair-input",
+      simulatorId,
+      requestedBy: { kind: "agent" },
+      approval: { kind: "not-required" },
+    });
+
+    const fullAccess = appleTools({}, { executionPolicy: "full-access" } as never, { request });
+    await fullAccess.tools.execute(repair);
+    expect(request).not.toHaveBeenCalled();
+    expect(fullAccess.execute.mock.calls[0]?.[1]).toMatchObject({ kind: "repair-input" });
+
+    const plan = appleTools({ inputGrantIsOpen: () => true }, { executionPolicy: "plan" } as never);
+    expect(await plan.tools.execute(repair)).toMatchObject({
+      isError: true,
+      result: { error: "plan-mode-read-only" },
+    });
+    expect(plan.execute).not.toHaveBeenCalled();
+  });
+
+  it("asks before an approval-gated agent's Repair input with no live grant, and refuses it when nobody can answer", async () => {
+    const approvalId = "d0000000-0000-4000-8000-000000000002";
+    const request = vi.fn(async (_effect: unknown) => ({
+      status: "approved" as const,
+      approvalId: approvalId as never,
+    }));
+    const repair = {
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "repair-input", simulatorId }),
+    };
+    const asked = appleTools({}, { executionPolicy: "approval-gated" } as never, { request });
+
+    await asked.tools.execute(repair);
+
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      kind: "apple-action",
+      request: { kind: "repair-input", simulatorId },
+    });
+    expect(asked.execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "repair-input",
+      approval: { kind: "approved", approvalId },
+    });
+
+    const unanswerable = appleTools({}, { executionPolicy: "approval-gated" } as never);
+    expect(await unanswerable.tools.execute(repair)).toMatchObject({
+      isError: true,
+      result: { error: "device-approval-required" },
+    });
+    expect(unanswerable.execute).not.toHaveBeenCalled();
+  });
+
   it("reads a Simulator app's log under Plan without asking, returning the text itself", async () => {
     const request = vi.fn();
     const readLog = vi.fn(async () => "Fixture[42:7] launched");
@@ -3249,6 +3644,8 @@ describe("Code tool families", () => {
     // Recording a call added its record argument and one short sentence on
     // when to use it (showing a reviewer a UI change), about 145 bytes; the
     // bounds and the answer are in help.
+    // The Simulator's repair-input operation added its name (15 bytes); its
+    // usage is in help.
     expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_570);
   });
 
@@ -3356,6 +3753,8 @@ describe("the pull request as an agent tool", () => {
     threadOverrides: Partial<CodeThread> = {},
     answer: "approved" | "denied" = "approved",
     standingMerge?: () => "project" | "routine" | undefined,
+    projectAllowsComments?: () => boolean,
+    threadReadOutsideContent?: () => boolean,
   ) {
     const request = vi.fn(async () =>
       answer === "approved"
@@ -3389,6 +3788,8 @@ describe("the pull request as an agent tool", () => {
       terminal: { read: async () => ({}) as never },
       pullRequestApproval: { request },
       ...(standingMerge === undefined ? {} : { standingMerge }),
+      ...(projectAllowsComments === undefined ? {} : { projectAllowsComments }),
+      ...(threadReadOutsideContent === undefined ? {} : { threadReadOutsideContent }),
     });
     return { tools, request, executeOperation };
   }
@@ -3459,7 +3860,7 @@ describe("the pull request as an agent tool", () => {
     expect(result).toMatchObject({ result: { status: "updated", draft: false }, isError: false });
   });
 
-  it("asks for each comment and each merge even in a Full-access thread, but not for a label", async () => {
+  it("asks for each merge even in a Full-access thread, but not for a label, a comment or a review reply", async () => {
     const { tools, request, executeOperation } = pullRequestTools();
 
     await tools.execute({
@@ -3480,16 +3881,14 @@ describe("the pull request as an agent tool", () => {
       name: CODE_PULL_REQUEST_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "comment", body: "Fixed.", reviewThreadId: "PRRT_1" }),
     });
-    expect(request).toHaveBeenLastCalledWith(
-      expect.objectContaining({ kind: "comment-pull-request", body: "Fixed." }),
-      undefined,
-    );
+    expect(request).not.toHaveBeenCalled();
     expect(executeOperation).toHaveBeenLastCalledWith(
       windowId,
       expect.objectContaining({
         kind: "comment-pull-request",
+        body: "Fixed.",
         reviewThreadId: "PRRT_1",
-        authorization: { kind: "approved", approvalId },
+        authorization: { kind: "full-access" },
       }),
     );
     expect(commented).toMatchObject({ result: { status: "commented" }, isError: false });
@@ -3498,7 +3897,7 @@ describe("the pull request as an agent tool", () => {
       name: CODE_PULL_REQUEST_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "merge", method: "squash", headSha: "a".repeat(40) }),
     });
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(1);
     expect(executeOperation).toHaveBeenLastCalledWith(
       windowId,
       expect.objectContaining({
@@ -3510,8 +3909,121 @@ describe("the pull request as an agent tool", () => {
     expect(merged).toMatchObject({ result: { status: "merged" }, isError: false });
   });
 
-  it("merges without asking when a stored choice allows it, but still asks for a comment", async () => {
-    const { tools, request, executeOperation } = pullRequestTools({}, "approved", () => "project");
+  it.each(["approval-gated", "auto-accept-edits"] as const)(
+    "still asks for each comment in a %s thread whose Project has not let agents comment",
+    async (executionPolicy) => {
+      for (const projectAllowsComments of [undefined, () => false]) {
+        const { tools, request, executeOperation } = pullRequestTools(
+          { executionPolicy },
+          "approved",
+          undefined,
+          projectAllowsComments,
+        );
+        const commented = await tools.execute({
+          name: CODE_PULL_REQUEST_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "comment", body: "Fixed." }),
+        });
+        expect(request).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "comment-pull-request", body: "Fixed." }),
+          undefined,
+        );
+        expect(executeOperation).toHaveBeenLastCalledWith(
+          windowId,
+          expect.objectContaining({
+            kind: "comment-pull-request",
+            authorization: { kind: "approved", approvalId },
+          }),
+        );
+        expect(commented).toMatchObject({ result: { status: "commented" }, isError: false });
+      }
+    },
+  );
+
+  it("comments without asking below Full access when the Project lets agents comment, naming that choice", async () => {
+    const { tools, request, executeOperation } = pullRequestTools(
+      { executionPolicy: "approval-gated" },
+      "approved",
+      undefined,
+      () => true,
+      () => false,
+    );
+    const replied = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Fixed.", reviewThreadId: "PRRT_1" }),
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "comment-pull-request",
+        reviewThreadId: "PRRT_1",
+        authorization: { kind: "standing", allowedBy: "project" },
+      }),
+    );
+    expect(replied).toMatchObject({ result: { status: "commented" }, isError: false });
+
+    // The comment choice covers comments alone: a title change still asks.
+    await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "update", title: "Renamed" }),
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("still asks before a comment below Full access once the thread has read outside content, though the Project lets agents comment", async () => {
+    // An unknown mark is read as marked: the choice stands in for the ask
+    // only on a thread the host knows has read nothing from outside.
+    for (const threadReadOutsideContent of [() => true, undefined]) {
+      const { tools, request, executeOperation } = pullRequestTools(
+        { executionPolicy: "approval-gated" },
+        "approved",
+        undefined,
+        () => true,
+        threadReadOutsideContent,
+      );
+      await tools.execute({
+        name: CODE_PULL_REQUEST_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "comment", body: "Fixed." }),
+      });
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(executeOperation).toHaveBeenLastCalledWith(
+        windowId,
+        expect.objectContaining({
+          kind: "comment-pull-request",
+          authorization: { kind: "approved", approvalId },
+        }),
+      );
+    }
+  });
+
+  it("comments unasked at Full access on a thread that has read outside content", async () => {
+    const { tools, request, executeOperation } = pullRequestTools(
+      { executionPolicy: "full-access" },
+      "approved",
+      undefined,
+      () => true,
+      () => true,
+    );
+    await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Fixed." }),
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "comment-pull-request",
+        authorization: { kind: "full-access" },
+      }),
+    );
+  });
+
+  it("merges without asking when a stored choice allows it, which lets no comment through below Full access", async () => {
+    const { tools, request, executeOperation } = pullRequestTools(
+      { executionPolicy: "approval-gated" },
+      "approved",
+      () => "project",
+    );
     const merged = await tools.execute({
       name: CODE_PULL_REQUEST_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "merge", method: "squash", headSha: "a".repeat(40) }),
@@ -3534,7 +4046,10 @@ describe("the pull request as an agent tool", () => {
   });
 
   it("sends nothing to GitHub when the person declines a merge or a comment", async () => {
-    const { tools, executeOperation } = pullRequestTools({}, "denied");
+    const { tools, executeOperation } = pullRequestTools(
+      { executionPolicy: "approval-gated" },
+      "denied",
+    );
     for (const input of [
       { operation: "comment", body: "Hello." },
       { operation: "merge", method: "merge", headSha: "a".repeat(40) },
@@ -3574,8 +4089,13 @@ describe("the pull request as an agent tool", () => {
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
-  it("refuses a comment or merge in Plan mode", async () => {
-    const { tools, request, executeOperation } = pullRequestTools({ executionPolicy: "plan" });
+  it("refuses a comment or merge in Plan mode, whatever the Project lets agents do", async () => {
+    const { tools, request, executeOperation } = pullRequestTools(
+      { executionPolicy: "plan" },
+      "approved",
+      () => "project",
+      () => true,
+    );
     const result = await tools.execute({
       name: CODE_PULL_REQUEST_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "comment", body: "Hello." }),
@@ -3640,26 +4160,15 @@ describe("watching the thread's own pull request as an agent tool", () => {
     number: 42,
   } as unknown as CodeProjectPullRequestSwitchTarget;
 
-  function watchTools(
-    threadOverrides: Partial<CodeThread> = {},
-    answer: "approved" | "denied" = "approved",
-    scope: WindowId = windowId,
-  ) {
-    const request = vi.fn(async () => answer);
+  function watchTools(threadOverrides: Partial<CodeThread> = {}, scope: WindowId = windowId) {
+    const request = vi.fn();
     const watch = vi.fn(
-      async (
-        ask: (watched: CodeProjectPullRequestSwitchTarget) => Promise<string>,
-      ): Promise<PullRequestWatchOutcome> => {
-        const asked = await ask(target);
-        return asked === "approved"
-          ? {
-              status: "watching",
-              target,
-              until: "2026-11-08T10:00:00.000Z",
-              alreadyWatching: false,
-            }
-          : { status: "declined", answer: "denied" };
-      },
+      async (): Promise<PullRequestWatchOutcome> => ({
+        status: "watching",
+        target,
+        until: "2026-11-08T10:00:00.000Z",
+        alreadyWatching: false,
+      }),
     );
     const unwatch = vi.fn(
       async (): Promise<PullRequestWatchOutcome> => ({
@@ -3675,33 +4184,26 @@ describe("watching the thread's own pull request as an agent tool", () => {
       uuid: uuidFactory(),
       executeOperation,
       terminal: { read: async () => ({}) as never },
-      pullRequestApproval: { request: vi.fn() },
-      pullRequestWatch: { watch, unwatch, request },
+      pullRequestApproval: { request },
+      pullRequestWatch: { watch, unwatch },
     });
     const run = (input: Record<string, unknown>) =>
       tools.execute({ name: CODE_PULL_REQUEST_TOOL_NAME, inputJson: JSON.stringify(input) });
     return { run, request, watch, unwatch, executeOperation };
   }
 
-  it("asks the person before each watch at every access level, then watches the thread's own pull request", async () => {
-    for (const executionPolicy of ["full-access", "approval-gated"] as const) {
-      const { run, request, executeOperation } = watchTools({ executionPolicy });
+  it("watches the thread's own pull request without asking the person at any access level", async () => {
+    for (const executionPolicy of ["full-access", "auto-accept-edits", "approval-gated"] as const) {
+      const { run, request, watch, executeOperation } = watchTools({ executionPolicy });
       const result = await run({ operation: "watch" });
-      expect(request).toHaveBeenCalledWith(target, undefined);
+      expect(request).not.toHaveBeenCalled();
+      expect(watch).toHaveBeenCalledTimes(1);
       expect(executeOperation).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         result: { status: "watching", number: 42, until: "2026-11-08T10:00:00.000Z" },
         isError: false,
       });
     }
-  });
-
-  it("watches nothing when the person declines", async () => {
-    const { run } = watchTools({}, "denied");
-    expect(await run({ operation: "watch" })).toMatchObject({
-      result: { error: "pull-request-watch-denied" },
-      isError: true,
-    });
   });
 
   it("refuses to watch in Plan without asking, but still stops a watch there", async () => {
@@ -3719,8 +4221,8 @@ describe("watching the thread's own pull request as an agent tool", () => {
     expect(unwatch).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses to watch in a turn the host started on its own, where nobody can approve it", async () => {
-    const { run, request, watch } = watchTools({}, "approved", ROUTINE_HOST_SCOPE_ID);
+  it("refuses to watch in a turn the host started on its own, so a wake cannot renew its watch", async () => {
+    const { run, request, watch } = watchTools({}, ROUTINE_HOST_SCOPE_ID);
     expect(await run({ operation: "watch" })).toMatchObject({
       result: { error: "automation-recursion" },
       isError: true,

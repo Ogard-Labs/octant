@@ -157,7 +157,6 @@
 
   --oct-weight-regular: 400;
   --oct-weight-medium: 500;
-  --oct-weight-display: 500;
   --oct-weight-strong: 600;
   /* The page title and the welcome greeting only (surface.css type roles);
      the stylesheet check refuses it anywhere else. */
@@ -684,7 +683,7 @@ html {
   line-height: var(--oct-leading-tight);
   letter-spacing: var(--oct-tracking-tight);
   margin: 0;
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 .h2 {
   font-family: var(--oct-font-display);
@@ -692,12 +691,12 @@ html {
   line-height: var(--oct-leading-heading);
   letter-spacing: var(--oct-tracking-tight);
   margin: 0;
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 .h3 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xl);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   line-height: var(--oct-leading-snug);
   letter-spacing: var(--oct-tracking-snug);
   margin: 0;
@@ -705,7 +704,7 @@ html {
 .h4 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   line-height: var(--oct-leading-snug);
   letter-spacing: var(--oct-tracking-snug);
   margin: 0;
@@ -728,7 +727,7 @@ html {
     line-height: var(--oct-leading-tight);
     letter-spacing: var(--oct-tracking-tight);
     margin: 0;
-    font-weight: var(--oct-weight-display);
+    font-weight: var(--oct-weight-medium);
   }
   h2 {
     font-family: var(--oct-font-display);
@@ -736,12 +735,12 @@ html {
     line-height: var(--oct-leading-heading);
     letter-spacing: var(--oct-tracking-tight);
     margin: 0;
-    font-weight: var(--oct-weight-display);
+    font-weight: var(--oct-weight-medium);
   }
   h3 {
     font-family: var(--oct-font-display);
     font-size: var(--oct-text-xl);
-    font-weight: var(--oct-weight-display);
+    font-weight: var(--oct-weight-medium);
     line-height: var(--oct-leading-snug);
     letter-spacing: var(--oct-tracking-snug);
     margin: 0;
@@ -749,7 +748,7 @@ html {
   h4 {
     font-family: var(--oct-font-display);
     font-size: var(--oct-text-lg);
-    font-weight: var(--oct-weight-display);
+    font-weight: var(--oct-weight-medium);
     line-height: var(--oct-leading-snug);
     letter-spacing: var(--oct-tracking-snug);
     margin: 0;
@@ -830,7 +829,7 @@ html {
   white-space: nowrap;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: var(--oct-tracking-wordmark);
 }
 .topnav .logo svg {
@@ -1047,7 +1046,7 @@ html {
 }
 .callout .callout-title {
   font-family: var(--oct-font-display);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   color: var(--oct-fg);
   margin-bottom: var(--oct-space-1);
 }
@@ -2396,7 +2395,7 @@ input.switch:checked::after {
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 .toast p {
   margin: 2px 0 0;
@@ -3224,7 +3223,7 @@ input.switch:checked::after {
   background: var(--board-well);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 /* A lane's name is the section-label step in the secondary ink; the count
    ends the line at the lane's trailing edge. */
@@ -4228,7 +4227,7 @@ input.switch:checked::after {
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4581,7 +4580,7 @@ input.switch:checked::after {
   /* The box's own rim is part of the shadow token, so a second ring here
      would draw two lines on one edge. */
   box-shadow: var(--octant-shadow-md);
-  transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
+  transition: box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 .composer[data-drop-target="true"] .thread-composer__surface {
   position: relative;
@@ -4608,7 +4607,7 @@ input.switch:checked::after {
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   max-width: calc(100% - 16px);
   overflow-wrap: anywhere;
   text-align: center;
@@ -8233,7 +8232,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   background: transparent;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: normal;
   color: var(--oct-fg);
 }
@@ -9421,7 +9420,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   color: var(--oct-muted);
 }
 .attempt[data-state="queued"],
@@ -9679,7 +9678,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
 /* selection is the check mark and the weight; it was accent-coloured,
    which measured 3.79:1 on glass over a light ground */
 .mopt[aria-selected="true"] .mopt-name {
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 /* ─── deferral ────────────────────────────────────────────────────────

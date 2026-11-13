@@ -39,7 +39,7 @@ export function partsLeftBehindSentence(departed: Departed): string | undefined 
  * worktree or Work folder that stayed when it held files the move did not
  * carry. The
  * thread itself was erased here through the ordinary purge. Canonical:
- * DESIGN.md "Moved" and docs/design/hub-and-spokes.md "Erase on the source".
+ * docs/design/hub-and-spokes.md "Moving a thread: screens", "Moved", and "Erase on the source".
  */
 export function ThreadMoveTombstone(props: {
   readonly departed: Departed;

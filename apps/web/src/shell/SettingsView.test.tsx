@@ -1955,12 +1955,71 @@ describe("SettingsView", () => {
     const onSettingsChange = vi.fn();
     renderSettings({ onSettingsChange });
     navigateTo("Permissions");
-    expect(screen.getByRole("heading", { name: "Browser downloads" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Browser uploads and downloads" }),
+    ).toBeInTheDocument();
     const control = screen.getByRole("switch", { name: "Let agents download files" });
     expect(control).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText(/Downloads you start yourself stay blocked/)).toBeVisible();
+    expect(
+      screen.getByText(/a download you start yourself goes to your Downloads folder/),
+    ).toBeVisible();
     await userEvent.setup().click(control);
     expect(onSettingsChange).toHaveBeenLastCalledWith({ agentBrowserDownloads: true });
+  });
+
+  it("lets the person change the largest file and the downloads kept waiting from their defaults", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    const user = userEvent.setup();
+    const largest = screen.getByRole("combobox", { name: "Largest file" });
+    expect(largest).toHaveTextContent("25 MB");
+    await user.click(largest);
+    await user.click(await screen.findByRole("option", { name: "100 MB" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserTransferFileLimitMegabytes: 100 });
+    const waiting = screen.getByRole("combobox", { name: "Downloads kept waiting" });
+    expect(waiting).toHaveTextContent("5 per page");
+    await user.click(waiting);
+    await user.click(await screen.findByRole("option", { name: "10 per page" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserHeldDownloadLimit: 10 });
+  });
+
+  it("lets the person change how many files one upload may send from the default five", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Permissions");
+    const user = userEvent.setup();
+    const files = screen.getByRole("combobox", { name: "Files per upload" });
+    expect(files).toHaveTextContent("5 files");
+    await user.click(files);
+    await user.click(await screen.findByRole("option", { name: "20 files" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ browserUploadFileCountLimit: 20 });
+  });
+
+  it("lists each always-allowed Browser upload and download with its site and folder, and forgets the one the person picks", async () => {
+    const onSettingsChange = vi.fn();
+    const upload = {
+      direction: "upload" as const,
+      origin: "https://example.com",
+      workspaceRoot: "/projects/brief",
+    };
+    const download = { ...upload, direction: "download" as const };
+    renderSettings({
+      onSettingsChange,
+      settings: { ...defaultShellSettings(), rememberedBrowserTransfers: [upload, download] },
+    });
+    navigateTo("Permissions");
+    expect(
+      screen.getByText("Agents upload files from /projects/brief to this site without asking."),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Agents save downloads from this site into /projects/brief without asking."),
+    ).toBeVisible();
+    // The rows are listed in the order remembered: the upload, then the download.
+    const forget = screen.getAllByRole("button", { name: "Forget" });
+    expect(forget).toHaveLength(2);
+    await userEvent.setup().click(forget[1] as HTMLElement);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ rememberedBrowserTransfers: [upload] });
   });
 
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {

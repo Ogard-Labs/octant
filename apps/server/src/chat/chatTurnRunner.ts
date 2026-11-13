@@ -64,6 +64,7 @@ import {
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
@@ -271,6 +272,13 @@ export interface ChatTurnRunnerInput {
   readonly nativeSetup?: ProviderNativeSetup;
   readonly researchRoute: ResearchRouteDecision;
   readonly appManagedTools?: AppManagedToolSet;
+  /**
+   * The turn's record of tool calls about to take effect: each call the host
+   * runs is journaled before it runs and settled after, and the runtime's own
+   * tool reports are recorded as they are read. A restart reads it to tell
+   * whether the turn it cut off left a call nobody saw finish.
+   */
+  readonly toolEffects?: TurnToolEffects;
   readonly mode?: "send" | "resume";
   readonly resumeCursor?: ProviderResumeCursor;
   readonly persistAttempt: (attempt: ChatAttempt) => Effect.Effect<void, ChatFailure>;
@@ -1030,6 +1038,7 @@ export class ChatTurnRunner {
                 yield* idle.observe(event);
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
+                input.toolEffects?.observe(event, input.appManagedTools);
                 timing = observeTurnMetrics(timing, event);
                 input.liveTurn?.observe(event);
                 const sighting = compactions.observe(event);
@@ -1335,7 +1344,7 @@ export class ChatTurnRunner {
                     yield* settleAnsweredAttempt(answer, event.requestId);
                     return;
                   }
-                  const toolSet = input.appManagedTools;
+                  const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
                   const allowed = toolSet?.definitions.some(
                     (definition) => definition.name === event.toolName,
                   );
@@ -1367,6 +1376,7 @@ export class ChatTurnRunner {
                             name: event.toolName,
                             inputJson: event.inputJson,
                             signal: toolSignal,
+                            toolCallId: event.requestId,
                           }),
                         catch: () =>
                           decodeChatFailure({

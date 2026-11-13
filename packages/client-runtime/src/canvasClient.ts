@@ -55,6 +55,13 @@ import {
   CanvasExportFolderView,
 } from "@octant/contracts/canvas-export-folder";
 import {
+  type CanvasNetworkAccessCommand,
+  CanvasNetworkAccessResult,
+  CanvasNetworkAccessView,
+  type CanvasNetworkPageRenewalCommand,
+  CanvasNetworkPageRenewalResult,
+} from "@octant/contracts/canvas-network";
+import {
   CanvasPublicLinkSettings,
   type CanvasPublicLinkSettingsCommand,
   CanvasPublicLinkSettingsResult,
@@ -184,6 +191,20 @@ export interface CanvasClient {
   exportFolder?(canvasId: CanvasId): Promise<CanvasExportFolderView>;
   /** Record the folder a person picked in the host's own browser. */
   chooseExportFolder?(command: CanvasExportFolderCommand): Promise<CanvasExportFolderResult>;
+  /**
+   * One Canvas's "Allow network" switch. Reading fails for a client the host
+   * does not offer the switch to, which then shows none.
+   */
+  networkAccess?(canvasId: CanvasId): Promise<CanvasNetworkAccessView>;
+  /** A person turns one Canvas's network on or off; the host decides whether they may. */
+  setNetworkAccess?(command: CanvasNetworkAccessCommand): Promise<CanvasNetworkAccessResult>;
+  /**
+   * Keep the network token of one page this window ran alive for another
+   * hour, naming the page by the ticket it was run with.
+   */
+  renewNetworkPage?(
+    command: CanvasNetworkPageRenewalCommand,
+  ): Promise<CanvasNetworkPageRenewalResult>;
   /**
    * Public links. The host keeps the record of each link and the owner
    * secret; a window reads the list, revokes one, and reads or changes the
@@ -655,6 +676,40 @@ export function createCanvasClient(
           body: JSON.stringify(body),
         },
         decodeHostAnswer(CanvasExportFolderResult),
+      );
+    },
+    networkAccess(canvasId) {
+      const url = new URL("/api/canvas/network-access", options.baseUrl);
+      url.searchParams.set("canvasId", String(canvasId));
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(CanvasNetworkAccessView),
+      );
+    },
+    setNetworkAccess(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/network-access", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasNetworkAccessResult),
+      );
+    },
+    renewNetworkPage(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/network-access/renew", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasNetworkPageRenewalResult),
       );
     },
     browseFolders(body) {

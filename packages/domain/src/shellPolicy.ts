@@ -1,4 +1,9 @@
 import {
+  DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+  MAX_BROWSER_HELD_DOWNLOADS,
+  MAX_BROWSER_UPLOAD_FILES,
+} from "@octant/contracts/browser-automation";
+import {
   DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
   DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
   DEFAULT_OPEN_IN_APPLICATIONS,
@@ -28,6 +33,7 @@ import {
   type HostId,
   type LayoutNodeId,
   type PaneId,
+  type RememberedBrowserTransfer,
   type ShellSettings,
   type SplitRatio,
   type StowedWorkspaceLayout,
@@ -203,6 +209,10 @@ export function defaultShellSettings(): ShellSettings {
     rememberedBrowserOrigins: [],
     rememberedBrowserProfileSites: [],
     agentBrowserDownloads: false,
+    browserTransferFileLimitMegabytes: DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+    browserHeldDownloadLimit: MAX_BROWSER_HELD_DOWNLOADS,
+    browserUploadFileCountLimit: MAX_BROWSER_UPLOAD_FILES,
+    rememberedBrowserTransfers: [],
     persistentBrowserOwner: false,
   };
 }
@@ -727,7 +737,38 @@ export function replaceShellSettings(
       current.rememberedBrowserProfileSites,
       replacement.rememberedBrowserProfileSites,
     ),
+    rememberedBrowserTransfers: resolveRememberedBrowserTransfers(
+      current.rememberedBrowserTransfers,
+      replacement.rememberedBrowserTransfers,
+    ),
   };
+}
+
+/** Whether an "Always allow" answer covers this direction, site and workspace. */
+export function browserTransferRemembered(
+  remembered: ReadonlyArray<RememberedBrowserTransfer>,
+  transfer: RememberedBrowserTransfer,
+): boolean {
+  return remembered.some(
+    (entry) =>
+      entry.direction === transfer.direction &&
+      entry.origin === transfer.origin &&
+      entry.workspaceRoot === transfer.workspaceRoot,
+  );
+}
+
+function resolveRememberedBrowserTransfers(
+  current: ReadonlyArray<RememberedBrowserTransfer>,
+  replacement: ReadonlyArray<RememberedBrowserTransfer> | undefined,
+): ReadonlyArray<RememberedBrowserTransfer> {
+  if (replacement === undefined) return current;
+  if (replacement.some((entry) => !browserTransferRemembered(current, entry))) {
+    reject(
+      "invalid-settings",
+      "Remembered Browser uploads and downloads can only be added by the approval decision.",
+    );
+  }
+  return replacement;
 }
 
 function resolveProfileSites(

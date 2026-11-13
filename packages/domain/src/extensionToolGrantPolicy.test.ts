@@ -17,10 +17,12 @@ function facts(overrides: Partial<ExtensionToolGrantFacts> = {}): ExtensionToolG
     hostOwnedTurn: false,
     pairedDeviceTurn: false,
     planTurn: false,
+    fullAccessTurn: false,
     threadTainted: false,
     reach: "network",
     offered: seen,
     grant: { ...seen, revoked: false },
+    serverGrant: undefined,
     ...overrides,
   };
 }
@@ -38,11 +40,53 @@ describe("remembered MCP tool approval", () => {
     });
   });
 
-  it("asks once only on a thread with no Project, where nothing can be remembered", () => {
-    expect(decideExtensionToolGrant(facts({ inProject: false }))).toEqual({
+  it("offers to remember for the account on a thread with no Project, and uses that grant", () => {
+    expect(decideExtensionToolGrant(facts({ inProject: false, grant: undefined }))).toEqual({
       kind: "ask",
-      reason: "no-project",
-      rememberable: false,
+      reason: "not-granted",
+      rememberable: true,
+    });
+    expect(decideExtensionToolGrant(facts({ inProject: false }))).toEqual({ kind: "covered" });
+  });
+
+  it("covers every tool of a server the person allowed whole, whatever the tool's listing", () => {
+    const serverGrant = { version: seen.version, digest: seen.digest, revoked: false };
+    expect(decideExtensionToolGrant(facts({ grant: undefined, serverGrant }))).toEqual({
+      kind: "covered",
+    });
+    expect(
+      decideExtensionToolGrant(
+        facts({
+          grant: { ...seen, definitionDigest: `sha256:${"d".repeat(64)}`, revoked: true },
+          serverGrant,
+        }),
+      ),
+    ).toEqual({ kind: "covered" });
+  });
+
+  it("asks again for a server allowed whole once its package was updated or the grant revoked", () => {
+    const serverGrant = { version: seen.version, digest: seen.digest, revoked: false };
+    expect(
+      decideExtensionToolGrant(
+        facts({ grant: undefined, serverGrant: { ...serverGrant, version: "1.3.0" } }),
+      ),
+    ).toEqual({ kind: "ask", reason: "package-changed", rememberable: true });
+    expect(
+      decideExtensionToolGrant(
+        facts({ grant: undefined, serverGrant: { ...serverGrant, revoked: true } }),
+      ),
+    ).toEqual({ kind: "ask", reason: "revoked", rememberable: true });
+  });
+
+  it("asks on a Plan turn and for a network tool on a tainted thread though the server is allowed whole", () => {
+    const serverGrant = { version: seen.version, digest: seen.digest, revoked: false };
+    expect(decideExtensionToolGrant(facts({ planTurn: true, serverGrant }))).toMatchObject({
+      kind: "ask",
+      reason: "plan-turn",
+    });
+    expect(decideExtensionToolGrant(facts({ threadTainted: true, serverGrant }))).toMatchObject({
+      kind: "ask",
+      reason: "network-tool-on-tainted-thread",
     });
   });
 
@@ -52,6 +96,55 @@ describe("remembered MCP tool approval", () => {
       reason: "plan-turn",
       rememberable: false,
     });
+  });
+
+  it("runs a tool unasked at Full access when the Project holds no grant", () => {
+    expect(decideExtensionToolGrant(facts({ fullAccessTurn: true, grant: undefined }))).toEqual({
+      kind: "covered",
+    });
+  });
+
+  it("runs a tool the catalog marks ask-every-call unasked at Full access", () => {
+    expect(
+      decideExtensionToolGrant(
+        facts({ fullAccessTurn: true, askEveryCall: true, grant: undefined }),
+      ),
+    ).toEqual({ kind: "covered" });
+  });
+
+  it("runs a network tool unasked at Full access on a thread that read outside content", () => {
+    expect(
+      decideExtensionToolGrant(
+        facts({ fullAccessTurn: true, threadTainted: true, grant: undefined }),
+      ),
+    ).toEqual({ kind: "covered" });
+  });
+
+  it("runs a tool unasked at Full access on a host-owned or paired-device turn", () => {
+    expect(
+      decideExtensionToolGrant(
+        facts({ fullAccessTurn: true, hostOwnedTurn: true, grant: undefined }),
+      ),
+    ).toEqual({ kind: "covered" });
+    expect(
+      decideExtensionToolGrant(
+        facts({ fullAccessTurn: true, pairedDeviceTurn: true, grant: undefined }),
+      ),
+    ).toEqual({ kind: "covered" });
+  });
+
+  it("still asks on a Plan turn of a Full access thread", () => {
+    expect(decideExtensionToolGrant(facts({ fullAccessTurn: true, planTurn: true }))).toEqual({
+      kind: "ask",
+      reason: "plan-turn",
+      rememberable: false,
+    });
+  });
+
+  it("still asks on a thread with no Project, which has no Full access level", () => {
+    expect(
+      decideExtensionToolGrant(facts({ fullAccessTurn: true, inProject: false, grant: undefined })),
+    ).toEqual({ kind: "ask", reason: "not-granted", rememberable: true });
   });
 
   it("lets a host-owned turn use a grant", () => {

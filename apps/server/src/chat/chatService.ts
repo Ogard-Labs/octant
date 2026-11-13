@@ -16,6 +16,7 @@ import {
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import {
   CANVAS_DELIVERY_INSTRUCTIONS,
@@ -735,6 +736,15 @@ export interface ChatServiceOptions {
   }) => AppManagedToolSet | undefined;
   readonly resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   /**
+   * Runs Verify tools for a direct-endpoint model nobody has verified yet,
+   * where a turn starts. Never rejects: a model it could not verify takes the
+   * turn without tools.
+   */
+  readonly verifyModelToolsOnFirstUse?: (
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ) => Promise<void>;
+  /**
    * The turn's Computer tool, offered on every eligible turn without a
    * composer selection; undefined when the turn cannot use it.
    */
@@ -758,6 +768,11 @@ export interface ChatServiceOptions {
    */
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** The turn's record of tool calls about to take effect (toolEffects/toolEffectLedger.ts). */
+    readonly toolEffects?: (turn: {
+      readonly threadId: string;
+      readonly turnId: string;
+    }) => TurnToolEffects;
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
@@ -1120,6 +1135,7 @@ export class ChatService {
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
+  readonly #verifyModelToolsOnFirstUse: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
@@ -1195,6 +1211,7 @@ export class ChatService {
     if (options.resolveExtensionSelectionContext !== undefined) {
       this.#resolveExtensionSelectionContext = options.resolveExtensionSelectionContext;
     }
+    this.#verifyModelToolsOnFirstUse = options.verifyModelToolsOnFirstUse;
     if (options.resolveComputerUseTools !== undefined)
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
     if (options.personMemoryBlock !== undefined)
@@ -2768,6 +2785,14 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "send-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
+    // Before the turn is admitted and its tools are chosen: one check at most
+    // per send, and a check that fails leaves the turn to run without tools.
+    const used = this.#persistence.readChatThread(command.threadId);
+    if (used !== undefined) {
+      await this.#verifyModelToolsOnFirstUse?.(used.providerInstanceId, used.modelId).catch(
+        () => undefined,
+      );
+    }
     const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#admitHarnessTurn(thread);
@@ -6545,6 +6570,10 @@ export class ChatService {
         ...(input.thread.projectId === undefined ? {} : { projectId: input.thread.projectId }),
       };
       this.#nativeHarness?.turnStarted(harnessScope);
+      const toolEffects = this.#nativeHarness?.toolEffects?.({
+        threadId: String(input.thread.id),
+        turnId: String(input.attempt.id),
+      });
       let endedTurn: TurnEndSummary | undefined;
       try {
         await Effect.runPromise(
@@ -6616,6 +6645,7 @@ export class ChatService {
               ...(input.prepared.appManagedTools === undefined
                 ? {}
                 : { appManagedTools: input.prepared.appManagedTools }),
+              ...(toolEffects === undefined ? {} : { toolEffects }),
               ...(input.mode === "resume" ? { mode: "resume" as const } : {}),
               ...(input.attempt.resumeCursor === undefined
                 ? {}

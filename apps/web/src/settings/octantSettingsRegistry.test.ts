@@ -128,6 +128,9 @@ describe("octantSettingsRegistry", () => {
       "public-link-service",
       "browser-site-approvals",
       "browser-agent-downloads",
+      "browser-transfer-file-limit",
+      "browser-held-download-limit",
+      "browser-upload-file-count-limit",
       "tool-approvals",
       "network-limits",
       "safe-networks",
@@ -255,6 +258,7 @@ describe("octantSettingsRegistry", () => {
       "provider-claude-account",
       "provider-claude-artifacts",
       "provider-native-setup",
+      "provider-own-memory",
     ]);
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
@@ -446,6 +450,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-deployment-ids": "provider-deployment-ids",
   "provider-*-claude-artifacts": "provider-claude-artifacts",
   "provider-*-native-setup": "provider-native-setup",
+  "provider-*-own-memory": "provider-own-memory",
   "provider-tooling-*": "provider-tooling-configured",
   "*-config-directory": "provider-claude-account",
   "*-accent": "provider-claude-account",

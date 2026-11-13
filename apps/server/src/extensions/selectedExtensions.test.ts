@@ -426,7 +426,12 @@ describe("selected MCP servers in Work and Code", () => {
         result.tools.execute({ name: "notes_search", inputJson: '{"q":"plan"}' }),
       ).resolves.toEqual({ result: "framed notes" });
       expect(test.execute).toHaveBeenCalledWith({
-        thread: { id: String(thread.id), projectId: String(thread.projectId), planTurn: false },
+        thread: {
+          id: String(thread.id),
+          projectId: String(thread.projectId),
+          planTurn: false,
+          fullAccessTurn: false,
+        },
         windowId,
         name: "notes_search",
         inputJson: '{"q":"plan"}',
@@ -434,12 +439,12 @@ describe("selected MCP servers in Work and Code", () => {
     },
   );
 
-  it("tells the tool call when a Code turn runs under Plan, so no remembered approval covers it", async () => {
+  it("tells the tool call when a Code turn runs under Plan or at Full access, so it asks always or never", async () => {
     const test = mcpFixture("code");
-    for (const [executionPolicy, planTurn] of [
-      ["plan", true],
-      ["approval-gated", false],
-      ["full-access", false],
+    for (const [executionPolicy, planTurn, fullAccessTurn] of [
+      ["plan", true, false],
+      ["approval-gated", false, false],
+      ["full-access", false, true],
     ] as const) {
       const result = await test.resolve({
         mode: "code",
@@ -453,9 +458,28 @@ describe("selected MCP servers in Work and Code", () => {
       }
       await result.tools.execute({ name: "notes_search", inputJson: "{}" });
       expect(test.execute).toHaveBeenLastCalledWith(
-        expect.objectContaining({ thread: expect.objectContaining({ planTurn }) }),
+        expect.objectContaining({
+          thread: expect.objectContaining({ planTurn, fullAccessTurn }),
+        }),
       );
     }
+  });
+
+  it("tells the tool call when a Work thread runs at Full access", async () => {
+    const test = mcpFixture("work");
+    const result = await test.resolve({
+      mode: "work",
+      thread: { ...thread, access: "full-access" } as never,
+      selections: [test.selection],
+      windowId,
+    });
+    if (result.kind !== "resolved" || result.tools === undefined) {
+      throw new Error(`Expected tools, got ${JSON.stringify(result)}`);
+    }
+    await result.tools.execute({ name: "notes_search", inputJson: "{}" });
+    expect(test.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ fullAccessTurn: true }) }),
+    );
   });
 
   it.each(["work", "code"] as const)(

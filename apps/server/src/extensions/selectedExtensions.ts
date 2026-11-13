@@ -263,6 +263,12 @@ export function createSelectedExtensionResolver(options: {
                 projectId: String(thread.projectId),
                 // A Code turn's thread carries the posture that turn runs under.
                 planTurn: "executionPolicy" in thread && thread.executionPolicy === "plan",
+                // A Work thread records its level as `access`, a Code thread
+                // as the posture its turn runs under.
+                fullAccessTurn:
+                  "executionPolicy" in thread
+                    ? thread.executionPolicy === "full-access"
+                    : thread.access === "full-access",
               },
               definitions: mcpDefinitions,
               windowId,

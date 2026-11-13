@@ -80,6 +80,8 @@ function setup(
   });
   const handler = createImageRouteHandler({
     offers,
+    // A thread outside a Project keeps its choice in the offer service.
+    kept: { remember: async (scope, choice) => offers.remember(scope, choice) },
     jobs: {
       enqueue,
       cancel,

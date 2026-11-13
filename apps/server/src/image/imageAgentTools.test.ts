@@ -91,6 +91,9 @@ function tools(
       offer: Parameters<ImageAgentToolPort["ask"]>[0]["offer"],
     ) => ImageGenerationOfferOutcome;
     readonly remembered?: ImageGenerationChoice;
+    readonly fullAccess?: boolean;
+    /** A turn the host runs as itself, with nobody at a window to answer a card. */
+    readonly unattended?: boolean;
     readonly refusal?: () => string | undefined;
     readonly finished?: Promise<ImageJob>;
     readonly bytes?: Uint8Array;
@@ -133,6 +136,10 @@ function tools(
       ask,
       remembered: () => remembered,
       forget,
+      ...(options.fullAccess === undefined
+        ? {}
+        : { fullAccess: () => options.fullAccess === true }),
+      ...(options.unattended === undefined ? {} : { unattended: options.unattended }),
       ...(options.refusal === undefined ? {} : { refusal: options.refusal }),
       ...(options.save === undefined
         ? {}
@@ -269,6 +276,48 @@ describe("createImageAgentTools", () => {
     await call(set, { prompt: "a red cube" });
     expect(forget).toHaveBeenCalledOnce();
     expect(ask).toHaveBeenCalledOnce();
+  });
+
+  it("generates without asking at Full access when exactly one image profile is ready", async () => {
+    const { ask, enqueue, set } = tools([imageProfile()], [], [], { fullAccess: true });
+    await call(set, { prompt: "a red cube" });
+    expect(ask).not.toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ profileInstanceId: profileId, modelId: "gpt-image-2" }),
+    );
+  });
+
+  it("asks at Full access when two image profiles are ready and nothing is kept", async () => {
+    const { ask, set } = tools(
+      [imageProfile(), compatibleInstance()],
+      [],
+      [{ providerInstanceId: compatibleId, modelId: "recraftv3" as never, label: "Recraft" }],
+      { fullAccess: true },
+    );
+    await call(set, { prompt: "a red cube" });
+    expect(ask).toHaveBeenCalledOnce();
+  });
+
+  it("asks at Full access rather than swap in the only profile when the kept model is gone", async () => {
+    const { ask, forget, set } = tools([imageProfile()], [], [], {
+      fullAccess: true,
+      remembered: { profileInstanceId: compatibleId, modelId: "recraftv3" as never },
+    });
+    await call(set, { prompt: "a red cube" });
+    expect(forget).toHaveBeenCalledOnce();
+    expect(ask).toHaveBeenCalledOnce();
+  });
+
+  it("drops a kept choice that can no longer run in a turn nobody attends, and starts nothing", async () => {
+    const { ask, enqueue, forget, set } = tools([imageProfile()], [], [], {
+      unattended: true,
+      remembered: { profileInstanceId: compatibleId, modelId: "recraftv3" as never },
+    });
+    const outcome = await call(set, { prompt: "a red cube" });
+    expect(forget).toHaveBeenCalledOnce();
+    expect(ask).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ isError: true });
   });
 
   it("refuses in Plan mode before asking anyone", async () => {

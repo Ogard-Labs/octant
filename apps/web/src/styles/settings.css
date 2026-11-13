@@ -447,7 +447,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   overflow: hidden;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -485,7 +485,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   margin: 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .settings-view__drawer-body {
@@ -630,7 +630,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* A loading or status line is one quiet sentence on the page ground. Boxed,
    "Loading GitHub status…" read as a finished empty-state card (DESIGN.md
-   "Spacing, shapes, and depth"). Only an error keeps a boundary, because it
+   "Depth and material"). Only an error keeps a boundary, because it
    is the one state a person has to act on. */
 .settings-state {
   margin: 0;
@@ -2306,7 +2306,7 @@ html[data-octant-increased-contrast="true"]
   margin: 8px 0 0;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .host-data-map__related {

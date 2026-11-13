@@ -554,6 +554,7 @@ describe("thread purge sweep", () => {
     const entryId = "c3630000-0000-4000-8000-0000000000e1";
     const successorId = "c3630000-0000-4000-8000-0000000000e2";
     const otherEntryId = "c3630000-0000-4000-8000-0000000000e3";
+    const retractedEntryId = "c3630000-0000-4000-8000-0000000000e4";
     const author = { kind: "local-user", actorId };
     const entry = (id: string, content: string, provenance: unknown, version: number) => ({
       id,
@@ -599,6 +600,38 @@ describe("thread purge sweep", () => {
       "memory.entry-created@1",
       3,
     );
+    // The person's own entry, retracted by the purged thread's agent with
+    // nobody asked: the retraction names the thread beside the provenance.
+    insertEvent(
+      harness.connection,
+      "project-memory",
+      projectId,
+      {
+        entry: {
+          ...entry(retractedEntryId, "Tabs.", { kind: "user-authored" }, 4),
+          status: "active",
+        },
+      },
+      "memory.entry-created@1",
+      4,
+    );
+    insertEvent(
+      harness.connection,
+      "project-memory",
+      projectId,
+      {
+        entry: {
+          ...entry(retractedEntryId, "Tabs.", { kind: "user-authored" }, 5),
+          status: "retracted",
+          retractionReason: "No longer true.",
+          retractedBy: author,
+          retractedAt: now,
+          retractionOrigin: { ...fromPurged, unconfirmed: true },
+        },
+      },
+      "memory.entry-retracted@1",
+      5,
+    );
     const projects = createPhase1RuntimeRegistries().projections.get("projects");
     if (projects === undefined) throw new Error("project projection is not registered");
     const rebuild = () =>
@@ -631,9 +664,12 @@ describe("thread purge sweep", () => {
       { kind: "agent-authored", mode: "code" },
       fromKept,
     ]);
-    expect(memory.history.map((old) => old.provenance)).toEqual([
-      { kind: "agent-authored", mode: "code" },
+    expect(memory.history.filter((old) => old.status === "superseded")).toMatchObject([
+      { provenance: { kind: "agent-authored", mode: "code" } },
     ]);
+    expect(
+      memory.history.flatMap((old) => (old.status === "retracted" ? [old.retractionOrigin] : [])),
+    ).toEqual([{ kind: "agent-authored", mode: "code", unconfirmed: true }]);
     const journaled = harness.connection
       .prepare(
         `SELECT COUNT(*) AS count FROM event_journal
@@ -719,6 +755,31 @@ describe("thread purge sweep", () => {
       .prepare(`SELECT aggregate_type FROM event_journal WHERE payload_json LIKE ?`)
       .all(`%${thread.marker}%`);
     expect(remaining).toEqual([]);
+  });
+
+  it("erases a Canvas's network switch with the Canvas, with its Project and with its thread", async () => {
+    const switched = (harness: Harness) =>
+      harness.connection
+        .prepare(
+          "SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'canvas-network-access'",
+        )
+        .all();
+
+    const byProject = openHarness();
+    seedCanvasFamily(byProject, threads.work);
+    expect(switched(byProject)).toEqual([{ aggregate_id: uuidFor("work", "canvas") }]);
+    erasePurgedProjectData({
+      connection: byProject.connection,
+      projectId,
+      canvasIds: [uuidFor("work", "canvas")],
+    });
+    expect(switched(byProject)).toEqual([]);
+
+    const byThread = openHarness();
+    seedThreadTraces(byThread, threads.code);
+    expect(switched(byThread)).toEqual([{ aggregate_id: uuidFor("code", "canvas") }]);
+    await purgeThread(byThread, "code", threads.code.id);
+    expect(switched(byThread)).toEqual([]);
   });
 
   it("erases a Project's language server approvals and egress records with the Project, and only that Project's", () => {
@@ -1156,6 +1217,8 @@ function seedCanvasFamily(harness: Harness, thread: SeededThread): void {
     versionId: uuidFor(thread.mode, "version"),
     writerId: thread.marker,
   });
+  // A person's "Allow network" choice for the Canvas names it and nothing else.
+  insertEvent(harness.connection, "canvas-network-access", canvasId, { canvasId, allowed: true });
   const shareId = uuidFor(thread.mode, "share");
   insertEvent(harness.connection, "canvas-share", shareId, {
     record: {
@@ -1304,6 +1367,17 @@ function seedFollowUp(harness: Harness, thread: SeededThread): void {
   insertEvent(harness.connection, "thread-turn-metrics", thread.id, {
     threadId: thread.id,
     modelId: thread.marker,
+  });
+  // A turn's record of its tool calls is keyed by the turn, not the thread,
+  // so only the thread id its frames carry ties it to the thread.
+  const turnId = uuidFor(thread.mode, "tool-effects-turn");
+  insertEvent(harness.connection, "turn-tool-effects", turnId, {
+    threadId: thread.id,
+    turnId,
+    toolCallId: "call-1",
+    toolName: thread.marker,
+    effect: "side-effecting",
+    origin: "host",
   });
 }
 

@@ -1,6 +1,7 @@
 import {
   PROVIDER_NATIVE_SETUP_FEATURES,
   type KeyProviderDriverKind,
+  type OwnMemoryProviderDriverKind,
   type ProviderCapabilities,
   type ProviderNativeSetupFeature,
   type ProviderObservedState,
@@ -77,6 +78,54 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
         describedBy={`${settingId}-description`}
         disabled={props.disabled}
         label={`Run ${props.instance.displayName} as itself`}
+        onCheckedChange={(next) => {
+          void props.onChange(next);
+        }}
+      />
+    </SettingRow>
+  );
+}
+
+export interface ProviderOwnMemorySettingProps {
+  readonly instance: {
+    readonly id: string;
+    readonly displayName: string;
+    readonly driverKind: OwnMemoryProviderDriverKind;
+    readonly ownMemory?: true;
+  };
+  readonly disabled: boolean;
+  readonly onChange: (enabled: boolean) => Promise<boolean>;
+}
+
+/**
+ * The person's switch for one Claude Code or Codex account's own memory, off
+ * by default and apart from "Run as itself": that switch and Full access never
+ * turn memory on. The text says what Octant does not control once it is on,
+ * and where it stays off. Only a window on this host may change it (the
+ * server refuses others).
+ */
+export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
+  const name = PROVIDER_NAMES[props.instance.driverKind];
+  const settingId = `provider-${props.instance.id}-own-memory`;
+  return (
+    <SettingRow
+      description={
+        <>
+          Lets {name} keep and use its own memory in this account’s Work and Code threads. {name}{" "}
+          decides what it remembers and carries it across Projects; Octant does not show, journal,
+          or clear it. It stays off in Plan and in Chat. Octant’s Project memory and its memory of
+          you work with this off. {name}’s telemetry and self-update stay off either way.
+        </>
+      }
+      label={`Use ${name}’s own memory`}
+      scope="host"
+      settingId={`provider-${props.instance.id}-own-memory`}
+    >
+      <OctantSwitch
+        checked={props.instance.ownMemory === true}
+        describedBy={`${settingId}-description`}
+        disabled={props.disabled}
+        label={`Use ${props.instance.displayName}’s own memory`}
         onCheckedChange={(next) => {
           void props.onChange(next);
         }}

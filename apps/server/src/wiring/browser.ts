@@ -24,6 +24,7 @@ import {
   decodeCodeThreadId,
   LOCAL_HOST_ID,
   type ProjectId,
+  type RememberedBrowserTransfer,
   type StoredBrowserProfile,
   sameToolActionAuthority,
   type WindowId,
@@ -63,8 +64,11 @@ import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBr
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
 import {
   isToolAllowedByAllowlist,
+  browserTransferLimits,
+  browserTransferRemembered,
   defaultShellSettings,
   enabledModes,
+  browserProfileSiteListed,
   isBrowserProfileSiteRemembered,
 } from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
@@ -84,7 +88,10 @@ import {
   BrowserDelegatedChildren,
   currentManagedChildBrowserTarget,
 } from "../browser/browserDelegatedChildren";
-import { browserSessionGrantJournal } from "../browser/browserSessionGrantJournal";
+import {
+  browserSessionGrantJournal,
+  heldBrowserSessionGrants,
+} from "../browser/browserSessionGrantJournal";
 import type { TerminalBrowserGrantId, ProviderExecutionPolicy } from "@octant/contracts";
 import type { BrowserSessionGrantee } from "@octant/contracts/browser-session-grants";
 import { decodeAgentRunId, type AgentRun } from "@octant/contracts";
@@ -181,9 +188,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const stored = persistence.readShellSettings();
         const current = stored?.settings ?? defaultShellSettings();
-        if (
-          isBrowserProfileSiteRemembered(current.rememberedBrowserProfileSites, origin, profile)
-        ) {
+        if (browserProfileSiteListed(current.rememberedBrowserProfileSites, origin, profile)) {
           return;
         }
         try {
@@ -197,6 +202,32 @@ export function wireBrowser(deps: BrowserDependencies) {
           if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
             console.warn(
               `Octant could not remember a signed-in site approval: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return;
+          }
+        }
+      }
+    };
+    // The same journaled path again, for an "Always allow" answer to an upload
+    // or a download save.
+    const rememberBrowserTransfer = (windowId: WindowId, transfer: RememberedBrowserTransfer) => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const stored = persistence.readShellSettings();
+        const current = stored?.settings ?? defaultShellSettings();
+        if (browserTransferRemembered(current.rememberedBrowserTransfers, transfer)) return;
+        try {
+          shellService.rememberBrowserTransfers({
+            windowId,
+            expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+            transfers: [transfer],
+          });
+          return;
+        } catch (error) {
+          if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
+            console.warn(
+              `Octant could not remember a Browser ${transfer.direction} approval: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -227,6 +258,13 @@ export function wireBrowser(deps: BrowserDependencies) {
         profile === undefined
           ? rememberedBrowserOrigins().includes(origin)
           : isBrowserProfileSiteRemembered(rememberedProfileSites(), origin, profile),
+      rememberTransfer: (transfer, windowId) => rememberBrowserTransfer(windowId, transfer),
+      isTransferRemembered: (transfer) =>
+        browserTransferRemembered(
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .rememberedBrowserTransfers,
+          transfer,
+        ),
       isHostScope: isRoutineHostScope,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       extensionsEnabledIn: (profile) => extensionFoldersFor(profile).length,
@@ -461,6 +499,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
       }),
+      held: heldBrowserSessionGrants(persistence.journal),
       onRevoked: (grantId) => {
         void delegatedChildren?.revoke(grantId);
         machineChangeFeed.publish(["tool-approvals"]);
@@ -711,6 +750,8 @@ export function wireBrowser(deps: BrowserDependencies) {
       // lives in shell settings, which only a local window writes.
       agentDownloadsEnabled: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
+      transferLimits: () =>
+        browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
       downloads: createBrowserDownloadJournal({
         journal: persistence.journal,
         connection: persistence.connection,

@@ -53,11 +53,7 @@ import type {
   GhPullRequestSwitchReads,
   GhPullRequestSwitchRequest,
 } from "./ghPullRequestSwitchPort";
-import type {
-  PullRequestWatchAnswer,
-  PullRequestWatchOutcome,
-  PullRequestWatchPort,
-} from "./pullRequestWatchPort";
+import type { PullRequestWatchOutcome, PullRequestWatchPort } from "./pullRequestWatchPort";
 
 /**
  * How long a keystroke in a thread's composer holds Auto-fix back. The
@@ -146,7 +142,7 @@ export interface PullRequestAutoFixThreads {
  * auto-merge and only watches it. Auto-fix watches the pull request on the
  * host and, on a new failure, wakes the linked thread with one turn that
  * carries the forge's text as outside content. A watch is asked for by the
- * thread's agent and turned on only by the person's approval of that act; it
+ * thread's agent and turned on without asking the person, at any level; it
  * shares the pass, the pauses, and the wake path, but only tells the thread
  * what changed. Every change and every wake is journaled, and the state is
  * rebuilt from the journal on start.
@@ -310,15 +306,15 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
 
   /**
    * A thread's agent asks to watch its own pull request. The host resolves
-   * which one, checks this window may act on it, and only then asks the person
-   * (`ask`) for this one act; the answer is the approval. The baseline is read
-   * after the answer, so the watch starts from what is true when it turns on.
+   * which one and checks this window may act on it. Nobody is asked, at any
+   * level: a watch changes nothing on the forge, and its wake count and
+   * lifetime bound what it can start. The baseline is read here, so the watch
+   * starts from what is true when it turns on.
    */
   async watch(input: {
     readonly windowId: WindowId;
     readonly threadId: CodeThreadId;
     readonly providerInstanceId: string;
-    readonly ask: (target: CodeProjectPullRequestSwitchTarget) => Promise<PullRequestWatchAnswer>;
     readonly signal: AbortSignal;
   }): Promise<PullRequestWatchOutcome> {
     const targets = await this.#authority.linkedPullRequests(input.windowId, input.threadId);
@@ -332,12 +328,6 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
       this.#vouchingWindows.set(pullRequestSwitchKey(target), input.windowId);
       return this.#watchingOutcome(target, true);
     }
-    const answer = await input.ask(target).catch(() => "unavailable" as const);
-    if (answer !== "approved") return { status: "declined", answer };
-    // The person answered while the thread or the Project could have moved on.
-    const current = await this.#admitWatch(input.windowId, input.threadId, target);
-    if (current.status !== "admitted") return current.outcome;
-    if (current.alreadyWatching) return this.#watchingOutcome(target, true);
     const observation = await this.#forge.observe(forgeRequest(target), input.signal, {
       failures: false,
       activity: true,
@@ -346,7 +336,7 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
       return { status: "unavailable", reason: "unavailable" };
     }
     if (observation.state !== "open") return { status: "refused", reason: "not-open" };
-    // Another linked thread approved at the same time may have recorded its
+    // Another linked thread asking at the same time may have recorded its
     // watch during the forge read; checking here, with no await before the
     // record, keeps the first watcher instead of silently replacing it.
     const settled = this.#fold(target).watch;

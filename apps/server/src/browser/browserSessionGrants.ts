@@ -53,10 +53,18 @@ interface BrowserSessionGrantsOptions {
   readonly current: (grantee: BrowserSessionGrantee) => CurrentBrowserSessionTarget | undefined;
   readonly profileLabel: (profile: StoredBrowserProfile) => Promise<string | undefined>;
   readonly record: (event: {
-    readonly kind: "granted" | "revoked" | "expired" | "changed";
+    readonly kind: "granted" | "revoked" | "expired" | "changed" | "held" | "resumed";
     readonly grant: BrowserSessionGrant;
     readonly windowId?: WindowId;
   }) => void;
+  /**
+   * Grants the journal proves were live at the last clean close. Absent, or
+   * throwing, restores nothing.
+   */
+  readonly held?: () => ReadonlyArray<{
+    readonly grant: BrowserSessionGrant;
+    readonly windowId: WindowId;
+  }>;
   readonly onRevoked: (grantId: string) => void;
 }
 
@@ -104,7 +112,11 @@ function httpsOrigins(values: ReadonlyArray<string>): ReadonlyArray<string> | un
   return origins.size > 0 && origins.size <= 16 ? [...origins].sort() : undefined;
 }
 
-/** Host-lifetime permissions; restart requires another explicit review. */
+/**
+ * A routine's or managed child's grant survives a clean host restart; a
+ * terminal's ends with the host. Nothing is restored that the journal cannot
+ * prove was still live when the earlier host closed.
+ */
 export class BrowserSessionGrants {
   readonly #options: BrowserSessionGrantsOptions;
   readonly #grants = new Map<string, SavedPermission>();
@@ -113,6 +125,8 @@ export class BrowserSessionGrants {
     string,
     SavedPermission & { readonly windowId: WindowId; readonly expires: number }
   >();
+  #restoreStarted = false;
+  #closed = false;
 
   constructor(options: BrowserSessionGrantsOptions) {
     this.#options = options;
@@ -208,6 +222,7 @@ export class BrowserSessionGrants {
         grantedAt: decodeUtcTimestamp(new Date(now).toISOString()),
         expiresAt: decodeUtcTimestamp(new Date(expires).toISOString()),
         ...(nativeOwner?.status === "ready" ? { continuesWithoutWindow: true } : {}),
+        ...(command.grantee.kind === "terminal" ? {} : { survivesRestart: true }),
       };
       if (this.#reviews.size >= MAX_PERMISSIONS)
         return refused("limit", "Finish or wait for an existing review before opening another.");
@@ -358,9 +373,82 @@ export class BrowserSessionGrants {
       if (String(row.windowId) === String(windowId)) this.#reviews.delete(id);
   }
 
+  /**
+   * Restores the grants the earlier host attested at its clean close, once per
+   * host lifetime. Each is checked against the caller, model, authority,
+   * definition revision, profile and expiry as they are now, and consuming the
+   * attestation must reach the journal before the grant authorizes anything:
+   * otherwise a later unclean end would restore it again unproved.
+   */
+  async restore(): Promise<void> {
+    if (this.#restoreStarted) return;
+    this.#restoreStarted = true;
+    let held: ReturnType<NonNullable<BrowserSessionGrantsOptions["held"]>>;
+    try {
+      held = this.#options.held?.() ?? [];
+    } catch {
+      return;
+    }
+    for (const { grant, windowId } of held) {
+      if (grant.survivesRestart !== true || grant.target.grantee.kind === "terminal") continue;
+      let label: string | undefined;
+      try {
+        label = await this.#options.profileLabel(grant.profile);
+      } catch {
+        label = undefined;
+      }
+      if (this.#closed || this.#grants.size >= MAX_PERMISSIONS) return;
+      if (this.#grants.has(grant.grantId)) continue;
+      const now = this.#options.now();
+      const current = this.#options.current(grant.target.grantee);
+      const lapse =
+        Date.parse(grant.expiresAt) <= now
+          ? "expired"
+          : label === undefined ||
+              current === undefined ||
+              !sameTarget(current.target, grant.target) ||
+              recipientDigest(current.revision) !== grant.recipientRevisionDigest ||
+              (current.notAfter !== undefined && current.notAfter <= now)
+            ? "changed"
+            : undefined;
+      try {
+        this.#options.record({ kind: lapse ?? "resumed", grant });
+      } catch {
+        continue;
+      }
+      if (lapse !== undefined || current === undefined) continue;
+      // The native owner the person reviewed ended with the earlier host, and
+      // a new owner never upgrades an earlier permission.
+      const { continuesWithoutWindow: _reviewedOwner, ...windowOwned } = grant;
+      const row: SavedPermission = { grant: windowOwned, revision: current.revision, windowId };
+      this.#grants.set(grant.grantId, row);
+      this.#scheduleExpiry(row);
+    }
+  }
+
+  /**
+   * A clean close attests each surviving grant instead of ending it. A grant
+   * whose attestation cannot be written is simply not restored.
+   */
   close(): void {
+    this.#closed = true;
     this.#reviews.clear();
-    for (const row of this.#grants.values()) this.#remove(row, "revoked");
+    this.#prune();
+    for (const row of this.#grants.values()) {
+      if (row.grant.survivesRestart !== true) {
+        this.#remove(row, "revoked");
+        continue;
+      }
+      this.#grants.delete(row.grant.grantId);
+      clearTimeout(this.#timers.get(row.grant.grantId));
+      this.#timers.delete(row.grant.grantId);
+      this.#options.onRevoked(row.grant.grantId);
+      try {
+        this.#options.record({ kind: "held", grant: row.grant });
+      } catch {
+        // Unattested, so the next host restores nothing for it.
+      }
+    }
   }
 
   #scheduleExpiry(row: SavedPermission): void {

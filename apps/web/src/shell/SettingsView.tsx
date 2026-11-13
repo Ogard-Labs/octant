@@ -19,6 +19,7 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ServerProject } from "@octant/contracts/server-projects";
 import {
+  ANY_BROWSER_ORIGIN,
   type ProjectId,
   type ProviderInstanceId,
   type SettingsDeepLink,
@@ -1571,12 +1572,12 @@ function ActiveSectionContent({
             }
           />
           <SettingsSection
-            description="Off, every download in the agent's Browser is blocked."
-            title="Browser downloads"
+            description="Files an agent sends to a page or saves from one. A thread at Full access downloads and uploads without asking; a download you start yourself goes to your Downloads folder."
+            title="Browser uploads and downloads"
           >
             <div className="setgroup">
               <SettingRow
-                description="Octant asks before saving a file a page starts downloading while an agent drives it, every time. Downloads you start yourself stay blocked."
+                description="Below Full access, lets a page an agent drives start a download, and Octant asks before saving it. Off, those downloads are blocked."
                 focused={focusedSetting === settingId("browser-agent-downloads")}
                 label="Let agents download files"
                 scope="host"
@@ -1590,6 +1591,89 @@ function ActiveSectionContent({
                   }
                 />
               </SettingRow>
+              <SettingRow
+                description="The largest file an agent may upload through a page or save from one."
+                focused={focusedSetting === settingId("browser-transfer-file-limit")}
+                label="Largest file"
+                scope="host"
+                settingId="browser-transfer-file-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_TRANSFER_FILE_LIMIT_CHOICES}
+                  id="browser-transfer-file-limit"
+                  label="Largest file"
+                  onChange={(megabytes) =>
+                    props.onSettingsChange({ browserTransferFileLimitMegabytes: megabytes })
+                  }
+                  optionLabel={(megabytes) =>
+                    megabytes >= 1024 ? `${String(megabytes / 1024)} GB` : `${String(megabytes)} MB`
+                  }
+                  value={props.settings.browserTransferFileLimitMegabytes}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How many downloads a page keeps waiting for an agent to save. A newer one replaces the oldest."
+                focused={focusedSetting === settingId("browser-held-download-limit")}
+                label="Downloads kept waiting"
+                scope="host"
+                settingId="browser-held-download-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES}
+                  id="browser-held-download-limit"
+                  label="Downloads kept waiting"
+                  onChange={(count) => props.onSettingsChange({ browserHeldDownloadLimit: count })}
+                  optionLabel={(count) => `${String(count)} per page`}
+                  value={props.settings.browserHeldDownloadLimit}
+                />
+              </SettingRow>
+              <SettingRow
+                description="How many files an agent may send to a page in one upload."
+                focused={focusedSetting === settingId("browser-upload-file-count-limit")}
+                label="Files per upload"
+                scope="host"
+                settingId="browser-upload-file-count-limit"
+              >
+                <BrowserTransferLimitSelect
+                  choices={BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES}
+                  id="browser-upload-file-count-limit"
+                  label="Files per upload"
+                  onChange={(count) =>
+                    props.onSettingsChange({ browserUploadFileCountLimit: count })
+                  }
+                  optionLabel={(count) => (count === 1 ? "1 file" : `${String(count)} files`)}
+                  value={props.settings.browserUploadFileCountLimit}
+                />
+              </SettingRow>
+              {props.settings.rememberedBrowserTransfers.map((transfer) => (
+                <SettingRow
+                  description={
+                    transfer.direction === "upload"
+                      ? `Agents upload files from ${transfer.workspaceRoot} to this site without asking.`
+                      : `Agents save downloads from this site into ${transfer.workspaceRoot} without asking.`
+                  }
+                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}`}
+                  label={`${transfer.direction === "upload" ? "Uploads to" : "Downloads from"} ${transfer.origin}`}
+                  scope="host"
+                  settingId="browser-agent-downloads"
+                >
+                  <OctantButton
+                    onClick={() =>
+                      void props.onSettingsChange({
+                        rememberedBrowserTransfers:
+                          props.settings.rememberedBrowserTransfers.filter(
+                            (entry) => entry !== transfer,
+                          ),
+                      })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Forget
+                  </OctantButton>
+                </SettingRow>
+              ))}
             </div>
           </SettingsSection>
           {props.canvasClient?.publicLinkSettings === undefined ? null : (
@@ -1741,7 +1825,7 @@ function RememberedBrowserOriginsPanel(props: {
               ? "1 site always allowed"
               : `${props.origins.length + props.profileSites.length} sites always allowed`,
       }}
-      description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
+      description="Granted with “Always allow” or “Allow all sites in this profile” on a thread’s Browser approval; forgetting one makes the next open ask again."
       title="Remembered websites"
     >
       {props.origins.length === 0 && props.profileSites.length === 0 ? (
@@ -1756,11 +1840,17 @@ function RememberedBrowserOriginsPanel(props: {
                 : site.profile.kind === "account"
                   ? `Account ${String(site.profile.profileId).slice(0, 8)} profile`
                   : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
+            // "Allow all sites in this profile" is stored as the any-site entry.
+            const everySite = site.origin === ANY_BROWSER_ORIGIN;
             return (
               <SettingRow
-                description={`Browser acts as you on this site in the ${profileName}, without asking.`}
+                description={
+                  everySite
+                    ? `Browser acts as you on every site in the ${profileName}, without asking.`
+                    : `Browser acts as you on this site in the ${profileName}, without asking.`
+                }
                 key={key}
-                label={`${site.origin} · ${profileName}`}
+                label={`${everySite ? "All sites" : site.origin} · ${profileName}`}
                 scope="host"
                 settingId="browser-site-approvals"
               >
@@ -2090,6 +2180,7 @@ function providerSettingsViewProps(
     onSetEnabled: controller.setEnabled,
     onSetClaudeArtifactDelivery: controller.setClaudeArtifactDelivery,
     onSetProviderNativeSetup: controller.setProviderNativeSetup,
+    onSetProviderOwnMemory: controller.setProviderOwnMemory,
     onDataTagsChange: controller.setDataTags,
     onModelDataTagsChange: controller.setModelDataTags,
     onModelContextWindowChange: controller.setModelContextWindow,
@@ -2226,6 +2317,35 @@ function StalledTurnLimitSelect(props: {
         { id: "off", label: "Off" },
       ]}
       value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
+const BROWSER_TRANSFER_FILE_LIMIT_CHOICES: ReadonlyArray<number> = [
+  10, 25, 50, 100, 250, 500, 1024,
+];
+const BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES: ReadonlyArray<number> = [5, 10, 20, 50];
+const BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES: ReadonlyArray<number> = [1, 5, 10, 20, 50];
+
+/** One of the Browser transfer limits; a stored value outside the choices stays selectable. */
+function BrowserTransferLimitSelect(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly choices: ReadonlyArray<number>;
+  readonly value: number;
+  readonly optionLabel: (value: number) => string;
+  readonly onChange: (value: number) => void;
+}) {
+  const choices = props.choices.includes(props.value)
+    ? props.choices
+    : [...props.choices, props.value].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label={props.label}
+      id={props.id}
+      onValueChange={(value) => props.onChange(Number(value))}
+      options={choices.map((choice) => ({ id: String(choice), label: props.optionLabel(choice) }))}
+      value={String(props.value)}
     />
   );
 }

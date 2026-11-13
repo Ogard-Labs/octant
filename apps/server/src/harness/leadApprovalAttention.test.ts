@@ -31,6 +31,7 @@ import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
 import { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
+import { registerToolEffectEvents, ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -195,6 +196,43 @@ describe("a pending harness approval across a host restart", () => {
     expect(after.sessions.read(thread)?.session.status).toBe("recovery-required");
     expect(leadApprovalFor(after, thread)).toMatchObject({ lostInRestart: true });
     expect(after.approvals.waiting()).toEqual([]);
+  });
+
+  it("reads the tool call that was only waiting for it as one that never ran, and as running once it is approved", async () => {
+    const before = fixture();
+    const turnId = "00000000-0000-4000-8000-000000000026";
+    const ledgerOn = () =>
+      new ToolEffectLedger({
+        journal: new Journal({
+          connection: before.connection,
+          registry: registerToolEffectEvents(new EventRegistry()),
+          projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+          clock: () => now,
+        }),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+    const tools = ledgerOn()
+      .forTurn({ threadId: thread, turnId })
+      .tools({
+        definitions: [{ name: "bash", description: "Shell", inputSchema: { type: "object" } }],
+        execute: async () => {
+          await before.ask({ mode: "code" });
+          // Approved: the command is running when the host stops.
+          return new Promise(() => {});
+        },
+      });
+    void tools.execute({ name: "bash", inputJson: "{}", toolCallId: "call-1" });
+    await Promise.resolve();
+
+    expect(ledgerOn().certainty(turnId)).toEqual({ kind: "settled" });
+
+    const pending = before.sessions.read(thread)?.approvals?.[0];
+    expect(before.approvals.decide(thread, String(pending?.id), "approve")).toBe("decided");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ledgerOn().certainty(turnId)).toEqual({ kind: "uncertain", toolName: "bash" });
   });
 
   it("never runs the action on an answer: the approval settles cancelled, not approved", () => {

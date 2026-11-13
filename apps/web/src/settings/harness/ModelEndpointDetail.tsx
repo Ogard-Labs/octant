@@ -533,6 +533,12 @@ function ModelsSection(props: ModelEndpointDetailProps & { readonly disabled: bo
                 const readsImages = model.inputModalities.includes("image");
                 const chatOnly =
                   observed !== undefined && !modelCarriesAppManagedTools(observed, model.id);
+                // The host also runs the check by itself the first time a model
+                // is used, with nobody at this page; what it found is said here,
+                // where a check run from this page says its result.
+                const lastCheck = chatOnly
+                  ? observed.toolChecks?.find((check) => String(check.modelId) === String(model.id))
+                  : undefined;
                 return (
                   <li className="endpoint-model" key={String(model.id)}>
                     <span className="endpoint-model__id">{model.displayName}</span>
@@ -547,6 +553,14 @@ function ModelsSection(props: ModelEndpointDetailProps & { readonly disabled: bo
                         />
                       ) : null}
                     </span>
+                    {lastCheck === undefined ? null : (
+                      <p className="endpoint-detail__note">
+                        Last tool check: {lastCheck.message}
+                        {lastCheck.outcome === "failed"
+                          ? " Octant tries again the next time this model is used."
+                          : ""}
+                      </p>
+                    )}
                     {props.onModelContextWindowChange === undefined ? null : (
                       <ModelContextWindowField
                         disabled={props.disabled}

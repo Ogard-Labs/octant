@@ -300,13 +300,13 @@ describe("WindowChrome", () => {
         (element) => getComputedStyle(element).fontWeight,
       );
 
-      // jsdom reports a custom property unresolved; `--oct-weight-display` is 500,
+      // jsdom reports a custom property unresolved; `--oct-weight-medium` is 500,
       // so only the page title and content emphasis stay at 600.
       expect(weights).toEqual([
         "600",
-        "var(--oct-weight-display)",
-        "var(--oct-weight-display)",
-        "var(--oct-weight-display)",
+        "var(--oct-weight-medium)",
+        "var(--oct-weight-medium)",
+        "var(--oct-weight-medium)",
         "600",
       ]);
     } finally {
@@ -461,7 +461,7 @@ describe("WindowChrome", () => {
     const sectionLabel = cssRule(".project-section > .sidebar-section");
     expect(sectionLabel).toContain("font-family: var(--oct-font-display);");
     // Sentence case: the section label reads "Projects", not a spaced-out
-    // "PROJECTS" kicker (DESIGN.md "Language").
+    // "PROJECTS" kicker (DESIGN.md "Voice").
     expect(sectionLabel).toContain("letter-spacing: 0;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");

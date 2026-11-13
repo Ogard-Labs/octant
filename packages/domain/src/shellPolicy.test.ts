@@ -233,6 +233,10 @@ describe("shell settings policy", () => {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      browserTransferFileLimitMegabytes: 25,
+      browserHeldDownloadLimit: 5,
+      browserUploadFileCountLimit: 5,
+      rememberedBrowserTransfers: [],
       persistentBrowserOwner: false,
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
@@ -245,6 +249,10 @@ describe("shell settings policy", () => {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      browserTransferFileLimitMegabytes: 25,
+      browserHeldDownloadLimit: 5,
+      browserUploadFileCountLimit: 5,
+      rememberedBrowserTransfers: [],
       persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);

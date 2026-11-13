@@ -12,6 +12,11 @@ export interface AppManagedToolSet {
     readonly name: string;
     readonly inputJson: string;
     readonly signal?: AbortSignal;
+    /**
+     * The provider's id for this call, when the caller has one. It pairs the
+     * call's journaled intent with its settlement and reaches no tool's input.
+     */
+    readonly toolCallId?: string;
   }) => Promise<{
     readonly result: unknown;
     readonly isError?: boolean;

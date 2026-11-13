@@ -11,11 +11,13 @@ const threadId = "44000000-0000-4000-8000-000000000001";
 const approvalId = "44000000-0000-4000-8000-000000000010";
 const extensionId = "44000000-0000-4000-8000-000000000011";
 const packageId = "44000000-0000-4000-8000-000000000012";
+const projectId = "44000000-0000-4000-8000-000000000013";
 
 function approval(overrides: Partial<ExtensionToolApproval> = {}): ExtensionToolApproval {
   return {
     approvalId,
     threadId,
+    projectId,
     extensionId,
     packageId,
     componentId: "files-server",
@@ -146,6 +148,45 @@ describe("ExtensionToolApprovalPrompt", () => {
         screen.queryByRole("group", { name: "Extension tool approval" }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("offers to allow all tools of the server and sends that scope", async () => {
+    const user = userEvent.setup();
+    const extensionClient = client([approval()]);
+    renderPrompt(extensionClient);
+
+    await user.click(await screen.findByRole("button", { name: "Allow all tools of this server" }));
+
+    expect(extensionClient.decideToolApproval).toHaveBeenCalledWith({
+      approvalId,
+      decision: "approved",
+      remember: true,
+      rememberScope: "server",
+    });
+  });
+
+  it("offers to remember for the account on a thread outside a Project", async () => {
+    const { projectId: _projectId, ...outsideProject } = approval();
+    renderPrompt(client([outsideProject as ExtensionToolApproval]));
+
+    expect(
+      await screen.findByRole("button", { name: "Always allow for this account" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Allow all tools of this server" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Always allow in this Project" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Extension tool approval" })).toHaveTextContent(
+      "in Chat threads outside a Project without asking",
+    );
+  });
+
+  it("offers no whole-server answer when the call can only be approved once", async () => {
+    renderPrompt(client([approval({ rememberable: false })]));
+    await screen.findByRole("button", { name: "Approve once" });
+    expect(
+      screen.queryByRole("button", { name: "Allow all tools of this server" }),
+    ).not.toBeInTheDocument();
   });
 
   it("approves once and denies without asking to remember anything", async () => {

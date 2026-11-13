@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
 import { createNativeHelperShutdown, type NativeHelperStopOutcome } from "./nativeHelperShutdown";
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
+import {
+  CANVAS_NETWORK_TOKEN_HEADER,
+  CANVAS_PROTOTYPE_SURFACE_HEADER,
+} from "@octant/contracts/canvas-network";
+import { CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES } from "@octant/domain/canvas-network-policy";
+import { canvasNetworkRelayAddress } from "./canvasPrototypeNetwork";
 import type {
   CanvasPrototypeEditCommand,
   CanvasPrototypeFrame,
@@ -8,6 +14,7 @@ import type {
   CanvasPrototypeHostEvent,
   CanvasPrototypeInput,
   CanvasPrototypeModifier,
+  CanvasPrototypeRelayAnswer,
 } from "./canvasPrototypeHost";
 
 /**
@@ -32,7 +39,14 @@ import type {
  *   that opened it and to no other;
  * - the window forwards a person's pointer and keys, which are checked here.
  *   The reserved shortcut that leaves a prototype is never forwarded, so a page
- *   cannot hold the keyboard.
+ *   cannot hold the keyboard;
+ * - when the host answers the page request with a network token (the Canvas's
+ *   "Allow network" switch is on, and this process proved itself with the
+ *   desktop bridge secret), the token stays here. The prototype host is told
+ *   only that the page has a network; each address its page asks for is
+ *   fetched here from one of the host's proxy paths under that token, and
+ *   from nowhere else. A script's JSON body goes with it as JSON; no header
+ *   of the page's does.
  */
 
 export type CanvasPrototypeSurfacePreparation =
@@ -85,12 +99,31 @@ export interface CanvasPrototypeSurfaceOptions {
   /** The host the renderer reaches now; it can change when the host restarts. */
   readonly serverUrl: () => string | undefined;
   readonly fetch: typeof fetch;
+  /**
+   * What proves this process to the host as its own desktop: the bridge
+   * secret every brokered desktop route takes. Sent with the page request to
+   * the loopback host only. Absent, no page is given a network.
+   */
+  readonly brokerHeaders?: () => Readonly<Record<string, string>>;
   readonly platform: NodeJS.Platform;
   /** How long the prototype host has to read back that it is closed. */
   readonly readyTimeoutMs?: number;
 }
 
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
+const NETWORK_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+/** The longest address a page's question may carry here; the host refuses one a quarter as long. */
+const MAX_RELAY_TARGET_LENGTH = 8_192;
+const RELAY_NOT_ALLOWED: CanvasPrototypeRelayAnswer = {
+  status: 403,
+  contentType: "application/json",
+  body: new TextEncoder().encode('{"refused":"no-network"}'),
+};
+const RELAY_UNREACHABLE: CanvasPrototypeRelayAnswer = {
+  status: 502,
+  contentType: "application/json",
+  body: new TextEncoder().encode('{"refused":"unreachable"}'),
+};
 const SURFACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** What of the host's answer the page keeps: the page and the policy it came with. */
 const PAGE_HEADERS = [
@@ -146,6 +179,16 @@ export function designPageTicket(
     return keys.length === 1 && ticket !== null && TICKET.test(ticket) ? ticket : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/** Whether an address is the loopback host a desktop attaches to, by its literal address. */
+function isLoopbackHost(address: string): boolean {
+  try {
+    const url = new URL(address);
+    return url.protocol === "http:" && url.hostname === "127.0.0.1";
+  } catch {
+    return false;
   }
 }
 
@@ -289,6 +332,17 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
   // Page requests still in flight, by the window that asked, so a window that
   // goes takes its requests with it.
   const pendingOpens = new Map<number, Set<AbortController>>();
+  // The network token of each open prototype whose Canvas has the switch on,
+  // as the host minted it for this process. It is never sent to the prototype
+  // host or a window, and goes when the prototype does.
+  const networkTokens = new Map<string, string>();
+  // Requests to the host's proxy still in flight, by the prototype that asked.
+  const relaying = new Map<string, Set<AbortController>>();
+  const forgetNetwork = (surfaceId: string) => {
+    networkTokens.delete(surfaceId);
+    for (const request of relaying.get(surfaceId) ?? []) request.abort();
+    relaying.delete(surfaceId);
+  };
 
   const retiring = new Map<CanvasPrototypeHostConnection, Promise<NativeHelperStopOutcome>>();
   let stopping: Promise<NativeHelperStopOutcome> | undefined;
@@ -312,13 +366,85 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
     host = undefined;
     for (const [surfaceId, owner] of owners) owner.send({ kind: "gone", surfaceId });
     owners.clear();
+    for (const surfaceId of networkTokens.keys()) forgetNetwork(surfaceId);
   };
 
-  const route = (event: CanvasPrototypeHostEvent) => {
+  /**
+   * One address a page asked for. This asks the host's proxy path for that
+   * kind of load under the token of the prototype that asked, and nothing
+   * else: no cookie and no header of its own or the page's, but the JSON type
+   * of a body the page's script sent, and no redirect followed. Whether the
+   * address is fetched is the host's decision there, under the destination
+   * rule, the bounds, and the switch. A question for a prototype with no
+   * token is answered here.
+   */
+  const relay = async (
+    connection: CanvasPrototypeHostConnection,
+    event: Extract<CanvasPrototypeHostEvent, { kind: "relay" }>,
+  ): Promise<void> => {
+    const { surfaceId, requestId, target, resource, body } = event;
+    // The prototype host draws agent-written pages; what it says is checked.
+    if (typeof surfaceId !== "string" || !Number.isSafeInteger(requestId)) return;
+    if (typeof target !== "string" || target.length > MAX_RELAY_TARGET_LENGTH) return;
+    if (
+      body !== undefined &&
+      (resource !== "fetch" ||
+        !(body instanceof Uint8Array) ||
+        body.byteLength > CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES)
+    ) {
+      return;
+    }
+    const answer = (relayed: CanvasPrototypeRelayAnswer) =>
+      connection.send({ kind: "relayed", surfaceId, requestId, answer: relayed });
+    const token = networkTokens.get(surfaceId);
+    const address =
+      token === undefined
+        ? undefined
+        : canvasNetworkRelayAddress(options.serverUrl(), token, target, resource);
+    if (address === undefined) {
+      answer(RELAY_NOT_ALLOWED);
+      return;
+    }
+    const request = new AbortController();
+    const inFlight = relaying.get(surfaceId) ?? new Set<AbortController>();
+    relaying.set(surfaceId, inFlight.add(request));
+    try {
+      const response = await options.fetch(address, {
+        method: body === undefined ? "GET" : "POST",
+        redirect: "error",
+        signal: request.signal,
+        ...(body === undefined
+          ? {}
+          : { headers: { "content-type": "application/json" }, body: body.slice() }),
+      });
+      const answered = new Uint8Array(await response.arrayBuffer());
+      // The prototype closed while the host answered: its page hears nothing.
+      if (request.signal.aborted) return;
+      answer({
+        status: response.status,
+        contentType: response.headers.get("content-type") ?? "application/octet-stream",
+        body: answered,
+      });
+    } catch {
+      if (!request.signal.aborted) answer(RELAY_UNREACHABLE);
+    } finally {
+      inFlight.delete(request);
+      if (inFlight.size === 0 && relaying.get(surfaceId) === inFlight) relaying.delete(surfaceId);
+    }
+  };
+
+  const route = (connection: CanvasPrototypeHostConnection, event: CanvasPrototypeHostEvent) => {
     if (event.kind === "ready" || event.kind === "unavailable") return;
+    if (event.kind === "relay") {
+      void relay(connection, event);
+      return;
+    }
     const owner = owners.get(event.surfaceId);
     if (owner === undefined) return;
-    if (event.kind === "gone") owners.delete(event.surfaceId);
+    if (event.kind === "gone") {
+      owners.delete(event.surfaceId);
+      forgetNetwork(event.surfaceId);
+    }
     owner.send(event);
   };
 
@@ -370,7 +496,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
         if (event.kind === "ready") finish({ status: "ready" });
         else if (event.kind === "unavailable") {
           finish({ status: "unavailable", reason: event.reason });
-        } else route(event);
+        } else route(launched, event);
       });
       launched.onExit(() => {
         if (host !== launched) return;
@@ -380,17 +506,39 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
     });
   };
 
-  const fetchPage = async (ticket: string, server: string, signal: AbortSignal) => {
-    const page = await options.fetch(
+  const fetchPage = async (
+    ticket: string,
+    server: string,
+    surfaceId: string,
+    signal: AbortSignal,
+  ) => {
+    // The proof goes to the loopback host this desktop attached to and to no
+    // other address, and only it can answer with a token.
+    const proof = isLoopbackHost(server) ? options.brokerHeaders?.() : undefined;
+    const response = await options.fetch(
       new URL(`${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}`, server),
-      { redirect: "error", signal },
+      {
+        redirect: "error",
+        signal,
+        ...(proof === undefined
+          ? {}
+          : { headers: { ...proof, [CANVAS_PROTOTYPE_SURFACE_HEADER]: surfaceId } }),
+      },
     );
     const headers: Record<string, string> = {};
     for (const name of PAGE_HEADERS) {
-      const value = page.headers.get(name);
+      const value = response.headers.get(name);
       if (value !== null) headers[name] = value;
     }
-    return { status: page.status, headers, body: new Uint8Array(await page.arrayBuffer()) };
+    const minted = proof === undefined ? null : response.headers.get(CANVAS_NETWORK_TOKEN_HEADER);
+    return {
+      page: {
+        status: response.status,
+        headers,
+        body: new Uint8Array(await response.arrayBuffer()),
+      },
+      networkToken: minted !== null && NETWORK_TOKEN.test(minted) ? minted : undefined,
+    };
   };
 
   const ownedBy = (owner: CanvasPrototypeOwner, surfaceId: unknown): surfaceId is string =>
@@ -455,11 +603,11 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       const pageRequest = new AbortController();
       const pending = pendingOpens.get(owner.id) ?? new Set<AbortController>();
       pendingOpens.set(owner.id, pending.add(pageRequest));
-      let page;
+      let fetched;
       try {
-        page = await fetchPage(ticket, server, pageRequest.signal);
+        fetched = await fetchPage(ticket, server, request.surfaceId, pageRequest.signal);
       } catch {
-        page = undefined;
+        fetched = undefined;
       } finally {
         pending.delete(pageRequest);
         if (pending.size === 0 && pendingOpens.get(owner.id) === pending) {
@@ -469,7 +617,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       if ((closings.get(owner.id) ?? 0) !== closingsAsked) {
         return { status: "refused", reason: "The window that asked for the prototype is gone." };
       }
-      if (page === undefined) {
+      if (fetched === undefined) {
         return { status: "refused", reason: "Octant could not reach the host for the page." };
       }
       const current = host;
@@ -482,13 +630,17 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
         return { status: "refused", reason: "The prototype surface is not ready." };
       }
       owners.set(request.surfaceId, owner);
+      if (fetched.networkToken !== undefined) {
+        networkTokens.set(request.surfaceId, fetched.networkToken);
+      }
       current.send({
         kind: "open",
         surfaceId: request.surfaceId,
-        page,
+        page: fetched.page,
         width: request.width,
         height: request.height,
         scaleFactor: request.scaleFactor,
+        ...(fetched.networkToken === undefined ? {} : { network: true as const }),
       });
       return { status: "open" };
     },
@@ -520,6 +672,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
     close: (owner: CanvasPrototypeOwner, surfaceId: unknown): void => {
       if (!ownedBy(owner, surfaceId)) return;
       owners.delete(surfaceId);
+      forgetNetwork(surfaceId);
       host?.send({ kind: "close", surfaceId });
     },
 
@@ -537,6 +690,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       for (const [surfaceId, owner] of owners) {
         if (owner.id !== ownerId) continue;
         owners.delete(surfaceId);
+        forgetNetwork(surfaceId);
         host?.send({ kind: "close", surfaceId });
       }
       users.delete(ownerId);

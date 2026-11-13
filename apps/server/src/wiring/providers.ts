@@ -223,6 +223,7 @@ import {
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
   isImageProfileDriverKind,
+  isNativeHarnessDriverKind,
   isKeyProviderDriverKind,
   providerKeepsConversation,
   resolveModelContextWindow,
@@ -430,6 +431,16 @@ export function makeConfiguredProviderDriver(
             String(candidate.id) === String(instanceId) &&
             candidate.driverKind === "claude" &&
             candidate.configuration.artifactDelivery === true,
+        ) === true,
+      // Read from the journal at every launch, so the next process a Claude
+      // Code or Codex account starts follows the person's current switch.
+      // The getter the artifact switch reads holds every account, Codex's too.
+      providerOwnMemory: (instanceId) =>
+        options.claudeInstances?.some(
+          (candidate) =>
+            String(candidate.id) === String(instanceId) &&
+            (candidate.driverKind === "claude" || candidate.driverKind === "codex") &&
+            candidate.ownMemory === true,
         ) === true,
       ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined
@@ -1825,6 +1836,21 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerInstanceId: ProviderInstance["id"],
     ) => Promise<ProviderProbeResult> = (providerInstanceId) =>
       providerService.probe(LOCAL_HOST_ID as never, providerInstanceId);
+    // Where a turn starts: a direct-endpoint model used for the first time
+    // has its tools verified by the host itself. The check updates the
+    // endpoint's last observation, so an endpoint the host has not looked at
+    // since it started is checked first. Neither step can fail the turn.
+    const verifyModelToolsOnFirstUse = async (
+      providerInstanceId: ProviderInstance["id"],
+      modelId: ProviderModelId,
+    ): Promise<void> => {
+      const instance = persistence.readProviderInstance(providerInstanceId);
+      if (instance === undefined || !isNativeHarnessDriverKind(instance.driverKind)) return;
+      if (providerRuntimeRegistry.observedState(providerInstanceId) === undefined) {
+        await probeProviderForThreads(providerInstanceId).catch(() => undefined);
+      }
+      await providerService.verifyModelToolsOnFirstUse(providerInstanceId, modelId);
+    };
     const reviewedModelManifest = new ReviewedModelManifest();
     // Model classification tracks the canonical manifest branch by commit
     // rather than by app release. It is opt-in so the local-first default
@@ -2271,6 +2297,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
       probeProviderForThreads,
+      verifyModelToolsOnFirstUse,
       providerDataDirectory,
       providerOAuthRoutes,
       providerRoutes,
