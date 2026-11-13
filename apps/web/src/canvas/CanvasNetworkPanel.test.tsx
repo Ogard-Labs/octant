@@ -116,4 +116,46 @@ describe("Canvas Allow network", () => {
     expect(screen.getByText("No switch")).toBeVisible();
     expect(host.networkAccess).not.toHaveBeenCalled();
   });
+
+  it("shows a change in every view of the same Canvas, not only the one it was made in", async () => {
+    const user = userEvent.setup();
+    const host = hostWith(false);
+    // The Canvas in the thread and in the sidebar: two views, one switch.
+    render(
+      <>
+        <Harness client={host.client} />
+        <Harness client={host.client} />
+      </>,
+    );
+    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(2));
+    const [first, second] = screen.getAllByRole("switch", { name: "Allow network" });
+    if (first === undefined || second === undefined) throw new Error("expected two views");
+    expect(second).not.toBeChecked();
+
+    await user.click(first);
+    await waitFor(() => expect(second).toBeChecked());
+    expect(host.setNetworkAccess).toHaveBeenCalledTimes(1);
+
+    await user.click(second);
+    await waitFor(() => expect(first).not.toBeChecked());
+  });
+
+  it("leaves a view the host gave no switch without one when another view changes it", async () => {
+    const user = userEvent.setup();
+    const host = hostWith(false);
+    const refusedRead = vi.fn(async () => {
+      throw new Error("403");
+    });
+    render(
+      <>
+        <Harness client={host.client} />
+        <Harness client={{ networkAccess: refusedRead }} />
+      </>,
+    );
+    await user.click(await screen.findByRole("switch", { name: "Allow network" }));
+    await waitFor(() => expect(screen.getByRole("switch")).toBeChecked());
+    await waitFor(() => expect(refusedRead).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("No switch")).toBeVisible();
+    expect(screen.getAllByRole("switch")).toHaveLength(1);
+  });
 });
