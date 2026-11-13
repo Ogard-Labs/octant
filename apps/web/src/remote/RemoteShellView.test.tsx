@@ -100,12 +100,18 @@ const boundProject = {
   binding: { canonicalRoot: "/repos/octant" },
   bindingRevisionId,
 };
+// What the fake host says of the Code Project's Git remotes; a test may replace it.
+let remoteFacts: { remotes: string[]; upstreamRemote?: string; defaultRemote?: string } = {
+  remotes: ["upstream", "fork"],
+  defaultRemote: "upstream",
+};
+
 const preparedCheckout = {
   id: "70000000-0000-4000-8000-000000000001",
   repositoryId: `repo_${"a".repeat(64)}`,
   kind: "existing-worktree",
   availability: "available",
-  head: { kind: "branch", name: "development", oid: "a".repeat(40) },
+  head: { kind: "branch", name: "main", oid: "a".repeat(40) },
   observedAt: now,
 };
 
@@ -130,6 +136,7 @@ function answerProduct(
             name: "Octant",
             type: "code",
             codeAccessPersistence: "current-session",
+            connectedRepository: { host: "github.com", owner: "acme", repository: "octant" },
             defaultPermissionMode: "full-access",
           },
         ],
@@ -166,6 +173,13 @@ function answerProduct(
     }
     if (withBoundProjects && method === "POST" && path === "/api/code/commands") {
       const command = body as Record<string, unknown>;
+      if (command.kind === "get-worktree-remote-facts") {
+        return Response.json({
+          kind: "worktree-remote-facts-retrieved",
+          projectId: codeProjectId,
+          facts: remoteFacts,
+        });
+      }
       if (command.kind === "prepare-code-project-checkout") {
         return Response.json({
           kind: "checkout-prepared",
@@ -803,14 +817,51 @@ describe("RemoteShellView", () => {
             checkoutId: preparedCheckout.id,
             title: "Fix the build",
             executionPolicy: "full-access",
+            // The repository the Project is connected to, the remote the host
+            // names as the repository's default, and the branch the checkout
+            // is on: what the host reads, with nothing assumed.
             deliveryTarget: expect.objectContaining({
-              branchIntent: "development",
+              branchIntent: "main",
+              remoteName: "upstream",
+              proposedBaseRepository: "acme/octant",
+              proposedBaseBranch: "main",
               outcomeKind: "local-implementation",
             }),
           }),
         }),
       ),
     );
+  });
+
+  it("refuses to start a Code thread when the host cannot say which remote the repository delivers to", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const known = remoteFacts;
+    remoteFacts = { remotes: ["upstream", "fork"] };
+    try {
+      const { bridge } = await readyBridge(seen, false, true, false, true);
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+      await user.click(await screen.findByRole("button", { name: "Code" }));
+      const code = await screen.findByRole("navigation", { name: "Code thread list" });
+      await user.type(
+        await within(code).findByRole("textbox", { name: "First message" }),
+        "Fix the build",
+      );
+      await user.click(within(code).getByRole("button", { name: "Start thread" }));
+
+      expect(
+        await within(code).findByText(/has more than one remote and none is its default/),
+      ).toBeInTheDocument();
+      expect(
+        seen.some(
+          (request) =>
+            (request.body as { kind?: string } | undefined)?.kind === "create-code-thread",
+        ),
+      ).toBe(false);
+    } finally {
+      remoteFacts = known;
+    }
   });
 
   it("offers a restricted session no way to start a Work or Code thread", async () => {

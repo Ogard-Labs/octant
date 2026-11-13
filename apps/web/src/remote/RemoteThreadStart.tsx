@@ -8,6 +8,7 @@ import { decodeWorkThreadId, type WorkThread } from "@octant/contracts/work-thre
 import {
   defaultPermissionModeFor,
   resolveDraftProviderSelection,
+  selectWorktreeRemote,
   suggestCodeDeliveryOutcome,
   threadAccessOf,
   type PickerGroup,
@@ -154,7 +155,8 @@ export interface RemoteCodeThreadStartProps {
  * steps a local window's start screen takes: prepare the Project's checkout,
  * create the thread on it at the Project's mode or the default (Full access
  * included; maintainer decision, 2026-11-12), then send the first message.
- * The delivery outcome is read from that message, as the composer reads it.
+ * The delivery outcome is read from that message, as the composer reads it;
+ * the repository, remote and base branch are the host's own reading.
  */
 export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
   const { controller } = props;
@@ -186,6 +188,29 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     if (prepared.checkout.head.kind !== "branch") {
       return "Create or select a branch before starting a Code thread.";
     }
+    // The delivery target is read by the host afterwards: the base branch for
+    // a pull-request draft's diff, the repository for GitHub reads. So each
+    // part is what the host says of this repository, and where the host
+    // cannot say, the thread is not started on an assumption.
+    const facts = await controller.execute({
+      kind: "get-worktree-remote-facts",
+      projectId: chosen.id,
+    });
+    if (facts?.kind !== "worktree-remote-facts-retrieved") {
+      return (
+        controller.lastExecuteError.current?.message ??
+        `The host could not read the remotes of ${chosen.name}.`
+      );
+    }
+    const { remotes, upstreamRemote, defaultRemote } = facts.facts;
+    const remote = selectWorktreeRemote({
+      remotes,
+      ...(upstreamRemote === undefined ? {} : { upstreamRemote }),
+      ...(defaultRemote === undefined ? {} : { defaultRemote }),
+    });
+    if (remote.status === "unavailable" && remote.reason === "ambiguous") {
+      return `${chosen.name} has more than one remote and none is its default. Start this thread at the host, where the remote can be chosen.`;
+    }
     const access = threadAccessOf(defaultPermissionModeFor({ project: chosen, settings }));
     const timestamp = new Date().toISOString();
     const created = await controller.execute({
@@ -205,9 +230,19 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
         permissionPersistence: settings.defaultPermissionPersistence,
         deliveryTarget: {
           branchIntent: prepared.checkout.head.name,
-          remoteName: "origin",
-          proposedBaseRepository: `local/${chosen.name}`,
-          proposedBaseBranch: "development",
+          // A repository with no remote still needs a name here; Git's own
+          // default is the one the host's own thread starts use, and a draft
+          // diff falls back to the local base branch when no such remote exists.
+          remoteName: remote.status === "selected" ? remote.remoteName : "origin",
+          // The connected GitHub repository, or the host's own id for a
+          // repository connected to none, which no GitHub read mistakes for
+          // an owner and a name.
+          proposedBaseRepository:
+            chosen.connectedRepository === undefined
+              ? String(prepared.checkout.repositoryId)
+              : `${chosen.connectedRepository.owner}/${chosen.connectedRepository.repository}`,
+          // A thread in the current checkout is based on the branch it is on.
+          proposedBaseBranch: prepared.checkout.head.name,
           outcomeKind: suggestCodeDeliveryOutcome(text),
           confirmedAt: timestamp,
         },
