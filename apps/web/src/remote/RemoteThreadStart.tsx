@@ -1,3 +1,4 @@
+import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { decodeCodeThread, type CodeThread } from "@octant/contracts/code";
@@ -144,6 +145,8 @@ export interface RemoteCodeThreadStartProps {
     ReturnType<typeof useCodeController>,
     "bootstrap" | "execute" | "lastExecuteError" | "startThreadTurn"
   >;
+  /** Reread at start: the default may have changed since this view loaded. */
+  readonly codeClient: Pick<CodeClient, "bootstrap">;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** False while the session is stale: the host would not hear the command. */
   readonly connected: boolean;
@@ -211,7 +214,24 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     if (remote.status === "unavailable" && remote.reason === "ambiguous") {
       return `${chosen.name} has more than one remote and none is its default. Start this thread at the host, where the remote can be chosen.`;
     }
-    const access = threadAccessOf(defaultPermissionModeFor({ project: chosen, settings }));
+    // The Default modes panel changes the host's default and each Project's
+    // mode through its own reads, and this view's snapshots are not refreshed
+    // by it; starting from them could open a thread at Full access the person
+    // just lowered, with its first turn sent at once. So both are reread here.
+    const [current, currentProjects] = await Promise.all([
+      props.codeClient.bootstrap(),
+      props.projectClient.bootstrap(),
+    ]);
+    const currentProject = currentProjects.active.find(
+      (project) => String(project.id) === String(chosen.id),
+    );
+    if (currentProject?.type !== "code" || currentProject.lifecycle !== "active") {
+      return `${chosen.name} is no longer an active Code Project on this host.`;
+    }
+    const currentSettings = current.settings;
+    const access = threadAccessOf(
+      defaultPermissionModeFor({ project: currentProject, settings: currentSettings }),
+    );
     const timestamp = new Date().toISOString();
     const created = await controller.execute({
       kind: "create-code-thread",
@@ -227,7 +247,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
         modelId: model.modelId,
         executionPolicy: access.executionPolicy,
         ...(access.autoApprove ? { autoApprove: true } : {}),
-        permissionPersistence: settings.defaultPermissionPersistence,
+        permissionPersistence: currentSettings.defaultPermissionPersistence,
         deliveryTarget: {
           branchIntent: prepared.checkout.head.name,
           // A repository with no remote still needs a name here; Git's own

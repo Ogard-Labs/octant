@@ -449,6 +449,7 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
       start={
         props.actsAsHostPerson ? (
           <RemoteCodeThreadStart
+            codeClient={props.clients.code}
             connected={props.connected}
             controller={controller}
             onCreated={(thread) => {
