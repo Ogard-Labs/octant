@@ -70,6 +70,16 @@ export type GhPullRequestActionContextResult =
     }>
   | Readonly<{ status: "unavailable"; reason: "disconnected" | "unauthenticated" | "unavailable" }>;
 
+export type GhPullRequestOwnCommentsResult =
+  | Readonly<{ status: "read"; bodies: ReadonlyArray<string> }>
+  | Readonly<{ status: "unavailable" }>;
+
+const OWN_COMMENTS_QUERY =
+  "query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){comments(last:100){nodes{author{login} body}}}}}";
+
+const OWN_REPLIES_QUERY =
+  "query($thread:ID!){viewer{login} node(id:$thread){... on PullRequestReviewThread{pullRequest{number repository{name owner{login}}} comments(last:100){nodes{author{login} body}}}}}";
+
 const THREAD_OWNER_QUERY =
   "query($thread:ID!){node(id:$thread){... on PullRequestReviewThread{pullRequest{number repository{name owner{login}}}}}}";
 
@@ -419,6 +429,60 @@ export class GhPullRequestActionPort {
   }
 
   /**
+   * The bodies of the newest comments the signed-in person wrote on the pull
+   * request, or in one of its review threads. A comment whose posting the host
+   * lost is looked for here before it is posted again. Only the last 100 are
+   * read, so a comment buried under more than that is reported absent.
+   */
+  async ownComments(
+    request: GhPullRequestIdentityRequest & { readonly threadNodeId?: string },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestOwnCommentsResult> {
+    if (repositoryOf(request) === undefined) return { status: "unavailable" };
+    const thread = request.threadNodeId;
+    if (thread !== undefined && !NODE_ID_PATTERN.test(thread)) return { status: "unavailable" };
+    const result = await this.#run(
+      thread === undefined
+        ? [
+            "api",
+            "graphql",
+            "-f",
+            `query=${OWN_COMMENTS_QUERY}`,
+            "-f",
+            `owner=${request.owner}`,
+            "-f",
+            `name=${request.name}`,
+            "-F",
+            `number=${request.number}`,
+          ]
+        : ["api", "graphql", "-f", `query=${OWN_REPLIES_QUERY}`, "-F", `thread=${thread}`],
+      undefined,
+      signal,
+    );
+    if (result === undefined || result.exitCode !== 0) return { status: "unavailable" };
+    const value = parseJson(result.stdout);
+    if (thread !== undefined && !threadBelongsTo(value, request)) return { status: "unavailable" };
+    const viewer = pathOf(value, ["data", "viewer", "login"]);
+    const nodes =
+      thread === undefined
+        ? pathOf(value, ["data", "repository", "pullRequest", "comments", "nodes"])
+        : pathOf(value, ["data", "node", "comments", "nodes"]);
+    if (typeof viewer !== "string" || viewer === "" || !Array.isArray(nodes))
+      return { status: "unavailable" };
+    return {
+      status: "read",
+      bodies: nodes.flatMap((node) =>
+        isRecord(node) &&
+        isRecord(node.author) &&
+        node.author.login === viewer &&
+        typeof node.body === "string"
+          ? [node.body]
+          : [],
+      ),
+    };
+  }
+
+  /**
    * Points a stacked pull request at the branch the stack lands on, so merging
    * its parent first does not strand it on the parent's branch.
    */
@@ -628,6 +692,7 @@ export function createGhPullRequestPort(options: {
       editLabels: (input, signal) => actions.editLabels(input, signal),
       comment: (input, signal) => actions.comment(input, signal),
       replyToReviewThread: (input, signal) => actions.replyToReviewThread(input, signal),
+      ownComments: (input, signal) => actions.ownComments(input, signal),
       retarget: (input, signal) => actions.retarget(input, signal),
       setState: (input, signal) => actions.setState(input, signal),
       summary: (input, signal) => actions.summary(input, signal),

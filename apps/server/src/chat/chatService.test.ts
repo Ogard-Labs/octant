@@ -1,4 +1,11 @@
 import { decodeChatThreadId } from "@octant/contracts";
+import { continueChatTurns } from "../wiring/continuation";
+import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
+import { threadRestartContinuationId } from "../harness/threadRestartContinuation";
+import {
+  createCodeRestartContinuationAttempts,
+  MAX_RESTART_CONTINUATIONS_CUT_OFF,
+} from "../code/codeRestartContinuation";
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { SideChatSidecarStore } from "./sideChatSidecarStore";
 import { createHash } from "node:crypto";
@@ -263,6 +270,8 @@ function openFixture(options?: {
     readonly modelId: string;
   }>;
   readonly chatEnabled?: { current: boolean };
+  /** How long a Stop on a shared-process provider waits for the runtime to confirm it. */
+  readonly stopConfirmationMs?: number;
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
   readonly moveHold?: (threadId: string) => boolean;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
@@ -714,6 +723,9 @@ function openFixture(options?: {
     recordExternalContentIngestion:
       options?.recordExternalContentIngestion ?? ((input) => ingestions.record(input)),
     ...(options?.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
+    ...(options?.stopConfirmationMs === undefined
+      ? {}
+      : { stopConfirmationMs: options.stopConfirmationMs }),
     ...(options?.awaitsHarnessApproval === undefined
       ? {}
       : { awaitsHarnessApproval: options.awaitsHarnessApproval }),
@@ -4508,55 +4520,135 @@ describe("ChatService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
-  it("refuses to force-stop a turn whose provider shares one process and still stops it at once", async () => {
-    const queue = Effect.runSync(Queue.unbounded<never>());
-    let acquired = false;
-    const driver = {
-      acquire: () =>
-        Effect.sync(() => {
-          acquired = true;
-        }).pipe(
-          Effect.as({
-            subscribe: Effect.succeed(Stream.fromQueue(queue)),
+  it("settles a Stop promptly while the provider floods the turn with deltas", async () => {
+    const runs = 10;
+    const latencies: number[] = [];
+    for (let run = 0; run < runs; run += 1) {
+      let streamed = 0;
+      let sessionId = "";
+      const driver = {
+        acquire: () =>
+          Effect.succeed({
+            // A provider streaming as fast as it can: every pull is answered at once.
+            subscribe: Effect.succeed(
+              Stream.repeatEffect(
+                Effect.sync(() => {
+                  streamed += 1;
+                  return { kind: "text-delta", sessionId, text: "x" } as never;
+                }),
+              ),
+            ),
             start: (input: { readonly sessionId: string }) =>
-              Effect.succeed({ sessionId: input.sessionId }),
-            send: () => Effect.never,
-            interrupt: () => Effect.never,
+              Effect.sync(() => {
+                sessionId = input.sessionId;
+                return { sessionId: input.sessionId };
+              }),
+            send: () => Effect.void,
+            interrupt: () => Effect.void,
             stop: () => Effect.void,
+            // Owning its process keeps the attempt live until the runner settles it.
+            forceStop: () => Effect.void,
             answerApproval: () => Effect.void,
             answerUserInput: () => Effect.void,
             answerTool: () => Effect.void,
           }),
-        ),
-    } as unknown as ProviderDriver;
-    const { service } = openFixture({ driver });
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Shared process",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    void service.execute({
-      kind: "send-chat-turn",
-      threadId: created.thread.id,
-      expectedVersion: created.thread.version,
-      prompt: "Hang",
-    });
-    await until(() => acquired);
-    const running = service.read(created.thread.id);
-    const command = {
-      threadId: created.thread.id,
-      expectedVersion: running.thread.version,
-      turnId: running.turns[0]!.id,
-      attemptId: running.turns[0]!.attempts[0]!.id,
-    };
+      } as unknown as ProviderDriver;
+      // A clock that moves, so streamed deltas are journaled in timed batches
+      // as they are on a real host rather than all at once when the turn ends.
+      const { service } = openFixture({ driver, clock: () => new Date().toISOString() });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Flooded turn",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      void service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Stream",
+      });
+      await until(() => streamed > 200, { intervalMs: 1 });
+      const running = service.read(created.thread.id);
+      const stopIssued = performance.now();
+      await service.execute({
+        kind: "interrupt-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: running.thread.version,
+        turnId: running.turns[0]!.id,
+        attemptId: running.turns[0]!.attempts[0]!.id,
+      });
+      await until(
+        () => service.read(created.thread.id).turns[0]!.attempts[0]!.outcome === "cancelled",
+        { intervalMs: 1 },
+      );
+      latencies.push(performance.now() - stopIssued);
+    }
+    latencies.sort((left, right) => left - right);
+    const p95 = latencies[Math.ceil(runs * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
+    expect(p95).toBeLessThan(1_000);
+  }, 30_000);
 
-    await expect(
-      service.execute({ kind: "force-stop-chat-turn", ...command }),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    await service.execute({ kind: "interrupt-chat-turn", ...command });
-    expect(service.read(created.thread.id).turns[0]!.attempts[0]!.outcome).toBe("cancelled");
-  });
+  it.each([
+    ["confirms the stop", "cancelled", undefined],
+    ["never confirms the stop", "interrupted", "stop-unconfirmed"],
+  ] as const)(
+    "on a provider that shares one process, refuses force stop and shows Cancelled only when the runtime %s",
+    async (_case, settled, failureCode) => {
+      const queue = Effect.runSync(Queue.unbounded<never>());
+      let acquired = false;
+      const driver = {
+        acquire: () =>
+          Effect.sync(() => {
+            acquired = true;
+          }).pipe(
+            Effect.as({
+              subscribe: Effect.succeed(Stream.fromQueue(queue)),
+              start: (input: { readonly sessionId: string }) =>
+                Effect.succeed({ sessionId: input.sessionId }),
+              send: () => Effect.never,
+              interrupt: () => (settled === "cancelled" ? Effect.void : Effect.never),
+              stop: () => Effect.void,
+              answerApproval: () => Effect.void,
+              answerUserInput: () => Effect.void,
+              answerTool: () => Effect.void,
+            }),
+          ),
+      } as unknown as ProviderDriver;
+      const { service } = openFixture({ driver, stopConfirmationMs: 50 });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Shared process",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      void service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Hang",
+      });
+      await until(() => acquired);
+      const running = service.read(created.thread.id);
+      const command = {
+        threadId: created.thread.id,
+        expectedVersion: running.thread.version,
+        turnId: running.turns[0]!.id,
+        attemptId: running.turns[0]!.attempts[0]!.id,
+      };
+      const attempt = () => service.read(created.thread.id).turns[0]!.attempts[0]!;
+
+      await expect(
+        service.execute({ kind: "force-stop-chat-turn", ...command }),
+      ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+      await service.execute({ kind: "interrupt-chat-turn", ...command });
+      // Stop alone is not proof the runtime stopped, so the turn is not yet
+      // recorded as cancelled.
+      if (settled === "interrupted") expect(attempt().outcome).toBe("queued");
+      await until(() => attempt().outcome === settled);
+      expect(attempt().failure?.code).toBe(failureCode);
+    },
+  );
 
   it("rejects a queued stale send before it can journal an orphaned context plan", async () => {
     const probeResult = probeFixture();
@@ -9586,7 +9678,7 @@ describe("ChatService provider session recovery", () => {
       throw new Error("Expected an active streaming attempt.");
     }
 
-    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toMatchObject({
       reaped: 0,
       resumable: 0,
     });
@@ -9670,7 +9762,7 @@ describe("ChatService provider session recovery", () => {
     });
     expect(persistence.readChatThreadView(thread.id)?.turns).toHaveLength(1);
 
-    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toMatchObject({
       reaped: 1,
       resumable: 1,
     });
@@ -9764,7 +9856,7 @@ describe("ChatService provider session recovery", () => {
       ],
     });
 
-    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toMatchObject({
       reaped: 2,
       resumable: 1,
     });
@@ -9867,7 +9959,7 @@ describe("ChatService provider session recovery", () => {
       return originalAppend(input);
     };
 
-    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toMatchObject({
       reaped: 1,
       resumable: 0,
     });
@@ -9913,7 +10005,7 @@ describe("ChatService provider session recovery", () => {
       return originalAppend(input);
     };
 
-    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toMatchObject({
       reaped: 1,
       resumable: 0,
     });
@@ -9967,7 +10059,7 @@ describe("ChatService provider session recovery", () => {
       return originalAppend(input);
     };
 
-    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toMatchObject({
       reaped: 1,
       resumable: 0,
     });
@@ -12307,4 +12399,284 @@ it("revalidates the exact returned reply before Chat resume instead of trusting 
     }),
   );
   expect(fakeDriver.sentTurns).toHaveLength(before);
+});
+
+describe("continuing a Chat answer a restart cut off", () => {
+  type Fixture = ReturnType<typeof openFixture>;
+
+  /**
+   * Leaves on the journal an answer the previous host was giving when it
+   * stopped: streaming, with nothing in this process carrying it.
+   */
+  async function cutOffAnswer(
+    fixture: Fixture,
+    options: {
+      readonly outcome?: "streaming" | "cancelled";
+      readonly resumeCursor?: boolean;
+      readonly submissionId?: string;
+    } = {},
+  ) {
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Answer cut off by a restart",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const thread = created.thread;
+    const turnId = decodeChatTurnId(crypto.randomUUID());
+    const contentId = decodeChatContentId(crypto.randomUUID());
+    const attempt = decodeChatAttempt({
+      id: decodeChatAttemptId(crypto.randomUUID()),
+      turnId,
+      threadId: thread.id,
+      providerInstanceId: thread.providerInstanceId,
+      providerSessionId: decodeProviderSessionId(crypto.randomUUID()),
+      modelId: thread.modelId,
+      contextManifestId: decodeContextManifestId(crypto.randomUUID()),
+      outcome: options.outcome ?? "streaming",
+      responseRefs: [],
+      citationIds: [],
+      ...(options.resumeCursor === false
+        ? {}
+        : { resumeCursor: { driverKind: "openai-compatible", value: "resume-me" } }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    const body = "Summarize the release notes";
+    const sha = createHash("sha256").update(body).digest("hex");
+    fixture.persistence.connection
+      .prepare(
+        `INSERT INTO chat_content_store (
+          content_id, thread_id, content_role, body_text, digest, byte_length
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(String(contentId), String(thread.id), "user", body, sha, Buffer.byteLength(body));
+    fixture.persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: thread.version,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: "chat.turn-created@1",
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor: { kind: "system", actorId: ids.actor },
+          occurredAt: now,
+          payload: {
+            kind: "turn-created",
+            turn: {
+              id: turnId,
+              threadId: thread.id,
+              sequence: 1,
+              ...(options.submissionId === undefined ? {} : { submissionId: options.submissionId }),
+              userMessageRef: {
+                contentId,
+                digest: decodeContentSha256(sha),
+                byteLength: Buffer.byteLength(body),
+              },
+              attachmentIds: [],
+              attempts: [attempt],
+              createdAt: now,
+            },
+          },
+        },
+      ],
+    });
+    return thread;
+  }
+
+  /** A start of the host: interrupting what it does not carry, then continuing it. */
+  async function restart(
+    fixture: Fixture,
+    overrides: Partial<Parameters<typeof continueChatTurns>[0]> = {},
+  ) {
+    const { cutOff } = await fixture.service.reapStaleProviderSessions({ staleAfterMs: 0 });
+    const releaseQueue = vi.fn(async (_threadId: string) => {});
+    const recovery = await continueChatTurns({
+      cutOff,
+      quitByPerson: false,
+      chat: fixture.service,
+      enabled: () => true,
+      connection: fixture.persistence.connection,
+      liftHarnessRecovery: async () => ({ kind: "none" as const }),
+      releaseQueue,
+      ...overrides,
+    });
+    return { cutOff, recovery, releaseQueue };
+  }
+
+  const continuationTurns = (fixture: Fixture) =>
+    fixture.fakeDriver.sentTurns.filter((turn) => turn.prompt === RESTART_CONTINUATION_PROMPT);
+
+  it("continues a cut-off answer exactly once, and a later start continues nothing", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+
+    const first = await restart(fixture);
+    expect(first.recovery).toEqual({
+      continued: [{ mode: "chat", threadId: String(thread.id) }],
+      held: [],
+    });
+    expect(first.releaseQueue).toHaveBeenCalledExactlyOnceWith(String(thread.id));
+    await until(
+      () => fixture.service.read(thread.id).turns[1]?.attempts[0]?.outcome === "completed",
+    );
+    const turns = fixture.service.read(thread.id).turns;
+    expect(turns).toHaveLength(2);
+    expect(turns[0]?.attempts[0]?.outcome).toBe("interrupted");
+    expect(String(turns[1]?.submissionId)).toBe(
+      threadRestartContinuationId("chat", {
+        threadId: String(thread.id),
+        turnId: String(first.cutOff[0]?.attemptId),
+      }),
+    );
+    expect(continuationTurns(fixture)).toHaveLength(1);
+
+    const second = await restart(fixture);
+    expect(second.cutOff).toEqual([]);
+    expect(second.recovery).toEqual({ continued: [], held: [] });
+    // The first start's recovery run again lands on the turn it already made.
+    await continueChatTurns({
+      cutOff: first.cutOff,
+      quitByPerson: false,
+      chat: fixture.service,
+      enabled: () => true,
+      connection: fixture.persistence.connection,
+      liftHarnessRecovery: async () => ({ kind: "none" }),
+      releaseQueue: async () => {},
+    });
+    expect(fixture.service.read(thread.id).turns).toHaveLength(2);
+    expect(continuationTurns(fixture)).toHaveLength(1);
+  });
+
+  it("holds a cut-off answer while Continue after restart is off in Settings", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+
+    const { recovery, releaseQueue } = await restart(fixture, { enabled: () => false });
+
+    expect(recovery.held).toMatchObject([
+      { mode: "chat", threadId: String(thread.id), reason: "turned-off" },
+    ]);
+    expect(recovery.continued).toEqual([]);
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(fixture.service.read(thread.id).turns).toHaveLength(1);
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
+
+  it("holds a cut-off answer for its person after a person quit Octant, and sends nothing", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+
+    const { recovery, releaseQueue } = await restart(fixture, { quitByPerson: true });
+
+    expect(recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "chat",
+          threadId: String(thread.id),
+          reason: "quit",
+          detail: "Octant was quit while this thread was working, so it waits for you.",
+        },
+      ],
+    });
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(fixture.service.read(thread.id).turns).toHaveLength(1);
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
+
+  it("lifts the thread's harness session out of restart recovery before continuing it", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+    const order: string[] = [];
+    const liftHarnessRecovery = vi.fn(async (threadId: string) => {
+      order.push(`lift:${threadId}`);
+      return { kind: "lifted" as const };
+    });
+    const releaseQueue = vi.fn(async (threadId: string) => {
+      order.push(`release:${threadId}`);
+    });
+
+    const { recovery } = await restart(fixture, { liftHarnessRecovery, releaseQueue });
+
+    expect(recovery.continued).toEqual([{ mode: "chat", threadId: String(thread.id) }]);
+    expect(order).toEqual([`lift:${String(thread.id)}`, `release:${String(thread.id)}`]);
+  });
+
+  it("holds a cut-off answer whose harness session a blocker keeps in restart recovery", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+
+    const { recovery, releaseQueue } = await restart(fixture, {
+      liftHarnessRecovery: async () => ({
+        kind: "held",
+        detail: "Not ready to resume: the thread is paused.",
+      }),
+    });
+
+    expect(recovery.held).toMatchObject([
+      {
+        mode: "chat",
+        threadId: String(thread.id),
+        reason: "refused",
+        detail: "Not ready to resume: the thread is paused.",
+      },
+    ]);
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
+
+  it("holds a cut-off answer on a thread whose own Continue after restart is off", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+    await fixture.service.execute({
+      kind: "set-chat-thread-restart-continuation",
+      threadId: thread.id,
+      expectedVersion: fixture.service.read(thread.id).thread.version,
+      continueAfterRestart: false,
+    });
+
+    const { recovery } = await restart(fixture);
+
+    expect(recovery.held).toMatchObject([{ threadId: String(thread.id), reason: "opted-out" }]);
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
+
+  it("leaves an answer the person cancelled before the restart as it was", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture, { outcome: "cancelled" });
+
+    const { cutOff, recovery } = await restart(fixture);
+
+    expect(cutOff).toEqual([]);
+    expect(recovery).toEqual({ continued: [], held: [] });
+    expect(fixture.service.read(thread.id).turns[0]?.attempts[0]?.outcome).toBe("cancelled");
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
+
+  it("holds a thread whose own continuations a restart has cut off twice", async () => {
+    const fixture = openFixture();
+    const chain = crypto.randomUUID();
+    const thread = await cutOffAnswer(fixture, { submissionId: chain });
+    createCodeRestartContinuationAttempts(fixture.persistence.connection).record(
+      String(thread.id),
+      { operationId: chain, attempts: MAX_RESTART_CONTINUATIONS_CUT_OFF },
+    );
+
+    const { recovery } = await restart(fixture);
+
+    expect(recovery.held).toMatchObject([{ threadId: String(thread.id), reason: "crash-loop" }]);
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
+
+  it("holds a cut-off answer whose provider cannot resume the session it ran in", async () => {
+    const fixture = openFixture({ nativeConversation: true });
+    const thread = await cutOffAnswer(fixture, { resumeCursor: false });
+
+    const { recovery } = await restart(fixture);
+
+    expect(recovery.held).toMatchObject([{ threadId: String(thread.id), reason: "cannot-resume" }]);
+    expect(continuationTurns(fixture)).toHaveLength(0);
+  });
 });

@@ -418,6 +418,28 @@ describe("native harness tools", () => {
     expect(decisions).toEqual(["write:project-file-writes", "write:project-file-writes"]);
   });
 
+  it.each([
+    ["switched to Plan", { executionPolicy: "plan" }, "plan-mode-denied"],
+    ["took in outside content", { externalContentIngested: true }, "approval-stale"],
+  ] as const)(
+    "does not write when the thread was %s while the approval waited",
+    async (_change, change, error) => {
+      const facts: Partial<ToolCallLiveFacts> = {
+        executionPolicy: "approval-gated",
+        approvalSatisfied: false,
+      };
+      const { root, tools } = await fixture(facts, {
+        approvals: async () => {
+          Object.assign(facts, change);
+          return "approved";
+        },
+      });
+      const outcome = await call(tools, "write", { path: "b.ts", content: "x" });
+      expect(outcome).toMatchObject({ isError: true, result: { error } });
+      await expect(readFile(join(root, "b.ts"), "utf8")).rejects.toThrow();
+    },
+  );
+
   it("asks once for an edit of several files, naming each, and applies them all", async () => {
     const summaries: string[] = [];
     const { root, tools } = await fixture(

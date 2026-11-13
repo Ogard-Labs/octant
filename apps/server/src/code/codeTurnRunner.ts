@@ -45,8 +45,12 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
+  makeEventLoopShare,
   makeIdleTimeout,
+  makeStreamedOutputBudget,
   makeTurnTextParagraphs,
+  MAX_TURN_STREAMED_OUTPUT_BYTES,
+  STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
 
 export const MAX_CODE_TURN_EVENT_BYTES = 64 * 1024;
@@ -273,21 +277,26 @@ export interface CodeTurnRunnerInput {
 export interface CodeTurnRunnerOptions {
   /** Maximum discrete (non-delta) provider events per turn. */
   readonly maxEvents?: number;
+  /** Most streamed text and reasoning bytes per turn. */
+  readonly maxStreamedOutputBytes?: number;
   /** Inactivity window after which a silent turn is interrupted. */
   readonly timeoutMs?: number;
 }
 
 export class CodeTurnRunner {
   readonly #maxEvents: number;
+  readonly #maxStreamedOutputBytes: number;
   readonly #timeoutMs: number;
 
   constructor(options: CodeTurnRunnerOptions = {}) {
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+    this.#maxStreamedOutputBytes = options.maxStreamedOutputBytes ?? MAX_TURN_STREAMED_OUTPUT_BYTES;
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
 
   run(input: CodeTurnRunnerInput): Effect.Effect<void, CodeTurnFailure, Scope.Scope> {
     const maxEvents = this.#maxEvents;
+    const streamedOutput = makeStreamedOutputBudget(this.#maxStreamedOutputBytes);
     const timeoutMs = this.#timeoutMs;
 
     return Effect.gen(function* () {
@@ -447,6 +456,7 @@ export class CodeTurnRunner {
       }
 
       const idle = yield* makeIdleTimeout(timeoutMs);
+      const shareEventLoop = makeEventLoopShare();
       const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
         connection,
@@ -461,6 +471,7 @@ export class CodeTurnRunner {
             Stream.takeUntil(isTerminalProviderEvent),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
+                yield* shareEventLoop;
                 yield* idle.touch;
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
@@ -469,8 +480,8 @@ export class CodeTurnRunner {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (event.kind === "outside-content-result") {
                   // The Watcher reads what the adapter saw of the page. Like
-                  // the read it follows, it runs before the budget or a
-                  // cancel is looked at.
+                  // the read it follows, it runs before the budget is looked
+                  // at.
                   if (
                     outsideContentMarks.watch(String(input.thread.id), event).status === "refused"
                   ) {
@@ -482,8 +493,8 @@ export class CodeTurnRunner {
                   return;
                 }
                 if (event.kind === "outside-content-read") {
-                  // Marked before the budget or a cancel is looked at: what
-                  // the runtime read reached its model either way. The tool
+                  // Marked before the budget is looked at, and after a cancel
+                  // too: what the runtime read reached its model either way. The tool
                   // start before it is the transcript's record of the call.
                   const marked = outsideContentMarks.mark(String(input.thread.id), event);
                   if (marked.status === "refused") {
@@ -502,7 +513,7 @@ export class CodeTurnRunner {
                       .pipe(Effect.catchAll(() => Effect.void));
                     return yield* fail("interrupted", RUNTIME_OUTSIDE_CONTENT_AUTO_REVIEW_STOP);
                   }
-                  if (input.signal?.aborted !== true) return;
+                  return;
                 }
                 if (event.kind === "tool-start" && event.argument !== undefined) {
                   input.forgeChanges?.observe({
@@ -517,11 +528,23 @@ export class CodeTurnRunner {
                     .pipe(Effect.catchAll(() => Effect.void));
                   return yield* fail("failed", "Code turn exceeded the bounded event budget.");
                 }
-                if (input.signal?.aborted) {
+                if (
+                  (event.kind === "text-delta" || event.kind === "reasoning-delta") &&
+                  streamedOutput(event) === "exceeded"
+                ) {
+                  // What was journaled stays, and the transcript ends in words
+                  // that say Octant stopped keeping the output.
+                  yield* input.persistEvent(
+                    yield* normalizeProviderEvent(
+                      input,
+                      { ...event, kind: "text-delta", text: STREAMED_OUTPUT_TRUNCATION_MARKER },
+                      compactions.compacted,
+                    ),
+                  );
                   yield* connection
                     .interrupt(input.sessionId)
                     .pipe(Effect.catchAll(() => Effect.void));
-                  return yield* fail("interrupted", "Code turn was cancelled.");
+                  return yield* fail("failed", "Code turn exceeded its streamed output budget.");
                 }
 
                 const boundedEvent = boundProviderEventInput(event);
@@ -756,6 +779,11 @@ export class CodeTurnRunner {
           isCodeTurnFailure(error) ? Effect.fail(error) : failForProvider(error, fail),
         ),
       );
+      // A cancel asks the runtime to stop once, here, and the turn ends when
+      // the runtime answers. Until then what the runtime sends is still this
+      // turn's, and its own terminal event settles it. Ending the turn on the
+      // next event instead asked again and waited again on every event, so a
+      // runtime that never answered held its later completion out of reach.
       const waitForAbort =
         input.signal === undefined
           ? Effect.never

@@ -548,7 +548,9 @@ function cardAction(item: LibraryItem): string | undefined {
   if (item.state !== "available") return undefined;
   if (item.localSetupId === "paper") return "Set up…";
   if (item.kind === "connector")
-    return item.connectorAuth?.kind === "key" ? "Add key…" : "Connect…";
+    return item.connectorAuth?.kind === "key" || item.connectorAuth?.kind === "command"
+      ? "Add key…"
+      : "Connect…";
   return "Review";
 }
 
@@ -927,6 +929,9 @@ function LibraryDetail(props: LibraryDetailProps) {
                   registration: {
                     guideUrl: item.connectorAuth.setupGuide,
                     requestedScopes: item.connectorAuth.requestedScopes ?? [],
+                    ...(item.connectorAuth.setupSteps === undefined
+                      ? {}
+                      : { setupSteps: item.connectorAuth.setupSteps }),
                     ...(item.connectorAuth.permissionNotice === undefined
                       ? {}
                       : { permissionNotice: item.connectorAuth.permissionNotice }),
@@ -940,7 +945,9 @@ function LibraryDetail(props: LibraryDetailProps) {
           />
         </div>
       ) : null}
-      {connector && item.connectorAuth?.kind === "key" && props.canConnect ? (
+      {connector &&
+      (item.connectorAuth?.kind === "key" || item.connectorAuth?.kind === "command") &&
+      props.canConnect ? (
         <form
           aria-label={`${item.name} key`}
           className="library-detail__key"
@@ -960,13 +967,35 @@ function LibraryDetail(props: LibraryDetailProps) {
             {props.connecting ? "Connecting…" : "Connect"}
           </OctantButton>
           <span className="oct-meta">
-            Create one at{" "}
-            <a href={item.connectorAuth.keyPage} rel="noreferrer" target="_blank">
-              {new URL(item.connectorAuth.keyPage).host}
+            {item.connectorAuth.kind === "command"
+              ? `Runs ${item.connectorAuth.package.name}@${item.connectorAuth.package.version} (checked against ${item.connectorAuth.package.integrity.slice(0, 19)}…) on this computer. Create the token at `
+              : "Create one at "}
+            <a
+              href={
+                item.connectorAuth.kind === "command"
+                  ? item.connectorAuth.secret.keyPage
+                  : item.connectorAuth.keyPage
+              }
+              rel="noreferrer"
+              target="_blank"
+            >
+              {
+                new URL(
+                  item.connectorAuth.kind === "command"
+                    ? item.connectorAuth.secret.keyPage
+                    : item.connectorAuth.keyPage,
+                ).host
+              }
             </a>
             . Kept in {thisComputerName(hostPlatform)}&apos;s credential store.
           </span>
         </form>
+      ) : null}
+      {connector &&
+      item.connectorAuth?.kind === "sign-in" &&
+      item.connectorAuth.clientSetup !== "registered" &&
+      item.connectorAuth.permissionNotice !== undefined ? (
+        <p className="oct-meta">{item.connectorAuth.permissionNotice}</p>
       ) : null}
       <footer className="library-detail__actions">
         {localSetup && available ? (
@@ -978,7 +1007,9 @@ function LibraryDetail(props: LibraryDetailProps) {
             {props.connecting ? "Adding…" : "Add local server"}
           </OctantButton>
         ) : null}
-        {connector && item.connectorAuth?.kind !== "key" ? (
+        {connector &&
+        item.connectorAuth?.kind !== "key" &&
+        item.connectorAuth?.kind !== "command" ? (
           <OctantButton
             disabled={!props.canConnect || props.connecting}
             onClick={() => void props.onConnect()}

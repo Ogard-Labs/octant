@@ -6,6 +6,7 @@ import {
   connectorById,
   connectorPackageName,
   PAPER_LOCAL_SETUP,
+  type ConnectorAuth,
 } from "@octant/domain";
 import type { UserAddedMcpServerRequest } from "@octant/contracts/extension-rpc";
 import type { GithubMcpPermissionProfile } from "@octant/contracts/host-oauth";
@@ -18,6 +19,7 @@ import {
   type AgentPluginsMcpLaunchSpec,
 } from "@octant/plugin-host/agent-plugins";
 import type { ProviderCredentialStore } from "../providers/credentialBrokerClient";
+import type { InstallConnectorPackage } from "./connectorPackageInstall";
 import type { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
 
 /**
@@ -56,6 +58,8 @@ export interface UserAddedMcpServerStoreOptions {
    */
   readonly linkedSecrets?: LinkedSecretPointers;
   readonly uuid?: () => string;
+  /** Installs a catalog command connector's pinned package; absent on a host that cannot. */
+  readonly installPackage?: InstallConnectorPackage;
 }
 
 export interface LinkedSecretPointers {
@@ -101,6 +105,7 @@ export class UserAddedMcpServerStore {
   readonly #secrets: ProviderCredentialStore | undefined;
   readonly #linkedSecrets: LinkedSecretPointers | undefined;
   readonly #uuid: () => string;
+  readonly #installPackage: InstallConnectorPackage | undefined;
 
   constructor(options: UserAddedMcpServerStoreOptions) {
     this.#directory = options.directory;
@@ -108,12 +113,14 @@ export class UserAddedMcpServerStore {
     this.#secrets = options.secrets;
     this.#linkedSecrets = options.linkedSecrets;
     this.#uuid = options.uuid ?? (() => crypto.randomUUID());
+    this.#installPackage = options.installPackage;
   }
 
   async add(request: UserAddedMcpServerRequest): Promise<{ source: UserAddedMcpServerSource }> {
     if (request.localSetupId !== undefined && request.connectorId !== undefined) {
       throw new UserAddedMcpServerError("invalid", "Choose a local setup or a hosted connector.");
     }
+    const command = commandConnector(request);
     const slug = localSetupSlug(request) ?? connectorSlug(request) ?? packageSlug(request.name);
     if (request.localSetupId === undefined && slug === PAPER_LOCAL_SETUP.packageName) {
       throw new UserAddedMcpServerError(
@@ -203,16 +210,45 @@ export class UserAddedMcpServerStore {
         storedSecretIds.push(secretId);
         resolvedValues[value.name] = `\${OCTANT_SECRET:${secretId}}`;
       }
+      await mkdir(folder, { recursive: true, mode: 0o700 });
+      if (command !== undefined) {
+        if (this.#installPackage === undefined) {
+          throw new UserAddedMcpServerError(
+            "unavailable",
+            "This host cannot install connector programs.",
+          );
+        }
+        try {
+          await this.#installPackage({ package: command.package, folder });
+        } catch (error) {
+          throw new UserAddedMcpServerError(
+            "failed",
+            error instanceof Error ? error.message : "The connector could not be installed.",
+          );
+        }
+        if (command.stateFileEnv !== undefined) {
+          resolvedValues[command.stateFileEnv] = "${PLUGIN_DATA}/tokens.json";
+        }
+        for (const fixed of command.env) resolvedValues[fixed.name] = fixed.value;
+      }
       const server =
-        request.server.type === "stdio"
+        command !== undefined
           ? {
               type: "stdio",
-              command: request.server.command,
-              args: request.server.args,
+              command: "node",
+              args: [
+                `\${PLUGIN_ROOT}/node_modules/${command.package.name}/${command.package.entry}`,
+              ],
               env: resolvedValues,
             }
-          : { type: "streamable-http", url: request.server.url, headers: resolvedValues };
-      await mkdir(folder, { recursive: true, mode: 0o700 });
+          : request.server.type === "stdio"
+            ? {
+                type: "stdio",
+                command: request.server.command,
+                args: request.server.args,
+                env: resolvedValues,
+              }
+            : { type: "streamable-http", url: request.server.url, headers: resolvedValues };
       await writeFile(
         join(folder, "plugin.json"),
         `${JSON.stringify(
@@ -267,6 +303,50 @@ export class UserAddedMcpServerStore {
    */
   owns(sourceRef: string): boolean {
     return this.#registry.get(sourceRef) !== undefined;
+  }
+
+  /**
+   * The hosts a package may reach, from the bundled catalog entry whose
+   * reserved `connector-<id>` folder this host wrote. The package never names
+   * its own: a third-party package or a hand-added server cannot hold that
+   * folder name, so it gets none.
+   */
+  egressHosts(
+    sourceRef: string,
+    lookup: (id: string) => { readonly egress?: ReadonlyArray<string> } | undefined = connectorById,
+  ): ReadonlyArray<string> | undefined {
+    const registered = this.#registry.get(sourceRef);
+    if (registered === undefined) return undefined;
+    const name = basename(registered.absolutePath);
+    if (!name.startsWith(CONNECTOR_PACKAGE_PREFIX)) return undefined;
+    const hosts = lookup(name.slice(CONNECTOR_PACKAGE_PREFIX.length))?.egress;
+    return hosts === undefined || hosts.length === 0 ? undefined : hosts;
+  }
+
+  /** Whether this vouched connector folder keeps a login that only one process may use. */
+  exclusive(
+    sourceRef: string,
+    lookup: (id: string) => { readonly auth: ConnectorAuth } | undefined = connectorById,
+  ): boolean {
+    const registered = this.#registry.get(sourceRef);
+    if (registered === undefined) return false;
+    const name = basename(registered.absolutePath);
+    if (!name.startsWith(CONNECTOR_PACKAGE_PREFIX)) return false;
+    const auth = lookup(name.slice(CONNECTOR_PACKAGE_PREFIX.length))?.auth;
+    return auth?.kind === "command" && auth.stateFileEnv !== undefined;
+  }
+
+  /** Tools the catalog marks ask-every-call for this vouched connector folder. */
+  askEveryCall(
+    sourceRef: string,
+    lookup: (id: string) => { readonly auth: ConnectorAuth } | undefined = connectorById,
+  ): ReadonlyArray<string> | undefined {
+    const registered = this.#registry.get(sourceRef);
+    if (registered === undefined) return undefined;
+    const name = basename(registered.absolutePath);
+    if (!name.startsWith(CONNECTOR_PACKAGE_PREFIX)) return undefined;
+    const auth = lookup(name.slice(CONNECTOR_PACKAGE_PREFIX.length))?.auth;
+    return auth?.kind === "command" ? auth.askEveryCall : undefined;
   }
 
   /** Verify the generated source's actual configuration, including packages added before this setup existed. */
@@ -504,6 +584,7 @@ function connectorSlug(request: UserAddedMcpServerRequest): string | undefined {
   if (entry === undefined) {
     throw new UserAddedMcpServerError("invalid", "This connector is not in the catalog.");
   }
+  if (entry.auth.kind === "command") return connectorPackageName(entry.id);
   if (request.server.type !== "streamable-http" || request.server.url !== entry.url) {
     throw new UserAddedMcpServerError("invalid", "This address is not the connector's own.");
   }
@@ -517,6 +598,37 @@ function connectorSlug(request: UserAddedMcpServerRequest): string | undefined {
       "This connector uses registered client setup, not inline headers.",
     );
   return connectorPackageName(entry.id);
+}
+
+type CommandConnector = Extract<ConnectorAuth, { readonly kind: "command" }>;
+
+/**
+ * The catalog's own command for a command connector, after checking the
+ * request carries nothing else. The host rebuilds the launch from the catalog,
+ * so the request may only say which entry and give the one secret.
+ */
+function commandConnector(request: UserAddedMcpServerRequest): CommandConnector | undefined {
+  if (request.connectorId === undefined) return undefined;
+  const auth = connectorById(request.connectorId)?.auth;
+  if (auth?.kind !== "command") return undefined;
+  if (
+    request.server.type !== "stdio" ||
+    request.server.command !== "node" ||
+    request.server.args.length !== 0
+  ) {
+    throw new UserAddedMcpServerError(
+      "invalid",
+      "This connector's program is set by Octant, not by the request.",
+    );
+  }
+  const [only, ...others] = request.server.env;
+  if (only === undefined || others.length !== 0 || only.name !== auth.secret.name || !only.secret) {
+    throw new UserAddedMcpServerError(
+      "invalid",
+      `This connector takes only its ${auth.secret.label.toLowerCase()}.`,
+    );
+  }
+  return auth;
 }
 
 function localSetupSlug(request: UserAddedMcpServerRequest): string | undefined {

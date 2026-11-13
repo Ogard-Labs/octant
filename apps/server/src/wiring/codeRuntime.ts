@@ -30,6 +30,7 @@ import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthorit
 import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { CodeService, CodeServiceError } from "../code/codeService";
 import {
+  beginUnconfirmedStepSettlement,
   type CodeOperationRuntime,
   type CodeOperationRuntimeOptions,
   createCodeOperationRuntime,
@@ -773,6 +774,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           readCodeThread: persistence.readCodeThread,
           readCodeCheckout: persistence.readCodeCheckout,
           readCodeRuntimeWorkAggregateVersion: persistence.readCodeRuntimeWorkAggregateVersion,
+          readCodeRuntimeWorks: persistence.readCodeRuntimeWorks,
+          readCodeThreadsWithUnconfirmedRemoteSteps:
+            persistence.readCodeThreadsWithUnconfirmedRemoteSteps,
           readReviewFinding: persistence.readCodeReviewFinding,
           readReviewFindings: persistence.readCodeReviewFindings,
         },
@@ -790,13 +794,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
-        resolveCheckoutRoot: async (windowId, thread, checkout) => {
+        resolveCheckoutRoot: async (windowId, thread, checkout, signal) => {
           // A remote root names a folder on another machine, never one here:
           // a server Project's is named, never resolved, and only the turn's
           // server tools act on it. Any other remote root resolves nothing.
           if (checkout.kind === "remote-root")
             return serverCodeCheckoutRoot(serverProjectStore, thread);
-          const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
+          const root = await roots.resolve(windowId, thread, checkout, rootProbePath, signal);
           if (root === undefined) return undefined;
           const project = persistence.readProject(thread.projectId);
           if (project?.type !== "code") return undefined;
@@ -1544,6 +1548,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     }
     const { codeCompletedThreadSource, codeService } = buildCodeService(codeOperationRuntime);
     yield* Effect.promise(() => codeOperationRuntime?.reconcile?.() ?? Promise.resolve());
+    // A push or pull request step a restart left unknown is settled by looking
+    // at the remote now, as the host, rather than when a person next opens
+    // that thread's Git or pull request tab. Persistence has already marked
+    // such steps ambiguous; the look runs in the background so a slow or
+    // unreachable remote never holds start-up, and stops with the server.
+    const unconfirmedStepLook = beginUnconfirmedStepSettlement(
+      codeOperationRuntime,
+      ROUTINE_HOST_SCOPE_ID,
+    );
+    yield* Effect.addFinalizer(() => Effect.promise(() => unconfirmedStepLook.stop()));
     // Code threads already have an inline question surface; the same question
     // shows there so the answer can come from the thread itself.
     onHarnessQuestionAsked(({ threadId, mode, question }) => {

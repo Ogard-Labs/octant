@@ -2,6 +2,29 @@ import { describe, expect, it } from "vitest";
 import { connectorCatalog, featuredConnectors, searchConnectorCatalog } from "./connectorCatalog";
 
 describe("the connectors catalog", () => {
+  it("pins Jottacloud to one exact package, reaching only its own hosts, read-only, asking before delete and share", () => {
+    const entry = connectorCatalog().find((candidate) => candidate.id === "jottacloud");
+    expect(entry?.egress).toEqual(["*.jottacloud.com"]);
+    expect(entry?.auth).toMatchObject({
+      kind: "command",
+      package: {
+        name: "@henrikogard/jottacloud-mcp",
+        version: "0.1.1",
+        integrity: expect.stringMatching(/^sha512-[A-Za-z0-9+/]{86}==$/),
+        entry: "dist/stdio.bundle.mjs",
+      },
+      env: [{ name: "JOTTACLOUD_READ_ONLY", value: "1" }],
+      askEveryCall: ["delete_file", "create_share_link"],
+    });
+    // A hosted entry never carries a network path of its own.
+    expect(
+      connectorCatalog()
+        .filter((candidate) => candidate.egress !== undefined)
+        .map((e) => e.id),
+    ).toEqual(["jottacloud"]);
+    expect(featuredConnectors().map((candidate) => candidate.id)).not.toContain("jottacloud");
+  });
+
   it("offers Atlassian v2 and Airtable sign-in with a distinct scoped Airtable PAT alternative", () => {
     expect(connectorCatalog().find((e) => e.id === "atlassian")).toMatchObject({
       url: "https://mcp.atlassian.com/v2/mcp",
@@ -164,5 +187,17 @@ describe("the connectors catalog", () => {
     expect(featured.length).toBeLessThanOrEqual(8);
     expect(featured.map((entry) => entry.id)).toContain("doop");
     expect(featured.some((entry) => entry.auth.kind === "none")).toBe(true);
+  });
+
+  it("gives every entry that needs an app you register numbered steps that end at Sign in", () => {
+    const registered = connectorCatalog().filter(
+      (entry) => entry.auth.kind === "sign-in" && entry.auth.clientSetup === "registered",
+    );
+    expect(registered.length).toBeGreaterThan(0);
+    for (const entry of registered) {
+      const steps = entry.auth.kind === "sign-in" ? (entry.auth.setupSteps ?? []) : [];
+      expect(steps.length, entry.id).toBeGreaterThanOrEqual(3);
+      expect(steps.at(-1), entry.id).toMatch(/Sign in/);
+    }
   });
 });

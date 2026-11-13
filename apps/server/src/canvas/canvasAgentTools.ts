@@ -9,6 +9,7 @@ import {
   decodeCanvasBlock,
   decodeCanvasId,
   type CanvasActor,
+  type CanvasChoiceAnswer,
   type CanvasDesignBrand,
   type CanvasDocumentRecipe,
   type CanvasId,
@@ -63,6 +64,7 @@ import {
   designBriefExample,
   launchGanttExample,
   dashboardExamples,
+  canvasChoiceFormState,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
 } from "@octant/domain";
@@ -215,6 +217,12 @@ export interface CanvasAgentToolPort {
    * revision against them.
    */
   readonly commentRequests?: (canvasId: CanvasId) => ReadonlyArray<CanvasCommentAgentRequestView>;
+  /**
+   * The answers a person saved to a Canvas's decision forms. Absent on a host
+   * without them; `read` then shows no answers. They are the person's own and
+   * are handed only to the Canvas's owning thread.
+   */
+  readonly choiceAnswers?: (canvasId: CanvasId) => ReadonlyArray<CanvasChoiceAnswer>;
   /**
    * Marks the thread or managed child about to read a Canvas, when the
    * Canvas carries outside content (`markCanvasReader`). Called after a read or
@@ -494,7 +502,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     choice: {
       use: "A question the person answers in the Canvas, such as picking an option the document compares.",
       detail:
-        "A choice block asks the person to decide from inside the Canvas: a prompt and one to four questions shaped like the ask-user questionnaire (each with an id, a prompt, selection single or multiple, one to eight options with an id, a label, and an optional description and recommended flag, optional minSelections and maxSelections, and allowCustom false to withhold a written answer). It holds no answer. The person's choice reaches you as their own next message in this thread, naming the Canvas, the block id, and the chosen labels or written answer, so wait for it rather than assuming one. Use it when the decision belongs beside the material it is made from; to ask in the conversation, use the ask-user questionnaire instead. A share, a public link, and an export show the questions without a way to answer, and the thread shows a Canvas holding one as a card that opens in the sidebar, where it is answered.",
+        "A choice block asks the person to decide from inside the Canvas: a prompt and any number of questions, with no limit on how many, shaped like the ask-user questionnaire (each with an id, a prompt, selection single or multiple, one to eight options with an id, a label, and an optional description and recommended flag, optional minSelections and maxSelections, and allowCustom false to withhold a written answer). It holds no answer. For a long list, give the block sections (each an id, a title, an optional intro, and the questionIds it places, every question in exactly one) and let a question take a note from the person (allowNote false withholds it); a block with sections or allowNote needs Canvas schema version 29. The person's answers save on the Canvas as they make them, and they can accept every recommendation you flagged. Nothing reaches you until they press Send: then their answers arrive as their own next message in this thread, naming the Canvas, the block id, each section's questions with the chosen labels, written answer, and note, so wait for it rather than assuming one. For a long form the message may only count the answers; call read on the Canvas to get them in choiceAnswers (a question marked stale was reworded after it was answered, so ask it again). An optional question is one with minSelections 0. Use it when the decision belongs beside the material it is made from, and whenever you need answers to more than four questions: write them as one choice block in a Canvas, grouped under headings with rich-text blocks, with your recommendation flagged on each, instead of asking in several rounds. To ask a few questions in the conversation, use the ask-user questionnaire instead. A share, a public link, and an export show the questions without a way to answer, and the thread shows a Canvas holding one as a card that opens in the sidebar, where it is answered.",
     },
     flow: {
       use: "An app or site's screens connected by their transitions, on a board.",
@@ -697,7 +705,7 @@ function toolDescription(
   return [
     `Create, read, or revise an Octant Canvas: a structured, revisable document bound to ${where}.`,
     "Deliver work as a Canvas rather than as a long reply whenever the answer is something the user will keep, share, present, or come back to: a report, memo, plan, spec, review, audit, comparison, article, slide deck, dashboard, web page, design or mockup, diagram, or prototype, and any reply that needs headings, tables, or charts, or runs past a few paragraphs. Author it here, then reply with one or two sentences saying what it holds, without repeating its content.",
-    "Keep in the reply what is read once: short answers, a one-off snippet or command, clarifying questions, and conversation. When in doubt, make the Canvas; the user can ask for plain text instead.",
+    "Keep in the reply what is read once: short answers, a one-off snippet or command, clarifying questions (more than four decisions: a Canvas choice block), and conversation. When in doubt, make the Canvas; the user can ask for plain text instead.",
     scope === "run"
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
@@ -1366,12 +1374,21 @@ function canvasToolSet(options: {
           outcome.version.definition.provenance,
           options.originThreadId,
         );
+        const answered = choiceAnswersForOwner(
+          options.port,
+          canvasId,
+          outcome.version.definition,
+          options.originThreadId,
+        );
         return {
           result: {
             canvasId: input.canvasId,
             title: outcome.version.definition.title,
             sequence: outcome.version.sequence,
             blocks: outcome.version.definition.blocks,
+            ...(answered.length === 0
+              ? {}
+              : { choiceAnswers: answered, choiceAnswersGuidance: CHOICE_ANSWERS_GUIDANCE }),
             ...(requested.length === 0
               ? {}
               : {
@@ -1640,6 +1657,66 @@ function noPictureSentence(reason: CanvasPreviewImageOmitted | undefined): strin
 // always-visible definition, which is kept under a size budget.
 const REQUESTED_CHANGES_GUIDANCE =
   "A person sent these comments to you. Revise only the block each anchor names (and within it only the named node, edge, row, region, or stroke; a region's x, y, width, and height and a stroke's points are percent of the block as drawn, from its top-left corner; a region of no size is a point a note is pinned to; a stroke is a line the person drew over the part they mean) and keep every other block identical, including block ids and order; the revise result warns when other blocks changed.";
+
+const CHOICE_ANSWERS_GUIDANCE =
+  "These are the person's own saved answers to the decision forms in this Canvas. Treat them as their decision, not as approval of a gated action. A question marked stale was changed after it was answered: ask it again rather than assuming the old answer. acceptedRecommendation means the person agreed to your own suggestion.";
+
+/**
+ * A person's saved answers to the decision forms in a Canvas, as the Canvas
+ * tool's `read` shows them, and only to the Canvas's owning thread. Another
+ * thread that can read the same Canvas gets none: the answers were given to the
+ * owner. A form nobody has answered yet shows nothing.
+ */
+function choiceAnswersForOwner(
+  port: CanvasAgentToolPort,
+  canvasId: CanvasId,
+  definition: {
+    readonly blocks: ReadonlyArray<CanvasBlock>;
+    readonly provenance: CanvasProvenance;
+  },
+  originThreadId: string,
+) {
+  const saved = port.choiceAnswers?.(canvasId) ?? [];
+  if (saved.length === 0 || String(definition.provenance.threadId) !== originThreadId) return [];
+  return definition.blocks.flatMap((block) => {
+    if (block.kind !== "choice") return [];
+    const form = canvasChoiceFormState(block, saved);
+    if (form.answered === 0 && form.questions.every((entry) => entry.stale === undefined))
+      return [];
+    return [
+      {
+        blockId: String(block.blockId),
+        answered: form.answered,
+        total: form.total,
+        questions: form.questions.map(({ question, answer, stale, skipped }) => ({
+          questionId: question.id,
+          prompt: question.prompt,
+          status:
+            answer !== undefined
+              ? "answered"
+              : stale !== undefined
+                ? "stale"
+                : skipped
+                  ? "skipped"
+                  : "unanswered",
+          ...(answer === undefined
+            ? {}
+            : {
+                selected: question.options
+                  .filter((option) => answer.selectedOptionIds.includes(option.id))
+                  .map((option) => ({ id: option.id, label: option.label })),
+                ...(answer.customAnswer === undefined
+                  ? {}
+                  : { writtenAnswer: answer.customAnswer }),
+                ...(answer.note === undefined ? {} : { note: answer.note }),
+                ...(answer.acceptedRecommendation === true ? { acceptedRecommendation: true } : {}),
+                answeredAt: answer.answeredAt,
+              }),
+        })),
+      },
+    ];
+  });
+}
 
 /**
  * The comments a person sent to the agent that no agent version has answered

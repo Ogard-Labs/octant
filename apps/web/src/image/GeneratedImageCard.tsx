@@ -68,7 +68,7 @@ export function GeneratedImageCard(props: GeneratedImageCardProps) {
   }
 
   return (
-    <OctantCard className="p-4" data-testid="generated-image-card">
+    <OctantCard className="p-3" data-testid="generated-image-card">
       <p className="meta" data-testid="generated-image-attribution">
         {attribution}
       </p>

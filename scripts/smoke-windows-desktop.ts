@@ -123,6 +123,11 @@ async function window(child: ChildProcess, close = false, requireRendered = fals
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return false;
   if (close && !births.has(child))
     throw Error("An unobserved process cannot receive native close.");
+  // A hosted runner's first PowerShell start can outlast the probe's own
+  // limit: the probe was then killed with nothing on stdout, twice in one
+  // hour on unrelated changes. An observation that never answered observed
+  // nothing, so the caller's poll asks again inside its own deadline. A close
+  // is sent once and is never retried here.
   const result = await run(
     "powershell.exe",
     [
@@ -142,7 +147,12 @@ async function window(child: ChildProcess, close = false, requireRendered = fals
       close ? "close" : "observe",
     ],
     { timeout: 8000, maxBuffer: 8192 },
-  );
+  ).catch((error: unknown) => {
+    if (!close && typeof error === "object" && error !== null && "killed" in error && error.killed)
+      return undefined;
+    throw error;
+  });
+  if (result === undefined) return false;
   const value: unknown = JSON.parse(result.stdout);
   if (
     typeof value !== "object" ||

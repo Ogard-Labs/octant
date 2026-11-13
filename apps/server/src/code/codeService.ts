@@ -138,6 +138,7 @@ import {
   ConcurrencyConflict,
   JournalWriteFailed,
   ThreadIdInUse,
+  persistenceFailureMessage,
 } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
@@ -602,6 +603,8 @@ export interface CodeFileRootAuthorityPort {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     relativePath: CodeRelativePath,
+    /** Stops the probe: its Git is killed and it resolves nothing once aborted. */
+    signal?: AbortSignal,
   ) => CodeFileRootResolution | undefined | Promise<CodeFileRootResolution | undefined>;
 }
 
@@ -1965,6 +1968,10 @@ export class CodeService {
                 coordinatorOpenWorkerLimit:
                   command.coordinatorOpenWorkerLimit ?? current.coordinatorOpenWorkerLimit,
               }),
+          // Absent reads as on, so only a stored off needs a value.
+          ...((command.restartContinuation ?? current.restartContinuation) === false
+            ? { restartContinuation: false }
+            : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -2128,6 +2135,35 @@ export class CodeService {
         return await this.#moveThread(authenticatedWindowId, current, command);
       }
       const updatedAt = decodeTimestamp(this.#clock());
+      if (command.kind === "set-code-thread-restart-continuation") {
+        const off = !command.continueAfterRestart;
+        if ((current.restartContinuationOff === true) === off) {
+          return {
+            kind: "thread-updated",
+            thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, current),
+          };
+        }
+        const { restartContinuationOff: _off, ...rest } = current;
+        const next = decodeCodeThread({
+          ...rest,
+          ...(off ? { restartContinuationOff: true } : {}),
+          version: command.expectedVersion + 1,
+          updatedAt,
+        });
+        this.#inUnit(() => {
+          this.#append(
+            "code-thread",
+            current.id,
+            command.expectedVersion,
+            "code.thread-updated@1",
+            { kind: "thread-updated", thread: next },
+          );
+        });
+        return {
+          kind: "thread-updated",
+          thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, next),
+        };
+      }
       if (
         command.kind === "set-code-thread-coordinator" ||
         command.kind === "set-code-thread-message-wake" ||
@@ -4150,7 +4186,10 @@ export class CodeService {
       return this.#failure("stale", "Code state changed; reload and retry.");
     }
     if (error instanceof JournalWriteFailed || error instanceof ProjectionApplicationFailed) {
-      return this.#failure("unavailable", "Code storage is unavailable.");
+      return this.#failure(
+        "unavailable",
+        persistenceFailureMessage(error, "Code storage is unavailable."),
+      );
     }
     return this.#failure("failed", "Octant Code service failed.");
   }

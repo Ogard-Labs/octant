@@ -1,4 +1,11 @@
 import { decodeStartWorkThreadTurnCommand } from "@octant/contracts";
+import { continueWorkTurns } from "../wiring/continuation";
+import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
+import { threadRestartContinuationId } from "../harness/threadRestartContinuation";
+import {
+  createCodeRestartContinuationAttempts,
+  MAX_RESTART_CONTINUATIONS_CUT_OFF,
+} from "../code/codeRestartContinuation";
 import { productFeedbackPersistenceFixture } from "../browser/productFeedback.test-fixtures";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
@@ -90,7 +97,11 @@ import { createWorkTurnRouteHandler } from "../workTurnRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { WorkAttachmentStore } from "./workAttachmentStore";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
-import { WorkTurnProjection, hydrateWorkTurnProjectionFromJournal } from "./workTurnProjection";
+import {
+  WorkTurnProjection,
+  hydrateWorkTurnProjectionFromJournal,
+  journalWorkTurnRestartSettlements,
+} from "./workTurnProjection";
 import {
   WORK_THREAD_MARKED_DONE_TURN_REFUSAL,
   type RunningWorkTurnAccess,
@@ -6112,4 +6123,255 @@ it("requires returned Side Chat provenance before Work runtime admission and ret
   });
   expect(valid.projection.listForThread(ids.thread)[0]?.sideChatReturns).toEqual(sideChatReturns);
   expect(run).toHaveBeenCalledOnce();
+});
+
+describe("continuing a Work turn a restart cut off", () => {
+  type Host = ReturnType<typeof serviceFixture>;
+  const restartedAt = "2026-08-11T12:05:00.000Z";
+  const directories: string[] = [];
+  afterEach(async () => {
+    await Promise.all(
+      directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+    );
+  });
+
+  /** The host's own store, which outlives every restart. */
+  async function hostStore() {
+    const directory = await mkdtemp(join(tmpdir(), "octant-work-restart-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    return connection;
+  }
+
+  const thread = (options: { readonly optedOut?: boolean } = {}) =>
+    decodeWorkThread({
+      id: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      lifecycle: "active",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      bindingRevisionId: ids.binding,
+      workingDirectory: ".",
+      ...(options.optedOut === true ? { restartContinuationOff: true } : {}),
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+  /** A turn the host was running when it stopped: it never finishes there. */
+  async function runningTurn(options: { readonly nativeConversation?: boolean } = {}) {
+    const before = serviceFixture({
+      ...options,
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Half a sent");
+          // Only a person's cancel ends it; the host stopping never reports back.
+          await new Promise((resolve) => input.signal.addEventListener("abort", resolve));
+          return { kind: "cancelled" };
+        },
+      },
+    });
+    await before.service.startFirstTurn(ids.window, startCommand());
+    return before;
+  }
+
+  /**
+   * A start over everything earlier hosts journaled: it settles what the
+   * previous host left running, journals that, and continues it.
+   */
+  async function hostStart(
+    history: ReadonlyArray<Host>,
+    connection: Awaited<ReturnType<typeof hostStore>>,
+    options: {
+      readonly fixture?: Parameters<typeof serviceFixture>[0];
+      readonly recovery?: Partial<Parameters<typeof continueWorkTurns>[0]>;
+    } = {},
+  ) {
+    const host = serviceFixture(options.fixture ?? {});
+    for (const earlier of history) {
+      for (const [call] of earlier.persistence.journal.append.mock.calls) {
+        const event = call?.events[0];
+        if (event !== undefined) host.projection.apply(event.payload as never);
+      }
+    }
+    const cutOff = host.projection.markInterruptedOnRestart(restartedAt);
+    journalWorkTurnRestartSettlements(host.persistence.journal, cutOff, {
+      settledAt: restartedAt,
+      uuid: randomUUID,
+      actorId: OCTANT_LOCAL_ACTOR_ID,
+    });
+    const releaseQueue = vi.fn(async (_threadId: string) => {});
+    const recovery = await continueWorkTurns({
+      cutOff,
+      quitByPerson: false,
+      work: host.service,
+      readThread: () => thread(),
+      enabled: () => true,
+      modeEnabled: () => true,
+      connection,
+      liftHarnessRecovery: async () => ({ kind: "none" as const }),
+      releaseQueue,
+      ...options.recovery,
+    });
+    return { host, cutOff, recovery, releaseQueue };
+  }
+
+  const continuations = (host: Host) =>
+    host.projection
+      .listForThread(ids.thread)
+      .filter((turn) => turn.prompt === RESTART_CONTINUATION_PROMPT);
+
+  it("continues a cut-off turn exactly once, and a later start continues nothing", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const run = vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+      kind: "completed",
+      response: "Picked up again",
+    });
+
+    const first = await hostStart([before], connection, { fixture: { turnRuntime: { run } } });
+    expect(first.recovery).toEqual({
+      continued: [{ mode: "work", threadId: String(ids.thread) }],
+      held: [],
+    });
+    expect(first.releaseQueue).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    const [continued] = continuations(first.host);
+    expect(String(continued?.requestId)).toBe(
+      threadRestartContinuationId("work", {
+        threadId: String(ids.thread),
+        turnId: String(ids.request),
+      }),
+    );
+    await first.host.waitForIdle(continued?.requestId);
+    expect(run).toHaveBeenCalledOnce();
+    expect(first.host.projection.lookup(ids.request)?.status).toBe("failed");
+
+    const second = await hostStart([before, first.host], connection);
+    expect(second.cutOff).toEqual([]);
+    expect(second.recovery).toEqual({ continued: [], held: [] });
+    expect(continuations(second.host)).toHaveLength(1);
+  });
+
+  it("holds a cut-off turn while Continue after restart is off in Settings", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { enabled: () => false },
+    });
+
+    expect(recovery.held).toMatchObject([
+      { mode: "work", threadId: String(ids.thread), reason: "turned-off" },
+    ]);
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("holds a cut-off turn for its person after a person quit Octant, and starts nothing", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const liftHarnessRecovery = vi.fn(async (_threadId: string) => ({ kind: "none" as const }));
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { quitByPerson: true, liftHarnessRecovery },
+    });
+
+    expect(recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "work",
+          threadId: String(ids.thread),
+          reason: "quit",
+          detail: "Octant was quit while this thread was working, so it waits for you.",
+        },
+      ],
+    });
+    expect(liftHarnessRecovery).not.toHaveBeenCalled();
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("holds a cut-off turn whose harness session a blocker keeps in restart recovery", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const liftHarnessRecovery = vi.fn(async (_threadId: string) => ({
+      kind: "held" as const,
+      detail: "Not ready to resume: the spend ceiling is reached.",
+    }));
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { liftHarnessRecovery },
+    });
+
+    expect(liftHarnessRecovery).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(recovery.held).toMatchObject([
+      {
+        mode: "work",
+        threadId: String(ids.thread),
+        reason: "refused",
+        detail: "Not ready to resume: the spend ceiling is reached.",
+      },
+    ]);
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("holds a cut-off turn on a thread whose own Continue after restart is off", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+
+    const { host, recovery } = await hostStart([before], connection, {
+      recovery: { readThread: () => thread({ optedOut: true }) },
+    });
+
+    expect(recovery.held).toMatchObject([{ reason: "opted-out" }]);
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("leaves a turn the person cancelled before the restart as it was", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    await before.service.cancelFirstTurn(ids.window, {
+      kind: "cancel-work-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+    });
+    await before.waitForIdle();
+
+    const { host, cutOff, recovery } = await hostStart([before], connection);
+
+    expect(cutOff).toEqual([]);
+    expect(recovery).toEqual({ continued: [], held: [] });
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("holds a thread whose own continuations a restart has cut off twice", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    createCodeRestartContinuationAttempts(connection).record(String(ids.thread), {
+      operationId: String(ids.request),
+      attempts: MAX_RESTART_CONTINUATIONS_CUT_OFF,
+    });
+
+    const { host, recovery } = await hostStart([before], connection);
+
+    expect(recovery.held).toMatchObject([{ reason: "crash-loop" }]);
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("holds a cut-off turn whose provider cannot resume the session it ran in", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn({ nativeConversation: true });
+
+    const { host, recovery } = await hostStart([before], connection, {
+      fixture: { nativeConversation: true },
+    });
+
+    expect(recovery.held).toMatchObject([{ reason: "cannot-resume" }]);
+    expect(continuations(host)).toHaveLength(0);
+  });
 });

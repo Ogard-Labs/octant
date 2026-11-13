@@ -13,8 +13,10 @@ private func normalizedTemporaryPath(_ path: String) -> String {
 }
 
 private func validExactHostRequirement(_ requirement: String) -> Bool {
-  let pattern =
-    #"^identifier "com\.octant\.desktop\.work-confinement-gate" and cdhash H"[0-9a-f]{40,128}"$"#
+  // Derived from the gate's bundle identifier: a hand-written copy went stale when the
+  // identifier changed, so the broker refused every establishAuthority as BootstrapRejected.
+  let identifier = NSRegularExpression.escapedPattern(for: octantWorkConfinementGateBundleIdentifier)
+  let pattern = #"^identifier ""# + identifier + #"" and cdhash H"[0-9a-f]{40,128}"$"#
   return requirement.range(of: pattern, options: .regularExpression) != nil
 }
 

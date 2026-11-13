@@ -56,6 +56,11 @@ export interface ServerPreviewOptions {
   readonly record: (record: ServerPreviewView & { readonly owner: string }) => boolean;
   readonly sshPath?: string;
   readonly configFile?: string;
+  /**
+   * The server's process authority clock. A tunnel's hour runs on it, so a
+   * wall clock set back cannot keep a tunnel open longer.
+   */
+  readonly now: () => number;
 }
 
 /** Stdio forwarding survives ClearAllForwardings, which removes configured listeners. */
@@ -233,7 +238,7 @@ export class ServerPreviewTunnels {
       localPort: port,
       listener,
       streams: new Map(),
-      expiresAt: Date.now() + 60 * 60 * 1_000,
+      expiresAt: this.#options.now() + 60 * 60 * 1_000,
       ownerCurrent: input.ownerCurrent,
       status: "listening",
     };
@@ -262,7 +267,7 @@ export class ServerPreviewTunnels {
     return (
       preview.ownerCurrent() &&
       this.#options.ownerCurrent(preview.owner) &&
-      Date.now() < preview.expiresAt &&
+      this.#options.now() < preview.expiresAt &&
       this.#options.address(preview.projectId)?.identity === preview.identity
     );
   }

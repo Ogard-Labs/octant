@@ -22,9 +22,11 @@ it exactly that one tool family, as that thread, and nothing wider.
 ## Current behavior
 
 - **Off by default, switched on per terminal.** A thread terminal starts with a
-  grant only when the start command says `browserGrant: "on"`. Only the person at
-  a local window can ask: any other caller (a paired device, a routine, an agent)
-  is refused `not-local-window` and **no terminal is started**, so a shell never
+  grant only when the start command says `browserGrant: "on"`. Only the person
+  can ask, at a local window or a paired device (maintainer decision,
+  2026-11-12; not built yet: today a paired device is refused as the others
+  are): any other caller (a routine, an agent) is refused `not-local-window` and
+  **no terminal is started**, so a shell never
   looks as if it has what it lacks. A running shell cannot be given the variables,
   so the grant applies to a terminal session started with it on.
 - **Code threads only.** The thread must be an active Code thread this window can
@@ -224,7 +226,8 @@ the app can point a CLI at `octant mcp`.
 - **Switch off** sends `revoke-terminal-browser-grant` and leaves the shell
   running. The notice that follows says a CLI that used the Browser stops at its
   next call and has to be started again after the Browser is switched back on.
-- **A paired device has no switch.** The paired-device client renders no thread
+- **A paired device has no switch yet.** Not built yet: today the paired-device
+  client renders no thread
   terminal, and the host refuses its start with a grant (`not-local-window`)
   before any terminal starts.
 - **The approval card.** The Code thread column lists the host's Browser

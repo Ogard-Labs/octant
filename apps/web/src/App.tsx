@@ -60,6 +60,7 @@ import { recordFirstRunMode } from "./onboarding/recordFirstRunMode";
 import { GuardrailDefaultsContext, guardrailDefaultsOf } from "./code/GuardrailLevelIndicator";
 import { useAppUpdateReadyNotice } from "./settings/useAppUpdateReadyNotice";
 import { useHostMemoryNotice } from "./host/useHostMemoryNotice";
+import { useHostRestartNotice } from "./host/useHostRestartNotice";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
@@ -2300,6 +2301,33 @@ function LaunchedShell(
     changeRevision: machineChanges.codeNavigation,
     readCursorStore: codeReadCursorStore,
   });
+  const restartNoticeThreads = useMemo(
+    () => [
+      ...codeController.navigation.map((thread) => ({
+        mode: "code" as const,
+        threadId: String(thread.threadId),
+        title: thread.title,
+        projectId: String(thread.projectId),
+      })),
+      ...chatController.navigation.map((thread) => ({
+        mode: "chat" as const,
+        threadId: thread.threadId,
+        title: thread.title,
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      })),
+      ...workNavigation.navigation.map((thread) => ({
+        mode: "work" as const,
+        threadId: thread.threadId,
+        title: thread.title,
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      })),
+    ],
+    [chatController.navigation, codeController.navigation, workNavigation.navigation],
+  );
+  const [hostRestartNotice, dismissHostRestartNotice] = useHostRestartNotice(
+    launchedClients.hostControlClient,
+    restartNoticeThreads,
+  );
   // Bringing a Code thread's tab in front is the user opening it: the thread's
   // view — or its error state — fills the workspace, so its unread dot is
   // spent here. A thread already open in a background tab re-runs no
@@ -4829,6 +4857,7 @@ function LaunchedShell(
             ...workerLineage(thread.coordinatorThreadId),
             ...(thread.messageWake === true ? { messageWake: true } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+            ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
             ...threadRest(thread, {
               now: minuteNow,
               awaitingInput:
@@ -5392,6 +5421,8 @@ function LaunchedShell(
       setCodeThreadCoordinator: codeController.setThreadCoordinator,
       setCodeThreadCoordinatorWake: codeController.setThreadCoordinatorWake,
       setCodeThreadMessageWake: codeController.setThreadMessageWake,
+      setCodeThreadRestartContinuation: codeController.setThreadRestartContinuation,
+      setChatThreadRestartContinuation: chatController.setThreadRestartContinuation,
       snoozeChatThread: chatController.snoozeThread,
       snoozeCodeThread: codeController.snoozeThread,
       spendRevealChatTurn,
@@ -8222,8 +8253,29 @@ function LaunchedShell(
       replyDetailNotice !== undefined ||
       updateReadyNotice ||
       quitHintVisible ||
-      hostMemoryNotice !== undefined ? (
+      hostMemoryNotice !== undefined ||
+      hostRestartNotice !== undefined ? (
         <div className="toast-stack">
+          {hostRestartNotice === undefined ? null : (
+            <OctantToast
+              {...(hostRestartNotice.open === undefined
+                ? {}
+                : {
+                    action: {
+                      label: `Open ${hostRestartNotice.open.title}`,
+                      onSelect: () => {
+                        const open = hostRestartNotice.open;
+                        if (open === undefined) return;
+                        openCommandThread(open);
+                      },
+                    },
+                  })}
+              detail={hostRestartNotice.detail}
+              onDismiss={dismissHostRestartNotice}
+              title={hostRestartNotice.title}
+              tone={hostRestartNotice.needsYou ? "warning" : "neutral"}
+            />
+          )}
           {hostMemoryNotice === undefined ? null : (
             <OctantToast
               action={{

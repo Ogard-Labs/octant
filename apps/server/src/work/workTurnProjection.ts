@@ -193,35 +193,100 @@ export class WorkTurnProjection {
    * runtime that is gone. A turn already `waiting` on a provider usage limit
    * waits on the reset, not on a runtime, so the restart leaves it alone.
    * Settling a settled turn changes nothing, so a rebuild reads the same.
+   *
+   * Returns the turns this restart cut off, each with the settlement to
+   * journal: once journaled, a later start reads the turn as settled and does
+   * not count it as cut off again.
    */
-  markInterruptedOnRestart(updatedAt: string): void {
+  markInterruptedOnRestart(updatedAt: string): ReadonlyArray<WorkTurnCutOffByRestart> {
+    const cutOff: WorkTurnCutOffByRestart[] = [];
     for (const [requestId, turn] of this.#byRequest) {
       if (turn.status !== "accepted" && turn.status !== "running" && turn.status !== "waiting") {
         continue;
       }
       if (turn.status === "waiting" && turn.failure?.usageLimit !== undefined) continue;
+      const failure = { category: "interrupted" as const, message: RESTART_INTERRUPTED_MESSAGE };
+      const transcript = [
+        { role: "user" as const, text: turn.prompt },
+        { role: "assistant" as const, text: turn.response ?? "", status: "interrupted" as const },
+      ];
       this.#byRequest.set(
         requestId,
         decodeWorkTurnState({
           ...turn,
           status: "failed",
-          failure: {
-            category: "interrupted",
-            message: RESTART_INTERRUPTED_MESSAGE,
-          },
-          transcript: [
-            { role: "user", text: turn.prompt },
-            {
-              role: "assistant",
-              text: turn.response ?? "",
-              status: "interrupted",
-            },
-          ],
+          failure,
+          transcript,
           version: turn.version + 1,
           updatedAt,
           capabilities: turn.capabilities ?? WORK_TURN_CAPABILITIES,
         }),
       );
+      cutOff.push({
+        threadId: turn.threadId,
+        requestId,
+        reachedRuntime: turn.status !== "accepted",
+        journaledVersion: turn.version,
+        settlement: decodeWorkTurnUpdated({
+          kind: "turn-updated",
+          requestId,
+          threadId: turn.threadId,
+          turnId: turn.turnId,
+          status: "failed",
+          failure,
+          transcript,
+          updatedAt,
+        }),
+      });
+    }
+    return cutOff;
+  }
+}
+
+/**
+ * A Work turn the previous host was running when it stopped. `reachedRuntime`
+ * is false for a turn still only accepted: its provider was never started, so
+ * nothing of it ever reached the provider.
+ */
+export interface WorkTurnCutOffByRestart {
+  readonly threadId: WorkThreadId;
+  readonly requestId: WorkTurnRequestId;
+  readonly reachedRuntime: boolean;
+  /** The turn's aggregate version before the settlement. */
+  readonly journaledVersion: number;
+  readonly settlement: WorkTurnUpdated;
+}
+
+/**
+ * Journals the settlement of each turn a restart cut off, as the system, so a
+ * later start reads the turn as settled. A turn whose stream moved on since
+ * the read keeps that stream as it is; the next start settles it then.
+ */
+export function journalWorkTurnRestartSettlements(
+  journal: { readonly append: (input: unknown) => unknown },
+  cutOff: ReadonlyArray<WorkTurnCutOffByRestart>,
+  input: { readonly settledAt: string; readonly uuid: () => string; readonly actorId: string },
+): void {
+  for (const turn of cutOff) {
+    try {
+      journal.append({
+        aggregate: { aggregateType: "work-turn", aggregateId: String(turn.requestId) },
+        expectedVersion: turn.journaledVersion,
+        events: [
+          {
+            eventId: input.uuid(),
+            eventName: "work.turn-updated@1",
+            eventVersion: 1,
+            correlationId: input.uuid(),
+            actor: { kind: "system", actorId: input.actorId },
+            occurredAt: input.settledAt,
+            payload: turn.settlement,
+          },
+        ],
+      });
+    } catch {
+      // Left unjournaled, the turn reads as cut off again at the next start,
+      // which is what it read as before restarts were continued.
     }
   }
 }

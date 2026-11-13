@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
 import { EventRegistry } from "./eventRegistry";
 import { Journal } from "./journal";
-import { JournalWriteFailed } from "./journalErrors";
+import { DISK_FULL_MESSAGE, JournalWriteFailed, persistenceFailureMessage } from "./journalErrors";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { ProjectionApplicationFailed, type Projection, ProjectionRegistry } from "./projection";
+import { databaseStatus, rebuildAll } from "./recovery";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 
 const directories: Array<string> = [];
@@ -182,4 +183,208 @@ describe("AggregateHeadsProjection", () => {
       connection.close();
     },
   );
+
+  it.each([false, true])(
+    "fails an append on a full disk with nothing committed and says the disk is full (derived view: %s)",
+    (derived) => {
+      const connection = openConnection();
+      connection.exec("CREATE TABLE fixture_projection (global_sequence INTEGER PRIMARY KEY)");
+      const fullDisk: Projection = {
+        name: "fixture-full-disk",
+        dependencies: [],
+        ...(derived ? { derived: true as const } : {}),
+        reset: () => undefined,
+        apply: (database, event) => {
+          database
+            .prepare("INSERT INTO fixture_projection (global_sequence) VALUES (?)")
+            .run(event.globalSequence);
+          throw Object.assign(new Error("database or disk is full"), { code: "SQLITE_FULL" });
+        },
+      };
+      const projections = new ProjectionRegistry()
+        .register(new AggregateHeadsProjection())
+        .register(fullDisk);
+      const journal = createJournal(connection, projections);
+
+      let failure: unknown;
+      try {
+        journal.append(appendRequest());
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(JournalWriteFailed);
+      expect(failure).toMatchObject({ reason: "disk-full" });
+      expect(
+        persistenceFailureMessage(failure, "Chat persistence is temporarily unavailable."),
+      ).toBe(DISK_FULL_MESSAGE);
+      expect(DISK_FULL_MESSAGE).toContain("disk is full");
+      for (const table of [
+        "event_journal",
+        "aggregate_heads",
+        "fixture_projection",
+        "projection_checkpoints",
+        "event_quarantine",
+      ]) {
+        expect(connection.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+          count: 0,
+        });
+      }
+      connection.close();
+    },
+  );
+
+  it("still says the disk is full when SQLite itself fills up inside a derived view", () => {
+    // A real SQLITE_FULL can roll back the whole transaction on its own, which
+    // removes the derived views' savepoint. Cleaning up that savepoint must not
+    // replace the storage failure with "no such savepoint".
+    const connection = openConnection();
+    connection.exec("CREATE TABLE fixture_blob (body BLOB)");
+    const fillsTheDisk: Projection = {
+      name: "fixture-fills-the-disk",
+      dependencies: [],
+      derived: true,
+      reset: () => undefined,
+      apply: (database) => {
+        database
+          .prepare("INSERT INTO fixture_blob (body) VALUES (zeroblob(?))")
+          .run(64 * 1024 * 1024);
+      },
+    };
+    const projections = new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(fillsTheDisk);
+    const journal = createJournal(connection, projections);
+    const { page_count: pages } = connection.prepare("PRAGMA page_count").get() as {
+      readonly page_count: number;
+    };
+    connection.exec(`PRAGMA max_page_count = ${pages + 64}`);
+
+    let failure: unknown;
+    try {
+      journal.append(appendRequest());
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(JournalWriteFailed);
+    expect(failure).toMatchObject({ reason: "disk-full" });
+    expect(connection.prepare("SELECT count(*) AS count FROM event_journal").get()).toEqual({
+      count: 0,
+    });
+    connection.close();
+  });
+
+  it("commits a Stop-shaped append when a derived view throws, holds that view, and a rebuild restores it", () => {
+    const connection = openConnection();
+    connection.exec("CREATE TABLE fixture_derived (global_sequence INTEGER PRIMARY KEY)");
+    let broken = true;
+    const derivedView: Projection = {
+      name: "fixture-derived",
+      dependencies: ["aggregate-heads"],
+      derived: true,
+      reset: (database) => database.exec("DELETE FROM fixture_derived"),
+      apply: (database, event) => {
+        database
+          .prepare("INSERT INTO fixture_derived (global_sequence) VALUES (?)")
+          .run(event.globalSequence);
+        if (broken) throw new Error("derived view bug");
+      },
+    };
+    const projections = new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(derivedView);
+    const journal = createJournal(connection, projections);
+    const count = (table: string) =>
+      (connection.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count: number })
+        .count;
+
+    const stopped = journal.append(appendRequest());
+    expect(stopped.lastSequence).toBe(1);
+    expect(count("event_journal")).toBe(1);
+    expect(count("aggregate_heads")).toBe(1);
+    expect(count("fixture_derived")).toBe(0);
+    expect(
+      connection
+        .prepare("SELECT projection_name, global_sequence, reason FROM event_quarantine")
+        .all(),
+    ).toEqual([
+      {
+        projection_name: "fixture-derived",
+        global_sequence: 1,
+        reason: "projection-application-failed",
+      },
+    ]);
+
+    // Held: a later append skips it even once it would succeed, so the view
+    // never reports current over the event it missed.
+    broken = false;
+    journal.append({
+      ...appendRequest(),
+      expectedVersion: 1,
+      events: [{ ...appendRequest().events[0], eventId: "00000000-0000-4000-8000-000000000105" }],
+    });
+    expect(count("fixture_derived")).toBe(0);
+    const held = databaseStatus({ connection, journal, projections });
+    expect(held.state).toBe("current");
+    expect(held.heldDerivedViews).toEqual(["fixture-derived"]);
+    expect(held.projections).toContainEqual({ name: "fixture-derived", lastSequence: 0, lag: 2 });
+    expect(held.projections).toContainEqual({ name: "aggregate-heads", lastSequence: 2, lag: 0 });
+
+    expect(rebuildAll({ connection, journal, projections, clock: () => now })).toEqual({
+      rebuilt: ["aggregate-heads", "fixture-derived"],
+      journalHead: 2,
+    });
+    expect(count("fixture_derived")).toBe(2);
+    const repaired = databaseStatus({ connection, journal, projections });
+    expect(repaired.state).toBe("current");
+    expect(repaired.heldDerivedViews).toBeUndefined();
+    expect(repaired.quarantineCount).toBe(0);
+    connection.close();
+  });
+
+  it("keeps a derived view held when a rebuild still cannot apply it", () => {
+    const connection = openConnection();
+    const derivedView: Projection = {
+      name: "fixture-derived",
+      dependencies: [],
+      derived: true,
+      reset: () => undefined,
+      apply: () => {
+        throw new Error("derived view bug");
+      },
+    };
+    const projections = new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(derivedView);
+    const journal = createJournal(connection, projections);
+    journal.append(appendRequest());
+
+    expect(rebuildAll({ connection, journal, projections, clock: () => now })).toEqual({
+      rebuilt: ["aggregate-heads"],
+      journalHead: 1,
+      held: ["fixture-derived"],
+    });
+    expect(databaseStatus({ connection, journal, projections }).heldDerivedViews).toEqual([
+      "fixture-derived",
+    ]);
+    connection.close();
+  });
+
+  it("refuses an authoritative projection that depends on a derived view", () => {
+    const derivedView: Projection = {
+      name: "fixture-derived",
+      dependencies: [],
+      derived: true,
+      reset: () => undefined,
+      apply: () => undefined,
+    };
+    const dependent: Projection = {
+      name: "fixture-dependent",
+      dependencies: ["fixture-derived"],
+      reset: () => undefined,
+      apply: () => undefined,
+    };
+    expect(() => new ProjectionRegistry().register(derivedView).register(dependent)).toThrow(
+      expect.objectContaining({ _tag: "AuthoritativeProjectionDependsOnDerived" }),
+    );
+  });
 });

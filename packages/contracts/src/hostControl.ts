@@ -206,6 +206,50 @@ export const HostMemoryStatus = Schema.Struct({
 }).annotations(strict);
 export type HostMemoryStatus = typeof HostMemoryStatus.Type;
 
+/**
+ * Why one start of the host held a thread a restart cut off instead of
+ * continuing it. `uncertain-external-action` is a push or pull request step
+ * whose outcome the host never learned; `crash-loop` is a thread whose own
+ * automatic continuations were cut off by a restart twice; `quit` is a thread
+ * whose turn ended because a person quit Octant, not because it crashed or
+ * the system restarted.
+ */
+export const HostRestartRecoveryHold = Schema.Literal(
+  "turned-off",
+  "opted-out",
+  "uncertain-external-action",
+  "quit",
+  "crash-loop",
+  "cannot-resume",
+  "refused",
+);
+export type HostRestartRecoveryHold = typeof HostRestartRecoveryHold.Type;
+
+const RestartRecoveryMode = Schema.Literal("chat", "work", "code");
+const MAX_RESTART_RECOVERY_THREADS = 500;
+
+/**
+ * What this start of the host did with the turns the previous one left cut
+ * off: the threads it continued by itself and the ones it held for a person.
+ * Absent when no turn was cut off. Thread ids only: a window resolves titles
+ * through the threads it may open, so the report names nothing it could not.
+ */
+export const HostRestartRecovery = Schema.Struct({
+  at: UtcTimestamp,
+  continued: Schema.Array(
+    Schema.Struct({ mode: RestartRecoveryMode, threadId: BoundedLabel }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_RESTART_RECOVERY_THREADS)),
+  held: Schema.Array(
+    Schema.Struct({
+      mode: RestartRecoveryMode,
+      threadId: BoundedLabel,
+      reason: HostRestartRecoveryHold,
+      detail: BoundedText,
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_RESTART_RECOVERY_THREADS)),
+}).annotations(strict);
+export type HostRestartRecovery = typeof HostRestartRecovery.Type;
+
 export const HostControlStatus = Schema.Struct({
   identity: HostControlIdentity,
   versions: HostControlVersions,
@@ -218,6 +262,7 @@ export const HostControlStatus = Schema.Struct({
   }).annotations(strict),
   /** Absent while the host runs without a memory guard (a test seam). */
   memory: Schema.optional(HostMemoryStatus),
+  restartRecovery: Schema.optional(HostRestartRecovery),
   lifecycle: Schema.Struct({
     stop: HostLifecycleControlAvailability,
     restart: HostLifecycleControlAvailability,

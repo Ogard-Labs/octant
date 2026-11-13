@@ -9,12 +9,17 @@ import {
   readFile,
   writeFile,
   mkdir,
-  unlink,
-  rename,
   type FileHandle,
 } from "node:fs/promises";
 import { lstatSync, realpathSync, type Dir } from "node:fs";
-import { confinedEnumerationPath, openConfinedPath, statConfinedPath } from "../confinedPathOpen";
+import { basename, dirname } from "node:path";
+import {
+  confinedEnumerationPath,
+  openConfinedPath,
+  removeConfinedEntry,
+  renameConfinedEntry,
+  statConfinedPath,
+} from "../confinedPathOpen";
 
 /**
  * Filesystem metadata for a Work-confined path. The port exposes only the
@@ -78,6 +83,12 @@ export interface WorkOpenWriteFile {
   close(): Promise<void>;
 }
 
+export interface WorkWriteOpenOptions {
+  readonly exclusiveCreate: boolean;
+  /** Permission bits for a created file, before the process umask; 0o600 when absent. */
+  readonly createMode?: number;
+}
+
 /**
  * One open directory, held so child creates stay bound to this object.
  *
@@ -104,10 +115,7 @@ export interface WorkOpenDirectory {
   read(maximumEntries: number): Promise<ReadonlyArray<{ readonly name: string }>>;
   openDirectory(name: string): Promise<WorkOpenDirectory>;
   mkdir(name: string): Promise<void>;
-  openWriteFile(
-    name: string,
-    options: { readonly exclusiveCreate: boolean },
-  ): Promise<WorkOpenWriteFile>;
+  openWriteFile(name: string, options: WorkWriteOpenOptions): Promise<WorkOpenWriteFile>;
   close(): Promise<void>;
 }
 
@@ -138,15 +146,14 @@ export interface WorkFilesystemPort {
   stat(path: string): Promise<WorkFileStat>;
   readlink(path: string): Promise<string>;
   openFile(path: string): Promise<WorkOpenFile>;
-  openWriteFile(
-    path: string,
-    options: { readonly exclusiveCreate: boolean },
-  ): Promise<WorkOpenWriteFile>;
+  openWriteFile(path: string, options: WorkWriteOpenOptions): Promise<WorkOpenWriteFile>;
   openDirectory(path: string): Promise<WorkOpenDirectory>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, bytes: Uint8Array): Promise<void>;
   mkdir(path: string, options: { readonly recursive: true }): Promise<void>;
+  /** Removes the entry at a canonical path, relative to its proved directory. */
   unlink(path: string): Promise<void>;
+  /** Renames an entry at a canonical path to another name in the same proved directory. */
   rename(from: string, to: string): Promise<void>;
 }
 
@@ -217,7 +224,7 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
   // A write's parent directory and an overwritten file are reached by the same
   // repeated path resolution as a read, so they take the same proved open.
   openWriteFile: async (path, options) =>
-    liveWriteFile(await openConfinedPath(path, writeFlags(options), 0o600)),
+    liveWriteFile(await openConfinedPath(path, writeFlags(options), createMode(options))),
   openDirectory: async (path) =>
     liveDirectory(await openConfinedPath(path, constants.O_RDONLY | constants.O_DIRECTORY), path),
   readFile: async (path) => await readFile(path),
@@ -227,8 +234,19 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
   mkdir: async (path, options) => {
     await mkdir(path, options);
   },
-  unlink,
-  rename,
+  // A delete or rename runs on the canonical path a resolution returned, after
+  // authority was decided. A path `unlink` or `rename` resolves the ancestors
+  // again and followed an ancestor swapped for a link to a host folder in that
+  // window, so both act through the proved directory instead.
+  unlink: async (path) => {
+    await removeConfinedEntry(dirname(path), basename(path));
+  },
+  rename: async (from, to) => {
+    if (dirname(from) !== dirname(to)) {
+      throw new Error("a confined rename keeps the entry in its directory");
+    }
+    await renameConfinedEntry(dirname(from), basename(from), basename(to));
+  },
 };
 
 function confinedEntryName(name: string): string {
@@ -334,7 +352,7 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
         await open(
           childOpenPath(handle, directoryPath, name),
           writeFlags(options) | childNoFollow,
-          0o600,
+          createMode(options),
         ),
       ),
     close: async () => {
@@ -344,8 +362,13 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
   };
 }
 
+/** Work artifacts are created private to the person; a caller may ask for another mode. */
+function createMode(options: WorkWriteOpenOptions): number {
+  return options.createMode ?? 0o600;
+}
+
 /** Open flags for a confined write, without the link guard its opener adds. */
-function writeFlags(options: { readonly exclusiveCreate: boolean }): number {
+function writeFlags(options: WorkWriteOpenOptions): number {
   // An overwrite opens an existing name, so a FIFO swapped in after the
   // containment check would hold a blocking open until a reader appeared.
   // O_NONBLOCK refuses it with ENXIO instead; with a reader present the open

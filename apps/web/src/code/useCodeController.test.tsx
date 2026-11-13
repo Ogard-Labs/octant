@@ -1500,6 +1500,10 @@ describe("useCodeController", () => {
     });
     await waitFor(() => expect(result.current.turnStatus).toBe("running"));
 
+    // Stop names the turn this window started, not just the thread.
+    const startedTurn = () =>
+      executeOperation.mock.calls.find(([command]) => command.kind === "start-provider-turn")?.[0]
+        .operationId;
     let cancelled = false;
     await act(async () => {
       cancelled = await result.current.cancelTurn();
@@ -1511,6 +1515,7 @@ describe("useCodeController", () => {
         operationId: expect.any(String),
         threadId: ids.thread,
         checkoutId: ids.checkout,
+        turnOperationId: startedTurn(),
       }),
     );
 
@@ -1523,6 +1528,63 @@ describe("useCodeController", () => {
       expect.objectContaining({ status: "interrupted" }),
     );
     await expect(result.current.cancelTurn()).resolves.toBe(false);
+  });
+
+  it("says when the host could not confirm a Stop and keeps the turn running", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000045";
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: {
+          kind: "operation-result",
+          result: { kind: "provider-turn-state", operationId, state: "running" },
+        },
+      };
+      await new Promise(() => {});
+    }
+    const executeOperation = vi.fn(async (command: CodeOperationCommand) =>
+      command.kind === "cancel-provider-turn"
+        ? {
+            kind: "provider-turn-state" as const,
+            operationId: command.operationId,
+            state: "interrupted" as const,
+            failure: {
+              category: "failed" as const,
+              message: "Stop was not confirmed. The provider may still be running this turn.",
+            },
+          }
+        : {
+            kind: "provider-turn-state" as const,
+            operationId: command.operationId,
+            state: "running" as const,
+          },
+    );
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    await act(async () => {
+      void result.current.sendFollowUp("keep going");
+    });
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+
+    let cancelled = false;
+    await act(async () => {
+      cancelled = await result.current.cancelTurn();
+    });
+
+    expect(cancelled).toBe(true);
+    expect(result.current.turnError).toBe(
+      "Stop was not confirmed. The provider may still be running this turn.",
+    );
+    expect(result.current.turnStatus).toBe("running");
   });
 
   it("keeps a cancellation failure on the thread that was stopped", async () => {

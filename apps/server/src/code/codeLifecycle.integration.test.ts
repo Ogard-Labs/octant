@@ -524,6 +524,7 @@ function makeRuntime(
       journal,
       readCodeRuntimeWorkAggregateVersion: (id) =>
         readCodeRuntimeWorkAggregateVersion(connection, id),
+      readCodeRuntimeWorks: () => [],
       readCodeThread: (id) => (id === threadId ? thread : undefined),
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
       readReviewFinding: () => undefined,
