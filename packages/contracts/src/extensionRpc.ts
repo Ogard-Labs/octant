@@ -29,7 +29,7 @@ import {
   SourceQualifiedSkill,
   StandaloneSkillRecord,
 } from "./extensions";
-import { ExtensionToolGrantId, ExtensionToolGrantRecorded } from "./extensionEvents";
+import { ExtensionToolGrantId, extensionToolGrantRecordedFields } from "./extensionEvents";
 import { ToolExtensionId } from "./toolActions";
 import { ProjectId } from "./projects";
 import { SecretStoreItemReference, SecretStoreKind } from "./secretStores";
@@ -77,10 +77,11 @@ export const ExtensionToolApproval = Schema.Struct({
   inputJson: Schema.String.pipe(Schema.maxLength(64 * 1024)),
   requestedAt: UtcTimestamp,
   /**
-   * Whether this prompt may be answered with `remember`. False when the
-   * thread has no Project, on a Plan turn, on a turn the host started as
-   * itself, and for a network tool on a thread that took in outside content:
-   * those are approved one call at a time.
+   * Whether this prompt may be answered with `remember`, for the tool or for
+   * its whole server. False on a Plan turn, on a turn the host started as
+   * itself or a paired device sent, and for a network tool on a thread that
+   * took in outside content: those are approved one call at a time. A thread
+   * with no `projectId` remembers for the account.
    */
   rememberable: Schema.Boolean,
   /** Present when the thread has taken in outside content; see `ApprovalOutsideContent`. */
@@ -94,16 +95,30 @@ export type ExtensionToolApprovalList = typeof ExtensionToolApprovalList.Type;
 export const ExtensionToolApprovalDecision = Schema.Struct({
   approvalId: Schema.UUID,
   decision: Schema.Literal("approved", "denied"),
-  /** Always allow this tool in this Project. Only an approval can be remembered. */
+  /** Always allow, where the thread remembers. Only an approval can be remembered. */
   remember: Schema.optional(Schema.Boolean),
+  /**
+   * What `remember` covers: this tool, or every tool of its server. Absent
+   * means this tool, which is all an older client can ask for.
+   */
+  rememberScope: Schema.optional(Schema.Literal("tool", "server")),
 })
   .annotations(strict)
-  .pipe(Schema.filter((answer) => answer.remember !== true || answer.decision === "approved"));
+  .pipe(
+    Schema.filter(
+      (answer) =>
+        (answer.remember !== true || answer.decision === "approved") &&
+        (answer.rememberScope === undefined || answer.remember === true),
+    ),
+  );
 export type ExtensionToolApprovalDecision = typeof ExtensionToolApprovalDecision.Type;
 
-/** A remembered approval of one MCP tool in one Project, as Settings lists it. */
+/**
+ * A remembered approval as Settings lists it: one MCP tool or a whole server,
+ * in one Project or for the account.
+ */
 export const ExtensionToolGrant = Schema.Struct({
-  ...ExtensionToolGrantRecorded.fields,
+  ...extensionToolGrantRecordedFields,
   grantedAt: UtcTimestamp,
 }).annotations({ ...strict, ...personDecides });
 export type ExtensionToolGrant = typeof ExtensionToolGrant.Type;

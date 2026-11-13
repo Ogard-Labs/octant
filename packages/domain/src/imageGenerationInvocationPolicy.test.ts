@@ -5,6 +5,7 @@ import {
   hasEligibleImageProfile,
   honoredImageGenerationOptions,
   imageGenerationConfigurationKind,
+  imageGenerationWithoutAsking,
   listCustomImageProfiles,
   listEligibleImageProfiles,
 } from "./imageGenerationInvocationPolicy";
@@ -154,6 +155,51 @@ describe("eligible image profiles", () => {
     });
     expect(hasEligibleImageProfile([instance], customSources)).toBe(true);
     expect(hasEligibleImageProfile([instance])).toBe(false);
+  });
+});
+
+describe("an agent's image generation before anyone is asked", () => {
+  const one = listEligibleImageProfiles([openAiImage()]);
+  const two = listEligibleImageProfiles([openAiImage(), geminiImage()]);
+  const kept = { profileInstanceId: openAiImage().id, modelId: "gpt-image-2" } as never;
+
+  it("generates with the choice the Project keeps, at every level", () => {
+    for (const fullAccess of [false, true]) {
+      expect(imageGenerationWithoutAsking({ profiles: two, kept, fullAccess })).toEqual({
+        kind: "generate",
+        choice: kept,
+      });
+    }
+  });
+
+  it("drops a kept choice the host can no longer run and asks, never swapping in another model", () => {
+    const gone = { profileInstanceId: openAiImage().id, modelId: "retired-model" } as never;
+    expect(imageGenerationWithoutAsking({ profiles: two, kept: gone, fullAccess: false })).toEqual({
+      kind: "ask",
+      keptUnavailable: true,
+    });
+    expect(imageGenerationWithoutAsking({ profiles: one, kept: gone, fullAccess: true })).toEqual({
+      kind: "ask",
+      keptUnavailable: true,
+    });
+  });
+
+  it("generates at Full access with the default model of the only ready profile", () => {
+    expect(
+      imageGenerationWithoutAsking({ profiles: one, kept: undefined, fullAccess: true }),
+    ).toEqual({
+      kind: "generate",
+      choice: { profileInstanceId: openAiImage().id, modelId: "gpt-image-2" },
+    });
+  });
+
+  it("asks at Full access when two profiles are ready, and below it whatever is ready", () => {
+    expect(
+      imageGenerationWithoutAsking({ profiles: two, kept: undefined, fullAccess: true }),
+    ).toEqual({ kind: "ask", keptUnavailable: false });
+    expect(
+      imageGenerationWithoutAsking({ profiles: one, kept: undefined, fullAccess: false }),
+    ).toEqual({ kind: "ask", keptUnavailable: false });
   });
 });
 

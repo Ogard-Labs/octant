@@ -85,7 +85,7 @@ describe("ComputerUseLifecyclePane", () => {
     expect(stop).toHaveBeenCalledOnce();
   });
 
-  it("describes an application-session approval as a five-minute app grant", () => {
+  it("describes an application-session approval as an app grant for the thread", () => {
     const approve = vi.fn();
     const appApproval = decodeComputerUseSessionView({
       ...waiting,
@@ -107,9 +107,11 @@ describe("ComputerUseLifecyclePane", () => {
     );
 
     expect(
-      screen.getByText("Octant is waiting for approval to control this application for 5 minutes."),
+      screen.getByText(
+        "Octant is waiting for approval to control this application for this thread.",
+      ),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Allow app for 5 minutes" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Allow app for this thread" })).toBeVisible();
   });
 
   it.each([

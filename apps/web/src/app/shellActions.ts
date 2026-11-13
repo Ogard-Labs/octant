@@ -258,6 +258,8 @@ export type ShellActions = {
   readonly setCodeNewThreadWorkspace: ProjectController["setCodeNewThreadWorkspace"];
   readonly setCodePullRequestBackgroundRefresh: ProjectController["setCodePullRequestBackgroundRefresh"];
   readonly setCodeAgentMerge: ProjectController["setCodeAgentMerge"];
+  readonly setCodeAgentPullRequestComments: ProjectController["setCodeAgentPullRequestComments"];
+  readonly setCodeAgentDefaultBranchPush: ProjectController["setCodeAgentDefaultBranchPush"];
   readonly setCodePullRequestsOpen: Dispatch<SetStateAction<boolean>>;
   readonly setDockSidecarsByThread: Dispatch<
     SetStateAction<ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>>
@@ -293,6 +295,8 @@ export type ShellActions = {
   readonly setProjectNativeProviders: ProjectController["setNativeProviders"];
   readonly setProjectPermissionMode: ProjectController["setCodePermissionMode"];
   readonly setProjectAutoReviewer: ProjectController["setCodeAutoReviewer"];
+  readonly setProjectAgentMemoryWrites: ProjectController["setAgentMemoryWrites"];
+  readonly askAgainForProjectImageGeneration: ProjectController["askAgainForImageGeneration"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectDesignSystem: ProjectController["setDesignSystem"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];

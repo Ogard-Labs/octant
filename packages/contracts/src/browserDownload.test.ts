@@ -6,6 +6,7 @@ import {
   decodeBrowserDownloadSaved,
   decodeBrowserDownloadSelectedSaved,
   MAX_BROWSER_DOWNLOAD_FILE_BYTES,
+  MAX_BROWSER_DOWNLOAD_RECEIPT_BYTES,
 } from "./browserDownload";
 import { Schema } from "effect";
 
@@ -53,7 +54,7 @@ describe("Browser download contracts", () => {
     expect(() => decodeBrowserDownloadSaved({ ...saved, bytes: "AAAA" })).toThrow();
     expect(() => decodeBrowserDownloadSaved({ ...saved, sha256: "short" })).toThrow();
     expect(() =>
-      decodeBrowserDownloadSaved({ ...saved, sizeBytes: MAX_BROWSER_DOWNLOAD_FILE_BYTES + 1 }),
+      decodeBrowserDownloadSaved({ ...saved, sizeBytes: MAX_BROWSER_DOWNLOAD_RECEIPT_BYTES + 1 }),
     ).toThrow();
   });
 

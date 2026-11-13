@@ -956,6 +956,46 @@ describe("WorkThreadService", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("verifies a direct-endpoint model's tools by itself when a thread first selects it, then admits it", async () => {
+    const verified: Array<string> = [];
+    const verifyModelToolsOnFirstUse = vi.fn(async (_provider: unknown, modelId: unknown) => {
+      verified.push(String(modelId));
+    });
+    const probeProvider = vi.fn(
+      async () =>
+        ({
+          readiness: "ready",
+          verifiedToolModelIds: [...verified],
+          models: [
+            {
+              id: "model-a",
+              displayName: "Endpoint model",
+              source: "discovered",
+              verification: "unverified",
+              reasoning: "unavailable",
+              inputModalities: ["text"],
+              options: [],
+            },
+          ],
+        }) as never,
+    );
+    const fixture = serviceFixture({ threads: [], probeProvider, verifyModelToolsOnFirstUse });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+      }),
+    ).resolves.toMatchObject({ kind: "thread-created" });
+    expect(verifyModelToolsOnFirstUse).toHaveBeenCalledExactlyOnceWith(ids.provider, "model-a");
+  });
+
   it("admits native-agent provider models whose runtime supplies tool execution", async () => {
     const probeProvider = vi.fn(
       async () =>
@@ -2041,6 +2081,7 @@ function serviceFixture(
     readonly providerEnabled?: boolean;
     readonly providerDriverKind?: "openai-compatible" | "azure-foundry" | "codex";
     readonly probeProvider?: WorkThreadServiceDependencies["probeProvider"];
+    readonly verifyModelToolsOnFirstUse?: WorkThreadServiceDependencies["verifyModelToolsOnFirstUse"];
     readonly readProviderModel?: WorkThreadServiceDependencies["readProviderModel"];
     readonly project?: Project;
     readonly events?: ReadonlyArray<EventEnvelope>;
@@ -2138,6 +2179,9 @@ function serviceFixture(
     workingDirectories,
     onWorkingDirectoryChanged,
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
+    ...(options.verifyModelToolsOnFirstUse === undefined
+      ? {}
+      : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
     ...(options.readProviderModel === undefined
       ? {}
       : { readProviderModel: options.readProviderModel }),

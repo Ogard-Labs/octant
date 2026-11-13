@@ -202,6 +202,61 @@ describe("CodeTurnRunner", () => {
     );
   });
 
+  it("records a host tool call under its provider call id before it runs, and hands the runtime's own tool reports to the turn's record", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "tool-start", toolCallId: "runtime-call", toolName: "Bash" }),
+          event({ kind: "tool-success", toolCallId: "runtime-call", summary: "done" }),
+          event({
+            kind: "tool-request",
+            requestId: "host-call",
+            toolName: "octant_browser",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const order: string[] = [];
+    const execute = vi.fn(async (call: { readonly toolCallId?: string }) => {
+      order.push(`ran:${call.toolCallId}`);
+      return { result: { ok: true } };
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute,
+            },
+            toolEffects: {
+              tools: (set) => ({
+                ...set,
+                execute: (call) => {
+                  order.push(`intended:${call.toolCallId}`);
+                  return set.execute(call);
+                },
+              }),
+              observe: (observed) => {
+                if (observed.kind === "tool-start" || observed.kind === "tool-success")
+                  order.push(`${observed.kind}:${observed.toolCallId}`);
+              },
+            },
+          }),
+        ),
+      ),
+    );
+    expect(order).toEqual([
+      "tool-start:runtime-call",
+      "tool-success:runtime-call",
+      "intended:host-call",
+      "ran:host-call",
+    ]);
+  });
+
   it("cancels a pending app tool when its transport request expires without answering a stale call", async () => {
     const request = new AbortController();
     const connection = fakeConnection({
@@ -1143,6 +1198,7 @@ describe("CodeTurnRunner", () => {
     expect(execute).toHaveBeenCalledWith({
       name: "octant_acp_fs_read_text_file",
       inputJson: rawInputJson,
+      toolCallId: "raw-path-request",
     });
     expect(observed).toContainEqual(
       expect.objectContaining({

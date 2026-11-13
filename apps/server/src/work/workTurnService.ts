@@ -95,6 +95,7 @@ import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import type {
   NativeHarnessTurnAdmission,
@@ -440,6 +441,11 @@ export interface WorkTurnServiceDependencies {
   }) => string | undefined;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** The turn's record of tool calls about to take effect (toolEffects/toolEffectLedger.ts). */
+    readonly toolEffects?: (turn: {
+      readonly threadId: string;
+      readonly turnId: string;
+    }) => TurnToolEffects;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
     readonly observeRemoteCommand?: (
       threadId: string,
@@ -1195,7 +1201,10 @@ export class WorkTurnService {
           ? undefined
           : await this.#resolveSelectedExtensions?.({
               mode: "work",
-              thread,
+              // The turn's own level, not the thread's stored one: a routine
+              // or goal-loop round under a lower ceiling must be asked about
+              // an extension tool as that level asks.
+              thread: { ...thread, access: turnAccess },
               selections,
               pinnedExtensionIds,
               windowId: authenticatedWindowId,
@@ -2225,6 +2234,10 @@ export class WorkTurnService {
         : undefined;
 
     const appManagedTools = input.preparedTools;
+    const toolEffects = this.#nativeHarness?.toolEffects?.({
+      threadId: String(input.command.threadId),
+      turnId: String(input.command.requestId),
+    });
     // Only a thread whose person chose the runtime's artifact tool is offered
     // it; every other thread of the account keeps Canvas and its launch keeps
     // every guard. A Work turn never runs in Plan: it runs at its thread's
@@ -2418,6 +2431,7 @@ export class WorkTurnService {
           ? {}
           : { modelOptionValues: input.thread.modelOptionValues }),
         ...(appManagedTools === undefined ? {} : { appManagedTools }),
+        ...(toolEffects === undefined ? {} : { toolEffects }),
         ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
         ...(input.admissionCurrent === undefined
           ? {}

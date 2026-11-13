@@ -175,6 +175,7 @@ function continuationPorts(
     enabled: () => true,
     modeEnabled: () => true,
     parentOptedOut: () => false,
+    uncertainToolCall: () => undefined,
     latestStartVersion: (run) => host.persistence.latestStartVersion(run.id),
     attempts: createCodeRestartContinuationAttempts(connection),
     // What the ordinary resume journals once its checks pass.
@@ -252,7 +253,7 @@ describe("subagent restart continuation", () => {
     expect(afterPerson.continued).toHaveLength(1);
   });
 
-  it("holds a cut-off run for its person after a deliberate quit, with the setting off, or with its mode turned off", async () => {
+  it("holds a cut-off run for its person after a deliberate quit, with the setting off, with a tool call nobody saw finish, or with its mode turned off", async () => {
     const connection = openJournalFile();
     const first = startHost(connection);
     const accepted = first.persistence.requestRun({
@@ -273,6 +274,7 @@ describe("subagent restart continuation", () => {
       [{ quitByPerson: true }, "quit"],
       [{ enabled: () => false }, "turned-off"],
       [{ parentOptedOut: () => true }, "opted-out"],
+      [{ uncertainToolCall: () => "A tool call may have taken effect." }, "uncertain-tool-call"],
       [{ modeEnabled: (mode: string) => mode !== "chat" }, "refused"],
     ] as const) {
       const { ports, resumed } = continuationPorts(host, connection, overrides);

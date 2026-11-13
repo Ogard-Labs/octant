@@ -197,6 +197,15 @@ export interface DesktopLeaseServiceOptions {
   readonly confirmTransfer: (
     request: DesktopTransferConfirmation,
   ) => Promise<"approved" | "declined">;
+  /**
+   * The answers a person gave once for a thread to an agent's transfers into
+   * its desktop on this machine, journaled by the host. Absent, every such
+   * transfer below Full access asks.
+   */
+  readonly transferAnswers?: {
+    readonly covers: (owner: DesktopLeaseOwner, markedNow: boolean) => boolean;
+    readonly record: (owner: DesktopLeaseOwner, threadMarked: boolean) => void;
+  };
   readonly systemActor: EventActor;
   readonly now: () => number;
   readonly uuid: () => string;
@@ -382,8 +391,9 @@ export interface DesktopLeaseService {
       readonly confirm?: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">;
       /**
        * An agent's turn as it runs now. A turn may sit below its thread's
-       * posture, and a thread that read outside content no longer lets Full
-       * access carry the agent's transfer; either only adds a question.
+       * posture, which only adds a question. Whether the thread has read
+       * outside content decides which earlier answer still covers the
+       * transfer below Full access; at Full access it changes nothing.
        */
       readonly turn?: {
         readonly executionPolicy: ProviderExecutionPolicy;
@@ -1788,6 +1798,8 @@ export function createDesktopLeaseService(
     const first = admitOperating(caller);
     if (first.status === "refused") return first;
     const confirmBilledDesktops = currentLeaseSettings().confirmBilledDesktops;
+    const owner = first.record.lease.owner;
+    const threadMarked = caller.turn?.externalContentIngested === true;
     const gate = decideDesktopArtifactTransfer({
       executionPolicy: clampTurnAccessPosture({
         ...(caller.turn === undefined ? {} : { requested: caller.turn.executionPolicy }),
@@ -1797,11 +1809,10 @@ export function createDesktopLeaseService(
       // provider that has placements.
       locality: first.record.lease.locality,
       initiator: caller.actor.kind,
-      externalContentIngested: caller.turn?.externalContentIngested === true,
+      answeredForThread: options.transferAnswers?.covers(owner, threadMarked) === true,
       confirmBilledDesktops,
     });
     if (gate.kind === "refused") return refused(gate.reason);
-    const owner = first.record.lease.owner;
     const root = await options.threadRoot(owner).catch(() => undefined);
     if (root === undefined) return { status: "refused", reason: "no-root" };
     const read = await readDesktopArtifact({
@@ -1839,6 +1850,12 @@ export function createDesktopLeaseService(
         rootNow !== root
       ) {
         return refused("declined");
+      }
+      // An answer in the thread covers the thread's later transfers, once it
+      // still stands for the posture and checkout it was given under. One for
+      // a file leaving the machine covers that file only.
+      if (gate.kind === "ask" && gate.asks === "in-thread") {
+        options.transferAnswers?.record(owner, threadMarked);
       }
       const sent: DesktopArtifactSent = {
         leaseId: caller.leaseId,
@@ -2374,7 +2391,7 @@ export interface LeasedComputerUsePort {
     owner: ComputerUseOwner,
     path: string,
     confirm: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">,
-    /** Whether the owner's thread has read outside content, which stops Full access carrying the send. */
+    /** Whether the owner's thread has read outside content, which an answer from before it does not cover. */
     externalContentIngested: boolean,
   ) => Promise<ComputerControlResult>;
   readonly extend: (

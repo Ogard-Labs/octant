@@ -1108,6 +1108,101 @@ describe("ProjectService", () => {
     );
   });
 
+  it("journals one event when a Project keeps an image generation choice and one when it drops it", async () => {
+    const fixture = fixtureService({ projects: [chatProject()] });
+    const imageGenerationChoice = {
+      profileInstanceId: "a3000000-0000-4000-8000-000000000001",
+      modelId: "gpt-image-2",
+    };
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-project-image-generation-choice",
+        projectId: chatId,
+        expectedVersion: 1,
+        imageGenerationChoice,
+      }),
+    ).resolves.toMatchObject({
+      kind: "project-image-generation-choice-changed",
+      project: { imageGenerationChoice, version: 2 },
+    });
+    const dropped = await fixture.service.executeProject(windowId, {
+      kind: "change-project-image-generation-choice",
+      projectId: chatId,
+      expectedVersion: 2,
+    });
+    expect(dropped).toMatchObject({ kind: "project-image-generation-choice-changed" });
+    expect("imageGenerationChoice" in dropped.project).toBe(false);
+    expect(fixture.append.mock.calls.map((call) => call[0]?.events?.[0]?.eventName)).toEqual([
+      "project.image-generation-choice-changed@1",
+      "project.image-generation-choice-changed@1",
+    ]);
+  });
+
+  it("journals one event when a Project of any mode lets agents write its memory without asking", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    for (const [index, id] of [chatId, workId].entries()) {
+      await expect(
+        fixture.service.executeProject(windowId, {
+          kind: "change-project-agent-memory-writes",
+          projectId: id,
+          expectedVersion: 1,
+          agentMemoryWrites: "enabled",
+        }),
+      ).resolves.toMatchObject({
+        kind: "project-agent-memory-writes-changed",
+        project: { agentMemoryWrites: "enabled", version: 2 },
+      });
+      expect(fixture.append.mock.calls[index]?.[0]?.events?.[0]?.eventName).toBe(
+        "project.agent-memory-writes-changed@1",
+      );
+    }
+    expect(fixture.append).toHaveBeenCalledTimes(2);
+  });
+
+  it("journals one event when a Code Project lets agents comment on pull requests or push to the default branch", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-pull-request-comments",
+        projectId: chatId,
+        expectedVersion: 1,
+        agentPullRequestComments: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+
+    expect(
+      await fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-pull-request-comments",
+        projectId: workId,
+        expectedVersion: 1,
+        agentPullRequestComments: "enabled",
+      }),
+    ).toMatchObject({
+      kind: "code-project-agent-pull-request-comments-changed",
+      project: { agentPullRequestComments: "enabled", version: 2 },
+    });
+    expect(
+      await fixture.service.executeProject(windowId, {
+        kind: "change-code-project-agent-default-branch-push",
+        projectId: workId,
+        expectedVersion: 2,
+        agentDefaultBranchPush: "enabled",
+      }),
+    ).toMatchObject({
+      kind: "code-project-agent-default-branch-push-changed",
+      project: {
+        agentPullRequestComments: "enabled",
+        agentDefaultBranchPush: "enabled",
+        version: 3,
+      },
+    });
+    expect(fixture.append.mock.calls.map((call) => call[0]?.events?.[0]?.eventName)).toEqual([
+      "project.code-agent-pull-request-comments-changed@1",
+      "project.code-agent-default-branch-push-changed@1",
+    ]);
+  });
+
   it("saves a Code Project's terminal actions as one journaled event and refuses a Work Project", async () => {
     const fixture = fixtureService({ projects: [codeProject()] });
     const actions = [

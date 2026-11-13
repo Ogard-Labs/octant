@@ -104,6 +104,8 @@ interface HostState {
   answer: "approved" | "declined";
   readonly asked: Array<string>;
   readonly askedTransfers: Array<DesktopTransferConfirmation>;
+  /** The in-thread transfer answers the service asked the host to keep. */
+  readonly transferAnswers: Array<{ readonly threadId: string; readonly threadMarked: boolean }>;
   /** Runs while a person is deciding on a transfer. */
   whileDeciding: () => void | Promise<void>;
   readonly roots: Map<string, string>;
@@ -162,6 +164,16 @@ function serviceOver(connection: SqliteConnection, state: HostState): DesktopLea
       await state.whileDeciding();
       return state.answer;
     },
+    transferAnswers: {
+      covers: (owner, markedNow) =>
+        state.transferAnswers.some(
+          (answer) =>
+            answer.threadId === String(owner.threadId) && (answer.threadMarked || !markedNow),
+        ),
+      record: (owner, threadMarked) => {
+        state.transferAnswers.push({ threadId: String(owner.threadId), threadMarked });
+      },
+    },
     systemActor: system,
     now: () => state.now,
     uuid: randomUUID,
@@ -192,6 +204,7 @@ function host(
     answer: "approved",
     asked: [],
     askedTransfers: [],
+    transferAnswers: [],
     whileDeciding: () => undefined,
     roots: new Map([threadA, threadB, threadC].map((threadId) => [threadId, checkout])),
     threads: new Map(
@@ -1682,7 +1695,47 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
     expect(state.askedTransfers).toEqual([]);
   });
 
-  it("asks an agent's transfer on a Full access thread when its turn runs lower or the thread read outside content", async () => {
+  it("asks an agent's transfer once per thread below Full access, and again once the thread has read outside content", async () => {
+    const { service, state, checkout } = host({ executionPolicy: "approval-gated" });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    const asked: Array<boolean> = [];
+    const fromAgent = (externalContentIngested: boolean, answer: "approved" | "declined") => ({
+      owner: code(threadA),
+      actor: agentOf(threadA),
+      leaseId,
+      path: "app.bin",
+      turn: { executionPolicy: "approval-gated" as const, externalContentIngested },
+      confirm: async () => {
+        asked.push(externalContentIngested);
+        return answer;
+      },
+    });
+
+    // A refusal is not remembered: the next send asks again.
+    await expect(service.transfer(fromAgent(false, "declined"))).resolves.toMatchObject({
+      status: "refused",
+    });
+    await expect(service.transfer(fromAgent(false, "approved"))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    await expect(service.transfer(fromAgent(false, "declined"))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    expect(asked).toEqual([false, false]);
+    expect(state.transferAnswers).toEqual([{ threadId: threadA, threadMarked: false }]);
+
+    // An answer from before the mark does not cover the marked thread.
+    await expect(service.transfer(fromAgent(true, "approved"))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    await expect(service.transfer(fromAgent(true, "declined"))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    expect(asked).toEqual([false, false, true]);
+  });
+
+  it("asks an agent's transfer on a Full access thread only when its turn runs lower, outside content or not", async () => {
     const { service, checkout, connection } = host({ executionPolicy: "full-access" });
     writeFileSync(join(checkout, "app.bin"), "built app");
     const leaseId = await acquired(service, threadA);
@@ -1704,8 +1757,7 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
 
     for (const [executionPolicy, tainted] of [
       ["approval-gated", false],
-      ["auto-accept-edits", false],
-      ["full-access", true],
+      ["auto-accept-edits", true],
     ] as const) {
       await expect(service.transfer(fromAgent(executionPolicy, tainted))).resolves.toEqual({
         status: "refused",
@@ -1716,13 +1768,15 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
       status: "refused",
       reason: "plan-mode",
     });
-    expect(asked).toEqual(["approval-gated false", "auto-accept-edits false", "full-access true"]);
+    expect(asked).toEqual(["approval-gated false", "auto-accept-edits true"]);
     expect(sentEvents(connection)).toEqual([]);
 
-    await expect(service.transfer(fromAgent("full-access", false))).resolves.toMatchObject({
-      status: "delivered",
-    });
-    expect(asked).toHaveLength(3);
+    for (const tainted of [false, true]) {
+      await expect(service.transfer(fromAgent("full-access", tainted))).resolves.toMatchObject({
+        status: "delivered",
+      });
+    }
+    expect(asked).toHaveLength(2);
   });
 
   it("always asks before a file leaves the machine for a cloud desktop, Full access included", async () => {

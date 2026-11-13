@@ -944,6 +944,73 @@ describe("createAgentRunSessionRuntime", () => {
     },
   );
 
+  it("records a child's tool calls on the run's own record before they take effect", async () => {
+    const provider = fakeProvider();
+    const recorded: string[] = [];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        appManagedTools: () => ({
+          definitions: [{ name: "octant_browser", description: "Browser", inputSchema: {} }],
+          execute: async () => {
+            recorded.push("ran");
+            return { result: { ok: true } };
+          },
+        }),
+        toolEffects: (run) => {
+          recorded.push(`record:${String(run.id)}`);
+          return {
+            tools: (set) => ({
+              ...set,
+              execute: async (input) => {
+                recorded.push(`intended:${input.name}:${String(input.toolCallId)}`);
+                const result = await set.execute(input);
+                recorded.push("settled");
+                return result;
+              },
+            }),
+            observe: (event, hostTools) => {
+              if (event.kind === "tool-start")
+                recorded.push(
+                  `observed:${event.toolName}:${String(hostTools?.definitions[0]?.name)}`,
+                );
+            },
+          };
+        },
+      }),
+    );
+    const outcome = settled(runtime.start(agentRun()));
+    await provider.emit({
+      kind: "tool-start",
+      sessionId,
+      instanceId: providerInstanceId,
+      sequence: 1,
+      toolCallId: "rt-1",
+      toolName: "Bash",
+      occurredAt: now,
+    });
+    await provider.emit({
+      kind: "tool-request",
+      sessionId,
+      instanceId: providerInstanceId,
+      sequence: 2,
+      requestId: "tool-1",
+      toolName: "octant_browser",
+      inputJson: "{}",
+      occurredAt: now,
+    });
+    await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+    await provider.emit({ kind: "completed", sessionId });
+    await outcome;
+
+    expect(recorded).toEqual([
+      `record:${String(runId)}`,
+      "observed:Bash:octant_browser",
+      "intended:octant_browser:tool-1",
+      "ran",
+      "settled",
+    ]);
+  });
+
   it("runs the child as an in-process provider session under the clamped authority", async () => {
     const provider = fakeProvider({
       onSend: (emit) => {

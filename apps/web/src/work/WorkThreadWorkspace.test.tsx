@@ -453,14 +453,62 @@ describe("WorkThreadWorkspace", () => {
     expect(row).toHaveTextContent(
       "Let the agent upload report.pdf (12 KB) to https://example.com?",
     );
-    expect(within(row).queryByRole("button", { name: "Always allow" })).toBeNull();
+    expect(
+      within(row).queryByRole("button", { name: "Allow all sites in this profile" }),
+    ).toBeNull();
     await user.click(within(row).getByRole("button", { name: "Upload once" }));
-    expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ approvalId: approval.approvalId, decision: "approved" }),
-    );
+    expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith({
+      approvalId: approval.approvalId,
+      decision: "approved",
+    });
   });
 
-  it("asks every time, naming the file, its size, its type and the site, before the agent saves a download", async () => {
+  it.each([
+    ["upload", { upload: { files: [{ name: "report.pdf", sizeBytes: 12_288 }] } }],
+    [
+      "download",
+      { download: { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" } },
+    ],
+  ])(
+    "offers Always allow on a Browser %s approval and sends that answer to the host",
+    async (kind, ask) => {
+      const user = userEvent.setup();
+      const approval = {
+        approvalId: "90000000-0000-4000-8000-000000000017",
+        threadId: String(threadId),
+        mode: "work",
+        origin: "https://example.com",
+        ...ask,
+        requestedAt: "2026-09-09T10:00:00.000Z",
+      };
+      const browserAutomationClient = {
+        listApprovals: vi.fn(async () => [approval]),
+        decideApproval: vi.fn(async () => undefined),
+      };
+      const threadClient = {
+        bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+        execute: vi.fn(),
+      } as unknown as WorkThreadClient;
+      render(
+        <WorkThreadWorkspace
+          browserAutomationClient={browserAutomationClient as never}
+          threadClient={threadClient}
+          threadId={threadId}
+          title="Draft brief"
+        />,
+      );
+
+      const row = await screen.findByRole("group", { name: `Browser ${kind} approval` });
+      await user.click(within(row).getByRole("button", { name: "Always allow" }));
+      expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith({
+        approvalId: approval.approvalId,
+        decision: "approved",
+        remember: true,
+      });
+    },
+  );
+
+  it("asks, naming the file, its size, its type and the site, before the agent saves a download", async () => {
     const user = userEvent.setup();
     const approval = {
       approvalId: "90000000-0000-4000-8000-000000000008",
@@ -499,7 +547,9 @@ describe("WorkThreadWorkspace", () => {
     expect(row).toHaveTextContent(
       "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: https://example.com → https://files.example.com.",
     );
-    expect(within(row).queryByRole("button", { name: "Always allow" })).toBeNull();
+    expect(
+      within(row).queryByRole("button", { name: "Allow all sites in this profile" }),
+    ).toBeNull();
     await user.click(within(row).getByRole("button", { name: "Save once" }));
     expect(browserAutomationClient.decideApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: approval.approvalId, decision: "approved" }),

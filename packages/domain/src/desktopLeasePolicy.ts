@@ -379,20 +379,24 @@ export type DesktopArtifactTransferGate =
 
 /**
  * Plan refuses. A transfer to a cloud desktop sends the file off this
- * machine, so it asks a person every time while they keep "Confirm each
- * billed desktop" on; with it off it follows the thread's level as a transfer
- * to a host-local desktop does. A person sending a file that asks nothing has
- * already decided; an agent asks unless the thread runs with Full access. Auto-accept-edits covers edits to the checkout, not
- * sending a file out of it, so it asks as approval-gated does. Once the
- * thread has read outside content, Full access no longer carries an agent's
- * transfer: it is a standing approval, and taint stops those for Computer
- * use, whose `send-file` this is.
+ * machine, which no posture covers, so it asks a person every time while they
+ * keep "Confirm each billed desktop" on; with it off it follows the thread's
+ * level as a transfer to a host-local desktop does. A person sending a file
+ * to a host-local desktop has already decided. An agent's transfer there
+ * does not ask at Full access, whether or not the thread has read outside
+ * content: the file goes from the thread's own checkout into a desktop on
+ * this machine that the same agent already operates, and its shell could put
+ * it there (maintainer decision, 2026-11-13). Below Full access it asks until
+ * the person has answered for the thread. Auto-accept-edits covers edits to
+ * the checkout, not sending a file out of it, so it asks as approval-gated
+ * does.
  */
 export function decideDesktopArtifactTransfer(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly locality: DesktopProviderLocality;
   readonly initiator: EventActor["kind"];
-  readonly externalContentIngested: boolean;
+  /** The person already allowed the agent's transfers for this thread as it stands. */
+  readonly answeredForThread: boolean;
   readonly confirmBilledDesktops: boolean;
 }): DesktopArtifactTransferGate {
   if (input.executionPolicy === "plan") return { kind: "refused", reason: "plan-mode" };
@@ -402,7 +406,7 @@ export function decideDesktopArtifactTransfer(input: {
   if (input.initiator === "local-user" || input.initiator === "remote-device") {
     return { kind: "proceed" };
   }
-  if (input.executionPolicy === "full-access" && !input.externalContentIngested) {
+  if (input.executionPolicy === "full-access" || input.answeredForThread) {
     return { kind: "proceed" };
   }
   return { kind: "ask", asks: "in-thread" };

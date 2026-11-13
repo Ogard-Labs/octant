@@ -82,6 +82,34 @@ export const ContentClearedPayload = Schema.Struct({
 export type ContentClearedPayload = typeof ContentClearedPayload.Type;
 
 /**
+ * What a person may answer once for a whole thread, below Full access:
+ * starting helper agents after the thread read outside content, and an
+ * agent's file transfers into the thread's desktop on this machine.
+ */
+export const ThreadStandingAnswerSubject = Schema.Literal("delegation", "desktop-file-transfer");
+export type ThreadStandingAnswerSubject = typeof ThreadStandingAnswerSubject.Type;
+
+export const THREAD_STANDING_ANSWER_AGGREGATE = "thread-standing-answer";
+export const THREAD_STANDING_ANSWER_RECORDED = "thread.standing-answer-recorded@1";
+
+/**
+ * Journaled record that a person allowed `subject` for the rest of a thread
+ * (aggregate id = thread id); the envelope's actor and time say who and when.
+ * `threadMarked` is whether the thread had read outside content when they
+ * answered: an answer from before the mark does not cover the thread after
+ * it, so the person is asked once more with the mark in front of them.
+ */
+export const ThreadStandingAnswerRecorded = Schema.Struct({
+  threadId: AggregateId,
+  subject: ThreadStandingAnswerSubject,
+  threadMarked: Schema.Boolean,
+}).annotations(strict);
+export type ThreadStandingAnswerRecorded = typeof ThreadStandingAnswerRecorded.Type;
+export const decodeThreadStandingAnswerRecorded = Schema.decodeUnknownSync(
+  ThreadStandingAnswerRecorded,
+);
+
+/**
  * Thread-lifetime taint projection over provenance events.
  * Once true, `externalContentIngested` does not clear on session/turn
  * boundaries; only a person's clear turns it false, until the next ingestion.

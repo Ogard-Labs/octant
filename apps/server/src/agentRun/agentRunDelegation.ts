@@ -108,7 +108,17 @@ export interface AgentRunDelegationOptions {
   readonly uuid: () => string;
   readonly listTargets: () => ReadonlyArray<AgentsToolTarget>;
   readonly routing?: AgentRunDelegationRouting;
+  /**
+   * Outside content the thread read gates its helpers: never true at Full
+   * access, nor once the person has answered for the thread.
+   */
   readonly isTainted?: () => boolean;
+  /**
+   * Asks the person, once for the thread, whether it may start helpers after
+   * reading outside content, and keeps a yes. Absent where the turn has no way
+   * to ask its person, or runs in Plan; the delegation is then refused.
+   */
+  readonly askMarkedDelegation?: () => Promise<boolean>;
   readonly isPaused?: () => boolean;
   readonly projectId?: string | undefined;
   /** Absent when this host cannot reach other members; a target member is then refused. */
@@ -143,17 +153,28 @@ export type AgentRunDelegationResult =
   | { readonly status: "refused"; readonly reason: string; readonly message?: string };
 
 /**
- * A tainted parent cannot start helpers, and a helper's own reply taints its
- * parent, so a lead that delegated once and took the result in meets this on
- * its next delegation. The bare reason code left the model and the person with
- * nothing to act on.
+ * Below Full access a tainted parent starts helpers only once its person has
+ * said it may, and a helper's own reply taints its parent, so a lead that
+ * delegated once and took the result in meets this on its next delegation.
+ * The bare reason code left the model and the person with nothing to act on.
  */
 const TAINTED_DELEGATION_MESSAGE =
-  "This thread has taken in outside content (a helper's reply counts), so it cannot start more helpers. A person can review what it read and clear that from the notice above the composer, or the work can continue in a new thread.";
+  "This thread has taken in outside content (a helper's reply counts), so it cannot start more helpers unless its person allows that for the thread. A person can review what it read and clear that from the notice above the composer, or the work can continue in a new thread.";
+
+/**
+ * Whether outside content stops this delegation. A thread that can ask its
+ * person does, once: their yes is kept for the thread, so the next call finds
+ * the thread no longer gated and asks nobody.
+ */
+async function markedDelegationRefused(options: AgentRunDelegationOptions): Promise<boolean> {
+  if (options.isTainted?.() !== true) return false;
+  return options.askMarkedDelegation === undefined || !(await options.askMarkedDelegation());
+}
 
 export function agentRunDelegationCapabilities(options: AgentRunDelegationOptions) {
   const posture = options.admission.settings.current().creationPosture;
-  const tainted = options.isTainted?.() === true;
+  // A thread that can still ask its person is not blocked: the call asks.
+  const tainted = options.isTainted?.() === true && options.askMarkedDelegation === undefined;
   const paused = options.isPaused?.() === true;
   return {
     posture,
@@ -193,14 +214,15 @@ export async function startAgentRunDelegation(
       reason: "creation-posture-off",
       message: "Subagents are turned off in Settings → Octant Harness → Helper agents.",
     };
-  if (options.isTainted?.())
-    return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
+  // A paused run starts nothing, so nobody is asked on its behalf.
   if (options.isPaused?.())
     return {
       status: "refused",
       reason: "session-paused",
       message: "This run is paused, so no new helper starts until it is resumed.",
     };
+  if (await markedDelegationRefused(options))
+    return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   if (input.targetProjectId !== undefined && input.targetMemberId === undefined)
     return {
       status: "refused",
@@ -532,9 +554,9 @@ export async function followUpAgentRunDelegation(
   if (request.message === undefined) return { status: "refused", reason: "invalid-follow-up" };
   if (options.admission.settings.current().creationPosture !== "automatic")
     return { status: "refused", reason: "creation-posture-off" };
-  if (options.isTainted?.())
-    return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   if (options.isPaused?.()) return { status: "refused", reason: "session-paused" };
+  if (await markedDelegationRefused(options))
+    return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   const run = options.persistence.getById(request.runId);
   if (run === undefined || String(run.parentThreadId) !== options.parentThreadId)
     return { status: "refused", reason: "run-not-found" };

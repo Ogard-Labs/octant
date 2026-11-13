@@ -245,6 +245,10 @@ describe("Journal", () => {
         keepToolCallRecords: true,
         toolStepsPerTurn: 64,
         fullAccessToolStepsPerTurn: 0,
+        browserTransferFileLimitMegabytes: 25,
+        browserHeldDownloadLimit: 5,
+        browserUploadFileCountLimit: 5,
+        rememberedBrowserTransfers: [],
         persistentBrowserOwner: false,
       },
     } as const;

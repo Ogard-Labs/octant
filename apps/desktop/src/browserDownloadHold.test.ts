@@ -49,6 +49,58 @@ class FakeItem extends EventEmitter implements DesktopDownloadItemPort {
 }
 
 describe("DesktopDownloadHold", () => {
+  it("saves a download the person started to their Downloads folder, with no agent action running and no hold folder", async () => {
+    const downloads = await root();
+    await writeFile(join(downloads, "report.pdf"), "already there");
+    const refused = vi.fn();
+    const hold = new DesktopDownloadHold(undefined);
+
+    const first = new FakeItem("../../report.pdf", 500 * 1024 * 1024);
+    hold.accept({ preventDefault: refused }, first, downloads);
+    const second = new FakeItem("setup.dmg");
+    hold.accept({ preventDefault: refused }, second, downloads);
+
+    expect(refused).not.toHaveBeenCalled();
+    // Never over a file already there, never outside the folder, and no size
+    // cap or type refusal: those are for an agent's download.
+    expect(first.savePath).toBe(join(downloads, "report (2).pdf"));
+    expect(second.savePath).toBe(join(downloads, "setup.dmg"));
+    // The agent is told nothing about it and can claim nothing.
+    await first.complete("pdf");
+    expect(hold.takeReports()).toEqual([]);
+    expect(hold.claim("d1")).toBeUndefined();
+  });
+
+  it("gives two downloads of the same name that start together their own files, in any pane", async () => {
+    const downloads = await root();
+    const first = new FakeItem("report.pdf");
+    const second = new FakeItem("report.pdf");
+    // Neither file exists yet when the second starts, in another pane's hold.
+    new DesktopDownloadHold(undefined).accept({}, first, downloads);
+    new DesktopDownloadHold(undefined).accept({}, second, downloads);
+
+    expect(first.savePath).toBe(join(downloads, "report.pdf"));
+    expect(second.savePath).toBe(join(downloads, "report (2).pdf"));
+
+    // A name is free again once its download ended without leaving a file.
+    first.emit("done", {}, "cancelled");
+    const third = new FakeItem("report.pdf");
+    new DesktopDownloadHold(undefined).accept({}, third, downloads);
+    expect(third.savePath).toBe(join(downloads, "report.pdf"));
+  });
+
+  it("holds a download for the agent's running action even when the person drove the pane last", async () => {
+    const downloads = await root();
+    const hold = new DesktopDownloadHold(await root());
+    hold.begin();
+    const item = new FakeItem("a.txt");
+    hold.accept({}, item, downloads);
+    expect(item.savePath).not.toContain(downloads);
+    await item.complete("held");
+    await hold.finish();
+    expect(hold.takeReports()).toMatchObject([{ state: "held", downloadId: "d1" }]);
+  });
+
   it("refuses a download when no agent action is running, and when it has no folder", () => {
     const refused = vi.fn();
     const item = new FakeItem("a.txt");
@@ -117,6 +169,27 @@ describe("DesktopDownloadHold", () => {
       { state: "refused", name: "stream.bin", reason: "too-large" },
     ]);
     expect(hold.claim("d1")).toBeUndefined();
+  });
+
+  it("holds to the limits the person set in Settings instead of the defaults", async () => {
+    const hold = new DesktopDownloadHold(await root());
+    hold.begin({ maxFileBytes: 30 * 1024 * 1024, maxHeldDownloads: 1 });
+    const refused = vi.fn();
+    const allowed = new FakeItem("a.bin", 26 * 1024 * 1024);
+    hold.accept({ preventDefault: refused }, allowed);
+    expect(refused).not.toHaveBeenCalled();
+    hold.accept({ preventDefault: refused }, new FakeItem("huge.bin", 31 * 1024 * 1024));
+    expect(refused).toHaveBeenCalledOnce();
+    await allowed.complete("x");
+    const second = new FakeItem("b.bin");
+    hold.accept({}, second);
+    await second.complete("y");
+    await hold.finish();
+    // One held file at a time: the first gave way to the second.
+    expect([hold.claim("d1"), hold.claim("d2")].filter((path) => path !== undefined)).toHaveLength(
+      1,
+    );
+    await hold.dispose();
   });
 
   it("keeps five and discards the oldest; closing deletes the rest", async () => {

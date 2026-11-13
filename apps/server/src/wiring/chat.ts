@@ -133,7 +133,10 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
-  Pick<WorkspaceWiring, "contextHarness" | "projectMemoryAccess" | "shellService"> &
+  Pick<
+    WorkspaceWiring,
+    "contextHarness" | "keptImageChoices" | "projectMemoryAccess" | "shellService"
+  > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<CodeWiring, "environmentService"> &
   Pick<
@@ -148,6 +151,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "imageJobService"
     | "reviewedModelManifest"
     | "skillDiscoveryService"
+    | "verifyModelToolsOnFirstUse"
   > &
   Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
   Pick<CanvasWiring, "canvasAgentToolPort"> &
@@ -216,6 +220,7 @@ export function wireChat(deps: ChatDependencies) {
     workTurnService,
     workRequestRuntime,
     personMemoryAccess,
+    keptImageChoices,
     projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
@@ -390,6 +395,7 @@ export function wireChat(deps: ChatDependencies) {
       return hidden;
     };
     const chatService = new ChatService({
+      verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
       conversationInputTransfer,
       liveTurns,
       toolCallRecorders: threadToolCallRecorders({
@@ -530,6 +536,7 @@ export function wireChat(deps: ChatDependencies) {
                       threadKind: "chat-thread",
                       scopeId: decodeImageGenerationScopeId(String(thread.id)),
                       offers: imageGenerationOffers,
+                      kept: keptImageChoices,
                       jobs: imageJobService,
                       listInstances: () => persistence.readProviderInstances(),
                       readImageGenerationCustomSources: () =>

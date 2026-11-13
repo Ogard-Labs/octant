@@ -235,6 +235,10 @@ describe("shell settings policy", () => {
       keepToolCallRecords: true,
       toolStepsPerTurn: 64,
       fullAccessToolStepsPerTurn: 0,
+      browserTransferFileLimitMegabytes: 25,
+      browserHeldDownloadLimit: 5,
+      browserUploadFileCountLimit: 5,
+      rememberedBrowserTransfers: [],
       persistentBrowserOwner: false,
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
@@ -251,6 +255,10 @@ describe("shell settings policy", () => {
       keepToolCallRecords: true,
       toolStepsPerTurn: 64,
       fullAccessToolStepsPerTurn: 0,
+      browserTransferFileLimitMegabytes: 25,
+      browserHeldDownloadLimit: 5,
+      browserUploadFileCountLimit: 5,
+      rememberedBrowserTransfers: [],
       persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);

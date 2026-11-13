@@ -335,7 +335,7 @@ describe("desktop lease policy", () => {
         locality: "host-local",
         initiator: "local-user",
         confirmBilledDesktops: true,
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
     for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
@@ -345,7 +345,7 @@ describe("desktop lease policy", () => {
           locality: "host-local",
           initiator: "agent",
           confirmBilledDesktops: true,
-          externalContentIngested: false,
+          answeredForThread: false,
         }),
       ).toEqual({ kind: "ask", asks: "in-thread" });
     }
@@ -355,7 +355,7 @@ describe("desktop lease policy", () => {
         locality: "host-local",
         initiator: "agent",
         confirmBilledDesktops: true,
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "proceed" });
     expect(
@@ -364,7 +364,7 @@ describe("desktop lease policy", () => {
         locality: "host-local",
         initiator: "remote-device",
         confirmBilledDesktops: true,
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "proceed" });
     for (const initiator of ["agent", "local-user"] as const) {
@@ -374,31 +374,42 @@ describe("desktop lease policy", () => {
           locality: "cloud",
           initiator,
           confirmBilledDesktops: true,
-          externalContentIngested: false,
+          answeredForThread: false,
         }),
       ).toEqual({ kind: "ask", asks: "off-machine" });
     }
   });
 
-  it("asks an agent's transfer under Full access once the thread has read outside content", () => {
-    expect(
-      decideDesktopArtifactTransfer({
-        executionPolicy: "full-access",
-        locality: "host-local",
-        initiator: "agent",
-        confirmBilledDesktops: true,
-        externalContentIngested: true,
-      }),
-    ).toEqual({ kind: "ask", asks: "in-thread" });
+  it("lets an agent's transfer through below Full access once the person answered for the thread, and never in Plan or off the machine", () => {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(
+        decideDesktopArtifactTransfer({
+          executionPolicy,
+          locality: "host-local",
+          initiator: "agent",
+          confirmBilledDesktops: true,
+          answeredForThread: true,
+        }),
+      ).toEqual({ kind: "proceed" });
+    }
     expect(
       decideDesktopArtifactTransfer({
         executionPolicy: "plan",
         locality: "host-local",
         initiator: "agent",
         confirmBilledDesktops: true,
-        externalContentIngested: true,
+        answeredForThread: true,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
+    expect(
+      decideDesktopArtifactTransfer({
+        executionPolicy: "approval-gated",
+        locality: "cloud",
+        initiator: "agent",
+        confirmBilledDesktops: true,
+        answeredForThread: true,
+      }),
+    ).toEqual({ kind: "ask", asks: "off-machine" });
   });
 
   it("journals a person's press, typing, key, and scroll, and not the pointer moving or letting go", () => {
@@ -503,7 +514,7 @@ describe("desktop lease policy", () => {
         ...off,
         executionPolicy: "full-access",
         initiator: "agent",
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "proceed" });
     expect(
@@ -511,7 +522,7 @@ describe("desktop lease policy", () => {
         ...off,
         executionPolicy: "approval-gated",
         initiator: "agent",
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "ask", asks: "in-thread" });
     expect(
@@ -519,7 +530,7 @@ describe("desktop lease policy", () => {
         ...off,
         executionPolicy: "plan",
         initiator: "local-user",
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
   });

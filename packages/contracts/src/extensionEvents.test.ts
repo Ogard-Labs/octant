@@ -162,7 +162,50 @@ describe("remembered MCP tool approvals", () => {
     ]) {
       expect(() => decodeExtensionToolGrantRecorded({ ...recorded, ...leaked })).toThrow();
     }
-    expect(() => decodeExtensionToolGrantRecorded({ ...recorded, projectId: undefined })).toThrow();
+  });
+
+  it("records a grant for the account, and one for every tool of a server", () => {
+    const { projectId: _projectId, ...forAccount } = recorded;
+    expect(decodeExtensionToolGrantRecorded(forAccount)).toEqual(forAccount);
+    const {
+      mcpToolName: _mcpToolName,
+      definitionDigest: _definitionDigest,
+      ...wholeServer
+    } = recorded;
+    expect(decodeExtensionToolGrantRecorded(wholeServer)).toEqual(wholeServer);
+    // A tool's grant binds its listing, and a server's grant names no tool.
+    expect(() =>
+      decodeExtensionToolGrantRecorded({ ...wholeServer, mcpToolName: "search" }),
+    ).toThrow();
+    expect(() =>
+      decodeExtensionToolGrantRecorded({
+        ...wholeServer,
+        definitionDigest: recorded.definitionDigest,
+      }),
+    ).toThrow();
+    expect(decodeExtensionToolGrantRevoked({ grantId, reason: "person" })).toEqual({
+      grantId,
+      reason: "person",
+    });
+  });
+
+  it("lets an approval be remembered for the tool or for its whole server", () => {
+    const approvalId = "60000000-0000-4000-8000-000000000001";
+    const answer = { approvalId, decision: "approved", remember: true };
+    expect(
+      decodeExtensionToolApprovalDecision({ ...answer, rememberScope: "server" }).rememberScope,
+    ).toBe("server");
+    expect(decodeExtensionToolApprovalDecision(answer).rememberScope).toBeUndefined();
+    expect(() =>
+      decodeExtensionToolApprovalDecision({ ...answer, rememberScope: "all" }),
+    ).toThrow();
+    expect(() =>
+      decodeExtensionToolApprovalDecision({
+        approvalId,
+        decision: "approved",
+        rememberScope: "server",
+      }),
+    ).toThrow();
   });
 
   it("revokes a grant only for a named reason", () => {

@@ -29,7 +29,10 @@ import {
   decodeBrowserProfileChoice,
   type BrowserProfileChoice,
 } from "@octant/contracts/project-browser";
-import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
+import {
+  ANY_BROWSER_ORIGIN,
+  MAX_BROWSER_TABS_PER_CONTEXT,
+} from "@octant/contracts/browser-automation";
 import type { ToolActionRequest } from "@octant/contracts/tool-actions";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import type { LocalServerOpenTarget, LocalServerSnapshot } from "@octant/contracts";
@@ -999,7 +1002,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     if (target === undefined) return;
     const targetOrigin = new URL(target).origin;
     const allowed = snapshot?.context?.policy.allowedOrigins.some(
-      (origin) => new URL(normalizeBrowserUrl(origin)).origin === targetOrigin,
+      (origin) =>
+        // The agent's Private page at Full access admits every site.
+        origin === ANY_BROWSER_ORIGIN ||
+        new URL(normalizeBrowserUrl(origin)).origin === targetOrigin,
     );
     if (allowed) {
       await act("navigate");

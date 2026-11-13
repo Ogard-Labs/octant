@@ -588,7 +588,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const owned = this.#contexts.get(contextId);
     // A download is held only while an agent action that was allowed to
     // download runs; at any other time the context cancels it.
-    if (request.downloads === "hold") owned?.downloads.begin();
+    if (request.downloads === "hold") owned?.downloads.begin(request.downloadLimits);
     let observed: BrowserRuntimeObservation;
     try {
       observed = await this.#act(contextId, request, signal);
