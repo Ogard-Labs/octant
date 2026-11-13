@@ -1417,9 +1417,10 @@ let serverStderrTail: StderrTail | undefined;
 
 /**
  * Keeps a local crash record for a managed host that ended unexpectedly. The
- * native Windows host keeps its data in an owned profile this does not write
- * into, so only the POSIX host gets one. A record that cannot be written is
- * reported on stderr and never blocks recovery.
+ * native Windows host keeps its data in an owned profile the desktop does not
+ * write into; that host keeps its own record at its next start instead. A
+ * record that cannot be written is reported on stderr and never blocks
+ * recovery.
  */
 async function keepHostCrashRecord(
   exitReason: string,

@@ -598,9 +598,18 @@ the redacted stderr tail. Every string is redacted again on write and the home
 folder becomes `~`; the newest 20 records are kept. The desktop writes the
 record because a host that crashed cannot be trusted to. Records never leave
 the machine except inside a support bundle the person saves. Native crash dumps
-are not collected: they carry process memory no redaction can sweep. The native
-Windows host and a background-service host no desktop watches keep no records
-yet, and the next start does not yet name them. See
+are not collected: they carry process memory no redaction can sweep. A host
+that no desktop watched (a background-service host, or the native Windows host,
+whose owned profile the desktop does not write into) keeps its own record at
+its next start: when `host-memory.json` shows the previous process ended
+without a clean stop and no record exists at or after that process's last
+reading, the host writes one with `stopped without a clean exit` and the last
+memory reading, through the same code on every platform. A record a watching
+desktop already wrote for that exit is reused, not doubled. The next start's
+"Octant stopped unexpectedly" notice names the record kept for that exit (how
+it ended and when) and says Save diagnostics includes it; host-control status
+carries it as `memory.previousStop.crashRecord`, with no path or output line.
+See
 [Persistence: startup repair](#persistence).
 
 **Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
@@ -17001,12 +17010,11 @@ documents its authority, privacy, and release boundaries):
   refusals open the desktop recovery screen, and a default-off background host
   and open-at-login item keep the host available
   ([process topology](#process-topology)), the desktop keeps local crash
-  records, and the recovery screen saves a support bundle. Not built yet:
-  naming crash records in the next start's notice, crash records for the
-  native Windows host and an unwatched background-service host, and one-click
-  reopening of a Browser session a restart ended. Code thread and Project
-  terminals, debug sessions and saved Project action runs a restart ended are
-  offered back through their ordinary start
+  records (an unwatched host keeps its own at its next start), the next
+  start's notice names them, and the recovery screen saves a support bundle.
+  Not built yet: one-click reopening of a Browser session a restart ended.
+  Code thread and Project terminals, debug sessions and saved Project action
+  runs a restart ended are offered back through their ordinary start
   ([Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the

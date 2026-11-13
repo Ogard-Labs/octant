@@ -191,6 +191,7 @@ export {
 export {
   HOST_CRASH_RECORD_LIMIT,
   hostCrashRecordsDirectory,
+  keepUncleanStopCrashRecord,
   readHostCrashRecords,
   recordHostCrash,
   type HostCrashRecord,

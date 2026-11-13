@@ -88,6 +88,39 @@ export async function recordHostCrash(
   }
 }
 
+/**
+ * What a host starting after an unclean exit keeps. A watching desktop may
+ * already have written a richer record for the same exit (any record at or
+ * after the dead process's last reading); that one is reused. Otherwise the
+ * host writes its own, which is the only record a background-service host or
+ * an unwatched native host ever gets: no process saw it die.
+ */
+export async function keepUncleanStopCrashRecord(
+  dataDirectory: string,
+  input: {
+    readonly lastSeenAt: string;
+    readonly recordedAt: string;
+    readonly lastLines: ReadonlyArray<string>;
+    readonly homeDirectory?: string;
+  },
+): Promise<HostCrashRecord | undefined> {
+  const existing = (await readHostCrashRecords(dataDirectory)).find(
+    (record) => record.recordedAt >= input.lastSeenAt,
+  );
+  if (existing !== undefined) return existing;
+  const outcome = await recordHostCrash(dataDirectory, {
+    recordedAt: input.recordedAt,
+    process: "host",
+    exitReason: "stopped without a clean exit",
+    lastLines: input.lastLines,
+    ...(input.homeDirectory === undefined ? {} : { homeDirectory: input.homeDirectory }),
+  });
+  if (outcome.status === "failed") return undefined;
+  return (await readHostCrashRecords(dataDirectory)).find(
+    (record) => record.recordedAt === input.recordedAt,
+  );
+}
+
 function decodeRecord(value: unknown): HostCrashRecord | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const record = value as Record<string, unknown>;

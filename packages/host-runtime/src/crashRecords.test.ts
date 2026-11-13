@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   HOST_CRASH_RECORD_LIMIT,
   hostCrashRecordsDirectory,
+  keepUncleanStopCrashRecord,
   readHostCrashRecords,
   recordHostCrash,
 } from "./crashRecords";
@@ -55,6 +56,37 @@ describe("host crash records", () => {
     expect(records).toHaveLength(HOST_CRASH_RECORD_LIMIT);
     expect(records[0]?.exitReason).toBe(`exit code ${HOST_CRASH_RECORD_LIMIT + 2}`);
     expect(await readdir(hostCrashRecordsDirectory(data))).toHaveLength(HOST_CRASH_RECORD_LIMIT);
+  });
+
+  it("writes its own record after an unclean exit nobody watched", async () => {
+    const data = await dataDirectory();
+    const record = await keepUncleanStopCrashRecord(data, {
+      lastSeenAt: "2026-11-13T09:59:00.000Z",
+      recordedAt: "2026-11-13T10:05:00.000Z",
+      lastLines: ["last reading normal, 300 MB"],
+    });
+    expect(record).toMatchObject({
+      recordedAt: "2026-11-13T10:05:00.000Z",
+      exitReason: "stopped without a clean exit",
+    });
+    expect(await readHostCrashRecords(data)).toHaveLength(1);
+  });
+
+  it("reuses the record a watching desktop already kept for the same exit", async () => {
+    const data = await dataDirectory();
+    await recordHostCrash(data, {
+      recordedAt: "2026-11-13T10:00:00.000Z",
+      process: "host",
+      exitReason: "signal SIGKILL",
+      lastLines: [],
+    });
+    const record = await keepUncleanStopCrashRecord(data, {
+      lastSeenAt: "2026-11-13T09:59:00.000Z",
+      recordedAt: "2026-11-13T10:05:00.000Z",
+      lastLines: [],
+    });
+    expect(record?.exitReason).toBe("signal SIGKILL");
+    expect(await readHostCrashRecords(data)).toHaveLength(1);
   });
 
   it("reads a host that never crashed as no records", async () => {
