@@ -70,7 +70,7 @@ const SPACING_PROPERTY =
 const SPACING_LITERAL = /(?<![\w.-])(\d*\.?\d+)px\b/g;
 
 // A corner is a radius token, `0`, `50%`, or the 1-4px of a chart bar, mark or
-// status dot (DESIGN.md, "Spacing, shapes, and depth"). Every component of the
+// status dot (DESIGN.md, "Radii"). Every component of the
 // value must be one of those on its own: a token with a fallback, a token next
 // to a literal, or a token plus a length is a literal corner in disguise. The
 // one derived form is a part inside a control, the control radius less the

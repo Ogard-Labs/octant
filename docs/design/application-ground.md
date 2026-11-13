@@ -57,7 +57,7 @@ it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
 may instead put the ground behind every page, from the workspace's leading
-edge, and under the sidebar too when they ask for it (see Shapes and depth). Every
+edge, and under the sidebar too when they ask for it (see [Depth and material](../../DESIGN.md#depth-and-material)). Every
 surface that shows text or information softens it beneath one continuous
 reading veil, the sheet colour at 80%, so it shows at about a fifth of its
 strength and agent replies remain bare prose: a thread, every other pane

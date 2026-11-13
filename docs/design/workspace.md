@@ -2510,7 +2510,7 @@ hiding them. The cards sit one step above the dock's own background. Sources lis
 Computer use offers Picture in Picture show/hide for its live activity card
 that floats over the main conversation. The Browser's live preview is separate:
 it is a card on the dock's shelf and follows the thread's Browser, not this
-control (see [Shell and layout](#minimised-tools) and
+control (see [Minimised tools](#minimised-tools) and
 [Workspace](#tool-lifecycles)). Neither preview occupies
 Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context

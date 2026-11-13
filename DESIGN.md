@@ -65,7 +65,7 @@ who prefers grey chooses Mono (Settings › Appearance › Style).
 - Controls are familiar, compact, keyboard reachable, and honest about loading,
   stale, unavailable, permission, and error states.
 
-_Rationale._ A grey app read as unfinished in use: nothing said what was
+_Rationale._ A grey app reads as unfinished: nothing says what was
 running, warned, or belonged to what. With colour the default and grey one
 choice away, the rules that remain are the ones that protect readers: colours
 come from the theme, text stays readable, and keyboard focus stays clear.
@@ -155,7 +155,7 @@ The roles live in `styles/surface.css`; the size tokens are listed under
 | Page title             | 14              | 600    | 1.35    | primary     | A destination or Settings page (`oct-page-title`)                                                                                                                                                             |
 | Dialog title           | 17              | 600    | 1.35    | primary     | What a dialog is about (its `h2`, `.octant-dialog__title`, and the Settings rail's title); a part of a dialog is headed at 15 / 600 (its `h3`)                                                                |
 | Reply heading          | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                                                                                                                             |
-| Section label          | 14              | 600    | 1.35    | secondary   | A heading inside content: over a hairline (`oct-section-label`), a Settings section's label, the Files tool's "In this folder"                                                                                |
+| Section label          | 14              | 600    | 1.3     | secondary   | A heading inside content: over a hairline (`oct-section-label`), a Settings section's label, the Files tool's "In this folder"                                                                                |
 | Row label              | 14              | 500    | 1.35    | primary     | A setting's row, a file row, an empty state's title                                                                                                                                                           |
 | Navigation name        | 13              | 400    | 1.35    | primary     | A thread's title in the sidebar and in the title band, the account row's name, a Settings rail item and "Back to app" (`oct-nav-name`; a Settings item rests in the muted ink until hovered, focused or open) |
 | Navigation group label | 12              | 400    | 1.3     | muted       | A sidebar group heading and a Settings rail group label, in sentence case (`oct-nav-group`; a group's count stays Meta)                                                                                       |
@@ -378,7 +378,8 @@ what they hold (a plan purple, a chart or figures amber, a diagram teal, a
 mockup pink, a table or document blue). Colour draws every hue from the preset's
 palette roles (`--octant-palette-*`, read through the `--oct-colour-*` aliases in
 `styles/colour.css`), so it follows the light or dark theme and any tinted
-preset. Mono draws the ink accent (`#f5f5f7` dark, `#141414` light) and the
+preset. Mono draws the ink accent (`#f5f5f7` dark, `#141414` light), the text on it
+(`#171717` dark, the primary and accent foreground; `#ffffff` light) and the
 neutral warning trio (`MONO_STYLE_TOKENS` in `packages/theme/src/tokens.ts`,
 swapped in only for roles a preset left at the colour default), grey tiles and
 marks, and connector marks in the ink. A stored `vivid` or `default` value, or
@@ -597,7 +598,7 @@ never writes its own colour.
 | 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)       | none                                                                                                                                                              |
 | 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: square, sharing edges   | `--octant-panel-surface`, with `--octant-panel-sheen`: a sheen across 96px | one 1px line (`--octant-pane-line`) on its top and left edges; no rim, no seat shadow, no corner at any width (a narrow window's sheet holds one square tile)     |
 | 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                            | `--octant-shadow-xs` (the card recipe), `-sm` (a Settings group, an empty state): top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`) |
-| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the composer's box, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; pressed sinks        |
+| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the composer's box, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; a press deepens the shadow        |
 | 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                            | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                                |
 | 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`            | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it                 |
 
@@ -778,7 +779,7 @@ panel, the thread's included), defined once on every shell in `shell.css`:
 - **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over the
   panel: the primary text at 4%. On Window glass a card takes a light rim and a
   shadow that can be seen on the desktop behind it
-  (`--octant-shadow-raised-glass`); the opaque border is near black and drew a
+  (`--octant-shadow-raised-glass`); the opaque border is near black and would draw a
   heavy outline there.
 - **An outline button** rests on that card step instead of the page colour
   (`--octant-outline-rest`); its hover and pressed fills stay the control fills.
@@ -939,8 +940,8 @@ backdrops stand at `--oct-z-floating` (50), a notice at `--oct-z-toast` (55), an
 everything a person opens to aim at (menus, context menus, popovers, selects,
 comboboxes, tooltips, hover cards) at `--oct-z-popup` (60). A notice sits above a
 dialog or sheet because under its backdrop it could be neither read nor
-dismissed, and under a popup because a notice once covered an open menu and took
-the clicks meant for its items. A menu or popover opened inside a dialog or the
+dismissed, and under a popup because a notice over an open menu would take the
+clicks meant for its items. A menu or popover opened inside a dialog or the
 narrow dock sheet appears above it, and Escape closes the innermost surface
 first. A new surface takes one of these tokens, never a number of its own, and
 nothing in the workspace goes above z-index 7.
@@ -1735,8 +1736,8 @@ as a border that takes one off the controls' centreline.
 
 ### Alignment
 
-One value does one job, so no edge or gap has to be explained. Each of these was
-measured off by a pixel or more in a render before it became a rule.
+One value does one job, so no edge or gap has to be explained. Each of these is a rule because a
+pixel of drift in a render reads as a mistake.
 
 - _The shell runs on one grid_, named by `--oct-title-rail-h`,
   `--oct-rail-tab-h`, `--oct-rail-button-h`, `--oct-nav-head-h`,
@@ -1820,7 +1821,7 @@ measured off by a pixel or more in a render before it became a rule.
   tint, and a Project tile's initial (22%, 40% on hover), which is an identity
   mark rather than a divider.
 - _The rule beside reasoning_ is 1px in `--octant-border-strong`, not a 2px bar:
-  the hairline measured about 1.2:1 and was too faint to find.
+  the hairline is about 1.2:1, too faint to find.
 
 ### Page shell
 
@@ -2172,7 +2173,7 @@ spans or animated divs.
   placement and content, not paint another notice. A field error stays by its
   field, and a warning that the person must review stays inline. Notices stack at
   the top trailing corner of the window, under the title bar: at the bottom
-  trailing corner a notice covered the composer's model picker and Send.
+  trailing corner a notice would cover the composer's model picker and Send.
 - **A lost host connection is one condition with one voice.** A Chat thread shows a
   single `OctantAlert` in plain words ("Can't reach the host" with Retry now),
   above its transcript in the thread's own measure; it becomes a success alert,

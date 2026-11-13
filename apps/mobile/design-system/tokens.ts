@@ -271,7 +271,7 @@ export const space = {
   xxl: 48,
 } as const;
 
-// One radius per role, the product scale (DESIGN.md › Shapes and depth): a
+// One radius per role, the product scale (DESIGN.md › Radii and Depth and material): a
 // control or row 8, a card or a person's message 12, a composer or dialog 14.
 // The sheet is the phone's own: it rises from the screen's rounded bottom.
 export const radii = {

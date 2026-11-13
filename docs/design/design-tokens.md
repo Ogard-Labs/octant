@@ -341,10 +341,6 @@ Source: [Motion](../../DESIGN.md#motion),
   headings (`octant.css:452`, `:458`); tabular figures wherever a number is
   compared (`apps/web/src/styles.css:829`, `:1108`; DESIGN.md names them per
   surface, never as a rule); `font-optical-sizing: auto` (`octant.css:434`).
-- A conflict to resolve in DESIGN.md, not here: Shapes and depth says pressing a
-  raised tile "sinks it", and Motion and interaction says a press moves nothing.
-  The implementation does both without movement (a darker fill and an inset
-  shadow), which is what the recipes copy.
 
 ## Appendix: minimum recipes
 

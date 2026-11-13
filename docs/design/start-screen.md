@@ -552,7 +552,7 @@ creating a second environment model. Every create composer shows Environment
 only when more than one host is known. With one host there is nothing to
 choose, so no Environment control or label appears. With several, an existing
 Project's fixed host reads as a label instead of a dropdown. Workspace remains on that rear card after the three primary choices;
-nothing about delivery is asked up front (see "Language"). The Project
+nothing about delivery is asked up front (see [Voice](../../DESIGN.md#voice)). The Project
 control is one menu: saved Projects to search, then New Project from folder
 and New Project from GitHub repository. Choosing GitHub swaps the menu's body
 for the managed-clone flow in place, so there is no second repository control
