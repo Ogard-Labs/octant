@@ -14,6 +14,13 @@ const boundedNonEmptyText = (maximumBytes: number) =>
 export const DEFAULT_THREAD_TOOL_STEPS_PER_TURN = 64;
 /** The most a person may set either tool-step limit to. */
 export const MAX_THREAD_TOOL_STEPS_SETTING = 4_096;
+/**
+ * The most discrete runtime events one Chat or Work turn handles before the
+ * host stops it; streamed text deltas do not count. Fixed whatever the
+ * tool-step settings say: it guards against a runaway turn (maintainer
+ * decision, 2026-11-13).
+ */
+export const MAX_TURN_RUNTIME_EVENTS = 4_096;
 /** The most a step's progress or result message keeps. */
 export const MAX_THREAD_TOOL_STEP_SUMMARY_BYTES = 2_048;
 

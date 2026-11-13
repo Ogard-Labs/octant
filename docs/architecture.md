@@ -4568,9 +4568,10 @@ have no row.
   host reads the setting when a turn starts. Spend ceilings and every other
   hard line are unchanged. Rationale: a count of rows protects nothing a
   person cannot get back, so it is a default; the bytes it used to cost are
-  gone with the next rule. One separate fixed bound remains: a Work turn
-  stops after 4,096 discrete runtime events, which a turn of well over a
-  thousand tool calls reaches whatever this setting says.
+  gone with the next rule. One bound stays fixed: a Chat or Work turn stops
+  after 4,096 discrete runtime events (streamed text does not count),
+  whatever this setting says, because it guards against a runaway turn
+  (maintainer decision, 2026-11-13). The Full access row in Settings says so.
 - **A step is journaled and streamed as a change.** Chat journals each tool
   event as `chat.attempt-tool-step@1`, carrying the one step that changed
   (none when the list only became truncated) and the attempt's `updatedAt`;

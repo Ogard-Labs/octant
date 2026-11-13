@@ -203,6 +203,7 @@ import {
   LOCAL_HOST_ID,
   MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_THREAD_TOOL_STEPS_SETTING,
+  MAX_TURN_RUNTIME_EVENTS,
 } from "@octant/contracts";
 import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
 import type { PickerGroup } from "@octant/domain";
@@ -1628,7 +1629,7 @@ function ActiveSectionContent({
                 />
               </SettingRow>
               <SettingRow
-                description="The same limit for a Work turn that runs at Full access. 0 means no limit: every call is kept, and the spend ceiling is what bounds the turn."
+                description={`The same limit for a Work turn that runs at Full access. 0 means no limit: every call is kept, and the spend ceiling is what bounds the turn. A turn still stops after ${MAX_TURN_RUNTIME_EVENTS.toLocaleString("en-US")} runtime events, whatever this is set to.`}
                 focused={focusedSetting === settingId("tool-steps-per-turn-full-access")}
                 label="Tool steps kept per turn at Full access"
                 scope="host"

@@ -1,4 +1,8 @@
-import { DEFAULT_THREAD_TOOL_STEPS_PER_TURN, MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import {
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  MAX_PROVIDER_ATTACHMENTS,
+  MAX_TURN_RUNTIME_EVENTS,
+} from "@octant/contracts";
 import type {
   ProviderChildActivityEvent,
   ShieldWatcherLabel,
@@ -69,7 +73,7 @@ import {
 } from "../providers/turnBudget";
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const MAX_EVENTS = 4_096;
+const MAX_EVENTS = MAX_TURN_RUNTIME_EVENTS;
 // Inactivity window, not total wall time. Matches Chat and Code: a model
 // writing one long tool call, such as a Canvas design, can be silent for
 // minutes.

@@ -35,6 +35,7 @@ import {
   type ThreadTaskProgress,
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   MAX_THREAD_TASKS_PER_TURN,
+  MAX_TURN_RUNTIME_EVENTS,
   restateThreadTaskList,
   upsertThreadTaskProgress,
   type ThreadToolStep,
@@ -88,7 +89,7 @@ import type { ResearchRouteDecision, ResearchRouter } from "./research/researchR
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const DEFAULT_MAX_EVENTS = 4_096;
+const DEFAULT_MAX_EVENTS = MAX_TURN_RUNTIME_EVENTS;
 // Inactivity window: a turn is cut off after this long without any provider
 // event, not after this much total wall time. A provider can stay silent while
 // the model writes one long tool call: Codex sent nothing for over two minutes
