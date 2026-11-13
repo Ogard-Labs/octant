@@ -159,11 +159,16 @@ through `serve-sim` as before. **Repair input** is a fifth input kind,
 offered by the device pane only after that refusal: it runs
 `serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
 screen restarts and running apps close) and drops the stream so the next input
-reconnects it. It rides the same Allow input grant as a tap and never runs
-automatically: a live Allow input grant covers it like any other input,
-whoever sends it (maintainer decision, 2026-11-12). Built: a person
-(`local-user` or `remote-device`) or an agent may ask for it, the host asking
-on its own is refused, and `octant_apple` offers it as `repair-input`.
+reconnects it. It rides the same Allow input grant as a tap, whoever asks: a live
+grant or a one-shot approval covers it, and without either it is refused as
+approval-required (maintainer decision, 2026-11-12). It never runs
+automatically. `octant_apple` offers it as its `repair-input` operation, which
+takes the Simulator's id and goes through the same authority check as the
+pane's (maintainer decision, 2026-11-13): Plan refuses it, a turn running at
+Full access sends it unasked, and below Full access a live grant covers it
+and a thread without one asks the person first, refusing it when nobody can
+answer. Its usage, behind the tool's `help`, tells the agent to send it only
+after an input was refused as `input-disconnected`.
 
 ## Open URL
 

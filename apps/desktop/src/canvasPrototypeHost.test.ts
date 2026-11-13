@@ -14,6 +14,7 @@ import {
   type CanvasPrototypePaint,
   type CanvasPrototypeRectangle,
   MAX_BRIDGE_MESSAGES_PER_SECOND,
+  MAX_RELAYS_PER_PAGE,
 } from "./canvasPrototypeHost";
 
 const NO_ROUTE = "SOCKS5 127.0.0.1:1";
@@ -320,5 +321,214 @@ describe("the page's preload", () => {
     const source = readFileSync(new URL("./canvasPrototypePreload.ts", import.meta.url), "utf8");
     expect(source).toContain(`const PAGE_CHANNEL = "${CANVAS_DESIGN_BRIDGE_CHANNEL}";`);
     expect(source).toContain(`const HOST_CHANNEL = "${CANVAS_PROTOTYPE_PAGE_BRIDGE_CHANNEL}";`);
+  });
+});
+
+describe("a page whose Canvas has the network on", () => {
+  const relay = `${CANVAS_PROTOTYPE_SCHEME}://network/${surfaceId}/fetch`;
+  const asked = `${relay}?url=${encodeURIComponent("https://api.example.com/data")}`;
+  const relays = (sent: ReadonlyArray<CanvasPrototypeHostEvent>) =>
+    sent.filter((event) => event.kind === "relay");
+
+  async function started(network: boolean) {
+    const made = fakeSession();
+    const running = host(made.session);
+    await running.host.start();
+    running.host.receive(network ? { ...open, network: true } : open);
+    return { ...running, answer: made.answer };
+  }
+
+  it("hands its question to the app and answers it with what the app brings back", async () => {
+    const { host: running, sent, answer } = await started(true);
+    const pending = answer(new Request(asked));
+    const [question] = relays(sent);
+    expect(question).toEqual({
+      kind: "relay",
+      surfaceId,
+      requestId: expect.any(Number),
+      resource: "fetch",
+      target: "https://api.example.com/data",
+    });
+    if (question?.kind !== "relay") throw new Error("The app was not asked.");
+    running.receive({
+      kind: "relayed",
+      surfaceId,
+      requestId: question.requestId,
+      answer: {
+        status: 200,
+        contentType: "application/json",
+        body: new TextEncoder().encode('{"ok":true}'),
+      },
+    });
+    const response = await pending;
+    expect(response?.status).toBe(200);
+    expect(await response?.text()).toBe('{"ok":true}');
+    // What a page with an opaque origin needs to read it, and nothing that makes it a document.
+    expect(Object.fromEntries(response?.headers ?? [])).toEqual({
+      "access-control-allow-origin": "*",
+      "cache-control": "no-store",
+      "content-disposition": "attachment",
+      "content-security-policy": "sandbox; default-src 'none'",
+      "content-type": "application/json",
+      "x-content-type-options": "nosniff",
+    });
+  });
+
+  it("hands the app a page's JSON body with its question, and nothing else of the request", async () => {
+    const { sent, answer } = await started(true);
+    void answer(
+      new Request(asked, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer page-secret",
+          cookie: "a=1",
+        },
+        body: '{"ask":1}',
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const [question] = relays(sent);
+    if (question?.kind !== "relay") throw new Error("The app was not asked.");
+    expect(Object.keys(question).sort()).toEqual([
+      "body",
+      "kind",
+      "requestId",
+      "resource",
+      "surfaceId",
+      "target",
+    ]);
+    expect(question.resource).toBe("fetch");
+    expect(new TextDecoder().decode(question.body)).toBe('{"ask":1}');
+  });
+
+  it("refuses a body that is not declared JSON or is past the bound, and hands the app nothing", async () => {
+    const { sent, answer } = await started(true);
+    const post = (body: string, type: string) =>
+      answer(new Request(asked, { method: "POST", headers: { "content-type": type }, body }));
+    expect((await post("a=1", "text/plain"))?.status).toBe(415);
+    expect((await post("a=1", "application/x-www-form-urlencoded"))?.status).toBe(415);
+    const large = await post(JSON.stringify("x".repeat(256 * 1024)), "application/json");
+    expect(large?.status).toBe(413);
+    expect(await large?.json()).toEqual({ refused: "request-too-large" });
+    expect(relays(sent)).toEqual([]);
+  });
+
+  it("hands the app an image's and a font's address as that kind, and answers a preflight itself", async () => {
+    const { sent, answer } = await started(true);
+    for (const resource of ["image", "font"] as const) {
+      void answer(
+        new Request(
+          `${CANVAS_PROTOTYPE_SCHEME}://network/${surfaceId}/${resource}?url=${encodeURIComponent("https://cdn.example.com/a")}`,
+        ),
+      );
+    }
+    expect(relays(sent).map((event) => event.kind === "relay" && event.resource)).toEqual([
+      "image",
+      "font",
+    ]);
+    const preflight = await answer(new Request(asked, { method: "OPTIONS" }));
+    expect(preflight?.status).toBe(204);
+    expect(preflight?.headers.get("access-control-allow-methods")).toBe("GET, POST");
+    expect(preflight?.headers.get("access-control-allow-headers")).toBe("content-type");
+    expect(preflight?.headers.get("access-control-allow-origin")).toBe("*");
+    expect(relays(sent)).toHaveLength(2);
+  });
+
+  it("still serves the page once and nothing else under the page's own address", async () => {
+    const { answer } = await started(true);
+    expect((await answer(new Request(address)))?.status).toBe(200);
+    expect((await answer(new Request(address)))?.status).toBe(404);
+  });
+
+  it("hands the app nothing for a page without the network, another address, or another method", async () => {
+    const without = await started(false);
+    expect((await without.answer(new Request(asked)))?.status).toBe(403);
+    expect(relays(without.sent)).toEqual([]);
+
+    const { sent, answer } = await started(true);
+    for (const [request, status] of [
+      [new Request(asked, { method: "PUT", body: "x" }), 405],
+      [new Request(asked, { method: "POST", body: "x" }), 415],
+      [new Request(relay), 400],
+      [new Request(`${relay}?url=a&url=b`), 400],
+      [new Request(`${CANVAS_PROTOTYPE_SCHEME}://network/${surfaceId}/other?url=a`), 404],
+      [
+        new Request(
+          `${CANVAS_PROTOTYPE_SCHEME}://network/22222222-2222-4222-8222-222222222222/fetch?url=a`,
+        ),
+        403,
+      ],
+    ] as const) {
+      const response = await answer(request);
+      expect(response?.status).toBe(status);
+      expect(response?.headers.get("access-control-allow-origin")).toBe("*");
+    }
+    expect(relays(sent)).toEqual([]);
+  });
+
+  it("answers what a closed page still waits on, and gives a late answer to nobody", async () => {
+    const { host: running, sent, answer } = await started(true);
+    const pending = answer(new Request(asked));
+    const [question] = relays(sent);
+    if (question?.kind !== "relay") throw new Error("The app was not asked.");
+    running.receive({ kind: "close", surfaceId });
+    expect((await pending)?.status).toBe(503);
+    expect(() =>
+      running.receive({
+        kind: "relayed",
+        surfaceId,
+        requestId: question.requestId,
+        answer: { status: 200, contentType: "text/plain", body: new Uint8Array() },
+      }),
+    ).not.toThrow();
+    // Closed, the surface has no network: the same address is refused.
+    expect((await answer(new Request(asked)))?.status).toBe(403);
+  });
+
+  it("gives an answer only to the page that asked", async () => {
+    const { host: running, sent, answer } = await started(true);
+    let settled = false;
+    const pending = answer(new Request(asked))?.then((response) => {
+      settled = true;
+      return response;
+    });
+    const [question] = relays(sent);
+    if (question?.kind !== "relay") throw new Error("The app was not asked.");
+    running.receive({
+      kind: "relayed",
+      surfaceId: "22222222-2222-4222-8222-222222222222",
+      requestId: question.requestId,
+      answer: { status: 200, contentType: "text/plain", body: new Uint8Array() },
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    running.receive({ kind: "close", surfaceId });
+    await pending;
+  });
+
+  it("holds only so many of one page's questions at a time", async () => {
+    const { sent, answer } = await started(true);
+    for (let index = 0; index < MAX_RELAYS_PER_PAGE; index += 1) void answer(new Request(asked));
+    expect((await answer(new Request(asked)))?.status).toBe(429);
+    expect(relays(sent)).toHaveLength(MAX_RELAYS_PER_PAGE);
+  });
+
+  it("turns an answer the page could not be given into a refusal, never a throw", async () => {
+    const { host: running, sent, answer } = await started(true);
+    const outcomes: Array<number | undefined> = [];
+    for (const status of [204, 99, 700]) {
+      const pending = answer(new Request(asked));
+      const question = relays(sent).at(-1);
+      if (question?.kind !== "relay") throw new Error("The app was not asked.");
+      running.receive({
+        kind: "relayed",
+        surfaceId,
+        requestId: question.requestId,
+        answer: { status, contentType: "text/plain", body: new TextEncoder().encode("x") },
+      });
+      outcomes.push((await pending)?.status);
+    }
+    expect(outcomes).toEqual([204, 502, 502]);
   });
 });

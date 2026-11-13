@@ -484,6 +484,30 @@ describe("Simulator frame input", () => {
     });
   });
 
+  it("lets an agent repair input on a Simulator the host holds open, and refuses it without the grant", () => {
+    const agent = {
+      kind: "agent" as const,
+      actorId: "10000000-0000-4000-8000-000000000098" as never,
+      providerInstanceId: "10000000-0000-4000-8000-000000000097" as never,
+      threadId: tap.threadId,
+    };
+    const repair = {
+      ...tap,
+      kind: "repair-input" as const,
+      point: undefined,
+      requestedBy: agent,
+      approval: { kind: "not-required" as const },
+    };
+    const decide = (scoped: unknown) =>
+      ApplePolicy.evaluateAppleSimulatorRequest(repair as never, scoped as never, [booted]);
+
+    expect(decide({ ...scope, inputGranted: true })).toEqual({ kind: "allowed" });
+    expect(decide(scope)).toMatchObject({ reason: "approval-required" });
+    expect(decide({ ...scope, inputGranted: true, executionPolicy: "plan" })).toMatchObject({
+      reason: "read-only-policy",
+    });
+  });
+
   it("treats Allow input as the confirmation that opens a Simulator, not as a click", () => {
     const openInput = {
       ...tap,
@@ -574,7 +598,7 @@ describe("Simulator frame input", () => {
   it("refuses a device effect the host asks for on its own, at Full access too", () => {
     const host = { kind: "system" as const, actorId: actor.actorId };
     const { point: _point, ...base } = tap;
-    for (const kind of ["open-url", "rotate", "start-recording", "repair-input"] as const) {
+    for (const kind of ["open-url", "rotate", "start-recording"] as const) {
       expect(
         evaluateAppleSimulatorRequest(
           {
