@@ -332,7 +332,7 @@ describe("remote route policy", () => {
     }
     const blocked: Response[] = [];
     for (const path of [
-      "/api/providers/discovery/scan",
+      "/api/providers/discovery/locate-binary",
       "/api/providers/instance-1/packaged-smoke-turn",
       "/api/providers/instance-1/probe",
       "/api/providers/bootstrap?windowId=forbidden",

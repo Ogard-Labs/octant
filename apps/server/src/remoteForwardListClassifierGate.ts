@@ -29,6 +29,8 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/secret-stores/commands", method: "POST" },
   { path: "/api/secret-stores/settings", method: "GET" },
   { path: "/api/provider-cloud", method: "POST" },
+  { path: "/api/providers/discovery/locate-binary", method: "POST" },
+  { path: "/api/providers/discovery/binary-receipts", method: "POST" },
   { path: "/api/secret-stores/command-bindings", method: "GET" },
   { path: "/api/secret-stores/command-bindings", method: "POST" },
   { path: "/api/replica-membership/commands", method: "POST" },

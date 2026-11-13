@@ -24,6 +24,7 @@ import {
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
   type DiscoveryCandidate,
+  type EventActor,
   LOCAL_HOST_ID,
   type OutsideProviderDriverReference,
   type PermissionPersistence,
@@ -1927,11 +1928,12 @@ export function wireProviders(deps: ProvidersDependencies) {
       candidate: DiscoveryCandidate,
       windowId: string,
       options: { readonly enabled: boolean },
+      actor?: EventActor,
     ) => {
       const { command } = createProviderFromDiscoveryCandidate(candidate, {
         enabled: options.enabled,
       });
-      const result = await providerService.execute(windowId as never, command);
+      const result = await providerService.execute(windowId as never, command, actor);
       if (result.kind !== "provider-created") {
         throw new Error("Provider discovery auto-register did not create a provider instance.");
       }
@@ -1946,13 +1948,13 @@ export function wireProviders(deps: ProvidersDependencies) {
         : { desktopBridgeSecret: options.desktopBridgeSecret }),
       binaryReceipts: new LocalPluginImportReceiptStore(),
       readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
-      applyProviderCommand: (windowId, command) =>
-        providerService.execute(decodeWindowId(windowId), command),
+      applyProviderCommand: (windowId, command, actor) =>
+        providerService.execute(decodeWindowId(windowId), command, actor),
       listInstances: async () => persistence.readProviderInstances(),
       createFromDiscovery: createProviderFromDiscovery,
       readFirstRunOnboarding: () =>
         persistence.readShellSettings()?.settings.firstRunOnboarding ?? "pending",
-      onConnect: async (command, windowId) => {
+      onConnect: async (command, windowId, actor) => {
         // The renderer names the canonical file; the launcher that reaches it
         // comes from the host's own scan, never from the request.
         const scanned = discoveryService
@@ -1968,7 +1970,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             : { ...command, discoveredPath: scanned.discoveredPath },
           { enabled: true },
         );
-        const result = await providerService.execute(windowId as never, providerCommand);
+        const result = await providerService.execute(windowId as never, providerCommand, actor);
         if (result.kind !== "provider-created") {
           throw new Error("Provider discovery connect did not create a provider instance.");
         }

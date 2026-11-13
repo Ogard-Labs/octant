@@ -51,6 +51,7 @@ export type RemoteShellSurfaceKind =
   | "design-systems"
   | "usage-ledger"
   | "file-event-routines"
+  | "provider-discovery"
   | "approvals"
   | "extension-install"
   | "provider-setup"
@@ -152,6 +153,14 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     availability: "local-host-only",
     // No catalogued action, as for shell settings above.
     catalogAction: "automation.source.configure",
+  },
+  {
+    id: "provider-discovery",
+    label: "Provider discovery",
+    description: "Scan the host for installed provider commands and connect what the scan found.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "provider.discovery.scan",
   },
   {
     id: "approvals",

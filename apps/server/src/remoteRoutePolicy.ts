@@ -83,7 +83,10 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/shell/launch-session",
   "/api/shell/local-session",
   "/api/folders",
-  "/api/providers/discovery",
+  // Pointing a runtime at an executable goes through the host's native file
+  // picker and the desktop broker. Scanning and connecting are forwarded below.
+  "/api/providers/discovery/locate-binary",
+  "/api/providers/discovery/binary-receipts",
   // The whole host's export: bulk data with no bound of its own for a remote
   // caller. Every other host-control route is forwarded below.
   "/api/host-control/export",
@@ -1112,6 +1115,16 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/usage/diagnostics",
     methods: ["POST"] as const,
   },
+  // Scanning the host for installed provider commands and connecting what
+  // the scan found, for a device the host's own person paired; the route
+  // refuses every other.
+  ...["/api/providers/discovery/scan", "/api/providers/discovery/connect"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  })),
   // The provider history read and the two host-wide ledger purges, for a
   // device the host's own person paired; the routes refuse every other.
   ...["/api/usage/local-history", "/api/usage/reset", "/api/usage/retain"].map((path) => ({

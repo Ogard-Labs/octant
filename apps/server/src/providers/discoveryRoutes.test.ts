@@ -14,6 +14,8 @@ import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { createDiscoveryRouteHandler } from "./discoveryRoutes";
 import { makeDiscoveryService, type DiscoveryService } from "./discoveryService";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -275,6 +277,92 @@ describe("discoveryRoutes", () => {
     );
     expect(result).toBeDefined();
     expect(result!.status).toBe(503);
+  });
+
+  it("scans and connects for a device the host's own person paired, journaled as the device, and refuses a restricted device and the native picker", async () => {
+    const deviceId = "00000000-0000-4000-8000-00000000d001";
+    const fromDevice = (
+      path: string,
+      admittedBy: "host-person" | "hub-roster",
+      body?: unknown,
+    ): Request => {
+      const request = makeRequest(path, body === undefined ? {} : { body });
+      request.headers.delete("x-octant-window-capability");
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "00000000-0000-4000-8000-00000000d002" as never,
+          deviceId: deviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "c".repeat(64),
+          sessionId: "00000000-0000-4000-8000-00000000d003" as never,
+          admittedBy,
+        }),
+        scopeId: deviceId as never,
+      });
+      return request;
+    };
+    const createFromDiscovery = vi.fn(async () => ({
+      instanceId: decodeProviderInstanceId("00000000-0000-4000-8000-000000000902"),
+    }));
+    const onConnect = vi.fn(async () => ({ instanceId: "00000000-0000-4000-8000-000000000901" }));
+    const handler = createDiscoveryRouteHandler({
+      discoveryService: makeFakeDiscoveryService(),
+      windowAuthorityStore: makeFakeWindowAuthorityStore(),
+      listInstances: async () => [],
+      createFromDiscovery,
+      onConnect,
+      readFirstRunOnboarding: () => "pending",
+    });
+    const connect = {
+      kind: "connect",
+      driverKind: "codex",
+      binaryPath: "/usr/local/bin/codex",
+      displayName: "Codex CLI",
+    };
+
+    expect((await handler(fromDevice("/api/providers/discovery/scan", "hub-roster")))?.status).toBe(
+      403,
+    );
+    expect(
+      (await handler(fromDevice("/api/providers/discovery/connect", "hub-roster", connect)))
+        ?.status,
+    ).toBe(403);
+    expect(createFromDiscovery).not.toHaveBeenCalled();
+    expect(onConnect).not.toHaveBeenCalled();
+
+    const device = { kind: "remote-device", deviceId };
+    expect(
+      (await handler(fromDevice("/api/providers/discovery/scan", "host-person")))?.status,
+    ).toBe(200);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ binaryPath: "/usr/local/bin/codex" }),
+      deviceId,
+      { enabled: true },
+      expect.objectContaining(device),
+    );
+    expect(
+      (await handler(fromDevice("/api/providers/discovery/connect", "host-person", connect)))
+        ?.status,
+    ).toBe(200);
+    expect(onConnect).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "connect" }),
+      deviceId,
+      expect.objectContaining(device),
+    );
+
+    // Pointing a runtime at a binary goes through the host's native picker.
+    expect(
+      (
+        await handler(
+          fromDevice("/api/providers/discovery/locate-binary", "host-person", {
+            instanceId: "00000000-0000-4000-8000-000000000901",
+            receipt: "r".repeat(43),
+          }),
+        )
+      )?.status,
+    ).toBe(403);
   });
 
   it("handles connect with onConnect handler", async () => {

@@ -35,6 +35,7 @@ describe("remoteSurfaceMatrix", () => {
       "design-systems",
       "usage-ledger",
       "file-event-routines",
+      "provider-discovery",
       "approvals",
       "extension-install",
       "provider-setup",
@@ -54,7 +55,7 @@ describe("remoteSurfaceMatrix", () => {
   });
 
   it("lists every declared surface exactly once", () => {
-    expect(listRemoteShellSurfaces()).toHaveLength(17);
+    expect(listRemoteShellSurfaces()).toHaveLength(18);
   });
 });
 
@@ -125,6 +126,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "design-systems",
       "usage-ledger",
       "file-event-routines",
+      "provider-discovery",
       "approvals",
       "extension-install",
       "provider-setup",
@@ -148,6 +150,7 @@ describe("what a session that acts as the host's own person reaches", () => {
       "design-systems",
       "usage-ledger",
       "file-event-routines",
+      "provider-discovery",
       "approvals",
       "extension-install",
       "provider-setup",
