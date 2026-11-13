@@ -49,13 +49,53 @@ function xtermRuntime() {
 }
 
 describe("ZenProjectTerminalCard", () => {
+  it("offers Restart when a shell it was following is ended by a host restart, and starts only one replacement", async () => {
+    let restarted = false;
+    const shell = client((command) =>
+      command.kind === "attach"
+        ? running("% ")
+        : !restarted
+          ? running("")
+          : {
+              kind: "project-terminal-refused",
+              reason: "host-restarted",
+              message: "This terminal ended when Octant restarted.",
+            },
+    );
+    const onRestart = vi.fn(async () => true);
+    const runtime = xtermRuntime();
+    render(
+      <ZenProjectTerminalCard
+        client={shell}
+        live
+        loadRuntime={runtime.loadRuntime}
+        onRestart={onRestart}
+        projectId={projectId}
+        terminalId={terminalId}
+      />,
+    );
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    restarted = true;
+
+    const button = await screen.findByRole(
+      "button",
+      { name: "Restart terminal" },
+      { timeout: 5000 },
+    );
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toBeDisabled());
+    fireEvent.click(button);
+    expect(onRestart).toHaveBeenCalledTimes(1);
+  });
+
   it("offers a shell a host restart ended back in one click, and only that shell", async () => {
     const ended = client(() => ({
       kind: "project-terminal-refused",
       reason: "host-restarted",
       message: "This terminal ended when Octant restarted.",
     }));
-    const onRestart = vi.fn(async () => undefined);
+    const onRestart = vi.fn(async () => true);
     const { unmount } = render(
       <ZenProjectTerminalCard
         client={ended}

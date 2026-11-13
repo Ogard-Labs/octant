@@ -277,7 +277,9 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
                       // The new shell is pinned before the ended one's card
                       // goes, so a refused start leaves the card as it was.
                       const started = await actions.addZenProjectTerminal(element.projectId);
-                      if (started !== undefined) await zen.removeElement(element.elementId);
+                      if (started === undefined) return false;
+                      await zen.removeElement(element.elementId);
+                      return true;
                     }}
                     projectId={element.projectId}
                     terminalId={element.terminalId}

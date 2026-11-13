@@ -587,36 +587,49 @@ export function useZenController(options: UseZenControllerOptions) {
 
   const removeElement = useCallback(
     async (elementId: ZenElementPayload["elementId"]) => {
-      if (client === undefined || space === null) return;
-      const previous = space;
-      setSpace({
-        ...space,
-        elements: space.elements.filter((element) => element.elementId !== elementId),
-      });
+      // The space as last loaded, which can be newer than this callback's
+      // render: a restarted terminal pins its replacement and then removes the
+      // ended card from the same closure, and the pin moved the version.
+      const current = presentationSpace.current ?? space;
+      if (client === undefined || current === null) return;
+      const previous = current;
+      const optimistic = {
+        ...current,
+        elements: current.elements.filter((element) => element.elementId !== elementId),
+      };
+      setSpace(optimistic);
+      presentationSpace.current = optimistic;
       try {
         const result = await client.command({
           command: "remove-element",
-          spaceId: space.spaceId,
+          spaceId: current.spaceId,
           elementId,
-          expectedVersion: space.version,
+          expectedVersion: current.version,
         });
-        if ("result" in result && result.result === "mutation" && mounted.current)
+        if ("result" in result && result.result === "mutation" && mounted.current) {
           setSpace(result.space);
+          presentationSpace.current = result.space;
+        }
       } catch (error) {
         if (!mounted.current) return;
         if (isZenStaleConflict(error)) {
           try {
             const refreshed = await client.bootstrap();
             if (mounted.current) setFocusZone(refreshed.focusZone);
-            if (refreshed.space !== null) setSpace(refreshed.space);
+            if (refreshed.space !== null) {
+              setSpace(refreshed.space);
+              presentationSpace.current = refreshed.space;
+            }
             setMessage("Zen changed elsewhere; refreshed the current space.");
           } catch {
             setSpace(previous);
+            presentationSpace.current = previous;
             setMessage("Zen changed elsewhere and could not be refreshed.");
           }
           return;
         }
         setSpace(previous);
+        presentationSpace.current = previous;
         setMessage(
           typeof error === "object" && error !== null && "message" in error
             ? String(error.message)
