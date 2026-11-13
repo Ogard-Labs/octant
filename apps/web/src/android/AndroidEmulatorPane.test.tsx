@@ -645,6 +645,9 @@ describe("AndroidEmulatorPane", () => {
     }
   });
   it("says Shutting down for a shutdown an agent started, without a lost live view", async () => {
+    // The pane learns of the shutdown on its 3-second poll; fake timers let the test
+    // step through two polls instead of spending real seconds on them.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.stubGlobal(
       "createImageBitmap",
       vi.fn(async () => ({ width: 1080, height: 2400, close: () => undefined })),
@@ -692,14 +695,15 @@ describe("AndroidEmulatorPane", () => {
       expect(await screen.findByText("Live stream")).toBeVisible();
       // An agent shuts the emulator down; nothing this pane did started it.
       state = "shutting-down";
-      expect(
-        await screen.findByText(/Shutting down Pixel 8/, {}, { timeout: 8_000 }),
-      ).toBeVisible();
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(await screen.findByText(/Shutting down Pixel 8/)).toBeVisible();
       expect(screen.queryByText("Live view lost")).toBeNull();
       state = "shutdown";
-      expect(await screen.findByText("No device running", {}, { timeout: 8_000 })).toBeVisible();
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(await screen.findByText("No device running")).toBeVisible();
       expect(screen.queryByText("Live view lost")).toBeNull();
     } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });
