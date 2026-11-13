@@ -238,6 +238,7 @@ describe("saying why a loop stopped", () => {
       "spend-unreported",
       "paused-by-user",
       "stopped-by-user",
+      "held-after-restart",
     ] as const) {
       expect(goalLoopPauseText(reason).length).toBeGreaterThan(0);
     }

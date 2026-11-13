@@ -21,6 +21,7 @@ import {
   mayCompleteGoalLoop,
   narrowGoalLoopCeiling,
 } from "@octant/domain";
+import type { GoalLoopFrame } from "./goalLoopEventStore";
 
 /**
  * Running a goal loop.
@@ -53,8 +54,14 @@ export interface GoalLoopRoundOutcome {
 export interface GoalLoopDependencies {
   /** The goal this loop works on, and the command path that changes it. */
   readonly readGoal: (threadId: string) => ThreadGoal | null;
+  /**
+   * Charge one round to the goal. It must charge a round id at most once:
+   * a host that stops after the charge and before the round's record settles
+   * the same round again on its next start (goalLoopCharge.ts).
+   */
   readonly recordUsage: (input: {
     readonly threadId: string;
+    readonly roundId: string;
     readonly goal: ThreadGoal;
     readonly tokensSpent: number;
     readonly elapsedMs: number;
@@ -86,6 +93,8 @@ export interface GoalLoopDependencies {
     readonly threadId: string;
     readonly objective: string;
     readonly authority: AgentRunAuthority;
+    /** Told what the round has charged so far, each time the runner sees it grow. */
+    readonly onSpend?: (tokensSpent: number) => void;
   }) => Promise<GoalLoopRoundOutcome>;
   readonly journal: {
     readonly append: (input: {
@@ -113,6 +122,36 @@ export interface GoalLoopDependencies {
   readonly clock: () => UtcTimestamp;
 }
 
+type LoopChanges = Partial<
+  Pick<GoalLoop, "status" | "pauseReason" | "ceiling" | "roundsRun" | "lastRoundAt">
+>;
+
+function trailingInterrupted(rounds: ReadonlyArray<GoalLoopRound>): number {
+  let count = 0;
+  for (let index = rounds.length - 1; index >= 0; index -= 1) {
+    if (rounds[index]?.outcome !== "interrupted") break;
+    count += 1;
+  }
+  return count;
+}
+
+/** The status a pause or stop frame leaves a loop in. */
+function pausedStatus(
+  reason: GoalLoopPauseReason,
+  stopped: boolean,
+): { readonly status: GoalLoop["status"]; readonly pauseReason: GoalLoopPauseReason } {
+  const status = stopped
+    ? reason === "goal-complete"
+      ? ("complete" as const)
+      : ("stopped" as const)
+    : reason === "approval-required"
+      ? ("awaiting-approval" as const)
+      : reason === "budget-exhausted" || reason === "budget-required"
+        ? ("budget-limited" as const)
+        : ("paused" as const);
+  return { status, pauseReason: reason };
+}
+
 interface LoopRecord {
   readonly loop: GoalLoop;
   readonly rounds: ReadonlyArray<GoalLoopRound>;
@@ -120,7 +159,33 @@ interface LoopRecord {
   readonly lastAuthority?: AgentRunAuthority;
   /** Whether the last round's spend was visible, for the token-budget rule. */
   readonly lastSpendObserved?: boolean;
+  /** A round the journal shows started and never recorded: the one a restart cut off. */
+  readonly openRound?: OpenRound;
 }
+
+interface OpenRound {
+  readonly roundId: string;
+  readonly sequence: number;
+  readonly authority: AgentRunAuthority;
+  readonly checkpointId?: string;
+  readonly startedAt: UtcTimestamp;
+  readonly tokensSpent?: number;
+  readonly lastSpendAt?: UtcTimestamp;
+}
+
+/**
+ * How often a running round journals what it has charged. A restart loses at
+ * most this much of a round's spend; journaling every usage report would add
+ * a frame per model step.
+ */
+const ROUND_SPEND_JOURNAL_INTERVAL_MS = 5_000;
+
+/**
+ * A loop's rounds cut off by restarts in a row before it waits for its person.
+ * The first is the restart's own; the rest are the host's continuations, held
+ * after two as a cut-off turn's continuations are (MAX_RESTART_CONTINUATIONS_CUT_OFF).
+ */
+const MAX_ROUNDS_CUT_OFF_IN_A_ROW = 3;
 
 export class GoalLoopService {
   readonly #dependencies: GoalLoopDependencies;
@@ -183,12 +248,16 @@ export class GoalLoopService {
             "A running loop's ceiling can only narrow. Stop it and start a new one to widen it.",
           );
         }
-        return this.#result(
-          this.#write({
-            ...record,
-            loop: this.#loopWith(record.loop, { ceiling: change.ceiling }),
-          }),
-        );
+        const next = this.#write({
+          ...record,
+          loop: this.#loopWith(record.loop, { ceiling: change.ceiling }),
+        });
+        this.#dependencies.journal.append({
+          aggregateId: String(record.loop.id),
+          eventName: GOAL_LOOP_EVENT_NAMES.ceilingNarrowed,
+          payload: { loopId: String(record.loop.id), ceiling: change.ceiling },
+        });
+        return this.#result(next);
       }
     }
   }
@@ -241,11 +310,42 @@ export class GoalLoopService {
 
     this.#inFlight.add(threadId);
     const startedAt = this.#dependencies.clock();
+    const roundId = this.#dependencies.uuid();
+    const loopId = String(record.loop.id);
     try {
+      // Journaled before the turn starts, so a restart mid-round finds the
+      // round open and can charge what it spent (settleAfterRestart).
+      this.#dependencies.journal.append({
+        aggregateId: loopId,
+        eventName: GOAL_LOOP_EVENT_NAMES.roundStarted,
+        payload: {
+          loopId,
+          roundId,
+          sequence: record.loop.roundsRun + 1,
+          authority: decision.authority,
+          ...(checkpointId === undefined ? {} : { checkpointId }),
+          startedAt,
+        },
+      });
+      let spendJournaledAt = Date.parse(startedAt);
       const outcome = await this.#dependencies.runRound({
         threadId,
         objective: goal.objective,
         authority: decision.authority,
+        onSpend: (tokensSpent) => {
+          const now = Date.parse(this.#dependencies.clock());
+          if (now - spendJournaledAt < ROUND_SPEND_JOURNAL_INTERVAL_MS) return;
+          spendJournaledAt = now;
+          try {
+            this.#dependencies.journal.append({
+              aggregateId: loopId,
+              eventName: GOAL_LOOP_EVENT_NAMES.roundSpend,
+              payload: { loopId, roundId, tokensSpent: Math.max(0, Math.floor(tokensSpent)) },
+            });
+          } catch {
+            // A spend frame is a restart's estimate; the round records its own total.
+          }
+        },
       });
       const complete =
         outcome.outcome === "ran" &&
@@ -264,6 +364,7 @@ export class GoalLoopService {
       try {
         await this.#dependencies.recordUsage({
           threadId,
+          roundId,
           goal,
           tokensSpent: outcome.tokensSpent,
           elapsedMs: outcome.elapsedMs,
@@ -275,7 +376,7 @@ export class GoalLoopService {
       }
 
       const round = decodeGoalLoopRound({
-        roundId: this.#dependencies.uuid(),
+        roundId,
         loopId: record.loop.id,
         sequence: record.loop.roundsRun + 1,
         ...(checkpointId === undefined ? {} : { checkpointId }),
@@ -305,7 +406,7 @@ export class GoalLoopService {
       this.#dependencies.journal.append({
         aggregateId: String(record.loop.id),
         eventName: GOAL_LOOP_EVENT_NAMES.roundRecorded,
-        payload: { round },
+        payload: { round, spendObserved: outcome.usageReported !== false },
       });
       if (usageRecorded && !complete && record.loop.trigger.kind === "continuous") {
         this.#dependencies.scheduleNextRound?.(threadId);
@@ -314,6 +415,204 @@ export class GoalLoopService {
     } finally {
       this.#inFlight.delete(threadId);
     }
+  }
+
+  /**
+   * Rebuilds every loop from its journaled frames, as the previous host left
+   * them. Each frame advances the loop's version exactly as the change that
+   * wrote it did, so a window's expected version still matches after a
+   * restart. A loop found running was running when the host stopped; it
+   * stays that way until continueAfterRestart or holdAfterRestart decides it,
+   * and nothing schedules it here.
+   */
+  replay(frames: ReadonlyArray<GoalLoopFrame>): void {
+    const byLoop = new Map<string, LoopRecord>();
+    for (const frame of frames) {
+      if (frame.kind === "started") {
+        const previous = this.#byThread.get(String(frame.payload.loop.threadId));
+        const record = { loop: frame.payload.loop, rounds: previous?.rounds ?? [] };
+        byLoop.set(String(frame.payload.loop.id), record);
+        this.#write(record);
+        continue;
+      }
+      const loopId =
+        frame.kind === "round-recorded" ? frame.payload.round.loopId : frame.payload.loopId;
+      if (frame.kind === "round-started" || frame.kind === "round-spend") {
+        const open = byLoop.get(String(loopId));
+        if (open === undefined) continue;
+        const openRound: OpenRound | undefined =
+          frame.kind === "round-started"
+            ? {
+                roundId: frame.payload.roundId,
+                sequence: frame.payload.sequence,
+                authority: frame.payload.authority,
+                ...(frame.payload.checkpointId === undefined
+                  ? {}
+                  : { checkpointId: frame.payload.checkpointId }),
+                startedAt: frame.payload.startedAt,
+              }
+            : open.openRound !== undefined && open.openRound.roundId === frame.payload.roundId
+              ? {
+                  ...open.openRound,
+                  tokensSpent: frame.payload.tokensSpent,
+                  lastSpendAt: frame.occurredAt,
+                }
+              : open.openRound;
+        const next = openRound === undefined ? open : { ...open, openRound };
+        byLoop.set(String(loopId), next);
+        const current = this.#byThread.get(String(next.loop.threadId));
+        if (current === undefined || String(current.loop.id) === String(loopId)) this.#write(next);
+        continue;
+      }
+      const record = byLoop.get(String(loopId));
+      if (record === undefined) continue;
+      const replayed = (changes: LoopChanges) =>
+        this.#loopWithAt(record.loop, changes, frame.occurredAt);
+      let next: LoopRecord;
+      switch (frame.kind) {
+        case "round-recorded":
+          // Built without openRound: recording a round closes the one open.
+          next = {
+            loop: replayed({
+              roundsRun: record.loop.roundsRun + 1,
+              lastRoundAt: frame.payload.round.endedAt,
+            }),
+            rounds: [...record.rounds, frame.payload.round],
+            lastAuthority: frame.payload.round.authority,
+            lastSpendObserved: frame.payload.spendObserved !== false,
+          };
+          break;
+        case "paused":
+          next = { ...record, loop: replayed(pausedStatus(frame.payload.reason, false)) };
+          break;
+        case "stopped":
+          next = { ...record, loop: replayed(pausedStatus(frame.payload.reason, true)) };
+          break;
+        case "resumed":
+          next = { ...record, loop: replayed({ status: "running" }) };
+          break;
+        case "ceiling-narrowed":
+          next = { ...record, loop: replayed({ ceiling: frame.payload.ceiling }) };
+          break;
+      }
+      byLoop.set(String(loopId), next);
+      // Only the thread's newest loop is the one it shows and commands.
+      const current = this.#byThread.get(String(next.loop.threadId));
+      if (current === undefined || String(current.loop.id) === String(loopId)) this.#write(next);
+    }
+  }
+
+  /**
+   * Records the round a restart cut off as interrupted and charges the goal
+   * what the round had journaled before the restart, so a restart neither
+   * loses that spend nor counts the round as run. Answers how many of the
+   * loop's rounds in a row a restart has now cut off.
+   */
+  async settleAfterRestart(threadId: string): Promise<{ readonly roundsCutOffInARow: number }> {
+    const record = this.#byThread.get(threadId);
+    const open = record?.openRound;
+    if (record === undefined || open === undefined) {
+      return { roundsCutOffInARow: trailingInterrupted(record?.rounds ?? []) };
+    }
+    const tokensSpent = open.tokensSpent ?? 0;
+    const endedAt = open.lastSpendAt ?? open.startedAt;
+    const elapsedMs = Math.max(0, Date.parse(endedAt) - Date.parse(open.startedAt));
+    const goal = this.#dependencies.readGoal(threadId);
+    let charged = goal !== null && goal.status !== "complete";
+    if (charged && goal !== null) {
+      try {
+        await this.#dependencies.recordUsage({
+          threadId,
+          roundId: open.roundId,
+          goal,
+          tokensSpent,
+          elapsedMs,
+          evidence: [],
+          complete: false,
+        });
+      } catch {
+        charged = false;
+      }
+    }
+    const round = decodeGoalLoopRound({
+      roundId: open.roundId,
+      loopId: record.loop.id,
+      sequence: open.sequence,
+      ...(open.checkpointId === undefined ? {} : { checkpointId: open.checkpointId }),
+      authority: open.authority,
+      outcome: "interrupted",
+      detail: charged
+        ? "Octant restarted while this round ran. The spend journaled before then is charged to the goal."
+        : "Octant restarted while this round ran, and its spend could not be charged to the goal.",
+      tokensSpent,
+      startedAt: open.startedAt,
+      endedAt,
+    });
+    // The current record, not the one read before the charge: a person's
+    // command may have moved the loop while the goal was written.
+    const current = this.#byThread.get(threadId) ?? record;
+    const { openRound: _closed, ...rest } = current;
+    const next = this.#write({
+      ...rest,
+      loop: this.#loopWith(current.loop, {
+        roundsRun: current.loop.roundsRun + 1,
+        lastRoundAt: endedAt,
+      }),
+      rounds: [...current.rounds, round],
+      lastAuthority: open.authority,
+      // Spend after the last journaled figure is unseen; a round with none
+      // journaled reads as unreported so a token budget is not trusted on it.
+      lastSpendObserved: open.tokensSpent !== undefined,
+    });
+    this.#dependencies.journal.append({
+      aggregateId: String(record.loop.id),
+      eventName: GOAL_LOOP_EVENT_NAMES.roundRecorded,
+      payload: { round, spendObserved: open.tokensSpent !== undefined },
+    });
+    return { roundsCutOffInARow: trailingInterrupted(next.rounds) };
+  }
+
+  /** Whether restarts have cut off so many of this loop's rounds in a row that it should wait. */
+  crashLooping(roundsCutOffInARow: number): boolean {
+    return roundsCutOffInARow >= MAX_ROUNDS_CUT_OFF_IN_A_ROW;
+  }
+
+  /**
+   * The threads whose loop has a round the restart cut off, whatever the
+   * loop's status: a person may pause a loop while its round runs, and that
+   * round still spent and must still be recorded before a Resume.
+   */
+  openRoundThreads(): ReadonlyArray<string> {
+    return [...this.#byThread.values()]
+      .filter((record) => record.openRound !== undefined)
+      .map((record) => String(record.loop.threadId));
+  }
+
+  /** The threads whose loop was running when the previous host stopped. */
+  runningLoopThreads(): ReadonlyArray<string> {
+    return [...this.#byThread.values()]
+      .filter((record) => record.loop.status === "running")
+      .map((record) => String(record.loop.threadId));
+  }
+
+  /**
+   * Takes up a loop the restart cut off: its next round starts through the
+   * ordinary round path, where every rule a round answers to applies again.
+   * The round in flight at the restart is not recorded; its Work turn settled
+   * as cut off and its spend is not charged to the goal.
+   */
+  continueAfterRestart(threadId: string): boolean {
+    if (this.#byThread.get(threadId)?.loop.status !== "running") return false;
+    this.#dependencies.scheduleFirstRound?.(threadId);
+    return true;
+  }
+
+  /** Leaves a loop the restart cut off paused for its person, with the reason journaled. */
+  holdAfterRestart(threadId: string): boolean {
+    const record = this.#byThread.get(threadId);
+    if (record?.loop.status !== "running") return false;
+    this.#pause(record, "held-after-restart");
+    return true;
   }
 
   #start(
@@ -417,15 +716,7 @@ export class GoalLoopService {
     reason: GoalLoopPauseReason,
     stopped = false,
   ): { readonly paused: GoalLoopPauseReason } {
-    const status = stopped
-      ? reason === "goal-complete"
-        ? ("complete" as const)
-        : ("stopped" as const)
-      : reason === "approval-required"
-        ? ("awaiting-approval" as const)
-        : reason === "budget-exhausted" || reason === "budget-required"
-          ? ("budget-limited" as const)
-          : ("paused" as const);
+    const { status } = pausedStatus(reason, stopped);
     // Journaled every time, including when the loop was already in this state:
     // a loop that goes quiet for six hours should leave six hours of evidence
     // that it kept deciding not to run, not silence indistinguishable from a
@@ -441,12 +732,11 @@ export class GoalLoopService {
     return { paused: reason };
   }
 
-  #loopWith(
-    loop: GoalLoop,
-    changes: Partial<
-      Pick<GoalLoop, "status" | "pauseReason" | "ceiling" | "roundsRun" | "lastRoundAt">
-    >,
-  ): GoalLoop {
+  #loopWith(loop: GoalLoop, changes: LoopChanges): GoalLoop {
+    return this.#loopWithAt(loop, changes, this.#dependencies.clock());
+  }
+
+  #loopWithAt(loop: GoalLoop, changes: LoopChanges, updatedAt: UtcTimestamp): GoalLoop {
     const status = changes.status ?? loop.status;
     const pauseReason = changes.pauseReason ?? loop.pauseReason;
     return decodeGoalLoop({
@@ -459,7 +749,7 @@ export class GoalLoopService {
       ...(status === "running"
         ? { pauseReason: undefined }
         : { pauseReason: pauseReason ?? "paused-by-user" }),
-      updatedAt: this.#dependencies.clock(),
+      updatedAt,
       version: loop.version + 1,
     });
   }
