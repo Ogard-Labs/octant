@@ -177,7 +177,8 @@ them in.
   that holds them starts with no replica identity.
 - **Commands.** The host serves create a replica, write a join request,
   approve a join, confirm a join, preview a revoke, revoke, pull, and leave
-  on the host-only `/api/replica-membership/commands` route. Creating a
+  on the `/api/replica-membership/commands` route (host-only today; a paired
+  device too once built, maintainer decision, 2026-11-12). Creating a
   replica or asking to join creates a new device key, and the id comes from
   it, so asking again - after a request went stale, a revocation, a cut that
   removed this computer's approval, or leaving - is always a new identity. Approving
@@ -466,19 +467,22 @@ them in.
   held here, the version standing here is a candidate unless a version from
   another computer revises it, and a head already in its own history is not
   one; a single version from elsewhere that revises it is `ahead`. The
-  host-wide library lists, for a local window only, each synced artifact
+  host-wide library lists, for a local window or a paired device (maintainer
+  decision, 2026-11-12; not built yet: today for a local window only, and a
+  paired device sees none), each synced artifact
   this host holds no Canvas for, under the Project name it was filed under
   and the name of the computer that wrote the version shown, with its
   standing; a deleted one shows the version its tombstone named and the
-  computer that deleted it. A paired device sees none. Each held Canvas's
+  computer that deleted it. Each held Canvas's
   card carries the computer that wrote its current version once this host
   has a replica identity, and its standing when it is not current. The
   library query applies to synced entries: mode, kind, and text match (text
   also matches the computer's name), and a Project filter or the Shared tab
   matches none, since they have no Project or share here.
-- **Binding.** `SyncedArtifactService` serves the host-only
-  `POST /api/artifacts/synced` route; a paired device is refused before the
-  command is decoded. Opening a synced artifact binds it to a thread the
+- **Binding.** `SyncedArtifactService` serves the `POST /api/artifacts/synced`
+  route to a local window or a paired device (not built yet: today it is
+  host-only and a paired device is refused before the command is decoded).
+  Opening a synced artifact binds it to a thread the
   person chooses among those `decideReplicaArtifactBinding` finds
   compatible from the thread's durable state: same mode, active thread,
   active Project of that mode, a workspace the host resolves now, and not
@@ -561,7 +565,9 @@ them in.
 
 Settings › Sync chooses this host's
 store: a synced folder, an S3-compatible bucket, or none, with a sync switch
-that starts off. It is served on the host-only `/api/replica-store` routes,
+that starts off. A local window or a paired device reads and changes it
+(maintainer decision, 2026-11-12). Not built yet: today it is served on the
+host-only `/api/replica-store` routes,
 which answer only a loopback host name and a local window, sit on the
 loopback chain outside the shared product dispatch, and are a remote
 local-only prefix, so a paired client can neither read nor change them. A

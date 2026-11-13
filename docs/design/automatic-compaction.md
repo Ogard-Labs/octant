@@ -423,8 +423,8 @@ contextWindow }`, optional on `ProviderSessionStart` and
 - **Settings**: under **Compact runtime threads**, the runtimes' own settings
   read from `~/.claude.json`, `~/.claude/settings.json` and
   `~/.codex/config.toml` (Claude Code's switch, its `DISABLE_AUTO_COMPACT`, its
-  window; Codex's limit), through the existing local-window-only route that
-  lists other tools' servers (`kind: "compaction-defaults"`). Nothing is
+  window; Codex's limit), through the existing route that lists other tools'
+  servers (local-window only today) (`kind: "compaction-defaults"`). Nothing is
   written.
 
 A share set in Octant overrides the runtime's own setting in the sessions

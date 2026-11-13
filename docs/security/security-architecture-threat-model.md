@@ -81,9 +81,14 @@ existing control.
 - **Extension packages and MCP servers:** third-party code and manifests. Installation never
   implies trust; executable components are quarantined until explicitly trusted, and trust never
   bypasses mode, sandbox, approval, or credential policy.
-- **Remote client:** an authenticated paired browser or mobile device. A remote principal, never
-  the host owner; it cannot exceed host, mode, provider, Project, or thread authority and cannot
-  mint local receipts.
+- **Remote client:** an authenticated paired browser or mobile device. Once
+  authenticated it is the person and holds what a local window holds (maintainer
+  decision, 2026-11-12; [Architecture: Remote
+  clients](../architecture.md#security-and-authority)); it cannot exceed host,
+  mode, provider, Project, or thread authority. Not built yet: today it is a
+  remote principal, never the host owner, held to the remote action catalogue
+  and unable to mint local receipts. A hub or peer host and an agent grant stay
+  remote principals held to their grants.
 - **Child agents (subagents):** provider-native or Octant-managed. Receive equal-or-narrower
   authority than their parent; a child request is admitted only after server-side clamping.
 - **Another local principal on the loopback path:** another OS user on the same machine, a local
@@ -175,9 +180,29 @@ authority is clamped against both the mode ceiling and the parent thread's live 
 
 ### AC4 — Remote client exceeding host policy
 
-A paired browser or mobile device attempts a local-only action (extension trust, credential write,
-Project binding, device approval), replays a stale session, launders its principal into a local
-window, or approves an action class the host policy reserves for the local user.
+The local-host-required action set is removed (maintainer decision, 2026-11-12):
+an authenticated paired device is the person and may do what a local window may,
+with extension trust, credential write, Project binding, device approval and
+Full access included. The threat that follows is stated plainly. **A stolen or
+compromised paired device holds the person's full authority on that host**, up
+to Full access with no sandbox and the use of every credential the broker holds,
+until its session ends or the device is revoked. What stands in front of it is
+the authentication of the device and no longer a list of actions: the device
+key, the pinned host identity over TLS, pairing approved only by a party the
+host already trusts, pairing and sign-in rate limits, session idle and absolute
+expiry with rotation, device expiry and revocation, every action journaled with
+the device as its actor, and secrets that are redacted and held only by the
+credential broker, so a device can use or replace a credential and never read
+one back. The residual risk is accepted: a device in an attacker's hands while
+its session lives, or malware on it, acts as the person, the host asks for no
+further proof of presence, and the journal shows what was done only afterwards.
+The attacks this class still names are a replayed or expired session, an
+unauthenticated or revoked caller, a hub, peer or agent-grant principal passing
+as a paired device, and identity supplied in a payload. Not built yet: today the
+closed action sets in the table below still hold, so a paired device that
+attempts a local-only action (extension trust, credential write, Project
+binding, device approval), launders its principal into a local window, or
+approves an action class reserved for the local user is refused.
 
 | Layer              | Control                                                                                                 | Module                                                                                                       | State        |
 | ------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------ |
@@ -367,9 +392,11 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window, the
   cleared source labels, and the ingestion count, never content). It names the aggregate version the
   person was shown, so an ingestion they have not seen refuses it, and it is refused while the
-  thread's turn is running, queued, or of unknown state. Only the local-only
-  `POST /api/thread-external-content` clears: a paired device is refused at the private listener
-  and at the handler, and the host's own scope, a tool, a command, model output, a structured
+  thread's turn is running, queued, or of unknown state. Only the person's `POST
+/api/thread-external-content` clears, from a local window or a paired device
+  (maintainer decision, 2026-11-12; not built yet: today the route is local-only
+  and a paired device is refused at the private listener and at the handler);
+  the host's own scope, a tool, a command, model output, a structured
   reference, an agent message, and a host-run turn cannot. It removes the mark only and holds for
   nothing: the next ingestion marks the thread again, including content the thread had read before.
   Residual risk: a clear removes nothing from the model's context, so content the person reviewed
@@ -652,7 +679,11 @@ Waived or skipped rows never count as passing (consistent with the Phase 4/16 ev
   broker tokens.
 - A secret (provider credential, OAuth token, broker token, pairing secret) in the journal,
   renderer, tool result, child environment, or export.
-- A remote principal executing a local-host-required action or minting a local approval receipt.
+- A caller that is not an authenticated local window or paired device (an
+  unauthenticated, expired or revoked device, a hub or peer host, an agent
+  grant) acting with a window's or a paired device's authority. Until the
+  paired-device rule is built, also: a remote principal executing a
+  local-host-required action or minting a local approval receipt.
 
 ### High
 

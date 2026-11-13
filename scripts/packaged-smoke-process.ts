@@ -232,7 +232,11 @@ export async function waitForProcessCleanup(
       );
       return;
     } catch (error) {
-      if (Date.now() >= deadline) throw error;
+      // A probe given all the time left is stopped by a timer, and a timer may
+      // fire a millisecond before the wall clock reaches the deadline. Judged
+      // strictly, that last probe was retried with nothing left and its second
+      // failure replaced "timed out" (seen on a hosted macOS runner).
+      if (Date.now() + 1 >= deadline) throw error;
       await sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
     }
   }

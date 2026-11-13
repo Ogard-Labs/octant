@@ -32,6 +32,11 @@ export interface ExtensionToolGrantFacts {
   /** The thread has taken in outside content: a tool result or external text. */
   readonly threadTainted: boolean;
   readonly reach: ExtensionToolReach;
+  /**
+   * The catalog names this tool as one that asks on every call because it
+   * publishes or removes data. No remembered approval covers it.
+   */
+  readonly askEveryCall?: boolean;
   /** The tool as its server lists it for this call. */
   readonly offered: ExtensionToolBinding;
   /** The Project's stored grant for this tool, when one was ever recorded. */
@@ -46,6 +51,7 @@ export type ExtensionToolGrantDecision =
         | "no-project"
         | "plan-turn"
         | "network-tool-on-tainted-thread"
+        | "ask-every-call-tool"
         | "not-granted"
         | "revoked"
         | "package-changed"
@@ -66,6 +72,11 @@ export function decideExtensionToolGrant(
   // Plan is the read-only posture: nothing runs unasked under it, and an
   // answer given there approves that call alone.
   if (facts.planTurn) return { kind: "ask", reason: "plan-turn", rememberable: false };
+  // A tool the catalog marks ask-every-call (it publishes or deletes) is never
+  // covered by a grant, whatever the thread has read.
+  if (facts.askEveryCall === true) {
+    return { kind: "ask", reason: "ask-every-call-tool", rememberable: false };
+  }
   // Taint rule. Outside content on the thread may be steering the model, and
   // a network tool can carry what the thread has read out in its arguments,
   // so each such call is confirmed and the answer is single use. A confined
