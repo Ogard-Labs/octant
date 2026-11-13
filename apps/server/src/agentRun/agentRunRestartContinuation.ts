@@ -6,9 +6,9 @@
  * rechecks the parent's live authority, the workspace, the saved conversation
  * and capacity as it admits it. A run is held for its person instead, still
  * Interrupted and resumable only by a person, when its parent mode's setting
- * or its parent thread's own switch is off, when a person quit Octant while
- * it ran, when its own continuations keep being cut off, or when the resume
- * refuses it.
+ * or its parent thread's own switch is off, when it left a tool call nobody
+ * saw finish, when a person quit Octant while it ran, when its own
+ * continuations keep being cut off, or when the resume refuses it.
  *
  * A run is its own provider session: resuming it never starts a turn on its
  * parent thread, and the resume refuses a run that is no longer Interrupted,
@@ -41,6 +41,11 @@ export interface AgentRunRestartContinuationPorts {
   readonly modeEnabled: (mode: AgentRun["workspaceReceipt"]["mode"]) => boolean;
   /** The parent thread's own Continue after restart switch is off. */
   readonly parentOptedOut: (run: AgentRun) => boolean;
+  /**
+   * Why the run must wait for a tool call of its own that nobody saw finish.
+   * Resuming it closes that record as superseded, so it is read first.
+   */
+  readonly uncertainToolCall: (run: AgentRun) => string | undefined;
   /** The run version its latest journaled start or resume reached, if the journal says. */
   readonly latestStartVersion: (run: AgentRun) => number | undefined;
   readonly attempts: CodeRestartContinuationAttempts;
@@ -97,6 +102,11 @@ export async function continueAgentRunsCutOffByRestart(
     }
     if (ports.parentOptedOut(run)) {
       hold("opted-out", HOLD_DETAIL["opted-out"]);
+      continue;
+    }
+    const uncertain = ports.uncertainToolCall(run);
+    if (uncertain !== undefined) {
+      hold("uncertain-tool-call", uncertain);
       continue;
     }
     if (ports.quitByPerson) {

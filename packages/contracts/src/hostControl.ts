@@ -213,21 +213,39 @@ export type HostMemoryStatus = typeof HostMemoryStatus.Type;
 /**
  * Why one start of the host held a thread a restart cut off instead of
  * continuing it. `uncertain-external-action` is a push or pull request step
- * whose outcome the host never learned; `crash-loop` is a thread whose own
+ * whose outcome the host never learned; `uncertain-tool-call` is a tool call
+ * of the cut-off turn that may change something and has no record of having
+ * finished, named in the detail by its tool; `crash-loop` is a thread whose own
  * automatic continuations were cut off by a restart twice; `quit` is a thread
  * whose turn ended because a person quit Octant, not because it crashed or
- * the system restarted.
+ * the system restarted. `other` is never sent: it is what a client reads when
+ * a later host names a reason this build does not know.
  */
 export const HostRestartRecoveryHold = Schema.Literal(
   "turned-off",
   "opted-out",
   "uncertain-external-action",
+  "uncertain-tool-call",
   "quit",
   "crash-loop",
   "cannot-resume",
   "refused",
+  "other",
 );
 export type HostRestartRecoveryHold = typeof HostRestartRecoveryHold.Type;
+
+/**
+ * A hold's reason as it crosses the wire. A reason this build does not know
+ * decodes to `other` and keeps its detail, which the host wrote for a person,
+ * so the status of a newer host still decodes. (`uncertain-tool-call` was
+ * added as a strict literal, and a client built before it refuses the whole
+ * status of a host that reports one.)
+ */
+const RestartRecoveryHoldOnWire = Schema.transform(BoundedLabel, HostRestartRecoveryHold, {
+  strict: true,
+  decode: (reason) => (Schema.is(HostRestartRecoveryHold)(reason) ? reason : "other"),
+  encode: (reason) => reason,
+});
 
 const RestartRecoveryMode = Schema.Literal("chat", "work", "code");
 const MAX_RESTART_RECOVERY_THREADS = 500;
@@ -247,7 +265,7 @@ export const HostRestartRecovery = Schema.Struct({
     Schema.Struct({
       mode: RestartRecoveryMode,
       threadId: BoundedLabel,
-      reason: HostRestartRecoveryHold,
+      reason: RestartRecoveryHoldOnWire,
       detail: BoundedText,
     }).annotations(strict),
   ).pipe(Schema.maxItems(MAX_RESTART_RECOVERY_THREADS)),

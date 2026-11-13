@@ -252,6 +252,7 @@ export function startOctantServer(
       agentRunRequestOwner,
       agentRunPersistence,
       agentRunsCutOffByRestart,
+      toolEffectLedger,
       androidInputGrants,
       automationEventStore,
       bindingReceiptStore,
@@ -331,6 +332,7 @@ export function startOctantServer(
     } = wireAgentRuns({
       agentRunParentAuthority,
       agentRunPersistence,
+      toolEffectLedger,
       codeBoardEventStore,
       codeParentActiveTurn,
       codeSessionAuthority,
@@ -599,6 +601,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      toolEffectLedger,
       serverConnection,
       personMemory,
       safeNetworkStore,
@@ -1173,6 +1176,7 @@ export function startOctantServer(
       externalContentIngestionStore,
       goalLoopService,
       liftRestartRecovery,
+      toolEffectLedger,
       persistence,
       routeCodeService,
       threadMessageQueue,

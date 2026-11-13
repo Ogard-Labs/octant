@@ -109,6 +109,7 @@ import { createGoogleCliCommandCredentials } from "../secretStores/googleCliComm
 import { awsCliEnvironment } from "../secretStores/awsCliEnvironment";
 import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import type { ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 
 export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
@@ -118,6 +119,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeSessionAuthority"
     | "personMemory"
     | "processAuthorityTime"
+    | "toolEffectLedger"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -689,7 +691,10 @@ export function wireHarness(deps: HarnessDependencies) {
   const promptDigest = openPromptDigester(
     join(providerDataDirectory, "metrics", "prompt-digest.key"),
   );
+  const { toolEffectLedger } = deps;
   const nativeHarnessHooks = {
+    toolEffects: (turn: Parameters<ToolEffectLedger["forTurn"]>[0]) =>
+      toolEffectLedger.forTurn(turn),
     ...(promptDigest === undefined ? {} : { promptDigest }),
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
       return nativeHarnessQuestions.answer(threadId, questionId, answer);

@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import type { AgentRunReviewCapture, AgentRunReviewCaptureLease } from "./agentRunReviewCapture";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import {
   decodeCapacityReservationId,
   decodeContextSubjectRef,
@@ -372,6 +373,13 @@ export interface AgentRunSessionRuntimeOptions {
     readonly authority: AgentRunAuthority;
     readonly projectRoot: string;
   }) => AppManagedToolSet | undefined;
+  /**
+   * The run's record of tool calls about to take effect
+   * (toolEffects/toolEffectLedger.ts), asked for once as the run starts
+   * executing. A child runs its tools outside its parent's turn, so without
+   * it a restart could not tell that it cut a child off inside a call.
+   */
+  readonly toolEffects?: (run: AgentRun) => TurnToolEffects;
   /**
    * Whether this child's provider transport can carry app-managed tools.
    * When tools are offered and the transport is not supported, start fails
@@ -774,6 +782,7 @@ export function createAgentRunSessionRuntime(
     let record = prepared.record;
     let reviewCapture: AgentRunReviewCaptureLease | undefined;
     let appManagedTools: AppManagedToolSet | undefined;
+    let toolEffects: TurnToolEffects | undefined;
     try {
       if (sessions.has(run.id))
         throw new AgentRunSessionError(
@@ -781,6 +790,7 @@ export function createAgentRunSessionRuntime(
           "This child already owns a live session.",
         );
       appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+      toolEffects = options.toolEffects?.(run);
       options.capacityScheduler.markRunning(reservationId);
       prepared.claim();
     } catch (error) {
@@ -1145,6 +1155,7 @@ export function createAgentRunSessionRuntime(
             };
           },
           ...(appManagedTools === undefined ? {} : { appManagedTools }),
+          ...(toolEffects === undefined ? {} : { toolEffects }),
         }),
       ),
       { signal: controller.signal },
@@ -1469,6 +1480,7 @@ interface ManagedSessionInput {
   ) => void;
   readonly onSessionEnding: () => void;
   readonly appManagedTools?: AppManagedToolSet | undefined;
+  readonly toolEffects?: TurnToolEffects | undefined;
 }
 
 interface ManagedSessionState {
@@ -2003,6 +2015,7 @@ function collectSessionEvents(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             state.handledEvents += 1;
+            input.toolEffects?.observe(event, input.appManagedTools);
             // Marked before the budget is looked at: what the runtime read
             // reached its model either way.
             if (event.kind === "outside-content-result") {
@@ -2202,7 +2215,7 @@ function collectSessionEvents(
                   ? toolAbort.signal
                   : AbortSignal.any([toolAbort.signal, requestSignal]);
               if (executionSignal.aborted) return;
-              const toolSet = input.appManagedTools;
+              const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
               const offered = toolSet?.definitions.some(
                 (definition) => definition.name === event.toolName,
               );
@@ -2221,6 +2234,7 @@ function collectSessionEvents(
                     name: event.toolName,
                     inputJson: event.inputJson,
                     signal: executionSignal,
+                    toolCallId: event.requestId,
                   });
                 } catch {
                   return { result: { error: "tool-execution-failed" }, isError: true } as const;

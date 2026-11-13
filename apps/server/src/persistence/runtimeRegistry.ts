@@ -428,6 +428,7 @@ import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
 import { registerMovedHistoryEvents } from "../hub/movedThreadHistory";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
+import { registerToolEffectEvents } from "../toolEffects/toolEffectLedger";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasChoiceAnswerEvents } from "../canvas/canvasChoiceAnswerService";
@@ -828,6 +829,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCoordinatorWakeEvents(events);
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
+  registerToolEffectEvents(events);
   registerFollowUpSuggestionEvents(events);
   registerTerminalSessionEvents(events);
   registerThreadMoveEvents(events);

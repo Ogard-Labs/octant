@@ -1332,6 +1332,17 @@ function seedFollowUp(harness: Harness, thread: SeededThread): void {
     threadId: thread.id,
     modelId: thread.marker,
   });
+  // A turn's record of its tool calls is keyed by the turn, not the thread,
+  // so only the thread id its frames carry ties it to the thread.
+  const turnId = uuidFor(thread.mode, "tool-effects-turn");
+  insertEvent(harness.connection, "turn-tool-effects", turnId, {
+    threadId: thread.id,
+    turnId,
+    toolCallId: "call-1",
+    toolName: thread.marker,
+    effect: "side-effecting",
+    origin: "host",
+  });
 }
 
 /**
