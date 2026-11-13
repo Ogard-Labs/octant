@@ -66,6 +66,7 @@ function surface(
     readonly fetch?: typeof fetch;
     readonly serverUrl?: string | undefined;
     readonly platform?: NodeJS.Platform;
+    readonly brokerHeaders?: () => Readonly<Record<string, string>>;
   } = {},
 ) {
   const hosts: Array<ReturnType<typeof fakeHost>> = [];
@@ -79,6 +80,7 @@ function surface(
     fetch: input.fetch ?? vi.fn<typeof fetch>(async () => new Response("page")),
     platform: input.platform ?? "darwin",
     readyTimeoutMs: 50,
+    ...(input.brokerHeaders === undefined ? {} : { brokerHeaders: input.brokerHeaders }),
   });
   return { surface: made, hosts };
 }
@@ -593,5 +595,251 @@ describe("design page addresses", () => {
     expect(designPageTicket(page, undefined)).toBeUndefined();
     expect(designPageTicket(page, server)).toBe(ticket);
     expect(designPageTicket("not a url", server)).toBeUndefined();
+  });
+});
+
+describe("a prototype whose Canvas has the network on", () => {
+  const token = "n".repeat(43);
+  const secret = "the-desktop-bridge-secret";
+  const brokerHeaders = () => ({ "x-octant-desktop-secret": secret });
+  const proxied = `${server}/api/canvas/network/${token}/fetch?url=${encodeURIComponent("https://api.example.com/data")}`;
+
+  /** A host that serves the design page with a token, then answers the proxy path. */
+  function networkHost(input: { readonly token?: string | null } = {}) {
+    const minted = "token" in input ? input.token : token;
+    return vi.fn<typeof fetch>(async (address) =>
+      String(address).includes(CANVAS_DESIGN_PAGE_PATH)
+        ? new Response("<p>design</p>", {
+            headers: {
+              "content-type": "text/html; charset=utf-8",
+              "content-security-policy": `connect-src octant-prototype://network/${surfaceId}/`,
+              ...(minted === null || minted === undefined
+                ? {}
+                : { "x-octant-canvas-network-token": minted }),
+            },
+          })
+        : new Response('{"ok":true}', {
+            status: 200,
+            headers: { "content-type": "application/json", "set-cookie": "far=side" },
+          }),
+    );
+  }
+  const question = (requestId: number, id = surfaceId) =>
+    ({
+      kind: "relay",
+      surfaceId: id,
+      requestId,
+      resource: "fetch",
+      target: "https://api.example.com/data",
+    }) as const;
+  const answers = (host: ReturnType<typeof fakeHost>) =>
+    host.sent.filter((command) => command.kind === "relayed");
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("proves itself to the host when it asks for the page, and keeps the token from the prototype host", async () => {
+    const fetchPage = networkHost();
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    await expect(made.open(owner().port, request())).resolves.toEqual({ status: "open" });
+    expect(fetchPage.mock.calls[0]?.[1]).toMatchObject({
+      redirect: "error",
+      headers: { "x-octant-desktop-secret": secret, "x-octant-prototype-surface": surfaceId },
+    });
+    const opened = host.sent[0];
+    if (opened?.kind !== "open") throw new Error("The host was not asked to open the page.");
+    expect(opened.network).toBe(true);
+    expect(opened.page.headers).toEqual({
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": `connect-src octant-prototype://network/${surfaceId}/`,
+    });
+    expect(JSON.stringify(host.sent)).not.toContain(token);
+    expect(JSON.stringify(host.sent)).not.toContain(secret);
+  });
+
+  it("tells the prototype host of no network when the host minted no token, or one it could not have", async () => {
+    for (const minted of [null, "short", `${token}/../x`]) {
+      const { surface: made, host } = await readySurface({
+        fetch: networkHost({ token: minted }),
+        brokerHeaders,
+      });
+      await made.open(owner().port, request());
+      const opened = host.sent[0];
+      if (opened?.kind !== "open") throw new Error("The host was not asked to open the page.");
+      expect(opened.network).toBeUndefined();
+      host.emit(question(1));
+      await settle();
+      expect(answers(host)).toEqual([
+        {
+          kind: "relayed",
+          surfaceId,
+          requestId: 1,
+          answer: expect.objectContaining({ status: 403 }),
+        },
+      ]);
+    }
+  });
+
+  it("sends its secret to no host but the loopback one", async () => {
+    const elsewhere = "http://192.168.1.20:3773";
+    const fetchPage = networkHost();
+    const { surface: made, host } = await readySurface({
+      fetch: fetchPage,
+      brokerHeaders,
+      serverUrl: elsewhere,
+    });
+    await made.open(
+      owner().port,
+      request({ src: `${elsewhere}${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}` }),
+    );
+    expect(JSON.stringify(fetchPage.mock.calls[0]?.[1] ?? {})).not.toContain(secret);
+    const opened = host.sent[0];
+    if (opened?.kind !== "open") throw new Error("The host was not asked to open the page.");
+    expect(opened.network).toBeUndefined();
+  });
+
+  it("asks the host's proxy path under the page's token, with nothing of its own, and passes the answer back", async () => {
+    const fetchPage = networkHost();
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    await made.open(owner().port, request());
+    host.emit(question(7));
+    await settle();
+    const [address, init] = fetchPage.mock.calls[1] ?? [];
+    expect(String(address)).toBe(proxied);
+    expect(init).toMatchObject({ method: "GET", redirect: "error" });
+    expect(init?.headers).toBeUndefined();
+    expect(init?.body).toBeUndefined();
+    const [answered] = answers(host);
+    if (answered?.kind !== "relayed") throw new Error("The page was not answered.");
+    expect(answered).toMatchObject({ surfaceId, requestId: 7 });
+    expect(answered.answer.status).toBe(200);
+    expect(answered.answer.contentType).toBe("application/json");
+    expect(new TextDecoder().decode(answered.answer.body)).toBe('{"ok":true}');
+    expect(Object.keys(answered.answer).sort()).toEqual(["body", "contentType", "status"]);
+  });
+
+  it("sends a page's JSON body to the proxy path as JSON, with no other header", async () => {
+    const fetchPage = networkHost();
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    await made.open(owner().port, request());
+    host.emit({ ...question(3), body: new TextEncoder().encode('{"ask":1}') });
+    await settle();
+    const [address, init] = fetchPage.mock.calls[1] ?? [];
+    expect(String(address)).toBe(proxied);
+    expect(init).toMatchObject({ method: "POST", redirect: "error" });
+    expect(init?.headers).toEqual({ "content-type": "application/json" });
+    expect(new TextDecoder().decode(init?.body as Uint8Array)).toBe('{"ask":1}');
+    expect(answers(host)).toHaveLength(1);
+  });
+
+  it("asks the image and font paths for an image and a font, never with a body", async () => {
+    const fetchPage = networkHost();
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    await made.open(owner().port, request());
+    host.emit({ ...question(1), resource: "image" });
+    host.emit({ ...question(2), resource: "font" });
+    await settle();
+    expect(
+      fetchPage.mock.calls.slice(1).map(([address, init]) => [String(address), init?.method]),
+    ).toEqual([
+      [proxied.replace("/fetch?", "/image?"), "GET"],
+      [proxied.replace("/fetch?", "/font?"), "GET"],
+    ]);
+    host.emit({ ...question(3), resource: "image", body: new Uint8Array(2) });
+    host.emit({ ...question(4), resource: "media" } as never);
+    host.emit({ ...question(5), body: new Uint8Array(256 * 1024 + 1) });
+    host.emit({ ...question(6), body: "{}" } as never);
+    await settle();
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+  });
+
+  it("asks nothing for a surface it opened no networked page on, or a question that is not one", async () => {
+    const fetchPage = networkHost();
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    await made.open(owner().port, request());
+    host.emit(question(1, other));
+    for (const malformed of [
+      { ...question(2), target: 7 },
+      { ...question(3), target: "x".repeat(9_000) },
+      { ...question(4), requestId: "4" },
+      { ...question(5), surfaceId: 5 },
+    ]) {
+      host.emit(malformed as never);
+    }
+    await settle();
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(answers(host)).toEqual([
+      {
+        kind: "relayed",
+        surfaceId: other,
+        requestId: 1,
+        answer: expect.objectContaining({ status: 403 }),
+      },
+    ]);
+  });
+
+  it("answers a refusal when the host cannot be reached, and does not follow where it points", async () => {
+    const fetchPage = vi.fn<typeof fetch>(async (address) => {
+      if (String(address).includes(CANVAS_DESIGN_PAGE_PATH)) {
+        return new Response("page", { headers: { "x-octant-canvas-network-token": token } });
+      }
+      throw new TypeError("redirected");
+    });
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    await made.open(owner().port, request());
+    host.emit(question(1));
+    await settle();
+    expect(answers(host)).toEqual([
+      {
+        kind: "relayed",
+        surfaceId,
+        requestId: 1,
+        answer: expect.objectContaining({ status: 502 }),
+      },
+    ]);
+  });
+
+  it("forgets the token when the prototype closes, and cancels what was still being fetched", async () => {
+    const signals: Array<AbortSignal> = [];
+    const fetchPage = vi.fn<typeof fetch>((address, init) => {
+      if (String(address).includes(CANVAS_DESIGN_PAGE_PATH)) {
+        return Promise.resolve(
+          new Response("page", { headers: { "x-octant-canvas-network-token": token } }),
+        );
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal === undefined || signal === null) return;
+        signals.push(signal);
+        signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    });
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    const window = owner(1);
+    await made.open(window.port, request());
+    host.emit(question(1));
+    await settle();
+    made.close(window.port, surfaceId);
+    await settle();
+    expect(signals.map((signal) => signal.aborted)).toEqual([true]);
+    // The same surface id asks again after its prototype closed: no token, no request.
+    host.emit(question(2));
+    await settle();
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(answers(host).at(-1)).toMatchObject({
+      requestId: 2,
+      answer: expect.objectContaining({ status: 403 }),
+    });
+  });
+
+  it("forgets the token when the prototype's window goes or its page is gone", async () => {
+    for (const end of ["window", "gone"] as const) {
+      const fetchPage = networkHost();
+      const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+      await made.open(owner(1).port, request());
+      if (end === "window") void made.closeOwnedBy(1);
+      else host.emit({ kind: "gone", surfaceId });
+      host.emit(question(1));
+      await settle();
+      expect(fetchPage).toHaveBeenCalledTimes(1);
+    }
   });
 });

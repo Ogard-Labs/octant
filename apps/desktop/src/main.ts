@@ -4604,6 +4604,7 @@ function desktopCanvasPrototypeSurface(): CanvasPrototypeSurface {
       }),
     serverUrl: () => activeServerUrl,
     fetch: globalThis.fetch,
+    brokerHeaders: desktopBrokerHeaders,
     platform: process.platform,
   });
   app.on("will-quit", () => surface.stop());

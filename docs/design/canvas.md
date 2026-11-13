@@ -1758,12 +1758,13 @@ form-action 'none'; base-uri 'none'`, `Referrer-Policy: no-referrer`, and
 `Cache-Control: no-store`; a refusal carries the same headers. A design or
 prototype has a per-Canvas **Allow network** switch, off by default, that only
 the person sets, at a local window or a paired device, never an agent or a
-routine; while it is on, that Canvas's running page reaches the network only
-through a filtering egress proxy on the host that refuses loopback, private
-ranges, link-local addresses and the Octant server, and nothing else about
-its sandbox changes. The proxy is built first and the switch after it
-(maintainer decision, 2026-11-12). Not built yet: today neither exists and no
-design page reaches the network. Declared
+routine; while it is on, a running page of that Canvas may ask the host to
+fetch public addresses for it through the host's filtering proxy, which
+refuses loopback, private ranges, link-local addresses and the host's own
+listeners, and nothing else about its sandbox changes
+([Allow network](#allow-network); maintainer decision, 2026-11-12). Not built
+yet: a paired device is not offered the switch, and today only a local window
+sets it. Declared
 images are resolved under the version's provenance and written in as `data:`
 images: every image once, and a repeated reference only while the page's
 images stay within the design's 5 MiB as base64, after which it draws a
@@ -1850,7 +1851,9 @@ answers every name with not-found among them:
   policy. The host serves it once, under an `octant-prototype:` scheme of its
   session, to an offscreen window sandboxed and context-isolated with no Node.
   Nothing else is served, so the page needs no route to the host's loopback
-  address and the host API is unreachable from it.
+  address and the host API is unreachable from it. The one other thing that
+  scheme answers is a question from a page whose Canvas has **Allow network**
+  on, which is relayed, not routed ([Allow network](#allow-network)).
 - **Drawing and input.** The host paints the page offscreen, at twice its
   pixels on a Retina display, and sends each changed rectangle, one frame at a
   time: the next goes only once the window says it drew the last, and paints
@@ -1889,6 +1892,277 @@ a hostile page in the prototype host reaches no UDP, TCP, HTTP, or host
 listener and asks the resolver for none of its names (`dns-prefetch` and
 `preconnect` links, STUN and TURN servers named by host name), while the same
 page in a frame of the app's own process does look them up.
+
+### Allow network
+
+A running design has no connection. A person can give one Canvas's running
+pages a filtered one: the **Allow network** switch, per Canvas, off by default
+(maintainer decision, 2026-11-12). The page never gets a route of its own. It
+asks the host, and the host fetches public addresses on its behalf under the
+destination rule below.
+
+**Turning it on shares the Canvas with the internet.** A page with the switch
+on can send anything it holds (its own markup, the images the host wrote into
+it, and whatever the person types into it) to any public address: in the
+address of a request, and in the JSON body of a `POST`. That is the
+accepted consequence of the switch, and the dialog that holds the switch says
+so. What stays protected is everything outside the page: Octant's API and
+renderer, the window credential, the person's files, loopback services, the
+local network, cloud metadata addresses, and this host's own listeners
+([threat model](../security/canvas-html-frames-threat-model.md), F16 to F19).
+
+**The switch.** `GET /api/canvas/network-access?canvasId=` reads it and `POST
+/api/canvas/network-access` sets it, under the window authorization `get` runs
+for that Canvas. The person sets it at a local window or a paired device,
+never an agent or a routine. Not built yet: a paired device setting it; today
+only a local window may set it: the route refuses any other
+principal (a paired device, an agent grant), the remote product classifier
+gives a paired device neither path although one is a `GET`, the agent's Canvas
+tool has no operation for it, and nothing a Canvas holds can ask for it,
+because the bridge grants nothing and a page holds no credential. A change is
+journaled as `canvas.network-access-changed@1` with the local person as its
+actor, on an aggregate of the Canvas's own (`canvas-network-access`, keyed by
+the Canvas), so the choice survives a restart and is erased with the Canvas
+when its thread or Project is erased. In the sidebar the Canvas's More menu offers **Allow
+network…** on a Canvas that holds a prototype; it opens a dialog that states
+the consequence above in one sentence beside the switch, so the person reads
+what they are choosing where they choose it. While it is on, the Canvas header
+shows **Network on** (which opens the same dialog), and every prototype of
+that Canvas, in the sidebar and in the thread, says **Network on** in its own
+chrome, running or not. A page keeps the policy it was served with, so turning
+the switch on reaches a prototype when it is run again.
+
+**How a page reaches the proxy.** `design-run` marks a ticket as
+network-capable only when a local window asked for it and the Canvas's switch
+is on. The desktop app's page is covered under "In the desktop app" below. When
+a browser frame redeems that ticket (`Sec-Fetch-Dest: iframe`) and
+the switch is still on, the host mints a network token (32 random bytes, held
+in memory only, at most 8 per Canvas, one hour unless renewed, below) and
+serves the page with three directives changed, each naming a path under that
+token (maintainer decision, 2026-11-13). With
+`<base>` for `<this host's loopback origin>/api/canvas/network/<token>/`:
+`connect-src` names `<base>` in place of `'none'`, `img-src` gains
+`<base>image`, and `font-src` gains `<base>font`. Every other directive, the
+`sandbox`, and the parent frame's sandbox are unchanged, so the page still has
+an opaque origin, no cookie or storage, no media, frame, or form destination,
+no WebSocket (a WebSocket address is not one the policy names, and the route
+answers no upgrade), and no path on the host but those. After the bridge the
+host writes one more script, which sends what the page's script asks of an
+absolute `http:` or `https:` address to its path instead: a `fetch`, the `src`
+of an `img` element, a `FontFace`, and a `url()` in a `style` element the
+script adds (a font in `@font-face`, an image anywhere else). An image's `src`
+is sent to its path when the script assigns it, by the property or by
+`setAttribute`, whether or not the element is in the page, so an image a
+script preloads with `new Image()` loads; markup the script inserts is caught
+when it is attached. Read back, `src` is the proxied address, as
+`getAttribute` and `currentSrc` report it. `data:` and `blob:` addresses and
+one already proxied are left as written. Not sent anywhere: `srcset`, and a
+`url()` in an inline `style` attribute. A design's own
+markup and style sheets still name no remote address
+(the markup policy under [Design block](#design-block) refuses every remote
+load when the design is written, with the switch on or off), so
+an image or a font from the network is one the page's script asks for. A page
+can also call a path itself. A `fetch` is a `GET`, or a `POST` whose body is a
+JSON string; the script refuses any other method or body, and the page's own
+request headers are not passed on.
+
+**The proxy.** Three paths under `/api/canvas/network/<token>/` are answered,
+for a live token alone; the token is the whole authority and names one Canvas:
+
+| Path         | Method        | Loaded by (`Sec-Fetch-Dest`, when the browser says) | Passed on                                 |
+| ------------ | ------------- | --------------------------------------------------- | ----------------------------------------- |
+| `fetch?url=` | `GET`, `POST` | a script (`empty`)                                  | any content type                          |
+| `image?url=` | `GET`         | an image (`image`)                                  | only a response that declares `image/*`   |
+| `font?url=`  | `GET`         | a font (`font`)                                     | only a response that declares a font type |
+
+The route reads no cookie, window credential, or Octant header, and attaches
+none. The host sets every outgoing header itself: a `GET` carries `Accept:
+*/*`, `Host`, and nothing else. A `POST` (maintainer decision, 2026-11-13)
+must declare `Content-Type: application/json` and carry a body of at most
+256 KiB that reads as JSON; it goes out with `Accept`, `Host`, `Content-Type:
+application/json`, the body's length, and that body, so no cookie,
+`Authorization`, API-key header, or any other header the page chose leaves,
+and neither does a cookie of the host's. Another content type is refused
+(415), a larger body is refused whole (413), and a body that is not JSON is
+refused (400). Every other method is refused (405), as is a body on the image
+or font path. A browser's preflight for the JSON `POST` (`OPTIONS` on
+`fetch`) is answered for a live token with `GET, POST`, the `content-type`
+header, and no credentials. Each path answers only the kind of load it is for,
+so a proxied page is never drawn as a document or a frame on the host's
+origin, and the image and font paths refuse (`response-type-not-allowed`) a
+response of any other declared type, so neither is a second way to read a
+document or an API (`canvasNetworkResponseTypeAllowed` in `packages/domain`;
+a font type is `font/*` or one of the older `application/` font types).
+Every answer carries `Content-Security-Policy: sandbox; default-src 'none'`,
+`X-Content-Type-Options: nosniff`, `Content-Disposition: attachment`,
+`Cache-Control: no-store`, and `Access-Control-Allow-Origin: *`. Of the
+fetched response it passes on the status, the content type, and the body;
+`Set-Cookie` and every other header are dropped. There is no path for media
+and none for a WebSocket. On every request it
+checks the Canvas's switch again, so a token outlives the switch for no
+request at all. A request a session carried to the route (one the remote
+gateway forwarded for a paired device) is refused whatever token it names: the
+proxy answers a frame on this machine.
+
+**The destination rule** (`canvasNetworkUrlRefusal` and
+`canvasNetworkAddressRefusal` in `packages/domain`). An address is fetched
+only if all of these hold, for the first request and for every redirect:
+
+- the scheme is `http` or `https`, on that scheme's own port (80 or 443), with
+  no user name or password, and the address is at most 2,048 characters;
+- the name is not `localhost` or under `.localhost`, and is not a name this
+  host's own listener answers to;
+- every address the name resolves to is public. Refused: loopback
+  (`127.0.0.0/8`, `::1`), private ranges (`10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`, `fc00::/7`), link-local (`169.254.0.0/16`, which holds
+  the cloud metadata address, and `fe80::/10`), carrier-grade NAT
+  (`100.64.0.0/10`, where overlay networks put their members), the
+  unspecified addresses, multicast, the other blocks the IANA registries mark
+  not globally reachable, and the IPv4-mapped, NAT64, 6to4, and Teredo forms
+  of any of them, judged by the IPv4 address they carry;
+- no address it resolves to is one of this machine's own interface addresses,
+  whatever the port, so no Octant listener (the loopback server, the private
+  listener, the remote gateway) is reachable through the proxy even on a
+  machine with a public address. A hub and every member host are reached only
+  at private or overlay addresses (a join refuses any other origin), so the
+  classes above already refuse them.
+
+The host resolves a name once per connection, judges every address it got, and
+connects only to those addresses; nothing resolves the name a second time, so
+a name that answers public and then private is refused when it next resolves,
+never connected. A redirect is not followed by the transport: the host reads
+its `Location` and runs the whole rule again, at most 5 times. A `POST` is
+repeated with its body only by a 307 or 308, at a destination judged afresh;
+any other redirect is followed with a `GET` and the body goes no further. An
+image and a font are fetched under the same rule, hop by hop.
+
+**Bounds**, per Canvas, as constants in `canvasNetworkPolicy.ts`: a response
+of at most 5 MiB (a larger one is refused, not cut short), a `POST` body of at
+most 256 KiB, 30 seconds for a request with all its redirects, 4 requests at
+once, and 60 requests a minute, counted across the three paths. A request
+past a bound is refused with a reason the page can read.
+
+**A token lives one hour and is renewed while its page is open** (maintainer
+decision, 2026-11-13). The surface that holds a running page (the prototype's
+own chrome in the window that ran it, in a browser and in the desktop app
+alike) asks the host every 20 minutes to keep that page's token alive:
+`POST /api/canvas/network-access/renew` with the single-use ticket the window
+ran the page with. The host gives the token minted for that ticket another
+hour when the caller is a local window that may read the token's Canvas and
+the switch is still on. Stopping the page, closing its window, or leaving the
+Canvas ends the asking, so a closed page's token is gone within the hour.
+Nothing else renews: using a token does not, and a renewal names the page's
+ticket, never the token, under a window credential a page does not hold. So a
+token that leaked from a page cannot be kept alive by whoever holds it; it
+ends with the page it came from. A token that aged out (the machine slept past
+the hour) or was revoked is not brought back; the page is run again. The cap
+of 8 per Canvas and the revocations below are unchanged.
+
+**Turning it off** forgets every network token of that Canvas in the same
+call, before the change is answered, so a page already running loses the
+proxy at its next request.
+
+**Erasing the Canvas** (with its thread or its Project) does the same: the
+purge tells the switch, which drops what it had read of that Canvas and
+forgets its tokens, and the proxy route refuses a token whose Canvas no longer
+exists whatever the switch last said.
+
+**What never carries the permission.** The switch belongs to the Canvas on
+this host and travels with nothing. A shared snapshot's prototype, a published
+page's snapshot, the agent's preview, an exported or saved HTML file, and a
+public link are ticketed or written without it: their page policy stays
+`connect-src 'none'` and no token is minted, so a reader of a share or a
+public link never fetches through the person's host.
+
+**In the desktop app.** A prototype there runs in the prototype host, whose
+process has no route and no resolver, and that stays so with the switch on: the
+host's proxy and resolver switches and the readback that proves them are not
+touched, and the page is given no address on the network, the loopback host
+included. Its requests are relayed instead, over the two channels that already
+exist (page to prototype host by the host's private scheme, prototype host to
+the app's main process by their IPC channel):
+
+- **Minting.** The main process asks for the ticketed design page with the
+  desktop bridge secret (`x-octant-desktop-secret`, the proof every brokered
+  desktop route already takes) and the surface id it will draw the page on
+  (`x-octant-prototype-surface`). The host mints a token for that request only
+  when `admitDesktopBroker` admits it as the desktop bridge on `127.0.0.1`
+  (so never a request with an `Origin`, one a session carried, or a native
+  window's main), the request names no fetch destination, the ticket is
+  network-capable, and the switch is still on. The token is answered to the
+  main process in a response header (`x-octant-canvas-network-token`) and is
+  not in the page: the page's `connect-src` names
+  `octant-prototype://network/<surface id>/`, its `img-src` and `font-src`
+  the `image` and `font` paths under it, and its script sends a `fetch`, an
+  image, and a font there. The main process keeps the token beside the surface and passes the
+  prototype host the page with a mark that it has a network, never the token.
+- **The page's side.** The prototype host's scheme handler, the only thing
+  that answers `octant-prototype:`, serves the page once as before and
+  otherwise answers exactly `octant-prototype://network/<surface
+id>/<fetch, image, or font>?url=<one address>` for a surface it was told has
+  a network (`canvasPrototypeRelayRequest`, a pure function): a `GET` of any
+  of the three, a `POST` of `fetch` that declares `application/json` (its body
+  read there and refused past 256 KiB), and the browser's preflight for that
+  `POST`, which the handler answers itself. Any other host, path, query,
+  method, body type, or surface is refused there and goes no further. An `http:`,
+  `https:`, `ws:`, or `file:` address never reaches the handler: it is
+  refused by the page's policy, and without the policy by the dead proxy.
+- **The relay.** The prototype host sends the main process the surface id,
+  which of the three paths was asked, the address, and a script's JSON body;
+  no header of the page's crosses. The main process makes one request to
+  `<host>/api/canvas/network/<that surface's token>/<fetch, image, or
+font>?url=<address>` (`canvasNetworkRelayAddress`: the address is one encoded
+  query value and can change neither the path nor the host): a `GET` with no
+  header of its own, or for a body a `POST` with `Content-Type:
+application/json` and nothing else, with no cookie and no redirect followed,
+  and hands back the status, the body, and the answer's fixed headers. The address is not judged in Electron: the host's
+  route applies the destination rule, the bounds, and the switch, exactly as
+  for a browser's page.
+- **Ending.** The token is forgotten by the main process when the prototype
+  closes, its window goes, or the prototype host stops, and its requests still
+  in flight are cancelled. While the prototype is open the window that ran it
+  renews the token on the host by the page's ticket, as a browser's window
+  does; the main process holds the same token throughout and the page still
+  holds none. Turning the switch off revokes it on the host, so
+  the next relayed request is refused there.
+
+What the page gained is one question it can ask ("fetch this public address",
+as a script, an image, or a font, with a JSON body if a script sends one)
+and nothing else: it still has no socket, no name lookup, no address of the
+host, no token it could send out, and no way to read another surface's
+answers. The two Chromium privileges the scheme gained so a page's `fetch` of
+it is delivered (`supportFetchAPI`, `corsEnabled`) open no route: the handler
+is still the one thing that answers it.
+
+The containment probe (`bun run smoke:canvas-prototype-containment`) draws the
+hostile page twice more with its Canvas's network on, once with the page's
+policy removed, against the host's real proxy and destination rule over a
+stand-in for the far side. Measured in Electron 43.7.11 on Linux (2026-11-13):
+no UDP, TCP, or HTTP listener and no other host route was reached and no name
+was looked up; the proxy route was asked only by relayed `GET`s with no added
+header and one `POST` whose only added header was the JSON content type; a
+public address was fetched with `Accept` alone; a JSON `POST` the page sent
+with an `Authorization` header, an API key, and credentials went out with
+`Accept` and the JSON type alone; an image and a font were fetched through
+their paths and drawn, and markup asked for as an image was not passed on;
+loopback, the host's own address, and the metadata address were refused by
+the rule; a `PUT` was refused by the host's script, a body that is not JSON
+by the route, and a body not declared as JSON, a `POST` to the image path,
+another path, and a second address by the scheme handler; another surface's
+relay and the page address were refused by the page's policy, and by the
+handler once the policy was removed; and a `fetch` from a fresh frame reached
+nothing. Not measured: the packaged macOS app.
+
+**Where it works today.** In a browser on the host's own machine and in the
+desktop app. A paired device's browser is not offered the switch and its pages
+are served without a token; a Nightly client window does not run prototypes.
+
+Rationale: a looser page policy (`connect-src https:`) was rejected because a
+browser would then connect from the person's machine, with its address, to
+anything, private addresses included, and nothing could bound or revoke it. A
+proxy path named by the page policy keeps one revocable door that the host
+judges. `GET` alone keeps a page from driving a form or an API with a body
+through the person's address; widening that is a later decision.
 
 ## HTML import
 
@@ -1997,6 +2271,21 @@ keeps an import from adding an unmarked channel to an agent's context.
   outside-content record in `canvasOutsideContentMark.test.ts`; the paired
   device refusal in `apps/server/src/authenticatedProductRoutes.test.ts`; and
   the panel in `apps/web/src/canvas/CanvasCards.test.tsx`.
+
+- Allow network: the destination rule, each refused class, and the image and
+  font types in `packages/domain/src/canvasNetworkPolicy.test.ts`; pinning,
+  redirects, headers, a `POST`'s body, and bounds in
+  `apps/server/src/canvas/canvasNetworkProxy.test.ts`; the journaled switch,
+  its tokens, their hour, and renewal by the page's ticket alone in
+  `canvasNetworkAccessService.test.ts`; the page policy and the host's
+  script in `canvasDesignPage.test.ts`; the renewal a running prototype asks
+  for in `apps/web/src/canvas/blocks/DesignBlock.test.tsx`;
+  the routes, revocation, and who may not set the switch or get a proxy in
+  `apps/server/src/canvasRoutes.test.ts` (`canvas network routes`) and
+  `authenticatedProductRoutes.test.ts`; the renderer in
+  `apps/web/src/canvas/CanvasNetworkPanel.test.tsx`, `CanvasWorkspaceTab.test.tsx`,
+  and `blocks/DesignBlock.test.tsx`; and a real browser's enforcement of the
+  page policy in `apps/server/src/canvas/canvasNetworkBrowser.smoke.ts`.
 
 ## Renderer loading
 

@@ -292,7 +292,10 @@ export type RemoteDependencies = {
     | "workThreadService"
     | "workTurnService"
   > &
-  Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService" | "canvasService"> &
+  Pick<
+    CanvasWiring,
+    "canvasNetworkAccess" | "canvasRoutes" | "canvasPublicShareService" | "canvasService"
+  > &
   Pick<
     AutomationWiring,
     | "automationCommandService"
@@ -351,6 +354,7 @@ export function wireRemote(deps: RemoteDependencies) {
     pairedMergeUnlockSlot,
     nativeHarnessSessions,
     remoteDelegationHolder,
+    canvasNetworkAccess,
     canvasPublicShareService,
     canvasRoutes,
     chatAttachmentStore,
@@ -2284,6 +2288,8 @@ export function wireRemote(deps: RemoteDependencies) {
       // retried until the service confirms the link is gone.
       canvasPublicShareService.revokeForPurge(canvasIds);
       canvasPublicShareService.forget(canvasIds);
+      // Its "Allow network" choice and its running pages' tokens go with it.
+      canvasNetworkAccess.forget(canvasIds);
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
     forgetProjectData: (projectId) => {

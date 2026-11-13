@@ -83,6 +83,17 @@ describe("createCanvasAgentTools", () => {
     }
   });
 
+  it("gives an agent no way to turn on a Canvas's network", () => {
+    const schema = JSON.stringify(
+      tools().set.definitions.map((definition) => definition.inputSchema),
+    );
+    // The switch is a person's, set at a route no tool reaches; the tool's
+    // operations are pinned above and none of its fields names it.
+    for (const word of ["network", "allowNetwork", "networkAccess", "allow-network"]) {
+      expect(schema).not.toContain(`"${word}"`);
+    }
+  });
+
   it("lets an MCP agent discover the Canvas workflow and author the supplied example", async () => {
     const { create, set } = tools();
     const server = createManagedMcpTools(set.definitions, async (name, inputJson) => {

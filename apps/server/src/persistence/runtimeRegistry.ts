@@ -439,6 +439,7 @@ import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareServ
 import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
+import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
 import { createRuntimeHostIdentityMigrationRegistry } from "./hostIdentityTransforms";
@@ -817,6 +818,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerProtectedFilesEvents(events);
   registerPersonMemoryEvents(events);
   registerCanvasExportFolderEvents(events);
+  registerCanvasNetworkAccessEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);
   registerCanvasChoiceAnswerEvents(events);
