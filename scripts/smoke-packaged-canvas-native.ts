@@ -1129,15 +1129,27 @@ const timer = setInterval(() => {
       ),
     );
     const updatedLinks = await showPublicLinks("updated");
-    const actionRows = updatedLinks.texts.filter(
-      (row) =>
-        row.text.includes("Copy link") &&
-        row.text.includes("Update") &&
-        row.text.endsWith("Revoke"),
+    // OCR used to read the link's actions as one row ("Copy link Update
+    // Revoke"); with the current control spacing the hosted runner reads
+    // "Copy link", "Update" and "Revoke" as three rows. Either shape is
+    // accepted, but there must be exactly one owned link's actions, and the
+    // click stays bound to that one row.
+    const rowTexts = updatedLinks.texts.map((row) => row.text.trim());
+    const joinedRows = rowTexts.filter(
+      (text) => text.includes("Copy link") && text.includes("Update") && text.endsWith("Revoke"),
     );
-    if (actionRows.length !== 1 || actionRows[0] === undefined)
+    const countOf = (value: string) => rowTexts.filter((text) => text === value).length;
+    const separateRows =
+      countOf("Copy link") === 1 && countOf("Update") === 1 && countOf("Revoke") === 1;
+    const actionRow =
+      joinedRows.length === 1 && !separateRows
+        ? joinedRows[0]
+        : joinedRows.length === 0 && separateRows
+          ? "Revoke"
+          : undefined;
+    if (actionRow === undefined)
       throw Error("The single owned public-link action row is unavailable.");
-    await nativeInput("native-revoke", "click", "Revoke", actionRows[0].text);
+    await nativeInput("native-revoke", "click", "Revoke", actionRow);
     await observeUntil(
       "native-revoke-card",
       (snapshot) =>
