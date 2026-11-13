@@ -688,7 +688,7 @@ describe("createCanvasAgentTools", () => {
             schemaVersion: CANVAS_SCHEMA_VERSION,
             kind: "code-excerpt",
             language: "mermaid",
-            code: 'flowchart TD\n  a --> b\n  click a href "https://example.com"',
+            code: "flowchart TD\n  a --> b\n  b>Flag] --> c",
           },
         ],
       }),

@@ -1208,7 +1208,7 @@ document as a future version. Frames follow the
   use most, with no new dependency and no Mermaid renderer; a diagram still
   outside the translated subset stays a code block showing its raw source
   (maintainer decision, 2026-11-12, which replaces the earlier bundled-renderer
-  direction; not built yet: today the subset is the narrower one).
+  direction).
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
