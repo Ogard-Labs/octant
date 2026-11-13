@@ -9,6 +9,7 @@ import type {
   RemotePendingPairingRequest,
 } from "@octant/contracts/desktop-bridge";
 import { useCallback, useEffect, useState } from "react";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -23,6 +24,9 @@ const SOURCE_OPTIONS: ReadonlyArray<{
   { id: "lan-private", label: "Private LAN" },
   { id: "tailscale", label: "Tailscale" },
 ];
+
+/** Often enough that a device waiting to be approved shows up while its code is still on screen. */
+const REFRESH_MS = 5_000;
 
 export interface RemotePairedDevicesProps {
   readonly client: PairedDeviceAdministrationClient;
@@ -59,9 +63,13 @@ export function RemotePairedDevices(props: RemotePairedDevicesProps) {
     const refused = [listed, pending].find((answer) => answer.status === "refused");
     if (refused?.status === "refused") setMessage(refused.message);
   }, [client]);
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  // A new device's request reaches the host after this panel's first read,
+  // and nothing here would otherwise read again until one of its own changes,
+  // so the lists are re-read while the panel is open and the page is in view.
+  useEffect(
+    () => scheduleVisibleInterval(() => void refresh(), REFRESH_MS, { runImmediately: true }),
+    [refresh],
+  );
 
   const change = async (act: () => Promise<PairedDeviceAdministrationAnswer>) => {
     setBusy(true);
@@ -187,6 +195,15 @@ export function RemotePairedDevices(props: RemotePairedDevicesProps) {
           variant="secondary"
         >
           Pair another device
+        </OctantButton>
+        <OctantButton
+          disabled={busy}
+          onClick={() => void refresh()}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Refresh
         </OctantButton>
         <OctantButton
           disabled={busy || devices.length === 0}

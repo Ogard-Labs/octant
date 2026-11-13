@@ -1,5 +1,5 @@
 import type { PairedDeviceAdministrationClient } from "@octant/client-runtime/paired-device-administration-client";
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RemotePairedDevices } from "./RemotePairedDevices";
@@ -106,6 +106,47 @@ describe("paired devices in a browser the host's own person paired", () => {
     expect(await screen.findByRole("textbox", { name: "Pairing link" })).toHaveValue(
       `https://host.example:13774/#ticketId=${request.ticketId}&ticketProof=proof`,
     );
+  });
+
+  it("shows a pairing request that arrives while the panel is open, on Refresh or by itself, and stops reading once closed", async () => {
+    vi.useFakeTimers();
+    try {
+      let arrived = false;
+      const listPairingRequests = vi.fn(async () => ({
+        status: "ok" as const,
+        value: arrived ? [request] : [],
+      }));
+      const host = client({ listPairingRequests });
+      const { unmount } = render(
+        <RemotePairedDevices client={host} origin="https://host.example:13774" />,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.queryByText("Tablet")).toBeNull();
+
+      // The new device claims its ticket after the panel's first read.
+      arrived = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(screen.getByText("Tablet")).toBeInTheDocument();
+
+      const reads = listPairingRequests.mock.calls.length;
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(listPairingRequests.mock.calls.length).toBe(reads + 1);
+
+      unmount();
+      const readsWhenClosed = listPairingRequests.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(listPairingRequests.mock.calls.length).toBe(readsWhenClosed);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says so when the host refuses a restricted session the list", async () => {
