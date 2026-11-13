@@ -321,6 +321,22 @@ export class ExtensionPackageStore {
     return this.#pluginData;
   }
 
+  /**
+   * Remove every plugin-data folder of an uninstalled extension. A server keeps
+   * state there that outlives its version folder, such as a login a connector
+   * stored, and a reinstall must not inherit it. Only folders named for this
+   * extension id are removed.
+   */
+  async removePluginData(extensionId: string): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(extensionId))
+      return;
+    for (const name of await directoryNames(this.#pluginData)) {
+      if (name.startsWith(`${extensionId}-`)) {
+        await rm(join(this.#pluginData, name), { recursive: true, force: true });
+      }
+    }
+  }
+
   async readVerifiedConfiguration(
     target: ExtensionVersionReference,
     componentId: string,

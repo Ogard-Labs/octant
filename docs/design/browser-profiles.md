@@ -101,8 +101,9 @@ Missing or invalid native metadata refuses creation/use without removing stores.
   thread and survives turns and host restart; absence keeps Private. The
   host resolves Project to the thread's live Project, never another Project
   named by a caller. A fork or new task starts without the choice.
-- Only a person at a local window changes this default. A paired device,
-  routine, child, terminal grant, agent, plugin, or imported thread cannot set
+- Only a person, at a local window or a paired device, changes this default
+  (maintainer decision, 2026-11-12; not built yet: today a paired device
+  cannot). A routine, child, terminal grant, agent, plugin, or imported thread cannot set
   it. It is a default, not a pin: an explicit agent profile request still
   follows the ordinary approval path and does not rewrite the default.
   Selecting a stored profile grants no access; callers that cannot use it are
@@ -168,7 +169,8 @@ Missing or invalid native metadata refuses creation/use without removing stores.
   confirmation it closes every page of that profile and clears all of its
   storage (cookies, storage, cache, service workers). The Settings row has the
   same action.
-- Clearing is the person's, at a local window only, and has two scopes: all of a
+- Clearing is the person's, at a local window or a paired device (maintainer
+  decision, 2026-11-12; not built yet: today a local window only), and has two scopes: all of a
   profile's storage (what "Sign out" does) or its cookies alone. The host closes
   the profile's pages, in the server's records and in the desktop app's views,
   before it removes anything, and journals `browser.profile-cleared@1` with the
@@ -213,9 +215,11 @@ into one stored profile, so they do not sign in again.
   installed on this Mac and each one's profiles by the names that browser shows;
   nothing is opened to produce the list. The person chooses a browser and one of
   its profiles and presses Import. Octant never imports in the background, on
-  startup, on a schedule, or because an agent, a routine, a plugin, or a paired
-  device asked. Only a local window can send the command, and the host refuses a
-  paired device before it reads anything.
+  startup, on a schedule, or because an agent, a routine, or a plugin asked. A
+  local window or a paired device sends the command, and any Keychain prompt
+  still appears on the Mac (maintainer decision, 2026-11-12; not built yet:
+  today only a local window can send it, and the host refuses a paired device
+  before it reads anything).
 - **Which browsers.** Chromium-family browsers (Chrome, Chromium, Brave, Edge,
   Vivaldi, Arc) and Firefox. Safari is not offered: its cookie store sits behind
   a macOS privacy permission Octant does not ask for.
@@ -328,14 +332,16 @@ thread made.
   open and stopping the thread's own Browser, and refuses every other
   operation ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode));
   a read of a profile page still needs its (origin, profile) approval.
-- **Paired devices.** A paired device may not open a profile page, switch a page
-  to a profile, answer a profile site approval, act on a profile page, list or
-  clear a profile, or see a profile page's picture, text, address, or title. It
-  sees "Signed-in page — open it on this Mac." (Built.) A turn that a phone
-  started still raises the approval, and the approval waits for a local window:
-  the phone that started the turn neither sees nor answers a profile approval,
-  and a window that can see the thread does. An approval for a page outside a
-  profile is answered as every Browser approval is.
+- **Paired devices.** A paired device opens a profile page, switches a page to
+  a profile, answers a profile site approval, acts on a profile page, lists and
+  clears a profile, and sees a profile page's picture, text, address, and
+  title, as a local window does (maintainer decision, 2026-11-12). A turn that
+  a phone started raises the approval and that phone answers it, as does any
+  window or device that can see the thread. Not built yet: today a paired
+  device may do none of these and sees "Signed-in page — open it on this
+  Mac."; a profile approval from a phone-started turn waits for a local
+  window, and the phone neither sees nor answers it. An approval for a page
+  outside a profile is answered as every Browser approval is.
 - **Unattended turns.** A routine or managed child uses a stored profile only with
   the explicit, persistent [delegated session permission](#delegated-sessions) below; it
   never inherits another caller's page, sign-in permission or authority.
@@ -362,7 +368,8 @@ floating page preview both show the profile's name. The toolbar's profile
 icon shows the page's profile at all times. The person can take the page
 from the agent with **Take over**
 ([Person and agent together](browser-agent-tool.md#person-and-agent-together));
-a paired device cannot, signed in or not.
+a paired device can too (maintainer decision, 2026-11-12; not built yet: today a
+paired device cannot, signed in or not).
 
 ## Delegated sessions
 
@@ -575,7 +582,8 @@ page they are allowed on, including what the agent reads.
 
 ### Installing
 
-- Only the person at a local window installs an extension, from an unpacked
+- Only the person installs an extension (at a local window, since the folder
+  picker is native; importing below is open to a paired device), from an unpacked
   extension folder chosen with the native folder picker (a host-issued binding
   receipt, as for Add folder), or by
   [importing it from another browser](#importing-from-another-browser) on this
@@ -596,7 +604,7 @@ page they are allowed on, including what the agent reads.
 ### Importing from another browser
 
 Settings › Data & storage › Browser extensions has "Import from another
-browser…" beside "Install extension…", in a local window only.
+browser…" beside "Install extension…".
 
 - **Which browsers.** Chromium-family browsers (Chrome, Chromium, Brave, Edge,
   Vivaldi, Arc). The dialog lists each browser's profiles by the names it shows
@@ -614,8 +622,9 @@ browser…" beside "Install extension…", in a local window only.
   installed) with the same fields as a picked folder plus the browser it came
   from. It is installed but off everywhere, is enabled per profile after the
   person confirms what it can read and change, and never loads into a Private
-  page. Importing is the person's, at a local window; a paired device is refused
-  and sees no list.
+  page. Importing is the person's, at a local window or a paired device
+  (maintainer decision, 2026-11-12; not built yet: today a paired device is
+  refused and sees no list).
 - **Unsupported, with the reason.** An extension that uses Manifest V2 is listed
   as unsupported ("It uses the older Manifest V2 format, which Octant cannot
   run."), and so is one that needs native messaging ("It needs to talk to a
@@ -639,8 +648,9 @@ browser…" beside "Install extension…", in a local window only.
   read and change, and its permissions) and needs the person's confirmation. It
   journals `browser.extension-enabled@1` with the profile; disabling journals
   `browser.extension-disabled@1`.
-- Only a local window enables or disables. A paired device sees the list and
-  changes nothing (`extension-not-local`). An agent cannot install, enable, or disable an extension, and
+- A local window or a paired device enables or disables (maintainer decision, 2026-11-12;
+  not built yet: today a paired device sees the list and
+  changes nothing, `extension-not-local`). An agent cannot install, enable, or disable an extension, and
   no plugin, skill, or structured reference can either.
 - An extension's own pages (`chrome-extension://` addresses: popups, options)
   are outside every agent allowlist. The agent cannot open or act on them.
@@ -711,17 +721,17 @@ work without it, and takes no extension-support package:
 
 ## Refusals
 
-| Reason                   | When                                                                                                  |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `profile-not-local`      | A paired device tries to open, switch to, or answer for a profile page                                |
-| `profile-needs-a-person` | A routine, a subagent, or a terminal Browser grant tries to use a profile page                        |
-| `profile-unavailable`    | The Project is archived, its mode is off, the native Browser is not available, or the store is locked |
-| `source-not-found`       | A cookie import names a browser or profile that is not on this Mac                                    |
-| `invalid`                | A cookie import's site names no web host                                                              |
-| `keychain-refused`       | The person declined the Keychain prompt for the browser's cookie key, or macOS would not answer       |
-| `source-unreadable`      | A cookie database could not be opened or decrypted, or the browser keeps no key in the Keychain       |
-| `extension-not-local`    | A paired device or any non-person caller tries to install, enable, or disable an extension            |
-| `extension-unsupported`  | The manifest is not Manifest V3, it needs native messaging, or the host has no desktop app            |
+| Reason                   | When                                                                                                                                                        |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `profile-not-local`      | A paired device tries to open, switch to, or answer for a profile page                                                                                      |
+| `profile-needs-a-person` | A routine, a subagent, or a terminal Browser grant tries to use a profile page                                                                              |
+| `profile-unavailable`    | The Project is archived, its mode is off, the native Browser is not available, or the store is locked                                                       |
+| `source-not-found`       | A cookie import names a browser or profile that is not on this Mac                                                                                          |
+| `invalid`                | A cookie import's site names no web host                                                                                                                    |
+| `keychain-refused`       | The person declined the Keychain prompt for the browser's cookie key, or macOS would not answer                                                             |
+| `source-unreadable`      | A cookie database could not be opened or decrypted, or the browser keeps no key in the Keychain                                                             |
+| `extension-not-local`    | A caller that is not the person tries to install, enable, or disable an extension (today a paired device too; not built yet: a paired device is the person) |
+| `extension-unsupported`  | The manifest is not Manifest V3, it needs native messaging, or the host has no desktop app                                                                  |
 
 Each refusal is a value the pane shows in words; none is a silent no-op.
 

@@ -105,6 +105,14 @@ describe("remembered MCP tool approval", () => {
     });
   });
 
+  it("runs a tool the catalog marks ask-every-call unasked at Full access", () => {
+    expect(
+      decideExtensionToolGrant(
+        facts({ fullAccessTurn: true, askEveryCall: true, grant: undefined }),
+      ),
+    ).toEqual({ kind: "covered" });
+  });
+
   it("runs a network tool unasked at Full access on a thread that read outside content", () => {
     expect(
       decideExtensionToolGrant(
@@ -272,6 +280,19 @@ describe("remembered MCP tool approval", () => {
     expect(
       decideExtensionToolGrant(facts({ threadTainted: true, reach: "confined-stdio" })),
     ).toEqual({ kind: "covered" });
+  });
+
+  it("never lets a grant cover a tool the catalog marks ask-every-call", () => {
+    for (const reach of ["confined-stdio", "proxied-stdio", "network"] as const) {
+      expect(decideExtensionToolGrant(facts({ reach, askEveryCall: true }))).toEqual({
+        kind: "ask",
+        reason: "ask-every-call-tool",
+        answerCovers: "call",
+      });
+    }
+    expect(decideExtensionToolGrant(facts({ reach: "proxied-stdio" }))).toEqual({
+      kind: "covered",
+    });
   });
 
   it("treats a proxied stdio server on a thread that took in outside content as a network server", () => {

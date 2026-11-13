@@ -184,7 +184,8 @@ the open set where packages already live.
 
 ### Admission lifecycle
 
-One **Install and trust** flow at a local window covers inspect, install,
+One **Install and trust** flow, at a local window or a paired device
+(maintainer decision, 2026-11-12; not built yet: today a local window only), covers inspect, install,
 trust and enable: the person reads one review and confirms once, and the host
 then runs steps 1 to 4 in order, each journaled through the existing extension
 lifecycle, stopping at the first that refuses. Digest-bound trust and the
@@ -970,7 +971,10 @@ takes the fail-closed option.
   [Admission rules](#admission-rules)). Until then every component reports
   `quarantined`, so no structured reference or mention can select one and no
   process exists.
-- **Local window only.** The lifecycle route refuses every command from a
+- **Local window only, today.** A paired device sends lifecycle commands and
+  inspects a driver folder as a local window does (maintainer decision,
+  2026-11-12); the folder itself is still picked on the host computer. Not built
+  yet: today the lifecycle route refuses every command from a
   paired device, in addition to remote forwarding never admitting it, and a
   paired device cannot inspect or preview a registered driver folder, since
   an inspection is what an install consumes. Registering a folder was already
