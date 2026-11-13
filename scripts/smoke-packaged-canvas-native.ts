@@ -826,14 +826,22 @@ const timer = setInterval(() => {
       process.env,
       8000,
     );
-    await observeUntil(
+    const exportPanel = await observeUntil(
       "canvas-export",
       (snapshot) => hasText(snapshot, "Review export") && hasText(snapshot, "Public link"),
     );
     // This is the selected trigger actually observed in the first export
     // panel. Opening its native menu grants nothing; only the exact owned
-    // Public link card below is eligible for approval.
-    await nativeInput("destination-trigger", "click", "sharehtml.org — Ready");
+    // Public link card below is eligible for approval. OCR reads the trigger's
+    // em dash as a hyphen at the 13px interface size ("sharehtml.org - Ready"
+    // on the hosted runner), so the row is matched as the menu row below is
+    // and clicked by the text actually observed.
+    const destinationTrigger = exportPanel.texts.find((row) =>
+      /^sharehtml\.org [—-] Ready$/.test(row.text),
+    );
+    if (destinationTrigger === undefined)
+      throw Error("The observed sharehtml.org destination trigger is absent.");
+    await nativeInput("destination-trigger", "click", destinationTrigger.text);
     const destinationMenu = await observeUntil("destination-native-menu", (snapshot) =>
       snapshot.texts.some((row) => /^Public link [—-] Ready$/.test(row.text)),
     );
