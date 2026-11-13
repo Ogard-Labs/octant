@@ -764,8 +764,9 @@ html:not([data-octant-reduced-transparency="true"])
   gap: 0;
 }
 
-.unified-diff--virtualized .unified-diff__file + .unified-diff__file {
-  margin-top: var(--oct-space-4);
+.unified-diff__file-gap {
+  flex: none;
+  height: var(--oct-space-4);
 }
 
 .unified-diff__spacer {

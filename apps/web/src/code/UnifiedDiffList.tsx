@@ -1,10 +1,19 @@
 import { useVirtualizer, type VirtualItem, type Virtualizer } from "@tanstack/react-virtual";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { DiffHunk, ParsedDiffFile } from "./unifiedDiff";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface UnifiedDiffListProps {
   readonly files: ReadonlyArray<ParsedDiffFile>;
+  readonly getScrollElement?: () => HTMLElement | null;
   readonly onOpenFile?: (path: string) => void;
   readonly onReadProviderFile?: (path: string) => void;
   readonly onSelectLine?: (input: {
@@ -30,12 +39,20 @@ const MARKERS: Readonly<Record<DiffHunk["lines"][number]["kind"], string>> = {
 
 const DIFF_VIRTUALIZATION_THRESHOLD = 60;
 const DIFF_OVERSCAN = 12;
-const FILE_HEADER_ESTIMATE_PX = 37;
+const FILE_BORDER_HEIGHT_PX = 2;
+const FILE_GAP_ESTIMATE_PX = 16;
+const FILE_HEADER_ESTIMATE_PX = 37 + FILE_BORDER_HEIGHT_PX;
 const BINARY_NOTICE_ESTIMATE_PX = 34;
 const GAP_ROW_ESTIMATE_PX = 26;
 const DIFF_LINE_ESTIMATE_PX = 20;
 
 type DiffVirtualRow =
+  | {
+      readonly kind: "file-gap";
+      readonly index: number;
+      readonly fileIndex: number;
+      readonly estimate: number;
+    }
   | {
       readonly kind: "header";
       readonly index: number;
@@ -68,6 +85,7 @@ type DiffVirtualRow =
 
 interface DiffFileRange {
   readonly fileIndex: number;
+  readonly gapIndex: number | undefined;
   readonly headerIndex: number;
   readonly firstBodyIndex: number | undefined;
   readonly lastItemIndex: number;
@@ -92,6 +110,9 @@ interface RenderedFileCluster {
  */
 export function UnifiedDiffList(props: UnifiedDiffListProps) {
   const container = useRef<HTMLDivElement>(null);
+  const resolveScrollElementRef = useRef<() => HTMLElement | null>(() => null);
+  resolveScrollElementRef.current = () =>
+    props.getScrollElement?.() ?? nearestScrollableAncestor(container.current);
   const model = useMemo(() => buildDiffVirtualModel(props.files), [props.files]);
   const virtualized = model.rows.length > DIFF_VIRTUALIZATION_THRESHOLD;
   const [scrollMargin, setScrollMargin] = useState(0);
@@ -99,7 +120,7 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
   const virtualizer = useVirtualizer<HTMLElement, Element>({
     count: virtualized ? model.rows.length : 0,
     estimateSize: (index) => model.rows[index]?.estimate ?? DIFF_LINE_ESTIMATE_PX,
-    getScrollElement: () => nearestScrollableAncestor(container.current) ?? container.current,
+    getScrollElement: () => resolveScrollElementRef.current() ?? container.current,
     overscan: DIFF_OVERSCAN,
     initialRect: { width: 720, height: 480 },
     scrollMargin,
@@ -109,9 +130,12 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
   });
 
   useLayoutEffect(() => {
-    if (!virtualized) return;
+    if (!virtualized) {
+      setScrollMargin(0);
+      return;
+    }
     const list = container.current;
-    const scrollElement = nearestScrollableAncestor(list);
+    const scrollElement = resolveScrollElementRef.current();
     if (list === null || scrollElement === null) {
       setScrollMargin(0);
       return;
@@ -122,10 +146,32 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
     };
     update();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
-    observer?.observe(list);
-    observer?.observe(scrollElement);
+    const observeLayout = () => {
+      observer?.observe(list);
+      observer?.observe(scrollElement);
+      for (const child of scrollElement.children) {
+        if (child instanceof Element) observer?.observe(child);
+      }
+    };
+    observeLayout();
+    const mutations =
+      typeof MutationObserver === "undefined"
+        ? undefined
+        : new MutationObserver((records) => {
+            // Virtualizer row recycling inside this list must not re-measure scrollMargin.
+            if (!records.some((record) => !list.contains(record.target))) return;
+            observeLayout();
+            update();
+          });
+    mutations?.observe(scrollElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["open"],
+    });
     return () => {
       observer?.disconnect();
+      mutations?.disconnect();
     };
   }, [props.files.length, virtualized]);
 
@@ -156,6 +202,8 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
           return renderFileSection({
             file,
             bodyRows: bodyRows.map((row) => ({ row, virtualIndex: undefined })),
+            headerVirtualIndex: undefined,
+            binaryVirtualIndex: undefined,
             topSpacerHeight: 0,
             bottomSpacerHeight: 0,
             onOpenFile: props.onOpenFile,
@@ -191,27 +239,46 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
       {outerTopSpacerHeight > 0 ? (
         <div aria-hidden="true" style={{ height: outerTopSpacerHeight }} />
       ) : null}
-      {clusters.map((cluster) => {
+      {clusters.map((cluster, clusterIndex) => {
         const file = props.files[cluster.fileIndex];
         const range = model.ranges[cluster.fileIndex];
         if (file === undefined || range === undefined) return null;
 
+        const gapElement =
+          clusterIndex > 0 && range.gapIndex !== undefined ? (
+            <div
+              aria-hidden="true"
+              className="unified-diff__file-gap"
+              data-index={range.gapIndex}
+              key={`${file.id}:gap`}
+              ref={virtualizer.measureElement}
+            />
+          ) : null;
+
         if (file.binary) {
-          return renderFileSection({
-            file,
-            bodyRows: [],
-            topSpacerHeight: 0,
-            bottomSpacerHeight: 0,
-            onOpenFile: props.onOpenFile,
-            onReadProviderFile: props.onReadProviderFile,
-            onSelectLine: props.onSelectLine,
-            measureRef: undefined,
-          });
+          return (
+            <Fragment key={file.id}>
+              {gapElement}
+              {renderFileSection({
+                file,
+                bodyRows: [],
+                headerVirtualIndex: range.headerIndex,
+                binaryVirtualIndex: range.firstBodyIndex,
+                topSpacerHeight: 0,
+                bottomSpacerHeight: 0,
+                onOpenFile: props.onOpenFile,
+                onReadProviderFile: props.onReadProviderFile,
+                onSelectLine: props.onSelectLine,
+                measureRef: virtualizer.measureElement,
+              })}
+            </Fragment>
+          );
         }
 
-        const bodyVirtualItems = cluster.items.filter(
-          (item) => model.rows[item.index]?.kind !== "header",
-        );
+        const bodyVirtualItems = cluster.items.filter((item) => {
+          const kind = model.rows[item.index]?.kind;
+          return kind !== "header" && kind !== "file-gap";
+        });
         const firstBodyVirtual = bodyVirtualItems[0];
         const lastBodyVirtual = bodyVirtualItems.at(-1);
         const fileFirstBodyStart =
@@ -235,16 +302,23 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
           return row === undefined ? [] : [{ row, virtualIndex: item.index }];
         });
 
-        return renderFileSection({
-          file,
-          bodyRows,
-          topSpacerHeight: innerTopSpacer,
-          bottomSpacerHeight: innerBottomSpacer,
-          onOpenFile: props.onOpenFile,
-          onReadProviderFile: props.onReadProviderFile,
-          onSelectLine: props.onSelectLine,
-          measureRef: virtualizer.measureElement,
-        });
+        return (
+          <Fragment key={file.id}>
+            {gapElement}
+            {renderFileSection({
+              file,
+              bodyRows,
+              headerVirtualIndex: range.headerIndex,
+              binaryVirtualIndex: undefined,
+              topSpacerHeight: innerTopSpacer,
+              bottomSpacerHeight: innerBottomSpacer,
+              onOpenFile: props.onOpenFile,
+              onReadProviderFile: props.onReadProviderFile,
+              onSelectLine: props.onSelectLine,
+              measureRef: virtualizer.measureElement,
+            })}
+          </Fragment>
+        );
       })}
       {outerBottomSpacerHeight > 0 ? (
         <div aria-hidden="true" style={{ height: outerBottomSpacerHeight }} />
@@ -259,6 +333,16 @@ function buildDiffVirtualModel(files: ReadonlyArray<ParsedDiffFile>): DiffVirtua
   const headerIndexByPath = new Map<string, number>();
 
   files.forEach((file, fileIndex) => {
+    let gapIndex: number | undefined;
+    if (fileIndex > 0) {
+      gapIndex = rows.length;
+      rows.push({
+        kind: "file-gap",
+        index: gapIndex,
+        fileIndex,
+        estimate: FILE_GAP_ESTIMATE_PX,
+      });
+    }
     const headerIndex = rows.length;
     headerIndexByPath.set(file.path, headerIndex);
     rows.push({
@@ -278,6 +362,7 @@ function buildDiffVirtualModel(files: ReadonlyArray<ParsedDiffFile>): DiffVirtua
       });
       ranges.push({
         fileIndex,
+        gapIndex,
         headerIndex,
         firstBodyIndex: binaryIndex,
         lastItemIndex: binaryIndex,
@@ -319,6 +404,7 @@ function buildDiffVirtualModel(files: ReadonlyArray<ParsedDiffFile>): DiffVirtua
 
     ranges.push({
       fileIndex,
+      gapIndex,
       headerIndex,
       firstBodyIndex,
       lastItemIndex: rows.length - 1,
@@ -352,6 +438,8 @@ function renderFileSection(input: {
     readonly row: DiffVirtualRow;
     readonly virtualIndex: number | undefined;
   }>;
+  readonly headerVirtualIndex: number | undefined;
+  readonly binaryVirtualIndex: number | undefined;
   readonly topSpacerHeight: number;
   readonly bottomSpacerHeight: number;
   readonly onOpenFile: UnifiedDiffListProps["onOpenFile"];
@@ -367,7 +455,11 @@ function renderFileSection(input: {
       className="unified-diff__file"
       key={file.id}
     >
-      <header className="unified-diff__file-header">
+      <header
+        className="unified-diff__file-header"
+        data-index={input.headerVirtualIndex}
+        ref={input.headerVirtualIndex === undefined ? undefined : input.measureRef}
+      >
         <h2 className="unified-diff__path" title={file.path}>
           {file.path}
         </h2>
@@ -403,7 +495,11 @@ function renderFileSection(input: {
         )}
       </header>
       {file.binary ? (
-        <p className="unified-diff__binary">
+        <p
+          className="unified-diff__binary"
+          data-index={input.binaryVirtualIndex}
+          ref={input.binaryVirtualIndex === undefined ? undefined : input.measureRef}
+        >
           This file changed without a textual diff, so there is nothing to compare.
         </p>
       ) : (
@@ -529,6 +625,7 @@ function diffRowKey(
 ): string {
   if (row === undefined) return String(index);
   const fileKey = files[row.fileIndex]?.id ?? String(row.fileIndex);
+  if (row.kind === "file-gap") return `${fileKey}:gap`;
   if (row.kind === "header") return `${fileKey}:header`;
   if (row.kind === "binary") return `${fileKey}:binary`;
   if (row.kind === "gap") return `${fileKey}:gap:${String(row.hunkIndex)}`;
@@ -548,17 +645,20 @@ function measureDiffElement(
       : element instanceof HTMLElement
         ? element.offsetHeight
         : 0;
-  return measured > 0 ? measured : instance.options.estimateSize(index);
+  if (measured <= 0) return instance.options.estimateSize(index);
+  // The enclosing section carries 1px top and bottom borders outside its
+  // sticky header, so attribute that 2px frame to the header's virtual slot.
+  const borderFrame = element.classList.contains("unified-diff__file-header")
+    ? FILE_BORDER_HEIGHT_PX
+    : 0;
+  return measured + borderFrame;
 }
 
 function nearestScrollableAncestor(element: HTMLElement | null): HTMLElement | null {
   let ancestor = element?.parentElement ?? null;
   while (ancestor !== null) {
     const style = getComputedStyle(ancestor);
-    if (
-      /^(auto|overlay|scroll)$/.test(style.overflowY) ||
-      ancestor.classList.contains("code-diff-pane__stack")
-    ) {
+    if (/^(auto|overlay|scroll)$/.test(style.overflowY)) {
       return ancestor;
     }
     ancestor = ancestor.parentElement;
