@@ -60,6 +60,7 @@ export function createExtensionToolCallAuthorizer(options: {
         fullAccessTurn: call.thread.fullAccessTurn === true,
         threadTainted: options.threadTainted(call.thread.id),
         reach: call.reach,
+        ...(call.askEveryCall === true ? { askEveryCall: true } : {}),
         offered: offeredBinding(call),
         // A tool's row always carries its listing digest; the payload schema
         // refuses a tool name without one.

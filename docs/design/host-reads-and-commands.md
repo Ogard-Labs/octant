@@ -183,7 +183,8 @@ Hand off is `POST /api/threads/hand-off`. The behavior rule is in
 
 ## Browser captures
 
-A thread's kept Browser screenshots use three local-window routes:
+A thread's kept Browser screenshots use three routes (local-window only today; a
+paired device too once built):
 `POST /api/browser/captures` (the retained list, newest first),
 `POST /api/browser/captures/image` (one picture as an image data URL), and
 `POST /api/browser/captures/take` (the Screenshot control). The behavior rule is
@@ -214,7 +215,9 @@ Create from an issue frames redacted issue text through
 ## Terminal sessions
 
 `POST /api/terminal-sessions/list` (`{ projectId }`) and
-`POST /api/terminal-sessions/history` (`{ threadId }`) are local-window only.
+`POST /api/terminal-sessions/history` (`{ threadId }`) answer a local window or
+a paired device (maintainer decision, 2026-11-12; not built yet: today they are
+local-window only).
 The list reads `projects/<folder>` under `CLAUDE_CONFIG_DIR` (default
 `~/.claude`) and the newest day folders of `sessions` under `CODEX_HOME`
 (default `~/.codex`), the head and tail of each file only, and keeps a session

@@ -1464,7 +1464,8 @@ Its radio items are **Use default (Low)**
 levels, with short descriptions that fit a phone-width menu: "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
 "Thinking, tool calls, and results open". A client that cannot change the
-level, a paired browser, shows no menu.
+level shows no menu (today a paired browser; not built yet: a paired device
+changes it as a local window does).
 
 **Change reply detail in this thread** (`reply-detail-cycle`, Mod+Shift+D by
 default, remappable in Settings › Keyboard shortcuts) steps the thread in front
@@ -1495,7 +1496,8 @@ The default and the threads' own levels live in the host's shell settings
 (`replyDetail`, `threadReplyDetail`), the document that already holds every
 other per-person presentation choice, keyed maps included. That is the
 narrowest home that keeps it a preference: it is written only by the shell
-route, which only a window on the host reaches; it is not part of any thread's
+route, which a window on the host reaches (a paired device too by maintainer
+decision, 2026-11-12; not built yet); it is not part of any thread's
 journal, so forks, exports and provider context never see it; and host export
 does not carry it. Code's pin is the one per-thread presentation choice kept on
 a thread's own record, and Chat and Work have no such record to share, so a
@@ -3537,7 +3539,9 @@ focused, **Remove protection**), because every agent can then read those
 files; the host journals the confirmed removal. Paths the person added follow
 as rows with Remove (no confirmation), then one "Protect another path" row with
 a text field and an **Add** button; a refused path is said in the section's
-feedback line. A paired device sees the section as set on the host machine.
+feedback line. A paired device edits the section as a local window does
+(maintainer decision, 2026-11-12; not built yet: today a paired device sees the
+section as set on the host machine).
 **Worktrees** in Settings › Code, above Open in applications, lists the managed
 worktrees archived threads still keep, largest first: the thread's title, then
 a line of Project, branch in mono, and size ("more than" when the count stopped
@@ -3547,7 +3551,9 @@ focused, **Remove worktree**), saying the folder and its ignored files go and
 the branch and its commits stay. A refusal (uncommitted changes, or a turn
 still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
-line; a paired device sees the section as managed on the host machine
+line; a paired device uses the section as a local window does (maintainer
+decision, 2026-11-12; not built yet: today a paired device sees the section
+as managed on the host machine)
 ([rules](docs/architecture.md#modes-chat-work-and-code)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,
@@ -4100,7 +4106,8 @@ per-row Edit, Export as JSON, and Delete. The editor holds the name and
 description; cases of kind prompt or Code (a Code case adds the Code Project and
 branch or tag), each with a title, prompt, reference answer, rubric line, and a
 checks list for every check kind; and an optional judge model with its rubric.
-A refusal names the case and check. Only a window on this Mac writes, and when
+A refusal names the case and check. A window on this Mac or a paired device writes
+(maintainer decision, 2026-11-12; not built yet: today only a window on this Mac), and when
 the host refuses a write the page says so in a sentence. The run builder
 picks contenders from the enabled provider accounts and their models, the same
 list the composer offers, then repetitions (1 to 5), a token or cost budget, and,

@@ -159,9 +159,11 @@ through `serve-sim` as before. **Repair input** is a fifth input kind,
 offered by the device pane only after that refusal: it runs
 `serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
 screen restarts and running apps close) and drops the stream so the next input
-reconnects it. It rides the same Allow input grant as a tap, never runs
-automatically, and is refused unless a person (`local-user` or
-`remote-device`) requested it; `octant_apple` does not offer it.
+reconnects it. It rides the same Allow input grant as a tap and never runs
+automatically: a live Allow input grant covers it like any other input,
+whoever sends it (maintainer decision, 2026-11-12). Not built yet: today it is
+refused unless a person (`local-user` or `remote-device`) requested it, and
+`octant_apple` does not offer it.
 
 ## Open URL
 
@@ -196,8 +198,8 @@ every address raises its own confirmation, which names the whole address and
 is bound to it, and Allow input never covers it. Evidence and its log keep only
 `open-url completed (<origin>; path and query not recorded)`: the tool's own
 output can quote the address, so none of it is kept, for the same reason typed
-text is redacted. Not built yet: today an agent is refused, as with Repair
-input, and the agent tools do not offer Open URL.
+text is redacted. Not built yet: today an agent is refused, and the agent
+tools do not offer Open URL.
 
 ## Volume
 
