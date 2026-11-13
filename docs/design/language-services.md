@@ -1504,7 +1504,11 @@ the addendum left a choice open.
   configuration and the adapter as it stands, or the adapter's package
   changed since the session started, even if confirmed again), `project-erased`,
   `host-shutdown`, and `host-restarted`, which a host appends at its next
-  start for every session a previous run left open. Every request re-checks
+  start for every session a previous run left open. That start also answers
+  a panel still following such a session with its `host-restarted` end, and
+  the panel offers **Restart** beside the confirmed configuration of the same
+  name: an ordinary Start, checked against the confirmation and the thread as
+  they stand then, so nothing the ended session held carries over. Every request re-checks
   these before it runs, and committed `code-thread`, `code-checkout`,
   extension, and confirmation events run the check once the call that
   committed them has finished, because a window leaving its own session grant

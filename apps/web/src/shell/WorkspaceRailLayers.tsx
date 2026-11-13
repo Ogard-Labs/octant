@@ -26,6 +26,7 @@ import type {
 } from "../automation/automationCenterModel";
 import type { CodeProjectPullRequestsProps } from "../code/CodeProjectPullRequests";
 import type { CodeThreadOpenTarget } from "../code/CodeThreadBoard";
+import { resolveUnconfirmedStep } from "../code/resolveUnconfirmedStep";
 import type { CodeBoardCoordinators, CodeBoardProjectRef } from "../code/codeBoardGrouping";
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "../inbox/loadAssignedLinearIssues";
@@ -291,6 +292,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             <CodeThreadBoard
               isNarrow={props.isNarrow}
               loadBoard={(query) => props.codeClient.queryBoard(query)}
+              resolveUnconfirmedStep={(card, workId, outcome) =>
+                resolveUnconfirmedStep(props.codeClient, card, workId, outcome)
+              }
               projects={props.codeBoardProjects}
               onClose={props.onCloseCodeBoard}
               onOpenThread={props.onOpenCodeBoardThread}

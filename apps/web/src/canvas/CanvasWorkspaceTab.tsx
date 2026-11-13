@@ -1,3 +1,4 @@
+import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControls";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CanvasDesignSystemPanel } from "./CanvasDesignSystemPanel";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -36,7 +37,7 @@ import type {
   CanvasShareSnapshotRevokeRequest,
 } from "@octant/contracts/canvas-share-snapshot";
 import type { WorkspaceTab } from "@octant/contracts/shell";
-import { ChevronDown, MessageSquare, MoreHorizontal, X } from "lucide-react";
+import { ChevronDown, Globe, MessageSquare, MoreHorizontal, X } from "lucide-react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -82,6 +83,8 @@ import {
 } from "./blocks/designDocument";
 import { copyCanvasHtml, saveCanvasHtmlFile } from "./canvasHtmlFile";
 import { designRunRuntimeFor } from "./blocks/designRunningFrame";
+import { CanvasNetworkPanel } from "./CanvasNetworkPanel";
+import { useCanvasNetworkAccess } from "./useCanvasNetworkAccess";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
 import { canvasChoiceMessage, canvasDecisionFormMessage } from "./canvasChoiceMessage";
@@ -90,7 +93,14 @@ import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
 import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
 
-const CANVAS_TOOL_DIALOGS = ["refine", "refresh", "share", "export", "design-system"] as const;
+const CANVAS_TOOL_DIALOGS = [
+  "refine",
+  "refresh",
+  "share",
+  "export",
+  "design-system",
+  "network",
+] as const;
 const CHOICE_MODE_NAMES = { chat: "Chat", work: "Work", code: "Code" } as const;
 type CanvasToolDialog = (typeof CANVAS_TOOL_DIALOGS)[number];
 
@@ -119,7 +129,14 @@ export interface CanvasWorkspaceTabProps {
   }) => void;
 }
 
+/** Hands the tool's own toolbar up to the bar that hosts it; it never folds. */
+function CanvasBarControls(props: { readonly children: ReactNode }) {
+  useDockBarControls([{ kind: "node", id: "toolbar", width: 232, node: props.children }]);
+  return null;
+}
+
 export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
+  const hosted = useDockBarPlacement() !== undefined;
   const [definition, setDefinition] = useState<CanvasDefinition | undefined>(undefined);
   const [message, setMessage] = useState("Loading canvas…");
   const [history, setHistory] = useState<ReadonlyArray<CanvasVersionHistoryEntry>>([]);
@@ -413,6 +430,17 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     };
   }, [props.client, props.tab.canvasId, selectedVersionId]);
 
+  // A Canvas's "Allow network" switch matters only to a prototype. It is the
+  // same switch in a browser on the host's machine and in the desktop app,
+  // whose main process relays a page's requests to the host's proxy. The host
+  // refuses the read to a client it gives no switch.
+  const network = useCanvasNetworkAccess({
+    client: props.client,
+    canvasId: props.tab.canvasId,
+    offered:
+      definition?.blocks.some((block) => block.kind === "design" && block.runsScript === true) ===
+      true,
+  });
   // The sidebar is where a person goes to use a Canvas, so a prototype here
   // runs as soon as it is shown, for the version on screen.
   const designRunRuntime = useMemo(
@@ -423,8 +451,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             canvasId: props.tab.canvasId,
             versionId: String(selectedVersionId),
             runsOnOpen: true,
+            networkOn: network.allowed === true,
           }),
-    [props.client, props.tab.canvasId, selectedVersionId],
+    [props.client, props.tab.canvasId, selectedVersionId, network.allowed],
   );
 
   // A plan task's status is a version of the selected head only, for the same
@@ -1027,6 +1056,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           },
         ]
       : []),
+    // Shown only when the host answered that this Canvas has a switch here.
+    ...(network.allowed === undefined ? [] : [{ label: "Allow network…", value: "network" }]),
     // One file of the version on screen, to this device only. A Canvas with
     // mockups also offers their TSX handoff: the same one-file flow, as
     // dependency-free components.
@@ -1132,119 +1163,150 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     );
   };
 
-  return (
-    <div className="canvas-workspace-tab">
-      <header className="canvas-workspace-tab__toolbar">
-        <OctantPopover
-          align="start"
-          className="canvas-workspace-tab__versions"
-          onOpenChange={setVersionsOpen}
-          open={versionsOpen}
-          title="Version history"
-          trigger={
-            <>
-              <span>v{expectedSequence}</span>
-              {String(selectedVersionId) === tipVersionId ? null : (
-                <span className="canvas-workspace-tab__older">older</span>
-              )}
-              <ChevronDown aria-hidden="true" size={12} />
-            </>
-          }
-          triggerLabel={`Version history, v${String(expectedSequence)}`}
-          triggerVariant="ghost"
-        >
-          <CanvasVersionHistoryPanel
-            entries={history}
-            selectedVersionId={selectedVersionId === undefined ? "" : String(selectedVersionId)}
-            currentVersionId={tipVersionId}
-            onSelect={(versionId) => {
-              setVersionsOpen(false);
-              handleSelectVersion(versionId);
-            }}
-          />
-          {previousEntry === undefined ? null : (
-            <OctantButton
-              disabled={loading}
-              onClick={() => void openCompare()}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Compare with v{previousEntry.sequence}
-            </OctantButton>
-          )}
-        </OctantPopover>
-        <span className="canvas-workspace-tab__spacer" />
-        {props.onAttachContext !== undefined && selectedVersionId !== undefined ? (
-          <CanvasWorkspaceTabActions
-            currentSequence={expectedSequence}
-            currentVersionId={selectedVersionId}
-            displayName={definition.title}
-            onAttachContext={props.onAttachContext}
-            {...(props.onPinCanvasInFocusZone === undefined
-              ? {}
-              : {
-                  onPinInFocusZone: () =>
-                    props.onPinCanvasInFocusZone?.({
-                      canvasId: props.tab.canvasId,
-                      title: definition.title,
-                    }),
-                })}
-            tab={props.tab}
-          />
-        ) : null}
-        {commentsAvailable ? (
+  // The toolbar's controls are the tool's own, so a tile's bar, the single row
+  // or the bottom panel's bar hosts them when there is one. The tool draws them
+  // itself (a version popover, a menu), so they go up as one control that never
+  // folds. A note about a file just taken stays in the tool, under them.
+  const toolbarControls = (
+    <>
+      <OctantPopover
+        align="start"
+        className="canvas-workspace-tab__versions"
+        onOpenChange={setVersionsOpen}
+        open={versionsOpen}
+        title="Version history"
+        trigger={
+          <>
+            <span>v{expectedSequence}</span>
+            {String(selectedVersionId) === tipVersionId ? null : (
+              <span className="canvas-workspace-tab__older">older</span>
+            )}
+            <ChevronDown aria-hidden="true" size={12} />
+          </>
+        }
+        triggerLabel={`Version history, v${String(expectedSequence)}`}
+        triggerVariant="ghost"
+      >
+        <CanvasVersionHistoryPanel
+          entries={history}
+          selectedVersionId={selectedVersionId === undefined ? "" : String(selectedVersionId)}
+          currentVersionId={tipVersionId}
+          onSelect={(versionId) => {
+            setVersionsOpen(false);
+            handleSelectVersion(versionId);
+          }}
+        />
+        {previousEntry === undefined ? null : (
           <OctantButton
-            aria-expanded={commentsOpen}
-            aria-label={
-              openThreads.length === 0 ? "Comments" : `Comments, ${String(openThreads.length)} open`
-            }
-            onClick={() => (commentsOpen ? closeComments() : openCommentsOn(undefined))}
+            disabled={loading}
+            onClick={() => void openCompare()}
             size="sm"
             type="button"
-            variant={commentsOpen ? "secondary" : "ghost"}
+            variant="secondary"
           >
-            <MessageSquare aria-hidden="true" size={14} />
-            Comments
-            {openThreads.length === 0 ? null : (
-              <span className="canvas-workspace-tab__count">{openThreads.length}</span>
-            )}
+            Compare with v{previousEntry.sequence}
           </OctantButton>
-        ) : null}
-        {overflowItems.length === 0 ? null : (
-          <OctantMenu
-            items={overflowItems}
-            onValueChange={(value) => {
-              if (value === "save-html" || value === "copy-html" || value === "save-tsx") {
-                void takeHtmlFile(value);
-                return;
-              }
-              if (value === "propose-deck") {
-                void proposeDeck();
-                return;
-              }
-              const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
-              if (chosen === undefined) return;
-              setExportTargetId(undefined);
-              setDialog(chosen);
-            }}
-            selectionMode="action"
-            trigger={<MoreHorizontal aria-hidden="true" size={16} />}
-            triggerClassName="canvas-workspace-tab__overflow"
-            triggerLabel="More Canvas actions"
-            value=""
-          />
         )}
-        {htmlFileMessage === undefined ? null : (
-          <p
-            className="canvas-workspace-tab__notice"
-            data-testid="canvas-html-file-status"
-            role="status"
-          >
-            {htmlFileMessage}
-          </p>
-        )}
-      </header>
+      </OctantPopover>
+      {/* On the Canvas for as long as it holds, and the way back to the switch. */}
+      {network.allowed === true ? (
+        <OctantButton onClick={() => setDialog("network")} size="sm" type="button" variant="ghost">
+          <Globe aria-hidden="true" size={14} />
+          Network on
+        </OctantButton>
+      ) : null}
+      <span className="canvas-workspace-tab__spacer" />
+      {props.onAttachContext !== undefined && selectedVersionId !== undefined ? (
+        <CanvasWorkspaceTabActions
+          currentSequence={expectedSequence}
+          currentVersionId={selectedVersionId}
+          displayName={definition.title}
+          onAttachContext={props.onAttachContext}
+          {...(props.onPinCanvasInFocusZone === undefined
+            ? {}
+            : {
+                onPinInFocusZone: () =>
+                  props.onPinCanvasInFocusZone?.({
+                    canvasId: props.tab.canvasId,
+                    title: definition.title,
+                  }),
+              })}
+          tab={props.tab}
+        />
+      ) : null}
+      {commentsAvailable ? (
+        <OctantButton
+          aria-expanded={commentsOpen}
+          aria-label={
+            openThreads.length === 0 ? "Comments" : `Comments, ${String(openThreads.length)} open`
+          }
+          onClick={() => (commentsOpen ? closeComments() : openCommentsOn(undefined))}
+          size="sm"
+          type="button"
+          variant={commentsOpen ? "secondary" : "ghost"}
+        >
+          <MessageSquare aria-hidden="true" size={14} />
+          Comments
+          {openThreads.length === 0 ? null : (
+            <span className="canvas-workspace-tab__count">{openThreads.length}</span>
+          )}
+        </OctantButton>
+      ) : null}
+      {overflowItems.length === 0 ? null : (
+        <OctantMenu
+          items={overflowItems}
+          onValueChange={(value) => {
+            if (value === "save-html" || value === "copy-html" || value === "save-tsx") {
+              void takeHtmlFile(value);
+              return;
+            }
+            if (value === "propose-deck") {
+              void proposeDeck();
+              return;
+            }
+            const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
+            if (chosen === undefined) return;
+            setExportTargetId(undefined);
+            setDialog(chosen);
+          }}
+          selectionMode="action"
+          trigger={<MoreHorizontal aria-hidden="true" size={16} />}
+          triggerClassName="canvas-workspace-tab__overflow"
+          triggerLabel="More Canvas actions"
+          value=""
+        />
+      )}
+    </>
+  );
+  const htmlFileNotice = (
+    <>
+      {htmlFileMessage === undefined ? null : (
+        <p
+          className="canvas-workspace-tab__notice"
+          data-testid="canvas-html-file-status"
+          role="status"
+        >
+          {htmlFileMessage}
+        </p>
+      )}
+    </>
+  );
+
+  return (
+    <div className="canvas-workspace-tab">
+      {hosted ? (
+        <CanvasBarControls>
+          <span className="canvas-workspace-tab__controls">{toolbarControls}</span>
+        </CanvasBarControls>
+      ) : null}
+      {hosted ? (
+        htmlFileNotice
+      ) : (
+        <header className="canvas-workspace-tab__toolbar">
+          {toolbarControls}
+          {htmlFileNotice}
+        </header>
+      )}
       <div
         className="canvas-workspace-tab__body"
         data-tools={commentsAvailable ? "true" : "false"}
@@ -1346,6 +1408,13 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         ) : null}
       </OctantDialog>
       <OctantDialog
+        label="Canvas network"
+        onClose={() => setDialog(undefined)}
+        open={dialog === "network"}
+      >
+        <CanvasNetworkPanel network={network} />
+      </OctantDialog>
+      <OctantDialog
         label="Design system"
         onClose={() => setDialog(undefined)}
         open={dialog === "design-system"}
@@ -1436,6 +1505,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             {...(exportTargetId === undefined ? {} : { initialTargetId: exportTargetId })}
             offers={exportOffers}
             onDecide={props.client.decideExport}
+            {...(props.client.dismissExportNotice === undefined
+              ? {}
+              : { onDismissNotice: props.client.dismissExportNotice })}
             onExportFolderChosen={() => void loadExportOffers()}
             onPrepare={prepareExportInTheme}
           />

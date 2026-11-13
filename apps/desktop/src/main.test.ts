@@ -1,5 +1,5 @@
 import { DESKTOP_FLAVOR_IDENTITIES } from "@octant/host-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
   app: {
@@ -1735,6 +1735,12 @@ describe("native menu authority", () => {
 });
 
 describe("start-up after a self-update", () => {
+  // The entry decides at evaluation whether it waits, so each case evaluates
+  // the whole desktop module graph again. That took 1.2 s on an idle machine
+  // and 4.6 s with the processors oversubscribed, and a hosted macOS runner
+  // that reported 258 s of import time ran a test past its 5 s limit while
+  // still importing. Each case therefore starts in `beforeAll`, outside any
+  // test's time limit.
   async function startWith(replacedProcessId: string | undefined) {
     vi.resetModules();
     const { app } = await import("electron");
@@ -1744,24 +1750,37 @@ describe("start-up after a self-update", () => {
     await import("./main");
     return app;
   }
+  let app: Awaited<ReturnType<typeof startWith>>;
 
-  it("asks for the single-instance lock at once on an ordinary launch", async () => {
-    const app = await startWith(undefined);
+  describe("on an ordinary launch", () => {
+    beforeAll(async () => {
+      app = await startWith(undefined);
+    }, 60_000);
 
-    expect(app.requestSingleInstanceLock).toHaveBeenCalledTimes(1);
+    it("asks for the single-instance lock at once on an ordinary launch", () => {
+      expect(app.requestSingleInstanceLock).toHaveBeenCalledTimes(1);
+    });
   });
 
-  it("asks for the lock only after the instance it replaces has exited, and passes nothing on", async () => {
-    vi.useFakeTimers();
+  describe("on a launch that replaces a running instance", () => {
     let replacedIsRunning = true;
-    const kill = vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
-      if (pid === 424242 && !replacedIsRunning) {
-        throw Object.assign(new Error("no such process"), { code: "ESRCH" });
-      }
-      return true;
-    }) as typeof process.kill);
-    try {
-      const app = await startWith("424242");
+    let kill: { mockRestore(): void };
+    beforeAll(async () => {
+      vi.useFakeTimers();
+      kill = vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
+        if (pid === 424242 && !replacedIsRunning) {
+          throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+        }
+        return true;
+      }) as typeof process.kill);
+      app = await startWith("424242");
+    }, 60_000);
+    afterAll(() => {
+      kill.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it("asks for the lock only after the instance it replaces has exited, and passes nothing on", async () => {
       await vi.advanceTimersByTimeAsync(5_000);
 
       expect(app.requestSingleInstanceLock).not.toHaveBeenCalled();
@@ -1771,9 +1790,6 @@ describe("start-up after a self-update", () => {
       await vi.advanceTimersByTimeAsync(200);
 
       expect(app.requestSingleInstanceLock).toHaveBeenCalledTimes(1);
-    } finally {
-      kill.mockRestore();
-      vi.useRealTimers();
-    }
+    });
   });
 });

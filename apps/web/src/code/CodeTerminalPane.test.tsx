@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { DockBarTestHost } from "../shell/dockBarHost.test-support";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -47,6 +48,59 @@ describe("CodeTerminalPane", () => {
     expect(await screen.findByRole("menuitem", { name: "Add selection to chat" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "New terminal" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Stop terminal" })).toBeVisible();
+  });
+
+  it("lists the terminal's actions in the bar, changes the list with the state and floats no menu over the output", async () => {
+    const props = {
+      client: codeClient({ evidence: "ready" }),
+      createOperationId: () => ids.operation as never,
+      executionPolicy: "full-access" as const,
+      loadRuntime: xtermRuntime().loadRuntime,
+      scope,
+    };
+    const { rerender } = render(
+      <DockBarTestHost placement="tiled" toolLabel="Terminal">
+        <CodeTerminalPane {...props} result={terminalResult} />
+      </DockBarTestHost>,
+    );
+    const bar = within(screen.getByTestId("bar"));
+    expect(document.querySelector(".code-terminal-pane__actions-menu")).toBeNull();
+    fireEvent.click(bar.getByRole("button", { name: "More terminal actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Stop terminal" })).toBeVisible();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    rerender(
+      <DockBarTestHost placement="tiled" toolLabel="Terminal">
+        <CodeTerminalPane
+          {...props}
+          restart={{
+            columns: 120,
+            createTerminalId: () => ids.terminal as never,
+            credentialRefs: [],
+            rows: 40,
+          }}
+          result={{ ...terminalResult, state: "interrupted" }}
+        />
+      </DockBarTestHost>,
+    );
+    fireEvent.click(
+      within(screen.getByTestId("bar")).getByRole("button", { name: "More terminal actions" }),
+    );
+    expect(await screen.findByRole("menuitem", { name: "Restart terminal" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Stop terminal" })).toBeNull();
+  });
+
+  it("floats the actions menu over the output where no bar hosts it", () => {
+    render(
+      <CodeTerminalPane
+        client={codeClient({ evidence: "ready" })}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={xtermRuntime().loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+    expect(document.querySelector(".code-terminal-pane__actions-menu")).not.toBeNull();
   });
 
   it("loads authoritative replay and routes input and resize through codeClient", async () => {
@@ -878,6 +932,63 @@ describe("CodeTerminalPane", () => {
         ...scope,
       }),
     );
+  });
+
+  it("offers a shell a host restart ended back in one click as a fresh start the host may refuse", async () => {
+    const client = codeClient();
+    vi.mocked(client.executeOperation).mockResolvedValueOnce({
+      kind: "operation-failed",
+      operationId: "70000000-0000-4000-8000-000000000004",
+      failure: { category: "unauthorized", message: "This thread cannot start a terminal now." },
+    } as never);
+    const restart = {
+      columns: 100,
+      createTerminalId: () => "80000000-0000-4000-8000-000000000004" as never,
+      credentialRefs: [],
+      rows: 30,
+    };
+    const interrupted = {
+      ...terminalResult,
+      state: "interrupted",
+      browserGrant: { status: "granted" },
+    } as never;
+    const { rerender } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => "70000000-0000-4000-8000-000000000004" as never}
+        executionPolicy="approval-gated"
+        restart={restart}
+        result={interrupted}
+        scope={scope}
+      />,
+    );
+
+    expect(screen.getByText("Interrupted · explicit restart required")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Restart terminal" }));
+    await waitFor(() =>
+      expect(client.executeOperation).toHaveBeenCalledWith({
+        kind: "start-terminal",
+        operationId: "70000000-0000-4000-8000-000000000004",
+        terminalId: "80000000-0000-4000-8000-000000000004",
+        columns: 100,
+        rows: 30,
+        credentialRefs: [],
+        ...scope,
+      }),
+    );
+    expect(await screen.findByText("This thread cannot start a terminal now.")).toBeVisible();
+
+    rerender(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => "70000000-0000-4000-8000-000000000005" as never}
+        executionPolicy="plan"
+        restart={restart}
+        result={interrupted}
+        scope={scope}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Restart terminal" })).not.toBeInTheDocument();
   });
 
   it("restarts the terminal in one of the Project's extra folders the person picks", async () => {

@@ -1,3 +1,4 @@
+import { DockBarTestHost } from "../shell/dockBarHost.test-support";
 import type { CodeCheckoutId, CodeFileListingResult, CodeThreadId } from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -398,6 +399,59 @@ describe("CodeFileExplorerPanel extra folders", () => {
       expect.objectContaining({ folder: "/Users/me/notes" }),
       expect.anything(),
     );
+  });
+
+  it.each([2, 3])(
+    "gives a tile's bar one Refresh for the checkout's tree beside %i trees and leaves each extra folder its own",
+    async (count) => {
+      const user = userEvent.setup();
+      const list = vi.fn(async (_request: { readonly directory?: string }) => listing([]));
+      const folders = ["a", "b"].slice(0, count - 1).map((name) => `/Users/me/${name}`);
+      render(
+        <DockBarTestHost placement="tiled" toolLabel="Files">
+          <CodeFileExplorerPanel
+            checkoutId={checkoutId}
+            client={{ list, watch: vi.fn(async function* () {}) } as never}
+            extraFolders={folders}
+            onOpenFile={vi.fn()}
+            threadId={threadId}
+          />
+        </DockBarTestHost>,
+      );
+      await screen.findByRole("region", { name: "a (extra folder)" });
+      const bar = within(screen.getByTestId("bar"));
+      expect(bar.getAllByRole("button", { name: "Refresh files" })).toHaveLength(1);
+      const folder = screen.getByRole("region", { name: "a (extra folder)" });
+      expect(within(folder).getAllByRole("button", { name: "Refresh files" })).toHaveLength(1);
+      const before = list.mock.calls.length;
+      await user.click(bar.getByRole("button", { name: "Refresh files" }));
+      await vi.waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(before));
+      const refreshed = list.mock.calls.slice(before).map(([request]) => request.directory);
+      expect(refreshed).toEqual([undefined]);
+    },
+  );
+
+  it("keeps the bar's Refresh for the checkout when an extra folder's listing fails and its tree goes", async () => {
+    const list = vi.fn(async (request: { readonly directory?: string }) => {
+      if (request.directory === "/Users/me/b") throw new Error("This folder is gone.");
+      return listing([]);
+    });
+    render(
+      <DockBarTestHost placement="bottom" toolLabel="Files">
+        <CodeFileExplorerPanel
+          checkoutId={checkoutId}
+          client={{ list, watch: vi.fn(async function* () {}) } as never}
+          extraFolders={["/Users/me/a", "/Users/me/b"]}
+          onOpenFile={vi.fn()}
+          threadId={threadId}
+        />
+      </DockBarTestHost>,
+    );
+    const folder = await screen.findByRole("region", { name: "b (extra folder)" });
+    expect(await within(folder).findByText(/gone|unavailable/i)).toBeVisible();
+    expect(
+      within(screen.getByTestId("bar")).getAllByRole("button", { name: "Refresh files" }),
+    ).toHaveLength(1);
   });
 
   it("follows every visible extra folder through the bounded shared connection", async () => {

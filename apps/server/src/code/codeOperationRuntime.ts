@@ -243,6 +243,7 @@ import {
 } from "./codeAppManagedTools";
 import type { CodePlannerToolPort } from "./codePlannerTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import {
   PROVIDER_CONTEXT_RESTATED,
@@ -723,6 +724,11 @@ export interface CodeOperationRuntimeOptions {
   }) => Promise<DesignSystemTurnContext | undefined>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** The turn's record of tool calls about to take effect (toolEffects/toolEffectLedger.ts). */
+    readonly toolEffects?: (turn: {
+      readonly threadId: string;
+      readonly turnId: string;
+    }) => TurnToolEffects;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
     readonly observeRemoteCommand?: (
       threadId: string,
@@ -1327,20 +1333,23 @@ export function createCodeOperationRuntime(
               readRuntimeWorks(threadId)
                 .map((entry) => entry.work)
                 .filter((work) => work.state === "ambiguous"),
-            settle: (work: CodeRuntimeWork, state: "completed" | "failed") =>
-              observeRuntimeWorkOutcome(
-                runtimeWork.settleOrphaned({
-                  // A push is recorded under its Git operation, a pull request
-                  // step under its own operation.
-                  id:
-                    work.kind === "git"
-                      ? decodeCodeGitOperationId(String(work.id))
-                      : decodeCodeOperationId(String(work.id)),
-                  threadId: work.threadId,
-                  kind: work.kind,
-                  state,
-                }),
-              ),
+            settle: (work: CodeRuntimeWork, state: "completed" | "failed" | "interrupted") => {
+              const outcome = runtimeWork.settleOrphaned({
+                // A push is recorded under its Git operation, a pull request
+                // step under its own operation.
+                id:
+                  work.kind === "git"
+                    ? decodeCodeGitOperationId(String(work.id))
+                    : decodeCodeOperationId(String(work.id)),
+                threadId: work.threadId,
+                kind: work.kind,
+                state,
+              });
+              observeRuntimeWorkOutcome(outcome);
+              return outcome.status === "recorded" || outcome.status === "unchanged"
+                ? "settled"
+                : "not-recorded";
+            },
             describe: (threadId, operationId, remoteStep) =>
               observeRuntimeWorkOutcome(
                 runtimeWork.describeRemoteStep({
@@ -5402,6 +5411,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     this.#options.nativeHarness?.turnStarted(harnessScope);
     let endedTurn: TurnEndSummary | undefined;
     const appManagedTools = this.#appManagedTools(active);
+    const toolEffects = this.#options.nativeHarness?.toolEffects?.({
+      threadId: String(active.thread.id),
+      turnId: String(active.operationId),
+    });
     // Only a thread whose person chose the runtime's artifact tool is told to
     // use it; the turn runner starts that thread's session with the same
     // choice, and every other thread keeps Canvas.
@@ -5720,6 +5733,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               };
             }),
           ...(appManagedTools === undefined ? {} : { appManagedTools }),
+          ...(toolEffects === undefined ? {} : { toolEffects }),
           ...(active.onContextDelivered === undefined
             ? {}
             : { onPromptSent: active.onContextDelivered }),

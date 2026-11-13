@@ -17,8 +17,10 @@ import {
   decodeCanvasExportOfferList,
   decodeCanvasExportPayloadDigest,
   decodeCanvasExportPrepareResult,
+  decodeCanvasExportIntentRecorded,
   decodeCanvasExportRecorded,
   decodeCanvasExportRenderedOutput,
+  CANVAS_EXPORT_UNCONFIRMED_NOTICE_MAX,
   isCanvasExportImplementedFormat,
   isCanvasExportPictureFormat,
   CanvasExportApprovalId,
@@ -29,6 +31,9 @@ import {
   type CanvasExportFrameTheme,
   type CanvasExportOfferList,
   type CanvasExportPictureFormat,
+  type CanvasExportRecorded,
+  type CanvasExportNoticeDismissResult,
+  type CanvasExportUnconfirmedNotice,
   type CanvasExportPrepareRequest,
   type CanvasExportPrepareResult,
   type CanvasExportRefusal,
@@ -148,6 +153,8 @@ export class CanvasExportService {
   readonly #clock: () => UtcTimestamp;
   readonly #renderer: CanvasExportRenderer | undefined;
   readonly #pending = new Map<string, PendingExport>();
+  /** Exports a restart cut off, per Canvas, oldest first; see `settleUnconfirmed`. */
+  readonly #unconfirmed = new Map<string, CanvasExportRecorded[]>();
 
   constructor(options: CanvasExportServiceOptions) {
     this.#load = options.load;
@@ -173,7 +180,109 @@ export class CanvasExportService {
           facts: binding.facts,
         })),
       ),
+      unconfirmed: (this.#unconfirmed.get(String(canvasId)) ?? [])
+        .slice(-CANVAS_EXPORT_UNCONFIRMED_NOTICE_MAX)
+        .reverse()
+        .map(
+          (record): CanvasExportUnconfirmedNotice => ({
+            exportId: record.exportId,
+            targetId: record.targetId,
+            destinationLabel: record.destinationLabel,
+            format: record.format,
+            sequence: record.sequence,
+          }),
+        ),
     });
+  }
+
+  /**
+   * Run once at startup, before any export is decided. An export whose intent
+   * was journaled but whose outcome never was may or may not have reached its
+   * destination. The host cannot read an arbitrary destination back, so it
+   * records the export as unconfirmed rather than guessing, and never
+   * delivers it again: a repeated publish could post twice. The Canvas keeps
+   * showing the notice until a later export to that destination is recorded.
+   */
+  settleUnconfirmed(actor: EventActor): void {
+    const { records, unsettled, dismissed } = this.#eventStore.replayAll();
+    const settled: CanvasExportRecorded[] = [...records];
+    for (const intent of unsettled) {
+      const record = decodeCanvasExportRecorded({
+        ...intent,
+        kind: "canvas-export",
+        outcome: {
+          kind: "unconfirmed",
+          message: `Octant stopped before ${intent.destinationLabel} confirmed this export. Check there before exporting again.`,
+        },
+      });
+      try {
+        this.#eventStore.append({ record, occurredAt: this.#clock(), actor });
+      } catch {
+        console.error("An unconfirmed Canvas export could not be settled; it stays unsettled.");
+      }
+      // Shown either way: the journal still holds only the intent, which the
+      // next start settles again, and the person must not read silence.
+      settled.push(record);
+    }
+    // A dismissed record still retires the older notices it superseded live;
+    // only its own notice is suppressed, so replay matches the live state.
+    for (const record of settled) {
+      this.#noteRecorded(record, dismissed.has(String(record.exportId)));
+    }
+  }
+
+  /**
+   * The person checked the destination and wants the notice gone without
+   * exporting again. Only a window on this computer may dismiss it: a paired
+   * device cannot quietly clear the host's record of an uncertain publish.
+   */
+  dismissUnconfirmed(input: {
+    readonly canvasId: CanvasId;
+    readonly exportId: CanvasExportRecordId;
+    readonly permitted: boolean;
+    readonly actor: EventActor;
+  }): CanvasExportNoticeDismissResult {
+    if (!input.permitted || input.actor.kind !== "local-user") {
+      return refused(
+        "unauthorized",
+        "An unconfirmed export can be dismissed only from a window on this computer.",
+      );
+    }
+    const key = String(input.canvasId);
+    const notices = this.#unconfirmed.get(key) ?? [];
+    const notice = notices.find((record) => String(record.exportId) === String(input.exportId));
+    if (notice === undefined) {
+      return refused("unavailable", "That export has no unconfirmed notice on this Canvas.");
+    }
+    try {
+      this.#eventStore.appendNoticeDismissed({
+        dismissal: {
+          schemaVersion: 1,
+          kind: "canvas-export-notice-dismissed",
+          exportId: notice.exportId,
+          canvasId: notice.canvasId,
+        },
+        occurredAt: this.#clock(),
+        actor: input.actor,
+      });
+    } catch {
+      return refused("unavailable", "This host could not record the dismissal; the notice stays.");
+    }
+    const kept = notices.filter((record) => record !== notice);
+    if (kept.length === 0) this.#unconfirmed.delete(key);
+    else this.#unconfirmed.set(key, kept);
+    return { kind: "dismissed", exportId: notice.exportId };
+  }
+
+  /** A recorded export retires earlier notices for its Canvas and destination. */
+  #noteRecorded(record: CanvasExportRecorded, dismissed = false): void {
+    const key = String(record.canvasId);
+    const kept = (this.#unconfirmed.get(key) ?? []).filter(
+      (earlier) => String(earlier.targetId) !== String(record.targetId),
+    );
+    if (record.outcome.kind === "unconfirmed" && !dismissed) kept.push(record);
+    if (kept.length === 0) this.#unconfirmed.delete(key);
+    else this.#unconfirmed.set(key, kept);
   }
 
   /**
@@ -457,6 +566,29 @@ export class CanvasExportService {
     }
 
     this.#pending.delete(key);
+    const exportId = decodeRecordId(this.#uuid());
+    const intent = decodeCanvasExportIntentRecorded({
+      schemaVersion: 1,
+      kind: "canvas-export-intent",
+      exportId,
+      canvasId: pending.output.metadata.canvasId,
+      versionId: pending.output.metadata.versionId,
+      sequence: pending.output.metadata.sequence,
+      targetId: pending.card.card.targetId,
+      destinationLabel: pending.card.card.destinationLabel,
+      format: pending.output.format,
+      payloadDigest: pending.output.metadata.contentDigest,
+      approvalId: pending.card.card.approvalId,
+    });
+    // The intent is journaled before the destination is called, so a crash
+    // mid-delivery leaves a trace startup settles. Without it, nothing is sent.
+    try {
+      this.#eventStore.recordIntent({ intent, occurredAt: this.#clock(), actor: input.actor });
+    } catch {
+      return decodeCanvasExportDecideResult(
+        refused("unavailable", "This host could not record the export, so nothing was sent."),
+      );
+    }
     // The audience the person chose on the card travels back to the target as
     // part of the approved destination; the target described the default it
     // showed, and nothing here lets a choice reach a destination that never
@@ -467,17 +599,8 @@ export class CanvasExportService {
       confirmedDestination(pending.confirmedDestination, input.visibility, input.link),
     );
     const record = decodeCanvasExportRecorded({
-      schemaVersion: 1,
+      ...intent,
       kind: "canvas-export",
-      exportId: decodeRecordId(this.#uuid()),
-      canvasId: pending.output.metadata.canvasId,
-      versionId: pending.output.metadata.versionId,
-      sequence: pending.output.metadata.sequence,
-      targetId: pending.card.card.targetId,
-      destinationLabel: pending.card.card.destinationLabel,
-      format: pending.output.format,
-      payloadDigest: pending.output.metadata.contentDigest,
-      approvalId: pending.card.card.approvalId,
       outcome: delivery,
     });
     // The destination has already been called, so a journal failure must not
@@ -492,6 +615,7 @@ export class CanvasExportService {
         message: "The export was delivered, but this host could not record it.",
       });
     }
+    this.#noteRecorded(record);
     return decodeCanvasExportDecideResult({ kind: "exported", record });
   }
 

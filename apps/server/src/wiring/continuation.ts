@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   decodeChatSubmissionId,
   decodeChatThreadId,
+  decodeCodeThreadId,
   decodeContextSubjectRef,
   decodeProviderSessionId,
   decodeUtcTimestamp,
@@ -10,7 +11,9 @@ import {
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   USAGE_RESUME_SETTLED,
+  type AgentRun,
   type HostRestartRecovery,
+  type HostRestartRecoveryHold,
   type WorkThread,
   type WorkThreadId,
 } from "@octant/contracts";
@@ -25,8 +28,10 @@ import {
   releaseQueueBehindRestartContinuation,
   restartContinuationId,
 } from "../harness/restartContinuation";
+import { QUIT_HOLD_DETAIL } from "../code/codeRestartContinuation";
 import {
   continueThreadTurnsCutOffByRestart,
+  HOLD_DETAIL,
   mergeRestartRecoveries,
   type ThreadRestartContinuationPorts,
 } from "../harness/threadRestartContinuation";
@@ -37,9 +42,11 @@ import {
 } from "../chat/chatService";
 import { WorkTurnServiceError, type WorkTurnService } from "../work/workTurnService";
 import type { WorkTurnCutOffByRestart } from "../work/workTurnProjection";
+import type { GoalLoopService } from "../goal/goalLoopService";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { consumePersonQuit } from "../personQuit";
+import { uncertainToolCallHold, type ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 import type { HarnessWiring } from "./harness";
 import { createChatAgentResultDeliveryPort } from "../chat/chatAgentResultDeliveryPort";
 import { UsageResumeService } from "../usage/usageResumeService";
@@ -48,6 +55,8 @@ import { AgentRunDependencyScheduler } from "../agentRun/agentRunDependencySched
 import { AgentRunProviderSlotScheduler } from "../agentRun/agentRunProviderSlotScheduler";
 import { AgentResultDeliveryService } from "../agentRun/agentResultDeliveryService";
 import { recordAgentRunResultIngestion } from "../agentRun/agentRunDelegation";
+import { continueAgentRunsCutOffByRestart } from "../agentRun/agentRunRestartContinuation";
+import { continueCoordinatorWakesAfterRestart } from "../coordinator/coordinatorWakeRestartContinuation";
 import {
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
@@ -63,16 +72,25 @@ import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
 export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "agentRunParentAuthority" | "agentRunPersistence"> &
+  Pick<
+    AuthorityWiring,
+    | "agentRunParentAuthority"
+    | "agentRunPersistence"
+    | "agentRunsCutOffByRestart"
+    | "toolEffectLedger"
+  > &
   Pick<
     AgentRunsWiring,
     "agentRunOrchestration" | "capacityScheduler" | "externalContentIngestionStore"
   > &
   Pick<WorkspaceWiring, "contextHarness"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
+  Pick<
+    CodeRuntimeWiring,
+    "codeOperationRuntime" | "coordinatorService" | "coordinatorWakes" | "routeCodeService"
+  > &
   Pick<ChatWiring, "chatAttemptsCutOffByRestart" | "chatService"> &
   Pick<HarnessWiring, "liftRestartRecovery"> &
-  Pick<WorkWiring, "threadMessageQueue" | "workTurnService"> &
+  Pick<WorkWiring, "goalLoopService" | "threadMessageQueue" | "workTurnService"> &
   Pick<
     FoundationsWiring,
     | "codeBoardEventStore"
@@ -287,10 +305,15 @@ function startRestartContinuation(
   // Read and removed on every start, whether or not anything was cut off, so
   // a quit with nothing running holds nothing after a later crash.
   const quitByPerson = consumePersonQuit(deps.persistence.dataDirectory);
+  // Read before anything this start wakes can append a newer frame.
+  const openWakes = deps.coordinatorWakes.open();
   if (
     deps.persistence.codeTurnsCutOffByRestart.length === 0 &&
     deps.chatAttemptsCutOffByRestart.length === 0 &&
-    deps.workTurnsCutOffByRestart.length === 0
+    deps.workTurnsCutOffByRestart.length === 0 &&
+    deps.goalLoopService.runningLoopThreads().length === 0 &&
+    deps.agentRunsCutOffByRestart.length === 0 &&
+    openWakes.length === 0
   )
     return () => undefined;
   let summary: HostRestartRecovery | undefined;
@@ -299,6 +322,7 @@ function startRestartContinuation(
       console.error(`[restart-continuation] ${mode} recovery did not finish.`, error);
       return undefined;
     });
+  const uncertainToolCall = cutOffToolCallHold(deps);
   void (async () => {
     const code = await settled(continueCodeTurns(deps, quitByPerson), "Code");
     const chat = await settled(
@@ -309,6 +333,7 @@ function startRestartContinuation(
         enabled: () => deps.persistence.readChatSettings()?.settings.restartContinuation !== false,
         connection: deps.persistence.connection,
         liftHarnessRecovery: (threadId) => deps.liftRestartRecovery(threadId),
+        uncertainToolCall,
         releaseQueue: (threadId) =>
           releaseQueueBehindRestartContinuation(deps.threadMessageQueue, {
             scopeId: ROUTINE_HOST_SCOPE_ID,
@@ -323,6 +348,7 @@ function startRestartContinuation(
         cutOff: deps.workTurnsCutOffByRestart,
         quitByPerson,
         work: deps.workTurnService,
+        goalLoops: deps.goalLoopService,
         readThread: (threadId) => deps.workThreadProjection.read(threadId),
         enabled: () => deps.workThreadProjection.settings()?.restartContinuation !== false,
         modeEnabled: () =>
@@ -331,6 +357,7 @@ function startRestartContinuation(
           ).includes("work"),
         connection: deps.persistence.connection,
         liftHarnessRecovery: (threadId) => deps.liftRestartRecovery(threadId),
+        uncertainToolCall,
         releaseQueue: (threadId) =>
           releaseQueueBehindRestartContinuation(deps.threadMessageQueue, {
             scopeId: ROUTINE_HOST_SCOPE_ID,
@@ -340,16 +367,80 @@ function startRestartContinuation(
       }),
       "Work",
     );
+    // After the threads, so a parent thread's own continuation is admitted
+    // before its children resume under its live authority.
+    const agentRuns = await settled(continueAgentRuns(deps, quitByPerson), "Subagent");
+    // After Code, so a wake never starts beside its thread's own continuation
+    // and waits with a thread Code recovery held.
+    const wakes = await settled(
+      continueCoordinatorWakesAfterRestart({
+        quitByPerson,
+        open: openWakes,
+        enabled: () => deps.persistence.readCodeSettings()?.settings.restartContinuation !== false,
+        modeEnabled: () =>
+          enabledModes(
+            deps.persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("code"),
+        optedOut: (threadId) => {
+          try {
+            return (
+              deps.persistence.readCodeThread(decodeCodeThreadId(threadId))
+                ?.restartContinuationOff === true
+            );
+          } catch {
+            return false;
+          }
+        },
+        heldByCode: new Set(
+          (code?.held ?? [])
+            .filter((entry: HostRestartRecovery["held"][number]) => entry.mode === "code")
+            .map((entry: HostRestartRecovery["held"][number]) => entry.threadId),
+        ),
+        attempts: createCodeRestartContinuationAttempts(deps.persistence.connection),
+        coordinator: deps.coordinatorService,
+      }),
+      "Coordinator wake",
+    );
     summary = mergeRestartRecoveries(decodeUtcTimestamp(new Date().toISOString()), [
       code,
       chat,
       work,
+      agentRuns,
+      wakes,
     ]);
   })();
   return () => summary;
 }
 
 /** What continuing Chat answers after a restart reads and does. */
+/** A turn a restart cut off, as its mode names it: a Code operation, a Chat attempt, a Work turn request. */
+interface CutOffTurn {
+  readonly threadId: string;
+  readonly turnId: string;
+}
+
+/**
+ * Why a cut-off turn waits for a tool call nobody saw finish: one of its own,
+ * or one of a child run of its thread that this start also found cut off. A
+ * child runs its tools outside the turn that started it, and continuing the
+ * parent could start the same child work again.
+ */
+export function cutOffToolCallHold(deps: {
+  readonly agentRunsCutOffByRestart: ReadonlyArray<Pick<AgentRun, "id" | "parentThreadId">>;
+  readonly toolEffectLedger: Pick<ToolEffectLedger, "certainty">;
+}): (turn: CutOffTurn) => string | undefined {
+  return (turn) => {
+    const own = uncertainToolCallHold(deps.toolEffectLedger.certainty(turn.turnId));
+    if (own !== undefined) return own;
+    for (const run of deps.agentRunsCutOffByRestart) {
+      if (String(run.parentThreadId) !== turn.threadId) continue;
+      const child = uncertainToolCallHold(deps.toolEffectLedger.certainty(String(run.id)), "child");
+      if (child !== undefined) return child;
+    }
+    return undefined;
+  };
+}
+
 export interface ChatRestartContinuationDependencies {
   readonly cutOff: ReadonlyArray<ChatAttemptCutOffByRestart>;
   /** The previous host stopped because a person quit it (personQuit.ts). */
@@ -361,6 +452,8 @@ export interface ChatRestartContinuationDependencies {
   readonly connection: SqliteConnection;
   /** Lifts the thread's harness session out of its restart recovery (threadRestartContinuation.ts). */
   readonly liftHarnessRecovery: ThreadRestartContinuationPorts["liftHarnessRecovery"];
+  /** Why the cut-off turn must wait for a tool call nobody saw finish. */
+  readonly uncertainToolCall: (turn: CutOffTurn) => string | undefined;
   readonly releaseQueue: (threadId: string) => Promise<void>;
 }
 
@@ -382,6 +475,7 @@ export function continueChatTurns(deps: ChatRestartContinuationDependencies) {
     enabled: deps.enabled,
     attempts: createCodeRestartContinuationAttempts(deps.connection),
     liftHarnessRecovery: deps.liftHarnessRecovery,
+    uncertainToolCall: (turn) => deps.uncertainToolCall(turn),
     // A host continuation is an ordinary send under its one submission
     // identity: a repeated recovery finds the turn the first one made, and
     // the send's own admission rechecks the thread's authority and spend.
@@ -426,6 +520,16 @@ export interface WorkRestartContinuationDependencies {
   /** The previous host stopped because a person quit it (personQuit.ts). */
   readonly quitByPerson: boolean;
   readonly work: Pick<WorkTurnService, "startFirstTurn" | "restartContinuationReadiness">;
+  /** The goal loops replayed from the journal; a loop the restart found running follows its thread. */
+  readonly goalLoops: Pick<
+    GoalLoopService,
+    | "runningLoopThreads"
+    | "openRoundThreads"
+    | "settleAfterRestart"
+    | "crashLooping"
+    | "continueAfterRestart"
+    | "holdAfterRestart"
+  >;
   readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
   /** Settings › Work › Continue after restart. */
   readonly enabled: () => boolean;
@@ -435,11 +539,94 @@ export interface WorkRestartContinuationDependencies {
   readonly connection: SqliteConnection;
   /** Lifts the thread's harness session out of its restart recovery (threadRestartContinuation.ts). */
   readonly liftHarnessRecovery: ThreadRestartContinuationPorts["liftHarnessRecovery"];
+  /** Why the cut-off turn must wait for a tool call nobody saw finish. */
+  readonly uncertainToolCall: (turn: CutOffTurn) => string | undefined;
   readonly releaseQueue: (threadId: string) => Promise<void>;
 }
 
-/** Continues the Work turns this start settled as cut off (docs/architecture.md, Work restart recovery). */
-export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
+/**
+ * Continues the Work turns this start settled as cut off, and the goal loops
+ * it found running (docs/architecture.md, Work restart recovery).
+ *
+ * A loop follows its thread's decision. On a thread whose round turn the
+ * restart cut off, the loop's next round is the continuation, through the same
+ * holds a cut-off turn passes, so the thread never gets a continuation turn and
+ * a round at once. A loop found running with no cut-off turn (stopped between
+ * rounds) continues unless the setting, the thread's switch, Work itself or a
+ * person's quit holds it. A held loop is paused with `held-after-restart`.
+ */
+export async function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
+  const { goalLoops } = deps;
+  // The round a restart cut off is charged and recorded first, so the
+  // crash-loop count below reads it.
+  // Every open round is settled, a paused or stopped loop's too; only a
+  // running loop is then continued or held.
+  for (const threadId of goalLoops.openRoundThreads()) {
+    await goalLoops.settleAfterRestart(threadId).catch(() => undefined);
+  }
+  const crashLooping = new Set<string>();
+  for (const threadId of goalLoops.runningLoopThreads()) {
+    const settled = await goalLoops
+      .settleAfterRestart(threadId)
+      .catch(() => ({ roundsCutOffInARow: 0 }));
+    if (goalLoops.crashLooping(settled.roundsCutOffInARow)) crashLooping.add(threadId);
+  }
+  const holdReason = (threadId: string): HostRestartRecovery["held"][number] | undefined => {
+    const thread = deps.readThread(decodeWorkThreadId(threadId));
+    const held = (reason: HostRestartRecoveryHold, detail: string) => ({
+      mode: "work" as const,
+      threadId,
+      reason,
+      detail,
+    });
+    if (!deps.enabled()) return held("turned-off", HOLD_DETAIL["turned-off"]);
+    if (thread?.restartContinuationOff === true) return held("opted-out", HOLD_DETAIL["opted-out"]);
+    if (deps.quitByPerson) return held("quit", QUIT_HOLD_DETAIL);
+    if (crashLooping.has(threadId)) return held("crash-loop", LOOP_CRASH_LOOP_DETAIL);
+    if (!deps.modeEnabled()) return held("refused", "Work is turned off on this host.");
+    return undefined;
+  };
+  const continued: Array<HostRestartRecovery["continued"][number]> = [];
+  const held: Array<HostRestartRecovery["held"][number]> = [];
+  // A crash-looping loop is held before its cut-off turn is looked at, so the
+  // host neither starts its round nor a continuation turn in its place.
+  const crashHeld = new Set<string>();
+  for (const threadId of crashLooping) {
+    const reason = holdReason(threadId);
+    if (reason?.reason !== "crash-loop") continue;
+    crashHeld.add(threadId);
+    goalLoops.holdAfterRestart(threadId);
+    held.push(reason);
+  }
+  const cutOff = deps.cutOff.filter((cut) => !crashHeld.has(String(cut.threadId)));
+  const recovered = await continueCutOffWorkTurns({ ...deps, cutOff });
+  const decided = new Set(cutOff.map((cut) => String(cut.threadId)));
+  for (const entry of recovered.held) goalLoops.holdAfterRestart(entry.threadId);
+  for (const threadId of goalLoops.runningLoopThreads()) {
+    if (decided.has(threadId)) {
+      // A cut-off turn that read settled was neither continued nor held:
+      // the thread moved on, so the loop takes its next round as usual.
+      if (!recovered.continued.some((entry) => entry.threadId === threadId))
+        goalLoops.continueAfterRestart(threadId);
+      continue;
+    }
+    // Caught between rounds: nothing was cut off, but the loop is still
+    // continued or held by the same rule, and the notice says which.
+    const reason = holdReason(threadId);
+    if (reason === undefined) {
+      if (goalLoops.continueAfterRestart(threadId)) continued.push({ mode: "work", threadId });
+    } else if (goalLoops.holdAfterRestart(threadId)) held.push(reason);
+  }
+  return {
+    continued: [...recovered.continued, ...continued],
+    held: [...recovered.held, ...held],
+  };
+}
+
+const LOOP_CRASH_LOOP_DETAIL =
+  "Octant stopped during this thread's goal loop rounds three times in a row. Check it before resuming the loop.";
+
+function continueCutOffWorkTurns(deps: WorkRestartContinuationDependencies) {
   const { cutOff, work } = deps;
   const byRequest = new Map(cutOff.map((cut) => [String(cut.requestId), cut] as const));
   return continueThreadTurnsCutOffByRestart({
@@ -461,9 +648,11 @@ export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
     enabled: deps.enabled,
     attempts: createCodeRestartContinuationAttempts(deps.connection),
     liftHarnessRecovery: deps.liftHarnessRecovery,
+    uncertainToolCall: (turn) => deps.uncertainToolCall(turn),
     dispatch: async (turn, continuation, prompt) => {
       if (!deps.modeEnabled())
         return { kind: "refused", detail: "Work is turned off on this host." };
+      if (deps.goalLoops.continueAfterRestart(turn.threadId)) return { kind: "dispatched" };
       const thread = deps.readThread(decodeWorkThreadId(turn.threadId));
       if (thread?.bindingRevisionId === undefined)
         return { kind: "refused", detail: "The thread has no bound project revision." };
@@ -507,6 +696,73 @@ export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
   });
 }
 
+/** Resumes the subagent runs this start interrupted (docs/architecture.md, subagent restart recovery). */
+function continueAgentRuns(deps: ContinuationDependencies, quitByPerson: boolean) {
+  const { agentRunOrchestration, agentRunParentAuthority, agentRunPersistence, persistence } = deps;
+  return continueAgentRunsCutOffByRestart({
+    quitByPerson,
+    cutOff: deps.agentRunsCutOffByRestart,
+    readRun: (run) => agentRunPersistence.getById(run.id),
+    enabled: (mode) =>
+      mode === "chat"
+        ? persistence.readChatSettings()?.settings.restartContinuation !== false
+        : mode === "work"
+          ? deps.workThreadProjection.settings()?.restartContinuation !== false
+          : persistence.readCodeSettings()?.settings.restartContinuation !== false,
+    parentOptedOut: (run) => {
+      const threadId = String(run.parentThreadId);
+      try {
+        switch (run.workspaceReceipt.mode) {
+          case "chat":
+            return (
+              persistence.readChatThread(decodeChatThreadId(threadId))?.restartContinuationOff ===
+              true
+            );
+          case "work":
+            return (
+              deps.workThreadProjection.read(decodeWorkThreadId(threadId))
+                ?.restartContinuationOff === true
+            );
+          case "code":
+            return (
+              persistence.readCodeThread(decodeCodeThreadId(threadId))?.restartContinuationOff ===
+              true
+            );
+        }
+      } catch {
+        // A parent that cannot be read is left to the resume's own authority check.
+        return false;
+      }
+    },
+    modeEnabled: (mode) =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        mode,
+      ),
+    uncertainToolCall: (run) =>
+      uncertainToolCallHold(deps.toolEffectLedger.certainty(String(run.id)), "child"),
+    latestStartVersion: (run) => agentRunPersistence.latestStartVersion(run.id),
+    attempts: createCodeRestartContinuationAttempts(persistence.connection),
+    // The parent's live grant is read again inside the resume, after its
+    // preflight yields, exactly as a person's Resume reads it.
+    resume: async (run, message) => {
+      const liveAuthority = agentRunParentAuthority(run);
+      if (liveAuthority === undefined)
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: "The parent thread's grant is unavailable.",
+        };
+      return agentRunOrchestration.resume(run.id, run.version, liveAuthority, {
+        message,
+        resolveLiveAuthority: () => {
+          const current = agentRunPersistence.getById(run.id);
+          return current === undefined ? undefined : agentRunParentAuthority(current);
+        },
+      });
+    },
+  });
+}
+
 /** Continues the Code turns this start found cut off (docs/architecture.md, Code restart recovery). */
 function continueCodeTurns(
   deps: ContinuationDependencies,
@@ -528,6 +784,7 @@ function continueCodeTurns(
     readThread: (threadId) => persistence.readCodeThread(threadId),
     runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
     enabled: () => persistence.readCodeSettings()?.settings.restartContinuation !== false,
+    uncertainToolCall: cutOffToolCallHold(deps),
     attempts: createCodeRestartContinuationAttempts(persistence.connection),
     resumability: (thread, continuation, cutOffOperationId) =>
       codeRestartResumability(

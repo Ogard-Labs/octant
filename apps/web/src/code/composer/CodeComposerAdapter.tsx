@@ -240,6 +240,12 @@ export interface CodeComposerSubmitInput {
     readonly proposedBaseBranch: string;
     readonly outcomeKind: CodeDeliveryOutcomeKind;
   };
+  /**
+   * Set when `proposedBaseBranch` is the stand-in rather than a branch the
+   * host named or the person picked, so the create path can base the thread on
+   * the branch the prepared checkout is on instead.
+   */
+  readonly baseBranchAssumed?: true;
   /** The workspace this one thread starts in, after any per-thread override. */
   readonly workspace: CodeNewThreadWorkspace;
   readonly worktreeSource: {
@@ -688,6 +694,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             proposedBaseBranch: submittedBaseBranch,
             outcomeKind,
           },
+          ...(resolvedBaseBranch === undefined ? { baseBranchAssumed: true as const } : {}),
           workspace,
           worktreeSource: {
             startFromOrigin,

@@ -8,7 +8,8 @@
  * person's Resume sends: inspect first, do not repeat what may already have
  * taken effect, ask again for approvals. A thread is held for its person
  * instead when continuing it could repeat or hide something: a push or pull
- * request step whose outcome nobody learned, a person who turned the
+ * request step whose outcome nobody learned, a tool call nobody saw finish, a
+ * person who turned the
  * continuation off or quit Octant while the turn ran, a thread whose own
  * continuations keep being cut off, or a provider that cannot resume the
  * session.
@@ -149,6 +150,15 @@ export interface CodeRestartContinuationPorts {
   readonly runtimeWorks: (threadId: CodeThreadId) => ReadonlyArray<ProjectedCodeRuntimeWork>;
   /** Settings › Code › Continue after restart. */
   readonly enabled: () => boolean;
+  /**
+   * Why the cut-off turn must wait, when it started a tool call that may
+   * change something and nothing records that the call finished; the reason
+   * names the tool. Undefined when every such call is known to have ended.
+   */
+  readonly uncertainToolCall: (turn: {
+    readonly threadId: string;
+    readonly turnId: string;
+  }) => string | undefined;
   readonly attempts: CodeRestartContinuationAttempts;
   /** Whether the thread's provider can take up the session the cut-off turn ran in. */
   readonly resumability: (
@@ -276,6 +286,14 @@ function guard(
       detail:
         "A push or pull request may have reached the remote before Octant stopped. Check it, then continue.",
     };
+  // A shell command, an edit or an MCP call the restart cut off in the
+  // middle may or may not have landed. The continuation never repeats a call
+  // itself, but the agent it starts could, so the person looks first.
+  const uncertain = ports.uncertainToolCall({
+    threadId: String(thread.id),
+    turnId: operationId,
+  });
+  if (uncertain !== undefined) return { reason: "uncertain-tool-call", detail: uncertain };
   if (ports.quitByPerson) return { reason: "quit", detail: QUIT_HOLD_DETAIL };
   if (priorContinuationsCutOff(ports, thread.id, operationId) >= MAX_RESTART_CONTINUATIONS_CUT_OFF)
     return {

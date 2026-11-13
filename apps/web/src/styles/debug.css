@@ -96,6 +96,10 @@
   font-size: var(--oct-text-xs);
 }
 
+.run-debug__restart {
+  align-self: flex-start;
+}
+
 .run-debug__session > .run-debug__line {
   padding: 0 var(--oct-space-3);
 }

@@ -86,6 +86,11 @@ import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
+import {
+  registerToolEffectEvents,
+  ToolEffectLedger,
+  uncertainToolCallHold,
+} from "../toolEffects/toolEffectLedger";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
@@ -7590,6 +7595,113 @@ describe("CodeOperationRuntime", () => {
             .filter((work) => work.id === lost)
             .at(-1)?.state,
         ).toBe("completed");
+      } finally {
+        fixture.close();
+      }
+    });
+
+    it("releases a thread from an unconfirmed merge only on the word of the person at a window", async () => {
+      const { fixture, locate } = actionFixture({});
+      try {
+        const lost = "90000000-0000-4000-8000-0000000000e7";
+        fixture.appendRuntimeWork({
+          id: lost,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: { kind: "pull-request", action: "merge" },
+        });
+        // Starting up never settles a merge: GitHub cannot tell it from an earlier one.
+        await fixture.runtime.settleUnconfirmedSteps?.(windowId, {
+          signal: new AbortController().signal,
+        });
+        expect(fixture.boardActivity()).toMatchObject({
+          awaitingInput: true,
+          unconfirmedPullRequestSteps: [{ workId: lost, action: "merge" }],
+        });
+        const resolve = {
+          kind: "resolve-unconfirmed-step" as const,
+          workId: lost,
+          outcome: "happened" as const,
+        };
+        expect(
+          await fixture.runtime.execute(windowId, { ...resolve, ...scope(170) }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+        expect(
+          await fixture.runtime.execute(
+            windowId,
+            { ...resolve, ...scope(171) },
+            { initiator: "user" },
+          ),
+        ).toMatchObject({ kind: "operation-accepted" });
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === lost)
+            .at(-1)?.state,
+        ).toBe("completed");
+        expect(fixture.boardActivity()).toMatchObject({ awaitingInput: false });
+        expect(fixture.boardActivity()).not.toHaveProperty("unconfirmedPullRequestSteps");
+        // A second word on a step already settled is refused, not recorded again.
+        expect(
+          await fixture.runtime.execute(
+            windowId,
+            { ...resolve, ...scope(172) },
+            { initiator: "user" },
+          ),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "stale" } });
+        expect(locate).not.toHaveBeenCalled();
+      } finally {
+        fixture.close();
+      }
+    });
+
+    it("answers that it could not record the person's word when the journal refuses it, and takes it on a retry", async () => {
+      const { fixture } = actionFixture({});
+      try {
+        const lost = "90000000-0000-4000-8000-0000000000e8";
+        fixture.appendRuntimeWork({
+          id: lost,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: { kind: "pull-request", action: "update" },
+        });
+        const append = fixture.journal.append.bind(fixture.journal);
+        const refusing = vi
+          .spyOn(fixture.journal, "append")
+          .mockImplementation((input: Parameters<Journal["append"]>[0]) => {
+            if (
+              typeof input === "object" &&
+              input !== null &&
+              "aggregate" in input &&
+              typeof input.aggregate === "object" &&
+              input.aggregate !== null &&
+              "aggregateType" in input.aggregate &&
+              input.aggregate.aggregateType === "code-runtime"
+            )
+              throw new Error("runtime work journal unavailable");
+            return append(input);
+          });
+        const command = {
+          kind: "resolve-unconfirmed-step" as const,
+          workId: lost,
+          outcome: "did-not-happen" as const,
+          ...scope(175),
+        };
+        expect(
+          await fixture.runtime.execute(windowId, command, { initiator: "user" }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unavailable" } });
+        expect(fixture.boardActivity()).toMatchObject({ awaitingInput: true });
+        refusing.mockRestore();
+        // The same operation id runs again rather than replaying a success.
+        expect(
+          await fixture.runtime.execute(windowId, command, { initiator: "user" }),
+        ).toMatchObject({ kind: "operation-accepted" });
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === lost)
+            .at(-1)?.state,
+        ).toBe("failed");
       } finally {
         fixture.close();
       }
@@ -15873,6 +15985,7 @@ describe("continuing a Code turn a restart cut off", () => {
       readThread: (id) => (String(id) === String(threadId) ? thread() : undefined),
       runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
       enabled: () => true,
+      uncertainToolCall: () => undefined,
       attempts: createCodeRestartContinuationAttempts(host.connection),
       resumability: (current, continuation, cutOffOperationId) =>
         codeRestartResumability(
@@ -16068,6 +16181,89 @@ describe("continuing a Code turn a restart cut off", () => {
       });
       expect(last.connection.send).not.toHaveBeenCalled();
       expect(statuses(last.host).every(([, status]) => status !== "running")).toBe(true);
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  /**
+   * The host's record of tool calls, over the store that outlives a restart,
+   * and one call of a turn that the host stopped inside of.
+   */
+  function toolCallCutOff(
+    connection: ReturnType<typeof openSqlite>,
+    turnId: string,
+    toolName: string,
+  ) {
+    const ledger = new ToolEffectLedger({
+      journal: new Journal({
+        connection,
+        registry: registerToolEffectEvents(new EventRegistry()),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => now,
+      }),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: operationId(990) as never },
+      clock: () => now,
+    });
+    const tools = ledger.forTurn({ threadId: String(threadId), turnId }).tools({
+      definitions: [{ name: toolName, inputSchema: { type: "object" } }],
+      execute: () => new Promise(() => {}),
+    });
+    void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
+    return (turn: { readonly turnId: string }) =>
+      uncertainToolCallHold(ledger.certainty(turn.turnId));
+  }
+
+  it("holds a thread whose cut-off turn left a tool call nobody saw finish, and names the tool", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, {
+        uncertainToolCall: toolCallCutOff(next.host.connection, String(operationId(61)), "edit"),
+      });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toMatchObject({
+        continued: [],
+        held: [
+          {
+            threadId: String(threadId),
+            reason: "uncertain-tool-call",
+            detail:
+              'Octant stopped while the tool "edit" was running, so it may or may not have taken effect. Check it, then continue.',
+          },
+        ],
+      });
+      expect(next.connection.send).not.toHaveBeenCalled();
+      expect(recovery.releaseQueue).not.toHaveBeenCalled();
+      expect(statuses(next.host)).toEqual([[String(operationId(61)), "interrupted"]]);
+      // The person's own Resume is an ordinary turn and is admitted as before.
+      await expect(
+        next.host.runtime.execute(windowId, {
+          ...start(62),
+          prompt: continuationPrompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("continues a thread whose cut-off turn left only a reading tool call unfinished", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, {
+        uncertainToolCall: toolCallCutOff(next.host.connection, String(operationId(61)), "read"),
+      });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toMatchObject({
+        continued: [{ mode: "code", threadId: String(threadId) }],
+        held: [],
+      });
     } finally {
       for (const host of hosts) host.close();
     }

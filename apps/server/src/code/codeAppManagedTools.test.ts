@@ -2882,6 +2882,73 @@ describe("the Apple capability as an agent tool", () => {
     });
   });
 
+  it("sends an agent's Repair input on a live Allow input grant, at Full access unasked, and never in Plan", async () => {
+    const request = vi.fn();
+    const granted = appleTools(
+      { inputGrantIsOpen: () => true },
+      { executionPolicy: "approval-gated" } as never,
+      { request },
+    );
+    const repair = {
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "repair-input", simulatorId }),
+    };
+
+    const repaired = await granted.tools.execute(repair);
+
+    expect(repaired.isError).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect(granted.execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "repair-input",
+      simulatorId,
+      requestedBy: { kind: "agent" },
+      approval: { kind: "not-required" },
+    });
+
+    const fullAccess = appleTools({}, { executionPolicy: "full-access" } as never, { request });
+    await fullAccess.tools.execute(repair);
+    expect(request).not.toHaveBeenCalled();
+    expect(fullAccess.execute.mock.calls[0]?.[1]).toMatchObject({ kind: "repair-input" });
+
+    const plan = appleTools({ inputGrantIsOpen: () => true }, { executionPolicy: "plan" } as never);
+    expect(await plan.tools.execute(repair)).toMatchObject({
+      isError: true,
+      result: { error: "plan-mode-read-only" },
+    });
+    expect(plan.execute).not.toHaveBeenCalled();
+  });
+
+  it("asks before an approval-gated agent's Repair input with no live grant, and refuses it when nobody can answer", async () => {
+    const approvalId = "d0000000-0000-4000-8000-000000000002";
+    const request = vi.fn(async (_effect: unknown) => ({
+      status: "approved" as const,
+      approvalId: approvalId as never,
+    }));
+    const repair = {
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "repair-input", simulatorId }),
+    };
+    const asked = appleTools({}, { executionPolicy: "approval-gated" } as never, { request });
+
+    await asked.tools.execute(repair);
+
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      kind: "apple-action",
+      request: { kind: "repair-input", simulatorId },
+    });
+    expect(asked.execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "repair-input",
+      approval: { kind: "approved", approvalId },
+    });
+
+    const unanswerable = appleTools({}, { executionPolicy: "approval-gated" } as never);
+    expect(await unanswerable.tools.execute(repair)).toMatchObject({
+      isError: true,
+      result: { error: "device-approval-required" },
+    });
+    expect(unanswerable.execute).not.toHaveBeenCalled();
+  });
+
   it("reads a Simulator app's log under Plan without asking, returning the text itself", async () => {
     const request = vi.fn();
     const readLog = vi.fn(async () => "Fixture[42:7] launched");
@@ -3574,6 +3641,8 @@ describe("Code tool families", () => {
     // Recording a call added its record argument and one short sentence on
     // when to use it (showing a reviewer a UI change), about 145 bytes; the
     // bounds and the answer are in help.
+    // The Simulator's repair-input operation added its name (15 bytes); its
+    // usage is in help.
     expect(JSON.stringify(families).length).toBeLessThanOrEqual(6_570);
   });
 

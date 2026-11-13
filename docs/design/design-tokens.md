@@ -48,6 +48,12 @@ export have the same name and there is no mapping table to maintain:
 - `--oct-*` are the foundations and the aliases a stylesheet reads: type, spacing,
   radii, motion, sizes, and short colour aliases (`--oct-bg`, `--oct-fg`,
   `--oct-border`) that point at the roles.
+- One value with one meaning has one token. Motion has `--oct-motion-fast` (150ms, colour
+  and overlay entry), `--oct-motion-base` (200ms, geometry) and `--oct-dur-fast` (100ms,
+  an overlay leaving); weight has `--oct-weight-regular`, `-medium`, `-strong` and
+  `-title`; spacing has `--oct-space-*`. Do not add a second name for a value one of
+  these already carries. Tokens that share a value by chance but mean different things
+  (a control height and an avatar size, a gutter and a space step) stay separate.
 - In `tokens.json` a token's key is its CSS name without the leading dashes, under
   a group (`radius.oct-radius-md`). The group list is in the file.
 
@@ -66,7 +72,7 @@ when the original was an expression.
   "$value": { "colorSpace": "srgb", "components": [0.9608, 0.9608, 0.9686], "alpha": 0.14, "hex": "#f5f5f7" }
 },
 "oct-radius-md": { "$type": "dimension", "$value": { "value": 12, "unit": "px" } },
-"oct-dur-base": { "$type": "duration", "$value": { "value": 0.15, "unit": "s" } }
+"oct-motion-fast": { "$type": "duration", "$value": { "value": 150, "unit": "ms" } }
 ```
 
 - Colours are sRGB with components in 0 to 1, rounded to four places from whole
@@ -148,7 +154,7 @@ one ladder: regular for reading, medium for labels and names, strong for
 emphasis, and `--oct-weight-title` for the large title alone. Nothing is set
 between steps (no 11.5 or 12.5px).
 
-**Spacing** ([Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth)).
+**Spacing** ([Spacing](../../DESIGN.md#spacing)).
 A 4px scale: `--oct-space-1` to `--oct-space-12` (4, 8, 12, 16, 20, 24, 32, 48).
 Use a gap for stacks and groups. A padding or margin off the scale is a defect.
 
@@ -158,7 +164,7 @@ picker row; `--oct-nav-row-h` (32px) is a navigation or list row;
 `--oct-title-rail-h` (44px) is the title band. `--oct-control-height` and
 `-sm` (44 and 34px) are the touch sizes, not the desktop default.
 
-**Radius** ([Shapes and depth](../../DESIGN.md#shapes-and-depth)). Two numbers and
+**Radius** ([Radii](../../DESIGN.md#radii)). Two numbers and
 a round exception. A control's outline is `--oct-radius-sm` (4px): every button,
 field, tab, menu and option row, filled list row, chip, and a capsule or track
 that only groups controls. A container's outline is `--oct-radius-md` (12px): a
@@ -183,14 +189,14 @@ surface it separates, so never hand-pick a grey.
 its value in primary ink. The accent is for the action and for the one thing a
 surface is for, not for decoration; status colours always travel with text or a
 shape. Normal text holds 4.5:1, large text and non-text marks 3:1
-([Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability)).
+([Accessibility](../../DESIGN.md#accessibility)).
 
 **Icons.** Four sizes: `--oct-icon-xs` (12: disclosure chevrons and status
 marks), `--oct-icon-sm` (14: inside a small control, inline in text),
 `--oct-icon-md` (16: the default) and `--oct-icon-lg` (20: an empty state, a
 dialog header). One stroke, 1.5, set once by the app's icon defaults
 (`apps/web/src/ui/IconDefaults.tsx`) and taking `currentColor`
-([Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks)).
+([Icons](../../DESIGN.md#icons)).
 The stroke is a TypeScript constant there, not a custom property, so it is not
 in the export; the recipes write `1.5` for it.
 
@@ -203,7 +209,7 @@ specified** with its `file:line` at the time this page was written.
 
 ### Depth comes from material, not flat fills and outlines
 
-Source: [Shapes and depth](../../DESIGN.md#shapes-and-depth).
+Source: [Depth and material](../../DESIGN.md#depth-and-material).
 
 Depth is one material in five levels. Every surface takes a fill one step
 lighter than what it sits on, a rim brighter along its top edge, and a shadow
@@ -254,7 +260,7 @@ outline alone. A surface consumes the tokens and never writes its own colour.
 ### Density
 
 Source: [Scale](../../DESIGN.md#scale),
-[Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth).
+[Spacing](../../DESIGN.md#spacing).
 
 - The interface is 13px; a row label is 14px at medium weight; metadata is 12px
   and nothing essential sits under 12px.
@@ -272,9 +278,8 @@ Source: [Scale](../../DESIGN.md#scale),
 
 ### Alignment
 
-Source: [Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth),
-[Page shell](../../DESIGN.md#page-shell), Settings in
-[Shell and layout](../../DESIGN.md#shell-and-layout).
+Source: [Spacing](../../DESIGN.md#spacing),
+[Page shell](../../DESIGN.md#page-shell), [Settings layout](../../DESIGN.md#settings-layout).
 
 - **One gutter per surface.** A page has one inline inset and everything stands
   on it. A grouped card takes a 16px inset for everything inside, including
@@ -299,9 +304,9 @@ Source: [Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth),
 
 ### Behaviour that makes it feel native
 
-Source: [Motion and interaction](../../DESIGN.md#motion-and-interaction),
+Source: [Motion](../../DESIGN.md#motion),
 [Face](../../DESIGN.md#face),
-[Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
+[Accessibility](../../DESIGN.md#accessibility).
 
 - **No text selection on chrome.** Words in the chrome do not select when the
   pointer drags across them; reading matter (a message, a diff, a value, an
@@ -321,7 +326,7 @@ Source: [Motion and interaction](../../DESIGN.md#motion-and-interaction),
   turn the transition off while a control is pressed, and there is no scale. A disabled control is drawn at `--oct-disabled-opacity`
   with no hover fill and no pointer events.
 - **150 to 200ms motion with the standard easing.** Colour settles in
-  `--oct-dur-base` (150ms) with `--oct-ease-color`; geometry and overlays in 150ms
+  `--oct-motion-fast` (150ms) with `--oct-ease-color`; geometry and overlays in 150ms
   with `--oct-ease-motion`, and an overlay leaves faster, in `--oct-dur-fast`
   (100ms). There is no decorative entrance and no ambient motion behind work.
   Only opacity, scale and translate change on an overlay.
@@ -336,10 +341,6 @@ Source: [Motion and interaction](../../DESIGN.md#motion-and-interaction),
   headings (`octant.css:452`, `:458`); tabular figures wherever a number is
   compared (`apps/web/src/styles.css:829`, `:1108`; DESIGN.md names them per
   surface, never as a rule); `font-optical-sizing: auto` (`octant.css:434`).
-- A conflict to resolve in DESIGN.md, not here: Shapes and depth says pressing a
-  raised tile "sinks it", and Motion and interaction says a press moves nothing.
-  The implementation does both without movement (a darker fill and an inset
-  shadow), which is what the recipes copy.
 
 ## Appendix: minimum recipes
 
@@ -378,8 +379,8 @@ The button, in full, as the template for the others:
   cursor: default;
   box-shadow: var(--octant-shadow-control);
   transition:
-    background-color var(--oct-dur-base) var(--oct-ease-color),
-    box-shadow var(--oct-dur-base) var(--oct-ease-color);
+    background-color var(--oct-motion-fast) var(--oct-ease-color),
+    box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 .oct-button:active {
   background: var(--octant-control-pressed);

@@ -7,6 +7,7 @@ import type {
 } from "@octant/contracts";
 import { MessagesSquare } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useDockBarPlacement } from "../shell/dockBarControls";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -81,13 +82,27 @@ export function SideChatPanel(props: SideChatPanelProps) {
     };
   }, [client, retryToken, sourceThreadId]);
 
+  // Where a tile, the single row or the bottom panel's bar names the tool, the
+  // header keeps what only this tool knows, what the chat is about, in the one
+  // 32px row the thread menu stands in.
+  const hosted = useDockBarPlacement() !== undefined;
   return (
-    <section aria-label="Side Chat" className="side-chat">
+    <section
+      aria-label="Side Chat"
+      className="side-chat"
+      data-bar-hosted={hosted ? "true" : undefined}
+    >
       <header className="side-chat__header">
         <p className="side-chat__title">
-          <MessagesSquare aria-hidden="true" size={14} />
+          {hosted ? null : <MessagesSquare aria-hidden="true" size={14} />}
           <span>
-            {props.sourceTitle === undefined ? "Side Chat" : `Side Chat about ${props.sourceTitle}`}
+            {hosted
+              ? props.sourceTitle === undefined
+                ? "About this thread"
+                : `About ${props.sourceTitle}`
+              : props.sourceTitle === undefined
+                ? "Side Chat"
+                : `Side Chat about ${props.sourceTitle}`}
           </span>
         </p>
       </header>

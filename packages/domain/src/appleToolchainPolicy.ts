@@ -32,7 +32,7 @@ export interface AppleExecutionScope {
 }
 
 // Repair input rides the same grant as a tap: it is input to the device a
-// person already allowed, sent only when that person asks for it.
+// person already allowed, whoever sends it.
 const SIMULATOR_INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press", "repair-input"]);
 
 /**
@@ -137,13 +137,12 @@ export function evaluateAppleSimulatorRequest(
   ) {
     return { kind: "denied", reason: "actor-required" };
   }
-  // Repairing input restarts the Simulator's home screen and closes its apps,
-  // and Open URL, Rotate and screen recording are offered only in the pane.
-  // Only a person may ask for any of them; an agent or the host never does it
-  // for them.
+  // Open URL, Rotate and screen recording are offered only in the pane. Only a
+  // person may ask for any of them; an agent or the host never does it for
+  // them. Repair input is not among them: it is input, so the Allow input
+  // grant or an approval decides it, as for a tap.
   if (
-    (request.kind === "repair-input" ||
-      request.kind === "open-url" ||
+    (request.kind === "open-url" ||
       request.kind === "rotate" ||
       isAppleScreenRecordingKind(request.kind)) &&
     request.requestedBy?.kind !== "local-user" &&

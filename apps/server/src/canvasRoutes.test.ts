@@ -54,6 +54,11 @@ import {
 import { CanvasCommentService, registerCanvasCommentEvents } from "./canvas/canvasCommentService";
 import { CanvasShareService } from "./canvas/canvasShareService";
 import { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
+import {
+  CanvasNetworkAccessService,
+  registerCanvasNetworkAccessEvents,
+} from "./canvas/canvasNetworkAccessService";
+import { CanvasNetworkProxy } from "./canvas/canvasNetworkProxy";
 import { registerCanvasExportFolderEvents } from "./canvas/canvasExportFolderEventStore";
 import { createCanvasExportFilePort } from "./canvas/canvasExportFilePort";
 import {
@@ -118,6 +123,21 @@ function createRevisionRoute(
     readonly activeContextResolver?: CanvasRouteDependencies["activeContextResolver"];
     readonly threadReadAuthority?: ThreadReadAuthority;
     readonly resolveDesignSystem?: CanvasRouteDependencies["resolveDesignSystem"];
+    /** The secret the desktop's main process proves itself with; absent, no desktop is attached. */
+    readonly desktopBridgeSecret?: string;
+    /** Handed the route's network switch and every connection its proxy made. */
+    readonly network?: (parts: {
+      readonly access: CanvasNetworkAccessService;
+      readonly connections: ReadonlyArray<{
+        readonly url: string;
+        readonly headers: Readonly<Record<string, string>>;
+        readonly method?: "POST";
+        readonly body?: string;
+      }>;
+      /** Moves the clock the network tokens age by. */
+      readonly advance: (ms: number) => void;
+    }) => void;
+    readonly canvasExportService?: CanvasRouteDependencies["canvasExportService"];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -176,15 +196,17 @@ function createRevisionRoute(
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
   const registry = registerCanvasOutsideContentEvents(
-    registerCanvasExportFolderEvents(
-      registerCanvasChoiceAnswerEvents(
-        registerCanvasCommentEvents(
-          registerCanvasShareEvents(
-            registerCanvasPublicShareEvents(new EventRegistry())
-              .register(CANVAS_CREATED, 1, CanvasCreated)
-              .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
-              .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
-              .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+    registerCanvasNetworkAccessEvents(
+      registerCanvasExportFolderEvents(
+        registerCanvasChoiceAnswerEvents(
+          registerCanvasCommentEvents(
+            registerCanvasShareEvents(
+              registerCanvasPublicShareEvents(new EventRegistry())
+                .register(CANVAS_CREATED, 1, CanvasCreated)
+                .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
+                .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
+                .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+            ),
           ),
         ),
       ),
@@ -275,18 +297,75 @@ function createRevisionRoute(
     home: tmpdir(),
     standingOutsideApproval: false,
   });
+  const networkConnections: Array<{
+    readonly url: string;
+    readonly headers: Readonly<Record<string, string>>;
+    readonly method?: "POST";
+    readonly body?: string;
+  }> = [];
+  let networkTime = 1;
+  const canvasNetworkAccess = new CanvasNetworkAccessService({
+    journal,
+    uuid: () => `acacacac-acac-4cac-8cac-${(counter += 1).toString(16).padStart(12, "0")}`,
+    actor,
+    clock: () => later as never,
+    now: () => networkTime,
+  });
+  options.network?.({
+    access: canvasNetworkAccess,
+    connections: networkConnections,
+    advance: (ms) => {
+      networkTime += ms;
+    },
+  });
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability: windowCapability, now: 0 });
   const route = createCanvasRouteHandler({
     canvasProjection: projection,
     canvasService,
     designRunTickets: new CanvasDesignRunTickets(() => 1),
+    ...(options.desktopBridgeSecret === undefined
+      ? {}
+      : { desktopBridgeSecret: options.desktopBridgeSecret }),
+    canvasNetwork: {
+      access: canvasNetworkAccess,
+      proxy: new CanvasNetworkProxy({
+        reserved: () => ({ addresses: [], hosts: [] }),
+        resolveAll: async () => ["93.184.216.34"],
+        connect: async (url, connection) => {
+          networkConnections.push({
+            url: url.toString(),
+            headers: connection.headers,
+            ...(connection.method === "POST"
+              ? { method: "POST" as const, body: new TextDecoder().decode(connection.body) }
+              : {}),
+          });
+          const far = /\.(png|woff2|html)$/.exec(url.pathname)?.[1];
+          return new Response("fetched for the page", {
+            headers: {
+              "content-type":
+                far === "png"
+                  ? "image/png"
+                  : far === "woff2"
+                    ? "font/woff2"
+                    : far === "html"
+                      ? "text/html"
+                      : "text/plain",
+              "set-cookie": "session=far",
+            },
+          });
+        },
+      }),
+    },
     ...(options.findPublishedSnapshot === undefined
       ? {}
       : { findPublishedSnapshot: options.findPublishedSnapshot }),
     ...(options.resolveDesignSystem === undefined
       ? {}
       : { resolveDesignSystem: options.resolveDesignSystem }),
+    ...(options.canvasExportService === undefined
+      ? {}
+      : { canvasExportService: options.canvasExportService }),
     canvasShareService,
     canvasPublicShareService: new CanvasPublicShareService({
       journal,
@@ -2291,6 +2370,45 @@ describe("paired device Canvas reads", () => {
     expect((await readable(paired(`public-shares?canvasId=${missing}`)))?.status).toBe(403);
   });
 
+  it("journals a dismissed export notice as the local window, and refuses the same dismissal from a paired device", async () => {
+    const actors: string[] = [];
+    const exportService = {
+      dismissUnconfirmed: (input: { readonly actor: { readonly kind: string } }) => {
+        actors.push(input.actor.kind);
+        return input.actor.kind === "local-user"
+          ? { kind: "dismissed", exportId: "33333333-3333-4333-8333-333333333333" }
+          : { kind: "refused", code: "unauthorized", message: "Local window only." };
+      },
+    };
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(),
+      canvasExportService: exportService as never,
+    });
+    const body = {
+      schemaVersion: 1,
+      kind: "canvas-export-notice-dismiss",
+      canvasId: String(canvasId),
+      exportId: "33333333-3333-4333-8333-333333333333",
+    };
+
+    const local = await route(
+      new Request("http://127.0.0.1/api/canvas/export-notice-dismiss", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": windowCapability,
+        },
+        body: JSON.stringify(body),
+      }),
+    );
+    const remote = await route(paired("export-notice-dismiss", { method: "POST", body }));
+
+    expect(JSON.parse(await local!.text())).toMatchObject({ kind: "dismissed" });
+    expect(JSON.parse(await remote!.text())).toMatchObject({ kind: "refused" });
+    expect(actors).toEqual(["local-user", "remote-device"]);
+  });
+
   it("refuses a paired device cards asked under another Project or mode, and a Canvas its thread has left", async () => {
     const route = createRevisionRoute(undefined, {
       activeContextResolver: pairedReaderContexts,
@@ -2726,5 +2844,908 @@ describe("canvas export folder routes", () => {
       kind: "canvas-export-folder-refused",
       reason: "malformed",
     });
+  });
+});
+
+describe("canvas network routes", () => {
+  const BASE_POLICY =
+    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
+  const prototype = {
+    blockId: "live" as never,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "design" as const,
+    title: "Live board",
+    size: "document" as const,
+    runsScript: true as const,
+    frames: [
+      {
+        frameId: "board" as never,
+        title: "Board",
+        html: '<p id="out"></p><script>function load() {}</script>',
+      },
+    ],
+  };
+  const versionId = "22222222-2222-4222-8222-222222222222";
+  const windowHeaders = {
+    "content-type": "application/json",
+    "x-octant-window-capability": windowCapability,
+  };
+
+  function networkRoute(options: Parameters<typeof createRevisionRoute>[1] = {}) {
+    let access: CanvasNetworkAccessService | undefined;
+    let connections: ReadonlyArray<{
+      readonly url: string;
+      readonly headers: Readonly<Record<string, string>>;
+      readonly method?: "POST";
+      readonly body?: string;
+    }> = [];
+    let advance: (ms: number) => void = () => undefined;
+    let journal: Journal | undefined;
+    const projection = new CanvasProjection();
+    const route = createRevisionRoute(projection, {
+      extraBlocks: [prototype],
+      journal: (opened) => {
+        journal = opened;
+      },
+      network: (parts) => {
+        access = parts.access;
+        connections = parts.connections;
+        advance = parts.advance;
+      },
+      ...options,
+    });
+    if (access === undefined || journal === undefined) throw new Error("expected the switch");
+    return { route, access, journal, projection, connections: () => connections, advance };
+  }
+
+  async function answer(route: ReturnType<typeof createRevisionRoute>, request: Request) {
+    const response = await route(request);
+    if (response === undefined) throw new Error(`expected ${request.url} to answer`);
+    return response;
+  }
+
+  const setSwitch = (route: ReturnType<typeof createRevisionRoute>, allowed: unknown) =>
+    answer(
+      route,
+      new Request("http://127.0.0.1/api/canvas/network-access", {
+        method: "POST",
+        headers: windowHeaders,
+        body: JSON.stringify({
+          schemaVersion: 1,
+          kind: "set-canvas-network-access",
+          canvasId: String(canvasId),
+          allowed,
+        }),
+      }),
+    );
+
+  const readSwitch = async (route: ReturnType<typeof createRevisionRoute>) =>
+    JSON.parse(
+      await (
+        await answer(
+          route,
+          new Request(`http://127.0.0.1/api/canvas/network-access?canvasId=${String(canvasId)}`, {
+            method: "GET",
+            headers: { "x-octant-window-capability": windowCapability },
+          }),
+        )
+      ).text(),
+    );
+
+  /** Runs the prototype as a local window and loads its page the way `headers` say. */
+  async function runPage(
+    route: ReturnType<typeof createRevisionRoute>,
+    headers: Record<string, string> = { "sec-fetch-dest": "iframe" },
+  ) {
+    const run = await answer(
+      route,
+      new Request("http://127.0.0.1/api/canvas/design-run", {
+        method: "POST",
+        headers: windowHeaders,
+        body: JSON.stringify({ canvasId: String(canvasId), versionId, blockId: "live" }),
+      }),
+    );
+    const ready = JSON.parse(await run.text());
+    expect(ready.kind).toBe("ready");
+    const page = await answer(
+      route,
+      new Request(`http://127.0.0.1${ready.page as string}`, { method: "GET", headers }),
+    );
+    const policy = page.headers.get("content-security-policy") ?? "";
+    const html = await page.text();
+    const token =
+      /connect-src http:\/\/127\.0\.0\.1\/api\/canvas\/network\/([A-Za-z0-9_-]{43})\/;/.exec(
+        policy,
+      )?.[1];
+    const ticket = new URL(ready.page as string, "http://127.0.0.1").searchParams.get("ticket");
+    return { policy, html, token, ticket: ticket ?? "" };
+  }
+
+  const networkPolicy = (base: string) =>
+    BASE_POLICY.replace("connect-src 'none'", `connect-src ${base}`)
+      .replace("img-src data: blob:", `img-src data: blob: ${base}image`)
+      .replace("font-src data:", `font-src data: ${base}font`);
+
+  const renew = (
+    route: ReturnType<typeof createRevisionRoute>,
+    ticket: unknown,
+    headers: Record<string, string> = windowHeaders,
+  ) =>
+    answer(
+      route,
+      new Request("http://127.0.0.1/api/canvas/network-access/renew", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ schemaVersion: 1, kind: "renew-canvas-network-page", ticket }),
+      }),
+    );
+
+  const viaProxy = (
+    route: ReturnType<typeof createRevisionRoute>,
+    token: string,
+    init: {
+      readonly method?: string;
+      readonly headers?: Record<string, string>;
+      readonly query?: string;
+      readonly resource?: string;
+      readonly body?: string;
+    } = {},
+  ) =>
+    answer(
+      route,
+      new Request(
+        `http://127.0.0.1/api/canvas/network/${token}/${init.resource ?? "fetch"}?${
+          init.query ?? `url=${encodeURIComponent("https://api.example.com/data")}`
+        }`,
+        {
+          method: init.method ?? "GET",
+          headers: { origin: "null", "sec-fetch-dest": "empty", ...init.headers },
+          ...(init.body === undefined ? {} : { body: init.body }),
+        },
+      ),
+    );
+
+  it("keeps a Canvas's network off until a person at a local window turns it on, and journals it", async () => {
+    const { route, journal } = networkRoute();
+    expect(await readSwitch(route)).toEqual({
+      kind: "canvas-network-access",
+      canvasId: String(canvasId),
+      allowed: false,
+    });
+
+    const turnedOn = await setSwitch(route, true);
+    expect(JSON.parse(await turnedOn.text())).toEqual({
+      kind: "canvas-network-access",
+      canvasId: String(canvasId),
+      allowed: true,
+    });
+    expect((await readSwitch(route)).allowed).toBe(true);
+    const events = journal.replayAggregate({
+      aggregateType: "canvas-network-access",
+      aggregateId: canvasId,
+      afterVersion: 0,
+      limit: 10,
+    });
+    expect(events.map((event) => [event.eventName, event.actor.kind, event.payload])).toEqual([
+      [
+        "canvas.network-access-changed@1",
+        "local-user",
+        { canvasId: String(canvasId), allowed: true },
+      ],
+    ]);
+  });
+
+  it("serves a running page that names no proxy while the switch is off", async () => {
+    const { route } = networkRoute();
+    const page = await runPage(route);
+    expect(page.policy).toBe(BASE_POLICY);
+    expect(page.html).not.toContain("/api/canvas/network/");
+  });
+
+  it("names the page's own proxy paths in its policy while the switch is on, and changes nothing else", async () => {
+    const { route } = networkRoute();
+    await setSwitch(route, true);
+    const page = await runPage(route);
+    expect(page.token).toBeDefined();
+    const base = `http://127.0.0.1/api/canvas/network/${page.token ?? ""}/`;
+    expect(page.policy).toBe(networkPolicy(base));
+    expect(page.html).toContain(JSON.stringify(base));
+    // The bridge still comes first, and the author's script after the host's.
+    expect(page.html.indexOf("octant-design-frame@1")).toBeLessThan(page.html.indexOf(base));
+    expect(page.html.indexOf(base)).toBeLessThan(page.html.indexOf("function load()"));
+    // Each page gets a token of its own.
+    expect((await runPage(route)).token).not.toBe(page.token);
+  });
+
+  it("fetches for a page's token and forwards no cookie, credential, or Octant header", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const response = await viaProxy(route, token ?? "", {
+      headers: {
+        cookie: "octant-session=secret",
+        authorization: "Bearer secret",
+        "x-octant-window-capability": windowCapability,
+        "x-octant-session-proof": "proof",
+        referer: "http://127.0.0.1/api/canvas/design-page?ticket=x",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("fetched for the page");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(connections()).toEqual([
+      { url: "https://api.example.com/data", headers: { accept: "*/*" } },
+    ]);
+  });
+
+  it("holds the page's request to the destination rule", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    for (const target of [
+      "http://127.0.0.1/api/canvas/get",
+      "http://localhost/",
+      "http://169.254.169.254/latest/meta-data/",
+      "http://10.0.0.1/",
+      "file:///etc/passwd",
+      "https://api.example.com:8443/",
+    ]) {
+      const response = await viaProxy(route, token ?? "", {
+        query: `url=${encodeURIComponent(target)}`,
+      });
+      expect([target, response.status]).toEqual([target, 403]);
+    }
+    expect(connections()).toEqual([]);
+  });
+
+  it("refuses the proxy to a token it did not mint, and to every token while the switch is off", async () => {
+    const { route, access, connections } = networkRoute();
+    const guessed = await viaProxy(route, "A".repeat(43));
+    expect(guessed.status).toBe(403);
+    expect(await guessed.json()).toEqual({ refused: "token-not-live" });
+    // No token is minted while the switch is off, whoever asks the service.
+    expect(access.issueToken(canvasId)).toBeUndefined();
+    await setSwitch(route, true);
+    expect((await viaProxy(route, "B".repeat(43))).status).toBe(403);
+    expect(connections()).toEqual([]);
+  });
+
+  it("revokes a running page's token the moment the switch is turned off", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    expect((await viaProxy(route, token ?? "")).status).toBe(200);
+
+    expect(JSON.parse(await (await setSwitch(route, false)).text()).allowed).toBe(false);
+    const after = await viaProxy(route, token ?? "");
+    expect(after.status).toBe(403);
+    expect(await after.json()).toEqual({ refused: "token-not-live" });
+
+    // Turning it on again does not bring the old page's token back.
+    await setSwitch(route, true);
+    expect((await viaProxy(route, token ?? "")).status).toBe(403);
+    expect(connections()).toHaveLength(1);
+  });
+
+  it("refuses the proxy to a page whose Canvas no longer exists, live token or not", async () => {
+    const { route, projection, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    expect((await viaProxy(route, token ?? "")).status).toBe(200);
+    // The Canvas was erased; nothing told the switch.
+    projection.evict([String(canvasId)]);
+    const response = await viaProxy(route, token ?? "");
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ refused: "token-not-live" });
+    expect(connections()).toHaveLength(1);
+  });
+
+  it("answers only a script's request, never a document, another method, or another query", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    for (const destination of ["document", "iframe", "image", "font", "script", "websocket"]) {
+      const response = await viaProxy(route, token ?? "", {
+        headers: { "sec-fetch-dest": destination },
+      });
+      expect([destination, response.status]).toEqual([destination, 403]);
+    }
+    for (const method of ["PUT", "DELETE", "PATCH", "HEAD"]) {
+      const response = await viaProxy(route, token ?? "", { method });
+      expect([method, response.status]).toEqual([method, 405]);
+    }
+    expect((await viaProxy(route, token ?? "", { query: "" })).status).toBe(400);
+    expect(
+      (await viaProxy(route, token ?? "", { query: "url=https%3A%2F%2Fa.example%2F&x=1" })).status,
+    ).toBe(400);
+    // No path under the token but the three the host names.
+    expect((await viaProxy(route, token ?? "", { resource: "media" })).status).toBe(400);
+    expect((await viaProxy(route, token ?? "", { resource: "socket" })).status).toBe(400);
+    expect(connections()).toEqual([]);
+  });
+
+  it("sends a page's JSON POST as JSON and forwards no header or credential the page set", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const response = await viaProxy(route, token ?? "", {
+      method: "POST",
+      body: '{"ask":1}',
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        cookie: "octant-session=secret",
+        authorization: "Bearer secret",
+        "x-api-key": "page-chosen",
+        "x-octant-window-capability": windowCapability,
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(connections()).toEqual([
+      {
+        url: "https://api.example.com/data",
+        headers: { accept: "*/*", "content-type": "application/json" },
+        method: "POST",
+        body: '{"ask":1}',
+      },
+    ]);
+  });
+
+  it("refuses a POST that is not JSON, is too large, or names a private address", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const json = { "content-type": "application/json" };
+    const post = (init: Parameters<typeof viaProxy>[2]) =>
+      viaProxy(route, token ?? "", { method: "POST", ...init });
+
+    for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"]) {
+      const response = await post({ body: "a=1", headers: { "content-type": type } });
+      expect([type, response.status, await response.json()]).toEqual([
+        type,
+        415,
+        { refused: "request-type-not-allowed" },
+      ]);
+    }
+    expect((await post({ body: "{}", headers: { "content-type": "" } })).status).toBe(415);
+    const notJson = await post({ body: "{not json", headers: json });
+    expect([notJson.status, await notJson.json()]).toEqual([400, { refused: "invalid-request" }]);
+    const large = await post({ body: JSON.stringify("x".repeat(256 * 1024)), headers: json });
+    expect([large.status, await large.json()]).toEqual([413, { refused: "request-too-large" }]);
+    const declared = await post({
+      body: "{}",
+      headers: { ...json, "content-length": String(256 * 1024 + 1) },
+    });
+    expect(declared.status).toBe(413);
+    for (const target of [
+      "http://127.0.0.1/api/canvas/get",
+      "http://169.254.169.254/",
+      "http://10.0.0.1/",
+    ]) {
+      const response = await post({
+        body: "{}",
+        headers: json,
+        query: `url=${encodeURIComponent(target)}`,
+      });
+      expect([target, response.status]).toEqual([target, 403]);
+    }
+    // An image or a font is never asked for with a body.
+    expect((await post({ body: "{}", headers: json, resource: "image" })).status).toBe(405);
+    expect((await post({ body: "{}", headers: json, resource: "font" })).status).toBe(405);
+    expect(connections()).toEqual([]);
+  });
+
+  it("answers a browser's preflight for a JSON POST of a live token, and offers nothing wider", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const preflight = await viaProxy(route, token ?? "", {
+      method: "OPTIONS",
+      headers: {
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type",
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
+    expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, POST");
+    expect(preflight.headers.get("access-control-allow-headers")).toBe("content-type");
+    expect(preflight.headers.get("access-control-allow-credentials")).toBeNull();
+    expect((await viaProxy(route, "A".repeat(43), { method: "OPTIONS" })).status).toBe(403);
+    expect(
+      (await viaProxy(route, token ?? "", { method: "OPTIONS", resource: "image" })).status,
+    ).toBe(405);
+    expect(connections()).toEqual([]);
+  });
+
+  it("serves an image and a font from their own paths, only to that kind of load and only as that type", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const load = (resource: string, target: string, destination: string | undefined) =>
+      viaProxy(route, token ?? "", {
+        resource,
+        query: `url=${encodeURIComponent(target)}`,
+        headers:
+          destination === undefined
+            ? { "sec-fetch-dest": "", cookie: "octant-session=secret" }
+            : { "sec-fetch-dest": destination, cookie: "octant-session=secret" },
+      });
+
+    const image = await load("image", "https://cdn.example.com/logo.png", "image");
+    expect([image.status, image.headers.get("content-type")]).toEqual([200, "image/png"]);
+    expect(image.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(image.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    const font = await load("font", "https://cdn.example.com/face.woff2", "font");
+    expect([font.status, font.headers.get("content-type")]).toEqual([200, "font/woff2"]);
+    expect(connections()).toEqual([
+      { url: "https://cdn.example.com/logo.png", headers: { accept: "*/*" } },
+      { url: "https://cdn.example.com/face.woff2", headers: { accept: "*/*" } },
+    ]);
+
+    // Markup, or the other kind, is not passed on from either path.
+    for (const [resource, target, destination] of [
+      ["image", "https://cdn.example.com/page.html", "image"],
+      ["image", "https://cdn.example.com/face.woff2", "image"],
+      ["font", "https://cdn.example.com/page.html", "font"],
+      ["font", "https://cdn.example.com/logo.png", "font"],
+    ] as const) {
+      const response = await load(resource, target, destination);
+      expect([resource, target, response.status, await response.json()]).toEqual([
+        resource,
+        target,
+        502,
+        { refused: "response-type-not-allowed" },
+      ]);
+    }
+    const before = connections().length;
+    // Neither path is a document's, a frame's, or the other kind's.
+    for (const [resource, destination] of [
+      ["image", "document"],
+      ["image", "iframe"],
+      ["image", "font"],
+      ["font", "image"],
+      ["font", "document"],
+      ["image", "video"],
+    ] as const) {
+      const response = await load(resource, "https://cdn.example.com/logo.png", destination);
+      expect([resource, destination, response.status]).toEqual([resource, destination, 403]);
+    }
+    // The destination rule holds on both.
+    for (const resource of ["image", "font"]) {
+      for (const target of ["http://127.0.0.1/logo.png", "http://192.168.1.1/face.woff2"]) {
+        const response = await load(resource, target, resource);
+        expect([resource, target, response.status]).toEqual([resource, target, 403]);
+      }
+    }
+    expect(connections()).toHaveLength(before);
+  });
+
+  it("lets a page's token age out in an hour unless the window that ran it keeps it alive", async () => {
+    const { route, advance, connections } = networkRoute();
+    await setSwitch(route, true);
+    const kept = await runPage(route);
+    const closed = await runPage(route);
+    const fiftyMinutes = 50 * 60 * 1_000;
+
+    advance(fiftyMinutes);
+    const renewed = await renew(route, kept.ticket);
+    expect(JSON.parse(await renewed.text())).toEqual({ kind: "canvas-network-page-renewed" });
+    advance(fiftyMinutes);
+    // The page nobody renewed is past its hour; the one kept open is not.
+    expect((await viaProxy(route, closed.token ?? "")).status).toBe(403);
+    expect((await viaProxy(route, kept.token ?? "")).status).toBe(200);
+    // Using the token did not renew it.
+    advance(fiftyMinutes);
+    expect((await viaProxy(route, kept.token ?? "")).status).toBe(403);
+    expect(JSON.parse(await (await renew(route, kept.ticket)).text())).toEqual({
+      kind: "canvas-network-page-renewal-refused",
+      reason: "not-live",
+    });
+    expect(connections()).toHaveLength(1);
+  });
+
+  it("renews a page only for the window that ran it: not for its token, a page, or a paired device", async () => {
+    const { route, advance } = networkRoute();
+    await setSwitch(route, true);
+    const page = await runPage(route);
+    const refusal = async (response: Response) => JSON.parse(await response.text());
+
+    // A leaked token names no page, with or without a window's credential.
+    expect(await refusal(await renew(route, page.token))).toEqual({
+      kind: "canvas-network-page-renewal-refused",
+      reason: "not-live",
+    });
+    // What the page itself could send: its ticket, an opaque origin, no credential.
+    const fromPage = await renew(route, page.ticket, {
+      "content-type": "application/json",
+      origin: "null",
+    });
+    expect(fromPage.status).toBeGreaterThanOrEqual(400);
+    expect(await refusal(await renew(route, "short"))).toMatchObject({ reason: "malformed" });
+
+    const paired = new Request("http://127.0.0.1/api/canvas/network-access/renew", {
+      method: "POST",
+      headers: windowHeaders,
+      body: JSON.stringify({
+        schemaVersion: 1,
+        kind: "renew-canvas-network-page",
+        ticket: page.ticket,
+      }),
+    });
+    bindPrincipalRouteContext(paired, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "17171717-1717-4171-8171-171717171717" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    expect(await refusal(await answer(route, paired))).toEqual({
+      kind: "canvas-network-page-renewal-refused",
+      reason: "local-window-required",
+    });
+
+    // None of that kept it alive.
+    advance(60 * 60 * 1_000);
+    expect((await viaProxy(route, page.token ?? "")).status).toBe(403);
+
+    // Turning the switch off ends renewal with the token.
+    const next = await runPage(route);
+    await setSwitch(route, false);
+    await setSwitch(route, true);
+    expect(await refusal(await renew(route, next.ticket))).toMatchObject({ reason: "not-live" });
+  });
+
+  it("refuses the switch to a paired device and gives its page no proxy", async () => {
+    const threadReadAuthority = createThreadReadAuthority({
+      chat: (id) => {
+        if (String(id) !== threadId) throw new Error("Chat thread was not found.");
+        return { projectId };
+      },
+      work: async () => undefined,
+      code: async () => undefined,
+    });
+    const { route, access } = networkRoute({
+      threadReadAuthority,
+      activeContextResolver: async (readerId) =>
+        String(readerId) === String(windowId) ? { mode: "chat", projectId } : undefined,
+    });
+    const paired = (path: string, init: { method?: string; body?: unknown } = {}) => {
+      const request = new Request(`http://127.0.0.1/api/canvas/${path}`, {
+        method: init.method ?? "GET",
+        headers: windowHeaders,
+        ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "17171717-1717-4171-8171-171717171717" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return request;
+    };
+
+    const refused = await answer(
+      route,
+      paired("network-access", {
+        method: "POST",
+        body: {
+          schemaVersion: 1,
+          kind: "set-canvas-network-access",
+          canvasId: String(canvasId),
+          allowed: true,
+        },
+      }),
+    );
+    expect(JSON.parse(await refused.text())).toMatchObject({
+      kind: "canvas-network-access-refused",
+      reason: "local-window-required",
+    });
+    expect(access.isAllowed(canvasId)).toBe(false);
+
+    // The person turned it on at the host; the device's page still gets no proxy.
+    await setSwitch(route, true);
+    const run = await answer(
+      route,
+      paired("design-run", {
+        method: "POST",
+        body: { canvasId: String(canvasId), versionId, blockId: "live" },
+      }),
+    );
+    const ready = JSON.parse(await run.text());
+    expect(ready.kind).toBe("ready");
+    const page = await answer(
+      route,
+      new Request(`http://127.0.0.1${ready.page as string}`, {
+        method: "GET",
+        headers: { "sec-fetch-dest": "iframe" },
+      }),
+    );
+    expect(page.headers.get("content-security-policy")).toBe(BASE_POLICY);
+    expect(await page.text()).not.toContain("/api/canvas/network/");
+  });
+
+  it("refuses the proxy to a request a paired device's session carried, live token or not", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const forwarded = new Request(
+      `http://127.0.0.1/api/canvas/network/${token ?? ""}/fetch?url=https%3A%2F%2Fapi.example.com%2F`,
+      { method: "GET", headers: { "sec-fetch-dest": "empty" } },
+    );
+    bindPrincipalRouteContext(forwarded, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "17171717-1717-4171-8171-171717171717" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    const response = await answer(route, forwarded);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ refused: "token-not-live" });
+    expect(connections()).toEqual([]);
+  });
+
+  it("cannot be turned on from a Canvas page: without a window credential nothing is set", async () => {
+    const { route, access } = networkRoute();
+    // What a page's script could send: its opaque origin and no credential.
+    const fromPage = await answer(
+      route,
+      new Request("http://127.0.0.1/api/canvas/network-access", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "null" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          kind: "set-canvas-network-access",
+          canvasId: String(canvasId),
+          allowed: true,
+        }),
+      }),
+    );
+    expect(fromPage.status).toBeGreaterThanOrEqual(400);
+    expect(access.isAllowed(canvasId)).toBe(false);
+    const malformed = await setSwitch(route, "yes");
+    expect(JSON.parse(await malformed.text())).toMatchObject({
+      kind: "canvas-network-access-refused",
+      reason: "malformed",
+    });
+    expect(access.isAllowed(canvasId)).toBe(false);
+  });
+
+  it("mints no token for a page that is not loaded by a browser frame", async () => {
+    const { route } = networkRoute();
+    await setSwitch(route, true);
+    // A request with no fetch destination and no proof of who sent it.
+    const page = await runPage(route, {});
+    expect(page.policy).toBe(BASE_POLICY);
+    expect(page.html).not.toContain("/api/canvas/network/");
+  });
+
+  describe("for the desktop app's prototype host", () => {
+    const secret = "desktop-bridge-secret-for-this-test";
+    const surfaceId = "9f3c2a10-5b7e-4c1d-8e2f-0a1b2c3d4e5f";
+    const relayBase = `octant-prototype://network/${surfaceId}/`;
+    const proof = { "x-octant-desktop-secret": secret, "x-octant-prototype-surface": surfaceId };
+    const runRequest = () =>
+      new Request("http://127.0.0.1/api/canvas/design-run", {
+        method: "POST",
+        headers: windowHeaders,
+        body: JSON.stringify({ canvasId: String(canvasId), versionId, blockId: "live" }),
+      });
+    const device = () => ({
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "17171717-1717-4171-8171-171717171717" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+
+    /** Runs the prototype as a local window and asks for its page as the desktop's main process does. */
+    async function desktopPage(
+      route: ReturnType<typeof createRevisionRoute>,
+      headers: Record<string, string>,
+      address = "http://127.0.0.1",
+    ) {
+      const ready = JSON.parse(await (await answer(route, runRequest())).text());
+      expect(ready.kind).toBe("ready");
+      const page = await answer(
+        route,
+        new Request(`${address}${ready.page as string}`, { method: "GET", headers }),
+      );
+      return {
+        policy: page.headers.get("content-security-policy") ?? "",
+        token: page.headers.get("x-octant-canvas-network-token"),
+        html: await page.text(),
+      };
+    }
+
+    it("mints a token for the desktop's main process and keeps it out of the page", async () => {
+      const { route, connections } = networkRoute({ desktopBridgeSecret: secret });
+      await setSwitch(route, true);
+      const page = await desktopPage(route, proof);
+      expect(page.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      // The page is told the prototype host's own address, never the host's or the token.
+      expect(page.policy).toBe(networkPolicy(relayBase));
+      expect(page.html).toContain(JSON.stringify(relayBase));
+      expect(page.html).not.toContain(page.token ?? "missing");
+      expect(page.html).not.toContain("/api/canvas/network/");
+      expect(page.policy).not.toContain("127.0.0.1");
+
+      // What the main process relays: the token's path and nothing else.
+      const relayed = await answer(
+        route,
+        new Request(
+          `http://127.0.0.1/api/canvas/network/${page.token ?? ""}/fetch?url=${encodeURIComponent("https://api.example.com/data")}`,
+          { method: "GET" },
+        ),
+      );
+      expect(relayed.status).toBe(200);
+      expect(connections().map((connection) => connection.url)).toEqual([
+        "https://api.example.com/data",
+      ]);
+    });
+
+    it("mints nothing without the desktop's proof, and the page keeps the policy that names nothing", async () => {
+      const { route } = networkRoute({ desktopBridgeSecret: secret });
+      await setSwitch(route, true);
+      const unproven: ReadonlyArray<Record<string, string>> = [
+        { "x-octant-prototype-surface": surfaceId },
+        { ...proof, "x-octant-desktop-secret": "another-secret" },
+        // A browser's script cannot send the secret unseen: it says where it is from.
+        { ...proof, origin: "http://127.0.0.1" },
+        { "x-octant-desktop-secret": secret },
+        { ...proof, "x-octant-prototype-surface": "not-a-surface" },
+        { ...proof, "x-octant-prototype-surface": `${surfaceId}/../x` },
+      ];
+      for (const headers of unproven) {
+        const page = await desktopPage(route, headers);
+        expect(page.token).toBeNull();
+        expect(page.policy).toBe(BASE_POLICY);
+        expect(page.html).not.toContain("octant-prototype://network/");
+      }
+      // The proof counts only on the loopback address the desktop reaches.
+      const elsewhere = await desktopPage(route, proof, "http://octant.example");
+      expect(elsewhere.token).toBeNull();
+      expect(elsewhere.policy).not.toContain("octant-prototype:");
+      expect(elsewhere.html).not.toContain("octant-prototype://network/");
+    });
+
+    it("mints nothing on a host no desktop is attached to", async () => {
+      const { route } = networkRoute();
+      await setSwitch(route, true);
+      const page = await desktopPage(route, proof);
+      expect(page.token).toBeNull();
+      expect(page.policy).toBe(BASE_POLICY);
+    });
+
+    it("mints nothing while the switch is off, or once it went off after the ticket", async () => {
+      const { route, access } = networkRoute({ desktopBridgeSecret: secret });
+      const off = await desktopPage(route, proof);
+      expect(off.token).toBeNull();
+      expect(off.policy).toBe(BASE_POLICY);
+
+      await setSwitch(route, true);
+      const ready = JSON.parse(await (await answer(route, runRequest())).text());
+      access.set(canvasId, false);
+      const late = await answer(
+        route,
+        new Request(`http://127.0.0.1${ready.page as string}`, { method: "GET", headers: proof }),
+      );
+      expect(late.headers.get("x-octant-canvas-network-token")).toBeNull();
+      expect(late.headers.get("content-security-policy")).toBe(BASE_POLICY);
+    });
+
+    it("mints nothing for a page a paired device asked for, whoever redeems its ticket", async () => {
+      const threadReadAuthority = createThreadReadAuthority({
+        chat: (id) => {
+          if (String(id) !== threadId) throw new Error("Chat thread was not found.");
+          return { projectId };
+        },
+        work: async () => undefined,
+        code: async () => undefined,
+      });
+      const { route } = networkRoute({
+        desktopBridgeSecret: secret,
+        threadReadAuthority,
+        activeContextResolver: async (readerId) =>
+          String(readerId) === String(windowId) ? { mode: "chat", projectId } : undefined,
+      });
+      await setSwitch(route, true);
+      // The device's ticket, redeemed with the desktop's own proof.
+      const asked = runRequest();
+      bindPrincipalRouteContext(asked, device());
+      const ready = JSON.parse(await (await answer(route, asked)).text());
+      expect(ready.kind).toBe("ready");
+      const redeemed = await answer(
+        route,
+        new Request(`http://127.0.0.1${ready.page as string}`, { method: "GET", headers: proof }),
+      );
+      expect(redeemed.headers.get("x-octant-canvas-network-token")).toBeNull();
+      expect(redeemed.headers.get("content-security-policy")).toBe(BASE_POLICY);
+
+      // A local window's ticket, redeemed by a request a device's session carried.
+      const local = JSON.parse(await (await answer(route, runRequest())).text());
+      const forwarded = new Request(`http://127.0.0.1${local.page as string}`, {
+        method: "GET",
+        headers: proof,
+      });
+      bindPrincipalRouteContext(forwarded, device());
+      const carried = await answer(route, forwarded);
+      expect(carried.headers.get("x-octant-canvas-network-token")).toBeNull();
+      expect(carried.headers.get("content-security-policy")).toBe(BASE_POLICY);
+    });
+
+    it("revokes the desktop page's token the moment the switch is turned off", async () => {
+      const { route, connections } = networkRoute({ desktopBridgeSecret: secret });
+      await setSwitch(route, true);
+      const { token } = await desktopPage(route, proof);
+      expect(token).not.toBeNull();
+      await setSwitch(route, false);
+      const refused = await answer(
+        route,
+        new Request(
+          `http://127.0.0.1/api/canvas/network/${token ?? ""}/fetch?url=https%3A%2F%2Fapi.example.com%2F`,
+          { method: "GET" },
+        ),
+      );
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toEqual({ refused: "token-not-live" });
+      expect(connections()).toEqual([]);
+    });
+  });
+
+  it("gives a thread's published page no proxy, whatever any Canvas's switch says", async () => {
+    const { route } = networkRoute({
+      findPublishedSnapshot: async () => ({
+        format: "html",
+        content: '<button onclick="add()">Add</button><script>function add() {}</script>',
+      }),
+    });
+    await setSwitch(route, true);
+    const run = await answer(
+      route,
+      new Request("http://127.0.0.1/api/canvas/published-snapshot-run", {
+        method: "POST",
+        headers: windowHeaders,
+        body: JSON.stringify({
+          mode: "work",
+          threadId: "abababab-abab-4bab-8bab-000000000901",
+          toolCallId: "tool-script",
+        }),
+      }),
+    );
+    const ready = JSON.parse(await run.text());
+    expect(ready.kind).toBe("ready");
+    const page = await answer(
+      route,
+      new Request(`http://127.0.0.1${ready.page as string}`, {
+        method: "GET",
+        headers: { "sec-fetch-dest": "iframe" },
+      }),
+    );
+    expect(page.headers.get("content-security-policy")).toBe(BASE_POLICY);
   });
 });

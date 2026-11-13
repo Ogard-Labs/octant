@@ -18,7 +18,7 @@ export interface HostStartupRefusal {
   readonly recovery?: HostStoreRecovery;
 }
 
-export type HostRecoveryAction = "rebuild" | "restore" | "retry" | "quit";
+export type HostRecoveryAction = "rebuild" | "restore" | "retry" | "quit" | "export";
 
 export interface HostRecoveryScreen {
   readonly heading: string;
@@ -28,7 +28,7 @@ export interface HostRecoveryScreen {
 }
 
 export interface HostRecoveryOutcome {
-  readonly status: "repaired" | "refused";
+  readonly status: "repaired" | "refused" | "saved";
   readonly message: string;
 }
 
@@ -219,7 +219,11 @@ export function hostRecoveryActionUrl(action: HostRecoveryAction): string {
 export function decodeHostRecoveryAction(url: string): HostRecoveryAction | undefined {
   if (!url.startsWith(RECOVERY_SCHEME)) return undefined;
   const action = url.slice(RECOVERY_SCHEME.length).replace(/^\/\//, "");
-  return action === "rebuild" || action === "restore" || action === "retry" || action === "quit"
+  return action === "rebuild" ||
+    action === "restore" ||
+    action === "retry" ||
+    action === "quit" ||
+    action === "export"
     ? action
     : undefined;
 }
@@ -229,11 +233,14 @@ const ACTION_LABELS: Readonly<Record<HostRecoveryAction, string>> = {
   restore: "Restore last backup…",
   retry: "Start Octant",
   quit: "Quit",
+  export: "Save support bundle…",
 };
 
 /**
  * A static document with no script: each action is a link the main process
- * intercepts, so the page itself can do nothing but ask.
+ * intercepts, so the page itself can do nothing but ask. Saving a support
+ * bundle is offered on every screen, after the screen's own actions: it reads
+ * and changes nothing in the store.
  */
 export function renderHostRecoveryDocument(
   screen: HostRecoveryScreen,
@@ -242,7 +249,7 @@ export function renderHostRecoveryDocument(
   const actions =
     state.busy === true
       ? `<p role="status">Working… This can take a minute on a large history.</p>`
-      : screen.actions
+      : [...screen.actions.filter((action) => action !== "export"), "export" as const]
           .map(
             (action, index) =>
               `<a class="button${index === 0 ? " primary" : ""}" href="${hostRecoveryActionUrl(action)}">${escapeHtml(ACTION_LABELS[action])}</a>`,

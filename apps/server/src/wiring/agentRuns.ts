@@ -557,6 +557,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "onAgentRunExecutionAccepted"
+    | "toolEffectLedger"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -737,6 +738,14 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   // the run rather than inherited from the parent thread at execution time.
   const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
     port: createAgentRunSessionRuntime({
+      // A run keeps one record under its own id, with its parent thread as
+      // the thread a purge finds it by. Whatever an earlier execution left
+      // open was read by the restart that cut it off, so it is closed here.
+      toolEffects: (run) => {
+        const record = { threadId: String(run.parentThreadId), turnId: String(run.id) };
+        deps.toolEffectLedger.supersede(record);
+        return deps.toolEffectLedger.forTurn(record);
+      },
       workingTimeLimitMs: () =>
         (agentRunSettingsStore.current().workingTimeLimitMinutes ??
           DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES) * 60_000,

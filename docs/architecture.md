@@ -582,7 +582,35 @@ starting again or quitting. Both repairs run the server's own offline store
 maintenance (`apps/server/dist/dbMaintenance.mjs` in the packaged app, the same
 code as the `db:*` scripts) under exclusive ownership, so the authority and
 integrity rules are the store's own. An unfinished local data removal offers
-neither repair. Starting again relaunches the app. See
+neither repair. Starting again relaunches the app. Every recovery screen also
+offers "Save support bundle…": the host's bundle route is unreachable while the
+host is down, so the desktop builds the same bundle layout itself from the two
+sources that live in files, the local crash records and the host's service log,
+marks every other section not available, and writes it owner-only to the place
+the person picks in the native save dialog. Nothing is journaled for that save,
+because the journal is what may have refused to open; nothing is sent.
+
+**Local crash records.** When the desktop-managed host exits without being
+asked to (the supervisor's unexpected exit, or an exit before it was ready),
+the desktop writes one owner-only JSON file to `crash-records/` in the host's
+data directory: the time, the process (`host`), how it ended (`exit code N`,
+`signal NAME`, or the host's refusal category), and its last output lines from
+the redacted stderr tail. Every string is redacted again on write and the home
+folder becomes `~`; the newest 20 records are kept. The desktop writes the
+record because a host that crashed cannot be trusted to. Records never leave
+the machine except inside a support bundle the person saves. Native crash dumps
+are not collected: they carry process memory no redaction can sweep. A host
+that no desktop watched (a background-service host, or the native Windows host,
+whose owned profile the desktop does not write into) keeps its own record at
+its next start: when `host-memory.json` shows the previous process ended
+without a clean stop and no record exists at or after that process's last
+reading, the host writes one with `stopped without a clean exit` and the last
+memory reading, through the same code on every platform. A record a watching
+desktop already wrote for that exit is reused, not doubled. The next start's
+"Octant stopped unexpectedly" notice names the record kept for that exit (how
+it ended and when) and says Save diagnostics includes it; host-control status
+carries it as `memory.previousStop.crashRecord`, with no path or output line.
+See
 [Persistence: startup repair](#persistence).
 
 **Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
@@ -1198,7 +1226,7 @@ document as a future version. Frames follow the
   use most, with no new dependency and no Mermaid renderer; a diagram still
   outside the translated subset stays a code block showing its raw source
   (maintainer decision, 2026-11-12, which replaces the earlier bundled-renderer
-  direction; not built yet: today the subset is the narrower one).
+  direction).
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
@@ -1233,11 +1261,28 @@ document as a future version. Frames follow the
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
   shipped. A design or prototype also has a per-Canvas "Allow network" switch
-  that only the person sets, off by default. The connection it gives runs
-  through a filtering egress proxy on the host that refuses loopback, private
-  ranges, link-local addresses and the Octant server; the proxy is built
-  first and the switch after it (maintainer decision, 2026-11-12; not built yet:
-  today neither exists and no running frame is given a connection).
+  that only the person sets, off by default and journaled (maintainer
+  decision, 2026-11-12; not built yet: a paired device is not offered the
+  switch, and today only a local window sets it). While it is on, a running page of that Canvas may ask
+  the host to fetch for it through token-bound proxy paths its page policy
+  names: a script's `GET`, a script's `POST` of a JSON body of at most
+  256 KiB, an image, and a font, and no WebSocket, media, or other method
+  (maintainer decision, 2026-11-13). The host fetches only `http` and `https`
+  addresses that resolve to public addresses, never loopback, a private,
+  link-local, or overlay range, or one of its own listeners, pins the resolved
+  address for the connection, judges every redirect again, sets every outgoing
+  header itself so that no cookie, credential, Octant header, or header the
+  page chose leaves, passes on an image or a font only when the response
+  declares that type, and bounds size, time, and rate per Canvas. The page's
+  token lives one hour and is renewed while the page is open, by the window
+  that ran it and by the page's ticket, never by the token (maintainer
+  decision, 2026-11-13). Turning the switch off revokes the token at once, and
+  no share, export, or public link carries it. In
+  the desktop app the prototype host keeps no route and no resolver: the
+  page asks an address of the host's private scheme, and the main process
+  relays that one question to the proxy path under a token the host minted
+  for the desktop bridge secret and the page never holds
+  ([Canvas: Allow network](design/canvas.md#allow-network)).
 - **A person can bring a page.** **Import HTML…** turns one HTML page a
   person chooses or pastes (for example, a page an AI assistant made) into a
   new Canvas holding one `document`-size `design`. It is a create in every
@@ -1313,9 +1358,9 @@ channel with actor attribution and the remote/headless fail-closed attach gate;
 an input whose delivery is unknown is reported `interrupted`, not `failed`, and an off-screen point or unsupported keyboard layout is refused,
 never clamped or guessed. Octant does not script Simulator.app, and an agent
 must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
-is input: a live Allow input grant covers it like a tap, whoever sends it
-(maintainer decision, 2026-11-12; not built yet: today it runs only when a
-person requests it). **Record screen** starts and stops a time-limited recording a person asked for;
+is input like a tap: a live Allow input grant or a one-shot approval covers
+it, whoever asks, and the agent's `octant_apple` tool offers it as
+`repair-input` (maintainer decision, 2026-11-13). **Record screen** starts and stops a time-limited recording a person asked for;
 the video is stored as evidence under the screenshot rules and starting is an
 effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
@@ -5149,7 +5194,8 @@ or .zip>` write the same files, built by one host command
   process state, sign-in kind, detected version, and capability support, never
   its name, address, models, or message), host log (the newest 200 lines with
   time, level, event, and message cut to 240 characters, without details),
-  recent activity (the newest 200 journal event names, sequences, and times
+  crash records (the newest 20 [local crash records](#process-topology): time,
+  process, how it ended, and the last output lines), recent activity (the newest 200 journal event names, sequences, and times
   from the journal, with the payload column never selected), confinement and
   guardrails (the default guardrail level and remembered-permission setting,
   Code threads counted per execution policy, the sandbox tools the host
@@ -5237,7 +5283,9 @@ or .zip>` write the same files, built by one host command
   with the reason in the restart notice, when: Settings › Code › Continue after
   restart is off; the thread's own switch is off (`restartContinuationOff`);
   any of its runtime work is `ambiguous` (a push or pull request step whose
-  outcome the restart left unknown); its own automatic continuation was cut
+  outcome the restart left unknown); the cut-off turn started a tool call
+  that may change something and nothing records that it finished (the
+  `uncertain-tool-call` hold, below); its own automatic continuation was cut
   off by a restart twice (the crash-loop guard counts per thread in the host
   store, keyed by the continuation it last started, and survives the restart
   it counts); its newest provider session on the same provider and model has
@@ -5253,9 +5301,114 @@ or .zip>` write the same files, built by one host command
   start keeps what it did as `restartRecovery` on the host control status (the
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
-  threads that window can open. Chat and Work turns are continued by the same
-  rule (Chat and Work restart recovery, below); subagent runs, coordinator
-  wakes and goal loops are not continued yet.
+  threads that window can open. A client decodes a hold reason it does not
+  know as `other` and still shows the host's own sentence for it, so a reason
+  a later host adds does not fail the status (maintainer decision,
+  2026-11-13). This protects clients built from now on. A client built before
+  it reads the reason as a closed list and refuses the whole status of a host
+  that reports an `uncertain-tool-call` hold, until that start's report is
+  replaced by the next one; the window a host serves is built with the host
+  and is not affected. Chat and Work turns are continued by the same
+  rule (Chat and Work restart recovery, below), and so are Work goal loops,
+  subagent runs (subagent restart recovery, below) and pending coordinator
+  wakes (coordinator wake restart recovery, below).
+
+  A restart cuts a turn off wherever it is, and a turn cut off inside a shell
+  command, an edit or an MCP call may or may not have changed something. The
+  host therefore records every tool call before it takes effect (maintainer
+  decision, 2026-11-12). `ToolEffectLedger` appends `tool-effect-intended@1`
+  before the call runs and `tool-effect-settled@1` (`succeeded` or `failed`; a
+  refused call is reported as an error result and reads `failed`) when its
+  outcome is known, on a `turn-tool-effects` aggregate keyed by the turn as
+  its mode names it: a Code operation, a Chat attempt, a Work turn request.
+  A frame carries the thread, the turn, the call id, the tool's name, its
+  effect class and who ran it, and never arguments, paths, commands or
+  results. Each append commits before the tool starts, so a call costs two
+  small frames and nothing else. The effect class fails closed: a tool is
+  `read-only` only when `READ_ONLY_TOOLS` declares it (`read`, `grep`, `glob`,
+  `web-fetch`, `web-search`, `context-remaining`, `journal-lookup`,
+  `octant_github`, `octant_past_threads` and the side chat's three file
+  tools), and every other tool is `side-effecting`. A family with one writing
+  operation is not declared, because the record never looks at arguments. A
+  call the journal refuses to record is not run. Nothing is rebuilt at start:
+  restart recovery reads only the cut-off turn's own aggregate, and a thread
+  whose turn left a `side-effecting` call with no settled frame is held with
+  the `uncertain-tool-call` reason and the tool's name ("Octant stopped while
+  the tool "shell" was running, so it may or may not have taken effect. Check
+  it, then continue."). A record the host cannot read holds the thread too. A
+  turn whose unsettled calls are all `read-only`, or that started none,
+  continues. The person's Resume or next message continues a held thread as
+  before, and the host never runs a call again. A thread's purge takes these
+  frames by the thread id they carry.
+
+  A call that was only waiting for its own approval when the host stopped
+  does not hold the thread: the turn continues and asks again (maintainer
+  decision, 2026-11-13). The first frame is still written before the tool is
+  entered, so a record always precedes any effect. When the tool then asks a
+  person, the approval service appends `tool-effect-awaiting-approval@1` for
+  the call, and when the person answers (allow, deny, expiry or cancel) it
+  appends `tool-effect-intended@1` again before the tool hears the answer; a
+  journal that refuses that second frame stops the call. Restart recovery
+  reads a call whose last frame is the awaiting one as a call that never ran.
+  Writing the first frame only after approval was rejected: the record cannot
+  know which tools will ask, so every tool would have to announce its own
+  effect and one that forgot would run unrecorded. This way a tool whose
+  approval service says nothing keeps today's hold. Built for the two
+  approvals asked before a call does anything: the harness's own tool
+  approvals (shell, edit, goal checks and the rest of
+  `NativeHarnessApprovalStore`) and a selected MCP server's tool approval.
+  Not built yet: Browser site, upload, download and sign-in prompts, routine
+  and memory proposals, image offers and a tool's question to the person keep
+  the first frame, so a call waiting on one of them still holds its thread (a
+  Browser prompt can follow a click that already happened, so it is not known
+  to precede every effect); and a runtime's own tool waiting on the runtime's
+  approval request still holds, because the request names no tool call and
+  the answer is sent from eleven places across the three modes.
+
+  What the record covers, by who runs the tool:
+
+  - Tools the host runs for a Chat, Work or Code turn (the harness's own
+    tools on key and endpoint providers, and Octant's app tools and selected
+    MCP servers' tools on every provider, including the runtimes that call
+    them back): the three turn runners record the call before they run it, so
+    a stop anywhere inside the call holds the thread, except while the call
+    waits for its own approval (above).
+  - A runtime's own tools (Codex, Claude Code, ACP agents, Pi, OpenCode): each
+    adapter reports `tool-start` and `tool-success` or `tool-failure`. The
+    host records the start when it reads it, always as `side-effecting`
+    because a runtime's tool name proves nothing, and the finish when it
+    reads that. A reported start with no finish holds the thread. A runtime
+    also reports a start for a call it hands to the host, under its own call
+    id and its own spelling of the tool, and the host already records that
+    call itself. Such a start is therefore not recorded (maintainer decision,
+    2026-11-13), so a read-only host tool never holds a thread through the
+    runtime's duplicate. It is recognized by name against the tools the turn
+    offers: the tool's own name (Codex, Pi), `mcp__octant__<tool>` (Claude
+    Code) and `octant-<16 hex>_<tool>` (OpenCode; this spelling is not
+    checked against a live OpenCode). Any other spelling stays a runtime
+    tool. Not built yet: an ACP agent titles its calls freely, so its start
+    for a host tool is still recorded as a runtime tool and can hold the
+    thread; and, not provable from what a runtime reports, a tool the runtime
+    started that the host had not read when it stopped leaves no record, and
+    that turn continues as before.
+  - A managed child agent run (maintainer decision, 2026-11-13): the tools
+    the host runs for the child, including a delegated Browser child's, and
+    the child runtime's own reported tools are recorded the same way on one
+    record per run, keyed by the run and carrying the parent thread's id. At
+    a start, a thread's cut-off turn is also held when a child run of that
+    thread which the same start found cut off left a `side-effecting` call
+    unfinished ("Octant stopped while a child agent's tool ..."). When a run
+    executes again, the calls its earlier execution left open are closed as
+    `superseded`, so one restart's record never holds a later one. The host's
+    own resume of a cut-off run (subagent restart recovery, below) reads the
+    run's record first: a run that left a `side-effecting` call unfinished,
+    or whose record cannot be read, is held with the same reason and stays
+    Interrupted for a person's Resume, whether or not its parent thread had a
+    turn running.
+  - Not built yet: a terminal-started Browser session and a saved Browser
+    flow's run call the Browser tool outside any turn or run, so there is no
+    record a restart would read, and they write none.
+
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5274,7 +5427,16 @@ or .zip>` write the same files, built by one host command
   ("Fixed.") never stands in for it. A comment record without that pull request
   or count, or one whose branch now carries a different pull request, is never
   judged against another pull request: it stays unconfirmed. An unconfirmed
-  update or merge stays unconfirmed.
+  update or merge cannot be told from an earlier one on GitHub, so the host
+  never settles it; the thread's board card offers Mark resolved instead. The
+  person checks GitHub and says it went through (`completed`), it did not
+  (`failed`), or just stops waiting (`interrupted`). That is the
+  `resolve-unconfirmed-step` operation: never gated, since it changes nothing
+  on GitHub, but accepted only from the person at a local window (an agent or
+  a paired device is refused), only for the thread's own still-unconfirmed
+  update or merge, after the same Project access check as any operation. The
+  runtime-work record and the operation result are journaled, and a repeat
+  on a step already settled is refused as stale.
   File, terminal, test, review, and local Git work, whose result is in the
   checkout, becomes `interrupted`.
 
@@ -5359,11 +5521,89 @@ ls-remote` against the thread's remote and the GitHub reads they already
   through the same blockers a person's Resume checks, because admission refuses
   a session still recovery-required); or admission refuses the send. Chat and
   Work keep no journaled push or pull
-  request step, so the uncertain-external-action hold reads nothing there; the
+  request step, so the uncertain-external-action hold reads nothing there. A
+  Chat answer or Work turn that left a tool call nobody saw finish is held with
+  the `uncertain-tool-call` reason exactly as a Code turn is (Code restart
+  recovery, above); for the rest the
   continuation message tells the agent to inspect before repeating. Queued
   messages follow the continuation under the same release as Code. A Chat
   attempt already waiting on a question or approval at the restart is retained
   as before, and answering it still settles it interrupted.
+
+  A Work goal loop is journaled frame by frame (started, each round's start,
+  what a running round has charged at most every five seconds, each round with
+  whether its spend was seen, paused, resumed, stopped, and each narrowed
+  ceiling) and every start rebuilds loops from those frames, so a restart
+  never widens a loop's ceiling or forgets its rounds. A round started and
+  never recorded is the one the restart cut off: the start records it as
+  `interrupted` and charges the goal the spend it last journaled (the last few
+  seconds may be missing; a round that journaled none reads as unreported
+  spend, so a token budget is not trusted on it). This settles every open
+  round, a paused or stopped loop's too. The goal keeps the newest round ids
+  it was charged for (`recentChargeIds`) and refuses a charge id it holds, so a
+  host that stops between charging a round and recording it charges that
+  round once however often it restarts. A loop the start finds
+  running then follows its thread's decision. When the restart cut off the
+  loop's round turn, the loop's next round is that thread's continuation,
+  behind the same holds and harness lift as a cut-off turn and in place of a
+  separate continuation turn, so the thread never gets two turns at once. A
+  loop found running with no cut-off turn continues unless the Work setting,
+  the thread's switch, a person's quit or Work being off holds it, and the
+  restart notice lists it either way. A loop whose rounds restarts cut off
+  three times in a row (the restart's own round and two continuations, the
+  same allowance as a cut-off turn's) waits with the `crash-loop` reason; the
+  count is read from the journaled rounds, so it survives the restart it
+  counts. A held loop is paused with `held-after-restart` ("Octant restarted
+  while this loop ran and did not continue it by itself"), journaled, and only
+  a person's Resume runs it again. A loop that continues starts its round
+  through the ordinary round path, where the budget, ceiling and authority
+  checks apply again.
+
+  Subagent restart recovery resumes the runs the start's reconciliation
+  interrupted (`restart-without-resumable-execution`: a run that was starting,
+  running or waiting on its provider; a run parked on its dependencies, a pool
+  decision or a usage limit keeps its wait). It runs after the three modes, so
+  a parent thread's own continuation is admitted first. Each run is resumed
+  once, as the host, through the ordinary run resume with the same message a
+  person's Resume sends; the resume reads the parent thread's live grant at
+  that moment and rechecks the saved conversation, the workspace, approvals
+  and capacity, and never starts a turn on the parent thread. A run is its own
+  provider session and the resume refuses a run that is no longer Interrupted,
+  so a run never has two executions at once. A run waits for its person
+  instead, still Interrupted and resumable only by a person's Resume, when its
+  parent mode's Continue after restart setting is off, its parent thread's own
+  switch is off, it left a tool call nobody saw finish (the
+  `uncertain-tool-call` hold, above, read before the resume closes the run's
+  record), a person quit Octant while it ran, the parent's mode is turned
+  off (the run resume does not read the mode switch, so it is checked here),
+  its own automatic continuation was cut off by a restart twice, or the resume
+  refuses it. The
+  crash-loop count shares the thread store under the run's own key and is
+  keyed by the version the host's resume moved the run to; the chain goes on
+  only while the run's latest journaled start is that resume, so a person's
+  later start begins a fresh count. The restart notice names each continued or
+  held run under its parent thread.
+
+  Coordinator wake restart recovery starts the wakes the previous host decided
+  but never started a turn for. Each wake is journaled on the woken thread's
+  `coordinator-wake` aggregate when it is decided (its id, cause, sender, hop,
+  and for a state notice only the worker change it was decided on) and again
+  when its turn starts or it is dropped or held, so a wake with no second frame
+  is open; purging the thread takes its wakes. The other pending notices stay
+  in memory, since the woken turn's roster reads every worker's state again.
+  It runs after Code restart recovery. Each thread's newest open wake is
+  started once, as the host, through the ordinary wake turn: the recipient's
+  switches and idleness are read as they are now, and the hourly bound charged
+  when the wake was decided is not charged again. A thread that is not idle
+  already has a turn (a person's or its own restart continuation), so its wake
+  is dropped rather than run beside it. A wake is held (journaled `held`, so no
+  later start runs it, and the thread's next turn is a person's) when Settings
+  › Code › Continue after restart or the thread's switch is off, a person quit
+  Octant, Code is turned off (wakes only start Code turns, and that path does
+  not read the mode switch), Code restart recovery held the same thread, or
+  its own start was cut
+  off by a restart twice (the crash-loop count sits in the thread store under
+  the wake's own key).
 
   A person who quits Octant while turns run chose to stop them, so the next
   start holds those threads instead of continuing them (maintainers decided on
@@ -6843,7 +7083,7 @@ occupancy precedes it) the window holds what the parts add up to, so the parts
 and the remainder always sum to the figure shown. The latest breakdown that was
 reported stands while a later turn is still running. Each category has one tone
 in the popover's bar and key and on the inspector's entries; Free space and
-Reserved have none ([DESIGN.md](../DESIGN.md), the context meter under "Shell and layout").
+Reserved have none ([context meter](design/thread-view.md#context-meter)).
 
 One operation contributes one request; a later report replaces its
 previous totals. Code conversation usage also preserves optional cache-read and cache-write
@@ -11164,10 +11404,28 @@ thirty-second export deadline apply; termination and revocation stop the owned
 process and abort its requests. Failure after possible external effects requires
 checking the destination before retrying; the host never retries automatically.
 
-Each completed export is a `canvas.export@1` journal event and is rebuilt by
-replay. When the destination was called but the journal could not take the
-record, the answer is `unrecorded` and carries the destination's outcome; it is
-never reported as a failed export. A target that passed activation is still reported honestly as
+Each approved export journals its intent (`canvas.export-intent@1`) before the
+destination is called, and its outcome (`canvas.export@1`) after; both are
+rebuilt by replay. When the intent cannot be journaled, nothing is sent and the
+answer is an `unavailable` refusal. When the destination was called but the
+journal could not take the outcome, the answer is `unrecorded` and carries the
+destination's outcome; it is never reported as a failed export. At startup,
+before any export is decided, the host settles every intent with no outcome as
+`unconfirmed`: a restart cut it off mid-delivery, the host cannot read an
+arbitrary destination back to learn whether it published, so it records
+neither success nor failure and never delivers it again. The Canvas's export
+offers list those exports, newest first and at most eight, and the export panel
+says each was not confirmed and asks the person to check the destination before
+exporting again. A later recorded export to the same destination retires the
+notice, and so does the person's Dismiss (`POST
+/api/canvas/export-notice-dismiss`), journaled as
+`canvas.export-notice-dismissed@1` and accepted only from a local window; a
+paired device's dismissal is refused, so a remote client cannot quietly clear
+the host's record of an uncertain publish. Exports journaled before intents
+existed replay as they were. In-app Canvas sharing records no separate intent:
+creating a share is a single journal append with nothing sent off the host
+and is idempotent on its snapshot id, so there is no window in which it can be
+half done. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`. A local target may describe the exact
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
@@ -13191,13 +13449,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
   approval offers (an app grant itself has no clock and lasts the thread),
   Claude's pre-tool grants, credential command
   requests, Browser upload and download permissions (which are not restored
-  after a restart), and server preview tunnels. A grant that is stored and
+  after a restart), Browser tool approvals, Browser session grants and
+  Browser credential use, and server preview tunnels. A deadline that
+  crosses to the desktop app crosses as time remaining, restated in the
+  desktop's wall time, and the desktop's own wall deadline stays its local
+  check; the server never compares one clock's deadline with the other's. A grant that is stored and
   must outlive a restart cannot use a process epoch and stays on wall time,
   stated in UTC: a paired device's registration expiry, and any stored
   `expiresAt` a later process reads back. Such a grant stays revocable by the
-  person at any time, which is what bounds it when the clock is wrong. Not
-  yet moved: Browser tool approvals, session grants and credential use read
-  wall time though they live in the process. Routine proposals and image
+  person at any time, which is what bounds it when the clock is wrong.
+  Routine proposals and image
   generation offers end on a timer alone; a timer is Node's monotonic clock,
   which on Linux does not count a suspend.
   _Why elapsed time is trusted._ On Linux `os.uptime()` reads `/proc/uptime`
@@ -17149,11 +17410,13 @@ documents its authority, privacy, and release boundaries):
   decision, 2026-11-12): projection-only damage rebuilds at startup, other
   refusals open the desktop recovery screen, and a default-off background host
   and open-at-login item keep the host available
-  ([process topology](#process-topology)). Not built yet: a local crash record
-  (Electron crash dumps kept on the device with upload off, added to a support
-  bundle only by choice, and named in the next start's notice), exporting a
-  support bundle from the recovery screen, and one-click restart of terminals,
-  dev servers and extensions a restart ended.
+  ([process topology](#process-topology)), the desktop keeps local crash
+  records (an unwatched host keeps its own at its next start), the next
+  start's notice names them, and the recovery screen saves a support bundle.
+  Not built yet: one-click reopening of a Browser session a restart ended.
+  Code thread and Project terminals, debug sessions and saved Project action
+  runs a restart ended are offered back through their ordinary start
+  ([Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the
   self-hostable reference app at `apps/share` in this repository. Ogard Labs
