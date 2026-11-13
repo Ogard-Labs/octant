@@ -40,19 +40,68 @@ const PATH_SHAPED = /^(?:\/|~(?:\/|$)|\$HOME(?:\/|$)|\$\{HOME\}(?:\/|$))/;
  * be judged; a relative path depends on a working directory the record does
  * not know. This decides what the record keeps and nothing else: the secret
  * guard still refuses or allows the call exactly as it did.
+ *
+ * A path may contain spaces (`~/Library/Application Support/...`), which the
+ * word split cuts apart, so each whole string value and each quote-aware shell
+ * word is judged as well as the plain words.
  */
 export function textNamesProtectedPath(
   text: string,
   protectedPath: (path: string) => boolean,
 ): boolean {
   let judged = 0;
-  for (const word of decodedStrings(text).split(/[\s"'`=,;:()[\]<>|&]+/)) {
-    if (!PATH_SHAPED.test(word)) continue;
-    if (protectedPath(word)) return true;
-    judged += 1;
-    if (judged >= MAX_JUDGED_PATHS) return false;
+  for (const value of decodedStrings(text)) {
+    const candidates = [
+      value.trim(),
+      ...shellWords(value),
+      ...value.split(/[\s"'`=,;:()[\]<>|&]+/),
+    ];
+    for (const word of candidates) {
+      if (!PATH_SHAPED.test(word)) continue;
+      if (protectedPath(word)) return true;
+      judged += 1;
+      if (judged >= MAX_JUDGED_PATHS) return false;
+    }
   }
   return false;
+}
+
+/**
+ * A command's words as a POSIX shell reads them: '...' and "..." keep their
+ * spaces, and a backslash keeps the next character. Only for judging paths;
+ * expansions are left as written.
+ */
+function shellWords(command: string): ReadonlyArray<string> {
+  const words: string[] = [];
+  let word = "";
+  let started = false;
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command.charAt(index);
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+      else if (character === "\\" && quote === '"' && index + 1 < command.length) {
+        index += 1;
+        word += command.charAt(index);
+      } else word += character;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+      started = true;
+    } else if (character === "\\" && index + 1 < command.length) {
+      index += 1;
+      word += command.charAt(index);
+      started = true;
+    } else if (/[\s;|&<>()]/.test(character)) {
+      if (started) words.push(word);
+      word = "";
+      started = false;
+    } else {
+      word += character;
+      started = true;
+    }
+  }
+  if (started) words.push(word);
+  return words;
 }
 
 /**
@@ -61,12 +110,12 @@ export function textNamesProtectedPath(
  * before it, so `cat ~/.docker/config.json` followed by a second line named
  * no protected file. Text that is not JSON is judged as it is.
  */
-function decodedStrings(text: string): string {
+function decodedStrings(text: string): ReadonlyArray<string> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return text;
+    return [text];
   }
   const strings: string[] = [];
   const pending: unknown[] = [parsed];
@@ -77,7 +126,7 @@ function decodedStrings(text: string): string {
     else if (typeof value === "object" && value !== null)
       pending.push(...Object.keys(value), ...Object.values(value));
   }
-  return strings.join("\n");
+  return strings;
 }
 
 /**

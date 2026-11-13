@@ -203,6 +203,29 @@ describe("textNamesProtectedPath", () => {
     }
   });
 
+  it("finds a protected file whose path contains spaces", () => {
+    const spaced = (path: string) =>
+      path === "/home/person/private credentials.json" ||
+      path === "~/Library/Application Support/Example/Cookies";
+    expect(
+      textNamesProtectedPath('{"file_path":"/home/person/private credentials.json"}', spaced),
+    ).toBe(true);
+    expect(
+      textNamesProtectedPath(
+        JSON.stringify({ path: "~/Library/Application Support/Example/Cookies" }),
+        spaced,
+      ),
+    ).toBe(true);
+    for (const command of [
+      "cat '/home/person/private credentials.json' | head",
+      'cat "~/Library/Application Support/Example/Cookies"',
+      "cat /home/person/private\\ credentials.json",
+    ]) {
+      expect(textNamesProtectedPath(command, spaced)).toBe(true);
+      expect(textNamesProtectedPath(JSON.stringify({ command }), spaced)).toBe(true);
+    }
+  });
+
   it("answers no for ordinary paths and for text that names no path", () => {
     expect(textNamesProtectedPath("cat /home/person/project/README.md", protectedPath)).toBe(false);
     expect(textNamesProtectedPath('{"query":"aws credentials"}', protectedPath)).toBe(false);
