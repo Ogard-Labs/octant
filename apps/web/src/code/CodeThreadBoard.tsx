@@ -50,6 +50,7 @@ import {
 } from "../threadBoard/threadBoardState";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -658,7 +659,7 @@ function UnconfirmedStepResolve(props: {
         >
           Just stop waiting
         </OctantButton>
-        {refusal === undefined ? null : <p role="alert">{refusal}</p>}
+        {refusal === undefined ? null : <OctantAlert tone="warning">{refusal}</OctantAlert>}
       </OctantPopover>
     </div>
   );
