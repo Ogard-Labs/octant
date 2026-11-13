@@ -604,9 +604,22 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           message: "Standalone skill discovery could not be refreshed.",
         });
       }
-      const scoped = await props.client.effectiveState({ scope });
+      // The scope's effective state only tells Settings whether the catalog
+      // is offline; the snapshot above is what Settings lists. One package
+      // the scope query refused used to blank the whole view, so a failed
+      // query keeps the list and says so.
+      let scoped: ExtensionEffectiveSnapshot | undefined;
+      try {
+        scoped = await props.client.effectiveState({ scope });
+      } catch {
+        if (epoch !== reloadEpoch.current) return;
+        setFailure({
+          category: "unavailable",
+          message: "Effective state could not be read. Installed packages are still shown.",
+        });
+      }
       if (epoch !== reloadEpoch.current) return;
-      if (scoped.catalogStatus === "offline") {
+      if (scoped?.catalogStatus === "offline") {
         setMarketplaceEntries([]);
         setPreview(undefined);
         setLocalPreview(undefined);
@@ -2022,8 +2035,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           <SettingsSection className="extensions-settings__section" title="Standalone skills">
             <div className="extensions-settings__body">
               <p className="extensions-settings__description">
-                Search skills.sh and npm packages that ship SKILL.md, preview, then install.
-                Installs start disabled — trust and enable them from Installed.
+                Search skills.sh and npm packages that ship SKILL.md, preview, then install. Choose
+                whether to trust and turn it on as you install it.
               </p>
               <div className="extensions-settings__search">
                 <OctantInput
@@ -2139,47 +2152,49 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                 <dd>{licenseLabel(skillPreview.license)}</dd>
                               </div>
                             </dl>
-                            <OctantButton
-                              variant="default"
-                              aria-label={
-                                skillPreviewAction === "current"
-                                  ? "Skill already installed"
+                            <div className="extensions-settings__preview-actions">
+                              <OctantButton
+                                variant="default"
+                                aria-label={
+                                  skillPreviewAction === "current"
+                                    ? "Skill already installed"
+                                    : skillPreviewAction === "update"
+                                      ? "Confirm skill update"
+                                      : "Confirm skill install"
+                                }
+                                disabled={installingSkill || skillPreviewAction === "current"}
+                                onClick={() => void confirmSkillInstall(skillPreview)}
+                                type="button"
+                              >
+                                {skillPreviewAction === "current"
+                                  ? "Already installed"
                                   : skillPreviewAction === "update"
-                                    ? "Confirm skill update"
-                                    : "Confirm skill install"
-                              }
-                              disabled={installingSkill || skillPreviewAction === "current"}
-                              onClick={() => void confirmSkillInstall(skillPreview)}
-                              type="button"
-                            >
-                              {skillPreviewAction === "current"
-                                ? "Already installed"
-                                : skillPreviewAction === "update"
-                                  ? "Confirm update"
-                                  : "Confirm install"}
-                            </OctantButton>
-                            {skillPreviewAction === "install" ? (
-                              <OctantButton
-                                variant="secondary"
-                                aria-label="Install and trust skill"
-                                disabled={installingSkill}
-                                onClick={() => void confirmSkillInstall(skillPreview, "trust")}
-                                type="button"
-                              >
-                                Install and trust
+                                    ? "Confirm update"
+                                    : "Confirm install"}
                               </OctantButton>
-                            ) : null}
-                            {skillPreviewAction === "install" ? (
-                              <OctantButton
-                                variant="secondary"
-                                aria-label="Install, trust and turn on skill"
-                                disabled={installingSkill}
-                                onClick={() => void confirmSkillInstall(skillPreview, "turn-on")}
-                                type="button"
-                              >
-                                Install, trust and turn on
-                              </OctantButton>
-                            ) : null}
+                              {skillPreviewAction === "install" ? (
+                                <OctantButton
+                                  variant="secondary"
+                                  aria-label="Install and trust skill"
+                                  disabled={installingSkill}
+                                  onClick={() => void confirmSkillInstall(skillPreview, "trust")}
+                                  type="button"
+                                >
+                                  Install and trust
+                                </OctantButton>
+                              ) : null}
+                              {skillPreviewAction === "install" ? (
+                                <OctantButton
+                                  variant="secondary"
+                                  aria-label="Install, trust and turn on skill"
+                                  disabled={installingSkill}
+                                  onClick={() => void confirmSkillInstall(skillPreview, "turn-on")}
+                                  type="button"
+                                >
+                                  Install, trust and turn on
+                                </OctantButton>
+                              ) : null}
+                            </div>
                           </div>
                         ) : null}
                       </li>

@@ -359,6 +359,17 @@ describe("ExtensionsSettingsView", () => {
     expect(screen.getByRole("status", { name: /effective/i })).toBeInTheDocument();
   });
 
+  it("still lists installed packages when the scope's effective state cannot be read", async () => {
+    const c = client();
+    c.effectiveState = vi.fn(async () => {
+      throw new Error("Package source is unavailable.");
+    });
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+    expect(screen.queryByText("Extensions are unavailable.")).not.toBeInTheDocument();
+  });
+
   it("hides uninstalled lifecycle tombstones from the Installed tab", async () => {
     const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
     const c = client({ snapshot });
@@ -1975,7 +1986,7 @@ describe("ExtensionsSettingsView", () => {
       "Follow the full frontend review checklist before changing code.",
     );
     expect(
-      screen.getByText(/Installs start disabled — trust and enable them from Installed\./),
+      screen.getByText(/Choose whether to trust and turn it on as you install it\./),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Install, trust and turn on skill" }),
