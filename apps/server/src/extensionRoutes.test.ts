@@ -488,7 +488,7 @@ describe("bounded authenticated extension routes", () => {
     );
     expect(remembered?.status).toBe(200);
     expect(remember).toHaveBeenCalledOnce();
-    expect(remember).toHaveBeenCalledWith(pairedDevice);
+    expect(remember).toHaveBeenCalledWith("tool", pairedDevice);
     await expect(call).resolves.toBe(true);
   });
 
