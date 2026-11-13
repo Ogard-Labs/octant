@@ -268,7 +268,13 @@ async function main(): Promise<void> {
   const interrupted = () => controller.abort();
   process.once("SIGTERM", interrupted);
   process.once("SIGINT", interrupted);
-  const timer = setTimeout(interrupted, 420_000);
+  // One bound for the whole run. A passing hosted run now takes about seven
+  // minutes (about 40 s of cold launch, some 45 observed stages of 5-10 s each,
+  // and the real 61 s listing-retry throttle). The earlier 420 s bound expired
+  // mid-stage on ordinary runs and was reported as a stage that was not
+  // observed. The step's own 25-minute timeout still applies above this.
+  const runBudgetMs = 720_000;
+  const timer = setTimeout(interrupted, runBudgetMs);
   let continuation = false;
   let verified = false;
   let cleanupVerified = false;
@@ -498,8 +504,8 @@ async function main(): Promise<void> {
         String.raw`
 const owner = Number(process.env.OCTANT_SMOKE_OWNER_PID);
 const group = Number(process.env.OCTANT_SMOKE_APP_PID);
-const deadline = Date.now() + 450000;
-if (!Number.isSafeInteger(owner) || owner < 2 || !Number.isSafeInteger(group) || group < 2) process.exit(1);
+const deadline = Date.now() + Number(process.env.OCTANT_SMOKE_WATCHDOG_MS);
+if (!Number.isFinite(deadline) || !Number.isSafeInteger(owner) || owner < 2 || !Number.isSafeInteger(group) || group < 2) process.exit(1);
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error?.code !== "ESRCH"; } };
 const signal = value => { try { process.kill(-group, value); } catch {} };
 const timer = setInterval(() => {
@@ -517,6 +523,8 @@ const timer = setInterval(() => {
           ...env,
           OCTANT_SMOKE_OWNER_PID: String(process.pid),
           OCTANT_SMOKE_APP_PID: String(ownPid),
+          // Outlives the run bound so the normal finally block stops the app first.
+          OCTANT_SMOKE_WATCHDOG_MS: String(runBudgetMs + 30_000),
         },
         stdio: "ignore",
       },
@@ -614,6 +622,9 @@ const timer = setInterval(() => {
       console.error(
         JSON.stringify({
           unobservedNativeStage: stage,
+          // True when the whole-run bound or a signal ended the wait, not the
+          // stage's own 60 s deadline: the window may never have been looked at.
+          runAborted: controller.signal.aborted,
           screenshot: join(artifacts, `${stage}.png`),
           observedRows: lastRows?.length ?? null,
           rows: lastRows?.slice(0, 120).map(bounded),
