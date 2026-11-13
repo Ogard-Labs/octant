@@ -207,7 +207,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     };
     const browserToolApprovalService = new BrowserToolApprovalService({
       uuid: randomUUID,
-      now: Date.now,
+      now: processAuthorityTime,
       authorityIsCurrent: (threadId, authority, windowId) => {
         const decodedThreadId = decodeBrowserThreadId(threadId);
         const current = browserAuthority.resolve(decodedThreadId, authority.mode);
@@ -416,7 +416,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         persistentOwnerEnabled()
           ? ((await browserRuntime.persistentOwner?.status()) ?? { status: "unavailable" })
           : { status: "disabled" },
-      now: Date.now,
+      now: processAuthorityTime,
       uuid: randomUUID,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       localWindows: () => windowAuthorityStore.listWindowIds(),
@@ -778,7 +778,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       metadata: async (item) =>
         (await credentialMetadataBroker?.browserMetadata?.(item)) ?? { status: "unavailable" },
       record: (record) => credentialUseJournal.record(record),
-      now: Date.now,
+      now: processAuthorityTime,
       uuid: randomUUID,
     });
     const browserExtensionService = new BrowserExtensionService({

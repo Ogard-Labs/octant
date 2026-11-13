@@ -33,7 +33,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 2       | 7            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 7         | 2       | 4            | 1                   |
-| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 4       | 3            | 0                   |
+| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 5       | 2            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 4       | 1            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **251**   | **137** | **109**      | **5**               |
+| **All areas**                                                                         | **251**   | **138** | **108**      | **5**               |
 
 ## Principles and hard lines
 
@@ -449,10 +449,9 @@ The desktop main process owns native windows, menus, the system keychain and all
 - The server listens on one canonical loopback endpoint, and every mutation goes through services that append to the journal.
 - A paired browser mounts the remote shell; the desktop's window-bound sidebar, dock and Settings are not served remotely.
 - Process-local approvals and grants expire on the process authority clock (wall time once at start, then suspend-aware elapsed time), so a wall clock set back cannot extend one, and a host restart discards them. A stored grant that must outlive a restart, such as a paired device's expiry, stays on wall time. No persisted local-authority epoch or wall-clock value may block local startup. Detail: [Security and authority, Which clock an expiry runs on](../architecture.md#security-and-authority).
-- Browser tool approvals, session grants and credential use are process-local but still read wall time (not built yet).
 - Shared product state is host-owned; window bounds, panes, focus, scroll and unsaved drafts stay client-context state. _Here only._
 
-Status: Partly built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
+Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 
 ### Local client context and loopback trust
 

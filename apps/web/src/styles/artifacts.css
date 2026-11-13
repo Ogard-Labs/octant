@@ -161,7 +161,7 @@
   min-width: 8rem;
   flex: 0 1 auto;
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -338,7 +338,7 @@
   overflow: hidden;
   color: var(--oct-fg);
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
