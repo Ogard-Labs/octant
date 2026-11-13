@@ -13,6 +13,7 @@ import {
   createBrowserCredentialUseService,
   type BrowserCredentialUseOptions,
 } from "./browserCredentialUseService";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const windowId = decodeWindowId(id(1));
@@ -31,6 +32,7 @@ function fixture(
     }>,
   ) => NonNullable<BrowserCredentialUseOptions["fill"]>,
   additionalOrigins: ReadonlyArray<string> = [],
+  clock?: () => number,
 ) {
   let now = Date.parse("2026-11-03T10:00:00Z");
   let sequence = 10;
@@ -56,7 +58,7 @@ function fixture(
     ...(fill === undefined ? {} : { fill: fill(readTarget) }),
     metadata: readMetadata,
     record,
-    now: () => now,
+    now: () => clock?.() ?? now,
     uuid: () => id(sequence++),
   });
   const review = () =>
@@ -486,6 +488,21 @@ describe("selected Browser login permission", () => {
     expect(await f.list()).toMatchObject({ kind: "browser-credential-grants", grants: [] });
     const restarted = fixture();
     expect(await restarted.list()).toMatchObject({ kind: "browser-credential-grants", grants: [] });
+  });
+
+  it("ends permission after eight hours of elapsed time even though the wall clock was set back", async () => {
+    let wallClockMs = Date.parse("2026-11-03T10:00:00Z");
+    let elapsedMs = 1_000;
+    const clock = new ProcessAuthorityClock({
+      wallClock: () => wallClockMs,
+      suspendAwareElapsedSource: () => elapsedMs,
+    });
+    const f = fixture(undefined, [], clock.now());
+    await f.allow(reviewId(await f.review()));
+    expect(await f.list()).toMatchObject({ grants: [expect.anything()] });
+    elapsedMs += 8 * 60 * 60_000;
+    wallClockMs -= 24 * 60 * 60_000;
+    expect(await f.list()).toMatchObject({ kind: "browser-credential-grants", grants: [] });
   });
 
   it("does not return a usable permission when relinking occurs during the final page check", async () => {
