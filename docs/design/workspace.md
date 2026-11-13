@@ -159,7 +159,7 @@ tool (its Computer card), under
 The window is mode-first: a persistent left sidebar headed by the Work and
 Code icon buttons (Work presents the Chat and Work domains together; see
 [architecture](../architecture.md#modes-chat-work-and-code)), optional count tiles, mode-aware destinations, Projects and
-threads, and settings (the sidebar's anatomy is in [DESIGN.md](../../DESIGN.md#shell-and-layout)); an
+threads, and settings (the sidebar's anatomy is in [Sidebar](#sidebar)); an
 integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
 never the navigation grammar.
@@ -876,7 +876,7 @@ rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
 
 Thread utilities live in the Right Utility Dock outside the split tree. The dock
 shows one open tool, or several together as tiles (at most two columns of three;
-[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the geometry and the tool
+[Tool tiles](#tool-tiles) owns the geometry and the tool
 buttons' menu). One tool at a time meant choosing between a simulator and the page it
 was testing, so a thread keeps, beside its open tools and the selected one, which
 tools are shown. A shown tile is live and stays mounted while it is shown;
@@ -1032,9 +1032,9 @@ task starts") and its body says so. That show or hide belongs to the draft and i
 never saved as the window's choice. Once that start screen has a Project, the dock's body holds the
 Project's quick tools (Terminal and Browser; a server Project's are its
 Terminal only); they never stand as a column
-beside the start screen ([DESIGN.md](../../DESIGN.md#welcome-and-composer)). An available empty dock opens on a stack of fact cards (Environment with
+beside the start screen ([Start screen: Welcome screen](start-screen.md#welcome-screen)). An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
-Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
+Outputs, Background tasks, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
 its header is an empty band as tall as the title rail, and the tools are opened
 from the title band's **tool row**. At 961px and wider the row sits before the
 bottom-panel and dock toggles: one
@@ -1427,7 +1427,7 @@ clicks, the wheel, and keys go to the desktop while it has focus, printable
 characters cross as typed text, and `Mod+Escape` moves focus out without
 sending anything. Closing the tab leaves the desktop running. The host owns
 authority, frames, and attribution under the slice 5 rules there.
-Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#shell-and-layout).
+Dock visibility and responsive presentation follow [Right dock and bottom panel](#right-dock-and-bottom-panel) and [DESIGN.md: Breakpoints](../../DESIGN.md#breakpoints).
 
 ### Routines
 
@@ -1502,7 +1502,7 @@ keeps completed history reachable. Chat admits Agents as its only dock tool;
 opening it does not expose Work or Code tools or the bottom panel. Provider-observed children carry an explicit
 observation-only label and no managed controls. Task-plan progress remains a
 separate disclosure. See
-[DESIGN.md](../../DESIGN.md#welcome-and-composer).
+[Thread view: Subagents in a thread](thread-view.md#subagents-in-a-thread).
 The Agents dock is a list and a page, and it shows and controls subagents
 without starting them: only the thread's agent starts one, through the Octant
 Harness `delegate` tool, and collects its result. The list has one title, then

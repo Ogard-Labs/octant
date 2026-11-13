@@ -1,6 +1,6 @@
 # Settings
 
-How Settings is organised and what its particular pages hold. The kit every Settings page is built from (page header, sections, rows, compact rows, saved state, destructive groups) is in [DESIGN.md: Settings layout](../../DESIGN.md#page-shell); provider catalog and model endpoint pages are in [Providers and model endpoints](model-endpoints.md).
+How Settings is organised and what its particular pages hold. The kit every Settings page is built from (page header, sections, rows, compact rows, saved state, destructive groups) is in [DESIGN.md: Settings layout](../../DESIGN.md#settings-layout); provider catalog and model endpoint pages are in [Providers and model endpoints](model-endpoints.md).
 
 ## Settings sheet
 

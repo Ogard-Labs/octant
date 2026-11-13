@@ -4,7 +4,7 @@ This is the detailed specification for what a Chat, Work, or Code start screen
 shows around its composer: the card area and Code's agent home. The rule set a
 contributor needs first is in
 [Workspace: start-screen cards](workspace.md#start-screen-cards); the question
-and the composer are in [DESIGN.md](../../DESIGN.md#welcome-and-composer).
+and the composer are in [DESIGN.md](../../DESIGN.md#composer-row).
 Update this specification with an approved change, following the
 [design workflow](README.md#changing-the-design).
 

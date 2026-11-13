@@ -1,6 +1,6 @@
 # Thread view
 
-How a thread reads in Chat, Work, and Code: the turn header, the transcript, what a turn shows of its work, the composer's thread-specific parts, and the controls that sit beside it. The shared composer shape and row are in [DESIGN.md: Composer row](../../DESIGN.md#welcome-and-composer); behavior of panes and tools is in [Workspace](workspace.md).
+How a thread reads in Chat, Work, and Code: the turn header, the transcript, what a turn shows of its work, the composer's thread-specific parts, and the controls that sit beside it. The shared composer shape and row are in [DESIGN.md: Composer row](../../DESIGN.md#composer-row); behavior of panes and tools is in [Workspace](workspace.md).
 
 ## Turn header
 
@@ -338,10 +338,10 @@ three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells wi
 1px gaps, lit in the same accent, whose last four columns thin out in steps (two
 thirds, a checker, a third, a stipple) so the fill dissolves at its leading edge.
 Neither animates, so reduced motion needs no variant. The row under the box
-([The row under the box](../../DESIGN.md#welcome-and-composer)) keeps its controls: the
+([The row under the box](../../DESIGN.md#composer-row)) keeps its controls: the
 approval mode is its shield icon alone, the model button names the model with a
 chosen effort in muted ink and no chevron, the microphone sits just before send,
-and send is the 28px icon button with an up arrow, with the control corner: the quiet secondary tile until there is something to send, then the accent primary (see [DESIGN.md: Composer row](../../DESIGN.md#welcome-and-composer)).
+and send is the 28px icon button with an up arrow, with the control corner: the quiet secondary tile until there is something to send, then the accent primary (see [DESIGN.md: Composer row](../../DESIGN.md#composer-row)).
 
 ## Composer behavior
 

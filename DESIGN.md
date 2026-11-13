@@ -8,7 +8,7 @@ public documentation, and marketing material. It holds three things:
    defined once.
 2. [Components](#components): one specification for each shared adapter in
    `apps/web/src/ui/base`.
-3. Patterns: arrangements that several screens share.
+3. [Patterns](#patterns): arrangements that several screens share.
 
 What one screen or tool shows and does lives in the topic file that owns it.
 This document is the system those files build with; they never define a
@@ -1575,7 +1575,252 @@ unless focus has already moved elsewhere. Neither draws anything.
 
 ## Patterns
 
-The pattern sections below are rewritten in the next change.
+### Menus
+
+**One menu row.** Every in-page pick-list (dropdown, context menu, select and
+combobox options, the model list, the mode menu, the Add tool menu) draws the
+same row from `ui/shadcn/menu-row.ts`: 28px tall (`--oct-menu-row-h`), 44px when
+it carries a second line (`--oct-menu-row-two-h`, an `oct-menu-detail` span), an
+8px inset (`--oct-menu-row-inset`) on a popup padded 4px (`--oct-menu-inset`), a
+16px icon column and an 8px gap (`--oct-menu-row-gap`), the words in the Menu
+option role (13/500), and a group label in the Navigation group label role
+(12/400, muted). A row's words therefore stand 36px from the popup's edge when it
+has an icon and 12px when it has none, in every menu. A menu where any row has an
+icon reserves the column for every row (`OctantMenuIconSlot`), so it never has two
+text edges; a menu with no icons keeps the words on the popup's own inset. The
+separator is one hairline as wide as the rows (4px in from the popup's edge, the
+same inset the rows have), never a negative margin. The command palette, the `#`
+and `/` typeaheads and the composer's picker rows take the same tokens. A row
+with a description under its label grows to two lines; no row is shorter than
+the height. The tokens are pixels on purpose: rem steps followed the interface
+size and gave one line of text a different height in every kind of menu. A
+feature sizes no row of its own. A choice is a check mark at the row's end and
+never a fill; a fill means only that the pointer or the keyboard is on the row.
+
+**Native menus.** In the desktop app, context menus and ordinary dropdown menus
+(including More, the account menu, action menus, plain select fields,
+Project and thread filters, and checkbox and radio choices) are the operating
+system's own menus, through the adapters. The OS owns their font, material,
+spacing, highlighting, submenu behavior, accessibility, and light and dark
+appearance; theme tokens do not repaint them. The account menu opens above its
+footer control and More beside its sidebar row. Activity › Custom range opens a date-range dialog. The existing action composition
+supplies labels, grouping, disabled and checked states, and nested actions.
+Native menus dismiss after a selection, including checkbox and radio changes;
+reopening reads the current state. Ordinary editable text and text selections
+receive the platform editing and copy menu. The Code editor and both diff sides
+use native editing and find actions that run through the existing editor
+commands. Browser clients keep the accessible Base UI menus. Native menus use
+macOS accessibility: verify their presentation and selection through native
+accessibility in an isolated desktop fixture; renderer keyboard and role checks
+cover the browser fallback. Searchable pickers and popovers with embedded
+controls stay renderer surfaces.
+
+#### Composer popups
+
+Every popup the composer opens (Project, base branch, checkout, Create from…,
+access, model) uses one recipe. The face is the popover fill with the overlay
+shadow and a 12px corner, a 6px inset, and it arrives and leaves with the shared
+[overlay motion](#motion). A search field is `.octant-popover-search`: a filled
+32px field with a leading 14px icon and no border; it takes focus as the popup
+opens, so it brightens rather than drawing the keyboard edge. Rows are
+`.octant-popover-option`: one line at the shared menu row height (28px), an icon,
+the name, and any detail (a folder, visibility, state) trailing in the meta ink
+and cut from the end. Group headings are `.octant-popover-group` (12px, medium,
+meta ink, sentence case) and status lines `.octant-popover-empty`. A control that
+acts on a field sits on the field's row ("Use repository", the refresh icon),
+never under it. A popup is capped to the room on the side it opens on; only its
+list scrolls, and the ways to add something (New Project from folder…, from
+GitHub) stay pinned under the list. The model picker anchors to the trigger's
+trailing edge, keeps its dimensions stable while filtering, and scrolls its model
+list internally. Its catalog filters wrap onto short rows so every catalog is visible (past three rows the block scrolls), and its level slider draws the whole track in ink, with the reading above it and both ends named below; the rest of the picker is in
+[Thread view: Model picker](docs/design/thread-view.md#model-picker).
+
+### Title band
+
+The title band, the window controls, the right dock head, and the bottom panel
+toolbar share one title rail (`--oct-title-rail-h`, 44px), on which a rail tab and
+a rail icon control sit on one centreline and the band's hairline meets the
+dock's. A control in the title band is one shape whatever it holds: 28px
+(`--oct-rail-button-h`) with the control corner, icon-only controls square, a
+label or a label with a chevron the same height. Open in is outlined, the one band
+control that keeps an edge, in the same 28px and control corner. The band's icon
+buttons stand 4px apart wherever the band shows a row of them (the window
+controls, the tool row, the sidebar's header actions), and the band keeps one
+inset at both ends, 8px, so Show sidebar is as far from the left edge as the last
+toggle is from the right. A slot a Project fills only sometimes (Open in, Project
+actions) takes no room and no gap while it is empty. The band's text starts on
+the thread column's edge ([Alignment](#alignment)). The tool row and the dock
+toggles are in
+[Workspace: Shell grid and tool row](docs/design/workspace.md#shell-grid-and-tool-row).
+
+**Native title bar.** Native Electron title-bar regions are a hard boundary.
+Interactive controls carry `window-no-drag` and render above the native drag
+target. Test title-bar buttons in the packaged or native surface, not only with
+React and jsdom. On macOS the desktop window keeps Electron's native frame and
+uses `titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
+Do not set a custom `trafficLightPosition`: Electron then resizes
+`NSTitlebarContainerView` to `buttonHeight + 2 * y`, and that native overlay eats
+title-row clicks. One explicit blank drag strip reaches the physical top edge
+after the traffic lights and, when the sidebar is collapsed, after the measured
+leading cluster. Pane tabs and window controls share the compact visual rail at a
+higher stacking layer; unused spans remain drag regions. Collapsed-sidebar Show
+sidebar and New thread actions reserve their own no-drag space after the same
+traffic-light width the sidebar uses. Packaged smoke checks both compact geometry
+and real native state transitions for Open in, Environment, bottom panel, right
+dock, and sidebar recovery.
+
+### One tile bar
+
+A tool hands its header controls up to its tile's bar and draws no header of its
+own, so a tiled tool has exactly one 32px bar: the tool's name, then the tool's
+controls, then Arrange and Close, on the bar's insets (12 leading, 8 trailing)
+with 4px between controls. Arrange and Close are 24px controls with one 14px
+glyph, centred on a whole pixel: the bar's hairline is drawn inside its 32px, not
+as a border that takes one off the controls' centreline.
+
+- _Navigation keeps its words._ A choice between a tool's views or places
+  (Review's Working tree, Local commits and History, Agents' List and Graph, the
+  Desktop's leases) is a word switch: a 28px tray of 24px segments, centred in the
+  bar (2px above and below), the pressed segment marked. Words are never replaced
+  by icons.
+- _Actions are icons._ An action everyone knows (Refresh, Back, Home, Screenshot,
+  Release) is a 24px icon button with a 14px glyph, a tooltip and an accessible
+  name. An action that opens a list of actions (a terminal's, a device's More) is
+  one such button with a menu. Status the tool says about itself (a test run's
+  state, a pull-request count, a device's state) is quiet text after the name.
+- _The bar folds in a fixed order._ When the controls do not fit beside the name
+  at the tile's width, each word switch first becomes one control showing the
+  current view's name with a menu of the views, so the current place is always
+  readable in words; then the actions fold into one **More <tool> actions** menu;
+  a control the tool draws itself (Canvas's version popover and menu) moves to the
+  one secondary row under the bar when even the folded bar cannot hold it; the
+  tool's name is cut last. Status text (a count, a device's state with its mark)
+  never folds, and its full text is its tooltip. A cue a person must be able to
+  read (View only, a billed Desktop's provider and place) is never cut to an
+  ellipsis: when the bar cannot hold it beside the tool's name even with the
+  actions folded, it moves, without being drawn again, to the secondary row, which
+  is inside the same toolbar and exists only while something has moved to it. It
+  follows the bar's actions in the page, so Tab, the arrow keys and the eye meet
+  the controls in the same order. The row wraps onto further 32px lines when its
+  contents are wider than the bar, and the bar reserves the height it has; a cue
+  has no cap, no ellipsis and does not shrink. The bar measures a control the tool
+  draws itself as it is drawn, not by a declared width, and reads its own insets.
+  The steps are decided from the bar's width, the name's natural width and the
+  words' natural width, never from the folded controls, so the bar cannot flip
+  between two states. At the 280px dock minimum Review's switch is already the
+  named control. A named control stops at 16em with an ellipsis and its full name
+  as the tooltip. The controls stand in one labelled toolbar with arrow-key
+  movement; Alt, Meta, Ctrl and Shift with an arrow key are left to the browser. A
+  menu returns focus to its control after an action.
+- _A secondary row is for content, and there is at most one._ A field or path the
+  tool shows to be read or typed into (Files' filter, Pull requests' search,
+  Document's path, Side Chat's "About" line) is content, not chrome: it keeps one
+  32px row under the bar, on the bar's insets and hairline, and the tool's first
+  content text stands on the bar's 12px text edge. Anything that is a control
+  goes in the bar.
+- _A tool alone keeps no tile bar_: the title band's tool row names it. Its
+  controls stand in one row of the bar's height, insets and hairline, holding
+  only them, and a tool without controls has no row. Where the tool has a content
+  field as well (Files' filter and Refresh, Pull requests' search and count), the
+  field and the action share that one row.
+- _The bottom panel follows the same rules._ A tool's controls stand in the
+  panel's bar between the tool tabs and Hide, as 24px controls with 14px glyphs,
+  4px apart, ending on the 8px end inset, and fold the same way. The panel's bar
+  stays the 44px band the tabs stand in; only the controls and insets are the
+  tile bar's. The bottom panel has no secondary row, so a control the tool draws
+  itself, or a cue, scrolls within its own box, which takes focus so a keyboard
+  can scroll it, with Hide beside it.
+- _A control is never a drag handle._ Each carries `window-no-drag`, and a tool's
+  controls come after its name in the keyboard order, before Arrange and Close.
+
+### Alignment
+
+One value does one job, so no edge or gap has to be explained. Each of these was
+measured off by a pixel or more in a render before it became a rule.
+
+- _The shell runs on one grid_, named by `--oct-title-rail-h`,
+  `--oct-rail-tab-h`, `--oct-rail-button-h`, `--oct-nav-head-h`,
+  `--oct-nav-row-h`, and `--oct-nav-inset` in `octant.css`. The sidebar's header
+  row is its part of the title rail, so its controls share the window controls'
+  centreline; below it the sidebar runs navigation, Project, and thread rows at
+  the nav row height down to a 44px account row (`--oct-nav-head-h`), with every
+  leading icon on the nav inset (12px) and its section labels at 12px in the meta
+  ink with a 20px gap above, so a label never reads as one more row. A thread row
+  that carries a facts line is two lines of type and takes 8px above and below
+  them: 8 + an 18px title line + 1 + a 17px facts line + 8 is 52px, and a row
+  stands 54px from the next with the list's 2px gap.
+- _Hover-only actions take no width_ (add, more, pin, archive, and a tab's pin
+  and close) until their row is hovered or focused. A section heading's add and
+  more controls are the exception: the list's view and filter controls share that
+  row, so they keep their width while hidden and only fade in, and nothing beside
+  them moves.
+- _The workspace and Settings share the saved sidebar width_, 280px by default
+  (wide enough to read a thread's title rather than guess it); narrow Settings
+  layouts keep their responsive rail clamp or drawer. The workspace sidebar
+  resizes.
+- _The icon rail's face is its button_ (32px in the column, 2px apart, the
+  button's `rail` variant), and the first face is centred on the title rail's
+  centreline, so it stands level with the band's controls beside it (6px down in
+  the 44px rail).
+- _A dock never clips._ The dock's own bar holds the same 8px at both ends at
+  every width, 280px and up, and reserves nothing for the title band's controls:
+  the tool row lives in the band, a wide dock's bar is an empty spacer under it,
+  and a narrow dock is a dialog that stands away from the band.
+- _A card's inset is exactly 16px_ (a Settings card draws its edge as an outline
+  inside its box, not as a border) and a dock card's title and its rows stand on
+  one edge: a title that is a button has no border, and a row's mark, whether an
+  icon or a dot, takes one 14px slot, so every name starts on one column.
+- _Rows are whole pixels._ A row whose height is the sum of its lines sets them
+  from the role leadings rounded to a pixel: a Settings row, a thread row in the
+  sidebar (two lines, 52px) and a dialog's paragraph. The roles keep their sizes.
+- _The composer's columns are the same in every mode._ The row under the box
+  starts on the box's inset, so its first control stands under attach in Chat,
+  Work and Code alike (an empty leading group takes no gap). The prompt's line is
+  the transcript size times the body leading, rounded to the nearest even pixel
+  (`--oct-composer-line`), so the 28px controls centre on whole pixels and the
+  one-line box is 44px at the default 13px (46px at 14px, 48px at 16px).
+- _A foot ends where the rows above it end._ The account row's chevron stands on
+  the navigation inset (12px), the edge a thread's status mark ends on.
+- _At a phone's width_ the start screen's composer stands the panel's 20px from
+  each edge, and so do a thread's composer and its text column. The panel is
+  already padded 20px at 680px and below, so the thread's gutter token
+  (`--oct-thread-gutter`, 40px for the two sides) is 0 there, and the column and
+  composer take the panel's width: 390, 430 and 680px all show 20px. Above 680px
+  nothing changes.
+- _The title's text stands on the thread column's edge._ The title band's text
+  starts where the transcript's column starts, at the larger of a 20px gutter and
+  half of the pane less the thread measure, so a centred, narrower column carries
+  the title with it. What could precede the title (the environment mark, the
+  pull-request chip) follows it, because the 20px gutter cannot hold a 20px mark;
+  with content tabs open there is no title and they lead. The grip's own 4px
+  padding and 1px border are taken off the start so the text, not the grip's
+  hover fill, stands on the edge. Where the sidebar is collapsed the title clears
+  the window controls instead (the larger of their width and the column's edge).
+  With a Project step in the breadcrumb ("Project / title"), the breadcrumb starts
+  on the edge and the title follows its slash.
+- _Trays._ A segment in a tray is 24px (`--oct-tray-segment-h`) inside 2px of
+  padding, so every tray is 28px: the mode switch in the sidebar's header, the
+  thread-list switch under it and the composer's Work and Code switch alike. A
+  tray's inner corner stays the tray's corner less its padding, never under 2px.
+- _The account row's avatar and the Projects toolbar's folder sit on the icon
+  column._ The 20px avatar is centred on the centre line of the 16px navigation
+  icons (the 12px inset plus half an icon), not left-aligned with them, and the
+  Projects toolbar's first button is centred on the same line so its 16px folder
+  starts where the rows' glyphs do.
+- _Settings has one rhythm._ The page's band takes the page's 32px gutter at both
+  ends (the close button ends where the content ends), sections are 24px apart,
+  the page ends 48px under its last section, and a section label and a section
+  note each leave 12px under them (a label that carries a note has 12px between
+  them too).
+- _One hairline._ A 1px dividing line or a quiet control outline on the title
+  band, the thread's disclosures, the sidebar's tiles and the icon rail is
+  `--oct-hairline` (10% ink): the environment mark's edge, the divider between a
+  thread's tool rows, the rail's count badge and divider, and a count tile's edge.
+  A deliberately stronger edge stays: a field's border, a focus edge, a status
+  tint, and a Project tile's initial (22%, 40% on hover), which is an identity
+  mark rather than a divider.
+- _The rule beside reasoning_ is 1px in `--octant-border-strong`, not a 2px bar:
+  the hairline measured about 1.2:1 and was too faint to find.
 
 ### Page shell
 
@@ -1592,764 +1837,397 @@ Surface (reading measure 880px, or wide for boards)
   SurfaceLoading  the page in outline while it loads: a title bar and rows
 ```
 
-A destination that is still loading shows its own outline (`SurfaceLoading`):
-a skeleton bar where the title will be and a few rows under it, in the frame
-the page itself draws in, so nothing changes place when the page arrives. A
-line of text in the middle of the pane ("Opening Inbox…") gave way to a title
-in the corner, and the pane jumped. The words stay in a `status` region for
-assistive technology and are not drawn; the bars are hidden from it. The
-skeleton's sheen stops under reduced motion, from the system or from the
-setting, and the shape stays. A page's own first read of its data keeps the
-state that page already draws.
-
-The header is a window toolbar, not a page heading: one 40px row at the Settings
-page title's size (`oct-page-title`, 14px, weight 600). The sidebar row already
-named the page, so the header does not describe it. It holds Back, the title,
-and actions at the trailing edge: a labelled secondary button for the page's one
-creation action ("Add Project", "New artifact") or a Refresh. Its one line of
-detail, in the meta ink on the title's line, is only for a fact that changes and
-that a person needs: a count ("3 finished threads"), a time zone. A count
-belongs there, never in the title. A sentence about what the page is for is not
-detail. Filters, including a single Project picker, sit in the toolbar under the
-header, never among the actions, and actions that do not fit wrap to a second
-row rather than squeezing the title.
-
-The header stays in place while the body scrolls under it. At rest it has no fill,
-so the page's ground runs unbroken behind the title; once a row passes beneath it
-takes the opaque workspace colour, under Glass too, so a row never reads through. The page's scroller
-stops at the title band, so a row never comes out above the header.
-
-A page with nothing on it is the empty state alone under that header, centred
-in the room left: no hero and no explanation around it. A page empty state
-carries the destination's own sidebar icon at 20px, and its next step (Clear
-filters, Add an image profile) is the outline button; a page whose next step
-lives in Settings names the page by its rail label. Search, filters and tabs
-show only once there is something to search or filter, and a chosen filter stays
-as the way out of its own empty result.
+The header is a window toolbar, not a page heading: one 40px row in the page
+title role (`oct-page-title`, 14/600). The sidebar row already named the page, so
+the header does not describe it. It holds Back, the title, and actions at the
+trailing edge: a labelled secondary button for the page's one creation action
+("Add Project", "New artifact") or a Refresh. Its one line of detail, in the meta
+ink on the title's line, is only for a fact that changes and that a person needs:
+a count ("3 finished threads"), a time zone. A count belongs there, never in the
+title. A sentence about what the page is for is not detail. Filters, including a
+single Project picker, sit in the toolbar under the header, never among the
+actions, and actions that do not fit wrap to a second row rather than squeezing
+the title. The header stays in place while the body scrolls under it. At rest it
+has no fill, so the page's ground runs unbroken behind the title; once a row
+passes beneath it takes the opaque workspace colour, under Glass too, so a row
+never reads through. The page's scroller stops at the title band, so a row never
+comes out above the header.
 
 Leaving a reader route is always the header's Back: a 28px ghost icon control at
-the leading edge, its glyph on the content's left edge, named "Back to
-workspace" for assistive technology and as its tooltip. A press shows in the
-fill; the control neither sinks nor shrinks. The destination pages the sidebar
-and its More menu reach (Inbox, Board, Issues, Linear, Pull requests, Projects,
-Agents, Automations, Artifacts, Image generator, Archive, To review) share one
-frame: the wide measure, so Back, the title, and the actions sit on the same left
-and right edges from page to page. A list there runs the frame's width; a board's
-columns may use all of it.
-Every Settings page is built from one kit, in `settings/primitives.tsx`:
+the leading edge, its glyph on the content's left edge, named "Back to workspace"
+for assistive technology and as its tooltip. A press shows in the fill; the
+control neither sinks nor shrinks. The destination pages the sidebar and its More
+menu reach (Inbox, Board, Issues, Linear, Pull requests, Projects, Agents,
+Automations, Artifacts, Image generator, Archive, To review) share one frame: the
+wide measure, so Back, the title, and the actions sit on the same left and right
+edges from page to page. A list there runs the frame's width; a board's columns
+may use all of it. Settings is the same shell with a 920px measure and its own
+navigation rail, which names each group of pages with a quiet label and draws no
+hairline between groups ([Settings layout](#settings-layout)). Rows in Settings
+are `SettingRow`; rows everywhere else are `surface-row`. Both draw the same
+hairline.
+
+A page with nothing on it is the empty state alone under that header, centred in
+the room left: no hero and no explanation around it. A page empty state carries
+the destination's own sidebar icon at 20px, and its next step (Clear filters, Add
+an image profile) is the outline button; a page whose next step lives in Settings
+names the page by its rail label. Search, filters and tabs show only once there
+is something to search or filter, and a chosen filter stays as the way out of its
+own empty result.
+
+### Settings layout
+
+Every Settings page is built from one kit, in `settings/primitives.tsx`. What
+Settings holds, its groups and pages, its sheet, and its search are in
+[Settings](docs/design/settings.md).
 
 - **Page header.** Compact, as in a preference window: the selected rail row
-  already names the page, and search is always in view. There is no
-  breadcrumb above it and no icon tile. The page title is the h1, the only
-  heading that names the page, in the page title role every destination uses
-  (`.oct-page-title`: the section-label scale, 14px, weight 600, primary ink).
-  Under it sits at most one line of
-  description in the secondary ink: a longer one ends in an ellipsis with its
-  full text as the tooltip, and the page scope follows outside the ellipsis.
-  An optional ghost action sits at the far edge (Appearance's "Reset to
-  default"). A sub-page (a Harness endpoint, a Provider catalog entry) hides
-  the page header and brings its own heading and Back control.
-- **On this page.** A page with four sections or more shows one row of plain
-  text links to them under the header, in the secondary ink; links that do not
-  fit wrap onto a second text line rather than hiding past the edge. A page
-  with fewer shows none. They are links,
-  not headings, so the page's heading outline is unchanged. Sections register
-  themselves with the shell, so one that mounts late joins the row and the row
-  never names one that is not drawn.
+  already names the page, and search is always in view. There is no breadcrumb
+  above it and no icon tile. The page title is the `h1`, the only heading that
+  names the page, in the page title role every destination uses
+  (`.oct-page-title`, 14/600, primary ink). Under it sits at most one line of
+  description in the secondary ink: a longer one ends in an ellipsis with its full
+  text as the tooltip, and the page scope follows outside the ellipsis. An
+  optional ghost action sits at the far edge (Appearance's "Reset to default"). A
+  sub-page (a Harness endpoint, a Provider catalog entry) hides the page header
+  and brings its own heading and Back control. A page names its scope once, under
+  its title, and a row names its own only when it differs.
+- **On this page.** A page with four sections or more shows one row of plain text
+  links to them under the header, in the secondary ink; links that do not fit
+  wrap onto a second text line rather than hiding past the edge. A page with fewer
+  shows none. They are links, not headings, so the page's heading outline is
+  unchanged. Sections register themselves with the shell, so one that mounts late
+  joins the row and the row never names one that is not drawn.
+- **Section.** A section label in the Section label role (14/600, secondary ink),
+  an optional one-line description in the secondary ink below it, then one
+  grouped card: `--oct-radius-md`, the raised card's fill
+  (`--oct-settings-card-fill`) and `--octant-shadow-sm`, which carries the edge,
+  with a clear 1px outline inside the box that forced colours and increased
+  contrast draw. The card never clips: a section keeps `overflow: visible` because
+  its rows hold menus and popovers, so the first and last row round themselves
+  instead. Rows are divided by a hairline inset 16px from the card's edges, and
+  everything inside takes the card's 16px inset, including content that is not a
+  row. A section label may carry ghost actions that act on the whole section on
+  its own line; a primary never lives in a section head.
+- **Row.** At least 52px tall with a 12px by 16px inset: a 14px row label and a
+  one-sentence 13px detail on the left, the control at the right edge. A compound
+  editor stacks its control under the label. Single-line controls stay 28px tall
+  (`--oct-settings-control-height`). Labels and descriptions align left, controls
+  align right.
 - **Compact row.** A long list (more than a handful of items: protected paths,
   registered servers, the Library's items) is drawn as one line per item, 36px
-  tall and the same height all down the list, with no description: the name,
-  a short state in the meta ink, and the one main control at the trailing
-  edge (`SettingsCompactRow`). What the item guards or may be asked to do
-  stays on the closed line, cut to one line with the full text in the detail:
-  a protected group's paths ("Protected · ~/.ssh/id_*, …"), a server's profile
-  and deploy-command count ("Operate · 3 deploy commands"). A list whose meta
-  names a source that must not be cut off (remembered tool approvals) lets it
-  wrap instead. The
-  name is a button with `aria-expanded` that opens the row's own detail
-  (paths, permissions, a longer sentence, secondary actions) in place; focus
-  stays on it. A row that awaits a decision (a protection removed, a server
-  that is not connecting, an item awaiting trust) leads its list and is drawn
-  in the warning ink. The state is on the line, never only in the detail: a
+  tall and the same height all down the list, with no description: the name, a
+  short state in the meta ink, and the one main control at the trailing edge
+  (`SettingsCompactRow`). What the item guards or may be asked to do stays on the
+  closed line, cut to one line with the full text in the detail: a protected
+  group's paths ("Protected · ~/.ssh/id_*, …"), a server's profile and
+  deploy-command count ("Operate · 3 deploy commands"). A list whose meta names a
+  source that must not be cut off (remembered tool approvals) lets it wrap
+  instead. The name is a button with `aria-expanded` that opens the row's own
+  detail (paths, permissions, a longer sentence, secondary actions) in place;
+  focus stays on it. A row that awaits a decision (a protection removed, a server
+  that is not connecting, an item awaiting trust) leads its list and is drawn in
+  the warning ink. The state is on the line, never only in the detail: a
   switched-on, trusted or protected item reads as such closed.
 - **List head and cap.** A list over ten items has its filter field and the
   counts at its head (the Library's search, kind counts and group counts) and
-  shows its first eight with "Show all N", but only for items not installed
-  (the catalog and what was found): what a person has installed, switched on or
-  off, is never capped, and items that await a decision lead.
+  shows its first eight with "Show all N", but only for items not installed (the
+  catalog and what was found): what a person has installed, switched on or off,
+  is never capped, and items that await a decision lead.
 - **Collapsed section.** Only reference material or an empty section folds
   (`collapse` on `SettingsSection`): its label becomes a button with
-  `aria-expanded` and the closed line says what it holds ("None remembered",
-  "2 refused, waiting for a decision"). Anything that sets what an agent may
-  do (a switch, a trusted place, a protection) stays open as a row, and a
-  section holding a remembered approval, a refusal or a removed protection
-  starts open. A deep link, a search result or an "On this page" link opens
-  the fold that holds its target, then scrolls and focuses.
-- **Section.** A 14px label in medium weight, an optional one-line
-  description in the secondary ink below it, then one grouped card: the
-  `--oct-radius-md` card radius, the raised card's fill (`--octant-card`) and
-  its shadow (`--octant-shadow-xs`), which carries the edge. The
-  card never clips: a section keeps `overflow: visible` because its rows hold
-  menus and popovers, so the first and last row round themselves instead.
-  Rows are divided by a hairline inset 16px from the card's edges. A section
-  label may carry ghost actions that act on the whole section on its own
-  line; a primary never lives in a section head.
-- **Row.** At least 52px tall with a 12px by 16px inset: a 14px row label and
-  a one-sentence 13px detail on the left, the control at the right edge. A
-  compound editor stacks its control under the label. Single-line controls
-  stay 28px tall.
-- **Saved.** Settings save as you change them. A slot of fixed width at the
-  right of the top rail shows a check and "Saved" for about two seconds once
-  a change resolves (a shell setting or a theme write), and holds its place
-  when empty so nothing shifts. A host that refuses a change shows nothing.
-  A Save button exists only for compound forms: a provider's or model
-  endpoint's connection details and a sync bucket's connection details. A
+  `aria-expanded` and the closed line says what it holds ("None remembered", "2
+  refused, waiting for a decision"). Anything that sets what an agent may do (a
+  switch, a trusted place, a protection) stays open as a row, and a section
+  holding a remembered approval, a refusal or a removed protection starts open. A
+  deep link, a search result or an "On this page" link opens the fold that holds
+  its target, then scrolls and focuses.
+- **Disclosure.** A row's "more" (a custom font stack, network details, what an
+  update check sends) sits behind one `.settings-disclosure` recipe: a 12px
+  summary with the app's chevron, never the browser's marker.
+- **Saved.** Settings save as you change them. A slot of fixed width at the right
+  of the top rail shows a check and "Saved" for about two seconds once a change
+  resolves (a shell setting or a theme write), and holds its place when empty so
+  nothing shifts. A host that refuses a change shows nothing. A Save button exists
+  only for compound forms: a provider's or model endpoint's connection details and
+  a sync bucket's connection details; it keeps a contextual accessible name. A
   host setting that can be changed elsewhere (the harness model roles) is sent
-  with the version it was read at; a refusal says it changed elsewhere,
-  inline, and reloads.
-- **Said before the switch.** A switch that sends something off this
-  computer carries the fact a person must know as its section's description,
-  above the switch and named as its description, and stays disabled until it
-  has something to send to. Sync is the case: it says the storage provider can
-  read the files, which are signed but not encrypted.
+  with the version it was read at; a refusal says it changed elsewhere, inline,
+  and reloads.
+- **Said before the switch.** A switch that sends something off this computer
+  carries the fact a person must know as its section's description, above the
+  switch and named as its description, and stays disabled until it has something
+  to send to. Sync is the case: it says the storage provider can read the files,
+  which are signed but not encrypted.
 - **Destructive.** A page's destructive group (logging out of GitHub,
-  disconnecting Linear, purging thread history, revoking paired devices) is
-  its own section, last on the page, whose card holds the destructive row
-  with the destructive button variant. The danger is carried by the
-  placement and the confirm control; the label keeps its ink.
-- **Actions.** A Settings action is the secondary button: the quiet control
-  fill and no edge, the way a Mac push button is drawn. The page's one main
-  action may take the primary button, a quiet or in-row extra the ghost
-  button, and the destructive group its own variant. Settings does not use
-  the outline button: the same kind of action was drawn filled on one row and
-  outlined on the next (62 outlined beside 113 filled), so a page of rows read
-  as two unrelated sets of controls.
-- **Rail.** Each page keeps its icon (16px) in the navigation rail, and
-  Device tools has its own, apart from Computer use. The open page takes the
-  same neutral wash of the ink as the open thread in the workspace sidebar,
-  never the theme's selection hue.
+  disconnecting Linear, purging thread history, revoking paired devices) is its
+  own section, last on the page, whose card holds the destructive row with the
+  destructive button variant. The danger is carried by the placement and the
+  confirm control; the label keeps its ink.
+- **Actions.** A Settings action is the secondary button: the quiet control fill
+  and no edge, the way a Mac push button is drawn. The page's one main action may
+  take the primary button, a quiet or in-row extra the ghost button, and the
+  destructive group its own variant. Settings does not use the outline button:
+  the same kind of action drawn filled on one row and outlined on the next made a
+  page of rows read as two unrelated sets of controls.
+- **Status lines.** Loading and status lines are one quiet sentence; only an
+  error keeps a box. Essential labels and explanatory text are at least 12px.
+  Every control uses the owned adapters, inherits the interface typography, and
+  either saves immediately or uses a compact Save action for a compound form.
+- **Rail.** Each page keeps its icon (16px) in the navigation rail, and Device tools has its own, apart from Computer use. The open page
+  takes the same neutral wash of the ink as the open thread in the workspace
+  sidebar, never the theme's selection hue.
 
-### Welcome and composer
+### Composer row
 
-Every composer has one shape, on a start screen or under a thread, in Chat,
-Work, and Code: the same width, corner (`--oct-radius-md`), hairline ring
-and mid shadow, the same insets, and the transcript's own type size, so a
-message looks the same in the box as in the bubble it becomes. The empty
-prompt is one line everywhere and grows as the person types: one line with
-12px above and under it is a 44px box, and a longer
-message keeps the same corner: the box grows, its corners stay a container's. Its width is the reading measure; in a split every
-composer takes the narrowest pane's room, so composers side by side match
-instead of each filling its own pane. A start screen's composer docks 12px
-above the pane's foot, where a thread's sits, so the two line up across a
-split; a start screen's card is the same box, with its row of where-it-runs
-chips above it. Nothing about the box changes while a turn runs.
-The composer is a box and two quiet lines. The box is the one raised
-surface: the raised card's fill, the hairline ring and the mid shadow. The
-start row above it and the line under it stand on the page with no fill or
-edge, as the figures of the last turn do, so the box is the one thing a
-person aims at. Over an application ground the box is the glass surface
-(floor, thick tint, blur, and the glass stroke as its ring). Under Window
-glass it keeps the blur and the stroke and takes the control tint in place of
-the floor: the floor made it darker than the glass around it, a well where a
-raised surface should be.
-A held thread has no box. (A tray drawn around the rows and the box made
-the composer a block three rows tall, with the box inside a box.)
-The box holds what acts on the message being written and nothing else: attach
-at its leading edge, the prompt, then the microphone and send (with Stop while
-a response streams) at its trailing edge, the controls riding the prompt's
-last line. They are 28px tiles with the control corner, 8px in from the box's
-12px corner, so a control and its box read as one family. Attach is a plus on the quiet
-control fill: it adds to the message, by more than one route in the desktop
-app. Send is a quiet tile in the control fill until there is something to
-send (the fill stays at full strength and only the arrow is dimmed: at half
-strength the tile measured 1.07:1 on the page in light and vanished), then
-the box's one solid control: the primary text colour as its fill, with the
-page colour on it. It is not the accent: a filled accent tile was the
-loudest thing on the page under an empty prompt. The microphone is in the
-box because it writes into the prompt; in the line under it, it read as a
-fact about the thread. A notice is never in the box. What the composer has to
-say about its thread or about sending (a refusal, a failure, a status, a hint,
-the Project offer, a failed dictation) is the system's callout in a card directly
-above the box, in the box's width, and in its tone: the callout's own corner
-(12px, as the box's own corner is), 8px between the last card and the box, the
-words wrapping and the action at the trailing edge, dropping under the words
-in a narrow composer. Each notice is a card of its own, the most severe first
-(a refusal or failure, then a warning, then a plain fact), so three notices are
-three short rows. A start screen's order from the top is the start row of
-chips, the notice cards, the box, the line under it. A card is shown for as
+Every composer has one shape, on a start screen or under a thread, in Chat, Work,
+and Code: the same width, corner (`--oct-radius-md`), hairline ring and mid
+shadow (`--octant-shadow-md`), the same insets, and the transcript's own type
+size, so a message looks the same in the box as in the bubble it becomes. Its
+width is the reading measure; in a split every composer takes the narrowest
+pane's room, so composers side by side match instead of each filling its own
+pane. A start screen's composer docks 12px above the pane's foot, where a
+thread's sits, so the two line up across a split; a start screen's card is the
+same box, with its row of where-it-runs chips above it. Nothing about the box
+changes while a turn runs. A held thread has no box.
+
+**The box.** The composer is a box and two quiet lines. The box is the one raised
+surface: the raised card's fill, the hairline ring and the mid shadow. In light
+the card is workspace white on the `--octant-app-background` well, not the grey
+floating fill, which reads as a sunken field. Over an application ground the box
+is the glass surface (floor, thick tint, blur, and the glass stroke as its ring);
+under Window glass it keeps the blur and the stroke and takes the control tint in
+place of the floor, which made it a well where a raised surface should be. The
+empty prompt is one line everywhere and grows as the person types: one line with
+12px above and under it is a 44px box, and a longer message keeps the same corner.
+The prompt is frameless (`OctantTextarea` with `composer-input`).
+
+The box holds what acts on the message being written and nothing else: attach at
+its leading edge, the prompt, then the microphone and send (with Stop while a
+response streams) at its trailing edge, the controls riding the prompt's last
+line. They are 28px tiles with the control corner, 8px in from the box's 12px
+corner. Attach is a plus on the quiet control fill: it adds to the message, by
+more than one route in the desktop app. All six composers use
+`ComposerAttachButton` for their file chooser; the visible button is the only tab
+stop, and an unsupported model keeps the button reachable and explains the
+refusal in the surface's status line; it never opens the file chooser or uploads
+while refused. Send is the quiet secondary tile until there is something to send,
+then the box's primary: the accent as a gradient with its glow. While refused it
+keeps its fill at full strength and only the arrow is dimmed, because at the
+shared disabled opacity the tile vanished on the page. The microphone is in the
+box because it writes into the prompt.
+
+**Notices above the box.** A notice is never in the box. What the composer has to
+say about its thread or about sending (a refusal, a failure, a status, a hint, the
+Project offer, a failed dictation) is the callout in a card directly above the
+box, in the box's width, and in its tone: the callout's own 12px corner, 8px
+between the last card and the box, the words wrapping and the action at the
+trailing edge, dropping under the words in a narrow composer. It is the callout's
+compact form (the 12px meta step, tight padding, one line where the text fits, its
+tone tint, the callout's own hairline) so the box stays the one strong shape. Each
+notice is a card of its own, the most severe first (a refusal or failure, then a
+warning, then a plain fact). A start screen's order from the top is the start row
+of chips, the notice cards, the box, the line under it. A card is shown for as
 long as its notice applies, so what an agent may do and what a thread read are
-never less visible than they were in the box; it takes no focus when it
-appears, and in tab order it comes before the prompt. A refusal is an alert and
-a status is a status. A card is for something the person must read or act on
-and that stays until it is resolved: a refusal, a failure, or an offer with an
-action. It is the callout's compact form (the 12px meta step, tight padding,
-one line where the text fits, its tone tint, the callout's own hairline) so
-the box stays the one strong shape. With nothing of that pending, nothing
-stands above the box. The composer is the box and one quiet row under it. A
-standing fact about access is not a card: that a thread has read outside content
-is a chip in that row, directly after the surface's own icons, a globe and the words
-"Outside content" in the warning ink with no fill or edge at rest, shown for as
-long as the fact applies. Pressing it opens a popover with the full sentence and
-the Review action; in a narrow row (under 560px) the chip keeps the globe and
-drops the words, and its name and tooltip keep them. A plain note that stays until the
-person acts (a saved-draft sentence saying nothing was sent, a locked task, a
-handoff or access note, what a newly picked provider will not carry over, a receipt) is still a card, one for each, wrapping whole,
-never cut to a line and never hidden: only a surface marks a state as passing.
-A card as heavy as the box, plus two rows under it, read as
-four stacked layers for a note that was not an error. Progress that a surface marks as passing by itself
-(sending, a response streaming, a provider check, a
-session compacting, a first turn being prepared, a keyboard hint) is never a card and never changes the
+never less visible than they were in the box; it takes no focus when it appears,
+and in tab order it comes before the prompt. A refusal is an alert and a status is
+a status. A card is for something the person must read or act on and that stays
+until it is resolved: a refusal, a failure, or an offer with an action; a plain
+note that stays until the person acts (a saved-draft sentence saying nothing was
+sent, a locked task, a handoff or access note, what a newly picked provider will
+not carry over, a receipt) is still a card, one for each, wrapping whole, never cut
+to a line and never hidden. With nothing of that pending, nothing stands above the
+box. Over an application ground or under Window glass the card is the same glass
+as the box with its tone laid over it. The empty box is 44px tall in every state.
+The person's own attachments and the message queue are not notices and keep their
+place.
+
+**Passing progress.** Progress that a surface marks as passing by itself
+(sending, a response streaming, a provider check, a session compacting, a first
+turn being prepared, a keyboard hint) is never a card and never changes the
 composer's height: it is one quiet line of meta ink in the transcript's bottom
 padding directly above the notice group, leading-aligned with the box, one
 message at a time with the newest winning, and no line at all where a control
-already says it (the Stop control during a response). A card for each passing
-status made the transcript jump about 48px twice a message. The line lives in
-one persistent polite status region that stays mounted, is the prompt's
+already says it (the Stop control during a response). The line lives in one
+persistent polite status region that stays mounted and is the prompt's
 description (why Send is held). Beside a subagents tray the line is clipped from
-view and still said. A card that stays is read where it stands and is not
-repeated in the region; a pending refusal's card is part of the prompt's description too, so
-it is heard again when the prompt takes focus. Over an application ground or under Window glass the card
-is the same glass as the box with its tone laid over it, not the callout's
-opaque ground beside a translucent box. A tinted bar inside the box fought the
-box's corners (a rounded bar in a rounded box, with thin uneven gaps), made the
-box a tall lopsided shape, and read as part of the message being typed; with
-the cards above it, the empty box is 44px tall in every state, and the
-microphone's failure no longer has to be cut to fit beside it. The person's
-own attachments and the message queue are not notices and keep their place. **The row under the box.** How the thread runs is one quiet row under the
-box, with no fill or edge of its own, 28px high and one spacing token (4px)
-below the box, so the space under a composer is the same on a thread, a start
-screen, a side chat and a split pane. It repeats the box's columns. Both sides
-have the box's own 8px inset. A leading cell as wide as attach (28px) holds the
-Project's icon, centred under attach, and the Project's name starts where the
-prompt's text does (44px in). The trailing cells are as wide as send (28px): the
-context ring is last, centred under send, and the approval control stands under
-the microphone where there is one. Measured in a render, the centres and the
-text edge agree within half a pixel. Left to right the row holds the Project
-control (its icon in the leading cell, then its name; in Code the checkout's
-branch, diff and pull-request icon follow it), the surface's own icons (Create
-image, Plan, Web research), then, right-aligned, the plan meters where there
-are any, the model's name in meta ink with no chevron, the approval mode as one
-icon-only button (Full access adds its words), and the context ring. The approval button's accessible name
-and tooltip state the mode ("Mode: Ask first"); each mode has its own icon, and
-Full access alone keeps its words beside it, in the warning ink (danger without
-the sandbox), so it cannot be read as asking first. Labels are the 12px meta step
-in the meta ink, icons are 16px, nothing is filled at rest, and the standard
-hover fill answers the pointer. A long Project name ends in an ellipsis and
-never pushes the right side under it. Where a Work thread names its Project,
-the name is the Thread info button: the panel opens above it from its leading
-edge, and "Review required" follows the name while a row waits. Chat and Code
-keep the small info icon after the Project (a Code checkout has actions of its
-own), in the leading cell where there is no Project. The overflow menu is gone:
-Mark done and the document-delivery choice are a group of the add menu. Reading
-order is visual order. A Work Project made from a folder names that folder once,
-not as Project and folder both. At a phone's width the row is two rows, the
-Project with Thread info beside it and the controls under them, still on the
-same columns, so the ring stays under send. Only the surface's row gives its
-controls the row's one quiet treatment; the checkout's actions and the info
-panel's fields keep their own. A card as tall as the box plus two rows under it
-read as four layers, and the row's old two lines of mixed icons and words read
-as loose text.
-The model button names a chosen reasoning effort after the model in muted ink
-("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
-(Project, working folder, base branch, checkout, Environment, repository) is
-one row just above the box, as quiet chips set together from the
-left: meta ink and no fill at rest, a fill only under the pointer or while the
-chip's menu is open, the same as the access and model controls under the
-box. Plan meters keep the right end of that row. The box itself holds only
-attach, the prompt, the microphone and send, so a start screen's composer and a thread's are
-the same object with the same row under it. Inside the card the row stood
-between the person and the prompt, and a control that was more than a label
-grew the card: a Project with extra folders drew a select, a labelled field
-and a paragraph there. That choice is one chip now ("Main folder", or "Main
-folder / src"), whose two fields open over the page; a subfolder the host
-would refuse stays on the chip in the danger ink until it is corrected. The
-Project chooser is the row's first chip. Code's
-base-branch chip is absent until a Project is chosen: with no Project it
-would name a branch of nothing. The chip
-is painted on the plain element that holds each control, never on the shared
-trigger inside it. The row wraps rather than grows: a control that needs a
-list ("Create from…") floats over the page. A thread's own follow-up
-composer keeps its context strip beneath the card. Nothing about delivery is
-asked up front; it is derived from the chips and shown on the thread once it
-exists.
+view and still said. A card that stays is read where it stands and is not repeated
+in the region; a pending refusal's card is part of the prompt's description too,
+so it is heard again when the prompt takes focus.
 
-**Composer popups.** Every popup the composer opens (Project, base branch,
-checkout, Create from…, access, model) uses one recipe. The face is the
-popover fill with the overlay shadow and a 12px corner, a 6px inset, and it
-arrives and leaves with the shared [overlay motion](#motion).
-A search field is `.octant-popover-search`: a filled
-32px field with a leading 14px icon and no border; it takes focus as the popup
-opens, so it brightens rather than drawing the keyboard edge. Rows are
-`.octant-popover-option`: one line at the shared menu row height (28px), an icon, the name, and any
-detail (a folder, visibility, state) trailing in the meta ink and cut from the
-end. A choice is a check mark at the row's end and never a fill; a fill means
-only that the pointer or the keyboard is on the row. Group headings are
-`.octant-popover-group` (12px, medium, meta ink, sentence case) and status
-lines `.octant-popover-empty`. A control that acts on a field sits on the
-field's row ("Use repository", the refresh icon), never under it. A popup is
-capped to the room on the side it opens on; only its list scrolls, and the
-ways to add something (New Project from folder…, from GitHub) stay pinned
-under the list.
+**The row under the box.** How the thread runs is one quiet row under the box,
+with no fill or edge of its own, 28px high and 4px below the box, so the space
+under a composer is the same on a thread, a start screen, a side chat and a split
+pane. It repeats the box's columns, with the box's 8px inset on both sides. A
+leading cell as wide as attach (28px) holds the Project's icon, centred under
+attach, and the Project's name starts where the prompt's text does (44px in). The
+trailing cells are as wide as send (28px): the context ring is last, centred under
+send, and the approval control stands under the microphone where there is one.
+The row is two groups with its free space between them, in one order on a new task
+and in the thread it becomes: where the thread runs and the surface's own icons
+on the left (the Project control, its icon in the leading cell, then its name; in
+Code the checkout's branch, diff and pull-request icon follow it; then Create image
+in an open thread once an image profile is ready, Plan, Web research), then how the
+turn runs on the right (the plan meters where there are any, the model's name in
+meta ink with no chevron, the approval mode as one icon-only button, and the
+context ring). A control never changes sides between the two composers. Labels
+are the 12px meta step in the meta ink, icons are 16px, nothing is filled at rest,
+and the standard hover fill answers the pointer. A long Project name ends in an
+ellipsis and never pushes the right side under it. The approval button's
+accessible name and tooltip state the mode ("Mode: Ask first"); each mode has its
+own icon, and Full access alone keeps its words beside it, in the warning ink
+(danger without the sandbox), so it cannot be read as asking first. The model
+button names a chosen reasoning effort after the model in muted ink ("GPT-6 Astra
+Medium"); the provider default names none. Model, access, and destination
+controls keep one type scale. Where a Work thread names its Project, the name is
+the Thread info button: the panel opens above it from its leading edge, and
+"Review required" follows the name while a row waits. Chat and Code keep the
+small info icon after the Project (a Code checkout has actions of its own), in the
+leading cell where there is no Project. Mark done and the document-delivery choice
+are a group of the add menu. Reading order is visual order. A Work Project made
+from a folder names that folder once, not as Project and folder both. At a phone's
+width the row is two rows, the Project with Thread info beside it and the controls
+under them, still on the same columns, so the ring stays under send. Only the
+surface's row gives its controls the row's quiet treatment; the checkout's actions
+and the info panel's fields keep their own. A standing fact about access is a chip
+in that row, directly after the surface's own icons: a thread that has read outside
+content shows a globe and the words "Outside content" in the warning ink with no
+fill or edge at rest, for as long as the fact applies; pressing it opens a popover
+with the full sentence and the Review action, and in a row under 560px the chip
+keeps the globe and drops the words, and its name and tooltip keep them.
 
-### Menu rows, shell frame, and alignment
+**The row above the box.** Where the thread runs (Project, working folder, base
+branch, checkout, Environment, repository) is one row just above the box, as quiet
+chips set together from the left: meta ink and no fill at rest, a fill only under
+the pointer or while the chip's menu is open, the same as the access and model
+controls under the box. Plan meters keep the right end of that row on a start
+screen. A choice that would grow the card is one chip: a Project with extra
+folders is "Main folder", or "Main folder / src", whose two fields open over the
+page; a subfolder the host would refuse stays on the chip in the danger ink until
+it is corrected. The Project chooser is the row's first chip. Code's base-branch
+chip is absent until a Project is chosen. The chip is painted on the plain element
+that holds each control, never on the shared trigger inside it. The row wraps
+rather than grows: a control that needs a list ("Create from…") floats over the
+page. A thread's own follow-up composer keeps its context strip beneath the card.
+Nothing about delivery is asked up front; it is derived from the chips and shown on
+the thread once it exists.
 
-_One menu row._ Every in-page pick-list (dropdown, context menu, select and
-combobox options, the model list, the mode menu, the Add tool menu) draws the
-same row from `ui/shadcn/menu-row.ts`: 28px tall (`--oct-menu-row-h`), 44px when
-it carries a second line (`--oct-menu-row-two-h`, an `oct-menu-detail` span), an
-8px inset on a popup padded 4px, a 16px icon column and an 8px gap
-(`--oct-menu-row-gap`), the words in the Menu option role (13 / 500), and a
-group label in the Navigation group label role (12 / 400, muted). A row's words
-therefore stand 36px from the popup's edge when it has an icon and 12px when it
-has none, in every menu. A menu where any row has an icon reserves the column
-for every row, so it never has two text edges; a menu with no icons keeps the
-words on the popup's own inset. The separator is one hairline as wide as the
-rows (4px in from the popup's edge, the same inset the rows have), never a
-negative margin. A feature stylesheet may colour a menu's icons but gives its
-rows no height, gap, padding or font size. In the desktop app dropdown and
-context menus can be drawn by the system; that path is unchanged and the OS owns
-its spacing.
+**The mode picker** reads the same in new and existing threads: Auto (with
+"Recommended" wherever a reviewer can run, the provider's own or Octant Shield,
+its description naming which; otherwise listed disabled with the reason), Ask
+first, Accept edits, Plan, and Full access, each with a one-line description.
+Choosing a mode is one click and changes the thread; the first Full access pick on
+this machine or in a Project shows the one-time warning first.
 
-The shell frame runs on one
-grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
-`--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
-`--oct-nav-inset` tokens in `octant.css`: the title band, the window
-controls, the right dock head, and the bottom panel toolbar share one title
-rail (44px), on which a rail tab and a rail icon control sit on one centreline and
-the band's hairline meets the dock's; the sidebar's header row is its part of
-that rail (`--oct-title-rail-h`), so its controls share the window controls'
-centreline, and below it the sidebar runs navigation, Project, and
-thread rows at the nav row height down to a 44px account row (`--oct-nav-head-h`),
-with every leading icon on the nav inset and its section labels at 12px in the
-meta ink with a 20px gap above, so a label never reads as one more row. A
-thread row that carries a facts line is two lines of type and takes 8px above
-and below them: 8 + an 18px title line + 1 + a 17px facts line + 8 is 52px, and a row stands 54px from the next with the list's 2px gap. Hover-only actions (add, more, pin, archive,
-and a tab's pin and close) take no width until their row is hovered or
-focused. A section heading's add and more controls are the exception: the
-list's view and filter controls share that row, so they keep their width while
-hidden and only fade in, and nothing beside them moves. Touch
-surfaces keep 44px targets. The workspace and Settings share the saved sidebar
-width, defaulting to 280px (wide enough to read a thread's title rather than
-guess it); narrow Settings layouts retain their responsive
-rail clamp or drawer. The workspace sidebar supports resizing.
+Screen-specific composer behavior (placeholders, predicted next message, the
+subagent card, plan meters, the model picker, the queue) is in
+[Thread view](docs/design/thread-view.md); the start screen's composer is in
+[Start screen](docs/design/start-screen.md#welcome-screen).
 
-**Alignment.** One value does one job, so no edge or gap has to be explained.
-Each of these was measured off by a pixel or more in a render before it was a
-rule:
+### Dialogs and sheets
 
-- _The title band's icon buttons_ are 28px and stand 4px apart wherever the
-  band shows a row of them: the window controls, the tool row, the sidebar's
-  header actions. The band keeps one inset at both of its ends, 8px, so Show
-  sidebar is as far from the left edge as the last toggle is from the right. A
-  slot a Project fills only sometimes (Open in, Project actions) takes no room
-  and no gap while it is empty.
-- _A tile's bar_ ends on the band's 8px, and its Arrange and Close are 24px
-  controls with one 14px glyph, centred on a whole pixel: the bar's hairline is
-  drawn inside its 32px, not as a border that takes one off the controls'
-  centreline. The Browser's row follows the bar's insets.
-  The tool's own controls stand in the same bar on the same terms (24px
-  controls, 14px glyphs, 4px gaps, a 28px word-switch tray of 24px segments),
-  and a tool's secondary row and its first content text sit on the bar's 12px
-  edge.
-- _The icon rail's_ face is its button (32px in the column, 2px
-  apart), and the first face is centred on the title rail's centreline, so it
-  stands level with the band's controls beside it (6px down in the 44px rail).
-- _A dock never clips._ The dock's own bar holds the same 8px at both ends at
-  every width, 280px and up, and reserves nothing for the title band's
-  controls: the tool row lives in the band, a wide dock's bar is an empty
-  spacer under it, and a narrow dock is a dialog that stands away from the
-  band. A reserve for the band's room left no content box at 300px.
-- _A card's inset is exactly 16px_ (a Settings card draws its edge as an
-  outline inside its box, not as a border) and a dock card's title and its rows
-  stand on one edge: a title that is a button has no border, and a row's mark,
-  whether an icon or a dot, takes one 14px slot, so every name starts on one
-  column.
-- _Rows are whole pixels._ A row whose height is the sum of its lines sets
-  them from the role leadings rounded to a pixel (`--oct-line-label`,
-  `--oct-line-detail`, `--oct-line-meta`, `--oct-line-snug`,
-  `--oct-line-tight`): a Settings row, a thread row in the sidebar (two lines,
-  52px) and a dialog's paragraph. The roles keep their sizes.
-- _The composer's columns are the same in every mode._ The row under the box
-  starts on the box's inset, so its first control stands under attach in Chat,
-  Work and Code alike (an empty leading group takes no gap). The prompt's line
-  is the transcript size times the body leading, rounded to the nearest even
-  pixel (`--oct-composer-line`), so the 28px controls centre on whole pixels
-  and the one-line box is 44px at the default 13px (46px at 14px, 48px at
-  16px).
-- _A foot ends where the rows above it end._ The account row's chevron stands
-  on the navigation inset (12px), the edge a thread's status mark ends on.
-- _At a phone's width_ the start screen's composer stands the panel's 20px from
-  each edge, and so do a thread's composer and its text column. The panel is
-  already padded 20px at 680px and below, so the thread's gutter token
-  (`--oct-thread-gutter`, 40px for the two sides) is 0 there, and the column
-  and composer take the panel's width: 390, 430 and 680px all show 20px, not
-  the 40px the column's own gutter added inside the panel. Above 680px nothing
-  changes.
-- _The title's text stands on the thread column's edge._ The title band's text
-  starts where the transcript's column starts, at the larger of a 20px gutter
-  and half of the pane less the thread measure, so a centred, narrower column
-  carries the title with it. What could precede the title (the environment
-  mark, the pull-request chip) follows it, because the 20px gutter cannot hold
-  a 20px mark; with content tabs open there is no title and they lead as before.
-  The grip's own 4px padding and 1px border are taken off the start so the text,
-  not the grip's hover fill, stands on the edge. Where the sidebar is collapsed
-  the title clears the window controls instead (the larger of their width and
-  the column's edge). With a Project step in the breadcrumb ("Project / title"),
-  the breadcrumb starts on the edge and the title follows its slash.
-- _Controls are 24, 28, 32 or 44px, and rows 32 or 44._ A segment in a tray is
-  24px (`--oct-tray-segment-h`) inside 2px of padding, so every tray is 28px:
-  the mode switch in the sidebar's header, the thread-list switch under it and
-  the composer's Work and Code switch alike. A tray's inner corner stays the
-  tray's corner less its padding, never under 2px. The icon rail's button takes
-  its face's 32px in the column (it is the button's `rail` variant, which draws
-  no border, so no negative margin gives one back), and the account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
-- _The account row's avatar and the Projects toolbar's folder sit on the icon
-  column._ The 20px avatar is centred on the centre line of the 16px navigation
-  icons (the 12px inset plus half an icon), not left-aligned with them, and the
-  Projects toolbar's first button is centred on the same line so its 16px folder
-  starts where the rows' glyphs do.
-- _A toast's dismiss ends on its padding._ The 24px button's box ends on the
-  toast's 12px padding, not 2px from its corner; the title line is 24px tall so
-  the icon, the title and the glyph share a centre, and an action in the message
-  (View host) is inline text, so its line is as tall as the others.
-- _Settings has one rhythm._ The page's band takes the page's 32px gutter at
-  both ends (the close button ends where the content ends), sections are 24px
-  apart, the page ends 48px under its last section, and a section label and a
-  section note each leave 12px under them (a label that carries a note has 12px
-  between them too), with lines set from the role leadings rounded to a pixel.
-- _One hairline._ A 1px dividing line or a quiet control outline on the title
-  band, the thread's disclosures, the sidebar's tiles and the icon rail is
-  `--oct-hairline` (10% ink): the environment mark's edge, the divider between
-  a thread's tool rows, the rail's count badge and divider, and a count tile's edge. A
-  deliberately stronger edge stays: a field's border, a focus edge, a status
-  tint, and a Project tile's initial (22%, 40% on hover), which is an
-  identity mark rather than a divider.
-- _The rule beside reasoning_ is 1px, not a 2px bar, in `--octant-border-strong`:
-  the hairline measured about 1.2:1 and was too faint to find.
-- _A slider's track is the strong divider role_ (`--octant-divider-strong`), a
-  theme role held to 3:1 against the workspace, so the track is found on a card
-  in dark and in light. The hairline it used was 1.5:1 in dark and 1.3:1 in
-  light. The thumb still carries the value.
+Every dialog shares one frame ([OctantDialog](#octantdialog)). The popup insets
+its content 16px, the title is the Dialog title role (17/600), and the answers sit
+in one row at the trailing edge: the answer that dismisses first, as an outline
+button, and the answer that acts last, filled (or in the destructive role), both
+at the default control height. A dialog that draws to its edges (the command
+palette, a player, a sheet with its own head and foot) sets its own inset with one
+class; no dialog sets its own title size or draws its answers at another height. A
+dialog wider than the 420px default says so with `--octant-dialog-width`, never
+with a width of its own: the shared popup caps any other width at the default.
+Dialogs use `--oct-radius-md` and the overlay shadow. Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and titled for assistive technology. Dialogs and sheets share one
+layer and popups stand above it ([Layers](#layers)). Shared dialog popups and
+backdrops suppress entrance motion under the persisted reduced-motion setting as
+well as the OS preference.
 
-While a route or tool is still loading, its state is one quiet line (spinner,
-then the title) on the page ground, never a raised card: a card with a title
-and a sentence reads as a finished empty state.
-A state that is the whole window (a refused launch address, a launch session
-that expired, Project authority that is unavailable, a lost connection, storage
-recovery) is the page presentation of `ShellState`: centred on the page, a 96px
-mark that is the state's glyph drawn as an open grid of dots in the primary ink
-(a warning is a filled triangle with its mark cut out), a title at the
-`--oct-text-xl` step, one line in the secondary ink, and the way back as a text
-link in the accent ink, with no eyebrow. A state inside a pane or panel keeps
-the compact layout: glyph, eyebrow, title, sentence, and a button.
+Ordinary usage reset and retention, Git discard, and remote administration
+confirmations use `OctantConfirmDialog`. The remote listener confirmation shows
+the address, origin, network reach, and certificate state without disclosing key
+material; revoking every device requires a destructive confirmation. Git
+confirmations consistently offer **Keep changes** and **Discard changes**.
+Permission decisions and confirmation side effects stay with the host and their
+existing dialog callers. A sheet ([OctantSheet](#octantsheet)) is for a page-sized
+surface with the app live behind it; a non-modal glass panel anchored in its
+surface stays a panel.
 
-Navigation panes stay compact hairline rails. Routine form layouts stay open
-and unshadowed; setup objects and cards use the card recipe (`OctantCard`), and
-a Settings section's group is the same hairline-ringed shape in its own fill,
-and neither draws a shadow —
-a card sits in the page, and shadow is reserved for something that floats
-above it. Welcome composers keep their raised frame.
-Every composer's row under the card is two groups with the row's free space
-between them, in one order on a new task and in the thread it becomes: where the
-thread runs and a surface's own icons on the left (Create image in an open
-thread once an image profile is ready, Plan, Web), then how the turn runs on the
-right (the model, the approval control, the context ring). Attach, dictation and
-send are in the card, and the add menu holds the thread's own actions as a
-group (Mark done). A control never changes sides between the two composers.
-All six composers use `ComposerAttachButton` for their file chooser. The visible
-button is the only tab stop; an unsupported model keeps the button reachable
-and explains the refusal in the surface's status line. It never opens the file
-chooser or uploads while refused. Model, access, and destination controls keep
-one type scale. The mode picker reads the same in new and existing threads:
-Auto (with "Recommended" wherever a reviewer can run, the provider's own or
-Octant Shield, its description naming which; otherwise listed disabled with
-the reason), Ask first, Accept edits, Plan, and Full access, each with a
-one-line description. Choosing a mode is one click and
-changes the thread; the first Full access pick on this machine or in a
-Project shows the one-time warning first.
-The prompt itself is frameless:
-`OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
-Composer-row selects drop the same field chrome. Feature CSS must not
-repaint those controls a third time. Select lists open beside their trigger
-without covering it with the selected item. The model picker anchors to the
-trigger's trailing edge, keeps its dimensions stable while filtering, and
-scrolls its model list internally. Its catalog filters wrap onto short rows so
-every catalog is visible (past three rows the block scrolls), and its level slider draws the whole track in ink, with the
-reading above it and both ends named below. Popovers, menus, dialogs, and hover cards use
-the floating surface and the overlay shadow, and have exactly one 1px hairline
-edge: the overlay shadow carries it for menus and popovers, and the shared
-dialog draws it as a border. A feature stylesheet sizes and places a popup and
-never sets its fill, border, or shadow. Environment's cards on the dock and a Settings section on the page are
-hairline-ringed cards, not floating objects. Frosted material (a
-`backdrop-filter` blur) is used only where a surface has a ground behind it to
-read through:
+### Toasts and notices
 
-### Dialog presence and the title bar
+Use Badge for status labels, Alert for callouts, Empty for empty states, Skeleton
+for loading, and the shared `.toast-stack` notification owner for transient
+acknowledgements. Do not add another toast package or recreate these with styled
+spans or animated divs.
 
-A stylesheet cannot
-hold an element that is gone, so a surface leaves this way only while it stays
-mounted and is told it has closed. Settings' sheet and a dialog with an `open`
-of its own do that themselves, and such a dialog keeps `open` apart from what
-it shows: one whose words come from the state closing clears (a review, a
-comparison, Rewind) is rendered only while that state exists, like the rest.
-A dialog a feature renders only while it is
-open is wrapped in `OctantDialogPresence`, which keeps the last thing the
-feature rendered until the exit has finished and tells the dialog inside it
-has closed: a confirmation still names what it asked about after the feature
-has cleared that state, and the command palette keeps the rows it showed.
-Every confirmation, the command palette, the Code file search, the Navigator,
-the narrow dock, first run and the other dialogs a feature mounts on demand
-leave this way. Two cases still leave at once: a dialog whose owner goes with
-it (a row removed by the confirmation it showed), and one of two dialogs that
-share a presence when the other takes its place. In a window nobody can see
-there is no exit to show, so a dialog closed there is removed at once.
-
-A dialog or a sheet that is leaving is only there to be seen. Its scrim and its controls
-take no press and no key (`inert`), so the page under it answers at once and a
-second press cannot repeat what the first did. Focus goes back to the opener
-as the exit starts, not when it ends, and when the exit ends focus is left
-where it is if the person, or a command they ran from it, has moved it
-in the meantime.
-
-Native Electron title-bar regions are a hard boundary. Interactive controls
-must carry `window-no-drag` and render above the native drag target. Test title-bar
-buttons in the packaged/native surface, not only with React/jsdom.
-
-On macOS the desktop window keeps Electron's native frame and uses
-`titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
-Do not set a custom `trafficLightPosition`: Electron then resizes
-`NSTitlebarContainerView` to `buttonHeight + 2 * y`, and that native overlay
-eats title-row clicks. One explicit blank drag strip reaches the physical top
-edge after the traffic lights and, when the sidebar is collapsed, after the
-measured leading cluster. Pane tabs and window controls share the compact
-visual rail at a higher stacking layer; unused spans remain drag regions.
-Collapsed-sidebar Show sidebar and New thread actions reserve their own no-drag
-space after the same traffic-light width the sidebar uses.
-Packaged smoke checks both compact geometry and real native state transitions
-for Open in, Environment, bottom panel, right dock, and sidebar recovery.
-
-### Confirmation and dialog behavior
-
-Ordinary usage reset/retention, Git discard, and remote administration
-confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
-remote listener confirmation shows the address, origin, network reach, and
-certificate state without disclosing key material; revoking every device
-requires a destructive confirmation. The safe action receives initial focus;
-Escape, Cancel, and backdrop dismissal do not mutate data, and closing restores
-focus to the opener. Git confirmations consistently offer **Keep changes** and
-**Discard changes**. Destructive actions opt into the danger treatment explicitly;
-ordinary confirmations use the standard action treatment. Long paths in the
-description wrap within the shared dialog. Their existing host approvals,
-receipts, and observed-state checks remain separate and mandatory.
-
-Every dialog shares one frame. The shared popup insets its content 16px, the
-title is the 15px body step at the strong weight, and the answers sit in one
-row at the trailing edge: the answer that dismisses first, as an outline
-button, and the answer that acts last, filled (or in the destructive role),
-both at the default control height. A dialog that draws to its edges (the
-command palette, a player, a sheet with its own head and foot) sets its own
-inset with one class; no dialog sets its own title size or draws its answers
-at another height. A dialog wider than the 420px default says so with
-`--octant-dialog-width`, never with a width of its own: the shared popup caps
-any other width at the default, which had opened the rewind, synced-artifact,
-Continue elsewhere, planner-review, plugin-detail and thread-search dialogs
-narrower than they were written. Before this, dialog titles ran from 14px to
-17px at two weights, the dismissing answer was drawn bare, outlined or filled
-depending on the dialog, and a confirmation's buttons were one step shorter
-than every other dialog's.
-
-Product notices stack at the top trailing corner of the window, under the
-title bar. At the bottom trailing corner a notice covered the composer's model
-picker and Send.
-
-A dialog with a visible heading uses that heading as its accessible name through
-`labelledBy`; specialized palettes and dock dialogs without one retain the hidden
-title. Do not add a second visible header. Shared dialog popups and backdrops
-suppress entrance motion under the persisted reduced-motion setting as well as
-the OS preference.
-
-## Shell and layout
-
-**One bar holds the tool's controls.** A tool used to draw its own 40 to 44px
-header under the tile's bar, with insets of 8, 12 or 16, so a tiled tool showed
-two bars that disagreed. The tool now hands its header controls up to the bar and
-draws no header of its own, so a tiled tool has exactly one 32px bar: the tool's
-name, then the tool's controls, then Arrange and Close, on the bar's insets (12
-leading, 8 trailing) with 4px between controls.
-
-- _Navigation keeps its words._ A choice between a tool's views or places
-  (Review's Working tree, Local commits and History, Agents' List and Graph, the
-  Desktop's leases) is drawn as a word switch: a 28px tray of 24px segments,
-  centred in the bar (2px above and below), the pressed segment marked. Words
-  are never replaced by icons.
-- _Actions are icons._ An action everyone knows (Refresh, Back, Home, Screenshot,
-  Release) is a 24px icon button with a 14px glyph, a tooltip and an accessible
-  name. An action that opens a list of actions (a terminal's, a device's More) is
-  one such button with a menu. Status the tool says about itself (a test run's
-  state, a pull-request count, a device's state) is quiet text after the name.
-- _The bar folds in a fixed order._ When the controls do not fit beside the
-  name at the tile's width, each word switch first becomes one control showing
-  the current view's name with a menu of the views, so the current place is
-  always readable in words; then the actions fold into one **More <tool> actions**
-  menu; a control the tool draws itself (Canvas's version popover and menu) moves to the one secondary row under the bar when even the folded bar cannot hold it; the tool's name is cut last. Status text (a count, a device's state with its mark) never folds either, and its full text is its tooltip: the actions fold first. A cue a person must be able to read (View only, a billed Desktop's provider and place) is never cut to an ellipsis: when the bar cannot hold it beside the tool's name even with the actions folded, it moves, without being drawn again, to the one secondary row, which is inside the same toolbar and exists only while something has moved to it. It follows the bar's actions in the page, so Tab, the arrow keys and the eye all meet the controls in the same order. The row wraps onto further 32px lines when its contents are wider than the bar and the bar reserves the height it has; a cue has no cap, no ellipsis and does not shrink. The bar measures a control the tool draws itself as it is drawn, not by a declared width, and reads its own insets. In the bottom panel, which has no second row, such a control, and a cue, scrolls within its own box, which takes focus so a keyboard can scroll it, with Hide beside it. Alt, Meta, Ctrl and Shift with an arrow key are left to the browser. A named control stops at 16em with an ellipsis and its full name as the tooltip. The controls stand in one labelled toolbar with arrow-key movement. A menu returns focus to its control after an
-  action. The steps are decided from the bar's width, the name's natural width
-  and the words' natural width, never from the folded controls, so the bar
-  cannot flip between two states. At the 280px dock minimum Review's switch is
-  already the named control.
-- _A secondary row is for content, and there is at most one._ A field or path the
-  tool shows to be read or typed into (Files' filter, Pull requests' search,
-  Document's path, Side Chat's "About" line) is content, not chrome: it keeps one
-  row under the bar, 32px, on the bar's insets and hairline, and the tool's
-  first content text stands on the bar's 12px text edge. Anything that is a
-  control goes in the bar. Canvas draws its own versions popover and menu, which
-  go up as one control that does not fold.
-- _A tool alone keeps no tile bar_, as before: the title band's tool row names
-  it. Its controls stand in one row of the bar's height, insets and hairline,
-  holding only them, and a tool without controls has no row. Where the tool has
-  a content field as well (Files' filter and Refresh, Pull requests' search and
-  count), the field and the action share that one row.
-- _The same tool in the bottom panel follows the same rules._ Its controls stand
-  in the panel's bar between the tool tabs and Hide, as 24px controls with 14px
-  glyphs, 4px apart, ending on the 8px end inset, and fold the same way. The
-  panel's bar stays the 44px band the tabs stand in; only the controls and
-  insets are the tile bar's.
-- _A control is never a drag handle._ Each carries `window-no-drag`, and a
-  tool's controls come after its name in the keyboard order, before Arrange and
-  Close.
-
-### Tabs and segmented choices
-
-True page tabs, segmented choices, and pane identity are intentionally
-different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
-semantics. `OctantToggleGroup` owns the enclosed track used for mutually
-exclusive values. A recipe styles the state attribute
-the installed Base UI part writes (a selected tab is `data-active`, a pressed
-toggle `data-pressed`, a checked switch `data-checked`), never one it invents. Each split pane keeps its close action on the trailing edge of its header;
-only a pane underneath the window controls reserves space for that cluster.
-The split-pane drag handle alone owns active-pane paint. Feature
-styles may size or scroll these primitives but may not restore a local tab
-track, underline recipe, or persistent active border.
-
-## Component ownership and composition
-
-### shadcn/Base recipes
-
-Use the Octant adapter names in feature code. The owned recipe list includes
-Button, Card, Badge, Input, Textarea, Field/FieldGroup, Select, Combobox,
-Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
-and Tooltip. Composition rules:
-
-- Buttons use `OctantButton` or `OctantIconButton`; variants are default,
-  destructive, outline, secondary, ghost, and link. Destructive is a tonal
-  fill, not a solid one: a red slab reads as the page's subject rather than one
-  action on it. Sizes are xs, sm, default, lg, icon, icon-xs, and icon-sm.
-  Icon-only buttons always have an accessible label and tooltip/title.
-  A control in the title band is one shape whatever it holds: 28px
-  (`--oct-rail-button-h`) with the control corner (`--oct-radius-sm`), icon-only
-  controls square, a label or a label with a chevron the same height. The compact
-  24px, 6px step drew the dock's tools and the Project actions beside 28px, 8px
-  window buttons as three shapes. Open in is outlined, the one band control that
-  keeps an edge, in the same 28px and control corner, not a card-radius tile.
-  A standalone icon-only control has two sizes and nothing between: the 28px
-  rail button (`OctantIconButton`, `--oct-rail-button-h`) in a title band,
-  panel head, or toolbar, and a 24px square for an action inside a row. The
-  recipe's `icon` sizes are rem and drift with the interface font size, so a
-  panel control takes `OctantIconButton` rather than a recipe size. Only a
-  control that floats over content, such as the terminal's actions button,
-  keeps a fill and an edge.
-- Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
-  and errors remain associated with their controls. Invalid state uses
-  `data-invalid` and `aria-invalid`.
-- Use `OctantSelectField`/Combobox for searchable or bounded choices, not a
-  custom dropdown. Option sets of 2–7 choices use `OctantToggleGroup`.
-- Use complete Card composition (`Header`, `Title`, `Description`, `Content`,
-  `Footer`) for discrete objects and grouped forms. Use compact rows and
-  `Separator` for navigation lists.
-- Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
-  titled for assistive technology. Use `OctantDialog` with a real label even
-  when the title is visually hidden. Dialogs and sheets share one layer and
-  popups stand above it: a menu or popover opened inside a dialog or the
-  narrow dock sheet appears above it, and Escape closes the innermost surface
-  first.
-- Layers are tokens: page chrome stays at or below `--oct-z-overlay` (40),
-  dialogs and sheets with their backdrops stand at `--oct-z-floating` (50), a
-  notice at `--oct-z-toast` (55), and everything a person opens to aim at
-  (menus, context menus, popovers, selects, comboboxes, tooltips, hover
-  cards) at `--oct-z-popup` (60). A notice sits above a dialog or sheet
-  because under its backdrop it could be neither read nor dismissed, and
-  under a popup because a notice that said the app had stopped unexpectedly
-  once covered an open menu in the right dock's header and took the clicks
-  meant for its items. A menu opened inside a dialog stays above the dialog.
-  The `.toast-stack` column takes no press outside its notices. A new surface
-  takes one of these tokens, never a number of its own, and nothing in the
-  workspace goes above z-index 7.
-- A list a person picks from draws one row. One line is 28px
-  (`--oct-menu-row-h`), its words stand 8px in from the row's edge
-  (`--oct-menu-row-inset`), and the rows stand 4px in from the popup's edge
-  (`--oct-menu-inset`). The menu, context menu, select and combobox recipes
-  share that row (`ui/shadcn/menu-row.ts`), and the command palette, the `#`
-  and `/` typeaheads and the composer's picker rows take the same tokens. A
-  row with a description under its label grows to two lines; no row is shorter
-  than the height. The tokens are pixels on purpose: the recipes' rem steps
-  followed the interface size, and one line of text was 24px in a menu, 26px
-  in a context menu and a select, 30px in a combobox and a picker, 34px in the
-  palette and 24px in a typeahead, on a 6.5, 8 or 12px inset. A feature sizes
-  no row of its own.
-- Use Badge for status labels, Alert for callouts, Empty for empty states,
-  Skeleton for loading, and the shared `.toast-stack` notification owner for
-  transient acknowledgements. Do not add another toast package or recreate
-  these with styled spans or animated divs.
-- App-owned inline notices use `OctantAlert` for the status mark, tone, live
-  region, message, optional title, and explicit actions. Warning and danger
-  announce as `alert`; neutral, accent, and success announce as `status`.
-  Placement belongs to the feature; the callout recipe owns its appearance.
-  The mark is in neutral ink for the neutral tone, composer notices included;
-  the warning tone draws it in the warning ink and the danger tone in the
-  danger ink.
-  Permission decisions and confirmation side effects stay with the host and
-  their existing dialog callers. A new raw `role="alert"` or `role="dialog"` in
-  feature source fails `bun run ui:check` unless it is a recorded exception:
-  an inline field error tied to its input, a compact status row that already
-  owns its mark or switches between status and alert, a screen-reader-only
-  announcement, a positioned banner whose placement is not a callout, an
-  empty-state live region owned by `ShellState` or `OctantEmpty`, or a
-  non-modal glass panel. Zen's thread picker, assistant, and add/appearance
-  panels stay anchored in the surface; `OctantDialog` would add a backdrop,
-  focus trap, and portal. The recipe owners (`OctantAlert`, `OctantToast`,
+- **Inline notices** are `OctantAlert`. A new raw `role="alert"` or
+  `role="dialog"` in feature source fails `bun run ui:check` unless it is a
+  recorded exception: an inline field error tied to its input, a compact status row
+  that already owns its mark or switches between status and alert, a
+  screen-reader-only announcement, a positioned banner whose placement is not a
+  callout, an empty-state live region owned by `ShellState` or `OctantEmpty`, or a
+  non-modal glass panel. The recipe owners (`OctantAlert`, `OctantToast`,
   `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
-- A lost host connection is one condition with one voice. A Chat thread shows a
+- **Product notices** are `OctantToast`: a semantic icon, short title, supporting
+  detail, and an explicit Dismiss button. Success and waiting announcements use
+  `status`; errors that need attention use `alert`. The recipe owns the opaque
+  floating material, compact spacing, shadow, and wrapping. A feature may choose
+  placement and content, not paint another notice. A field error stays by its
+  field, and a warning that the person must review stays inline. Notices stack at
+  the top trailing corner of the window, under the title bar: at the bottom
+  trailing corner a notice covered the composer's model picker and Send.
+- **A lost host connection is one condition with one voice.** A Chat thread shows a
   single `OctantAlert` in plain words ("Can't reach the host" with Retry now),
   above its transcript in the thread's own measure; it becomes a success alert,
   "Reconnected", for a few seconds when the host answers, then goes quiet. The
   thread's other surfaces (the subagent card, the message queue, the composer's
-  status line) never repeat the loss: they dim and disable their controls. Use
-  no other wording for it, and never show internal vocabulary such as "the
+  status line) never repeat the loss: they dim and disable their controls. Use no
+  other wording for it, and never show internal vocabulary such as "the
   authoritative transcript". A failure unrelated to the connection keeps its own
-  alert. Work and Code threads keep their own connection messages until they
-  adopt this notice.
-- Product notices use `OctantToast`: a semantic icon, short title, supporting
-  detail, and an explicit Dismiss button. An optional inline action can open the
-  relevant destination without implicitly dismissing the notice. Success and
-  waiting announcements use `status`; errors that need attention use `alert`.
-  The shared recipe owns the opaque floating material, compact spacing, shadow,
-  and wrapping of long filenames or messages in both themes. A feature may
-  choose placement and content, not paint another notice. A field error stays
-  by its field, and a warning that the user must review stays inline.
-- Use `cn()` for conditional classes, semantic Tailwind tokens (`bg-primary`,
-  `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
-  and `truncate` for clipping. Feature classes position; recipe classes paint.
+  alert. Work and Code threads keep their own connection messages until they adopt
+  this notice.
 
-### Product-owned surfaces
+### Empty, loading, and whole-window states
 
-`octant.css` and the feature stylesheets own shell grid, Project/thread tree,
-composers, transcript measure, boards, review, terminal, Monaco, Canvas,
-Environment, context/task popovers, and dock geometry. These surfaces compose
-the adapters for controls instead of recreating their interaction behavior.
+- **A destination that is still loading** shows its own outline
+  (`SurfaceLoading`): a skeleton bar where the title will be and a few rows under
+  it, in the frame the page itself draws in, so nothing changes place when the
+  page arrives. The words stay in a `status` region for assistive technology and
+  are not drawn; the bars are hidden from it. The skeleton's sheen stops under
+  reduced motion, from the system or from the setting, and the shape stays. A
+  page's own first read of its data keeps the state that page already draws.
+- **A route or tool that is still loading** is one quiet line (spinner, then the
+  title) on the page ground, never a raised card: a card with a title and a
+  sentence reads as a finished empty state.
+- **A page with nothing on it** follows [Page shell](#page-shell).
+- **A state inside a pane or panel** is `OctantEmpty`'s compact layout: glyph,
+  eyebrow, title, sentence, and a button.
+- **A state that is the whole window** (a refused launch address, a launch session
+  that expired, Project authority that is unavailable, a lost connection, storage
+  recovery) is the page presentation of `ShellState`: centred on the page, a 96px
+  mark that is the state's glyph drawn as an open grid of dots in the primary ink
+  (a warning is a filled triangle with its mark cut out), a title at the
+  `--oct-text-xl` step, one line in the secondary ink, and the way back as a text
+  link in the accent ink, with no eyebrow.
+
+### Lists and rows
 
 Thread and Project rows reserve stable gutters for status and provider marks;
-hover/focus actions remain in flow or use an overflow menu so the list does not
-jump. Right-click mirrors available actions but is never the sole route to an
-essential action.
+hover and focus actions remain in flow or use an overflow menu so the list does
+not jump. Right click mirrors available actions but is never the sole route to an
+essential action. Rows are hairline rails, never cards. The row a list is showing
+is a raised control and the row under the pointer a flat wash
+([Depth and material](#depth-and-material)). Routine form layouts stay open and
+unshadowed.
+
+### Tabs and segmented choices
+
+True page tabs, segmented choices, and pane identity are intentionally different.
+`OctantTabs` owns a flat rail with a selected fill and keyboard tab semantics.
+`OctantToggleGroup` owns the enclosed track used for mutually exclusive values.
+Each split pane keeps its close action on the trailing edge of its header; only a
+pane underneath the window controls reserves space for that cluster. The
+split-pane drag handle alone owns active-pane paint. Feature styles may size or
+scroll these primitives but may not restore a local tab track, underline recipe,
+or persistent active border. Content tabs in a pane are in
+[Workspace: Content tabs](docs/design/workspace.md#content-tabs).
 
 ## Source of truth and CSS layers
 
@@ -2376,8 +2254,16 @@ The import order in `apps/web/src/styles.css` is load-bearing:
    shared control.
 
 `--octant-*` roles own persistence and theme editing. `--oct-*` and shadcn
-variables are consumption aliases. Do not add a new raw colour, radius, shadow,
-or control recipe in a feature stylesheet.
+variables are consumption aliases. Do not add a new raw colour, radius, shadow, or
+control recipe in a feature stylesheet. `octant.css` and the feature stylesheets
+own the shell grid, Project and thread tree, composers, transcript measure,
+boards, review, terminal, Monaco, Canvas, Environment, context and task popovers,
+and dock geometry; these surfaces compose the adapters for controls instead of
+recreating their interaction behavior. The shadcn registry metadata is in
+`apps/web/components.json` (`base-nova`, Tailwind v4, CSS variables, Lucide); the
+checked-in recipes are owned source and use `@base-ui/react` primitives behind the
+Octant adapters, which keeps the interaction backend accessible and editable while
+preserving the shadcn composition and visual vocabulary.
 
 The portable projection of these layers, for a website or another app, is
 generated, not hand-kept: `bun run tokens:export` writes
@@ -2386,98 +2272,69 @@ and `bun run tokens:check` fails when they are stale. How to load and use them,
 and the app-feel rules a consumer follows, are in
 [Design tokens and the app feel](docs/design/design-tokens.md).
 
+### Enforcement
+
 `bun run ui:check` enforces this on every `.css` file under `apps/web/src`
-(`scripts/check-ui-stylesheets.ts`). A raw colour in a rule fails closed; a
-block that must depict one fixed scheme regardless of theme, such as the
-light/dark preview swatches in Settings, carries
-`/* ui-style-exception: fixed-scheme */` on the line before it. Off-scale
-`font-size` values, raw `transition`/`animation` durations, and `!important`
-outside an accessibility fallback, any `font-weight` heavier than 600 outside
-the title roles (see [Scale](#scale)), and any paint
-(colour, background, border, radius, shadow, outline) that a feature rule puts
-on a class handed to an Octant primitive (place or size a shared control,
-never repaint it; pick a recipe variant instead) ratchet against
+(`scripts/check-ui-stylesheets.ts`). A raw colour in a rule fails closed; a block
+that must depict one fixed scheme regardless of theme, such as the light and dark
+preview swatches in Settings, carries `/* ui-style-exception: fixed-scheme */` on
+the line before it. Off-scale `font-size` values, raw `transition` and `animation`
+durations, `!important` outside an accessibility fallback, any `font-weight`
+heavier than 600 outside the title roles (see [Scale](#scale)), and any paint
+(colour, background, border, radius, shadow, outline) that a feature rule puts on
+a class handed to an Octant primitive (place or size a shared control, never
+repaint it; pick a recipe variant instead) ratchet against
 `scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
 re-record the lower count with `--write-baseline` so the baseline never
 overstates.
 
 The remaining control repaints are burned down by restoring each control to its
 recipe, in small batches. Each batch is its own pull request with before and
-after screenshots, and the maintainer approves the paint change before it
-merges, because removing a repaint changes what the control looks like.
+after screenshots, and a maintainer approves the paint change before it merges,
+because removing a repaint changes what the control looks like.
 
 The `control-repaint` rule reads the classes feature code hands to an Octant
 primitive. A control marked `unstyled` is feature-owned paint by design and is
 skipped; `unstyled={false}` is not, and stays under the rule. The checker also
-skips `composer-input`, the system prompt, because that surface is
-already painted twice; the rule still holds for it — feature CSS must not
-repaint it a third time — it is simply not machine-checked.
+skips `composer-input`, the system prompt, because that surface is already painted
+twice; the rule still holds for it (feature CSS must not repaint it a third time),
+it is simply not machine-checked.
 
-The shadcn registry metadata is in `apps/web/components.json` (`base-nova`,
-Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
-and use `@base-ui/react` primitives behind the Octant adapters. They follow the Base UI-native shadcn `nova` style and its
-denser controls, except that recipes paint no focus ring, halo or second outline
-(the global `:focus-visible` rule is the only keyboard focus treatment, so a
-combobox's frame draws none of its own) and the badge and
-the card keep the shape and elevation set in this document. A recipe's heading
-(a card's or popover's title) takes the recipe's own type role: the page's bare
-`h1` to `h4` defaults sit in the base layer, below every utility, so they size
-reading content and never a component. This
-keeps the interaction backend accessible and editable while preserving the
-shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
-`ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
-menus use the shared `OctantContextMenu` adapter; do not add a new direct
-primitive import.
+`scripts/check-ui-component-boundaries.ts` is a blocking repository check.
+Production feature code cannot import Base UI or shadcn recipes directly and
+cannot render ordinary raw buttons, inputs, selects, or textareas. Controls
+compose through `apps/web/src/ui/base`. The only accepted raw categories are
+hidden native file inputs, explicitly documented native platform surfaces, and
+specialized editor surfaces that cannot be represented by an adapter. Tests and
+the owned `ui/shadcn` and `ui/base` implementation are not feature surfaces and
+are excluded from the inventory. `apps/web/src/ui/shadcn` is the owned recipe
+source; `components.json` is CLI registry metadata and does not describe the
+product's complete shell. Contract tests in `apps/web/src/theme`
+(`visualLanguageContract.test.ts`, `surfaceLanguageContract.test.ts`) and
+`apps/web/src/ui/iconScaleContract.test.ts`, and sometimes a feature folder's own
+test, pin rules of this document to the stylesheets.
 
-Desktop context menus and ordinary dropdown menus (including More, the account
-menu, action menus, plain select fields, Project/thread filters, and checkbox/radio choices) use Electron's native OS menus through that adapter.
-The OS owns their font, material, spacing, highlighting, submenu behavior,
-accessibility, and light/dark appearance; renderer theme tokens do not repaint
-native menus. The account menu opens above its footer control and More beside
-its sidebar row. Activity › Custom range opens a date-range dialog.
-The existing action composition supplies labels, grouping,
-disabled and checked states, and nested actions. Native menus dismiss after
-a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
-receive the platform editing/copy menu. The Code editor and both diff sides
-use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
-Base UI menus. Native menus use macOS accessibility. Verify their actual presentation and
-selection through native accessibility in an isolated desktop fixture; renderer
-keyboard and role checks cover the browser fallback. Searchable pickers and popovers with embedded controls remain
-renderer surfaces.
-
-## Implementation checklist
+### Implementation checklist
 
 When adding or touching UI:
 
-1. Read this file and, for system boundaries, the owning architecture section.
+1. Read the relevant foundation, component, and pattern here, the owning topic
+   file for the screen, and, for system boundaries, the owning architecture
+   section.
 2. Reuse an existing adapter and semantic token before adding CSS.
 3. Keep domain logic in its owning package; keep renderer components focused on
    presentation and user interaction.
 4. Add a focused behavior test for meaningful interaction or accessibility.
-5. Run the nearest web test/typecheck/build and `git diff --check`; broaden to
-   the repository verification command for cross-package changes.
+5. Run the nearest web test, typecheck, and build and `git diff --check`; broaden
+   to the repository verification command for cross-package changes.
 6. For shell, title-bar, dock, Environment, context, or settings work, perform
-   rendered/native verification at the relevant viewport and capability state.
-7. Record a deliberate exception here when a surface cannot yet use the shared
+   rendered or native verification at the relevant viewport and capability state.
+7. Record a deliberate exception below when a surface cannot yet use the shared
    recipe.
 
 ### Current exceptions and known migration edges
 
-- `apps/web/src/ui/shadcn` is the owned recipe source; `components.json` is CLI
-  registry metadata and does not describe the product's complete shell.
-- `scripts/check-ui-component-boundaries.ts` is a blocking repository check.
-  Production feature code cannot import Base UI or shadcn recipes directly and
-  cannot render ordinary raw buttons, inputs, selects, or textareas. Controls
-  compose through `apps/web/src/ui/base`. The only accepted raw categories are
-  hidden native file inputs, explicitly documented native platform surfaces,
-  and specialized editor surfaces that cannot be represented by an adapter.
-  Tests and the owned `ui/shadcn`/`ui/base` implementation are not feature
-  surfaces and are excluded from the inventory.
-- Feature styles position product surfaces; adapters paint shared controls.
-  When migrating an old control, remove the replaced paint rules rather than
-  keeping a parallel recipe.
-- Glass is limited to the surfaces listed under
-  [Spacing, shapes, and depth](#glass); it is a different
-  material, not a second palette. Do not copy mobile atmosphere or phone radii
-  into a flat desktop pane, and do not bring a blur onto a pane that has no
-  ground under it.
+- Feature styles position product surfaces; adapters paint shared controls. When
+  migrating an old control, remove the replaced paint rules rather than keeping a
+  parallel recipe.
+- Glass is limited to the surfaces listed under [Glass](#glass).

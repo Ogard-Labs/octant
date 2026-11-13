@@ -154,7 +154,7 @@ one ladder: regular for reading, medium for labels and names, strong for
 emphasis, and `--oct-weight-title` for the large title alone. Nothing is set
 between steps (no 11.5 or 12.5px).
 
-**Spacing** ([Spacing, shapes, and depth](../../DESIGN.md#spacing)).
+**Spacing** ([Spacing](../../DESIGN.md#spacing)).
 A 4px scale: `--oct-space-1` to `--oct-space-12` (4, 8, 12, 16, 20, 24, 32, 48).
 Use a gap for stacks and groups. A padding or margin off the scale is a defect.
 
@@ -189,14 +189,14 @@ surface it separates, so never hand-pick a grey.
 its value in primary ink. The accent is for the action and for the one thing a
 surface is for, not for decoration; status colours always travel with text or a
 shape. Normal text holds 4.5:1, large text and non-text marks 3:1
-([Accessibility and reliability](../../DESIGN.md#accessibility)).
+([Accessibility](../../DESIGN.md#accessibility)).
 
 **Icons.** Four sizes: `--oct-icon-xs` (12: disclosure chevrons and status
 marks), `--oct-icon-sm` (14: inside a small control, inline in text),
 `--oct-icon-md` (16: the default) and `--oct-icon-lg` (20: an empty state, a
 dialog header). One stroke, 1.5, set once by the app's icon defaults
 (`apps/web/src/ui/IconDefaults.tsx`) and taking `currentColor`
-([Iconography and provider marks](../../DESIGN.md#icons)).
+([Icons](../../DESIGN.md#icons)).
 The stroke is a TypeScript constant there, not a custom property, so it is not
 in the export; the recipes write `1.5` for it.
 
@@ -209,7 +209,7 @@ specified** with its `file:line` at the time this page was written.
 
 ### Depth comes from material, not flat fills and outlines
 
-Source: [Shapes and depth](../../DESIGN.md#depth-and-material).
+Source: [Depth and material](../../DESIGN.md#depth-and-material).
 
 Depth is one material in five levels. Every surface takes a fill one step
 lighter than what it sits on, a rim brighter along its top edge, and a shadow
@@ -260,7 +260,7 @@ outline alone. A surface consumes the tokens and never writes its own colour.
 ### Density
 
 Source: [Scale](../../DESIGN.md#scale),
-[Spacing, shapes, and depth](../../DESIGN.md#spacing).
+[Spacing](../../DESIGN.md#spacing).
 
 - The interface is 13px; a row label is 14px at medium weight; metadata is 12px
   and nothing essential sits under 12px.
@@ -278,9 +278,8 @@ Source: [Scale](../../DESIGN.md#scale),
 
 ### Alignment
 
-Source: [Spacing, shapes, and depth](../../DESIGN.md#spacing),
-[Page shell](../../DESIGN.md#page-shell), Settings in
-[Shell and layout](../../DESIGN.md#shell-and-layout).
+Source: [Spacing](../../DESIGN.md#spacing),
+[Page shell](../../DESIGN.md#page-shell), [Settings layout](../../DESIGN.md#settings-layout).
 
 - **One gutter per surface.** A page has one inline inset and everything stands
   on it. A grouped card takes a 16px inset for everything inside, including
@@ -305,9 +304,9 @@ Source: [Spacing, shapes, and depth](../../DESIGN.md#spacing),
 
 ### Behaviour that makes it feel native
 
-Source: [Motion and interaction](../../DESIGN.md#motion),
+Source: [Motion](../../DESIGN.md#motion),
 [Face](../../DESIGN.md#face),
-[Accessibility and reliability](../../DESIGN.md#accessibility).
+[Accessibility](../../DESIGN.md#accessibility).
 
 - **No text selection on chrome.** Words in the chrome do not select when the
   pointer drags across them; reading matter (a message, a diff, a value, an
