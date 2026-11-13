@@ -321,7 +321,9 @@ describe("the bar's sizes", () => {
     expect(rule(".dock-tile__control")).toMatch(/height:\s*24px/);
     expect(rule(".dock-tile__control > svg")).toMatch(/width:\s*var\(--oct-icon-sm\)/);
     expect(rule(".dock-bar-switch")).toMatch(/height:\s*28px/);
-    expect(rule(".dock-bar-switch__option")).toMatch(/height:\s*24px/);
+    // The tray's 2px padding and the segments' 24px belong to the shared toggle group.
+    expect(rule(".dock-bar-switch")).not.toMatch(/padding/);
+    expect(rule(".dock-bar-switch__option")).not.toMatch(/height/);
   });
 });
 
@@ -576,6 +578,14 @@ function Drawn() {
   return null;
 }
 
+function DrawnWithAction() {
+  useDockBarControls([
+    { kind: "node", id: "own", width: 232, node: <button type="button">Versions</button> },
+    { kind: "button", id: "r", label: "Refresh", icon: RefreshCw, onSelect: () => {} },
+  ]);
+  return null;
+}
+
 function dockOf(tool: ReactNode, layout: DockTileLayout = two) {
   return (
     <DockTiles
@@ -612,6 +622,24 @@ describe("controls a tool draws itself", () => {
     ).toBe(versions);
     expect(screen.getByRole("button", { name: "Arrange one" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
+  });
+
+  it("tabs through the bar's actions before the control that moved to the row under it, as the arrow keys and the eye do", () => {
+    const fire = observers();
+    barOfWidth(500);
+    render(dockOf(<DrawnWithAction />));
+    const names = () =>
+      within(screen.getByRole("toolbar", { name: "one controls" }))
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+    // Beside the name the control comes first and the action after it.
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "full");
+    expect(names()).toEqual(["Versions", "Refresh"]);
+    barWidth = 280;
+    fire();
+    // In the row it stands under the bar, after the action (now in More).
+    expect(document.querySelector(".dock-tile__bar")).toHaveAttribute("data-fold", "row");
+    expect(names()).toEqual(["More one actions", "Versions"]);
   });
 
   it("measures the control as drawn, not the width it declared", () => {
