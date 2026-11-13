@@ -48,6 +48,12 @@ export have the same name and there is no mapping table to maintain:
 - `--oct-*` are the foundations and the aliases a stylesheet reads: type, spacing,
   radii, motion, sizes, and short colour aliases (`--oct-bg`, `--oct-fg`,
   `--oct-border`) that point at the roles.
+- One value with one meaning has one token. Motion has `--oct-motion-fast` (150ms, colour
+  and overlay entry), `--oct-motion-base` (200ms, geometry) and `--oct-dur-fast` (100ms,
+  an overlay leaving); weight has `--oct-weight-regular`, `-medium`, `-strong` and
+  `-title`; spacing has `--oct-space-*`. Do not add a second name for a value one of
+  these already carries. Tokens that share a value by chance but mean different things
+  (a control height and an avatar size, a gutter and a space step) stay separate.
 - In `tokens.json` a token's key is its CSS name without the leading dashes, under
   a group (`radius.oct-radius-md`). The group list is in the file.
 
@@ -66,7 +72,7 @@ when the original was an expression.
   "$value": { "colorSpace": "srgb", "components": [0.9608, 0.9608, 0.9686], "alpha": 0.14, "hex": "#f5f5f7" }
 },
 "oct-radius-md": { "$type": "dimension", "$value": { "value": 12, "unit": "px" } },
-"oct-dur-base": { "$type": "duration", "$value": { "value": 0.15, "unit": "s" } }
+"oct-motion-fast": { "$type": "duration", "$value": { "value": 150, "unit": "ms" } }
 ```
 
 - Colours are sRGB with components in 0 to 1, rounded to four places from whole
@@ -321,7 +327,7 @@ Source: [Motion and interaction](../../DESIGN.md#motion-and-interaction),
   turn the transition off while a control is pressed, and there is no scale. A disabled control is drawn at `--oct-disabled-opacity`
   with no hover fill and no pointer events.
 - **150 to 200ms motion with the standard easing.** Colour settles in
-  `--oct-dur-base` (150ms) with `--oct-ease-color`; geometry and overlays in 150ms
+  `--oct-motion-fast` (150ms) with `--oct-ease-color`; geometry and overlays in 150ms
   with `--oct-ease-motion`, and an overlay leaves faster, in `--oct-dur-fast`
   (100ms). There is no decorative entrance and no ambient motion behind work.
   Only opacity, scale and translate change on an overlay.
@@ -378,8 +384,8 @@ The button, in full, as the template for the others:
   cursor: default;
   box-shadow: var(--octant-shadow-control);
   transition:
-    background-color var(--oct-dur-base) var(--oct-ease-color),
-    box-shadow var(--oct-dur-base) var(--oct-ease-color);
+    background-color var(--oct-motion-fast) var(--oct-ease-color),
+    box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 .oct-button:active {
   background: var(--octant-control-pressed);

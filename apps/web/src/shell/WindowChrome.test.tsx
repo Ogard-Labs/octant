@@ -300,13 +300,13 @@ describe("WindowChrome", () => {
         (element) => getComputedStyle(element).fontWeight,
       );
 
-      // jsdom reports a custom property unresolved; `--oct-weight-display` is 500,
+      // jsdom reports a custom property unresolved; `--oct-weight-medium` is 500,
       // so only the page title and content emphasis stay at 600.
       expect(weights).toEqual([
         "600",
-        "var(--oct-weight-display)",
-        "var(--oct-weight-display)",
-        "var(--oct-weight-display)",
+        "var(--oct-weight-medium)",
+        "var(--oct-weight-medium)",
+        "var(--oct-weight-medium)",
         "600",
       ]);
     } finally {

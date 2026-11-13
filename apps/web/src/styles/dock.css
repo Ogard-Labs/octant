@@ -1675,7 +1675,7 @@ html[data-octant-increased-contrast="true"] .octant-dialog__popup {
 
 .navigator-panel__header h2 {
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .navigator-panel__header p {

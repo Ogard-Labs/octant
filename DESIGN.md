@@ -157,8 +157,7 @@ nothing essential sits under 12px at the default. The roles live in
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text and every name in navigation (thread titles, sidebar and
-Settings rail rows, the account's name), 500 (`--oct-weight-medium`,
-`--oct-weight-display`) for labels, controls, a setting's row and a menu's
+Settings rail rows, the account's name), 500 (`--oct-weight-medium`) for labels, controls, a setting's row and a menu's
 options, 600 (`--oct-weight-strong`) for emphasis (section labels, card titles,
 `strong`, the app's name, a destination's page title), and 700
 (`--oct-weight-title`) only for the large title. A count beside a label is Meta
@@ -1289,10 +1288,24 @@ outside an accessibility fallback, any `font-weight` heavier than 600 outside
 the title roles (see [Scale](#scale)), and any paint
 (colour, background, border, radius, shadow, outline) that a feature rule puts
 on a class handed to an Octant primitive (place or size a shared control,
-never repaint it; pick a recipe variant instead) ratchet against
+never repaint it; pick a recipe variant instead), a corner that is not a radius token, `0`, `50%` or a 1–4px mark (each part of the
+value must be one of those alone: a token with a fallback, beside a literal, or
+plus a length is refused; only `calc(token - Npx)`, optionally under
+`max(1–4px, …)`, may derive a part inside a control), read in
+stylesheets, in arbitrary `rounded-[…]` classes, and in inline `borderRadius`, its
+longhand and logical forms, `el.style` assignments and `setProperty` (a
+conditional or template is judged by the literals it spells out), and a fixed
+`h-[…]` or `size-[…]` in the shared recipes under `apps/web/src/ui/base` and
+`ui/shadcn`, subfolders included, that is not 20, 24, 28 or 32px at the 13px
+root (`min-h` and `max-h` are not read: a field's minimum and a popup's maximum
+are not control heights) ratchet against
 `scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
 re-record the lower count with `--write-baseline` so the baseline never
 overstates.
+
+Off-scale pixel spacing (see [Spacing, shapes, and depth](#spacing-shapes-and-depth)) ratchets
+the same way. Icon sizes are not in this script: `apps/web/src/ui/iconScaleContract.test.ts`
+refuses an icon asked for at a size off 12/14/16/20 or a stroke off 1.5.
 
 The remaining control repaints are burned down by restoring each control to its
 recipe, in small batches. Each batch is its own pull request with before and
@@ -3512,8 +3525,8 @@ interfaces. Revealing them must not move the transcript.
 
 ## Motion and interaction
 
-Functional feedback uses 120–160ms transitions; the base system duration is
-200ms. Use standard easing and no decorative entrance animation. There is no
+Functional feedback uses 150ms (`--oct-motion-fast`) and geometry 200ms
+(`--oct-motion-base`); an overlay leaves in 100ms (`--oct-dur-fast`). One value with one meaning has one token: a duration, a weight or a space is never defined twice under two names. Use standard easing and no decorative entrance animation. There is no
 ambient motion behind the work by default; an animated built-in picture, the
 Pulsing characters, Dithered pixels, and Flowing grounds, and a printed picture
 set to Wave are the moving grounds a person may choose, and reduced motion holds
@@ -3526,7 +3539,7 @@ animations without removing state information.
 way, declared once (`components.css`, Overlay motion): a menu, a context
 menu, a select or combobox list, a popover, a tooltip, a hover card, a dialog,
 Settings' sheet, and the scrim under a dialog or a sheet. It fades in over
-150ms (`--oct-dur-base`, `--oct-ease-motion`) and out over 100ms
+150ms (`--oct-motion-fast`, `--oct-ease-motion`) and out over 100ms
 (`--oct-dur-fast`, `--oct-ease-color`): nobody waits for a thing to leave. A
 popup settles from 98% at the point it is anchored to and a dialog from 98%
 about its centre; the sheet rises 8px instead, since a surface that size reads
