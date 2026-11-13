@@ -155,7 +155,10 @@ export interface CodeRestartContinuationPorts {
    * change something and nothing records that the call finished; the reason
    * names the tool. Undefined when every such call is known to have ended.
    */
-  readonly uncertainToolCall: (cutOffOperationId: string) => string | undefined;
+  readonly uncertainToolCall: (turn: {
+    readonly threadId: string;
+    readonly turnId: string;
+  }) => string | undefined;
   readonly attempts: CodeRestartContinuationAttempts;
   /** Whether the thread's provider can take up the session the cut-off turn ran in. */
   readonly resumability: (
@@ -286,7 +289,10 @@ function guard(
   // A shell command, an edit or an MCP call the restart cut off in the
   // middle may or may not have landed. The continuation never repeats a call
   // itself, but the agent it starts could, so the person looks first.
-  const uncertain = ports.uncertainToolCall(operationId);
+  const uncertain = ports.uncertainToolCall({
+    threadId: String(thread.id),
+    turnId: operationId,
+  });
   if (uncertain !== undefined) return { reason: "uncertain-tool-call", detail: uncertain };
   if (ports.quitByPerson) return { reason: "quit", detail: QUIT_HOLD_DETAIL };
   if (priorContinuationsCutOff(ports, thread.id, operationId) >= MAX_RESTART_CONTINUATIONS_CUT_OFF)

@@ -1,5 +1,5 @@
 import { decodeChatThreadId } from "@octant/contracts";
-import { continueChatTurns } from "../wiring/continuation";
+import { continueChatTurns, cutOffToolCallHold } from "../wiring/continuation";
 import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
 import { threadRestartContinuationId } from "../harness/threadRestartContinuation";
 import {
@@ -104,7 +104,7 @@ import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { Journal } from "../persistence/journal";
-import { ToolEffectLedger, uncertainToolCallHold } from "../toolEffects/toolEffectLedger";
+import { ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 import {
   readAgentRunResultEvidence,
   readAgentRunResultText,
@@ -12623,9 +12623,79 @@ describe("continuing a Chat answer a restart cut off", () => {
     });
     void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
     return {
-      uncertainToolCall: (turnId: string) => uncertainToolCallHold(ledger.certainty(turnId)),
+      uncertainToolCall: cutOffToolCallHold({
+        toolEffectLedger: ledger,
+        agentRunsCutOffByRestart: [],
+      }),
     };
   }
+
+  it("holds a cut-off answer whose child agent left a tool call nobody saw finish", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+    const ledger = new ToolEffectLedger({
+      journal: fixture.persistence.journal,
+      uuid: () => crypto.randomUUID(),
+      actor: { kind: "system", actorId: ids.actor } as never,
+      clock: () => now,
+    });
+    const run = { id: crypto.randomUUID(), parentThreadId: String(thread.id) };
+    const otherThreadsRun = { id: crypto.randomUUID(), parentThreadId: crypto.randomUUID() };
+    for (const child of [run, otherThreadsRun]) {
+      const tools = ledger.forTurn({ threadId: child.parentThreadId, turnId: child.id }).tools({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+        execute: () => new Promise(() => {}),
+      });
+      void tools.execute({ name: "octant_browser", inputJson: "{}", toolCallId: "call-1" });
+    }
+
+    const held = await restart(fixture, {
+      uncertainToolCall: cutOffToolCallHold({
+        toolEffectLedger: ledger,
+        agentRunsCutOffByRestart: [run] as never,
+      }),
+    });
+    expect(held.recovery.held).toEqual([
+      {
+        mode: "chat",
+        threadId: String(thread.id),
+        reason: "uncertain-tool-call",
+        detail:
+          'Octant stopped while a child agent\'s tool "octant_browser" was running, so it may or may not have taken effect. Check it, then continue.',
+      },
+    ]);
+  });
+
+  it("continues a cut-off answer when only another thread's child agent left a tool call open", async () => {
+    const fixture = openFixture();
+    const thread = await cutOffAnswer(fixture);
+    const ledger = new ToolEffectLedger({
+      journal: fixture.persistence.journal,
+      uuid: () => crypto.randomUUID(),
+      actor: { kind: "system", actorId: ids.actor } as never,
+      clock: () => now,
+    });
+    const otherThreadsRun = { id: crypto.randomUUID(), parentThreadId: crypto.randomUUID() };
+    void ledger
+      .forTurn({ threadId: otherThreadsRun.parentThreadId, turnId: otherThreadsRun.id })
+      .tools({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+        execute: () => new Promise(() => {}),
+      })
+      .execute({ name: "octant_browser", inputJson: "{}", toolCallId: "call-1" });
+
+    const { recovery } = await restart(fixture, {
+      uncertainToolCall: cutOffToolCallHold({
+        toolEffectLedger: ledger,
+        agentRunsCutOffByRestart: [otherThreadsRun] as never,
+      }),
+    });
+
+    expect(recovery).toEqual({
+      continued: [{ mode: "chat", threadId: String(thread.id) }],
+      held: [],
+    });
+  });
 
   it("holds a cut-off answer whose tool call nobody saw finish, names the tool, and still takes the person's own continue", async () => {
     const fixture = openFixture();

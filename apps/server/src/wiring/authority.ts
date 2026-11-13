@@ -56,6 +56,7 @@ import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
 import type { ServerStart } from "./serverShape";
 import type { FoundationsWiring } from "./foundations";
+import { ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 
 /**
  * Where a Code thread's running-turn posture is read from. A runtime the host
@@ -316,10 +317,22 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => new Date().toISOString(),
     connection: persistence.connection,
   });
-  agentRunPersistence.reconcileAfterRestart();
+  // The child runs this start found without a live execution. Restart
+  // recovery reads each one's record of tool calls beside its parent's turn.
+  const agentRunsCutOffByRestart = agentRunPersistence.reconcileAfterRestart();
+  // Every tool call about to take effect, on every provider, so a restart
+  // can tell a turn it cut off between calls from one it cut off inside one.
+  const toolEffectLedger = new ToolEffectLedger({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    clock: () => new Date().toISOString(),
+  });
   return {
     agentRunParentAuthority,
     agentRunPersistence,
+    agentRunsCutOffByRestart,
+    toolEffectLedger,
     androidInputGrants,
     automationEventStore,
     bindingReceiptStore,

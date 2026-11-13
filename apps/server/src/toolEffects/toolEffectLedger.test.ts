@@ -15,7 +15,11 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
-import { registerToolEffectEvents, ToolEffectLedger } from "./toolEffectLedger";
+import {
+  registerToolEffectEvents,
+  ToolEffectLedger,
+  whileAwaitingToolApproval,
+} from "./toolEffectLedger";
 
 const directories: string[] = [];
 const now = "2026-11-12T12:00:00.000Z";
@@ -282,5 +286,137 @@ describe("tool effect ledger", () => {
       .execute({ name: "shell", inputJson: "{}", toolCallId: "call-2" });
 
     expect(restarted.journaled()).toHaveLength(4);
+  });
+
+  it("continues a turn whose tool was still waiting for its own approval when the host stopped", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const tools = before.ledger.forTurn({ threadId, turnId }).tools(
+      // The host stops while the person has not answered: nothing ran.
+      toolSet(["shell"], () => whileAwaitingToolApproval(() => new Promise(() => {}))),
+    );
+    void tools.execute({ name: "shell", inputJson: "{}", toolCallId: "call-1" });
+    await Promise.resolve();
+
+    expect(before.journaled().map((entry) => entry.eventName)).toEqual([
+      "tool-effect-intended@1",
+      "tool-effect-awaiting-approval@1",
+    ]);
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({ kind: "settled" });
+  });
+
+  it("holds a turn whose tool was approved and running when the host stopped", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    let seenByEffect: ReadonlyArray<string> = [];
+    const tools = before.ledger.forTurn({ threadId, turnId }).tools(
+      toolSet(["shell"], async () => {
+        await whileAwaitingToolApproval(() => Promise.resolve("approved"));
+        seenByEffect = before.journaled().map((entry) => entry.eventName);
+        return new Promise(() => {});
+      }),
+    );
+    void tools.execute({ name: "shell", inputJson: "{}", toolCallId: "call-1" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The answered approval is on record before the tool goes on.
+    expect(seenByEffect).toEqual([
+      "tool-effect-intended@1",
+      "tool-effect-awaiting-approval@1",
+      "tool-effect-intended@1",
+    ]);
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "shell",
+    });
+  });
+
+  it("settles a call whose approval was refused", async () => {
+    const host = hostOn(openConnection());
+    const tools = host.ledger.forTurn({ threadId, turnId }).tools(
+      toolSet(["shell"], async () => {
+        const answer = await whileAwaitingToolApproval(() => Promise.resolve("denied"));
+        return { result: { error: answer }, isError: true };
+      }),
+    );
+
+    await tools.execute({ name: "shell", inputJson: "{}", toolCallId: "call-1" });
+
+    expect(host.journaled().at(-1)).toMatchObject({
+      eventName: "tool-effect-settled@1",
+      payload: { outcome: "failed" },
+    });
+    expect(host.ledger.certainty(turnId)).toEqual({ kind: "settled" });
+  });
+
+  it("waits for an approval outside any recorded call without writing a record", async () => {
+    const host = hostOn(openConnection());
+
+    await expect(whileAwaitingToolApproval(() => Promise.resolve("approved"))).resolves.toBe(
+      "approved",
+    );
+
+    expect(host.journaled()).toEqual([]);
+  });
+
+  it("never holds a turn for a read-only host tool its runtime also reports starting", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    const host = toolSet(["read", "octant_github"], () => new Promise(() => {}));
+    // The runtime names the bridged call by its own id and its own spelling
+    // of the tool, so nothing pairs it with the host's record of the call.
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", toolCallId: "rt-1", toolName: "mcp__octant__read" }),
+      host,
+    );
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", toolCallId: "rt-2", toolName: "octant_github" }),
+      host,
+    );
+    void turn.tools(host).execute({ name: "read", inputJson: "{}", toolCallId: "request-1" });
+    await Promise.resolve();
+
+    expect(before.journaled().map((entry) => entry.payload)).toEqual([
+      expect.objectContaining({ toolCallId: "request-1", effect: "read-only", origin: "host" }),
+    ]);
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({ kind: "settled" });
+  });
+
+  it("still holds for a runtime tool that only resembles a host tool's name", () => {
+    const connection = openConnection();
+    const turn = hostOn(connection).ledger.forTurn({ threadId, turnId });
+    const host = toolSet(["read"], async () => ({ result: {} }));
+
+    // Another server's tool of the same name is the runtime's own.
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", toolCallId: "rt-1", toolName: "mcp__files__read" }),
+      host,
+    );
+
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "mcp__files__read",
+    });
+  });
+
+  it("closes the calls an agent run left open when the run starts again", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    void before.ledger
+      .forTurn({ threadId, turnId })
+      .tools(toolSet(["shell"], () => new Promise(() => {})))
+      .execute({ name: "shell", inputJson: "{}", toolCallId: "call-1" });
+    await Promise.resolve();
+    const restarted = hostOn(connection);
+    expect(restarted.ledger.certainty(turnId)).toEqual({ kind: "uncertain", toolName: "shell" });
+
+    restarted.ledger.supersede({ threadId, turnId });
+
+    expect(restarted.journaled().at(-1)).toMatchObject({
+      eventName: "tool-effect-settled@1",
+      payload: { toolCallId: "call-1", outcome: "superseded" },
+    });
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({ kind: "settled" });
   });
 });

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import {
   AggregateId,
@@ -7,6 +8,7 @@ import {
   EventId,
   TOOL_EFFECT_AGGREGATE_TYPE,
   TOOL_EFFECT_EVENT_NAMES,
+  ToolEffectAwaitingApproval,
   ToolEffectIntended,
   ToolEffectSettled,
   type ProviderRuntimeEvent,
@@ -25,6 +27,7 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeIntended = Schema.decodeUnknownSync(ToolEffectIntended);
 const decodeSettled = Schema.decodeUnknownSync(ToolEffectSettled);
+const decodeAwaitingApproval = Schema.decodeUnknownSync(ToolEffectAwaitingApproval);
 
 /** The contract's bound on a tool name and a call id. */
 const MAX_LABEL_LENGTH = 128;
@@ -40,7 +43,55 @@ type JournalPort = Pick<Journal, "append" | "replayAggregate" | "latestAggregate
 export function registerToolEffectEvents(registry: EventRegistry): EventRegistry {
   return registry
     .register(TOOL_EFFECT_EVENT_NAMES.intended, 1, ToolEffectIntended)
+    .register(TOOL_EFFECT_EVENT_NAMES.awaitingApproval, 1, ToolEffectAwaitingApproval)
     .register(TOOL_EFFECT_EVENT_NAMES.settled, 1, ToolEffectSettled);
+}
+
+/**
+ * The recorded call the running code belongs to, so the service that asks a
+ * person for the call's approval can say so without every tool between them
+ * passing the record along. A tool whose approval service never says it is
+ * waiting keeps its first frame, and a stop holds its thread: the default is
+ * the safe one.
+ */
+const recordedCall = new AsyncLocalStorage<{
+  readonly awaitingApproval: () => boolean;
+  readonly approvalAnswered: () => void;
+}>();
+
+/**
+ * Runs one wait for a person's answer to a tool call's own approval. The
+ * approval is asked before the call takes effect, so while it waits the
+ * call's record says nothing ran, and a restart continues the turn and asks
+ * again. Whatever the answer, the call's intent is on record again before
+ * the tool hears it; when the journal refuses that frame this throws, because
+ * the tool would otherwise run under a record that says it did not.
+ *
+ * Only a wait that precedes every effect of its call belongs here. A prompt a
+ * tool raises after it already acted (a download a click started) does not.
+ */
+export async function whileAwaitingToolApproval<T>(wait: () => Promise<T>): Promise<T> {
+  const call = recordedCall.getStore();
+  if (call === undefined || !call.awaitingApproval()) return wait();
+  try {
+    return await wait();
+  } finally {
+    call.approvalAnswered();
+  }
+}
+
+/**
+ * The host tool a runtime's report of a tool start names, when the start is
+ * the runtime's side of a call it hands to the host: the tool's own name
+ * (Codex, Pi), or the name under the server the host's tools are offered
+ * through (`mcp__octant__` on Claude Code, `octant-<16 hex>_` on OpenCode).
+ * Any other spelling is the runtime's own tool.
+ */
+function bridgedHostTool(runtimeToolName: string, hostTools: AppManagedToolSet): boolean {
+  const name = runtimeToolName.trim();
+  const bridged =
+    /^mcp__octant__(.+)$/.exec(name)?.[1] ?? /^octant-[0-9a-f]{16}_(.+)$/.exec(name)?.[1] ?? name;
+  return hostTools.definitions.some((definition) => definition.name === bridged);
 }
 
 /**
@@ -61,8 +112,12 @@ export interface TurnToolEffects {
   /**
    * Records what a provider runtime reports of its own tools: a start as a
    * call that may have taken effect, a success or failure as its end.
+   * `hostTools` is the set the turn offers its runtime: a start that names
+   * one of them is the runtime's side of a call the host runs and records
+   * itself, under another id, so it is not recorded a second time as a tool
+   * that may have changed something.
    */
-  readonly observe: (event: ProviderRuntimeEvent) => void;
+  readonly observe: (event: ProviderRuntimeEvent, hostTools?: AppManagedToolSet) => void;
 }
 
 /** The set as the turn's runner calls it: recorded when the turn keeps a record. */
@@ -129,7 +184,13 @@ export class ToolEffectLedger {
           }
           let outcome: ToolEffectSettled["outcome"] = "failed";
           try {
-            const result = await set.execute(input);
+            const result = await recordedCall.run(
+              {
+                awaitingApproval: () => this.#awaitApproval(turn, toolCallId),
+                approvalAnswered: () => this.#intend(turn, toolCallId, input.name, "host"),
+              },
+              () => set.execute(input),
+            );
             if (result.isError !== true) outcome = "succeeded";
             return result;
           } finally {
@@ -137,10 +198,14 @@ export class ToolEffectLedger {
           }
         },
       }),
-      observe: (event) => {
+      observe: (event, hostTools) => {
         if (event.kind === "tool-start") {
           const toolCallId = boundedCallId(event.toolCallId);
           if (this.#turns.get(turn.turnId)?.open.has(toolCallId) === true) return;
+          // The host runs this call and records it before it does. Recorded
+          // here too, a read-only host tool would hold its thread as a
+          // runtime tool nobody saw finish.
+          if (hostTools !== undefined && bridgedHostTool(event.toolName, hostTools)) return;
           try {
             this.#intend(turn, toolCallId, event.toolName, "runtime");
           } catch {
@@ -159,9 +224,61 @@ export class ToolEffectLedger {
     };
   }
 
-  /** Whether every side-effecting call the turn started is known to have ended. */
+  /**
+   * Whether every side-effecting call the turn started is known to have
+   * ended. A call whose last frame says it was waiting for its approval had
+   * not run, and counts as ended.
+   */
   certainty(turnId: string): TurnToolCertainty {
-    const unsettled = new Map<string, ToolEffectIntended>();
+    const unsettled = this.#unsettled(turnId);
+    if (unsettled === undefined) return { kind: "unreadable" };
+    for (const call of unsettled.values()) {
+      if (call.intended.effect === "side-effecting" && !call.awaitingApproval)
+        return { kind: "uncertain", toolName: call.intended.toolName };
+    }
+    return { kind: "settled" };
+  }
+
+  /**
+   * Closes the calls an earlier execution under this id left open. An agent
+   * run keeps one record across the times it runs, and a restart reads it
+   * once, when it cut the run off; without this a call that restart already
+   * reported would hold the thread again after every later one.
+   */
+  supersede(turn: { readonly threadId: string; readonly turnId: string }): void {
+    try {
+      const unsettled = this.#unsettled(turn.turnId);
+      if (unsettled === undefined || unsettled.size === 0) return;
+      const state = this.#openTurn(turn.turnId);
+      for (const toolCallId of unsettled.keys()) {
+        this.#append(
+          state,
+          turn.turnId,
+          TOOL_EFFECT_EVENT_NAMES.settled,
+          decodeSettled({
+            threadId: turn.threadId,
+            turnId: turn.turnId,
+            toolCallId,
+            outcome: "superseded",
+          }),
+        );
+        state.open.delete(toolCallId);
+      }
+    } catch {
+      // Left open: the record reads as uncertain, the safe reading.
+    }
+  }
+
+  /** The calls with no settled frame, or undefined when the record cannot be read. */
+  #unsettled(
+    turnId: string,
+  ):
+    | Map<string, { readonly intended: ToolEffectIntended; readonly awaitingApproval: boolean }>
+    | undefined {
+    const unsettled = new Map<
+      string,
+      { readonly intended: ToolEffectIntended; readonly awaitingApproval: boolean }
+    >();
     try {
       let afterVersion = 0;
       for (;;) {
@@ -174,7 +291,11 @@ export class ToolEffectLedger {
         for (const envelope of page) {
           if (envelope.eventName === TOOL_EFFECT_EVENT_NAMES.intended) {
             const intended = decodeIntended(envelope.payload);
-            unsettled.set(intended.toolCallId, intended);
+            unsettled.set(intended.toolCallId, { intended, awaitingApproval: false });
+          } else if (envelope.eventName === TOOL_EFFECT_EVENT_NAMES.awaitingApproval) {
+            const { toolCallId } = decodeAwaitingApproval(envelope.payload);
+            const call = unsettled.get(toolCallId);
+            if (call !== undefined) unsettled.set(toolCallId, { ...call, awaitingApproval: true });
           } else if (envelope.eventName === TOOL_EFFECT_EVENT_NAMES.settled) {
             unsettled.delete(decodeSettled(envelope.payload).toolCallId);
           }
@@ -183,13 +304,32 @@ export class ToolEffectLedger {
         if (page.length < REPLAY_PAGE) break;
       }
     } catch {
-      return { kind: "unreadable" };
+      return undefined;
     }
-    for (const intended of unsettled.values()) {
-      if (intended.effect === "side-effecting")
-        return { kind: "uncertain", toolName: intended.toolName };
+    return unsettled;
+  }
+
+  /**
+   * Whether the call's wait for its approval is on record. When the journal
+   * refuses the frame the call keeps its first one, and a stop holds it.
+   */
+  #awaitApproval(
+    turn: { readonly threadId: string; readonly turnId: string },
+    toolCallId: string,
+  ): boolean {
+    const state = this.#turns.get(turn.turnId);
+    if (state?.open.get(toolCallId) !== "host") return false;
+    try {
+      this.#append(
+        state,
+        turn.turnId,
+        TOOL_EFFECT_EVENT_NAMES.awaitingApproval,
+        decodeAwaitingApproval({ threadId: turn.threadId, turnId: turn.turnId, toolCallId }),
+      );
+      return true;
+    } catch {
+      return false;
     }
-    return { kind: "settled" };
   }
 
   #intend(
@@ -300,12 +440,18 @@ function boundedToolName(value: string): string {
 }
 
 /**
- * Why a thread waits for its person after a restart, when its cut-off turn
- * left a call nobody saw finish. Undefined when nothing is uncertain.
+ * Why a thread waits for its person after a restart, when its cut-off turn,
+ * or a child run of the thread, left a call nobody saw finish. Undefined
+ * when nothing is uncertain.
  */
-export function uncertainToolCallHold(certainty: TurnToolCertainty): string | undefined {
+export function uncertainToolCallHold(
+  certainty: TurnToolCertainty,
+  ranBy: "turn" | "child" = "turn",
+): string | undefined {
   if (certainty.kind === "settled") return undefined;
-  return certainty.kind === "uncertain"
-    ? `Octant stopped while the tool "${certainty.toolName}" was running, so it may or may not have taken effect. Check it, then continue.`
+  if (certainty.kind === "uncertain")
+    return `Octant stopped while ${ranBy === "child" ? "a child agent's tool" : "the tool"} "${certainty.toolName}" was running, so it may or may not have taken effect. Check it, then continue.`;
+  return ranBy === "child"
+    ? "Octant could not read which tool calls a child agent of this thread had started. Check it, then continue."
     : "Octant could not read which tool calls this turn had started. Check it, then continue.";
 }

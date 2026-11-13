@@ -15856,7 +15856,8 @@ describe("continuing a Code turn a restart cut off", () => {
       execute: () => new Promise(() => {}),
     });
     void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
-    return (cutOffTurnId: string) => uncertainToolCallHold(ledger.certainty(cutOffTurnId));
+    return (turn: { readonly turnId: string }) =>
+      uncertainToolCallHold(ledger.certainty(turn.turnId));
   }
 
   it("holds a thread whose cut-off turn left a tool call nobody saw finish, and names the tool", async () => {

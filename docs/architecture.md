@@ -5109,7 +5109,14 @@ or .zip>` write the same files, built by one host command
   start keeps what it did as `restartRecovery` on the host control status (the
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
-  threads that window can open. Chat and Work turns are continued by the same
+  threads that window can open. A client decodes a hold reason it does not
+  know as `other` and still shows the host's own sentence for it, so a reason
+  a later host adds does not fail the status (maintainer decision,
+  2026-11-13). This protects clients built from now on. A client built before
+  it reads the reason as a closed list and refuses the whole status of a host
+  that reports an `uncertain-tool-call` hold, until that start's report is
+  replaced by the next one; the window a host serves is built with the host
+  and is not affected. Chat and Work turns are continued by the same
   rule (Chat and Work restart recovery, below); subagent runs, coordinator
   wakes and goal loops are not continued yet.
 
@@ -5141,26 +5148,70 @@ or .zip>` write the same files, built by one host command
   before, and the host never runs a call again. A thread's purge takes these
   frames by the thread id they carry.
 
+  A call that was only waiting for its own approval when the host stopped
+  does not hold the thread: the turn continues and asks again (maintainer
+  decision, 2026-11-13). The first frame is still written before the tool is
+  entered, so a record always precedes any effect. When the tool then asks a
+  person, the approval service appends `tool-effect-awaiting-approval@1` for
+  the call, and when the person answers (allow, deny, expiry or cancel) it
+  appends `tool-effect-intended@1` again before the tool hears the answer; a
+  journal that refuses that second frame stops the call. Restart recovery
+  reads a call whose last frame is the awaiting one as a call that never ran.
+  Writing the first frame only after approval was rejected: the record cannot
+  know which tools will ask, so every tool would have to announce its own
+  effect and one that forgot would run unrecorded. This way a tool whose
+  approval service says nothing keeps today's hold. Built for the two
+  approvals asked before a call does anything: the harness's own tool
+  approvals (shell, edit, goal checks and the rest of
+  `NativeHarnessApprovalStore`) and a selected MCP server's tool approval.
+  Not built yet: Browser site, upload, download and sign-in prompts, routine
+  and memory proposals, image offers and a tool's question to the person keep
+  the first frame, so a call waiting on one of them still holds its thread (a
+  Browser prompt can follow a click that already happened, so it is not known
+  to precede every effect); and a runtime's own tool waiting on the runtime's
+  approval request still holds, because the request names no tool call and
+  the answer is sent from eleven places across the three modes.
+
   What the record covers, by who runs the tool:
 
   - Tools the host runs for a Chat, Work or Code turn (the harness's own
     tools on key and endpoint providers, and Octant's app tools and selected
     MCP servers' tools on every provider, including the runtimes that call
     them back): the three turn runners record the call before they run it, so
-    a stop anywhere inside the call holds the thread. The intent precedes the
-    tool's own approval prompt, so a call still waiting for its approval at
-    the stop holds the thread as well.
+    a stop anywhere inside the call holds the thread, except while the call
+    waits for its own approval (above).
   - A runtime's own tools (Codex, Claude Code, ACP agents, Pi, OpenCode): each
     adapter reports `tool-start` and `tool-success` or `tool-failure`. The
     host records the start when it reads it, always as `side-effecting`
     because a runtime's tool name proves nothing, and the finish when it
-    reads that. A reported start with no finish holds the thread. Not built
-    yet, and not provable from what a runtime reports: a tool the runtime
+    reads that. A reported start with no finish holds the thread. A runtime
+    also reports a start for a call it hands to the host, under its own call
+    id and its own spelling of the tool, and the host already records that
+    call itself. Such a start is therefore not recorded (maintainer decision,
+    2026-11-13), so a read-only host tool never holds a thread through the
+    runtime's duplicate. It is recognized by name against the tools the turn
+    offers: the tool's own name (Codex, Pi), `mcp__octant__<tool>` (Claude
+    Code) and `octant-<16 hex>_<tool>` (OpenCode; this spelling is not
+    checked against a live OpenCode). Any other spelling stays a runtime
+    tool. Not built yet: an ACP agent titles its calls freely, so its start
+    for a host tool is still recorded as a runtime tool and can hold the
+    thread; and, not provable from what a runtime reports, a tool the runtime
     started that the host had not read when it stopped leaves no record, and
     that turn continues as before.
-  - Not built yet: subagent runs, a terminal-started Browser session and
-    delegated Browser children run tools outside the three turn runners and
-    write no record.
+  - A managed child agent run (maintainer decision, 2026-11-13): the tools
+    the host runs for the child, including a delegated Browser child's, and
+    the child runtime's own reported tools are recorded the same way on one
+    record per run, keyed by the run and carrying the parent thread's id. At
+    a start, a thread's cut-off turn is also held when a child run of that
+    thread which the same start found cut off left a `side-effecting` call
+    unfinished ("Octant stopped while a child agent's tool ..."). When a run
+    executes again, the calls its earlier execution left open are closed as
+    `superseded`, so one restart's record never holds a later one. A child
+    cut off while its parent thread had no turn running holds nothing,
+    because nothing continues that thread by itself.
+  - Not built yet: a terminal-started Browser session and a saved Browser
+    flow's run call the Browser tool outside any turn or run, so there is no
+    record a restart would read, and they write none.
     Other running Code work has no process left after a restart. A push or pull
     request step may already have landed on the remote, so it becomes `ambiguous`
     and keeps the thread Waiting ("could not confirm how the last step ended")

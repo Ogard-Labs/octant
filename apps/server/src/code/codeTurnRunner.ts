@@ -484,7 +484,7 @@ export class CodeTurnRunner {
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
                 input.observeRemoteCommand?.(event);
-                input.toolEffects?.observe(event);
+                input.toolEffects?.observe(event, input.appManagedTools);
                 timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (event.kind === "outside-content-result") {

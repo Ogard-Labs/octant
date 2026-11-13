@@ -471,7 +471,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Stream.filter((event) => event.kind !== "liveness"),
             Stream.tap((event) => Effect.sync(() => meter.observe(event))),
             Stream.tap((event) => Effect.sync(() => input.observeRemoteCommand?.(event))),
-            Stream.tap((event) => Effect.sync(() => input.toolEffects?.observe(event))),
+            Stream.tap((event) =>
+              Effect.sync(() => input.toolEffects?.observe(event, input.appManagedTools)),
+            ),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;

@@ -1014,7 +1014,7 @@ export class ChatTurnRunner {
                 yield* idle.touch;
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
-                input.toolEffects?.observe(event);
+                input.toolEffects?.observe(event, input.appManagedTools);
                 timing = observeTurnMetrics(timing, event);
                 input.liveTurn?.observe(event);
                 const sighting = compactions.observe(event);
