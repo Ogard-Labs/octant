@@ -474,6 +474,41 @@ export function DockBarRow(props: {
       <ChoiceMenu choice={item} key={item.id} />
     );
   };
+  const cuesBlock =
+    rowable.length === 0 ? null : (
+      <CuesGroup
+        fold={props.fold}
+        key="cues"
+        scrollable={props.scrollCues === true}
+        toolLabel={props.toolLabel}
+      >
+        {rowable.map(drawItem)}
+      </CuesGroup>
+    );
+  const actionsBlock =
+    actions.length === 0 ? null : (
+      <div className="dock-tile__tool-actions" key="actions">
+        {props.fold === "menu" || props.fold === "row" ? (
+          <MoreMenu items={props.items} toolLabel={props.toolLabel} />
+        ) : (
+          actions.map((item) =>
+            item.kind === "button" ? (
+              <IconButton
+                className="dock-tile__control window-no-drag"
+                disabled={item.disabled === true}
+                icon={item.icon}
+                key={item.id}
+                label={item.label}
+                onClick={item.onSelect}
+                {...(item.title === undefined ? {} : { title: item.title })}
+              />
+            ) : item.kind === "menu" ? (
+              <ActionMenu item={item} key={item.id} />
+            ) : null,
+          )
+        )}
+      </div>
+    );
   return (
     <div
       aria-label={`${props.toolLabel} controls`}
@@ -482,39 +517,12 @@ export function DockBarRow(props: {
       role="toolbar"
     >
       <Rulers items={props.items} />
-      <div className="dock-tile__tool-lead">{lead.map(drawItem)}</div>
-      {rowable.length === 0 ? null : (
-        <CuesGroup
-          fold={props.fold}
-          scrollable={props.scrollCues === true}
-          toolLabel={props.toolLabel}
-        >
-          {rowable.map(drawItem)}
-        </CuesGroup>
-      )}
-      {actions.length === 0 ? null : (
-        <div className="dock-tile__tool-actions">
-          {props.fold === "menu" || props.fold === "row" ? (
-            <MoreMenu items={props.items} toolLabel={props.toolLabel} />
-          ) : (
-            actions.map((item) =>
-              item.kind === "button" ? (
-                <IconButton
-                  className="dock-tile__control window-no-drag"
-                  disabled={item.disabled === true}
-                  icon={item.icon}
-                  key={item.id}
-                  label={item.label}
-                  onClick={item.onSelect}
-                  {...(item.title === undefined ? {} : { title: item.title })}
-                />
-              ) : item.kind === "menu" ? (
-                <ActionMenu item={item} key={item.id} />
-              ) : null,
-            )
-          )}
-        </div>
-      )}
+      <div className="dock-tile__tool-lead" key="lead">
+        {lead.map(drawItem)}
+      </div>
+      {/* In the row the cues stand under the bar, after the actions, so the page
+          order (Tab) is the visual and arrow-key order. Keys keep them mounted. */}
+      {props.fold === "row" ? [actionsBlock, cuesBlock] : [cuesBlock, actionsBlock]}
     </div>
   );
 }
