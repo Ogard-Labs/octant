@@ -195,6 +195,7 @@ import {
   createReleaseFeedVerifier,
   decodeKeychainServiceFamily,
   KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
+  readHostCrashRecords,
   type HostRuntimeDiagnostics,
 } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -291,7 +292,10 @@ export type RemoteDependencies = {
     | "workThreadService"
     | "workTurnService"
   > &
-  Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService" | "canvasService"> &
+  Pick<
+    CanvasWiring,
+    "canvasNetworkAccess" | "canvasRoutes" | "canvasPublicShareService" | "canvasService"
+  > &
   Pick<
     AutomationWiring,
     | "automationCommandService"
@@ -350,6 +354,7 @@ export function wireRemote(deps: RemoteDependencies) {
     pairedMergeUnlockSlot,
     nativeHarnessSessions,
     remoteDelegationHolder,
+    canvasNetworkAccess,
     canvasPublicShareService,
     canvasRoutes,
     chatAttachmentStore,
@@ -2283,6 +2288,8 @@ export function wireRemote(deps: RemoteDependencies) {
       // retried until the service confirms the link is gone.
       canvasPublicShareService.revokeForPurge(canvasIds);
       canvasPublicShareService.forget(canvasIds);
+      // Its "Allow network" choice and its running pages' tokens go with it.
+      canvasNetworkAccess.forget(canvasIds);
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
     forgetProjectData: (projectId) => {
@@ -2389,6 +2396,7 @@ export function wireRemote(deps: RemoteDependencies) {
       ...(options.hostControl?.readServiceLog === undefined
         ? {}
         : { readHostLog: options.hostControl.readServiceLog }),
+      readCrashRecords: () => readHostCrashRecords(persistence.dataDirectory),
       codeSettings: () => persistence.readCodeSettings()?.settings,
       codeThreadPolicies: () =>
         persistence.readCodeThreads().map((thread) => thread.executionPolicy),

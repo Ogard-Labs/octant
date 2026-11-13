@@ -249,6 +249,10 @@ let server: Server;
 let origin = "";
 let browser: Browser | undefined;
 
+// The first launch of an installed Chrome measured about 4 s on an idle Mac
+// (later ones under 1 s) and a loaded hosted runner takes several times that,
+// so the hook gets Playwright's own 30 s launch limit plus the server start,
+// not the 10 s default.
 beforeAll(async () => {
   server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
@@ -284,7 +288,7 @@ beforeAll(async () => {
       args: ["--site-per-process", "--window-size=1600,1200"],
     });
   }
-});
+}, 45_000);
 
 afterAll(async () => {
   await browser?.close();

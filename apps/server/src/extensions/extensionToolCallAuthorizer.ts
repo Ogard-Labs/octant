@@ -7,6 +7,7 @@ import type { ExtensionToolGrantSubject } from "../persistence/extensionToolGran
 import type { ExtensionToolCall } from "./agentPluginMcpSessionManager";
 import type { ExtensionToolApprovalService } from "./extensionToolApprovalService";
 import type { ExtensionToolGrantStore } from "./extensionToolGrantStore";
+import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 
 /**
  * Decides whether an MCP tool call may run: a thread at Full access runs it
@@ -109,23 +110,28 @@ export function createExtensionToolCallAuthorizer(options: {
     // A turn nobody is sitting at may use a grant but cannot raise a prompt.
     if (call.windowId === undefined) return false;
     const outsideContent = options.outsideContent?.(call.thread.id);
-    return options.approvals.request({
-      windowId: call.windowId,
-      threadId: call.thread.id,
-      ...(call.thread.projectId === undefined ? {} : { projectId: call.thread.projectId }),
-      extensionId: call.extensionId,
-      packageId: call.packageId,
-      componentId: call.componentId,
-      serverName: call.serverName,
-      providerToolName: call.providerToolName,
-      mcpToolName: call.mcpToolName,
-      inputJson: call.inputJson,
-      ...(outsideContent === undefined ? {} : { outsideContent }),
-      ...(decision.rememberable
-        ? { remember: (scope: "tool" | "server") => remember(call, scope) }
-        : {}),
-      ...(call.signal === undefined ? {} : { signal: call.signal }),
-    });
+    const { windowId } = call;
+    // Asked before the server is called: while it waits, the call's record
+    // says nothing ran, so a restart continues the turn and asks again.
+    return whileAwaitingToolApproval(() =>
+      options.approvals.request({
+        windowId,
+        threadId: call.thread.id,
+        ...(call.thread.projectId === undefined ? {} : { projectId: call.thread.projectId }),
+        extensionId: call.extensionId,
+        packageId: call.packageId,
+        componentId: call.componentId,
+        serverName: call.serverName,
+        providerToolName: call.providerToolName,
+        mcpToolName: call.mcpToolName,
+        inputJson: call.inputJson,
+        ...(outsideContent === undefined ? {} : { outsideContent }),
+        ...(decision.rememberable
+          ? { remember: (scope: "tool" | "server") => remember(call, scope) }
+          : {}),
+        ...(call.signal === undefined ? {} : { signal: call.signal }),
+      }),
+    );
   };
 }
 

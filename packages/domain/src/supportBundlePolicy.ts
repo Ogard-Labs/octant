@@ -41,6 +41,14 @@ export interface SupportBundleLogLine {
   readonly message: string;
 }
 
+/** One local crash record the desktop kept when the host exited unexpectedly. */
+export interface SupportBundleCrashRecord {
+  readonly recordedAt: string;
+  readonly process: string;
+  readonly exitReason: string;
+  readonly lastLines: ReadonlyArray<string>;
+}
+
 export interface SupportBundleJournalEvent {
   readonly sequence: number;
   readonly name: string;
@@ -68,6 +76,7 @@ export interface SupportBundleFacts {
     readonly disabledCount: number;
   };
   readonly hostLog?: { readonly lines: ReadonlyArray<SupportBundleLogLine> };
+  readonly crashRecords?: { readonly records: ReadonlyArray<SupportBundleCrashRecord> };
   readonly journalEvents?: {
     readonly head: number;
     readonly events: ReadonlyArray<SupportBundleJournalEvent>;
@@ -137,6 +146,13 @@ export const SUPPORT_BUNDLE_SECTIONS: ReadonlyArray<SectionDescription> = [
     file: "host-log.json",
   },
   {
+    id: "crash-records",
+    title: "Crash records",
+    includes:
+      "Each recent unexpected host exit: when, how it ended, and its last few output lines.",
+    file: "crash-records.json",
+  },
+  {
     id: "journal-events",
     title: "Recent activity",
     includes: "The names and times of the most recent journal events, with nothing they carry.",
@@ -169,6 +185,8 @@ export const SUPPORT_BUNDLE_NEVER_INCLUDED: ReadonlyArray<string> = [
 /** Newest host log lines and journal events a bundle carries. */
 export const SUPPORT_BUNDLE_LOG_LINE_LIMIT = 200;
 export const SUPPORT_BUNDLE_JOURNAL_EVENT_LIMIT = 200;
+export const SUPPORT_BUNDLE_CRASH_RECORD_LIMIT = 20;
+const CRASH_RECORD_LINE_LIMIT = 20;
 const MESSAGE_LIMIT = 240;
 const WITHHELD = "[withheld]";
 // "password is hunter2": redacting the keyword would leave the value behind, so
@@ -253,6 +271,10 @@ function entryCount(facts: SupportBundleFacts, id: SupportBundleSectionId): numb
       return facts.hostLog === undefined
         ? undefined
         : Math.min(facts.hostLog.lines.length, SUPPORT_BUNDLE_LOG_LINE_LIMIT);
+    case "crash-records":
+      return facts.crashRecords === undefined
+        ? undefined
+        : Math.min(facts.crashRecords.records.length, SUPPORT_BUNDLE_CRASH_RECORD_LIMIT);
     case "journal-events":
       return facts.journalEvents === undefined
         ? undefined
@@ -317,6 +339,21 @@ function sectionBody(
               event: line.event,
               message: line.message.slice(0, MESSAGE_LIMIT),
             })),
+          };
+    case "crash-records":
+      return facts.crashRecords === undefined
+        ? undefined
+        : {
+            records: facts.crashRecords.records
+              .slice(0, SUPPORT_BUNDLE_CRASH_RECORD_LIMIT)
+              .map((record) => ({
+                recordedAt: record.recordedAt,
+                process: record.process,
+                exitReason: record.exitReason.slice(0, MESSAGE_LIMIT),
+                lastLines: record.lastLines
+                  .slice(-CRASH_RECORD_LINE_LIMIT)
+                  .map((line) => line.slice(0, MESSAGE_LIMIT)),
+              })),
           };
     case "journal-events":
       return facts.journalEvents === undefined

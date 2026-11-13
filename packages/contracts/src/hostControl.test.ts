@@ -53,6 +53,35 @@ describe("HostControlStatus", () => {
     expect(decoded.lifecycle.restart.kind).toBe("unavailable");
   });
 
+  it("decodes a restart hold whose reason this build does not know as a hold of another kind", () => {
+    const decoded = decodeHostControlStatus({
+      ...status,
+      restartRecovery: {
+        at: "2026-11-13T00:00:00.000Z",
+        continued: [],
+        held: [
+          {
+            mode: "code",
+            threadId: "thread-a",
+            reason: "uncertain-tool-call",
+            detail: "Octant stopped while a tool was running.",
+          },
+          {
+            mode: "chat",
+            threadId: "thread-b",
+            reason: "a-reason-a-later-host-added",
+            detail: "Check it, then continue.",
+          },
+        ],
+      },
+    });
+    expect(decoded.restartRecovery?.held.map((entry) => entry.reason)).toEqual([
+      "uncertain-tool-call",
+      "other",
+    ]);
+    expect(decoded.restartRecovery?.held[1]?.detail).toBe("Check it, then continue.");
+  });
+
   it("decodes an unavailable service policy", () => {
     const decoded = decodeHostControlStatus({
       ...status,

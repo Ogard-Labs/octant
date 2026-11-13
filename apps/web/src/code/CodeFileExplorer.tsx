@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from "react";
+import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControls";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
@@ -50,6 +51,8 @@ export interface CodeFileExplorerProps {
   /** Absent on a surface that does not offer an explicit relist. */
   readonly onRefresh?: () => void;
   readonly refreshing?: boolean;
+  /** False for a tree that is not the tool's primary one: its Refresh stays in its own row. */
+  readonly barControls?: boolean;
 }
 
 export function CodeFileExplorer(props: CodeFileExplorerProps) {
@@ -192,8 +195,37 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
     event.preventDefault();
   };
 
+  // Refresh is an action, so in a tile's bar or the bottom panel's it stands in
+  // the bar beside the name and the filter, which is content, keeps the one row
+  // under it. Shown alone there is no bar: filter and Refresh share the one row.
+  const placement = useDockBarPlacement();
+  // A tool lists the checkout and each extra folder as separate trees, each with
+  // its own filter, so only the primary tree (`barControls`) hands its Refresh
+  // to the bar; an extra folder keeps its own beside its own filter.
+  const refreshInBar =
+    props.barControls !== false && (placement === "tiled" || placement === "bottom");
+  useDockBarControls(
+    props.onRefresh === undefined || !refreshInBar
+      ? []
+      : [
+          {
+            kind: "button",
+            id: "refresh",
+            label: "Refresh files",
+            icon: RefreshCw,
+            onSelect: props.onRefresh,
+            disabled: props.refreshing === true,
+          },
+        ],
+  );
+  const hosted = placement !== undefined;
+
   return (
-    <section aria-label="Code file explorer" className="code-file-explorer">
+    <section
+      aria-label="Code file explorer"
+      className="code-file-explorer"
+      data-bar-hosted={hosted ? "true" : undefined}
+    >
       <div className="code-file-explorer__head">
         <label className="code-file-explorer__search">
           <span className="sr-only">Filter files</span>
@@ -223,7 +255,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
           )}
         </label>
 
-        {props.onRefresh === undefined ? null : (
+        {props.onRefresh === undefined || refreshInBar ? null : (
           <OctantIconButton
             disabled={props.refreshing === true}
             label="Refresh files"

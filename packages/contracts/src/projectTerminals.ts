@@ -245,12 +245,15 @@ export type ProjectTerminalOutput = typeof ProjectTerminalOutput.Type;
  * Why the host would not act. Each reason is one the caller can do something
  * about: `unauthorized` is not this window's Project or shell, `unavailable`
  * is a Project or shell that is not there to act on, `authority-revoked` is a
- * shell the host ended because its Project was archived or rebound.
+ * shell the host ended because its Project was archived or rebound,
+ * `host-restarted` is a shell the last run of the host left running and a
+ * restart ended, which a new start may replace.
  */
 export const ProjectTerminalRefusalReason = Schema.Literal(
   "unauthorized",
   "unavailable",
   "authority-revoked",
+  "host-restarted",
 );
 export type ProjectTerminalRefusalReason = typeof ProjectTerminalRefusalReason.Type;
 

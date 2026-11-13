@@ -41,6 +41,7 @@ const serverUrl = process.env.OCTANT_PROBE_SERVER_URL ?? "";
 const beaconUrl = process.env.OCTANT_PROBE_BEACON_URL ?? "";
 const hostEntry = process.env.OCTANT_PROBE_HOST ?? "";
 const packagedApp = process.env.OCTANT_PROBE_PACKAGED_APP ?? "";
+const bridgeSecret = process.env.OCTANT_PROBE_BRIDGE_SECRET ?? "";
 const watchMs = Number(process.env.OCTANT_PROBE_WATCH_MS ?? "9000");
 
 app.setPath("userData", mkdtempSync(join(tmpdir(), "octant-prototype-probe-")));
@@ -174,6 +175,8 @@ function surfaceFor() {
     },
     serverUrl: () => serverUrl,
     fetch: globalThis.fetch,
+    // As the app's main process proves itself to the host for a page.
+    brokerHeaders: () => ({ "x-octant-desktop-secret": bridgeSecret }),
     platform: process.platform,
   });
 }

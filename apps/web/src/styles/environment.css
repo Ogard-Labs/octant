@@ -1271,7 +1271,7 @@ details.thread-move-sheet__section > summary {
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
-  width: min(100% - 40px, var(--oct-composer-width));
+  width: min(100% - var(--oct-thread-gutter), var(--oct-composer-width));
   margin: var(--oct-space-6) auto var(--oct-space-3);
 }
 
@@ -1379,7 +1379,7 @@ html[data-octant-reduced-motion="true"] .thread-move-frozen__progress > span {
 .thread-move-tombstone__title {
   margin: 0;
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .thread-move-tombstone__meta {

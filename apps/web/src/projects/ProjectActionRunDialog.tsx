@@ -36,6 +36,10 @@ export function ProjectActionRunDialog(props: {
   });
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
+  // A run a host restart ended is offered again through the ordinary review:
+  // the saved command, folder and authority are read as they are now, and
+  // Run action is still the person's to press.
+  const [endedByRestart, setEndedByRestart] = useState(false);
   const submitted = useRef(terminalId !== undefined);
   const cursor = useRef(0);
   const [output, setOutput] = useState("");
@@ -84,6 +88,9 @@ export function ProjectActionRunDialog(props: {
         );
         if (abort.signal.aborted) return;
         if (result.kind !== "project-terminal") {
+          setEndedByRestart(
+            result.kind === "project-terminal-refused" && result.reason === "host-restarted",
+          );
           setFailure(
             (current) =>
               current ??
@@ -264,10 +271,11 @@ export function ProjectActionRunDialog(props: {
                   setRun(undefined);
                   setOutput("");
                   setTerminalId(undefined);
+                  setEndedByRestart(false);
                 }}
                 type="button"
               >
-                Prepare another run
+                {endedByRestart ? "Review and run again" : "Prepare another run"}
               </OctantButton>
             ) : null}
           </>

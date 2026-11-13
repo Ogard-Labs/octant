@@ -51,6 +51,13 @@ export interface HostMemoryGuardOptions {
   /** Epoch milliseconds. */
   readonly clock?: () => number;
   readonly log?: (line: string) => void;
+  /**
+   * Keeps a local crash record for an unclean previous stop and answers the
+   * one kept, so the next-start notice can name it. Failure only drops the name.
+   */
+  readonly keepCrashRecord?: (
+    stop: NonNullable<HostMemoryStatus["previousStop"]>,
+  ) => Promise<{ readonly recordedAt: string; readonly exitReason: string } | undefined>;
   readonly setTimer?: (tick: () => void, delayMs: number) => RepeatingTimer;
 }
 
@@ -98,6 +105,9 @@ export class HostMemoryGuard {
   async start(): Promise<void> {
     this.#previousStop = await this.#readPreviousStop();
     if (this.#previousStop !== undefined) {
+      const stop = this.#previousStop;
+      const crashRecord = await this.#options.keepCrashRecord?.(stop).catch(() => undefined);
+      if (crashRecord !== undefined) this.#previousStop = { ...stop, crashRecord };
       this.#log(
         `[memory-guard] the previous host stopped without a clean exit; last seen ${this.#previousStop.lastSeenAt} at ${this.#previousStop.pressure} pressure using ${this.#previousStop.processMegabytes} MB`,
       );

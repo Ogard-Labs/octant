@@ -1220,7 +1220,7 @@ describe("SettingsView", () => {
     expect(styles).toMatch(/--oct-settings-reading-width:\s*920px;/);
     expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0 auto;/);
     expect(styles).toMatch(
-      /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*48px var\(--oct-settings-gutter\) 72px;/,
+      /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*var\(--oct-space-12\) var\(--oct-settings-gutter\) var\(--oct-space-12\);/,
     );
     expect(styles).toContain("font-family: var(--oct-font-display)");
     // The rail's rows, "Back to app" included, take their size from the

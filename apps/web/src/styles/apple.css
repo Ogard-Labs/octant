@@ -36,7 +36,7 @@
 
 .apple-workbench h1 {
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .apple-workbench p {

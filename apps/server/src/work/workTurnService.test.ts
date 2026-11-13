@@ -54,6 +54,11 @@ import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjectio
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { ProjectionRegistry } from "../persistence/projection";
+import {
+  registerToolEffectEvents,
+  ToolEffectLedger,
+  uncertainToolCallHold,
+} from "../toolEffects/toolEffectLedger";
 import { leadApprovalFor } from "../harness/leadApprovalAttention";
 import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
@@ -6243,16 +6248,45 @@ describe("continuing a Work turn a restart cut off", () => {
       cutOff,
       quitByPerson: false,
       work: host.service,
+      goalLoops: noGoalLoops,
       readThread: () => thread(),
       enabled: () => true,
       modeEnabled: () => true,
       connection,
       liftHarnessRecovery: async () => ({ kind: "none" as const }),
+      uncertainToolCall: () => undefined,
       releaseQueue,
       ...options.recovery,
     });
     return { host, cutOff, recovery, releaseQueue };
   }
+
+  const noGoalLoops = {
+    runningLoopThreads: () => [],
+    openRoundThreads: () => [],
+    settleAfterRestart: async () => ({ roundsCutOffInARow: 0 }),
+    crashLooping: () => false,
+    continueAfterRestart: () => false,
+    holdAfterRestart: () => false,
+  };
+
+  /** A goal loop the previous host was running on the test thread. */
+  const runningGoalLoop = (roundsCutOffInARow = 1) => {
+    let running = true;
+    const goalLoops = {
+      runningLoopThreads: vi.fn(() => (running ? [String(ids.thread)] : [])),
+      openRoundThreads: () => [],
+      settleAfterRestart: vi.fn(async (_threadId: string) => ({ roundsCutOffInARow })),
+      crashLooping: (count: number) => count >= 3,
+      continueAfterRestart: vi.fn((_threadId: string) => running),
+      holdAfterRestart: vi.fn((_threadId: string) => {
+        const was = running;
+        running = false;
+        return was;
+      }),
+    };
+    return goalLoops;
+  };
 
   const continuations = (host: Host) =>
     host.projection
@@ -6288,6 +6322,157 @@ describe("continuing a Work turn a restart cut off", () => {
     expect(second.cutOff).toEqual([]);
     expect(second.recovery).toEqual({ continued: [], held: [] });
     expect(continuations(second.host)).toHaveLength(1);
+  });
+
+  /**
+   * The host's record of tool calls, over the store that outlives a restart,
+   * and one call of a turn that the host stopped inside of.
+   */
+  function toolCallCutOff(
+    connection: ReturnType<typeof openSqlite>,
+    turnId: string,
+    toolName: string,
+  ) {
+    const ledger = new ToolEffectLedger({
+      journal: new Journal({
+        connection,
+        registry: registerToolEffectEvents(new EventRegistry()),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => now,
+      }),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => now,
+    });
+    const tools = ledger.forTurn({ threadId: String(ids.thread), turnId }).tools({
+      definitions: [{ name: toolName, inputSchema: { type: "object" } }],
+      execute: () => new Promise(() => {}),
+    });
+    void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
+    return (turn: { readonly turnId: string }) =>
+      uncertainToolCallHold(ledger.certainty(turn.turnId));
+  }
+
+  it("holds a cut-off turn whose tool call nobody saw finish and names the tool", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const uncertainToolCall = toolCallCutOff(connection, String(ids.request), "shell");
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { uncertainToolCall },
+    });
+
+    expect(recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "work",
+          threadId: String(ids.thread),
+          reason: "uncertain-tool-call",
+          detail:
+            'Octant stopped while the tool "shell" was running, so it may or may not have taken effect. Check it, then continue.',
+        },
+      ],
+    });
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("continues a cut-off turn whose only unfinished tool call reads", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const uncertainToolCall = toolCallCutOff(connection, String(ids.request), "grep");
+
+    const { host, recovery } = await hostStart([before], connection, {
+      recovery: { uncertainToolCall },
+    });
+
+    expect(recovery).toEqual({
+      continued: [{ mode: "work", threadId: String(ids.thread) }],
+      held: [],
+    });
+    expect(continuations(host)).toHaveLength(1);
+  });
+
+  it("lets a goal loop's next round continue a thread whose round turn a restart cut off, instead of a second turn", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const goalLoops = runningGoalLoop();
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { goalLoops },
+    });
+
+    expect(recovery).toEqual({
+      continued: [{ mode: "work", threadId: String(ids.thread) }],
+      held: [],
+    });
+    expect(goalLoops.continueAfterRestart).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(goalLoops.holdAfterRestart).not.toHaveBeenCalled();
+    expect(releaseQueue).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("holds a running goal loop for its person after a person quit Octant", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const goalLoops = runningGoalLoop();
+
+    const { recovery } = await hostStart([before], connection, {
+      recovery: { quitByPerson: true, goalLoops },
+    });
+
+    expect(recovery.held).toMatchObject([{ reason: "quit" }]);
+    expect(goalLoops.holdAfterRestart).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(goalLoops.continueAfterRestart).not.toHaveBeenCalled();
+  });
+
+  it("continues a goal loop the restart caught between rounds, unless the thread's own switch is off", async () => {
+    const connection = await hostStore();
+    const continuing = runningGoalLoop(0);
+    const first = await hostStart([], connection, { recovery: { goalLoops: continuing } });
+    expect(continuing.continueAfterRestart).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(first.recovery).toEqual({
+      continued: [{ mode: "work", threadId: String(ids.thread) }],
+      held: [],
+    });
+
+    const optedOut = runningGoalLoop(0);
+    const second = await hostStart([], connection, {
+      recovery: { goalLoops: optedOut, readThread: () => thread({ optedOut: true }) },
+    });
+    expect(optedOut.holdAfterRestart).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(optedOut.continueAfterRestart).not.toHaveBeenCalled();
+    expect(second.recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "work",
+          threadId: String(ids.thread),
+          reason: "opted-out",
+          detail: "Continue after restart is off for this thread, so it waits for you.",
+        },
+      ],
+    });
+  });
+
+  it("holds a goal loop whose rounds restarts cut off three times in a row, with no turn or round started", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const goalLoops = runningGoalLoop(3);
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { goalLoops },
+    });
+
+    expect(goalLoops.settleAfterRestart).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
+    expect(recovery.continued).toEqual([]);
+    expect(recovery.held).toMatchObject([
+      { mode: "work", threadId: String(ids.thread), reason: "crash-loop" },
+    ]);
+    expect(goalLoops.continueAfterRestart).not.toHaveBeenCalled();
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
   });
 
   it("holds a cut-off turn while Continue after restart is off in Settings", async () => {

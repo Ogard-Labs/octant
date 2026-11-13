@@ -52,7 +52,11 @@ function stopDetail(stop: NonNullable<HostMemoryStatus["previousStop"]>): string
     stop.pressure === "normal"
       ? `At the last reading memory looked normal and the host held ${stop.processMegabytes} MB, so the cause is not known.`
       : `At the last reading memory was ${stop.pressure === "critical" ? "very low" : "low"} and the host held ${stop.processMegabytes} MB.`;
-  return `Octant ended without a clean stop and is running again. ${reading}`;
+  const record =
+    stop.crashRecord === undefined
+      ? ""
+      : ` Octant kept a crash record on this device (${stop.crashRecord.exitReason}, ${formatMemoryEventTime(stop.crashRecord.recordedAt)}). Save diagnostics in Settings > Host includes it; nothing was sent.`;
+  return `Octant ended without a clean stop and is running again. ${reading}${record}`;
 }
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, {

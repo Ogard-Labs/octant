@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
  * Focuses an element that replaced the control the person used: Review opens
  * the card, Back returns to the list, Start shows the session, Stop shows why
  * it ended. Without it focus fell to the page at each step (DESIGN.md §
- * Accessibility and reliability). It moves focus only when focus has fallen
+ * Accessibility). It moves focus only when focus has fallen
  * to the page or is still in the panel, so a session that ends on its own
  * never pulls the keyboard out of the editor.
  */

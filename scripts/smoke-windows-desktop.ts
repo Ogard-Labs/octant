@@ -45,12 +45,34 @@ const diagnostics = new Map<ChildProcess, { readonly role: string; readonly read
 const checks: string[] = [];
 const run = promisify(execFile);
 const begin = Date.now();
+// One phase's whole budget. The owned-job launcher that runs this script
+// (scripts/windows-host-owner/reader.cpp) ends the job 90 seconds after it
+// starts, so every wait also stops here: the 15 seconds left over are for the
+// failure evidence below and the exit. Keep the two numbers together.
+//
+// The budget was 34 seconds under a 40-second launcher while a healthy owned
+// phase already took 19 to 21 seconds on the hosted runner. Four runs on
+// unrelated changes then failed in one day, each at the first start of the
+// packaged app, with the script reporting at most 23 to 31 seconds after its
+// step began: host readiness at its 18-second limit twice, and the rendered
+// welcome window at its 12-second limit twice. Each change passed when run
+// again.
+const PROOF_BUDGET_MS = 75000;
+// A first start of the packaged app: the host until it publishes readiness,
+// and a window until it has rendered. A window probe that outlasts its own 8
+// seconds counts as nothing observed, so 12 seconds held at most two looks.
+const HOST_READY_LIMIT_MS = 40000;
+const RENDERED_WINDOW_LIMIT_MS = 30000;
 function check(value: boolean, name: string) {
   if (!value) throw Error(`Windows desktop proof failed: ${name}`);
   checks.push(name);
 }
-async function until(name: string, predicate: () => Promise<boolean>, limit = 12000) {
-  const end = Math.min(begin + 34000, Date.now() + limit);
+async function until(
+  name: string,
+  predicate: () => Promise<boolean>,
+  limit = RENDERED_WINDOW_LIMIT_MS,
+) {
+  const end = Math.min(begin + PROOF_BUDGET_MS, Date.now() + limit);
   do {
     if (await predicate()) return;
     await new Promise((r) => setTimeout(r, 100));
@@ -171,7 +193,7 @@ async function window(child: ChildProcess, close = false, requireRendered = fals
 }
 async function observeColdHostWindow(nightly: ChildProcess) {
   const birth = births.get(nightly);
-  const remaining = Math.min(8000, begin + 34000 - Date.now());
+  const remaining = Math.min(8000, begin + PROOF_BUDGET_MS - Date.now());
   if (!nightly.pid || !birth || !nightlyExecutable || remaining <= 0)
     throw Error("The exact cold-launch parent is unavailable.");
   const result = await run(
@@ -226,7 +248,7 @@ async function ready(control?: ChildProcess) {
         throw Error(`The direct host-only control exited before readiness (${control.exitCode}).`);
       return (await host.startup.readHostInfo()) !== undefined;
     },
-    18000,
+    HOST_READY_LIMIT_MS,
   );
   const attachment = await attachWindowsDesktopHost(host);
   if (attachment === undefined) throw Error("The actual native owner was absent after readiness.");
@@ -275,7 +297,7 @@ async function hostOnlyControlEnvironment(): Promise<Readonly<Record<string, str
   };
 }
 async function verifyHostOnlyDiagnosticPipe(environment: Readonly<Record<string, string>>) {
-  const deadline = Math.min(begin + 34000, Date.now() + 2000);
+  const deadline = Math.min(begin + PROOF_BUDGET_MS, Date.now() + 2000);
   const marker = "octant-host-only-diagnostic-pipe\n";
   let probe: ChildProcess;
   try {

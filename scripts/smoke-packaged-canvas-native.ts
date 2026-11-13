@@ -36,6 +36,10 @@ import { openReadOnlySqlite } from "../apps/server/src/persistence/sqlitePort";
 import { createQuitAppleScript } from "./package-desktop";
 import {
   cleanupPackagedProcess,
+  coldLaunchPhases,
+  collectHostInteractionMarks,
+  formatColdLaunchPhases,
+  readHostStartupTimes,
   runBoundedCommand,
   sanitizedPackagedEnvironment,
   spawnPackagedApplication,
@@ -305,6 +309,10 @@ async function main(): Promise<void> {
         join(root, "data"),
       ),
       OCTANT_SERVER_PORT: String(port),
+      // Local launch marks on the app's stderr and a service log of this run's
+      // own, so a slow cold launch reports which phase took the time.
+      OCTANT_PERF_TRACE: "1",
+      OCTANT_LOGS_DIR: join(root, "logs"),
       ...(process.env.RUNNER_TRACKING_ID === undefined
         ? {}
         : { RUNNER_TRACKING_ID: process.env.RUNNER_TRACKING_ID }),
@@ -475,7 +483,9 @@ async function main(): Promise<void> {
       throw Error(
         "Packaged Keychain synthetic environment probe failed; see sanitized fixture evidence.",
       );
+    const launchedAt = Date.now();
     app = spawnPackagedApplication({ executable, env });
+    const launchMarks = collectHostInteractionMarks(app.child.stderr);
     pid = app.child.pid;
     if (pid === undefined) throw Error("No owned packaged application process.");
     const ownPid = pid;
@@ -555,6 +565,7 @@ const timer = setInterval(() => {
       accept: (snapshot: typeof Snapshot.Type) => boolean,
     ) => {
       let lastNativeError = "";
+      let lastRows: ReadonlyArray<string> | undefined;
       // A cold macOS runner can still show "Connecting to Chat..." well past 20s
       // (the primary-window stage includes app start), so a stage that is merely
       // slow must not read as a failed one. Each observation keeps its own 8s bound.
@@ -578,6 +589,7 @@ const timer = setInterval(() => {
           const snapshot = decodeSnapshot(JSON.parse(raw));
           if (snapshot.pid !== ownPid) throw Error("The observation belongs to another process.");
           lastNativeError = "";
+          lastRows = snapshot.texts.map((row) => row.text);
           if (accept(snapshot)) {
             console.log(`Observed native stage: ${stage}`);
             return snapshot;
@@ -591,6 +603,24 @@ const timer = setInterval(() => {
       await writeFile(
         join(artifacts, "native-controller-diagnostic.txt"),
         lastNativeError || `The latest owned image did not contain the expected ${stage} state.`,
+      );
+      // The last observation otherwise exists only in the uploaded artifact,
+      // and two runs that gave up at update-owned-card could not be read from
+      // their job logs. The rows are what the window showed, bounded; a long
+      // unbroken run of key-like characters is hidden in case a row came from
+      // a field that holds a key.
+      const bounded = (text: string) =>
+        text.slice(0, 200).replace(/[A-Za-z0-9_+/=-]{24,}/g, "[hidden]");
+      console.error(
+        JSON.stringify({
+          unobservedNativeStage: stage,
+          screenshot: join(artifacts, `${stage}.png`),
+          observedRows: lastRows?.length ?? null,
+          rows: lastRows?.slice(0, 120).map(bounded),
+          ...(lastNativeError === ""
+            ? {}
+            : { lastObservationError: bounded(lastNativeError.slice(-200)) }),
+        }),
       );
       throw Error(`The real packaged ${stage} state was not observed.`);
     };
@@ -639,7 +669,29 @@ const timer = setInterval(() => {
         },
         { timeoutMs: 5000 },
       );
-    await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
+    try {
+      await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
+    } finally {
+      // Reported whether or not the window arrived: a launch that never left
+      // "Connecting to Chat" is the case that needs the phases most.
+      const phases = coldLaunchPhases({
+        launchedAt,
+        marks: launchMarks(),
+        ...(await readHostStartupTimes({
+          dataDirectory: join(root, "data"),
+          logsDirectory: join(root, "logs"),
+        })),
+      });
+      console.log(formatColdLaunchPhases(phases));
+      await writeFile(
+        join(artifacts, "cold-launch-phases.json"),
+        JSON.stringify(
+          phases.map((phase) => ({ ...phase, sinceLaunchMs: phase.sinceLaunchMs ?? null })),
+          null,
+          2,
+        ),
+      ).catch(() => undefined);
+    }
     await runBoundedCommand(
       nativeControllerPath,
       ["click", String(ownPid), join(artifacts, "skip-setup-target.png"), "Skip setup"],
@@ -671,6 +723,17 @@ const timer = setInterval(() => {
     await runBoundedCommand(
       nativeControllerPath,
       ["click", String(ownPid), join(artifacts, "fixture-project-target.png"), "Canvas fixtures"],
+      process.env,
+      8000,
+    );
+    // The click leaves the pointer on the sidebar row, whose hover card opens
+    // over the start of the transcript. In the hosted runner's window that card
+    // was observed covering the start of the Canvas sentence this stage reads
+    // ("...week running."), so the pointer is moved onto the Canvas first.
+    await observeUntil("fixture-canvas-drawn", (snapshot) => hasText(snapshot, "Worth watching"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["hover", String(ownPid), join(artifacts, "fixture-canvas-hover.png"), "Worth watching"],
       process.env,
       8000,
     );
@@ -815,14 +878,22 @@ const timer = setInterval(() => {
       process.env,
       8000,
     );
-    await observeUntil(
+    const exportPanel = await observeUntil(
       "canvas-export",
       (snapshot) => hasText(snapshot, "Review export") && hasText(snapshot, "Public link"),
     );
     // This is the selected trigger actually observed in the first export
     // panel. Opening its native menu grants nothing; only the exact owned
-    // Public link card below is eligible for approval.
-    await nativeInput("destination-trigger", "click", "sharehtml.org — Ready");
+    // Public link card below is eligible for approval. OCR reads the trigger's
+    // em dash as a hyphen at the 13px interface size ("sharehtml.org - Ready"
+    // on the hosted runner), so the row is matched as the menu row below is
+    // and clicked by the text actually observed.
+    const destinationTrigger = exportPanel.texts.find((row) =>
+      /^sharehtml\.org [—-] Ready$/.test(row.text),
+    );
+    if (destinationTrigger === undefined)
+      throw Error("The observed sharehtml.org destination trigger is absent.");
+    await nativeInput("destination-trigger", "click", destinationTrigger.text);
     const destinationMenu = await observeUntil("destination-native-menu", (snapshot) =>
       snapshot.texts.some((row) => /^Public link [—-] Ready$/.test(row.text)),
     );
@@ -1110,15 +1181,27 @@ const timer = setInterval(() => {
       ),
     );
     const updatedLinks = await showPublicLinks("updated");
-    const actionRows = updatedLinks.texts.filter(
-      (row) =>
-        row.text.includes("Copy link") &&
-        row.text.includes("Update") &&
-        row.text.endsWith("Revoke"),
+    // OCR used to read the link's actions as one row ("Copy link Update
+    // Revoke"); with the current control spacing the hosted runner reads
+    // "Copy link", "Update" and "Revoke" as three rows. Either shape is
+    // accepted, but there must be exactly one owned link's actions, and the
+    // click stays bound to that one row.
+    const rowTexts = updatedLinks.texts.map((row) => row.text.trim());
+    const joinedRows = rowTexts.filter(
+      (text) => text.includes("Copy link") && text.includes("Update") && text.endsWith("Revoke"),
     );
-    if (actionRows.length !== 1 || actionRows[0] === undefined)
+    const countOf = (value: string) => rowTexts.filter((text) => text === value).length;
+    const separateRows =
+      countOf("Copy link") === 1 && countOf("Update") === 1 && countOf("Revoke") === 1;
+    const actionRow =
+      joinedRows.length === 1 && !separateRows
+        ? joinedRows[0]
+        : joinedRows.length === 0 && separateRows
+          ? "Revoke"
+          : undefined;
+    if (actionRow === undefined)
       throw Error("The single owned public-link action row is unavailable.");
-    await nativeInput("native-revoke", "click", "Revoke", actionRows[0].text);
+    await nativeInput("native-revoke", "click", "Revoke", actionRow);
     await observeUntil(
       "native-revoke-card",
       (snapshot) =>

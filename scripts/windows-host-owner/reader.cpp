@@ -94,7 +94,9 @@ int wmain(int argc, wchar_t** argv) {
   if (ResumeThread(thread.value) == static_cast<DWORD>(-1)) return refused("owned-resume");
   if (profile_owner) std::puts("{\"fixtureRestricted\":true,\"fixtureDefaultOwnerIsUser\":true,\"originalTokenOwnerUnchanged\":true}");
   else std::puts("{\"fixtureRestricted\":true}");
-  const DWORD waited = WaitForSingleObject(process.value, 40000);
+  // The hard end of one owned run. scripts/smoke-windows-desktop.ts spends at
+  // most 75 seconds of it on its waits; keep the two numbers together.
+  const DWORD waited = WaitForSingleObject(process.value, 90000);
   DWORD result = 2;
   if (waited == WAIT_OBJECT_0) GetExitCodeProcess(process.value, &result);
   if (!TerminateJobObject(job.value, result)) return refused("owned-job-cleanup");

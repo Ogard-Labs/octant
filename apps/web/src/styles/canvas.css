@@ -3154,6 +3154,12 @@
   border-bottom: 1px solid var(--oct-border);
 }
 
+.canvas-workspace-tab__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
 .canvas-workspace-tab__spacer {
   flex: 1;
 }
@@ -3880,7 +3886,7 @@
 
 .canvas-action__reason {
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-action__status[data-run="completed"],
@@ -3891,7 +3897,7 @@
 .canvas-action__status[data-run="denied"],
 .canvas-action__status[data-run="failed"] {
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-action__spinner {
@@ -3956,7 +3962,7 @@
 .canvas-refresh__status[data-run="failed"],
 .canvas-refresh__status[data-run="partial"] {
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .canvas-refresh__spinner {
@@ -4072,7 +4078,7 @@
 
 .canvas-share__status[data-run="failed"] {
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 /* Opened shared snapshot: a clearly labeled read-only copy, framed apart from
