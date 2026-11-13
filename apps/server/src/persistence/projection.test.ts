@@ -516,4 +516,79 @@ describe("projection replay", () => {
     });
     connection.close();
   });
+
+  it("writes a checkpoint row once per catch-up batch and once per rebuild", () => {
+    const connection = openConnection();
+    const journal = createJournal(connection);
+    const makeBatch = (offset: number, count: number) =>
+      Array.from({ length: count }, (_, index) => {
+        const seq = offset + index + 1;
+        return pendingEvent(
+          `00000000-0000-4000-8000-${String(1000 + seq).padStart(12, "0")}`,
+          `value-${seq}`,
+        );
+      });
+
+    append(journal, makeBatch(0, 25));
+    catchUpProjection({
+      connection,
+      journal,
+      projection: fixtureProjection(),
+      clock: () => now,
+      batchSize: 25,
+    });
+
+    let checkpointWrites = 0;
+    const basePrepare = connection.prepare.bind(connection);
+    const countedConnection: SqliteConnection = {
+      ...connection,
+      exec: connection.exec.bind(connection),
+      close: connection.close.bind(connection),
+      transaction: connection.transaction.bind(connection),
+      prepare(sql: string) {
+        const statement = basePrepare(sql);
+        if (!sql.includes("INSERT INTO projection_checkpoints")) return statement;
+        return {
+          ...statement,
+          get: statement.get.bind(statement),
+          all: statement.all.bind(statement),
+          run(...params: ReadonlyArray<unknown>) {
+            checkpointWrites += 1;
+            return statement.run(...params);
+          },
+        } as SqliteStatement;
+      },
+    };
+
+    journal.append({
+      aggregate: {
+        aggregateType: "fixture",
+        aggregateId: "00000000-0000-4000-8000-000000000299",
+      },
+      expectedVersion: 0,
+      events: makeBatch(25, 25),
+    });
+    catchUpProjection({
+      connection: countedConnection,
+      journal,
+      projection: fixtureProjection(),
+      clock: () => now,
+      batchSize: 25,
+    });
+    expect(checkpointWrites).toBe(1);
+    expect(checkpoint(connection)).toMatchObject({ last_sequence: 50 });
+
+    checkpointWrites = 0;
+    rebuildProjection({
+      connection: countedConnection,
+      journal,
+      projection: fixtureProjection(),
+      clock: () => now,
+      batchSize: 25,
+    });
+    expect(checkpointWrites).toBe(1);
+    expect(checkpoint(connection)).toMatchObject({ last_sequence: 50 });
+    expect(rows(connection)).toHaveLength(50);
+    connection.close();
+  });
 });
