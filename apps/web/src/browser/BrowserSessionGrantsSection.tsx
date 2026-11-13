@@ -143,7 +143,7 @@ export function BrowserSessionGrantsSection(props: {
   return (
     <SettingsSection
       title="Browser session permissions"
-      description="Allow a selected caller to use an existing sign-in on this host for exact sites. Permissions end on host restart. File transfers and login or script permissions stay separate."
+      description="Allow a selected caller to use an existing sign-in on this host for exact sites. A routine's or child's permission is kept across a restart until it expires, is revoked or its caller changes; a terminal's ends with the host. File transfers and login or script permissions stay separate."
     >
       <SettingRow
         label="Session permissions"
@@ -195,7 +195,7 @@ export function BrowserSessionGrantsSection(props: {
           settingId="browser-session-permissions"
           key={grant.grantId}
           label={`${grant.target.label} · ${grant.profileLabel}`}
-          description={`${grant.origins.join(", ")} · Expires ${new Date(grant.expiresAt).toLocaleString()} · ${grant.target.modelId}${grant.continuesWithoutWindow === true ? " · Continues when windows close" : " · Requires an open local window"}`}
+          description={`${grant.origins.join(", ")} · Expires ${new Date(grant.expiresAt).toLocaleString()} · ${grant.target.modelId}${grant.continuesWithoutWindow === true ? " · Continues when windows close" : " · Requires an open local window"}${grant.survivesRestart === true ? " · Kept across restarts" : " · Ends when the host restarts"}`}
           scope="host"
         >
           <OctantButton
@@ -248,13 +248,20 @@ export function BrowserSessionGrantsSection(props: {
             details={
               <>
                 <p>
-                  Permissions end at the displayed expiry, on revocation or when this host restarts.
-                  Granting starts no task or routine.
+                  Permissions end at the displayed expiry or on revocation. Granting starts no task
+                  or routine.
                 </p>
                 {review === undefined ? null : (
                   <p>
+                    {review.grant.survivesRestart === true
+                      ? "This permission survives a host restart and an app update. A changed definition, model, authority or Project binding ends it, and so does a host that did not close normally."
+                      : "This permission ends when this host restarts."}
+                  </p>
+                )}
+                {review === undefined ? null : (
+                  <p>
                     {review.grant.continuesWithoutWindow === true
-                      ? "This permission can keep using the native Browser when all windows close. Turning off background Browser ownership or quitting Octant ends its execution lease; a new owner requires another review."
+                      ? "This permission can keep using the native Browser when all windows close. Turning off background Browser ownership or quitting Octant ends its execution lease; after a restart it requires an open local window until reviewed again."
                       : "This permission requires an open local window. Turning on background Browser ownership later does not extend it."}
                   </p>
                 )}

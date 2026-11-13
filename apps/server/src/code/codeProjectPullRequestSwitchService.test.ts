@@ -534,20 +534,15 @@ describe("a thread watching its own pull request", () => {
     });
   }
 
-  async function watching(
-    f: ReturnType<typeof fixture>,
-    answer: "approved" | "denied" = "approved",
-  ) {
-    const ask = vi.fn(async () => answer);
-    const outcome = await f.service.watch({ windowId, threadId, providerInstanceId, ask, signal });
-    return { ask, outcome };
+  async function watching(f: ReturnType<typeof fixture>) {
+    const outcome = await f.service.watch({ windowId, threadId, providerInstanceId, signal });
+    return { outcome };
   }
 
-  it("watches only after the person allows it, journaled as the thread's agent with what was already true", async () => {
+  it("watches without asking anyone, journaled as the thread's agent with what was already true", async () => {
     const f = fixture();
     f.observe(activity({ checks: "passed", reviewDecision: "review-required" }));
-    const { ask, outcome } = await watching(f);
-    expect(ask).toHaveBeenCalledWith(target);
+    const { outcome } = await watching(f);
     expect(outcome).toMatchObject({ status: "watching", target, alreadyWatching: false });
     const [event] = f.recorded(WATCH);
     expect(event?.actor).toMatchObject({ kind: "agent", providerInstanceId, threadId });
@@ -566,19 +561,11 @@ describe("a thread watching its own pull request", () => {
     expect(f.threads.startTurn).not.toHaveBeenCalled();
   });
 
-  it("journals nothing when the person declines, and asks nothing without a linked pull request", async () => {
-    const declined = fixture();
-    declined.observe(activity());
-    expect((await watching(declined, "denied")).outcome).toEqual({
-      status: "declined",
-      answer: "denied",
-    });
-    expect(declined.recorded(WATCH)).toHaveLength(0);
-
+  it("journals nothing and reads no forge without a linked pull request", async () => {
     const unlinked = fixture({ threadPullRequests: [] });
-    const { ask, outcome } = await watching(unlinked);
+    const { outcome } = await watching(unlinked);
     expect(outcome).toEqual({ status: "refused", reason: "no-pull-request" });
-    expect(ask).not.toHaveBeenCalled();
+    expect(unlinked.recorded(WATCH)).toHaveLength(0);
     expect(unlinked.forge.observe).not.toHaveBeenCalled();
   });
 
@@ -744,30 +731,27 @@ describe("a thread watching its own pull request", () => {
     });
   });
 
-  it("answers a second watch of the same pull request without asking again", async () => {
+  it("answers a second watch of the same pull request without journaling it again", async () => {
     const f = fixture();
     f.observe(activity());
     await watching(f);
-    const { ask, outcome } = await watching(f);
+    const { outcome } = await watching(f);
     expect(outcome).toMatchObject({ status: "watching", alreadyWatching: true });
-    expect(ask).not.toHaveBeenCalled();
     expect(f.recorded(WATCH)).toHaveLength(1);
   });
 
-  it("keeps the first of two linked threads approved at once as the watcher, and refuses the second", async () => {
+  it("keeps the first of two linked threads asking at once as the watcher, and refuses the second", async () => {
     const otherThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000002");
     const f = fixture({ linked: [String(threadId), String(otherThreadId)] });
     const reads: Array<(observation: GhPullRequestSwitchObservation) => void> = [];
     f.forge.observe.mockImplementation(
       () => new Promise<GhPullRequestSwitchObservation>((resolve) => reads.push(resolve)),
     );
-    const ask = vi.fn(async () => "approved" as const);
-    const first = f.service.watch({ windowId, threadId, providerInstanceId, ask, signal });
+    const first = f.service.watch({ windowId, threadId, providerInstanceId, signal });
     const second = f.service.watch({
       windowId,
       threadId: otherThreadId,
       providerInstanceId,
-      ask,
       signal,
     });
     await vi.waitFor(() => expect(reads).toHaveLength(2));

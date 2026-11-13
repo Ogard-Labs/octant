@@ -52,6 +52,12 @@ export const BrowserSessionGrant = Schema.Struct({
   expiresAt: UtcTimestamp,
   /** Host-selected during review; never accepted in a grant command. */
   continuesWithoutWindow: Schema.optional(Schema.Boolean),
+  /**
+   * Host-selected during review for a routine or managed child, so the person
+   * agrees to a grant that outlives the host. A permission journaled without it
+   * was reviewed as ending with the host and is never restored.
+   */
+  survivesRestart: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserSessionGrant = typeof BrowserSessionGrant.Type;
 
@@ -60,6 +66,8 @@ export const BROWSER_SESSION_EVENT_NAMES = {
   revoked: "browser.session-revoked@1",
   expired: "browser.session-expired@1",
   changed: "browser.session-changed@1",
+  held: "browser.session-held@1",
+  resumed: "browser.session-resumed@1",
 } as const;
 const audit = { grant: BrowserSessionGrant, windowId: Schema.optional(WindowId) };
 export const BrowserSessionGranted = Schema.Struct({
@@ -77,6 +85,19 @@ export const BrowserSessionExpired = Schema.Struct({
 export const BrowserSessionChanged = Schema.Struct({
   ...audit,
   kind: Schema.Literal("changed"),
+}).annotations(strict);
+/**
+ * A clean host close attests that a surviving grant was neither revoked nor
+ * lapsed when the host ended. A restart restores only a grant whose newest
+ * record is this one, and consumes it with `resumed`.
+ */
+export const BrowserSessionHeld = Schema.Struct({
+  ...audit,
+  kind: Schema.Literal("held"),
+}).annotations(strict);
+export const BrowserSessionResumed = Schema.Struct({
+  ...audit,
+  kind: Schema.Literal("resumed"),
 }).annotations(strict);
 
 export const BrowserSessionGrantsCommand = Schema.Union(

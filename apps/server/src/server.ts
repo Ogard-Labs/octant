@@ -318,6 +318,7 @@ export function startOctantServer(
       contributeChildTools,
       coordinatorWorkersHolder,
       externalContentIngestionStore,
+      threadStandingAnswers,
       managedWorktreeReceipts,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
@@ -337,6 +338,8 @@ export function startOctantServer(
       codeParentActiveTurn,
       codeSessionAuthority,
       configuredDriverOptions: (): ConfiguredProviderDriverOptions => configuredDriverOptions,
+      // Deferred: Work's running turns are wired later in this scope.
+      runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       isProjectPolicyTargetAllowed,
       nativeHarnessSessions,
       nativeHarnessApprovals,
@@ -425,6 +428,8 @@ export function startOctantServer(
       stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
+      // Deferred: Work's running turns are wired later in this scope.
+      runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       onWindowRevoked,
       browserAuthority,
       externalContentIngestionStore,
@@ -435,6 +440,7 @@ export function startOctantServer(
       processAuthorityNow,
       processAuthorityTime,
       providerRuntimeRegistry,
+      threadStandingAnswers,
       validationEventStore,
       windowAuthorityStore,
       workThreadProjection,
@@ -451,6 +457,7 @@ export function startOctantServer(
       contextHarness,
       gitEnvironmentPort,
       gitObservationPort,
+      keptImageChoices,
       githubCloneRoutes,
       githubRepositoryObservationPort,
       goalRoutes,
@@ -471,6 +478,7 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
     } = yield* wireWorkspace({
+      imageGenerationOffers,
       isPairedDeviceScope,
       machineChangeFeed,
       onWindowRevoked,
@@ -530,6 +538,7 @@ export function startOctantServer(
       nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
       probeProviderForThreads,
+      verifyModelToolsOnFirstUse,
       localPluginImportReceipts,
       providerDataDirectory,
       providerOAuthRoutes,
@@ -844,6 +853,7 @@ export function startOctantServer(
       shieldServerStore,
       hostShield,
       imageGenerationOffers,
+      keptImageChoices,
       imageJobService,
       runtimeForgeChanges,
       onHarnessQuestionAsked,
@@ -899,6 +909,7 @@ export function startOctantServer(
       peekCreateFromIssueFramed,
       persistence,
       probeProviderForThreads,
+      verifyModelToolsOnFirstUse,
       productFeedbackService,
       resolveFeedbackThread,
       projectPullRequestActionService,
@@ -1004,6 +1015,7 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      verifyModelToolsOnFirstUse,
       threadMoveHolds,
       conversationInputTransfer,
       personMemoryAccess,
@@ -1032,6 +1044,7 @@ export function startOctantServer(
       externalContentIngestionStore,
       githubIssueContextService,
       imageGenerationOffers,
+      keptImageChoices,
       imageJobService,
       linearIssueContextService,
       liveTurns,
@@ -1117,6 +1130,7 @@ export function startOctantServer(
       githubIssueContextService,
       goalService,
       imageGenerationOffers,
+      keptImageChoices,
       imageJobService,
       linearIssueContextService,
       terminalSessionImports,
@@ -1127,6 +1141,7 @@ export function startOctantServer(
       peekCreateFromIssueFramed,
       persistence,
       probeProviderForThreads,
+      verifyModelToolsOnFirstUse,
       productFeedbackService,
       projectService,
       providerRuntimeRegistry,
@@ -1264,6 +1279,7 @@ export function startOctantServer(
     } = wireWorkFiles({
       credentialResolver,
       imageGenerationOffers,
+      keptImageChoices,
       imageJobService,
       options,
       persistence,
@@ -1501,8 +1517,10 @@ export function startOctantServer(
         projectId: String(thread.projectId),
         writeRefusal: () =>
           (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
-            ? "Plan mode cannot change Project memory. Leave Plan mode to propose the change."
+            ? "Plan mode cannot change Project memory. Leave Plan mode to make the change."
             : undefined,
+        fullAccess: () =>
+          (readThread()?.executionPolicy ?? thread.executionPolicy) === "full-access",
       }),
     );
     const credentialRequestRoutes = createCredentialRequestRoutes(
@@ -2017,6 +2035,10 @@ export function startOctantServer(
           // provider process behind, and it is background work: a provider that
           // refuses to start must not delay or fail startup.
           warmingProviders = providerService.warmEnabledProviders().catch(() => undefined);
+          // A grant is restored only for a caller that is eligible now, and a
+          // routine's eligibility reads what its provider was observed to
+          // support. Restoring before warming would lapse every grant.
+          void warmingProviders.then(() => browserSessionGrants.restore()).catch(() => undefined);
           // Startup auto-enable: a launch-time private listener config (the
           // test/smoke seam) or else the listener the host last enabled from
           // its local administration channel is enabled through the controller

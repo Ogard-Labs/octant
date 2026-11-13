@@ -66,6 +66,27 @@ export function resolveProviderNativeSetup(
   };
 }
 
+/**
+ * Whether a session launches with the provider's own memory on. The account's
+ * own setting decides, and nothing else turns it on: not "Run as itself", not
+ * a trusted Project, not Full access. Plan keeps it off because a Plan launch
+ * may write nothing a later session would load, and the runtime's memory
+ * folder is exactly that. Chat keeps it off too: its launch is confined the
+ * same way, and no Chat launch has been run with a provider's memory on.
+ */
+export function providerOwnMemoryLaunches(input: {
+  /** The account's own switch: `ownMemory` on the provider instance. */
+  readonly accountAllows: boolean;
+  readonly mode: "chat" | "work" | "code" | undefined;
+  readonly executionPolicy: ProviderExecutionPolicy;
+}): boolean {
+  return (
+    input.accountAllows &&
+    (input.mode === "work" || input.mode === "code") &&
+    input.executionPolicy !== "plan"
+  );
+}
+
 /** Whether any feature of a resolved setup is on. */
 export function providerNativeSetupIsOn(setup: ProviderNativeSetup | undefined): boolean {
   return (

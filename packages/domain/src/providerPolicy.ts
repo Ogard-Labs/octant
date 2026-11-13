@@ -1978,6 +1978,31 @@ export function setProviderNativeSetup(
   };
 }
 
+/**
+ * Turns the provider's own memory on or off for one account. Only Claude Code
+ * and Codex accounts take it: theirs are the runtimes with a memory of their
+ * own behind a launch switch. Like the run-as-itself switch it changes no
+ * input of a running process; the next launch reads it.
+ */
+export function setProviderOwnMemory(
+  current: ProviderInstance,
+  input: { readonly enabled: boolean; readonly updatedAt: UtcTimestamp },
+): ClaudeProviderInstance | CodexProviderInstance {
+  if (current.driverKind !== "claude" && current.driverKind !== "codex") {
+    reject(
+      "invalid-configuration",
+      "Only a Claude Code or Codex account has a memory of its own to turn on.",
+    );
+  }
+  const { ownMemory: _previous, ...rest } = current;
+  return {
+    ...rest,
+    ...(input.enabled ? { ownMemory: true as const } : {}),
+    version: nextVersion(current.version),
+    updatedAt: input.updatedAt,
+  };
+}
+
 interface SetProviderEnabledInput {
   readonly enabled: boolean;
   readonly updatedAt: UtcTimestamp;

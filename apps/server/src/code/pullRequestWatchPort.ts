@@ -10,13 +10,13 @@ import type { CodeProjectPullRequestSwitchTarget, CodeThreadId, WindowId } from 
 export interface PullRequestWatchPort {
   /**
    * Resolves the thread's own linked pull request, checks the window may act
-   * on it, and only then calls `ask`; the person's answer is the approval.
+   * on it, and turns the watch on. Nobody is asked: a watch changes nothing on
+   * the forge and ends by its own wake and lifetime limits.
    */
   watch(input: {
     readonly windowId: WindowId;
     readonly threadId: CodeThreadId;
     readonly providerInstanceId: string;
-    readonly ask: (target: CodeProjectPullRequestSwitchTarget) => Promise<PullRequestWatchAnswer>;
     readonly signal: AbortSignal;
   }): Promise<PullRequestWatchOutcome>;
   /** Stops the thread's own watch; it only takes reach away, so it never asks. */
@@ -25,14 +25,6 @@ export interface PullRequestWatchPort {
     readonly providerInstanceId: string;
   }): Promise<PullRequestWatchOutcome>;
 }
-
-/** The person's answer to one request to watch a pull request. */
-export type PullRequestWatchAnswer =
-  | "approved"
-  | "denied"
-  | "cancelled"
-  | "expired"
-  | "unavailable";
 
 /** What a thread's agent hears back when it asks to watch or stop watching. */
 export type PullRequestWatchOutcome =
@@ -44,7 +36,6 @@ export type PullRequestWatchOutcome =
     }
   | { readonly status: "unwatched"; readonly target: CodeProjectPullRequestSwitchTarget }
   | { readonly status: "not-watching" }
-  | { readonly status: "declined"; readonly answer: Exclude<PullRequestWatchAnswer, "approved"> }
   | {
       readonly status: "refused";
       readonly reason:

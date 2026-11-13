@@ -14,6 +14,7 @@ import {
   decodeWorkThreadId,
   type DesktopPreviewRequest,
   type DesktopPreviewAnswer,
+  type WorkAccess,
 } from "@octant/contracts";
 import type { DesktopLeaseCaller } from "../computerUse/desktopLeaseService";
 import { createMachineChangeRouteHandler } from "../machineChangeRoutes";
@@ -124,9 +125,18 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
     | "processAuthorityTime"
     | "windowAuthorityStore"
   > &
-  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
+  Pick<
+    AgentRunsWiring,
+    "externalContentIngestionStore" | "managedWorktreeReceipts" | "threadStandingAnswers"
+  > &
   Pick<UsageWiring, "validationEventStore"> &
-  Pick<FoundationsWiring, "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection">;
+  Pick<
+    FoundationsWiring,
+    "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection"
+  > & {
+    /** The level a Work thread's running turn holds; wired later, read per call. */
+    readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
+  };
 
 export function wireComputerUse(deps: ComputerUseDependencies) {
   const {
@@ -140,6 +150,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     processAuthorityNow,
     processAuthorityTime,
     providerRuntimeRegistry,
+    threadStandingAnswers,
     validationEventStore,
     windowAuthorityStore,
     workThreadProjection,
@@ -241,6 +252,12 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     daemonReady: () => cuaDaemonReady,
   });
   const desktopLeases = createDesktopLeaseService({
+    transferAnswers: {
+      covers: (owner, markedNow) =>
+        threadStandingAnswers.covers(String(owner.threadId), "desktop-file-transfer", markedNow),
+      record: (owner, threadMarked) =>
+        threadStandingAnswers.record(String(owner.threadId), "desktop-file-transfer", threadMarked),
+    },
     journal: persistence.journal,
     projection: persistence.desktopLeaseProjection,
     hostTag: desktopHostTag,
@@ -436,6 +453,20 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               ? (persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.toolConstraints ??
                 [])
               : [],
+          // Read from the thread as it stands now, so lowering a thread from
+          // Full access brings back the ask on its next action. A Code
+          // owner also carries its turn's posture, and a Work thread's
+          // running turn its own level, either of which may sit below the
+          // thread's (a routine under a lower ceiling); Chat has no Full access.
+          fullAccess: (owner) =>
+            owner.mode === "code"
+              ? owner.executionPolicy === "full-access" &&
+                persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.executionPolicy ===
+                  "full-access"
+              : owner.mode === "work" &&
+                workThreadProjection.read(decodeWorkThreadId(owner.threadId))?.access ===
+                  "full-access" &&
+                (deps.runningWorkTurnAccess(owner.threadId) ?? "full-access") === "full-access",
           externalContentIngested: (owner) =>
             readThreadExternalContentTaint(persistence.connection, owner.threadId)
               .externalContentIngested,

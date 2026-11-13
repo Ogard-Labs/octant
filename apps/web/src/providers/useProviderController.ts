@@ -2172,6 +2172,21 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const setProviderOwnMemory = useCallback(
+    (instanceId: ProviderInstanceId, enabled: boolean) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-provider-own-memory",
+              instanceId,
+              expectedVersion: instance.version,
+              enabled,
+            };
+      }),
+    [execute],
+  );
   const threadNativeSetup = useMemo(
     () =>
       client?.threadNativeSetup === undefined
@@ -2631,6 +2646,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     setEnabled,
     setClaudeArtifactDelivery,
     setProviderNativeSetup,
+    setProviderOwnMemory,
     threadNativeSetup,
     setDataTags,
     setModelDataTags,

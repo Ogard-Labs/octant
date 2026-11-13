@@ -463,6 +463,22 @@ describe("codexAppServerArgs", () => {
       ]);
     }
   });
+
+  it("leaves Codex's memories to its own configuration only for a lease whose account keeps them, and never forces them on", () => {
+    const withMemory = codexAppServerArgs("0.164.0", { ownMemory: true });
+    expect(withMemory.join(" ")).not.toContain("features.memories");
+    // Its subagents stay off: the two switches are separate.
+    expect(withMemory).toContain("features.multi_agent=false");
+    expect(withMemory).toContain("agents.enabled=false");
+    expect(codexAppServerArgs("0.164.0", { ownSubagents: true, ownMemory: true })).toEqual([
+      "app-server",
+      "--listen",
+      "stdio://",
+    ]);
+    expect(codexAppServerArgs("0.164.0", { ownSubagents: true })).toContain(
+      "features.memories=false",
+    );
+  });
 });
 
 describe("CodexProcessPort", () => {

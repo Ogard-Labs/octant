@@ -73,14 +73,21 @@ export function createComputerUseToolService(options: {
   readonly authority: (owner: ComputerUseOwner) => ToolActionAuthority | undefined;
   readonly ownerIsCurrent: (owner: ComputerUseOwner) => boolean;
   readonly toolConstraints: (owner: ComputerUseOwner) => ReadonlyArray<string>;
+  /**
+   * Whether the owner's thread stands at Full access now. The owner's own
+   * `executionPolicy` cannot say: a Work thread's owner never carries its
+   * level, and a thread lowered since the turn began must ask again.
+   */
+  readonly fullAccess: (owner: ComputerUseOwner) => boolean;
   readonly externalContentIngested: (owner: ComputerUseOwner) => boolean;
   /** The sources that marked the owner's thread, read when an approval is asked. */
   readonly outsideContent?: (owner: ComputerUseOwner) => ApprovalOutsideContent | undefined;
   readonly threadTitle: (owner: ComputerUseOwner) => string;
   readonly record: (event: ComputerUseEvidenceEvent) => void | Promise<void>;
   /**
-   * The server's process authority clock. Owners and five-minute app grants
-   * expire from it, so a wall clock set back cannot extend one.
+   * The server's process authority clock. An unanswered approval offer
+   * expires from it, so a wall clock set back cannot extend one. An app
+   * grant has no clock at all.
    */
   readonly now: () => number;
 }) {
@@ -99,25 +106,31 @@ export function createComputerUseToolService(options: {
   >();
   const owners = new Map<
     string,
-    {
-      readonly owner: ComputerUseOwner;
-      readonly authority: ToolActionAuthority;
-      readonly expiresAt: number;
-    }
+    { readonly owner: ComputerUseOwner; readonly authority: ToolActionAuthority }
   >();
   const observations = new Map<
     string,
     { readonly owner: ComputerUseOwner; readonly appId: string }
   >();
-  /** Five-minute app grants, keyed by owner, authority, and app. */
+  /**
+   * App grants, keyed by owner, authority, and app. A grant has no clock: it
+   * lasts until its owner is stopped, which `sweep` does once the thread is
+   * no longer active or its authority changed, and it is held in memory only,
+   * so a host restart ends every grant.
+   */
   const grants = new Map<
     string,
-    {
-      readonly appId: string;
-      readonly leaseId: ComputerUseOwner["leaseId"];
-      readonly expiresAt: number;
-    }
+    { readonly appId: string; readonly leaseId: ComputerUseOwner["leaseId"] }
   >();
+  /**
+   * Whether outside content on the owner's thread makes every action ask.
+   * Below Full access it does: a standing grant must not carry an
+   * irreversible action the content may have steered (untrustedContentPolicy).
+   * At Full access the mark gates nothing, as for every other tool there, and
+   * only the first action on each app asks.
+   */
+  const asksEveryAction = (owner: ComputerUseOwner): boolean =>
+    options.externalContentIngested(owner) && !options.fullAccess(owner);
   /**
    * Why the tool-call authority gate refuses this owner, or undefined when it
    * admits it. `approved` says a one-time approval for this very action was
@@ -191,20 +204,18 @@ export function createComputerUseToolService(options: {
   }
   const runtime = createComputerUseRuntime({
     destination: { status: "available", kind: "macos-host" },
-    // Once the thread has ingested external content no standing grant carries
-    // an action (see `requiresApproval` below), so the offer is for this one
-    // action: saying five minutes there promised a grant the next action
-    // would not honour.
+    // Where outside content makes every action ask (see `requiresApproval`
+    // below), the offer is for this one action: offering the app there
+    // promised a grant the next action would not honour.
     approvalScope: (request) => {
       const action = pending.get(String(request.actionId));
-      return action !== undefined && options.externalContentIngested(action.owner)
+      return action !== undefined && asksEveryAction(action.owner)
         ? undefined
         : "application-session";
     },
-    // Both surfaces and the approval summary say five minutes; the runtime's
-    // own default is one. An offer that dies while still reading as a
-    // five-minute grant turns a late click into a silent no-op that the agent
-    // then reports as a denial.
+    // How long an unanswered offer waits, not how long a grant lasts. An
+    // offer that died sooner turned a late click into a silent no-op that the
+    // agent then reported as a denial.
     approvalTtlMs: 5 * 60_000,
     approvalSummary: (request) => {
       const action = pending.get(String(request.actionId));
@@ -218,9 +229,9 @@ export function createComputerUseToolService(options: {
       const title =
         action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100);
       const head =
-        action !== undefined && options.externalContentIngested(action.owner)
+        action !== undefined && asksEveryAction(action.owner)
           ? `Allow this one action in ${action.appId}${where} for "${title}".`
-          : `Allow control of ${action?.appId ?? "this application"}${where} for "${title}" for 5 minutes.`;
+          : `Allow control of ${action?.appId ?? "this application"}${where} for "${title}" for this thread.`;
       const prefix = ' The agent says: "';
       const room = APPROVAL_SUMMARY_LIMIT - head.length - prefix.length - 2;
       if (action?.reason === undefined || room < 1) return head.slice(0, APPROVAL_SUMMARY_LIMIT);
@@ -237,8 +248,8 @@ export function createComputerUseToolService(options: {
       return options.outsideContent?.(action.owner) ?? { sources: [], sourceCount: 0 };
     },
     uuid: randomUUID,
-    // Approval events carry this clock's time, and an app grant's expiry is
-    // computed from its approval's time, so both stay on the authority clock.
+    // Approval events carry this clock's time, and an offer's expiry is
+    // computed from it, so both stay on the authority clock.
     clock: () => new Date(options.now()).toISOString(),
     evidence: { record: options.record },
     adapter: {
@@ -330,13 +341,8 @@ export function createComputerUseToolService(options: {
         "Computer use is unavailable for this task's current authority.",
       );
     const previous = owners.get(ownerKey(owner));
-    if (
-      previous !== undefined &&
-      (previous.expiresAt <= options.now() ||
-        !sameToolActionAuthority(previous.authority, authority))
-    ) {
+    if (previous !== undefined && !sameToolActionAuthority(previous.authority, authority))
       await execute(owner, { operation: "stop" });
-    }
     if (owner.leaseId === undefined) {
       if (options.desktop === undefined) return NO_DESTINATION;
       // A host with no screen of its own has no macOS permission to grant, so
@@ -353,11 +359,7 @@ export function createComputerUseToolService(options: {
       await releaseReservation(owner);
       return refused("cancelled", "Computer use was cancelled.");
     }
-    owners.set(ownerKey(owner), {
-      owner,
-      authority,
-      expiresAt: owners.get(ownerKey(owner))?.expiresAt ?? options.now() + 5 * 60_000,
-    });
+    owners.set(ownerKey(owner), { owner, authority });
     if (command.operation === "apps") return dispatch(owner, command, signal);
     const observed =
       "observationId" in command ? observations.get(command.observationId) : undefined;
@@ -384,15 +386,11 @@ export function createComputerUseToolService(options: {
             : "observe-window";
     const grantKey = `${ownerKey(owner)}:${JSON.stringify(authority)}:${appId}`;
     // The first action on each app in a thread always asks: no grant exists
-    // until the person approves one, and the owner's execution policy is never
-    // read here, so Full access skips nothing. A five-minute app grant is a
-    // standing approval. Once the thread has ingested external content,
-    // standing approvals no longer carry an irreversible action
-    // (untrustedContentPolicy), so the runtime asks again and the person
-    // confirms this action freshly.
-    const requiresApproval =
-      (grants.get(grantKey)?.expiresAt ?? 0) <= options.now() ||
-      options.externalContentIngested(owner);
+    // until the person approves one, and no level skips that, Full access
+    // included. The grant is a standing approval for the thread. Where
+    // outside content makes every action ask, the runtime asks again and the
+    // person confirms this action freshly.
+    const requiresApproval = !grants.has(grantKey) || asksEveryAction(owner);
     const action = {
       owner,
       command,
@@ -509,12 +507,8 @@ export function createComputerUseToolService(options: {
         );
       }
       if (requiresApproval) {
-        const approved = view.events.find((event) => event.kind === "approval-approved");
-        if (approved !== undefined) {
-          const expiresAt = Date.parse(approved.occurredAt) + 5 * 60_000;
-          grants.set(grantKey, { appId, leaseId: owner.leaseId, expiresAt });
-          owners.set(ownerKey(owner), { owner, authority, expiresAt });
-        }
+        if (view.events.some((event) => event.kind === "approval-approved"))
+          grants.set(grantKey, { appId, leaseId: owner.leaseId });
       }
       if (result.kind === "observation") {
         if (observations.size >= 256) observations.clear();
@@ -529,9 +523,10 @@ export function createComputerUseToolService(options: {
 
   /**
    * An agent's transfer into its bound desktop. The lease service reads and
-   * hashes the file first and decides whether anyone is asked; when it asks,
-   * the question goes to this turn's thread with the path, size, hash, and
-   * where the file goes.
+   * hashes the file first and decides whether anyone is asked: nobody at Full
+   * access, and below it once per thread for a desktop on this machine. When
+   * it asks, the question goes to this turn's thread with the path, size,
+   * hash, and where the file goes.
    */
   async function sendFile(
     owner: ComputerUseOwner,
@@ -561,11 +556,14 @@ export function createComputerUseToolService(options: {
         path,
         async (request) => {
           const { artifact, provider } = request;
-          const offMachine =
+          // A file leaving the machine is asked about every time; one that
+          // stays on it is asked about once for the thread, and the card
+          // says which answer the person is giving.
+          const covers =
             request.asks === "off-machine"
               ? ` This sends the file off this machine to ${provider.displayName}.`
-              : "";
-          const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${offMachine}`;
+              : " Approving also covers this thread's later files into that desktop.";
+          const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${covers}`;
           return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
         },
         options.externalContentIngested(owner),
@@ -615,15 +613,13 @@ export function createComputerUseToolService(options: {
             sessionId: action.sessionId,
           });
       }
-      for (const [key, grant] of grants) if (grant.expiresAt <= options.now()) grants.delete(key);
       await Promise.all(
         [...owners.values()]
-          .filter(({ owner, authority, expiresAt }) => {
+          .filter(({ owner, authority }) => {
             const current = options.authority(owner);
             return (
               !options.settings().enabled ||
               !options.ownerIsCurrent(owner) ||
-              expiresAt <= options.now() ||
               current === undefined ||
               !sameToolActionAuthority(authority, current)
             );

@@ -213,7 +213,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "plan",
         locality: "host-local",
         initiator: "local-user",
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
     for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
@@ -222,7 +222,7 @@ describe("desktop lease policy", () => {
           executionPolicy,
           locality: "host-local",
           initiator: "agent",
-          externalContentIngested: false,
+          answeredForThread: false,
         }),
       ).toEqual({ kind: "ask", asks: "in-thread" });
     }
@@ -231,7 +231,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "full-access",
         locality: "host-local",
         initiator: "agent",
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "proceed" });
     expect(
@@ -239,7 +239,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "approval-gated",
         locality: "host-local",
         initiator: "remote-device",
-        externalContentIngested: false,
+        answeredForThread: false,
       }),
     ).toEqual({ kind: "proceed" });
     for (const initiator of ["agent", "local-user"] as const) {
@@ -248,29 +248,39 @@ describe("desktop lease policy", () => {
           executionPolicy: "full-access",
           locality: "cloud",
           initiator,
-          externalContentIngested: false,
+          answeredForThread: false,
         }),
       ).toEqual({ kind: "ask", asks: "off-machine" });
     }
   });
 
-  it("asks an agent's transfer under Full access once the thread has read outside content", () => {
-    expect(
-      decideDesktopArtifactTransfer({
-        executionPolicy: "full-access",
-        locality: "host-local",
-        initiator: "agent",
-        externalContentIngested: true,
-      }),
-    ).toEqual({ kind: "ask", asks: "in-thread" });
+  it("lets an agent's transfer through below Full access once the person answered for the thread, and never in Plan or off the machine", () => {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(
+        decideDesktopArtifactTransfer({
+          executionPolicy,
+          locality: "host-local",
+          initiator: "agent",
+          answeredForThread: true,
+        }),
+      ).toEqual({ kind: "proceed" });
+    }
     expect(
       decideDesktopArtifactTransfer({
         executionPolicy: "plan",
         locality: "host-local",
         initiator: "agent",
-        externalContentIngested: true,
+        answeredForThread: true,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
+    expect(
+      decideDesktopArtifactTransfer({
+        executionPolicy: "approval-gated",
+        locality: "cloud",
+        initiator: "agent",
+        answeredForThread: true,
+      }),
+    ).toEqual({ kind: "ask", asks: "off-machine" });
   });
 
   it("journals a person's press, typing, key, and scroll, and not the pointer moving or letting go", () => {

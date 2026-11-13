@@ -164,6 +164,48 @@ describe("ProjectMemoryInspector", () => {
     expect(screen.queryByText(/Original author/)).not.toBeInTheDocument();
   });
 
+  it("says nobody was asked about an entry or a retraction an agent made without a confirmation", () => {
+    const unasked = {
+      kind: "agent-authored",
+      mode: "code",
+      threadId: "00000000-0000-4000-8000-000000000930",
+      unconfirmed: true,
+    } as const;
+    renderInspector({
+      memory: {
+        projectId: sourceProjectId,
+        active: [
+          entry(decisionId, "decision", "Releases ship from main only.", { provenance: unasked }),
+        ],
+        history: [
+          {
+            ...entry(factId, "fact", "Tabs."),
+            status: "retracted",
+            retractionReason: "No longer true.",
+            retractedBy: {
+              kind: "local-user",
+              actorId: "00000000-0000-4000-8000-000000000919" as never,
+            },
+            retractedAt: "2026-07-14T09:00:00.000Z" as never,
+            retractionOrigin: unasked,
+          },
+        ],
+      },
+    });
+
+    expect(
+      screen.getByText(
+        "Written by an agent in a Code thread · 00000000-0000-4000-8000-000000000930. Nobody was asked",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Retracted by an agent in a Code thread · 00000000-0000-4000-8000-000000000930. Nobody was asked",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Approved by/)).not.toBeInTheDocument();
+  });
+
   it("embeds in Project Overview without a close control of its own", () => {
     renderInspector({ embedded: true });
 

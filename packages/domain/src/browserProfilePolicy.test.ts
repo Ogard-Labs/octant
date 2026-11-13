@@ -254,6 +254,43 @@ describe("remembered signed-in sites", () => {
     ).toBe(false);
   });
 
+  it("covers every site of a profile the person allowed all sites in, and no other profile", () => {
+    const allSites: ReadonlyArray<RememberedBrowserProfileSite> = [
+      { origin: "*", profile: { kind: "personal" } },
+    ];
+    expect(
+      isBrowserProfileSiteRemembered(allSites, "https://example.com", { kind: "personal" }),
+    ).toBe(true);
+    expect(
+      isBrowserProfileSiteRemembered(allSites, "https://example.com", {
+        kind: "project",
+        projectId,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not let a settings write add a pair or widen a profile to all sites", () => {
+    const allSites: ReadonlyArray<RememberedBrowserProfileSite> = [
+      { origin: "*", profile: { kind: "personal" } },
+    ];
+    expect(
+      resolveRememberedBrowserProfileSites(allSites, [
+        ...allSites,
+        { origin: "https://example.com", profile: { kind: "personal" } },
+      ]),
+    ).toEqual({ kind: "rejected" });
+    expect(
+      resolveRememberedBrowserProfileSites(remembered, [
+        ...remembered,
+        { origin: "*", profile: { kind: "personal" } },
+      ]),
+    ).toEqual({ kind: "rejected" });
+    expect(resolveRememberedBrowserProfileSites(allSites, [])).toEqual({
+      kind: "kept",
+      sites: [],
+    });
+  });
+
   it("lets a settings write forget a pair but not add one", () => {
     expect(resolveRememberedBrowserProfileSites(remembered, [])).toEqual({
       kind: "kept",
