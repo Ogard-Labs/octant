@@ -885,8 +885,10 @@ Each tile resolves its own availability against the active pane, and the dock
 still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
-has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
-with an Arrange menu (Move left, right, up and down where the caps allow, Show
+has one. Each tile has one bar, 32px: the tool's name (the Browser's bar is its page row),
+then the tool's own controls (navigation as words, actions as icons, status as
+text; they fold into a named view menu and then a More menu before the name is
+cut), with an Arrange menu (Move left, right, up and down where the caps allow, Show
 alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
 trailing edge; a tool that is open but not shown is marked on its button in the title band's
 tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
