@@ -19,6 +19,8 @@ import {
   decideOutsideDriverNewPublisher,
   outsideDriverPublisherPinAtTrust,
   outsideDriverUpdateKeepsTrust,
+  sameExtensionSource,
+  unsignedUpdateKeepsApprovals,
 } from "@octant/domain/outside-driver-publisher-policy";
 import type { ExtensionRuntimeEvidence } from "./extensionSupervisor";
 
@@ -186,16 +188,50 @@ export class ExtensionLifecycleService {
     // keeps the trust and the on switch the package had: both are journaled
     // again after the update's own commit, so the journal shows why the new
     // version runs. A new or missing key stays held and asks.
+    const previous = existing.current;
+    const driver = holdsProviderDriver(inspection.manifest);
+    const capabilitiesWidened =
+      previous !== undefined && hasCapabilityExpansion(previous, inspection.manifest);
     const keepsTrust =
-      existing.current !== undefined &&
-      holdsProviderDriver(inspection.manifest) &&
+      previous !== undefined &&
+      driver &&
       outsideDriverUpdateKeepsTrust({
         trusted: existing.trusted,
         pinned: existing.publisherPin,
         updated: inspection.manifest.provenance.publisherKey,
-        capabilitiesWidened: hasCapabilityExpansion(existing.current, inspection.manifest),
+        capabilitiesWidened,
+      });
+    // Any other package keeps its trust across an update that may do no
+    // more. What an unsigned one needs journaled is that the update came
+    // from the source the person trusted: that is what lets the approvals
+    // its tools were given hold, and what the Updated notice and its roll
+    // back read. A driver is admitted digest by digest and is left out.
+    const keptFromSource =
+      previous !== undefined &&
+      !driver &&
+      unsignedUpdateKeepsApprovals({
+        trusted: existing.trusted,
+        pinned: existing.publisherPin,
+        previous: previous.provenance.publisherKey,
+        updated: inspection.manifest.provenance.publisherKey,
+        sameSource: sameExtensionSource(
+          { source: previous.source, npm: previous.provenance.npm },
+          { source: inspection.manifest.source, npm: inspection.manifest.provenance.npm },
+        ),
+        capabilitiesWidened,
       });
     const updated = await this.#promote(inspection, "update");
+    if (keptFromSource && previous !== undefined) {
+      this.#append(inspection.manifest.extensionId, {
+        kind: "update-kept-from-source",
+        packageId: inspection.manifest.packageId,
+        version: inspection.manifest.version,
+        digest: inspection.manifest.digest,
+        previousVersion: previous.version,
+        previousDigest: previous.digest,
+      });
+      return this.snapshot();
+    }
     if (!keepsTrust) return updated;
     this.#append(inspection.manifest.extensionId, [
       { kind: "source-trust-changed", trusted: true },
@@ -206,7 +242,16 @@ export class ExtensionLifecycleService {
     return this.snapshot();
   }
 
-  async rollback(target: ExtensionVersionReference): Promise<ExtensionSnapshot> {
+  /**
+   * Selects a retained version again. A roll back leaves the package
+   * untrusted and off and ends its remembered approvals. With `restoreTrust`,
+   * and only when the target is the version an Updated notice names, the
+   * trust and the switches the package had are journaled again after it:
+   * the person is returning to the digest they trusted.
+   */
+  async rollback(
+    target: ExtensionVersionReference & { readonly restoreTrust?: boolean | undefined },
+  ): Promise<ExtensionSnapshot> {
     const record = this.#installedRecord(target.extensionId);
     const retained = record.versions.find(
       (version) =>
@@ -236,6 +281,15 @@ export class ExtensionLifecycleService {
       });
       throw new ExtensionLifecycleServiceError("invalid", "Rollback version is not verified.");
     }
+    const update = record.sourceUpdate;
+    const restores =
+      target.restoreTrust === true &&
+      record.trusted &&
+      update !== undefined &&
+      record.current?.version === update.version &&
+      record.current.digest === update.digest &&
+      retained.manifest.version === update.previousVersion &&
+      retained.manifest.digest === update.previousDigest;
     this.#append(target.extensionId, {
       kind: "rollback-selected",
       packageId: retained.manifest.packageId,
@@ -243,6 +297,20 @@ export class ExtensionLifecycleService {
       digest: retained.manifest.digest,
       manifest: retained.manifest,
     });
+    if (!restores) return this.snapshot();
+    this.#append(target.extensionId, [
+      { kind: "source-trust-changed", trusted: true },
+      ...(record.pluginDesired
+        ? [{ kind: "plugin-desired-state-changed" as const, desired: true }]
+        : []),
+      ...retained.manifest.components
+        .filter((component) => record.componentDesired[component.id] === true)
+        .map((component) => ({
+          kind: "component-desired-state-changed" as const,
+          componentId: component.id,
+          desired: true,
+        })),
+    ]);
     return this.snapshot();
   }
 
@@ -260,10 +328,9 @@ export class ExtensionLifecycleService {
       );
     }
     const manifest = installedManifest(record);
-    const pin =
-      command.trusted && holdsProviderDriver(manifest)
-        ? outsideDriverPublisherPinAtTrust(record.publisherPin, manifest.provenance.publisherKey)
-        : undefined;
+    const pin = command.trusted
+      ? outsideDriverPublisherPinAtTrust(record.publisherPin, manifest.provenance.publisherKey)
+      : undefined;
     this.#append(
       command.extensionId,
       [
@@ -286,8 +353,8 @@ export class ExtensionLifecycleService {
   }
 
   /**
-   * Re-trusts the publisher of an outside driver held because another key,
-   * the one the person confirms, signed its selected version. The new key
+   * Re-trusts the publisher of a package held because another key, the one
+   * the person confirms, signed its selected version. The new key
    * replaces the pin and the package stays held until the person trusts it.
    */
   async trustNewPublisher(
@@ -295,13 +362,11 @@ export class ExtensionLifecycleService {
   ): Promise<ExtensionSnapshot> {
     const record = this.#stateMutationRecord(command.extensionId, command.expectedStateVersion);
     const manifest = installedManifest(record);
-    const decision = holdsProviderDriver(manifest)
-      ? decideOutsideDriverNewPublisher({
-          pinned: record.publisherPin,
-          selected: manifest.provenance.publisherKey,
-          confirmed: command.publisherKey,
-        })
-      : ({ kind: "refused", reason: "not-held" } as const);
+    const decision = decideOutsideDriverNewPublisher({
+      pinned: record.publisherPin,
+      selected: manifest.provenance.publisherKey,
+      confirmed: command.publisherKey,
+    });
     if (decision.kind === "refused") {
       throw new ExtensionLifecycleServiceError("invalid", "No new publisher is waiting for trust.");
     }

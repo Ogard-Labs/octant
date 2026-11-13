@@ -19,12 +19,12 @@ import type { ExtensionToolGrantStore } from "./extensionToolGrantStore";
  * prompt, so nothing a model, a tool, or a route sends can create one.
  *
  * On a thread that has taken in outside content a network server asks once
- * more, and that approval holds for the server on that thread until the host
- * stops. It is kept in memory and not journaled, so a restarted host asks
- * that thread again rather than run on an answer it cannot show.
+ * more, and that approval holds for the server on that thread alone. It is
+ * journaled beside the grants, so a restarted host does not ask that thread
+ * again, and it ends when the package's grants end.
  */
 export function createExtensionToolCallAuthorizer(options: {
-  readonly grants: Pick<ExtensionToolGrantStore, "read" | "record" | "approvalsEnded">;
+  readonly grants: Pick<ExtensionToolGrantStore, "read" | "record">;
   readonly approvals: Pick<ExtensionToolApprovalService, "request">;
   /**
    * Whether the scope a turn runs under is the host acting on its own (a
@@ -51,8 +51,17 @@ export function createExtensionToolCallAuthorizer(options: {
     readonly version: string;
     readonly digest: string;
   }) => string | undefined;
+  /**
+   * The run of same-source updates one retained, unsigned package version
+   * belongs to, or `undefined` outside any. An approval given to one version
+   * of a run holds for the later ones.
+   */
+  readonly updateLine?: (version: {
+    readonly extensionId: string;
+    readonly version: string;
+    readonly digest: string;
+  }) => string | undefined;
 }): (call: ExtensionToolCall) => Promise<boolean> {
-  const allowedOnMarkedThread = new Set<string>();
   const judge = (
     call: ExtensionToolCall,
   ): {
@@ -67,13 +76,19 @@ export function createExtensionToolCallAuthorizer(options: {
     };
     const stored = options.grants.read({ ...server, mcpToolName: call.mcpToolName });
     const storedForServer = options.grants.read(server);
+    const storedForThread = options.grants.read({ ...server, threadId: call.thread.id });
     const signedBy = (version: { readonly version: string; readonly digest: string }) => {
-      const publisherKey = options.verifiedPublisherKey?.({
+      const retained = {
         extensionId: call.extensionId,
         version: version.version,
         digest: version.digest,
-      });
-      return publisherKey === undefined ? {} : { publisherKey };
+      };
+      const publisherKey = options.verifiedPublisherKey?.(retained);
+      const updateLine = options.updateLine?.(retained);
+      return {
+        ...(publisherKey === undefined ? {} : { publisherKey }),
+        ...(updateLine === undefined ? {} : { updateLine }),
+      };
     };
     return {
       server,
@@ -108,9 +123,15 @@ export function createExtensionToolCallAuthorizer(options: {
                 ...signedBy(storedForServer),
                 revoked: storedForServer.revocationReason !== undefined,
               },
-        serverAllowedOnMarkedThread: allowedOnMarkedThread.has(
-          markedThreadKey(call, options.grants),
-        ),
+        markedThreadAnswer:
+          storedForThread === undefined
+            ? undefined
+            : {
+                version: storedForThread.version,
+                digest: storedForThread.digest,
+                ...signedBy(storedForThread),
+                revoked: storedForThread.revocationReason !== undefined,
+              },
       }),
     };
   };
@@ -144,7 +165,12 @@ export function createExtensionToolCallAuthorizer(options: {
       // A grant the journal refuses leaves this call approved and the next asked.
       options.grants.record({ ...server, version: call.version, digest: call.digest });
     } else if (decision.answerCovers === "server-on-thread") {
-      allowedOnMarkedThread.add(markedThreadKey(call, options.grants));
+      options.grants.record({
+        ...server,
+        threadId: call.thread.id,
+        version: call.version,
+        digest: call.digest,
+      });
     }
   };
 
@@ -175,27 +201,6 @@ export function createExtensionToolCallAuthorizer(options: {
     if (approved) keepApproval(call);
     return approved;
   };
-}
-
-/**
- * One server of one package version on one thread: an update is different
- * code under the same name, so it asks the marked thread again. So does the
- * same version after an uninstall, a rollback or withdrawn trust, which end
- * every approval of the package.
- */
-function markedThreadKey(
-  call: ExtensionToolCall,
-  grants: Pick<ExtensionToolGrantStore, "approvalsEnded">,
-): string {
-  return [
-    call.thread.id,
-    grants.approvalsEnded(call.extensionId),
-    call.extensionId,
-    call.packageId,
-    call.componentId,
-    call.version,
-    call.digest,
-  ].join("\u0000");
 }
 
 function offeredBinding(call: ExtensionToolCall) {

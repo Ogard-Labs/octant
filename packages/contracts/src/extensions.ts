@@ -155,9 +155,8 @@ const canonicalHttpUrl = Schema.NonEmptyTrimmedString.pipe(
 );
 
 /**
- * Why an installed outside provider driver is held for its publisher: the
- * selected version is not signed by the key pinned for its package name and
- * source. Only re-trusting the new publisher or forgetting the pin lifts it.
+ * Why an installed package is held for its publisher: the selected version
+ * is not signed by the key pinned for its package name and source. Only re-trusting the new publisher or forgetting the pin lifts it.
  */
 export const ExtensionPublisherHoldReason = Schema.Literal("publisher-changed");
 export type ExtensionPublisherHoldReason = typeof ExtensionPublisherHoldReason.Type;
@@ -968,15 +967,29 @@ export const ExtensionPackageState = Schema.Struct({
    */
   npm: Schema.optional(ExtensionNpmSource),
   /**
-   * An outside provider driver's publisher keys: the one pinned for its
-   * package name and source, the one that signed the selected version, and
-   * the hold when they differ. Absent when neither key exists.
+   * A signed package's publisher keys: the one pinned for its package name
+   * and source, the one that signed the selected version, and the hold when
+   * they differ. Absent when neither key exists.
    */
   publisher: Schema.optional(
     Schema.Struct({
       pinned: Schema.optional(ExtensionPublisherKeyFingerprint),
       selected: Schema.optional(ExtensionPublisherKeyFingerprint),
       held: Schema.optional(ExtensionPublisherHoldReason),
+    }).annotations(strict),
+  ),
+  /**
+   * Present while the selected version is an unsigned update the host took
+   * from the source the person trusted, keeping its trust and approvals:
+   * what it replaced and when. `rollbackAvailable` says the replaced version
+   * is still held intact, so one command returns to it.
+   */
+  updated: Schema.optional(
+    Schema.Struct({
+      previousVersion: ExtensionPackageVersion,
+      previousDigest: ExtensionContentDigest,
+      at: UtcTimestamp,
+      rollbackAvailable: Schema.Boolean,
     }).annotations(strict),
   ),
   components: Schema.Array(

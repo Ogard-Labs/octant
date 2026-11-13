@@ -2604,6 +2604,17 @@ CREATE INDEX validation_evidence_authority_idx
       DELETE FROM projection_checkpoints WHERE projection_name = 'extension-tool-grants';
     `,
   },
+  {
+    version: 102,
+    name: "record_extension_tool_answer_thread",
+    // The answer a person gives a server on a thread that has read outside
+    // content is now journaled beside the grants, for that thread alone.
+    // Every row journaled before this names no thread, so none is replayed.
+    sql: `
+      ALTER TABLE extension_tool_grant_projection
+        ADD COLUMN thread_id TEXT CHECK(thread_id IS NULL OR length(trim(thread_id)) > 0);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

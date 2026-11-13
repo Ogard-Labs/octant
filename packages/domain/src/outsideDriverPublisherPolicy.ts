@@ -1,5 +1,7 @@
 /**
- * Publisher key pinning for outside provider drivers.
+ * Publisher key pinning for installed packages. It began with outside
+ * provider drivers, whose names it keeps, and now holds for every package
+ * kind whose signature the host verifies on the way in.
  *
  * A package name from one source keeps the publisher key it was first
  * trusted under. The pin outlives an uninstall, so reinstalling the same
@@ -60,6 +62,71 @@ export function outsideDriverUpdateKeepsTrust(input: {
     !input.capabilitiesWidened &&
     input.pinned !== undefined &&
     outsideDriverPublisherStanding(input.pinned, input.updated).kind === "pinned-publisher"
+  );
+}
+
+/** Where the host recorded a package came from, as its manifest states it. */
+export interface ExtensionSourceIdentity {
+  readonly source:
+    | { readonly kind: string; readonly sourceRef: string }
+    | { readonly kind: string; readonly catalogId: string; readonly entryId: string };
+  /** The registry and package name, for a package the host fetched from npm. */
+  readonly npm?: { readonly packageName: string; readonly registry: string } | undefined;
+}
+
+/**
+ * Whether two versions came from one source: the same folder, the same
+ * catalog entry, or the same package of the same npm registry. The version
+ * and the tarball's integrity differ between two releases and are not part
+ * of where a package comes from.
+ */
+export function sameExtensionSource(
+  previous: ExtensionSourceIdentity,
+  next: ExtensionSourceIdentity,
+): boolean {
+  const a = previous.source;
+  const b = next.source;
+  if (a.kind !== b.kind) return false;
+  const sameReference =
+    "sourceRef" in a
+      ? "sourceRef" in b && a.sourceRef === b.sourceRef
+      : !("sourceRef" in b) && a.catalogId === b.catalogId && a.entryId === b.entryId;
+  if (!sameReference) return false;
+  if (previous.npm === undefined || next.npm === undefined) return previous.npm === next.npm;
+  return (
+    previous.npm.packageName === next.npm.packageName && previous.npm.registry === next.npm.registry
+  );
+}
+
+/**
+ * Whether an unsigned package's update keeps the approvals its tools were
+ * given (maintainer decision, 2026-11-13). No key vouches for either
+ * version, so what the person trusted is the source: an update the host took
+ * from that same source keeps them, and the person is shown the update and
+ * can roll it back. It asks again when the package was not trusted, when the
+ * source differs, when the update may do more than the reviewed version, and
+ * wherever a key exists or existed: then the key rule above decides.
+ *
+ * Accepted risk: whoever controls that source can publish an update that
+ * runs under the approvals already given. The notice, the one-click roll
+ * back, and the asks that never rest on a grant (Plan, an ask-every-call
+ * tool) are what bound it.
+ */
+export function unsignedUpdateKeepsApprovals(input: {
+  readonly trusted: boolean;
+  readonly pinned: string | undefined;
+  readonly previous: string | undefined;
+  readonly updated: string | undefined;
+  readonly sameSource: boolean;
+  readonly capabilitiesWidened: boolean;
+}): boolean {
+  return (
+    input.trusted &&
+    input.sameSource &&
+    !input.capabilitiesWidened &&
+    input.pinned === undefined &&
+    input.previous === undefined &&
+    input.updated === undefined
   );
 }
 

@@ -303,7 +303,7 @@ describe("a person's clear of a thread's outside-content mark", () => {
         offered: binding,
         grant: { ...binding, revoked: false },
         serverGrant: undefined,
-        serverAllowedOnMarkedThread: false,
+        markedThreadAnswer: undefined,
       });
     const ingested = {
       kind: "content-ingested",

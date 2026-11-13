@@ -23,7 +23,7 @@ function facts(overrides: Partial<ExtensionToolGrantFacts> = {}): ExtensionToolG
     offered: seen,
     grant: { ...seen, revoked: false },
     serverGrant: undefined,
-    serverAllowedOnMarkedThread: false,
+    markedThreadAnswer: undefined,
     ...overrides,
   };
 }
@@ -313,14 +313,14 @@ describe("remembered MCP tool approval", () => {
     });
     expect(
       decideExtensionToolGrant(
-        facts({ threadTainted: true, serverAllowedOnMarkedThread: true, grant: undefined }),
+        facts({ threadTainted: true, markedThreadAnswer: { ...seen, revoked: false }, grant: undefined }),
       ),
     ).toEqual({ kind: "covered" });
   });
 
   it("does not carry an answer given on a marked thread to a thread that is not marked", () => {
     expect(
-      decideExtensionToolGrant(facts({ serverAllowedOnMarkedThread: true, grant: undefined })),
+      decideExtensionToolGrant(facts({ markedThreadAnswer: { ...seen, revoked: false }, grant: undefined })),
     ).toEqual({ kind: "ask", reason: "not-granted", answerCovers: "server" });
   });
 
@@ -334,10 +334,58 @@ describe("remembered MCP tool approval", () => {
     }
   });
 
+  it("asks a marked thread again once its answer was ended or the package changed", () => {
+    const update = { ...seen, version: "1.3.0", digest: `sha256:${"d".repeat(64)}` };
+    for (const markedThreadAnswer of [
+      { ...seen, revoked: true },
+      { ...update, revoked: false },
+    ]) {
+      expect(decideExtensionToolGrant(facts({ threadTainted: true, markedThreadAnswer }))).toEqual({
+        kind: "ask",
+        reason: "network-tool-on-tainted-thread",
+        answerCovers: "server-on-thread",
+      });
+    }
+  });
+
+  it("keeps a server's approval, and a marked thread's answer, across an unsigned update from the source the person trusted", () => {
+    const update = {
+      ...seen,
+      version: "1.3.0",
+      digest: `sha256:${"d".repeat(64)}`,
+      updateLine: "line-1",
+    };
+    const approved = { version: seen.version, digest: seen.digest, updateLine: "line-1" };
+    expect(
+      decideExtensionToolGrant(
+        facts({ offered: update, grant: undefined, serverGrant: { ...approved, revoked: false } }),
+      ),
+    ).toEqual({ kind: "covered" });
+    expect(
+      decideExtensionToolGrant(
+        facts({
+          offered: update,
+          threadTainted: true,
+          markedThreadAnswer: { ...approved, revoked: false },
+        }),
+      ),
+    ).toEqual({ kind: "covered" });
+    // An update outside that run is different code nobody answered for.
+    expect(
+      decideExtensionToolGrant(
+        facts({
+          offered: { ...update, updateLine: "line-2" },
+          grant: undefined,
+          serverGrant: { ...approved, revoked: false },
+        }),
+      ),
+    ).toEqual({ kind: "ask", reason: "package-changed", answerCovers: "server" });
+  });
+
   it("still asks a Plan turn on a marked thread whose server the person allowed there", () => {
     expect(
       decideExtensionToolGrant(
-        facts({ threadTainted: true, serverAllowedOnMarkedThread: true, planTurn: true }),
+        facts({ threadTainted: true, markedThreadAnswer: { ...seen, revoked: false }, planTurn: true }),
       ),
     ).toEqual({ kind: "ask", reason: "plan-turn", answerCovers: "call" });
   });

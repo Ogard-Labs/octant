@@ -110,6 +110,28 @@ describe("the outside driver signing tool", () => {
     expect(written.name).toBe("@example/loopback-chat");
   });
 
+  it("signs a package that is not a provider driver when --name and --version name it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-sign-tool-"));
+    folders.push(root);
+    await writeFile(join(root, "plugin.json"), JSON.stringify({ name: "review-tools" }));
+    const key = throwawayKey();
+
+    const run = spawnSync(
+      process.execPath,
+      [tool, root, "--key-stdin", "--name", "review-tools", "--version", "1.2.3"],
+      { input: key.pem, encoding: "utf8" },
+    );
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain(`Publisher key ${key.fingerprint}`);
+    expect(JSON.parse(await readFile(join(root, "octant-signature.json"), "utf8"))).toMatchObject({
+      name: "review-tools",
+      version: "1.2.3",
+      protocolVersions: [],
+      files: [{ path: "plugin.json" }],
+    });
+  });
+
   it("refuses a flag it does not know", async () => {
     const root = await driverFolder();
     const run = spawnSync(process.execPath, [tool, root, "--key-stdin", "--registry", "x"], {

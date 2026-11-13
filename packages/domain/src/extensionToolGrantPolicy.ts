@@ -21,7 +21,19 @@ export interface ExtensionToolBinding {
    * verified. Absent for an unsigned version.
    */
   readonly publisherKey?: string;
+  /**
+   * The unbroken run of updates this unsigned version belongs to, each taken
+   * from the source the person trusted, as the host journaled them. Absent
+   * for a version outside any such run.
+   */
+  readonly updateLine?: string;
 }
+
+/** The package a whole-server answer was given to. */
+export type ExtensionToolPackageBinding = Pick<
+  ExtensionToolBinding,
+  "version" | "digest" | "publisherKey" | "updateLine"
+>;
 
 export interface ExtensionToolGrantFacts {
   /**
@@ -63,16 +75,16 @@ export interface ExtensionToolGrantFacts {
    * It binds the package alone, because it covers tools whose listings the
    * person never saw.
    */
-  readonly serverGrant:
-    | (Pick<ExtensionToolBinding, "version" | "digest" | "publisherKey"> & {
-        readonly revoked: boolean;
-      })
-    | undefined;
+  readonly serverGrant: (ExtensionToolPackageBinding & { readonly revoked: boolean }) | undefined;
   /**
-   * A person already answered this server's prompt on this thread after the
-   * thread took in outside content, and approved it.
+   * The approval a person gave this server's prompt on this thread after the
+   * thread took in outside content, when one was ever journaled. It binds
+   * the package as a whole-server grant does, and ends with the package's
+   * grants.
    */
-  readonly serverAllowedOnMarkedThread: boolean;
+  readonly markedThreadAnswer:
+    | (ExtensionToolPackageBinding & { readonly revoked: boolean })
+    | undefined;
 }
 
 /**
@@ -143,7 +155,10 @@ export function decideExtensionToolGrant(
   // server has no network to carry anything out, so its grant holds. This
   // branch is the whole rule.
   if (facts.threadTainted && facts.reach !== "confined-stdio") {
-    if (facts.serverAllowedOnMarkedThread) return { kind: "covered" };
+    const answer = facts.markedThreadAnswer;
+    if (answer !== undefined && !answer.revoked && approvedPackage(answer, facts.offered)) {
+      return { kind: "covered" };
+    }
     return {
       kind: "ask",
       reason: "network-tool-on-tainted-thread",
@@ -185,14 +200,21 @@ export function decideExtensionToolGrant(
  * different code under the same name, so it asks again, unless the key that
  * signed the approved version signed the update too: the person's answer was
  * given to that publisher's server, and the host verified both signatures.
- * An update with a new key, or with none, asks again. This is the whole rule.
+ * An update with a new key asks again. An unsigned update keeps the answer
+ * only inside one run of updates the host took from the source the person
+ * trusted (maintainer decision, 2026-11-13): no key vouches for it, so the
+ * source is what the answer was given to, and the person is shown the update
+ * and can roll it back. This is the whole rule.
  */
 function approvedPackage(
-  granted: Pick<ExtensionToolBinding, "version" | "digest" | "publisherKey">,
-  offered: Pick<ExtensionToolBinding, "version" | "digest" | "publisherKey">,
+  granted: ExtensionToolPackageBinding,
+  offered: ExtensionToolPackageBinding,
 ): boolean {
   if (granted.version === offered.version && granted.digest === offered.digest) return true;
-  return granted.publisherKey !== undefined && granted.publisherKey === offered.publisherKey;
+  if (granted.publisherKey !== undefined || offered.publisherKey !== undefined) {
+    return granted.publisherKey === offered.publisherKey;
+  }
+  return granted.updateLine !== undefined && granted.updateLine === offered.updateLine;
 }
 
 /**

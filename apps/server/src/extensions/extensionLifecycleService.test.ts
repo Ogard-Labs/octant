@@ -20,6 +20,7 @@ import {
   EXTENSION_AGGREGATE_TYPE,
   EXTENSION_LIFECYCLE_EVENT,
   readExtensionRecord,
+  readUpdateLine,
   readVerifiedPublisherKey,
 } from "../persistence/extensionProjection";
 import {
@@ -78,6 +79,8 @@ function inspection(
     entryPoint: "runtime/main.mjs",
   },
   modes: ReadonlyArray<"chat" | "work" | "code"> = ["code"],
+  /** The publisher key the host verified for this version, when it is signed. */
+  signedBy?: string,
 ) {
   const entries: ReadonlyArray<ExtensionArchiveEntry> = [
     {
@@ -99,6 +102,7 @@ function inspection(
     provenance: {
       canonicalUrl: "https://example.com/lifecycle-fixture",
       publisher: "Example Publisher",
+      ...(signedBy === undefined ? {} : { publisherKey: signedBy }),
       reviewed: false,
     },
     license: { kind: "spdx", identifier: "MIT" },
@@ -414,6 +418,125 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
 
     const updated = await service.update(driverInspection("1.1.0", publisherKey, ["network"]));
     expect(updated.packages[0]?.activation.trusted).toBe(false);
+  });
+
+  it("keeps an unsigned plugin's trust and approvals across an update from the source it was trusted at, and shows the update", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const first = inspection("1.0.0", "known good");
+    await service.install(first, { trust: true, enable: true });
+    expect(readUpdateLine(context.connection, targetFor(first))).toBeUndefined();
+
+    const second = inspection("1.1.0", "newer");
+    const updated = await service.update(second);
+
+    expect(updated.packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: true, pluginDesired: true, quarantined: false },
+      updated: {
+        previousVersion: "1.0.0",
+        previousDigest: first.manifest.digest,
+        at: now,
+        rollbackAvailable: true,
+      },
+    });
+    expect(lifecycleKinds(context).slice(-2)).toEqual([
+      "update-committed",
+      "update-kept-from-source",
+    ]);
+    const line = readUpdateLine(context.connection, targetFor(second));
+    expect(line).toBeDefined();
+    expect(readUpdateLine(context.connection, targetFor(first))).toBe(line);
+
+    // A third version from the same source stays on the line the first began.
+    const third = inspection("1.2.0", "newest");
+    await service.update(third);
+    expect(readUpdateLine(context.connection, targetFor(third))).toBe(line);
+    expect(service.snapshot().packages[0]?.updated).toMatchObject({ previousVersion: "1.1.0" });
+  });
+
+  it("asks again for an unsigned update that may do more, or that follows one nobody trusted", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(inspection("1.0.0", "known good"), { trust: true, enable: true });
+
+    const widened = inspection("2.0.0", "expanded", ["mcp", "shell"]);
+    const updated = await service.update(widened);
+    expect(updated.packages[0]?.activation.trusted).toBe(false);
+    expect(updated.packages[0]?.updated).toBeUndefined();
+    expect(readUpdateLine(context.connection, targetFor(widened))).toBeUndefined();
+
+    const next = inspection("2.1.0", "after the held one", ["mcp", "shell"]);
+    await service.update(next);
+    expect(readUpdateLine(context.connection, targetFor(next))).toBeUndefined();
+    expect(lifecycleKinds(context)).not.toContain("update-kept-from-source");
+  });
+
+  it("rolls an update back to the version the person trusted in one step, trusted and on as it was", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const first = inspection("1.0.0", "known good");
+    await service.install(first, { trust: true, enable: true });
+    await service.update(inspection("1.1.0", "suspect"));
+
+    const rolledBack = await service.rollback({ ...targetFor(first), restoreTrust: true });
+
+    expect(rolledBack.packages[0]).toMatchObject({
+      version: "1.0.0",
+      activation: { trusted: true, pluginDesired: true },
+      components: [{ activation: { componentDesired: true } }],
+    });
+    expect(rolledBack.packages[0]?.updated).toBeUndefined();
+    expect(lifecycleKinds(context).slice(-4)).toEqual([
+      "rollback-selected",
+      "source-trust-changed",
+      "plugin-desired-state-changed",
+      "component-desired-state-changed",
+    ]);
+    // The roll back ends every approval, as any roll back does.
+    expect(readExtensionRecord(context.connection, extensionId)?.grantsEnded).toMatchObject({
+      reason: "rolled-back",
+    });
+    expect(readUpdateLine(context.connection, targetFor(first))).toBeUndefined();
+  });
+
+  it("restores trust only when rolling back the update it kept trust across", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const first = inspection("1.0.0", "known good");
+    await service.install(first);
+    await service.update(inspection("1.1.0", "never trusted"));
+
+    const rolledBack = await service.rollback({ ...targetFor(first), restoreTrust: true });
+    expect(rolledBack.packages[0]?.activation).toMatchObject({
+      trusted: false,
+      pluginDesired: false,
+    });
+  });
+
+  it("pins a signed plugin's key at trust, keeps it across a same-key update, and holds an update with another key or none", async () => {
+    for (const signedBy of [`ed25519:${"b".repeat(64)}`, undefined]) {
+      const context = await setup();
+      const service = context.makeService();
+      const first = inspection("1.0.0", "signed", ["mcp"], undefined, ["code"], publisherKey);
+      await service.install(first, { trust: true, enable: true });
+      expect(readExtensionRecord(context.connection, extensionId)?.publisherPin).toBe(publisherKey);
+
+      const sameKey = inspection("1.1.0", "same key", ["mcp"], undefined, ["code"], publisherKey);
+      const kept = await service.update(sameKey);
+      expect(kept.packages[0]?.activation).toMatchObject({ trusted: true, quarantined: false });
+      expect(readVerifiedPublisherKey(context.connection, targetFor(first))).toBe(publisherKey);
+      expect(readVerifiedPublisherKey(context.connection, targetFor(sameKey))).toBe(publisherKey);
+
+      const changed = inspection("1.2.0", "other key", ["mcp"], undefined, ["code"], signedBy);
+      const held = await service.update(changed);
+      expect(held.packages[0]).toMatchObject({
+        activation: { trusted: false, pluginDesired: false, quarantined: true },
+        publisher: { pinned: publisherKey, held: "publisher-changed" },
+      });
+      expect(readVerifiedPublisherKey(context.connection, targetFor(changed))).toBeUndefined();
+      expect(readUpdateLine(context.connection, targetFor(changed))).toBeUndefined();
+    }
   });
 
   it("journals independent trust and desired state with optimistic replay-safe updates", async () => {

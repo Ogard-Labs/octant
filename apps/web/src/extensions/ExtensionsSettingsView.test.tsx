@@ -80,6 +80,12 @@ interface InstalledSnapshotOptions {
   readonly componentActivation?: Activation;
   readonly componentEffectiveState?: EffectiveState;
   readonly publisher?: Record<string, string>;
+  readonly updated?: {
+    readonly previousVersion: string;
+    readonly previousDigest: string;
+    readonly at: string;
+    readonly rollbackAvailable: boolean;
+  };
   readonly diagnostics?: ReadonlyArray<{ readonly code: string; readonly message: string }>;
 }
 
@@ -115,6 +121,7 @@ function installedSnapshot(options: InstalledSnapshotOptions = {}): ExtensionSna
         },
         activation,
         ...(options.publisher === undefined ? {} : { publisher: options.publisher }),
+        ...(options.updated === undefined ? {} : { updated: options.updated }),
         components: [
           {
             component: {
@@ -760,6 +767,42 @@ describe("ExtensionsSettingsView", () => {
             command.kind === "forget-publisher" && String(command.publisherKey) === pinned,
         ),
       ).toBe(true),
+    );
+  });
+
+  it("shows what an update that kept trust changed and when, and rolls it back in one click", async () => {
+    const previousDigest = `sha256:${"c".repeat(64)}`;
+    const c = client({
+      snapshot: installedSnapshot({
+        activation: baseActivation({ trusted: true, pluginDesired: true }),
+        updated: {
+          previousVersion: "1.1.0",
+          previousDigest,
+          at: "2026-11-13T09:30:00.000Z",
+          rollbackAvailable: true,
+        },
+      }),
+    });
+    render(<ExtensionsSettingsView initialView="installed" client={c} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    const notice = screen.getByRole("status", { name: "Updated" });
+    expect(notice).toHaveTextContent("Updated from v1.1.0 to v1.2.0");
+    expect(notice).toHaveTextContent("2026-11-13");
+    const digests = screen.getByLabelText("Update digests");
+    expect(within(digests).getByText("Was").nextSibling?.textContent).toBe(previousDigest);
+    expect(within(digests).getByText("Now").nextSibling?.textContent).toBe(digest);
+
+    fireEvent.click(screen.getByRole("button", { name: "Roll back to v1.1.0" }));
+    await waitFor(() =>
+      expect(c.calls).toContainEqual({
+        kind: "rollback-package",
+        extensionId,
+        packageId,
+        version: "1.1.0",
+        digest: previousDigest,
+        restoreTrust: true,
+      }),
     );
   });
 
@@ -1921,6 +1964,9 @@ describe("ExtensionsSettingsView", () => {
     );
     expect(
       screen.getByText(/Installs start disabled — trust and enable them from Installed\./),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Install, trust and turn on skill" }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /confirm skill install/i }));
 

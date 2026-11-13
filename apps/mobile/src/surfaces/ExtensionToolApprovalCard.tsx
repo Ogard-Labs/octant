@@ -30,9 +30,12 @@ export interface ExtensionToolApprovalCardProps {
 
 /**
  * An MCP tool call this phone's turn made waits on the host until someone
- * answers it, here or at a local window that may drive the thread. The phone
- * offers Allow (this one call) and Deny only: "always allow in this Project" is a local
- * window's answer, and the host refuses it from a paired device.
+ * answers it, here or at a local window that may drive the thread. The host
+ * says what approving covers, and the card offers exactly that, as the
+ * desktop card does: every tool of the server (or this tool alone), the
+ * server for the rest of a thread that has read outside content, or this one
+ * call. The phone never decides what is kept; a host that keeps nothing for
+ * this turn says `call`, and the card is then Allow and Deny.
  */
 export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps) {
   const { colors } = useTheme();
@@ -55,7 +58,8 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
   const pending = resource.value?.[0];
   if (pending === undefined) return null;
 
-  const decide = async (decision: "approved" | "denied") => {
+  const covers = pending.answerCovers ?? "call";
+  const decide = async (decision: "approved" | "denied", narrowToTool = false) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
@@ -65,6 +69,7 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
           transport: props.transport,
           approvalId: String(pending.approvalId),
           decision,
+          ...(narrowToTool ? { remember: true } : {}),
         });
       // Denying is the safe direction, so only Allow asks for confirmation.
       const outcome: ConfirmedSendResult<Awaited<ReturnType<typeof send>>> =
@@ -126,8 +131,30 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
       {pending.outsideContent === undefined ? null : (
         <OutsideContentNote outsideContent={pending.outsideContent} />
       )}
+      {covers === "call" ? null : (
+        <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+          {covers === "server"
+            ? MOBILE_COPY.toolApprovalServerDetail
+            : MOBILE_COPY.toolApprovalServerOnThreadDetail}
+        </Text>
+      )}
       <ApprovalDecisionButtons
+        allowLabel={
+          covers === "server"
+            ? MOBILE_COPY.toolApprovalAllowServer
+            : covers === "server-on-thread"
+              ? MOBILE_COPY.toolApprovalAllowServerOnThread
+              : undefined
+        }
         busy={busy}
+        narrower={
+          covers === "server"
+            ? {
+                label: MOBILE_COPY.toolApprovalAllowToolOnly,
+                onPress: () => void decide("approved", true),
+              }
+            : undefined
+        }
         onAllow={() => void decide("approved")}
         onDeny={() => void decide("denied")}
       />

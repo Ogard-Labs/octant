@@ -12,12 +12,13 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Manifest facts only the host states: the identity it stores the package
- * under, where it came from, what its content hashes to, and whether anyone
- * reviewed it. An author who writes one is refused rather than overwritten,
+ * under, where it came from, what its content hashes to, whether anyone
+ * reviewed it, and which publisher key signed it. An author who writes one is
+ * refused rather than overwritten,
  * so the document a person reads is the document the host used.
  */
 const HOST_ASSIGNED_MANIFEST_FIELDS = ["extensionId", "packageId", "digest", "source"] as const;
-const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt"] as const;
+const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt", "publisherKey", "npm"] as const;
 
 const {
   extensionId: _extensionId,
@@ -30,6 +31,8 @@ const {
 const {
   reviewed: _reviewed,
   reviewedAt: _reviewedAt,
+  publisherKey: _publisherKey,
+  npm: _npm,
   ...authoredProvenanceFields
 } = ExtensionProvenance.fields;
 

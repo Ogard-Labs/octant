@@ -11,6 +11,23 @@ import {
   decodeMcpServerConnectionRequest,
 } from "./extensionRpc";
 
+describe("installing a skill in one step", () => {
+  const install = {
+    kind: "install-skill",
+    extensionId: "15000000-0000-4000-8000-000000000001",
+    packageId: "15000000-0000-4000-8000-000000000002",
+    version: "1.0.0",
+    digest: `sha256:${"a".repeat(64)}`,
+  };
+
+  it("turns a skill on only together with trusting it", () => {
+    expect(decodeExtensionCommand({ ...install, trust: true, enable: true })).toMatchObject({
+      enable: true,
+    });
+    expect(() => decodeExtensionCommand({ ...install, enable: true })).toThrow();
+  });
+});
+
 describe("the server connection contract", () => {
   const extensionId = "44000000-0000-4000-8000-000000000002";
 

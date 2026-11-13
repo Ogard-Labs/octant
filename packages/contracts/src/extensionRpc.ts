@@ -172,6 +172,12 @@ const userAddedSecretValue = Schema.Struct({
 export const UserAddedMcpServerRequest = Schema.Struct({
   name: boundedText(64),
   /**
+   * Adds the server without trusting it or turning it on, leaving both as
+   * the person's own steps. Left out, the one confirmation of adding it
+   * installs, trusts and turns it on.
+   */
+  installOnly: Schema.optional(Schema.Boolean),
+  /**
    * The catalog connector this server is, when it was added from Connectors.
    * The host checks it against the bundled catalog and names the package after
    * it, so the package stays recognizable whatever its display name is.
@@ -584,17 +590,30 @@ export const ExtensionCommand = Schema.Union(
     .annotations(strict)
     .pipe(Schema.filter((install) => install.enable !== true || install.trust === true)),
   Schema.Struct({ kind: Schema.Literal("update-package"), ...versionedTarget }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("rollback-package"), ...versionedTarget }).annotations(
-    strict,
-  ),
+  /**
+   * `restoreTrust` is the one step behind an Updated notice: rolling back to
+   * the version that notice names also trusts it and turns it on as it was,
+   * journaled as separate events. Anywhere else it changes nothing, and a
+   * roll back leaves the package untrusted and off. Every roll back ends the
+   * package's remembered approvals.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("rollback-package"),
+    ...versionedTarget,
+    restoreTrust: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("uninstall-package"), ...packageTarget }).annotations(
     strict,
   ),
+  /** `trust` and `enable` compose the same steps as `install-package`, under one confirmation. */
   Schema.Struct({
     kind: Schema.Literal("install-skill"),
     ...versionedTarget,
     trust: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
+    enable: Schema.optional(Schema.Boolean),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((install) => install.enable !== true || install.trust === true)),
   Schema.Struct({ kind: Schema.Literal("update-skill"), ...versionedTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("remove-skill"), ...packageTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("reconcile-skills") }).annotations(strict),

@@ -186,6 +186,13 @@ export const MOBILE_COPY = {
     "Approve or reject on the desktop host. High-risk approval challenges stay local-host-only.",
   approvalAllow: "Allow",
   approvalAllowSession: "Allow this session",
+  toolApprovalAllowServer: "Allow all tools of this server",
+  toolApprovalAllowServerOnThread: "Allow this server in this thread",
+  toolApprovalAllowToolOnly: "Allow only this tool",
+  toolApprovalServerDetail:
+    "Octant asks about a server once: allowing lets every tool of this server run without asking, until its plugin is updated.",
+  toolApprovalServerOnThreadDetail:
+    "This thread has read outside content, and this server can send what the thread has read over the network. Allowing lets its tools run for the rest of this thread without asking.",
   approvalDeny: "Deny",
   approvalSendFailed: "Couldn't send that. Check the connection and try again.",
   approvalReconnecting: "Reconnecting…",

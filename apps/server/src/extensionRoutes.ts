@@ -1056,6 +1056,11 @@ async function addUserMcpServer(
         packageId: entry.packageId,
         version: entry.version,
         digest: entry.digest,
+        // The person just typed this server in, so their one confirmation
+        // installs, trusts and turns it on, as the one-step install of any
+        // plugin does; the journal still records each step. With Add only
+        // the server is installed and the other two steps stay theirs.
+        ...(added.installOnly === true ? {} : { trust: true, enable: true }),
       },
       signal,
     );
@@ -1063,38 +1068,10 @@ async function addUserMcpServer(
     return await abandon(failure("failed", "The server could not be installed."));
   }
   if (installed.kind !== "extension-state-updated") return await abandon(installed);
-  // The person just typed this server in, so trusting and switching it on is
-  // what they asked for; the ladder still records each step.
-  let current = installed;
-  const enable = async (command: Readonly<Record<string, unknown>>) => {
-    const state = current.snapshot.packages.find(
-      (candidate) => candidate.extensionId === entry.extensionId,
-    );
-    if (state === undefined) return;
-    const result = await service.execute(
-      decodeExtensionCommand({
-        ...command,
-        commandVersion: 1,
-        extensionId: String(entry.extensionId),
-        expectedStateVersion: Number(state.stateVersion),
-      }),
-      signal,
-    );
-    if (result.kind === "extension-state-updated") current = result;
-  };
-  await enable({ kind: "set-source-trust", trusted: true });
-  await enable({ kind: "set-plugin-desired", desired: true });
+  const current = installed;
   const installedState = current.snapshot.packages.find(
     (candidate) => candidate.extensionId === entry.extensionId,
   );
-  for (const component of installedState?.components ?? []) {
-    if (component.component.kind !== "mcp-server") continue;
-    await enable({
-      kind: "set-component-desired",
-      componentId: component.component.id,
-      desired: true,
-    });
-  }
   const addedComponent = installedState?.components.find(
     (component) => component.component.kind === "mcp-server",
   );

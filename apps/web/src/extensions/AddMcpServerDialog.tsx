@@ -4,7 +4,7 @@ import type {
   UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { Plus, X } from "lucide-react";
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useSecretStoresClient } from "../settings/SecretStoresClientContext";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -117,6 +117,9 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
     setRows(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   const removeRow = (id: number) => setRows(rows.filter((row) => row.id !== id));
 
+  // Add only installs the server and leaves trusting and turning it on as
+  // separate steps; the submit button's one confirmation does all three.
+  const installOnly = useRef(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedName = name.trim();
@@ -167,7 +170,9 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
     setFailure(undefined);
     setSubmitting(true);
     try {
-      const result = await props.client.addUserMcpServer(request);
+      const result = await props.client.addUserMcpServer(
+        installOnly.current ? { ...request, installOnly: true } : request,
+      );
       if (result.kind === "extension-command-failed") {
         setFailure(result.failure);
         return;
@@ -195,8 +200,9 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
       onSubmit={(event) => void submit(event)}
     >
       <p className="endpoint-flow__detail">
-        A command Octant starts on this computer, or an address it connects to. Its tools ask for
-        your approval on every call.
+        A command Octant starts on this computer, or an address it connects to. Add server also
+        trusts it and turns it on; Add only leaves both to you. Its tools ask for your approval
+        the first time one is used.
       </p>
       <div className="endpoint-flow__field">
         <label htmlFor={`${ids}-name`}>Name</label>
@@ -358,7 +364,25 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
         <OctantButton onClick={props.onClose} size="sm" type="button" variant="ghost">
           Cancel
         </OctantButton>
-        <OctantButton disabled={submitting} size="sm" type="submit">
+        <OctantButton
+          disabled={submitting}
+          onClick={() => {
+            installOnly.current = true;
+          }}
+          size="sm"
+          type="submit"
+          variant="outline"
+        >
+          Add only
+        </OctantButton>
+        <OctantButton
+          disabled={submitting}
+          onClick={() => {
+            installOnly.current = false;
+          }}
+          size="sm"
+          type="submit"
+        >
           {submitting ? "Adding…" : "Add server"}
         </OctantButton>
       </div>

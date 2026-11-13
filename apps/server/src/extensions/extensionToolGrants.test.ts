@@ -23,7 +23,11 @@ import {
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ExtensionToolGrantProjection } from "../persistence/extensionToolGrantProjection";
-import { catchUpProjection, rebuildProjection } from "../persistence/projection";
+import {
+  catchUpProjection,
+  ProjectionRegistry,
+  rebuildProjection,
+} from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -85,6 +89,8 @@ function openHost(
     readonly transport?: "streamable-http" | "stdio";
     /** The publisher key the host verified for each package version, by version. */
     readonly signedBy?: Readonly<Record<string, string>>;
+    /** The run of same-source updates the host journaled for each unsigned version, by version. */
+    readonly updateLines?: Readonly<Record<string, string>>;
   } = {},
 ) {
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -203,6 +209,7 @@ function openHost(
         readThreadExternalContentTaint(connection, threadId).externalContentIngested,
       outsideContent: (threadId) => readApprovalOutsideContent(connection, threadId),
       verifiedPublisherKey: (version) => options.signedBy?.[version.version],
+      updateLine: (version) => options.updateLines?.[version.version],
     }),
     recordExternalContentIngestion: (input) => taint.record(input),
   });
@@ -494,6 +501,45 @@ describe("an MCP server a person is asked about once", () => {
     expect(await host.deny()).toBe(true);
     await deniedAgain;
   });
+  it("keeps a marked thread's answer across a host restart, for that thread alone", async () => {
+    const directory = temporaryDirectory();
+    const host = openHost(directory);
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+    const marked = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await host.answer(false)).toBe(true);
+    await marked;
+    await host.unprompted({ threadId: threadTwo, projectId: projectA });
+    await host.close();
+
+    const restarted = openHost(directory);
+    await expect(
+      restarted.unprompted({ threadId: threadOne, projectId: projectA, tool: "delete" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    // Settings lists what is kept for a Project or the account, not a thread's answer.
+    expect(restarted.grants.list()).toHaveLength(1);
+    const otherMarked = restarted.call({ threadId: threadTwo, projectId: projectA });
+    expect(await restarted.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await restarted.deny()).toBe(true);
+    await otherMarked;
+
+    // Withdrawn trust ends the thread's answer with the package's grants,
+    // and a restart cannot bring it back.
+    restarted.grants.revokeForLifecycleChange({
+      kind: "set-source-trust",
+      extensionId,
+      trusted: false,
+    });
+    await restarted.close();
+    const again = openHost(directory);
+    const asked = again.call({ threadId: threadOne, projectId: projectA });
+    expect(await again.prompt()).toMatchObject({ threadId: threadOne });
+    expect(await again.deny()).toBe(true);
+    await asked;
+  });
+
   it("asks a marked thread again once the package was uninstalled, rolled back or lost its trust", async () => {
     const host = openHost(temporaryDirectory());
     const first = host.call({ threadId: threadOne, projectId: projectA });
@@ -804,6 +850,38 @@ describe("an MCP tool a person always allows in a Project", () => {
     expect(updated.grants.list()).toEqual([]);
   });
 
+  it("keeps a server's approval and a marked thread's answer across an unsigned update from the trusted source, and asks again outside that run", async () => {
+    const directory = temporaryDirectory();
+    const host = openHost(directory);
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+    const marked = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await host.answer(false)).toBe(true);
+    await marked;
+    await host.close();
+
+    const update = { version: "1.1.0", digest: `sha256:${"e".repeat(64)}` };
+    const sameSource = openHost(directory, {
+      package: update,
+      updateLines: { "1.0.0": "line", "1.1.0": "line" },
+    });
+    await expect(
+      sameSource.unprompted({ threadId: threadTwo, projectId: projectA, tool: "delete" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    await expect(
+      sameSource.unprompted({ threadId: threadOne, projectId: projectA }),
+    ).resolves.not.toMatchObject({ isError: true });
+    await sameSource.close();
+
+    const otherRun = openHost(directory, { package: update });
+    const call = otherRun.call({ threadId: threadThree, projectId: projectA, tool: "delete" });
+    expect(await otherRun.prompt()).toMatchObject({ mcpToolName: "delete" });
+    expect(await otherRun.deny()).toBe(true);
+    await call;
+  });
+
   it("keeps a server's approval across an update the same publisher key signed, and asks again for a new or missing key", async () => {
     const key = `ed25519:${"1".repeat(64)}`;
     const directory = temporaryDirectory();
@@ -997,10 +1075,15 @@ describe("an MCP tool a person always allows in a Project", () => {
       () => now,
     );
     const runtime = createPhase1RuntimeRegistries();
+    // The table as it stood then cannot hold a row as it is written now, so
+    // the grant reaches the journal alone, as an upgraded host finds it.
     const journal = new Journal({
       connection,
       registry: runtime.events,
-      projections: runtime.projections,
+      projections: runtime.projections
+        .all()
+        .filter((projection) => !(projection instanceof ExtensionToolGrantProjection))
+        .reduce((registry, projection) => registry.register(projection), new ProjectionRegistry()),
       clock: () => now,
     });
     const grants = new ExtensionToolGrantStore({
@@ -1025,8 +1108,6 @@ describe("an MCP tool a person always allows in a Project", () => {
         definitionDigest: `sha256:${"d".repeat(64)}`,
       }),
     ).toBe("recorded");
-    const before = grants.list();
-    expect(before).toHaveLength(1);
 
     applyMigrations(connection, MIGRATIONS, () => now);
     catchUpProjection({
@@ -1035,7 +1116,7 @@ describe("an MCP tool a person always allows in a Project", () => {
       projection: new ExtensionToolGrantProjection(),
       clock: () => now,
     });
-    expect(grants.list()).toEqual(before);
+    expect(grants.list()).toMatchObject([{ ...subject, version: "1.0.0" }]);
   });
 
   it("leaves a newer answer standing when an older revocation is applied again", async () => {
