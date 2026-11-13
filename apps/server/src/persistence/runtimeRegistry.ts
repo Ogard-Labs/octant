@@ -428,6 +428,7 @@ import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
 import { registerMovedHistoryEvents } from "../hub/movedThreadHistory";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
+import { registerToolEffectEvents } from "../toolEffects/toolEffectLedger";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasChoiceAnswerEvents } from "../canvas/canvasChoiceAnswerService";
@@ -439,6 +440,7 @@ import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareServ
 import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
+import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
 import { createRuntimeHostIdentityMigrationRegistry } from "./hostIdentityTransforms";
@@ -817,6 +819,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerProtectedFilesEvents(events);
   registerPersonMemoryEvents(events);
   registerCanvasExportFolderEvents(events);
+  registerCanvasNetworkAccessEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);
   registerCanvasChoiceAnswerEvents(events);
@@ -826,6 +829,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCoordinatorWakeEvents(events);
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
+  registerToolEffectEvents(events);
   registerFollowUpSuggestionEvents(events);
   registerTerminalSessionEvents(events);
   registerThreadMoveEvents(events);

@@ -19,6 +19,7 @@ import { approvalAnswerUnderPosture } from "@octant/domain/guardrail-policy";
 import { canonicalToolEgressRuleHost } from "@octant/domain/tool-egress-policy";
 import type { ToolEgressCallConfirmation, ToolEgressPerson } from "./nativeHarnessEgressRules";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
+import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
@@ -277,51 +278,58 @@ export class NativeHarnessApprovalStore {
     } catch {
       // A surface that cannot show the approval does not stop it being asked.
     }
-    return new Promise((resolve) => {
-      const settle = (
-        outcome: SettledApprovalOutcome,
-        remembered?: boolean,
-        confirmed?: ToolEgressCallConfirmation,
-        actor?: EventActor,
-      ) => {
-        const waiter = this.#waiters.get(String(approvalId));
-        if (waiter === undefined) return;
-        this.#waiters.delete(String(approvalId));
-        clearTimeout(waiter.timer);
-        waiter.signal?.removeEventListener("abort", waiter.onAbort);
-        this.#options.sessions.settleApproval(
-          input.threadId,
-          approvalId,
-          { status: outcome, ...(remembered === true ? { remembered: true } : {}) },
-          actor,
-        );
-        resolve(
-          outcome === "approved" && confirmed !== undefined ? { outcome, confirmed } : { outcome },
-        );
-      };
-      const waiter: Waiter = {
-        threadId: input.threadId,
-        mode: input.mode,
-        askedUnder: this.#options.posture?.(input.threadId, input.mode),
-        approvalClass: input.approvalClass,
-        allowRemember: input.source === undefined && !singleUse,
-        commandHosts:
-          commandHosts === undefined
-            ? undefined
-            : new Set(commandHosts.map((entry) => commandHostKey(entry.host, entry.port))),
-        expiresAt: Date.parse(askedAt) + timeoutMs,
-        resolve: settle,
-        timer: setTimeout(() => settle("expired"), timeoutMs),
-        onAbort: () => settle("cancelled"),
-        signal: input.signal,
-      };
-      this.#waiters.set(String(approvalId), waiter);
-      if (input.signal?.aborted) {
-        waiter.onAbort();
-        return;
-      }
-      input.signal?.addEventListener("abort", waiter.onAbort, { once: true });
-    });
+    // Asked before the call does anything: while it waits, the call's record
+    // says nothing ran, so a restart continues the turn and asks again.
+    return whileAwaitingToolApproval(
+      () =>
+        new Promise<NativeHarnessCommandApprovalOutcome>((resolve) => {
+          const settle = (
+            outcome: SettledApprovalOutcome,
+            remembered?: boolean,
+            confirmed?: ToolEgressCallConfirmation,
+            actor?: EventActor,
+          ) => {
+            const waiter = this.#waiters.get(String(approvalId));
+            if (waiter === undefined) return;
+            this.#waiters.delete(String(approvalId));
+            clearTimeout(waiter.timer);
+            waiter.signal?.removeEventListener("abort", waiter.onAbort);
+            this.#options.sessions.settleApproval(
+              input.threadId,
+              approvalId,
+              { status: outcome, ...(remembered === true ? { remembered: true } : {}) },
+              actor,
+            );
+            resolve(
+              outcome === "approved" && confirmed !== undefined
+                ? { outcome, confirmed }
+                : { outcome },
+            );
+          };
+          const waiter: Waiter = {
+            threadId: input.threadId,
+            mode: input.mode,
+            askedUnder: this.#options.posture?.(input.threadId, input.mode),
+            approvalClass: input.approvalClass,
+            allowRemember: input.source === undefined && !singleUse,
+            commandHosts:
+              commandHosts === undefined
+                ? undefined
+                : new Set(commandHosts.map((entry) => commandHostKey(entry.host, entry.port))),
+            expiresAt: Date.parse(askedAt) + timeoutMs,
+            resolve: settle,
+            timer: setTimeout(() => settle("expired"), timeoutMs),
+            onAbort: () => settle("cancelled"),
+            signal: input.signal,
+          };
+          this.#waiters.set(String(approvalId), waiter);
+          if (input.signal?.aborted) {
+            waiter.onAbort();
+            return;
+          }
+          input.signal?.addEventListener("abort", waiter.onAbort, { once: true });
+        }),
+    );
   }
 
   #outsideContentFor(

@@ -19,6 +19,7 @@ import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { rebuildProjection } from "./persistence/projection";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
+import { CanvasNetworkAccessService } from "./canvas/canvasNetworkAccessService";
 import { ThreadRetentionService } from "./threadRetentionService";
 
 const directories: Array<string> = [];
@@ -58,6 +59,13 @@ function openHarness(
     projections: runtime.projections,
     clock: () => now,
   });
+  // The live "Allow network" switch, told of erased Canvases as the server's wiring tells it.
+  const canvasNetwork = new CanvasNetworkAccessService({
+    journal,
+    uuid: randomUUID,
+    actor: { kind: "system", actorId: ids.actor } as never,
+    clock: () => now as never,
+  });
   const erasedCanvasFiles: Array<ReadonlyArray<string>> = [];
   const forgottenProjects: string[] = [];
   const forgottenPresentation: Array<string> = [];
@@ -76,7 +84,10 @@ function openHarness(
         ...threads.map((thread) => `${thread.mode}:${String(thread.threadId)}`),
       );
     },
-    forgetCanvases: (canvasIds) => runtime.canvasProjection.evict(canvasIds),
+    forgetCanvases: (canvasIds) => {
+      runtime.canvasProjection.evict(canvasIds);
+      canvasNetwork.forget(canvasIds);
+    },
     purgeCanvasFiles: (canvasIds) => {
       erasedCanvasFiles.push(canvasIds);
     },
@@ -89,6 +100,7 @@ function openHarness(
     journal,
     service,
     runtime,
+    canvasNetwork,
     erasedCanvasFiles,
     forgottenProjects,
     forgottenPresentation,
@@ -328,6 +340,52 @@ describe("ThreadRetentionService", () => {
       "local-window",
     );
     expect(runtime.canvasProjection.getById(decodeCanvasId(canvasId))).toBeUndefined();
+  });
+
+  it("takes a purged thread's Canvas off the network at once: its switch reads off and its page's token is dead", async () => {
+    const { connection, journal, canvasNetwork, service } = openHarness();
+    const canvasId = decodeCanvasId("c1000000-0000-4000-8000-0000000000a3");
+    const keptCanvasId = decodeCanvasId("c1000000-0000-4000-8000-0000000000a4");
+    seedChatThread(journal, connection, ids.thread, "Has a canvas", "body");
+    appendCanvas(journal, String(canvasId), "c1000000-0000-4000-8000-0000000000a1", ids.thread);
+    canvasNetwork.set(canvasId, true);
+    canvasNetwork.set(keptCanvasId, true);
+    const token = canvasNetwork.issueToken(canvasId) ?? "";
+    const keptToken = canvasNetwork.issueToken(keptCanvasId) ?? "";
+    expect(canvasNetwork.canvasForToken(token)).toBe(canvasId);
+
+    await service.purge(
+      { scope: { kind: "thread", mode: "chat", threadId: ids.thread }, confirm: true },
+      "local-window",
+    );
+
+    expect(canvasNetwork.canvasForToken(token)).toBeUndefined();
+    expect(canvasNetwork.isAllowed(canvasId)).toBe(false);
+    expect(canvasNetwork.issueToken(canvasId)).toBeUndefined();
+    // Another Canvas's choice and page are untouched.
+    expect(canvasNetwork.isAllowed(keptCanvasId)).toBe(true);
+    expect(canvasNetwork.canvasForToken(keptToken)).toBe(keptCanvasId);
+  });
+
+  it("takes a purged Project's Canvases off the network at once", async () => {
+    const { connection, journal, canvasNetwork, service } = openHarness();
+    const projectId = "c1000000-0000-4000-8000-0000000000a1";
+    const canvasId = decodeCanvasId("c1000000-0000-4000-8000-0000000000a3");
+    seedProject(connection, projectId);
+    appendCanvas(journal, String(canvasId), projectId);
+    canvasNetwork.set(canvasId, true);
+    const token = canvasNetwork.issueToken(canvasId) ?? "";
+    expect(canvasNetwork.canvasForToken(token)).toBe(canvasId);
+
+    await service.purge(
+      { scope: { kind: "project", projectId: decodeProjectId(projectId) }, confirm: true },
+      "local-window",
+    );
+
+    expect(canvasNetwork.canvasForToken(token)).toBeUndefined();
+    expect(canvasNetwork.isAllowed(canvasId)).toBe(false);
+    // A Canvas later made under the same identity starts from the journal: off, at version 0.
+    expect(() => canvasNetwork.set(canvasId, true)).not.toThrow();
   });
 
   it("erases the Canvas a purged Chat thread outside every Project owned, from the journal and the live projection", async () => {

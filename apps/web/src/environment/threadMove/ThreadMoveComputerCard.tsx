@@ -58,8 +58,7 @@ export type ThreadMoveEnvironment = Omit<ThreadMoveComputerCardProps, "thread" |
 /**
  * The Computer card at the top of a thread's Environment: where the thread
  * runs, and the one place a person moves it to another of their computers.
- * Canonical: DESIGN.md "Moving a thread starts in Environment and nowhere
- * else in the thread" and docs/design/hub-and-spokes.md.
+ * Canonical: docs/design/hub-and-spokes.md "Moving a thread: screens".
  */
 export function ThreadMoveComputerCard(props: ThreadMoveComputerCardProps) {
   if (props.client === undefined) {

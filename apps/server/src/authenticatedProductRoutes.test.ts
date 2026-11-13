@@ -560,6 +560,27 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("refuses a paired device a Canvas's network switch and its proxy", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    for (const [path, method] of [
+      ["/api/canvas/network-access", "POST"],
+      ["/api/canvas/network-access?canvasId=11111111-1111-4111-8111-111111111111", "GET"],
+      [`/api/canvas/network/${"a".repeat(43)}/fetch?url=https%3A%2F%2Fexample.com%2F`, "GET"],
+      ["/api/canvas/network-access/renew", "POST"],
+      [`/api/canvas/network/${"a".repeat(43)}/fetch?url=https%3A%2F%2Fexample.com%2F`, "POST"],
+      [`/api/canvas/network/${"a".repeat(43)}/image?url=https%3A%2F%2Fexample.com%2Fa.png`, "GET"],
+      [`/api/canvas/network/${"a".repeat(43)}/font?url=https%3A%2F%2Fexample.com%2Fa.woff2`, "GET"],
+    ] as const) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method })),
+      ).toBeUndefined();
+      expect((await product(handoff(path, method)))?.status).toBe(403);
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("dispatches a Canvas share read for a paired device but not a share mutation", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });

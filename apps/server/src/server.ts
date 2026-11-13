@@ -253,6 +253,7 @@ export function startOctantServer(
       agentRunRequestOwner,
       agentRunPersistence,
       agentRunsCutOffByRestart,
+      toolEffectLedger,
       androidInputGrants,
       automationEventStore,
       bindingReceiptStore,
@@ -333,6 +334,7 @@ export function startOctantServer(
     } = wireAgentRuns({
       agentRunParentAuthority,
       agentRunPersistence,
+      toolEffectLedger,
       codeBoardEventStore,
       codeParentActiveTurn,
       codeSessionAuthority,
@@ -601,6 +603,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      toolEffectLedger,
       serverConnection,
       personMemory,
       safeNetworkStore,
@@ -709,6 +712,7 @@ export function startOctantServer(
       artifactMirrorRoutes,
       canvasAgentToolPort,
       canvasCommentService,
+      canvasNetworkAccess,
       canvasPublicShareService,
       canvasRoutes,
       canvasService,
@@ -724,6 +728,12 @@ export function startOctantServer(
             ? {}
             : { codeConversation: routeCodeService.conversation }),
         })(windowId, request),
+      // The remote listener is wired below; a Canvas page's proxy reads its
+      // name only when a page asks for a fetch, and never fetches from it.
+      canvasNetworkOwnHosts: () => {
+        const hostname = privateListenerController.status().hostname;
+        return hostname === null ? [] : [hostname];
+      },
       // A paired device reads a thread's Canvases under the same Open check
       // its own thread routes run: Chat's read rule, Work's and Code's reads.
       threadReadAuthority: (scopeId, thread) =>
@@ -1168,6 +1178,7 @@ export function startOctantServer(
       externalContentIngestionStore,
       goalLoopService,
       liftRestartRecovery,
+      toolEffectLedger,
       persistence,
       routeCodeService,
       threadMessageQueue,
@@ -1847,6 +1858,7 @@ export function startOctantServer(
       browserExtensionService,
       browserFlowService,
       browserProfileService,
+      canvasNetworkAccess,
       canvasPublicShareService,
       threadExportService,
       threadHandOffProvider,

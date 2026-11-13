@@ -5,13 +5,15 @@
  * person's Resume sends, through the mode's ordinary turn admission, which
  * rechecks authority, posture and the spend ceiling as it admits it. A thread
  * is held for its person instead when the setting or the thread's own switch
- * is off, when a person quit Octant while it ran, when its own continuations
- * keep being cut off, or when its provider cannot take up the session the
- * cut-off turn ran in.
+ * is off, when its cut-off turn left a tool call nobody saw finish, when a
+ * person quit Octant while it ran, when its own continuations keep being cut
+ * off, or when its provider cannot take up the session the cut-off turn ran
+ * in.
  *
  * Chat and Work keep no journaled push or pull request steps of their own,
  * so the Code hold for an uncertain external action has nothing to read here;
- * the continuation message tells the agent to inspect before repeating.
+ * a tool call cut off in the middle is held like Code's, and for the rest the
+ * continuation message tells the agent to inspect before repeating.
  */
 import type { HostRestartRecovery, HostRestartRecoveryHold } from "@octant/contracts";
 import {
@@ -56,6 +58,12 @@ export interface ThreadRestartContinuationPorts {
   readonly readiness: (turn: ThreadTurnCutOffByRestart) => RestartContinuationReadiness;
   /** The mode's Continue after restart setting. */
   readonly enabled: () => boolean;
+  /**
+   * Why the cut-off turn must wait, when it started a tool call that may
+   * change something and nothing records that the call finished; the reason
+   * names the tool. Undefined when every such call is known to have ended.
+   */
+  readonly uncertainToolCall: (turn: ThreadTurnCutOffByRestart) => string | undefined;
   readonly attempts: CodeRestartContinuationAttempts;
   /**
    * Starts the continuation as the host under its one identity. Resolves once
@@ -121,6 +129,13 @@ export async function continueThreadTurnsCutOffByRestart(
     }
     if (readiness.optedOut) {
       hold(turn.threadId, "opted-out", HOLD_DETAIL["opted-out"]);
+      continue;
+    }
+    // The continuation never repeats a call itself, but the agent it starts
+    // could repeat one that already landed, so the person looks first.
+    const uncertain = ports.uncertainToolCall(turn);
+    if (uncertain !== undefined) {
+      hold(turn.threadId, "uncertain-tool-call", uncertain);
       continue;
     }
     if (ports.quitByPerson) {

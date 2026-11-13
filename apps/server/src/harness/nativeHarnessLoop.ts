@@ -51,21 +51,7 @@ import type {
   NativeHarnessUsage,
 } from "./nativeHarnessTransport";
 import { addNativeHarnessUsage } from "./nativeHarnessTransport";
-
-/**
- * Tools whose call only reads. One the process stopped in the middle of can be
- * called again with no harm; every other tool may already have changed
- * something, so the model is told to check before it repeats one.
- */
-const REPLAY_SAFE_TOOLS: ReadonlySet<string> = new Set([
-  "read",
-  "grep",
-  "glob",
-  "web-fetch",
-  "web-search",
-  "context-remaining",
-  "journal-lookup",
-]);
+import { toolEffectClass } from "../toolEffects/toolEffectClass";
 
 const OMITTED_RESULT_JSON = JSON.stringify({
   omitted: true,
@@ -1767,7 +1753,10 @@ function interruptedResults(
     toolCallId: call.toolCallId,
     isError: true,
     resultJson: JSON.stringify(
-      REPLAY_SAFE_TOOLS.has(call.toolName)
+      // A call that only reads can be made again with no harm; every
+      // other tool may already have changed something, so the model is told
+      // to check before it repeats one.
+      toolEffectClass(call.toolName) === "read-only"
         ? {
             interrupted: true,
             replay: "safe",

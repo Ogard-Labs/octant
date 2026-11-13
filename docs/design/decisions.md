@@ -600,7 +600,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Canvas documents, desig
 Frames run nothing unless a design declares script, and a running design never runs where it could reach the network unless the person turned on that Canvas's "Allow network" switch.
 
 - A static frame never gets script permission, and no frame has both script and same-origin permission.
-- On desktop a running design runs in a prototype host process with no network route and no resolver; if that closure cannot be verified, the prototype does not run. A design or prototype has a per-Canvas "Allow network" switch that only the person sets, off by default; its connection runs through a filtering egress proxy that refuses loopback, private ranges, link-local addresses and the Octant server, and the proxy is built first, then the switch (maintainer decision, 2026-11-12). Not built yet: today neither exists and a running design never has a network route.
+- On desktop a running design runs in a prototype host process with no network route and no resolver; if that closure cannot be verified, the prototype does not run. A design or prototype has a per-Canvas "Allow network" switch that only the person sets, at a local window or a paired device, off by default and journaled (maintainer decision, 2026-11-12; not built yet: a paired device is not offered the switch, and today only a local window sets it). While it is on, a running page reaches the network only through the host's filtering proxy, which refuses loopback, private, link-local and overlay addresses and the host's own listeners, pins the resolved address, re-checks redirects, sends no credential and is bounded per Canvas; turning it off revokes the page's token at once, and no share, export or public link carries it. Through the proxy a page's script may `GET`, and `POST` a JSON body of at most 256 KiB, and the page may load images and fonts, each passed on only when the response declares that type; the host sets every outgoing header, so no cookie and no header the page chose is sent, and there is no WebSocket, media or other method (maintainer decision, 2026-11-13). The page's token lives one hour and is renewed while the page is open, only by the window that ran it and never by the token itself (maintainer decision, 2026-11-13). Built for a browser on the host's machine and for the desktop app, where the prototype host keeps no route and no resolver and the main process relays each request of the page to the proxy under a token the page never holds.
 - A remote browser cannot network-contain a running frame; that exposure is accepted and the Run control says so.
 - Import HTML is a create like any other, bounded to 256 KiB; nothing it references is fetched, and a paired device imports as a local window does (maintainer decision, 2026-11-12; not built yet: today a paired device may not import).
 - A share carries a design only with the sharer's acknowledgement. A public link is off by default and published only from the person's approval card, at a local window or a paired device, never by an agent (maintainer decision, 2026-11-12; not built yet: today only a local card).
@@ -656,7 +656,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 
 - Chat and Work can be switched off in Settings; Code is always available, and disabling a mode never deletes its data.
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
-- The mode switcher is the Work and Code icon pair at the top of the sidebar, not in the title band; each mode's name is its tooltip and accessible name (maintainer request, 2026-11-09). Detail: [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout).
+- The mode switcher is the Work and Code icon pair at the top of the sidebar, not in the title band; each mode's name is its tooltip and accessible name (maintainer request, 2026-11-09). Detail: [Workspace: Sidebar](workspace.md#sidebar).
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
 - Project memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. Person memory, beside it, crosses Projects ([Person memory across Projects](#person-memory-across-projects)). _Here only._
 - Every Chat, Work and Code turn in a Project carries its active Project memory. Agents read it and write to it through `octant_memory`. At Full access an agent's write is accepted without a confirmation, marked agent-written with its thread and shown in the thread; below Full access a Project setting "Agents may write Project memory without asking" (off by default) does the same for every turn in the Project, and otherwise the write waits for the person's confirmation in the thread with no answer remembered. Plan refuses writes (maintainer request, 2026-11-12). Not built yet: today every write waits for the person's confirmation at every level, the path built 2026-11-08 ([Architecture: Project memory](../architecture.md#project-memory)).
@@ -1157,12 +1157,17 @@ After a crash, a force quit or a reboot, the host continues each turn the restar
 - Only a turn the previous host was still running qualifies: a turn its person stopped, a turn that failed and a turn already waiting before the restart do not. A clean shutdown, as a reboot performs, leaves its turns as a crash would.
 - The continuation is the same message a person's Resume sends: inspect first, do not repeat what may already have taken effect, ask again for approvals and answers.
 - Each mode has its own switch: Settings › Chat, Settings › Work and Settings › Code › Continue after restart, each on by default, because each mode already keeps its own settings record. Every thread's menu carries its own switch. Both are changed at a window on this computer or on a device its person paired, and the journal names the device (maintainer decision, 2026-11-12); a hub-introduced device and an agent grant are refused.
-- The thread waits for its person instead when Continue after restart is off in Settings or for the thread, when it holds a push or pull request step whose outcome the restart left unknown (Code: Chat and Work journal no such step), when its own automatic continuation was cut off by a restart twice, or when its provider cannot resume the session the turn ran in. A turn that never reached its provider waits too, so the person's message is sent again rather than lost.
+- The thread waits for its person instead when Continue after restart is off in Settings or for the thread, when it holds a push or pull request step whose outcome the restart left unknown (Code: Chat and Work journal no such step), when its cut-off turn started a tool call that may change something and nothing records that the call finished, when its own automatic continuation was cut off by a restart twice, or when its provider cannot resume the session the turn ran in. A turn that never reached its provider waits too, so the person's message is sent again rather than lost.
+- A tool call is recorded before it takes effect and again when its outcome is known (maintainer decision, 2026-11-12). The record names the thread, the turn, the call and its tool, and whether the tool only reads; it never carries arguments, paths, commands or results. A tool is read-only only where it is declared so, and every other tool counts as one that may change something. A cut-off turn whose unfinished calls all only read, or that started no call, continues as before. The held thread's notice names the tool, and the person's own Resume or next message continues it as before. The host never runs a call again: this only adds a reason to wait.
+- What the record covers. Tools the host runs for a Chat, Work or Code turn, on every provider (the harness's own tools, Octant's app tools and selected MCP servers' tools): recorded before the tool starts, so a stop at any point inside the call holds the thread. A runtime's own tools (Codex, Claude Code, ACP agents, Pi and OpenCode each report a start and a finish): recorded when the host reads the start, always as a tool that may change something, so a reported start with no finish holds the thread. A managed child agent run records its tools the same way, a delegated Browser child's included, on a record of its own, and a thread's cut-off turn also waits when a child run of that thread cut off by the same restart left such a call unfinished (maintainer decision, 2026-11-13). Not built yet: a runtime's own tool whose start the host had not read when it stopped cannot be proved either way, and that turn continues as before; a terminal-started Browser session and a saved Browser flow's run sit outside any turn or run and write no record.
+- A tool that was only waiting for its own approval when the host stopped does not hold the thread: nothing ran, so the turn continues and asks again (maintainer decision, 2026-11-13). The call is still recorded before the tool is entered, a second record marks that it is waiting for a person, and a third is written before the tool hears the answer, so a record always precedes any effect. Built for the harness's own tool approvals and a selected MCP server's tool approval. Not built yet: a call waiting on a Browser prompt, a routine or memory proposal, an image offer or a question to the person, and a runtime's own tool waiting on the runtime's approval request, still hold the thread.
+- A read-only tool the host runs never holds a thread because the runtime also reports a start for the same call (maintainer decision, 2026-11-13): a runtime's start that names a tool the turn offers it is not recorded, since the host records that call itself. Built for Codex, Pi, Claude Code and OpenCode by the way each names such a tool; the OpenCode spelling is not checked against a live OpenCode. Not built yet: an ACP agent titles its calls freely, so its start for a host tool can still hold the thread.
+- A client reads a hold reason it does not know as a hold of another kind and still shows the host's sentence for it (maintainer decision, 2026-11-13). This protects clients built from now on; a client built before it refuses the status of a host that reports a tool-call hold, for as long as that start's report stands.
 - After a person's deliberate quit (the app menu's Quit, ⌘Q, or closing the last window where that quits) while turns run, nothing is continued: each cut-off thread waits with the `quit` reason, and the notice reads "Octant was quit while threads were working. N threads wait for you." with a link to the first; the person continues it with the thread's ordinary Resume or next message. Maintainers decided this on 2026-11-12. The desktop only reports the quit, on a loopback route only its bridge secret opens, and the host keeps a one-start marker beside its store; no marker continues as before. A system restart, shutdown or session end (Electron's `powerMonitor` `shutdown` on macOS and Linux, a window's session end on Windows, or the non-interactive quit macOS sends) continues, and with the Background service on the host keeps running, so nothing is held. The Dock's Quit arrives as the same event a shutdown sends and continues.
 - Each recovery identity is continued at most once, and the crash-loop count survives the restart it counts.
 - Dispatch needs no window: it runs under the host's own scope and rechecks authority, posture and the spend ceiling through ordinary turn admission at that moment. Messages queued behind the cut-off turn follow the continuation; a queue its person paused stays paused.
 - Each start reports the threads it continued and the ones that wait, with links, in a notice: "Octant restarted. Continued N threads; M need you."
-- Built for Code, Chat, Work, Work goal loops, subagent runs and pending coordinator wakes. A Chat answer the start interrupts and a Work turn the start settles as cut off are continued through each mode's ordinary send, so a person's own "continue" and the host's take the same path. A Chat answer already waiting on a question or approval at the restart is still settled interrupted when it is answered; asking it again is not built. A Work goal loop the restart found running is rebuilt from its journaled frames, charges the goal the journaled spend of the round the restart cut off (recorded as interrupted), and follows its thread: its next round continues the thread, a loop cut off three rounds in a row waits as a crash loop, a held loop pauses with `held-after-restart`, and the restart notice lists the loop even when no turn was cut off ([Architecture: Work restart recovery](../architecture.md#persistence)). A subagent run the start interrupted is resumed through the ordinary run resume under its parent's live grant, behind the same holds and crash-loop guard, and a held run stays Interrupted for a person's Resume ([Architecture: subagent restart recovery](../architecture.md#persistence)). A coordinator wake that was journaled as decided but never started its turn is started once after Code recovery, dropped when its thread already has a turn, and held under the same rule and crash-loop guard. Settling lost remote steps at start is not built yet. A packaged-app `kill -9` smoke, and a packaged-app quit, system restart and Windows session end, are maintainer live checks still owed.
+- Built for Code, Chat, Work, Work goal loops, subagent runs and pending coordinator wakes, including the hold for a tool call nobody saw finish, which also keeps a subagent run that left one from being resumed by the host. A Chat answer the start interrupts and a Work turn the start settles as cut off are continued through each mode's ordinary send, so a person's own "continue" and the host's take the same path. A Chat answer already waiting on a question or approval at the restart is still settled interrupted when it is answered; asking it again is not built. A Work goal loop the restart found running is rebuilt from its journaled frames, charges the goal the journaled spend of the round the restart cut off (recorded as interrupted), and follows its thread: its next round continues the thread, a loop cut off three rounds in a row waits as a crash loop, a held loop pauses with `held-after-restart`, and the restart notice lists the loop even when no turn was cut off ([Architecture: Work restart recovery](../architecture.md#persistence)). A subagent run the start interrupted is resumed through the ordinary run resume under its parent's live grant, behind the same holds and crash-loop guard, and a held run stays Interrupted for a person's Resume ([Architecture: subagent restart recovery](../architecture.md#persistence)). A coordinator wake that was journaled as decided but never started its turn is started once after Code recovery, dropped when its thread already has a turn, and held under the same rule and crash-loop guard. Settling lost remote steps at start is not built yet. A packaged-app `kill -9` smoke, and a packaged-app quit, system restart and Windows session end, are maintainer live checks still owed.
 
 Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
@@ -2269,22 +2274,22 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
 - The phone app reads as a native app, not a web page: a bottom tab bar for its top places, large titles on tab roots, a centred nav bar on pushed screens, inset grouped lists, the system segmented control and sheets with a grabber. It uses the product radius scale with one 20px sheet, three count tiles that take the desktop tiles' hues and marks, and the transcript recipe: bare prose replies and a control-fill bubble for the person's message.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice), [Motion and interaction](../../DESIGN.md#motion-and-interaction), [shadcn/Base recipes](../../DESIGN.md#shadcnbase-recipes), [Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability), and the [mobile design system](../../apps/mobile/design-system/README.md).
+Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice), [Motion](../../DESIGN.md#motion), [Components](../../DESIGN.md#components), [Accessibility](../../DESIGN.md#accessibility), and the [mobile design system](../../apps/mobile/design-system/README.md).
 
 ### One theme authority and shared controls
 
 There is one runtime theme authority and one owned control layer. Feature code places and sizes shared controls but never repaints them.
 
 - Feature stylesheets add no raw colour, radius, shadow or control recipe. A repository checker enforces this and ratchets existing violations against a baseline.
-- Shared recipes space in pixels on the 4px scale: the theme sets Tailwind's spacing step to `--spacing: 4px`, so `px-2` is 8px at every interface size, while type and control heights still follow the interface size. A recipe names a step on the scale and never a half step, and a field, select and combobox share the default button's 28px height. A contract test scans every class string. Detail: [DESIGN.md: Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth).
-- Every in-page menu is one row: 28px (44px with a second line), a 16px icon column and 8px gap, the Menu option type, group labels in the Navigation group label role, and one separator as wide as the rows. A menu where any row has an icon reserves the column for all of them. Natively drawn desktop menus are unchanged. Detail: [DESIGN.md: Spacing, shapes, and depth](../../DESIGN.md#spacing-shapes-and-depth).
+- Shared recipes space in pixels on the 4px scale: the theme sets Tailwind's spacing step to `--spacing: 4px`, so `px-2` is 8px at every interface size, while type and control heights still follow the interface size. A recipe names a step on the scale and never a half step, and a field, select and combobox share the default button's 28px height. A contract test scans every class string. Detail: [DESIGN.md: Spacing](../../DESIGN.md#spacing).
+- Every in-page menu is one row: 28px (44px with a second line), a 16px icon column and 8px gap, the Menu option type, group labels in the Navigation group label role, and one separator as wide as the rows. A menu where any row has an icon reserves the column for all of them. Natively drawn desktop menus are unchanged. Detail: [DESIGN.md: Spacing](../../DESIGN.md#spacing).
 - Feature code composes controls only through the Octant adapters; direct imports of the recipe or primitive libraries are blocked by a repository check.
 - There is one interaction primitive backend. A recipe style's own palette is never adopted; the `--octant-*` roles stay the theme source. A style variant for a primitive state is checked against the attribute the primitive actually writes. _Here only._
 - Desktop context and dropdown menus use native OS menus through one shared adapter. Browser clients keep accessible renderer menus.
 - Removing an existing repaint is a separate batch per pull request with before and after screenshots, and the maintainer approves the visual change (burn-down still in progress).
 - A development-only component gallery draws every shared adapter under the shipped stylesheets, and a new adapter must appear in it (a test enforces this).
 
-Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Component gallery](../../DESIGN.md#component-gallery) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
+Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Enforcement](../../DESIGN.md#enforcement), [Spacing](../../DESIGN.md#spacing), [Menus](../../DESIGN.md#menus), [Components](../../DESIGN.md#components), [Component gallery](../../DESIGN.md#component-gallery) and [Current exceptions and known migration edges](../../DESIGN.md#current-exceptions-and-known-migration-edges).
 
 ### Portable design tokens
 
@@ -2307,7 +2312,7 @@ Every list, board, reader and preference page is one `Surface`. Settings groups 
 - A destination page and Settings show their own outline while they load (a title bar and rows; a rail and a page), not a line of text, so nothing changes place when they arrive. The words stay for assistive technology, and the skeleton's sheen stops under reduced motion.
 - Background refresh preserves loaded controls and active drafts; status slots are bounded so a changed status never pushes the form below it.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell) and [Settings stability](../../DESIGN.md#settings-stability).
+Status: Built. Since: —. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell), [Settings layout](../../DESIGN.md#settings-layout), [Empty, loading, and whole-window states](../../DESIGN.md#empty-loading-and-whole-window-states), [Settings: Settings sheet](settings.md#settings-sheet), [Groups and pages](settings.md#groups-and-pages) and [Settings stability](settings.md#settings-stability).
 
 ### User profile
 
@@ -2316,7 +2321,7 @@ The user profile (optional name, email, accent and avatar) authenticates and aut
 - An avatar image is inlined in settings, downscaled to 128 px and at most 96 KB encoded. _Here only._
 - The avatar lookup by email hash is the one part that leaves the Mac. It runs only on a button press, says it sends a hash, and copies the result so the host never contacts the service again by itself. _Here only._
 
-Status: Built. Since: —. Detail: [DESIGN.md: Optional Settings details](../../DESIGN.md#optional-settings-details).
+Status: Built. Since: —. Detail: [Settings: Optional Settings details](settings.md#optional-settings-details).
 
 ### Approvals and confirmations
 
@@ -2328,7 +2333,7 @@ Approval and confirmation dialogs default to the safe answer, and the host decid
 - A browser request from a CLI in a Code thread's terminal says a program in the terminal asked, not the thread's agent.
 - Native Code approvals are isolated host documents. Shared renderer components never grant Code authority, and Enter never implicitly grants access.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Confirmation and dialog behavior](../../DESIGN.md#confirmation-and-dialog-behavior).
+Status: Built. Since: —. Detail: [DESIGN.md: Dialogs and sheets](../../DESIGN.md#dialogs-and-sheets), [OctantConfirmDialog](../../DESIGN.md#octantconfirmdialog), [Settings: Permissions](settings.md#permissions), and [Thread view: Native Code approvals](thread-view.md#native-code-approvals).
 
 ### Accessibility baseline
 
@@ -2340,7 +2345,7 @@ Accessibility is a baseline for every changed surface, not a late pass.
 - Theme, typography, density, translucency, contrast and reduced-motion settings persist through the server-authoritative journal; renderer state is presentation only.
 - A refused server command is never a silent no-op, and loading, stale, denied, empty and error states keep stable geometry.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
+Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#accessibility).
 
 ### Guarded quit
 
@@ -2350,7 +2355,7 @@ Quitting the desktop app is guarded so that open provider sessions are never dro
 - When a window can show the quit notice, the quit keyboard shortcut needs a second press within 1.5 seconds; that double-press guard is a setting (maintainer request, 2026-11-12), not built yet: today it is always on. With no window able to show it, the first press enters guarded shutdown. Pointer quits, OS shutdown and updater restarts stay immediate.
 - Once confirmed, quitting never waits on a person; a fixed deadline ends the app.
 
-Status: Partly built. Since: —. Detail: [DESIGN.md: Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability).
+Status: Partly built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#accessibility).
 
 ### Window defaults, ground and drafts
 
@@ -2362,7 +2367,7 @@ A new window, its background and its drafts behave predictably.
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
 - If first-turn startup fails after the task opens, the provisional prompt is withdrawn and its text returns to the composer with the refusal reason. _Here only._
 
-Status: Built. Since: —. Detail: [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout), [Shapes and depth](../../DESIGN.md#shapes-and-depth), [Welcome and composer](../../DESIGN.md#welcome-and-composer) and [Draft continuity and composer notices](../../DESIGN.md#draft-continuity-and-composer-notices).
+Status: Built. Since: —. Detail: [Workspace: Right dock and bottom panel](workspace.md#right-dock-and-bottom-panel), [Application ground](application-ground.md), [DESIGN.md: Depth and material](../../DESIGN.md#depth-and-material), [Composer row](../../DESIGN.md#composer-row) and [Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
 
 ### Usage reading and provider marks
 
@@ -2373,7 +2378,7 @@ The Usage page reports what was measured and shows each provider with a bundled 
 - Provider logos are locally bundled and licensed, never fetched at runtime, and never drawn approximately. Unknown providers get a truthful fallback.
 - Interface icons use four sizes (12, 14, 16, 20) and one stroke (1.5), set once for the app; a contract test refuses any other.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](../../DESIGN.md#usage-surface-ownership) and [Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks).
+Status: Built. Since: —. Detail: [Settings: Usage](settings.md#usage) and [DESIGN.md: Icons](../../DESIGN.md#icons).
 
 ### Reply detail
 
@@ -2390,7 +2395,7 @@ Reply detail chooses how much of a turn's thinking and tool calls the transcript
 - A disclosure opened or closed by hand keeps that state while its turn stays mounted and the thread's level is unchanged; a change of that level resets every disclosure to the new level.
 - The thinking preview is hidden from assistive technology so it is never read twice, and every disclosure keeps `open` and `aria-expanded` in step.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Transcript](../../DESIGN.md#transcript).
+Status: Built. Since: —. Detail: [Thread view: Reply detail](thread-view.md#reply-detail) and [Transcript](thread-view.md#transcript).
 
 ## Workspace
 
@@ -2497,7 +2502,7 @@ The dock is contextual: it follows the active pane's thread and Project, and nev
 - Code Review turns a person-selected captured diff line into a local finding without execution approval, and selected findings into an editable unsent draft in the owning thread. Checkout/revision/side identity and outside-content references survive ordinary send and queue; missing provenance refuses, and only the person resolves a finding. Receipt links never infer a missing checkout or retarget after rebind. [Workspace](workspace.md) owns the detailed rule.
 - Running Code turns expose bounded versioned comparisons from their recorded starting tree after typed edit activity. Captured Review stays on an exact immutable version while newer/final captures are announced, preserves view preferences, and keeps original note anchors. Passive reads never capture; current authority, cancellation, unavailable source and final-capture failure remain explicit. [Workspace](workspace.md) owns the lifecycle and view-only whitespace rule.
 
-Status: Partly built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#tool-lifecycles) and [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout).
+Status: Partly built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#tool-lifecycles) and [Workspace: Tool tiles](workspace.md#tool-tiles).
 
 ### Canvas in the thread
 
@@ -2611,7 +2616,7 @@ An agent delivers anything the person will keep, share or return to as a Canvas,
 - The delivery test is the answer, not the verb. When in doubt the agent makes the Canvas rather than asking.
 - A document that declares an older schema version but carries a newer block is refused as a future version.
 - A diagram holds at most 512 nodes and 1,024 edges, re-checked by domain policy before it persists or renders. Boards embed no third-party canvas engine and run no markup or script. _Here only._
-- A bounded subset of Mermaid is translated into typed blocks. The translator is widened to the constructs models use most, with no new dependency and no Mermaid renderer, and a diagram still outside the subset keeps its raw source as the fallback (maintainer decision, 2026-11-12, which replaces the earlier bundled-renderer direction). Not built yet: today the subset is the narrower one.
+- A bounded subset of Mermaid is translated into typed blocks. The translator is widened to the constructs models use most (more flowchart directions, shapes, links and nested subgraphs; more sequence arrows and the activation shorthand; state descriptions), with no new dependency and no Mermaid renderer. A diagram still outside the subset is refused with a typed reason and keeps its raw source as a code block (maintainer decision, 2026-11-12, which replaces the earlier bundled-renderer direction). Styling is dropped and the diagram still imports, because Canvas applies its own theme: `%%{…}%%` directives, and in flowcharts and state diagrams `classDef`, `class`, `style` and `linkStyle` lines and the `:::class` suffix on a node (maintainer decision, 2026-11-13). The subset also covers, with no change to a block schema (maintainer decision, 2026-11-13): flowchart hexagon, subroutine and parallelogram nodes (a process node whose detail names the shape), `<-->` (one arrow each way) and `click` lines (dropped); and in a sequence `loop`, `alt`/`else`, `opt` and `par`/`and` (flattened, with a note on the first message of each part and on the last message of the fragment), `Note over A,B` (a note naming no participant), `rect` (dropped as colour), `box` (a note naming its participants) and nested activations. Still refused: class diagrams, `critical` and `break`, a fragment part with no message.
 
 Status: Partly built. Since: —. Detail: [Canvas: Agent tool and recipes](canvas.md#agent-tool-and-recipes) and [Presentation and schema versions](canvas.md#presentation-and-schema-versions).
 
@@ -2630,7 +2635,7 @@ A design is the author's own markup in sandboxed frames. A design that runs scri
 
 - A static frame never gets `allow-scripts`, and no frame has both `allow-scripts` and `allow-same-origin`.
 - Design markup refuses remote images, stylesheets and fonts, embedded documents and any link that is not a fragment.
-- A running design runs only on Run, with the network blocked on desktop unless the person turned on that Canvas's "Allow network" switch, which only the person sets and is off by default and which connects through a filtering egress proxy that refuses loopback, private ranges, link-local addresses and the Octant server (maintainer decision, 2026-11-12); not built yet: today the network is always blocked on desktop. In a browser the prototype is not network-contained and says so.
+- A running design runs only on Run, with the network blocked on desktop unless the person turned on that Canvas's "Allow network" switch, which only the person sets and is off by default (maintainer decision, 2026-11-12). With the switch on, on desktop and in a browser on the host's machine, a page reaches public addresses through the host's filtering proxy and nothing else: a script's `GET` and JSON `POST`, images and fonts, under a token that lives one hour and is renewed while the page is open (maintainer decision, 2026-11-13; [Canvas: Allow network](canvas.md#allow-network)). In a browser the prototype is not network-contained and says so.
 - Sharing design markup needs the person's acknowledgement that it leaves as written.
 
 Status: Partly built. Since: —. Detail: [Canvas: Design block](canvas.md#design-block).
@@ -2809,7 +2814,7 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - The person can draw on a kept capture and add it to the thread's message: "Draw on page" keeps a capture through the Screenshot route and draws on that picture only, then "Add to chat" hands a PNG to the thread's composer as an ordinary image attachment. It sends nothing, stores nothing beside the capture, and is offered only in a Work or Code thread's Browser.
 - Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Partly built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings).
+Status: Partly built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings), and [Draw on page toolbar](browser-captures.md#draw-on-page-toolbar).
 
 ### Browser for agents
 
@@ -2842,7 +2847,7 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - Download-source review preserves every attested origin. Code refuses a review that cannot fit its complete approval-summary byte limit; it never approves a truncated chain.
 - Threads of a Project drive their own pages at the same time without waiting on each other. An agent's action reaches only its own thread's context, checked on the server by thread as well as authority. The Project browser dock lists each thread's live page by title or host, owner thread, and an "Agent active" mark, as names only: a selected page shows its thread's own picture read-only, and a paired device sees a stored-profile page by its existence alone.
 
-Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Page lifetime](browser-agent-tool.md#page-lifetime), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Page audits](browser-agent-tool.md#page-audits), [Download](browser-agent-tool.md#download), [Parallel threads](browser-agent-tool.md#parallel-threads), and [Bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
+Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Page lifetime](browser-agent-tool.md#page-lifetime), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Flows](browser-agent-tool.md#flows), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), [Person and agent together](browser-agent-tool.md#person-and-agent-together), [Diagnostics](browser-agent-tool.md#diagnostics), [Page audits](browser-agent-tool.md#page-audits), [Download](browser-agent-tool.md#download), [Parallel threads](browser-agent-tool.md#parallel-threads), and [Bounded page scripts](browser-agent-tool.md#bounded-page-scripts), and [Workspace: Browser toolbar](workspace.md#browser-toolbar).
 
 ### Browser profiles and extensions
 
@@ -3111,7 +3116,7 @@ Status: Built. Since: —. Detail: [Device workbench: input channel](device-work
 
 ### Device effects
 
-Open URL, Rotate and Record screen are effects, not input. A person or an agent may request them, and Allow input never covers them (maintainer request, 2026-11-12). Simulator Repair input is input: a live Allow input grant covers it like any other input (maintainer decision, 2026-11-12; not built yet: today it rides the grant but is refused unless a person requested it).
+Open URL, Rotate and Record screen are effects, not input. A person or an agent may request them, and Allow input never covers them (maintainer request, 2026-11-12). Repair input is input: a live Allow input grant covers it whoever asks (maintainer decision, 2026-11-12), and the agent's Simulator tool offers it as its `repair-input` operation under the same check (maintainer decision, 2026-11-13).
 
 - An agent's request is unasked at Full access and approval-gated below it; the host asking on its own is refused. Not built yet: today only a person may request them, an agent or the host asking is refused, and the agent tools do not offer these actions.
 - Plan refuses them, Full access sends them unasked, and an approval-gated thread raises its own confirmation for each.
@@ -3240,7 +3245,7 @@ Before shutting down or restarting a computer, a person can move a Chat, Work or
 - Stop and move is only the person's choice in a window, checked per thread on the server: the destination's unlock is redeemed before anything stops, the thread's turn stops through its own mode's Stop and its child runs here and elsewhere are cancelled, and a turn still running two minutes later ends the move with `busy`. A thread with a child run or delegated child still going reads as busy (resolved with its implementation, 2026-11-09). Built.
 - A move that cannot finish always ends in an explicit This thread can't move error with one journaled reason; the thread unfreezes and stays on the source, and Prepare to shut down never says Safe to shut down while a chosen thread failed (maintainer request, 2026-11-08).
 
-Status: Partly built. Since: 2026-11-07. Detail: [Hub and spokes: moving a thread to another member](hub-and-spokes.md#moving-a-thread-to-another-member) and [Design system: shell and layout](../../DESIGN.md#shell-and-layout).
+Status: Partly built. Since: 2026-11-07. Detail: [Hub and spokes: moving a thread to another member](hub-and-spokes.md#moving-a-thread-to-another-member) and [Hub and spokes: moving a thread, screens](hub-and-spokes.md#moving-a-thread-screens).
 
 ### Octant Nightly
 

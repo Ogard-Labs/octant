@@ -29,7 +29,20 @@
 //    content policy stripped, so only the host process's switches stand
 //    between the page and the network.
 //
-// A fourth run clicks a benign page through the same path a person's pointer
+// 4. `network on`: the same hostile page with its Canvas's "Allow network"
+//    switch on, served as the host serves a page the desktop proves itself
+//    for. Its questions are relayed to the host's proxy route, which here runs
+//    the real destination rule over a stand-in for the far side. Nothing may
+//    arrive at any listener but that route, the rule must refuse loopback and
+//    the host, and only public addresses may be fetched: by a script's GET, a
+//    script's POST of JSON (which must go out with the host's headers alone),
+//    an image, and a font. A body that is not JSON, another method, and
+//    markup asked for as an image must be refused.
+// 5. `network on, page policy removed`: the same with the page's own content
+//    policy stripped, so only the prototype host stands between the page and
+//    everything but the relay.
+//
+// A last run clicks a benign page through the same path a person's pointer
 // takes and reads back what the page drew, so the contained page still renders
 // and interacts.
 //
@@ -45,10 +58,11 @@
 // in hosted CI.
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { createSocket } from "node:dgram";
 import { createServer, type Socket } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -58,13 +72,34 @@ import {
   type CanvasDesignBlock,
 } from "../packages/contracts/src/canvas";
 import {
+  CANVAS_NETWORK_PROXY_PATH_PREFIX,
+  CANVAS_NETWORK_TOKEN_HEADER,
+  CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX,
+  CANVAS_PROTOTYPE_SURFACE_HEADER,
+} from "../packages/contracts/src/canvasNetwork";
+import {
   canvasDesignPageHeaders,
   canvasDesignPagePath,
   CanvasDesignRunTickets,
   renderCanvasDesignPage,
 } from "../apps/server/src/canvas/canvasDesignPage";
+import {
+  CanvasNetworkProxy,
+  canvasNetworkProxyResponse,
+} from "../apps/server/src/canvas/canvasNetworkProxy";
 
 const root = resolve(import.meta.dir, "..");
+// A real image and a real font for the far side to answer with, so the page
+// can say whether what the relay brought back was drawn.
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+const FONT = await readFile(
+  createRequire(join(root, "apps/server/package.json")).resolve(
+    "katex/dist/fonts/KaTeX_Size2-Regular.woff2",
+  ),
+);
 
 function inScript(value: string): string {
   return JSON.stringify(value).replace(
@@ -78,9 +113,49 @@ function hostileBlock(input: {
   readonly tcp: number;
   readonly beacon: string;
   readonly host: string;
+  /** Also ask for fetches the way a page whose Canvas has the network on can. */
+  readonly network: boolean;
 }): CanvasDesignBlock {
   const { udp, tcp, beacon, host } = input;
-  const script = `
+  // What a page with the network on tries: a public address, addresses the
+  // rule must refuse, the relay under other methods, paths and surfaces, and
+  // the listeners directly, through a `fetch` the host's script never wrapped.
+  const networkScript = `
+const say = (label, what) => { try { parent.postMessage({ channel: "octant-design-frame@1", type: "error", message: "net:" + label + ":" + what }, "*"); } catch (_) {} };
+const ask = (label, send) => { try { send().then(async (response) => say(label, response.status + ":" + (await response.text()).slice(0, 40)), () => say(label, "failed")); } catch (_) { say(label, "failed"); } };
+const mine = "octant-prototype://network/" + location.pathname.slice(1) + "/";
+const wanted = (address) => "fetch?url=" + encodeURIComponent(address);
+ask("public", () => fetch("https://public.example.test/data"));
+ask("loopback", () => fetch(${inScript(`${beacon}/through-relay`)}));
+ask("host-api", () => fetch(${inScript(`${host}/api/host-secret`)}));
+ask("metadata", () => fetch("http://169.254.169.254/latest/meta-data/"));
+ask("post-json", () => fetch("https://public.example.test/rpc", { method: "POST", headers: { authorization: "Bearer page-secret", "x-api-key": "page-key" }, credentials: "include", body: JSON.stringify({ ask: 1 }) }));
+ask("post", () => fetch("https://public.example.test/post", { method: "POST", body: "x" }));
+ask("put", () => fetch("https://public.example.test/put", { method: "PUT", body: "{}" }));
+ask("raw-post", () => fetch(mine + wanted("https://public.example.test/raw-post"), { method: "POST", body: "x" }));
+ask("raw-image-post", () => fetch(mine + "image?url=" + encodeURIComponent("https://public.example.test/logo.png"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
+const draw = (label, address) => {
+  const image = document.createElement("img");
+  image.onload = () => say(label, "loaded:" + image.naturalWidth);
+  // The address as written is refused first; only the proxied one counts.
+  image.onerror = () => { if ((image.getAttribute("src") || "").indexOf("image?url=") !== -1) say(label, "failed"); };
+  image.setAttribute("src", address);
+  document.body.appendChild(image);
+};
+draw("image", "https://public.example.test/logo.png");
+draw("image-of-markup", "https://public.example.test/page.html");
+const face = new FontFace("Probe", 'url("https://public.example.test/face.woff2") format("woff2")');
+document.fonts.add(face);
+face.load().then(() => say("font", "1:" + document.fonts.check('16px "Probe"')), () => say("font", "failed"));
+ask("raw-other-path", () => fetch(mine + "other?url=x"));
+ask("raw-two-addresses", () => fetch(mine + wanted("https://public.example.test/a") + "&url=x"));
+ask("other-surface", () => fetch("octant-prototype://network/22222222-2222-4222-8222-222222222222/" + wanted("https://public.example.test/other-surface")));
+ask("page-scheme", () => fetch("octant-prototype://page/" + location.pathname.slice(1)));
+const fresh = document.createElement("iframe");
+document.body.appendChild(fresh);
+ask("direct-beacon", () => fresh.contentWindow.fetch(${inScript(`${beacon}/direct`)}));
+ask("direct-host", () => fresh.contentWindow.fetch(${inScript(`${host}/api/canvas/network/${"A".repeat(43)}/fetch?url=x`)}));`;
+  const script = `${input.network ? networkScript : ""}
 const note = (what) => { try { parent.postMessage({ channel: "octant-design-frame@1", type: "error", message: "tried:" + what }, "*"); } catch (_) {} };
 const attempt = (what, run) => { try { const out = run(); if (out && out.catch) out.catch(() => {}); } catch (_) {} note(what); };
 const peer = (RTC, what) => attempt(what, () => {
@@ -158,6 +233,19 @@ interface Hits {
   tcp: number;
   readonly http: Array<string>;
   readonly host: Array<string>;
+  /** The addresses the proxy route was asked to fetch, and those the rule let through. */
+  readonly asked: Array<string>;
+  readonly fetched: Array<{
+    readonly url: string;
+    readonly method: string;
+    readonly headers: ReadonlyArray<string>;
+    readonly body?: string;
+  }>;
+  /**
+   * Requests the proxy route got that were neither a bare GET nor a POST of
+   * JSON to the fetch path: a header the desktop added, or another method.
+   */
+  readonly dressed: Array<string>;
 }
 
 interface Listeners {
@@ -167,12 +255,15 @@ interface Listeners {
   readonly beaconUrl: string;
   readonly hostUrl: string;
   readonly strip: { policy: boolean };
+  /** Whether the Canvas's switch is on for the run, and what the host then minted and served. */
+  readonly network: { on: boolean; token: string | undefined; tokenInPage: boolean };
+  readonly secret: string;
   readonly issueUrl: string;
   readonly stop: () => void;
 }
 
 async function startListeners(): Promise<Listeners> {
-  const hits: Hits = { udp: 0, tcp: 0, http: [], host: [] };
+  const hits: Hits = { udp: 0, tcp: 0, http: [], host: [], asked: [], fetched: [], dressed: [] };
   const udp = createSocket("udp4");
   udp.on("message", () => {
     hits.udp += 1;
@@ -203,11 +294,95 @@ async function startListeners(): Promise<Listeners> {
 
   const tickets = new CanvasDesignRunTickets();
   const strip = { policy: false };
+  const network: Listeners["network"] = { on: false, token: undefined, tokenInPage: false };
+  // What the desktop proves itself with, as the app's bridge secret does.
+  const secret = randomBytes(32).toString("base64url");
+  const canvasId = decodeCanvasId("22222222-2222-4222-8222-222222222222");
+  // The host's own proxy and destination rule, over a stand-in for the far
+  // side: one public name resolves to a public address, and every other name
+  // and literal meets the rule as itself.
+  const proxy = new CanvasNetworkProxy({
+    reserved: () => ({ addresses: [], hosts: [] }),
+    resolveAll: async (hostname) =>
+      hostname === "public.example.test" ? ["93.184.216.34"] : [hostname],
+    connect: async (url, connection) => {
+      hits.fetched.push({
+        url: url.toString(),
+        method: connection.method,
+        headers: Object.keys(connection.headers).sort(),
+        ...(connection.body === undefined
+          ? {}
+          : { body: new TextDecoder().decode(connection.body) }),
+      });
+      if (url.pathname.endsWith(".png")) {
+        return new Response(PNG, { headers: { "content-type": "image/png" } });
+      }
+      if (url.pathname.endsWith(".woff2")) {
+        return new Response(FONT, { headers: { "content-type": "font/woff2" } });
+      }
+      return new Response(`proxied ${url.pathname}`, {
+        headers: {
+          "content-type": url.pathname.endsWith(".html") ? "text/html" : "text/plain",
+          "set-cookie": "far=1",
+        },
+      });
+    },
+  });
   const host = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch(request) {
+    async fetch(request) {
       const url = new URL(request.url);
+      // The proxy route, for the token minted in this run and no other.
+      const resource =
+        network.token === undefined
+          ? undefined
+          : (["fetch", "image", "font"] as const).find(
+              (name) =>
+                url.pathname ===
+                `${CANVAS_NETWORK_PROXY_PATH_PREFIX}${network.token ?? ""}/${name}`,
+            );
+      if (resource !== undefined) {
+        const extra = [...request.headers.keys()].filter(
+          (name) =>
+            ![
+              "accept",
+              "accept-encoding",
+              "accept-language",
+              "connection",
+              "content-length",
+              "host",
+            ].includes(name) &&
+            !name.startsWith("sec-fetch-") &&
+            name !== "user-agent",
+        );
+        // A script's JSON is the one body, and its type the one header, the
+        // desktop may send; an image or a font is asked for bare.
+        const posts =
+          resource === "fetch" &&
+          request.method === "POST" &&
+          extra.length === 1 &&
+          request.headers.get("content-type") === "application/json";
+        if (
+          url.searchParams.size !== 1 ||
+          !(posts || (request.method === "GET" && extra.length === 0))
+        ) {
+          hits.dressed.push(`${request.method} ${resource} ${extra.join(",")} ${url.search}`);
+        }
+        const target = url.searchParams.get("url") ?? "";
+        hits.asked.push(target);
+        if (!posts) {
+          return canvasNetworkProxyResponse(await proxy.fetch(canvasId, target, { resource }));
+        }
+        // As the host's route does: only what reads as JSON goes further.
+        const body = new Uint8Array(await request.arrayBuffer());
+        try {
+          JSON.parse(new TextDecoder().decode(body));
+        } catch {
+          return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+        }
+        return canvasNetworkProxyResponse(await proxy.fetch(canvasId, target, { resource, body }));
+      }
       hits.host.push(`${request.method} ${url.pathname}`);
       if (url.pathname === "/issue") {
         const block =
@@ -218,9 +393,10 @@ async function startListeners(): Promise<Listeners> {
                 tcp: tcpPort,
                 beacon: beaconUrl,
                 host: hostUrl(),
+                network: network.on,
               });
         const ticket = tickets.issue({
-          canvasId: decodeCanvasId("22222222-2222-4222-8222-222222222222"),
+          canvasId,
           versionId: decodeCanvasVersionId("33333333-3333-4333-8333-333333333333"),
           blockId: block.blockId,
           startFrameId: "start",
@@ -232,12 +408,27 @@ async function startListeners(): Promise<Listeners> {
         const ticket = url.searchParams.get("ticket") ?? "";
         const grant = tickets.redeem(ticket);
         if (grant === undefined) return new Response("refused", { status: 403 });
-        const headers = canvasDesignPageHeaders("text/html; charset=utf-8");
+        // With the switch on, the page is served as the host serves one the
+        // desktop proved itself for: the relay address of its surface in the
+        // policy and the script, and the token in a header for the desktop.
+        const surface = request.headers.get(CANVAS_PROTOTYPE_SURFACE_HEADER);
+        const proven =
+          network.on &&
+          request.headers.get("x-octant-desktop-secret") === secret &&
+          surface !== null &&
+          /^[0-9a-f-]{36}$/.test(surface);
+        const networkBase = proven
+          ? `${CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX}${surface}/`
+          : undefined;
+        const headers = canvasDesignPageHeaders("text/html; charset=utf-8", networkBase);
         if (strip.policy) delete headers["content-security-policy"];
-        return new Response(renderCanvasDesignPage(grant.block, grant.startFrameId, []), {
-          status: 200,
-          headers,
-        });
+        const html = renderCanvasDesignPage(grant.block, grant.startFrameId, [], networkBase);
+        if (proven) {
+          network.token = randomBytes(32).toString("base64url");
+          network.tokenInPage = html.includes(network.token);
+          headers[CANVAS_NETWORK_TOKEN_HEADER] = network.token;
+        }
+        return new Response(html, { status: 200, headers });
       }
       return new Response("host api", { status: 200 });
     },
@@ -253,6 +444,8 @@ async function startListeners(): Promise<Listeners> {
     beaconUrl,
     hostUrl: hostUrl(),
     strip,
+    network,
+    secret,
     issueUrl: `${hostUrl()}/issue`,
     stop: () => {
       udp.close();
@@ -319,6 +512,7 @@ async function runElectron(input: {
       OCTANT_PROBE_SERVER_URL: input.listeners.hostUrl,
       OCTANT_PROBE_BEACON_URL: input.listeners.beaconUrl,
       OCTANT_PROBE_HOST: input.host,
+      OCTANT_PROBE_BRIDGE_SECRET: input.listeners.secret,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -400,6 +594,11 @@ interface Row {
   readonly tcp: number;
   readonly http: ReadonlyArray<string>;
   readonly hostRequests: ReadonlyArray<string>;
+  readonly asked: ReadonlyArray<string>;
+  readonly fetched: ReadonlyArray<Hits["fetched"][number]>;
+  readonly dressed: ReadonlyArray<string>;
+  readonly minted: boolean;
+  readonly tokenInPage: boolean;
   readonly result: ProbeResult | undefined;
 }
 
@@ -409,15 +608,23 @@ const failures: Array<string> = [];
 const listeners = await startListeners();
 try {
   for (const run of [
-    { name: "uncontained-frame", mode: "uncontained-frame", strip: false },
-    { name: "contained", mode: "contained", strip: false },
-    { name: "contained, page policy removed", mode: "contained", strip: true },
+    { name: "uncontained-frame", mode: "uncontained-frame", strip: false, network: false },
+    { name: "contained", mode: "contained", strip: false, network: false },
+    { name: "contained, page policy removed", mode: "contained", strip: true, network: false },
+    { name: "network on", mode: "contained", strip: false, network: true },
+    { name: "network on, page policy removed", mode: "contained", strip: true, network: true },
   ]) {
     listeners.hits.udp = 0;
     listeners.hits.tcp = 0;
     listeners.hits.http.length = 0;
     listeners.hits.host.length = 0;
+    listeners.hits.asked.length = 0;
+    listeners.hits.fetched.length = 0;
+    listeners.hits.dressed.length = 0;
     listeners.strip.policy = run.strip;
+    listeners.network.on = run.network;
+    listeners.network.token = undefined;
+    listeners.network.tokenInPage = false;
     const result = await runElectron({
       binary,
       main: join(work, "probe-main.mjs"),
@@ -434,6 +641,11 @@ try {
       hostRequests: listeners.hits.host.filter(
         (entry) => entry !== "GET /issue" && entry !== "GET /api/canvas/design-page",
       ),
+      asked: [...listeners.hits.asked],
+      fetched: [...listeners.hits.fetched],
+      dressed: [...listeners.hits.dressed],
+      minted: listeners.network.token !== undefined,
+      tokenInPage: listeners.network.tokenInPage,
       result,
     });
   }
@@ -449,8 +661,14 @@ try {
   await rm(work, { recursive: true, force: true });
 }
 
-const [control, contained, stripped] = rows;
-if (control === undefined || contained === undefined || stripped === undefined) {
+const [control, contained, stripped, networked, networkedStripped] = rows;
+if (
+  control === undefined ||
+  contained === undefined ||
+  stripped === undefined ||
+  networked === undefined ||
+  networkedStripped === undefined
+) {
   throw new Error("The probe did not run every mode.");
 }
 if (control.result === undefined) failures.push("the control run reported nothing");
@@ -461,6 +679,98 @@ if ((control.result?.dnsLookups ?? []).length === 0) {
   failures.push("the control looked up no page-chosen name, so this probe could not see a lookup");
 }
 for (const row of [contained, stripped]) {
+  if (row.minted || row.asked.length !== 0) {
+    failures.push(`${row.run}: a page with the switch off was given a network`);
+  }
+}
+// With the switch on, the page reaches the proxy route and nothing else, and
+// the route's rule lets only the public address through.
+for (const row of [networked, networkedStripped]) {
+  const said = (label: string) =>
+    (row.result?.bridge?.attempts ?? [])
+      .find((entry) => entry?.startsWith(`net:${label}:`))
+      ?.slice(`net:${label}:`.length);
+  if (!row.minted) failures.push(`${row.run}: the host minted no token for the desktop`);
+  if (row.tokenInPage) failures.push(`${row.run}: the page was handed its token`);
+  if (row.dressed.length !== 0) {
+    failures.push(`${row.run}: the desktop dressed a relayed request: ${row.dressed.join("; ")}`);
+  }
+  if (said("public") !== "200:proxied /data") {
+    failures.push(`${row.run}: a public address was not fetched: ${String(said("public"))}`);
+  }
+  const fetched = [...new Set(row.fetched.map((entry) => `${entry.method} ${entry.url}`))].sort();
+  // With or without its policy, only its own surface's questions for public
+  // addresses get as far as the far side: a fetch, a JSON POST, an image, a
+  // font, and the markup it asked for as an image, which is not passed on.
+  const expected = [
+    "GET https://public.example.test/data",
+    "GET https://public.example.test/face.woff2",
+    "GET https://public.example.test/logo.png",
+    "GET https://public.example.test/page.html",
+    "POST https://public.example.test/rpc",
+  ];
+  if (JSON.stringify(fetched) !== JSON.stringify(expected)) {
+    failures.push(`${row.run}: the far side was asked for ${fetched.join(", ") || "nothing"}`);
+  }
+  for (const entry of row.fetched) {
+    // The page asked with an Authorization header, an API key, and
+    // credentials; a POST carries the JSON type and nothing else of it.
+    const allowed = entry.method === "POST" ? ["accept", "content-type"] : ["accept"];
+    if (entry.headers.some((name) => !allowed.includes(name))) {
+      failures.push(`${row.run}: the far side was sent ${entry.headers.join(", ")}`);
+    }
+    if (entry.method === "POST" && entry.body !== '{"ask":1}') {
+      failures.push(`${row.run}: the far side was sent the body ${String(entry.body)}`);
+    }
+  }
+  if (said("post-json") !== "200:proxied /rpc") {
+    failures.push(`${row.run}: a JSON POST was not sent: ${String(said("post-json"))}`);
+  }
+  if (said("image") !== "loaded:1") {
+    failures.push(`${row.run}: an image was not drawn: ${String(said("image"))}`);
+  }
+  if (said("image-of-markup") !== "failed") {
+    failures.push(
+      `${row.run}: markup was passed on as an image: ${String(said("image-of-markup"))}`,
+    );
+  }
+  if (said("font") !== "1:true") {
+    failures.push(`${row.run}: a font was not loaded: ${String(said("font"))}`);
+  }
+  for (const label of ["loopback", "host-api", "metadata"]) {
+    if (said(label)?.startsWith("403:") !== true) {
+      failures.push(`${row.run}: ${label} was not refused by the rule: ${String(said(label))}`);
+    }
+  }
+  if (said("put") !== "failed") failures.push(`${row.run}: a PUT was offered: ${said("put")}`);
+  for (const [label, status] of [
+    // A body that is not JSON is refused by the host's route, and one not
+    // declared as JSON by the scheme handler before it leaves the process.
+    ["post", "400"],
+    ["raw-post", "415"],
+    ["raw-image-post", "405"],
+    ["raw-other-path", "404"],
+    ["raw-two-addresses", "400"],
+  ] as const) {
+    if (said(label)?.startsWith(`${status}:`) !== true) {
+      failures.push(`${row.run}: ${label} was answered ${String(said(label))}, not ${status}`);
+    }
+  }
+  // The page's policy refuses another surface's relay and the page address;
+  // without the policy the handler does (no network there, and served once).
+  const elsewhere = row === networked ? ["failed", "failed"] : ["403:", "404:"];
+  for (const [index, label] of (["other-surface", "page-scheme"] as const).entries()) {
+    if (said(label)?.startsWith(elsewhere[index] ?? "") !== true) {
+      failures.push(`${row.run}: ${label} was answered ${String(said(label))}`);
+    }
+  }
+  for (const label of ["direct-beacon", "direct-host"]) {
+    if (said(label) !== "failed") {
+      failures.push(`${row.run}: ${label} reached something: ${String(said(label))}`);
+    }
+  }
+}
+for (const row of [contained, stripped, networked, networkedStripped]) {
   if (row.result === undefined) failures.push(`${row.run}: nothing reported`);
   if (row.udp !== 0) failures.push(`${row.run}: ${String(row.udp)} UDP datagrams arrived`);
   if (row.tcp !== 0) failures.push(`${row.run}: ${String(row.tcp)} TCP connections arrived`);
@@ -486,7 +796,7 @@ for (const row of [contained, stripped]) {
   if ((row.result?.logEvents ?? 0) === 0) {
     failures.push(`${row.run}: the prototype host wrote no network log`);
   }
-  if (row === stripped && row.result?.beaconInLog !== true) {
+  if ((row === stripped || row === networkedStripped) && row.result?.beaconInLog !== true) {
     failures.push(`${row.run}: the prototype host's network log holds none of the page's requests`);
   }
   if ((row.result?.painted ?? 0) < 1) failures.push(`${row.run}: the page painted nothing`);
@@ -553,6 +863,10 @@ console.log(
         tcpConnections: row.tcp,
         httpRequests: row.http,
         hostRoutesReached: row.hostRequests,
+        proxyAskedFor: row.asked,
+        farSideFetched: row.fetched,
+        tokenMinted: row.minted,
+        network: (row.result?.bridge?.attempts ?? []).filter((entry) => entry?.startsWith("net:")),
         heartbeats: row.result?.bridge?.heartbeats,
         sizes: row.result?.bridge?.sizes,
         attempts: row.result?.bridge?.attempts,

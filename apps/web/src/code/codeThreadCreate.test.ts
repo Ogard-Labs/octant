@@ -163,6 +163,37 @@ describe("planCodeThreadCreate", () => {
     });
   });
 
+  it.each(["current-checkout", "managed-worktree"] as const)(
+    "bases a thread sent before the host named the branch on the branch the checkout is on in %s",
+    (workspace) => {
+      const onMain = prepared();
+      if (onMain.kind !== "checkout-prepared") throw new Error("Expected a prepared checkout.");
+      const result = planCodeThreadCreate({
+        composer: composer(workspace, { baseBranchAssumed: true }),
+        modelId: "qwen-3.6" as never,
+        prepared: {
+          ...onMain,
+          checkout: {
+            ...onMain.checkout,
+            head: { kind: "branch", name: "main", oid: "b".repeat(40) },
+          },
+        } as never,
+        projectId: ids.project as never,
+        providerInstanceId: ids.provider as never,
+        threadId: ids.thread,
+        timestamp: now,
+        title: "Fix search",
+      });
+      expect(result).toMatchObject({
+        kind: "command",
+        command:
+          workspace === "managed-worktree"
+            ? { sourceBranch: "main", deliveryTarget: { proposedBaseBranch: "main" } }
+            : { thread: { deliveryTarget: { proposedBaseBranch: "main" } } },
+      });
+    },
+  );
+
   it("carries the selected profile into either creation command", () => {
     const profileId = "60000000-0000-4000-8000-000000000001";
     for (const workspace of ["managed-worktree", "current-checkout"] as const) {
