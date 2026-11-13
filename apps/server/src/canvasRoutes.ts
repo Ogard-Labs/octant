@@ -31,6 +31,8 @@ import {
   decodeCanvasReviseResult,
   decodeCanvasRefreshResult,
   decodeCanvasExportDecideRequest,
+  decodeCanvasExportNoticeDismissRequest,
+  decodeCanvasExportNoticeDismissResult,
   decodeCanvasExportDecideResult,
   decodeCanvasExportOfferList,
   decodeCanvasExportPrepareRequest,
@@ -316,6 +318,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "export-targets" &&
       route !== "export-prepare" &&
       route !== "export-decide" &&
+      route !== "export-notice-dismiss" &&
       route !== "export-folder" &&
       route !== "html-file" &&
       route !== "public-shares" &&
@@ -1555,6 +1558,55 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               ...(requestBody.link === undefined ? {} : { link: requestBody.link }),
               // The envelope names the transport principal this host
               // authenticated for the approval, never a fixed local user.
+              actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
+            }),
+          ),
+          200,
+          origin,
+        );
+      }
+
+      if (route === "export-notice-dismiss" && request.method === "POST") {
+        const exportService = dependencies.canvasExportService;
+        if (exportService === undefined) {
+          return jsonResponse(
+            decodeCanvasExportNoticeDismissResult({
+              kind: "refused",
+              code: "unavailable",
+              message: "Canvas export is unavailable on this host.",
+            }),
+            200,
+            origin,
+          );
+        }
+        const malformed = decodeCanvasExportNoticeDismissResult({
+          kind: "refused",
+          code: "malformed",
+          message: "Canvas export request is malformed.",
+        });
+        const body = await readJson(request);
+        if (body.kind === "too-large" || body.kind === "invalid") {
+          return jsonResponse(malformed, 200, origin);
+        }
+        let requestBody;
+        try {
+          requestBody = decodeCanvasExportNoticeDismissRequest(body.value);
+        } catch {
+          return jsonResponse(malformed, 200, origin);
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          requestBody.canvasId,
+        );
+        return jsonResponse(
+          decodeCanvasExportNoticeDismissResult(
+            exportService.dismissUnconfirmed({
+              canvasId: requestBody.canvasId,
+              exportId: requestBody.exportId,
+              permitted: context.kind === "ok",
+              // A paired device's request is journaled as that device, which
+              // the service refuses: only a local window may dismiss.
               actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
             }),
           ),

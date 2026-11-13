@@ -1,6 +1,18 @@
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentRunAuthority, ThreadGoal } from "@octant/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WORK_GOAL_LOOP_CEILING } from "@octant/domain";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { GoalLoopEventStore } from "./goalLoopEventStore";
+import { chargeGoalForRound } from "./goalLoopCharge";
+import { GoalService } from "./goalService";
+import { JournalGoalStore } from "./journalGoalStore";
 import { GoalLoopService, type GoalLoopDependencies } from "./goalLoopService";
 
 const threadId = "22222222-0000-4000-8000-000000000001";
@@ -242,7 +254,11 @@ describe("taking a round", () => {
       authority: { filesystem: false, executionPolicy: "plan" },
     });
     expect(round).toMatchObject({ outcome: "ran", sequence: 1, checkpointId: "checkpoint-1" });
-    expect(journaled(h.journal)).toEqual(["goal-loop-started@1", "goal-loop-round-recorded@1"]);
+    expect(journaled(h.journal)).toEqual([
+      "goal-loop-started@1",
+      "goal-loop-round-started@1",
+      "goal-loop-round-recorded@1",
+    ]);
   });
 
   it("a goal loop completes a round in a Work Project, whose folder has no checkpoint", async () => {
@@ -558,5 +574,241 @@ describe("steering a running loop", () => {
     expect(outcome).toEqual({ paused: "stopped-by-user" });
     expect(h.runRound).not.toHaveBeenCalled();
     expect(journaled(h.journal)).toContain("goal-loop-stopped@1");
+  });
+});
+
+describe("a goal loop across a restart", () => {
+  const opened: Array<SqliteConnection> = [];
+  const directories: Array<string> = [];
+  afterEach(() => {
+    for (const connection of opened.splice(0)) connection.close();
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true });
+  });
+
+  /** One host start over the same store: a fresh journal, frame store and loop service. */
+  function hostStart(
+    path: string,
+    scheduleFirstRound = vi.fn(),
+    runRound?: GoalLoopDependencies["runRound"],
+    options: { readonly stopBeforeRoundRecord?: boolean } = {},
+  ) {
+    const connection = openSqlite(path);
+    opened.push(connection);
+    const at = "2026-08-19T09:00:00.000Z";
+    applyMigrations(connection, MIGRATIONS, () => at);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => at,
+    });
+    const events = new GoalLoopEventStore({
+      journal,
+      uuid: randomUUID,
+      clock: () => at as never,
+      actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000001" },
+    });
+    const h = harness({ scheduleFirstRound });
+    // Ten seconds a reading, so a running round's spend is journaled.
+    let tick = 0;
+    const clock = () => new Date(Date.parse(at) + (tick += 10_000)).toISOString() as never;
+    // The real goal, journaled beside the loop, so a charge survives the restart.
+    const goals = new GoalService({ store: new JournalGoalStore({ journal }), clock });
+    const recordUsage = vi.fn((input: Parameters<GoalLoopDependencies["recordUsage"]>[0]) =>
+      chargeGoalForRound(goals, input),
+    );
+    // A host that stops after the charge commits and before the round's record.
+    const frames = options.stopBeforeRoundRecord
+      ? {
+          append: (input: Parameters<GoalLoopEventStore["append"]>[0]) => {
+            if (input.eventName === "goal-loop-round-recorded@1") throw new Error("host stopped");
+            events.append(input);
+          },
+        }
+      : events;
+    const service = new GoalLoopService({
+      readGoal: (id) => goals.read(id).goal,
+      recordUsage,
+      threadAuthority: () => ceiling,
+      modePosture: () => undefined,
+      pendingApproval: () => undefined,
+      markCheckpoint: async () => "checkpoint-1",
+      runRound: runRound ?? h.runRound,
+      journal: frames,
+      scheduleFirstRound,
+      uuid: randomUUID,
+      clock,
+    });
+    service.replay(events.replay());
+    return { service, scheduleFirstRound, recordUsage, goals };
+  }
+
+  async function storeWithGoal(): Promise<string> {
+    const directory = mkdtempSync(join(tmpdir(), "octant-goal-loop-"));
+    directories.push(directory);
+    const path = join(directory, "octant.sqlite3");
+    await hostStart(path).goals.execute({
+      kind: "create-thread-goal",
+      threadId,
+      expectedVersion: 0,
+      goalId,
+      revisionId: "44444444-0000-4000-8000-000000000001",
+      objective: "Get the migration passing",
+      budget: { turnBudget: 10 },
+    });
+    return path;
+  }
+
+  const cutOffRound: GoalLoopDependencies["runRound"] = (input) => {
+    input.onSpend?.(700);
+    return new Promise(() => {});
+  };
+
+  async function loopCutOffMidRound(path: string) {
+    const before = hostStart(path, vi.fn(), cutOffRound);
+    await before.service.execute({
+      kind: "start-goal-loop",
+      threadId,
+      expectedVersion: 0,
+      loopId,
+      goalId,
+      ceiling,
+      trigger: { kind: "continuous" },
+    });
+    void before.service.advance(threadId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return before;
+  }
+
+  it("charges a cut-off round once when the host stops between the charge and the round's record, across two restarts", async () => {
+    const path = await storeWithGoal();
+    await loopCutOffMidRound(path);
+
+    const stopped = hostStart(path, vi.fn(), undefined, { stopBeforeRoundRecord: true });
+    await expect(stopped.service.settleAfterRestart(threadId)).rejects.toThrow("host stopped");
+    expect(stopped.goals.read(threadId).goal?.usage).toMatchObject({
+      tokensUsed: 700,
+      turnsUsed: 1,
+    });
+
+    const first = hostStart(path);
+    await first.service.settleAfterRestart(threadId);
+    const second = hostStart(path);
+    await second.service.settleAfterRestart(threadId);
+    expect(second.goals.read(threadId).goal?.usage).toMatchObject({
+      tokensUsed: 700,
+      turnsUsed: 1,
+    });
+    expect(second.service.read(threadId).rounds).toMatchObject([
+      { outcome: "interrupted", tokensSpent: 700 },
+    ]);
+  });
+
+  it("settles a round cut off on a loop a person paused mid-round, and does not continue the loop", async () => {
+    const path = await storeWithGoal();
+    const before = await loopCutOffMidRound(path);
+    const loop = before.service.read(threadId).loop;
+    await before.service.execute({
+      kind: "pause-goal-loop",
+      threadId,
+      expectedVersion: loop?.version ?? 0,
+    });
+
+    const after = hostStart(path);
+    expect(after.service.runningLoopThreads()).toEqual([]);
+    expect(after.service.openRoundThreads()).toEqual([threadId]);
+    await after.service.settleAfterRestart(threadId);
+    expect(after.service.read(threadId)).toMatchObject({
+      loop: { status: "paused", pauseReason: "paused-by-user" },
+      rounds: [{ outcome: "interrupted", tokensSpent: 700 }],
+    });
+    expect(after.goals.read(threadId).goal?.usage.tokensUsed).toBe(700);
+    expect(after.service.continueAfterRestart(threadId)).toBe(false);
+    expect(after.scheduleFirstRound).not.toHaveBeenCalled();
+  });
+
+  it("comes back running with its rounds and narrowed ceiling, and a held loop stays paused on the next start", async () => {
+    const path = await storeWithGoal();
+
+    const before = hostStart(path);
+    await before.service.execute({
+      kind: "start-goal-loop",
+      threadId,
+      expectedVersion: 0,
+      loopId,
+      goalId,
+      ceiling,
+      trigger: { kind: "continuous" },
+    });
+    await before.service.advance(threadId);
+    const running = before.service.read(threadId).loop;
+    await before.service.execute({
+      kind: "narrow-goal-loop-ceiling",
+      threadId,
+      expectedVersion: running?.version ?? 0,
+      ceiling: { ...ceiling, tools: false },
+    });
+    const left = before.service.read(threadId);
+
+    const after = hostStart(path);
+    const replayed = after.service.read(threadId);
+    expect(replayed.loop).toMatchObject({
+      status: "running",
+      roundsRun: 1,
+      version: left.loop?.version,
+      ceiling: { tools: false },
+    });
+    expect(replayed.rounds).toEqual(left.rounds);
+    expect(after.service.runningLoopThreads()).toEqual([threadId]);
+    expect(after.scheduleFirstRound).not.toHaveBeenCalled();
+
+    expect(after.service.holdAfterRestart(threadId)).toBe(true);
+    const next = hostStart(path);
+    expect(next.service.read(threadId).loop).toMatchObject({
+      status: "paused",
+      pauseReason: "held-after-restart",
+    });
+    expect(next.service.runningLoopThreads()).toEqual([]);
+    expect(next.service.continueAfterRestart(threadId)).toBe(false);
+    expect(next.scheduleFirstRound).not.toHaveBeenCalled();
+  });
+
+  it("charges a round a restart cut off at its journaled spend, and counts rounds cut off in a row", async () => {
+    const path = await storeWithGoal();
+
+    const before = hostStart(path, vi.fn(), cutOffRound);
+    await before.service.execute({
+      kind: "start-goal-loop",
+      threadId,
+      expectedVersion: 0,
+      loopId,
+      goalId,
+      ceiling,
+      trigger: { kind: "continuous" },
+    });
+    void before.service.advance(threadId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const after = hostStart(path, vi.fn(), cutOffRound);
+    expect(await after.service.settleAfterRestart(threadId)).toEqual({ roundsCutOffInARow: 1 });
+    expect(after.recordUsage).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ tokensSpent: 700, complete: false }),
+    );
+    expect(after.service.read(threadId)).toMatchObject({
+      loop: { status: "running", roundsRun: 1 },
+      rounds: [{ outcome: "interrupted", tokensSpent: 700 }],
+    });
+    expect(after.service.crashLooping(1)).toBe(false);
+
+    void after.service.advance(threadId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const again = hostStart(path, vi.fn(), cutOffRound);
+    expect(await again.service.settleAfterRestart(threadId)).toEqual({ roundsCutOffInARow: 2 });
+    // Settling twice charges nothing more: the round is recorded and closed.
+    const replayed = hostStart(path);
+    expect(await replayed.service.settleAfterRestart(threadId)).toEqual({ roundsCutOffInARow: 2 });
+    expect(replayed.recordUsage).not.toHaveBeenCalled();
+    expect(replayed.service.crashLooping(3)).toBe(true);
   });
 });

@@ -575,10 +575,13 @@ Thread titles appear once in the title row, and the row shows the thread's
 current title: a pane stores the title the thread had when it opened, so the
 shell reads the title from the navigation rows instead, and a rename made in
 any window reaches every open pane. A thread pane's title row is its
-drag handle: an environment mark (a small neutral tile holding a laptop glyph
+drag handle. Its text starts on the left edge of the thread's text column
+below (see Alignment in the design system), so the title reads one line down
+into the transcript: a breadcrumb (the Project in meta text, a slash, and the
+title), then the environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
-it runs on another host), then a breadcrumb: the Project in meta text, a slash,
-and the title. The Project keeps its width (capped at a fixed character count,
+it runs on another host) and the pull-request chip. With content tabs open the
+mark leads the tabs as before. The Project keeps its width (capped at a fixed character count,
 not a share of the header) and the title truncates first (it shrinks much
 faster, with no fixed floor so a narrow pane keeps its status chip); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
@@ -882,8 +885,10 @@ Each tile resolves its own availability against the active pane, and the dock
 still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
-has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
-with an Arrange menu (Move left, right, up and down where the caps allow, Show
+has one. Each tile has one bar, 32px: the tool's name (the Browser's bar is its page row),
+then the tool's own controls (navigation as words, actions as icons, status as
+text; they fold into a named view menu and then a More menu before the name is
+cut), with an Arrange menu (Move left, right, up and down where the caps allow, Show
 alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
 trailing edge; a tool that is open but not shown is marked on its button in the title band's
 tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
@@ -1146,7 +1151,12 @@ explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
 tool does not stop its server-owned lifecycle. Restoring a Terminal tab may
 reattach to an existing process, but a saved layout is not permission to start
-a new shell. When no process remains, the tab offers **Start terminal**.
+a new shell. When no process remains, the tab offers **Start terminal**. A
+shell a host restart ended reads Interrupted with a **Restart terminal** button
+beside it: one click starts a new shell through the ordinary start, checked
+against the thread's posture and authority at that moment, with a fresh
+terminal and no Browser grant or other permission the ended shell held. Plan
+shows no button.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.

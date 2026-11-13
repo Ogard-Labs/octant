@@ -178,6 +178,17 @@ export const CanvasExportTargetOffer = Schema.Struct({
   );
 export type CanvasExportTargetOffer = typeof CanvasExportTargetOffer.Type;
 
+export const CANVAS_EXPORT_UNCONFIRMED_NOTICE_MAX = 8;
+
+export const CanvasExportUnconfirmedNotice = Schema.Struct({
+  exportId: CanvasExportRecordId,
+  targetId: CanvasExportTargetId,
+  destinationLabel: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
+  format: CanvasExportImplementedFormat,
+  sequence: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type CanvasExportUnconfirmedNotice = typeof CanvasExportUnconfirmedNotice.Type;
+
 export const CanvasExportOfferList = Schema.Struct({
   schemaVersion: CanvasExportSchemaVersion,
   kind: Schema.Literal("canvas-export-offers"),
@@ -185,6 +196,16 @@ export const CanvasExportOfferList = Schema.Struct({
   versionId: CanvasVersionId,
   sequence: Schema.Int.pipe(Schema.positive()),
   targets: Schema.Array(CanvasExportTargetOffer).pipe(Schema.maxItems(32)),
+  /**
+   * Exports of this Canvas a restart cut off before their delivery was
+   * recorded, newest first. A later recorded export to the same destination
+   * retires the notice.
+   */
+  unconfirmed: Schema.optional(
+    Schema.Array(CanvasExportUnconfirmedNotice).pipe(
+      Schema.maxItems(CANVAS_EXPORT_UNCONFIRMED_NOTICE_MAX),
+    ),
+  ),
 }).annotations(strict);
 export type CanvasExportOfferList = typeof CanvasExportOfferList.Type;
 
@@ -689,9 +710,8 @@ export const CanvasExportDenied = Schema.Struct({
 }).annotations(strict);
 export type CanvasExportDenied = typeof CanvasExportDenied.Type;
 
-export const CanvasExportRecorded = Schema.Struct({
+const canvasExportRecordFields = {
   schemaVersion: CanvasExportSchemaVersion,
-  kind: Schema.Literal("canvas-export"),
   exportId: CanvasExportRecordId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
@@ -701,7 +721,34 @@ export const CanvasExportRecorded = Schema.Struct({
   format: CanvasExportImplementedFormat,
   payloadDigest: CanvasExportPayloadDigest,
   approvalId: CanvasExportApprovalId,
-  outcome: CanvasExportDelivery,
+};
+
+/**
+ * The approved export the host is about to deliver, journaled before the
+ * destination is called. An intent with no recorded outcome means the host
+ * stopped mid-delivery: the destination may or may not have published.
+ */
+export const CanvasExportIntentRecorded = Schema.Struct({
+  ...canvasExportRecordFields,
+  kind: Schema.Literal("canvas-export-intent"),
+}).annotations(strict);
+export type CanvasExportIntentRecorded = typeof CanvasExportIntentRecorded.Type;
+
+/**
+ * Startup settled an intent whose delivery was never recorded. The host cannot
+ * read an arbitrary destination back, so it never guesses either way and never
+ * repeats the delivery; the person checks the destination.
+ */
+export const CanvasExportUnconfirmedOutcome = Schema.Struct({
+  kind: Schema.Literal("unconfirmed"),
+  message: CanvasExportMessage,
+}).annotations(strict);
+export type CanvasExportUnconfirmedOutcome = typeof CanvasExportUnconfirmedOutcome.Type;
+
+export const CanvasExportRecorded = Schema.Struct({
+  ...canvasExportRecordFields,
+  kind: Schema.Literal("canvas-export"),
+  outcome: Schema.Union(CanvasExportDelivery, CanvasExportUnconfirmedOutcome),
 }).annotations(strict);
 export type CanvasExportRecorded = typeof CanvasExportRecorded.Type;
 
@@ -728,6 +775,37 @@ export const CanvasExportDecideResult = Schema.Union(
 );
 export type CanvasExportDecideResult = typeof CanvasExportDecideResult.Type;
 
+/**
+ * The person's own answer to an unconfirmed-export notice: they checked the
+ * destination and want the notice gone without exporting again. Journaled,
+ * and accepted only from a window on this computer.
+ */
+export const CanvasExportNoticeDismissRequest = Schema.Struct({
+  schemaVersion: CanvasExportSchemaVersion,
+  kind: Schema.Literal("canvas-export-notice-dismiss"),
+  canvasId: CanvasId,
+  exportId: CanvasExportRecordId,
+}).annotations(strict);
+export type CanvasExportNoticeDismissRequest = typeof CanvasExportNoticeDismissRequest.Type;
+
+export const CanvasExportNoticeDismissResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("dismissed"),
+    exportId: CanvasExportRecordId,
+  }).annotations(strict),
+  CanvasExportRefusal,
+);
+export type CanvasExportNoticeDismissResult = typeof CanvasExportNoticeDismissResult.Type;
+
+/** The journal frame for a dismissal: the export's third and last event. */
+export const CanvasExportNoticeDismissed = Schema.Struct({
+  schemaVersion: CanvasExportSchemaVersion,
+  kind: Schema.Literal("canvas-export-notice-dismissed"),
+  exportId: CanvasExportRecordId,
+  canvasId: CanvasId,
+}).annotations(strict);
+export type CanvasExportNoticeDismissed = typeof CanvasExportNoticeDismissed.Type;
+
 export const decodeCanvasExportContribution = Schema.decodeUnknownSync(CanvasExportContribution);
 export const decodeCanvasExportTargetOffer = Schema.decodeUnknownSync(CanvasExportTargetOffer);
 export const decodeCanvasExportOfferList = Schema.decodeUnknownSync(CanvasExportOfferList);
@@ -744,6 +822,18 @@ export const decodeCanvasExportPrepareResult = Schema.decodeUnknownSync(CanvasEx
 export const decodeCanvasExportDecideRequest = Schema.decodeUnknownSync(CanvasExportDecideRequest);
 export const decodeCanvasExportDecideResult = Schema.decodeUnknownSync(CanvasExportDecideResult);
 export const decodeCanvasExportRecorded = Schema.decodeUnknownSync(CanvasExportRecorded);
+export const decodeCanvasExportIntentRecorded = Schema.decodeUnknownSync(
+  CanvasExportIntentRecorded,
+);
 export const decodeCanvasExportPayloadDigest = Schema.decodeUnknownSync(CanvasExportPayloadDigest);
 export const decodeCanvasHtmlFileRequest = Schema.decodeUnknownSync(CanvasHtmlFileRequest);
 export const decodeCanvasHtmlFileResult = Schema.decodeUnknownSync(CanvasHtmlFileResult);
+export const decodeCanvasExportNoticeDismissRequest = Schema.decodeUnknownSync(
+  CanvasExportNoticeDismissRequest,
+);
+export const decodeCanvasExportNoticeDismissResult = Schema.decodeUnknownSync(
+  CanvasExportNoticeDismissResult,
+);
+export const decodeCanvasExportNoticeDismissed = Schema.decodeUnknownSync(
+  CanvasExportNoticeDismissed,
+);

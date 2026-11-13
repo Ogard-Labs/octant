@@ -1,6 +1,6 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -15,6 +15,7 @@ import { RIGHT_UTILITY_DOCK_SURFACES } from "../shell/rightUtilityDockModel";
 import { RightUtilityDock } from "../shell/RightUtilityDock";
 import { CanvasWorkspaceTab } from "./CanvasWorkspaceTab";
 import { canvasFixture } from "./test-fixtures";
+import { DockBarTestHost } from "../shell/dockBarHost.test-support";
 
 const skillDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -96,6 +97,35 @@ async function openCanvasTool(label: string) {
   await user.click(await screen.findByRole("button", { name: "More Canvas actions" }));
   await user.click(await screen.findByRole("menuitem", { name: label }));
 }
+
+describe("CanvasWorkspaceTab in a bar", () => {
+  it("hands its toolbar to the bar that hosts it, keeps its file note in the tool and draws no header", async () => {
+    render(
+      <DockBarTestHost placement="tiled" toolLabel="Canvas">
+        <CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />
+      </DockBarTestHost>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Signed Q3 report" })).toBeInTheDocument(),
+    );
+    const bar = within(screen.getByTestId("bar"));
+    expect(bar.getByRole("button", { name: /Version history/ })).toBeInTheDocument();
+    expect(document.querySelector(".canvas-workspace-tab__toolbar")).toBeNull();
+    expect(bar.queryByTestId("canvas-html-file-status")).toBeNull();
+  });
+
+  it("draws its own toolbar again where no bar hosts it", async () => {
+    render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Signed Q3 report" })).toBeInTheDocument(),
+    );
+    const header = document.querySelector(".canvas-workspace-tab__toolbar");
+    expect(header).not.toBeNull();
+    expect(
+      within(header as HTMLElement).getByRole("button", { name: /Version history/ }),
+    ).toBeInTheDocument();
+  });
+});
 
 describe("CanvasWorkspaceTab", () => {
   it("renders the authorized canvas definition when get returns ready", async () => {

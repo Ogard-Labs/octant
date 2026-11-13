@@ -5179,8 +5179,8 @@ or .zip>` write the same files, built by one host command
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
   threads that window can open. Chat and Work turns are continued by the same
-  rule (Chat and Work restart recovery, below); subagent runs, coordinator
-  wakes and goal loops are not continued yet.
+  rule (Chat and Work restart recovery, below), and so are Work goal loops;
+  subagent runs and coordinator wakes are not continued yet.
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5199,7 +5199,16 @@ or .zip>` write the same files, built by one host command
   ("Fixed.") never stands in for it. A comment record without that pull request
   or count, or one whose branch now carries a different pull request, is never
   judged against another pull request: it stays unconfirmed. An unconfirmed
-  update or merge stays unconfirmed.
+  update or merge cannot be told from an earlier one on GitHub, so the host
+  never settles it; the thread's board card offers Mark resolved instead. The
+  person checks GitHub and says it went through (`completed`), it did not
+  (`failed`), or just stops waiting (`interrupted`). That is the
+  `resolve-unconfirmed-step` operation: never gated, since it changes nothing
+  on GitHub, but accepted only from the person at a local window (an agent or
+  a paired device is refused), only for the thread's own still-unconfirmed
+  update or merge, after the same Project access check as any operation. The
+  runtime-work record and the operation result are journaled, and a repeat
+  on a step already settled is refused as stale.
   File, terminal, test, review, and local Git work, whose result is in the
   checkout, becomes `interrupted`.
 
@@ -5289,6 +5298,35 @@ ls-remote` against the thread's remote and the GitHub reads they already
   messages follow the continuation under the same release as Code. A Chat
   attempt already waiting on a question or approval at the restart is retained
   as before, and answering it still settles it interrupted.
+
+  A Work goal loop is journaled frame by frame (started, each round's start,
+  what a running round has charged at most every five seconds, each round with
+  whether its spend was seen, paused, resumed, stopped, and each narrowed
+  ceiling) and every start rebuilds loops from those frames, so a restart
+  never widens a loop's ceiling or forgets its rounds. A round started and
+  never recorded is the one the restart cut off: the start records it as
+  `interrupted` and charges the goal the spend it last journaled (the last few
+  seconds may be missing; a round that journaled none reads as unreported
+  spend, so a token budget is not trusted on it). This settles every open
+  round, a paused or stopped loop's too. The goal keeps the newest round ids
+  it was charged for (`recentChargeIds`) and refuses a charge id it holds, so a
+  host that stops between charging a round and recording it charges that
+  round once however often it restarts. A loop the start finds
+  running then follows its thread's decision. When the restart cut off the
+  loop's round turn, the loop's next round is that thread's continuation,
+  behind the same holds and harness lift as a cut-off turn and in place of a
+  separate continuation turn, so the thread never gets two turns at once. A
+  loop found running with no cut-off turn continues unless the Work setting,
+  the thread's switch, a person's quit or Work being off holds it, and the
+  restart notice lists it either way. A loop whose rounds restarts cut off
+  three times in a row (the restart's own round and two continuations, the
+  same allowance as a cut-off turn's) waits with the `crash-loop` reason; the
+  count is read from the journaled rounds, so it survives the restart it
+  counts. A held loop is paused with `held-after-restart` ("Octant restarted
+  while this loop ran and did not continue it by itself"), journaled, and only
+  a person's Resume runs it again. A loop that continues starts its round
+  through the ordinary round path, where the budget, ceiling and authority
+  checks apply again.
 
   A person who quits Octant while turns run chose to stop them, so the next
   start holds those threads instead of continuing them (maintainers decided on
@@ -10924,10 +10962,28 @@ thirty-second export deadline apply; termination and revocation stop the owned
 process and abort its requests. Failure after possible external effects requires
 checking the destination before retrying; the host never retries automatically.
 
-Each completed export is a `canvas.export@1` journal event and is rebuilt by
-replay. When the destination was called but the journal could not take the
-record, the answer is `unrecorded` and carries the destination's outcome; it is
-never reported as a failed export. A target that passed activation is still reported honestly as
+Each approved export journals its intent (`canvas.export-intent@1`) before the
+destination is called, and its outcome (`canvas.export@1`) after; both are
+rebuilt by replay. When the intent cannot be journaled, nothing is sent and the
+answer is an `unavailable` refusal. When the destination was called but the
+journal could not take the outcome, the answer is `unrecorded` and carries the
+destination's outcome; it is never reported as a failed export. At startup,
+before any export is decided, the host settles every intent with no outcome as
+`unconfirmed`: a restart cut it off mid-delivery, the host cannot read an
+arbitrary destination back to learn whether it published, so it records
+neither success nor failure and never delivers it again. The Canvas's export
+offers list those exports, newest first and at most eight, and the export panel
+says each was not confirmed and asks the person to check the destination before
+exporting again. A later recorded export to the same destination retires the
+notice, and so does the person's Dismiss (`POST
+/api/canvas/export-notice-dismiss`), journaled as
+`canvas.export-notice-dismissed@1` and accepted only from a local window; a
+paired device's dismissal is refused, so a remote client cannot quietly clear
+the host's record of an uncertain publish. Exports journaled before intents
+existed replay as they were. In-app Canvas sharing records no separate intent:
+creating a share is a single journal append with nothing sent off the host
+and is idempotent on its snapshot id, so there is no window in which it can be
+half done. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`. A local target may describe the exact
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without

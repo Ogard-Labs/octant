@@ -137,6 +137,7 @@ function createRevisionRoute(
       /** Moves the clock the network tokens age by. */
       readonly advance: (ms: number) => void;
     }) => void;
+    readonly canvasExportService?: CanvasRouteDependencies["canvasExportService"];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -362,6 +363,9 @@ function createRevisionRoute(
     ...(options.resolveDesignSystem === undefined
       ? {}
       : { resolveDesignSystem: options.resolveDesignSystem }),
+    ...(options.canvasExportService === undefined
+      ? {}
+      : { canvasExportService: options.canvasExportService }),
     canvasShareService,
     canvasPublicShareService: new CanvasPublicShareService({
       journal,
@@ -2364,6 +2368,45 @@ describe("paired device Canvas reads", () => {
       canvasId: missing,
     });
     expect((await readable(paired(`public-shares?canvasId=${missing}`)))?.status).toBe(403);
+  });
+
+  it("journals a dismissed export notice as the local window, and refuses the same dismissal from a paired device", async () => {
+    const actors: string[] = [];
+    const exportService = {
+      dismissUnconfirmed: (input: { readonly actor: { readonly kind: string } }) => {
+        actors.push(input.actor.kind);
+        return input.actor.kind === "local-user"
+          ? { kind: "dismissed", exportId: "33333333-3333-4333-8333-333333333333" }
+          : { kind: "refused", code: "unauthorized", message: "Local window only." };
+      },
+    };
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(),
+      canvasExportService: exportService as never,
+    });
+    const body = {
+      schemaVersion: 1,
+      kind: "canvas-export-notice-dismiss",
+      canvasId: String(canvasId),
+      exportId: "33333333-3333-4333-8333-333333333333",
+    };
+
+    const local = await route(
+      new Request("http://127.0.0.1/api/canvas/export-notice-dismiss", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": windowCapability,
+        },
+        body: JSON.stringify(body),
+      }),
+    );
+    const remote = await route(paired("export-notice-dismiss", { method: "POST", body }));
+
+    expect(JSON.parse(await local!.text())).toMatchObject({ kind: "dismissed" });
+    expect(JSON.parse(await remote!.text())).toMatchObject({ kind: "refused" });
+    expect(actors).toEqual(["local-user", "remote-device"]);
   });
 
   it("refuses a paired device cards asked under another Project or mode, and a Canvas its thread has left", async () => {

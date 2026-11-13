@@ -56,6 +56,7 @@ import {
   type WorkListState,
 } from "../surface/WorkList";
 import { relativeTimeLabel } from "../lib/relativeTime";
+import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControls";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   NO_PULL_REQUEST_FILTERS,
@@ -279,6 +280,14 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       ? undefined
       : pullRequestCountCopy(scopedFreshness ?? view.freshness, visibleRows.length);
 
+  // The count is status, so a bar hosts it beside the tool's name; the search
+  // field is content and keeps the one 32px row under it. Shown alone there is
+  // no bar: search and count share the one row.
+  const placement = useDockBarPlacement();
+  const countInBar =
+    dock && (placement === "tiled" || placement === "bottom") && countCopy !== undefined;
+  useDockBarControls(countInBar ? [{ kind: "text", id: "count", text: countCopy }] : []);
+
   const searchField = (
     <label className="surface-toolbar__search code-project-pull-requests__search">
       <Search aria-hidden="true" size={14} />
@@ -346,17 +355,20 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       className="code-project-pull-requests"
       data-freshness={freshnessStatus}
       data-narrow={props.isNarrow === true ? "true" : "false"}
+      data-bar-hosted={dock && placement !== undefined ? "true" : undefined}
       data-presentation={dock ? "dock" : "page"}
     >
       {!ready ? null : dock ? (
         <div className="surface-toolbar">
           {searchField}
-          <span
-            className="oct-meta code-project-pull-requests__count"
-            data-freshness={scopedFreshness?.status}
-          >
-            {countCopy}
-          </span>
+          {countInBar ? null : (
+            <span
+              className="oct-meta code-project-pull-requests__count"
+              data-freshness={scopedFreshness?.status}
+            >
+              {countCopy}
+            </span>
+          )}
         </div>
       ) : (
         <div className="surface-toolbar">{searchField}</div>

@@ -4,8 +4,10 @@ import {
   type CanvasExportApprovalCard,
   type CanvasExportDecideRequest,
   type CanvasExportDecideResult,
-  type CanvasExportDelivery,
+  type CanvasExportRecorded,
   type CanvasExportFormat,
+  type CanvasExportNoticeDismissRequest,
+  type CanvasExportNoticeDismissResult,
   type CanvasExportOfferList,
   type CanvasExportPrepareRequest,
   type CanvasExportPrepareResult,
@@ -30,6 +32,10 @@ export interface CanvasExportPanelProps {
   readonly offers: CanvasExportOfferList;
   readonly onPrepare: (request: CanvasExportPrepareRequest) => Promise<CanvasExportPrepareResult>;
   readonly onDecide: (request: CanvasExportDecideRequest) => Promise<CanvasExportDecideResult>;
+  /** Clears an unconfirmed-export notice without exporting again. Absent hides the action. */
+  readonly onDismissNotice?: (
+    request: CanvasExportNoticeDismissRequest,
+  ) => Promise<CanvasExportNoticeDismissResult>;
   /** The folder this Canvas exports to. Absent on a host without that surface. */
   readonly folder?: CanvasExportFolderState;
   /** Called after a folder was chosen, so the offers are read again. */
@@ -109,6 +115,31 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
   // time a card is prepared; "never" is only ever picked, never a default.
   const [linkExpiry, setLinkExpiry] = useState("");
   const [linkPassword, setLinkPassword] = useState("");
+  // Notices the host confirmed dismissed in this panel; the next offers read
+  // no longer lists them.
+  const [dismissed, setDismissed] = useState<ReadonlyArray<string>>([]);
+  const notices = (props.offers.unconfirmed ?? []).filter(
+    (notice) => !dismissed.includes(String(notice.exportId)),
+  );
+
+  async function dismissNotice(exportId: CanvasExportNoticeDismissRequest["exportId"]) {
+    if (props.onDismissNotice === undefined) return;
+    try {
+      const result = await props.onDismissNotice({
+        schemaVersion: 1,
+        kind: "canvas-export-notice-dismiss",
+        canvasId: props.offers.canvasId,
+        exportId,
+      });
+      if (result.kind === "dismissed") {
+        setDismissed((current) => [...current, String(result.exportId)]);
+        return;
+      }
+      setMessage(result.message);
+    } catch {
+      setMessage("The notice could not be dismissed.");
+    }
+  }
 
   const chosenFormat = formats.includes(format) ? format : formats[0];
   const folder = props.folder;
@@ -189,6 +220,13 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
       setCard(undefined);
       setLinkPassword("");
       if (result.kind === "exported") {
+        // The host retires this destination's notices once an export to it
+        // is recorded; drop them here too, or Dismiss would be refused.
+        const target = String(result.record.targetId);
+        const retired = notices
+          .filter((notice) => String(notice.targetId) === target)
+          .map((notice) => String(notice.exportId));
+        setDismissed((current) => [...current, ...retired]);
         setMessage(receiptText(result.record.outcome));
         return;
       }
@@ -230,6 +268,26 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
           </OctantButton>
         </div>
       )}
+      {notices.length > 0 ? (
+        <ul className="canvas-export__statuses" data-testid="canvas-export-unconfirmed">
+          {notices.map((notice) => (
+            <li key={String(notice.exportId)}>
+              Export to {notice.destinationLabel} not confirmed. Octant stopped before it finished;
+              check {notice.destinationLabel} before exporting again.
+              {props.onDismissNotice === undefined ? null : (
+                <OctantButton
+                  onClick={() => void dismissNotice(notice.exportId)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Dismiss
+                </OctantButton>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {props.offers.targets.length === 0 ? (
         <p className="canvas-export__note" data-testid="canvas-export-empty">
           No export destination is installed yet.
@@ -469,8 +527,8 @@ function destinationLabel(target: CanvasExportTargetOffer): string {
   return `${target.label} — ${STATUS_LABEL[target.status]}`;
 }
 
-function receiptText(outcome: CanvasExportDelivery): string {
-  if (outcome.kind === "refused") return outcome.message;
+function receiptText(outcome: CanvasExportRecorded["outcome"]): string {
+  if (outcome.kind === "refused" || outcome.kind === "unconfirmed") return outcome.message;
   const receipt = outcome.receipt;
   if (receipt.kind === "link") return `Exported. ${receipt.href}`;
   if (receipt.kind === "path") return `Exported. ${receipt.path}`;

@@ -61,6 +61,8 @@ export interface CodeBoardRuntimeActivity {
   readonly awaitingInput: boolean;
   readonly interrupted: boolean;
   readonly blockingReason?: string;
+  /** Unconfirmed pull request updates and merges only the person can settle. */
+  readonly unconfirmedPullRequestSteps?: CodeBoardCard["unconfirmedPullRequestSteps"];
   /** The latest finished turn closed by asking the person to decide; absent means none. */
   readonly decisionPending?: boolean;
 }
@@ -125,6 +127,15 @@ export function boardRuntimeActivityFromWorks(
   );
   const asking = parked || contributing.some((entry) => entry.work.state === "waiting");
   const unconfirmed = contributing.some((entry) => entry.work.state === "ambiguous");
+  // A push, creation, or comment is settled by looking at the remote; an
+  // update or merge cannot be, so the card offers the person the say.
+  const personSettles = contributing.flatMap(({ work }) =>
+    work.state === "ambiguous" &&
+    work.remoteStep?.kind === "pull-request" &&
+    (work.remoteStep.action === "update" || work.remoteStep.action === "merge")
+      ? [{ workId: work.id, action: work.remoteStep.action }]
+      : [],
+  );
   const awaitingInput = asking || unconfirmed;
   const interrupted = latestTurn !== undefined && latestTurn.work.state === "interrupted";
   const waiting = awaitingInput || interrupted;
@@ -132,6 +143,9 @@ export function boardRuntimeActivityFromWorks(
     executing,
     awaitingInput,
     interrupted,
+    ...(personSettles.length === 0
+      ? {}
+      : { unconfirmedPullRequestSteps: personSettles.slice(0, 16) }),
     ...(waiting && !executing
       ? {
           // An operation whose outcome could not be established (a push the
@@ -139,9 +153,13 @@ export function boardRuntimeActivityFromWorks(
           // would point at a control the thread does not have.
           blockingReason: asking
             ? "Waiting for a decision or answer."
-            : unconfirmed
-              ? "Octant could not confirm how the last step ended. Opening the thread's Git or pull request tab checks the remote again."
-              : "The last agent turn was interrupted.",
+            : unconfirmed &&
+                personSettles.length ===
+                  contributing.filter((entry) => entry.work.state === "ambiguous").length
+              ? "Octant could not confirm whether the pull request change went through. Check GitHub, then mark it resolved."
+              : unconfirmed
+                ? "Octant could not confirm how the last step ended. Opening the thread's Git or pull request tab checks the remote again."
+                : "The last agent turn was interrupted.",
         }
       : {}),
   };
@@ -343,6 +361,9 @@ function buildCard(
     recovery: metadata.recovery,
     githubFreshness: metadata.githubFreshness,
     ...(blockingReason === undefined ? {} : { blockingReason }),
+    ...(activity.unconfirmedPullRequestSteps === undefined
+      ? {}
+      : { unconfirmedPullRequestSteps: activity.unconfirmedPullRequestSteps }),
     followUp: entry.followUp,
     lastMeaningfulActivityAt: metadata.lastMeaningfulActivityAt,
     ...(outsideContent === undefined ? {} : { outsideContent }),

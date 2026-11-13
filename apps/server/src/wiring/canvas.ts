@@ -1181,6 +1181,9 @@ export function wireCanvas(deps: CanvasDependencies) {
     // switches and interception, that the agent's preview uses.
     renderer: canvasPreviewRenderer,
   });
+  // Settle exports a previous run cut off mid-delivery before any new one is
+  // decided: recorded as unconfirmed for the person, never sent again.
+  canvasExportService.settleUnconfirmed({ kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID });
   // The library is a host-wide read of the same journal-derived projection
   // the per-Project inventory reads. It is deliberately wider than a window's
   // Project scope; the service, not the route, decides what a given
