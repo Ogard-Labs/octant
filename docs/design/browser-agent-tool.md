@@ -267,9 +267,10 @@ the page, the workspace, or the person is reached.
   front the agent can still list tabs and switch to another. On the headless
   Browser, a tab that followed a redirect off the allowed origins after its own
   action is sent to a blank page before it is listed.
-- A paired device may hover and list tabs. It may not choose an option, drag,
-  upload, save a download, or open, switch, or close a tab, as it may not
-  navigate or type
+- A paired device does all of this as a local window does: hover, list tabs,
+  choose an option, drag, upload, save a download, open, switch, and close a
+  tab, navigate and type (maintainer decision, 2026-11-12). Not built yet: today
+  it may hover and list tabs only
   ([Architecture: remote access](../architecture.md#security-and-authority)).
 
 ### Upload
@@ -302,7 +303,10 @@ and the answer is never remembered.
 - For an ordinary upload below Full access, the person is asked, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
   covers those files to that site once, or, with "Always allow", later uploads
-  to that site from this thread's workspace. An unanswered ask waits in Needs
+  to that site from that folder in that profile: the remembered answer is
+  keyed by site, folder and profile (maintainer decision, 2026-11-12; not built
+  yet: today "Always allow" covers later uploads to that site from this
+  thread's workspace). An unanswered ask waits in Needs
   you. At Full access nothing is asked. Work asks in the thread's
   Browser approval card; Code asks in the thread's tool approval.
 - Only the agent tool can upload: it resolves the files and holds the answer,
@@ -316,7 +320,7 @@ and the answer is never remembered.
   explicit recurring manifest. At Full access the same agent already holds an
   unwrapped shell and an open network, so an ask on an upload protects nothing
   the shell does not already reach; below it the ask stays and can be
-  remembered per site.
+  remembered per site, folder and profile.
 
 ### Recurring upload manifests
 
@@ -382,8 +386,9 @@ download in the pane is cancelled.
 
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default below Full access and on by default for a thread at Full access.
-  It is a host setting in the shell settings, which only a window
-  of this computer writes: the shell route is local-only, so a paired device, a
+  It is a host setting in the shell settings, which a window of this computer
+  or a paired device writes (maintainer decision, 2026-11-12; not built yet:
+  today the shell route is local-only and a paired device cannot); a
   routine, a subagent, a plugin, a CLI in a thread terminal, and an agent have
   no way to set it, and a change is journaled like every shell setting. Off,
   every download on every page stays blocked, as before: the runtime cancels
@@ -421,8 +426,10 @@ download in the pane is cancelled.
   source: unverified." A page address is never substituted as source proof.
   Code refuses a save whose complete review exceeds its approval-summary byte
   limit; it never offers approval of a truncated source chain. The answer covers that file
-  once, or, with "Always allow", later saves from that site into this thread's
-  workspace. At Full access the save is not asked and the checks, the
+  once, or, with "Always allow", later saves from that site into that folder
+  in that profile: the remembered answer is keyed by site, folder and profile
+  (maintainer decision, 2026-11-12; not built yet: today "Always allow" covers
+  later saves from that site into this thread's workspace). At Full access the save is not asked and the checks, the
   destination rules and the journal record still apply. Work asks in the thread's
   Browser approval card ("Save once", "Always allow" or "Deny"); Code asks in the thread's tool
   approval.
@@ -455,10 +462,11 @@ download in the pane is cancelled.
   the thread.
 - **Who can save.** Only the agent tool: it names a held file by the id the
   runtime issued and the server resolves the rest, so no route and no paired
-  device can name a host path or save a file. A paired device's turn, a CLI in
-  a thread terminal, and Plan mode refuse (`download-needs-this-computer`,
-  `download-needs-a-person`, `plan-mode-read-only`), and such a turn holds no
-  download. A routine's or a subagent's turn follows upload: the question goes
+  device can name a host path or save a file. A CLI in a thread terminal and
+  Plan mode refuse (`download-needs-a-person`, `plan-mode-read-only`), and
+  such a turn holds no download. A paired device's turn saves as a local
+  window's does (maintainer decision, 2026-11-12; not built yet: today it
+  refuses with `download-needs-this-computer`). A routine's or a subagent's turn follows upload: the question goes
   to a window that can see the thread, and an unanswered question waits in Needs you and saves nothing until it is answered. A batch cannot hold `download-save`.
 - Rationale: an agent's download is a file written by a page into a folder the
   thread's own file tools and a shell can reach, so below Full access it keeps
@@ -595,8 +603,9 @@ runs, not when it was recorded.
   `record: true` keeps an animated recording of the replay, as a `steps` batch
   does ([Results](#results)); a saved flow never holds a recording.
 - **Who may.** The thread's own agent in Work and Code saves, lists, and runs. A
-  paired device may not save or run (a flow navigates and types, which it may
-  not), and Plan mode lists but refuses to save or run
+  paired device's turn saves and runs as a local window's does (maintainer
+  decision, 2026-11-12; not built yet: today it may not, because a flow
+  navigates and types, which it may not), and Plan mode lists but refuses to save or run
   ([Plan mode](#plan-mode)). A routine or a subagent may run a flow, on a Private page only,
   because the profile rules apply to each replayed step as to any call; it may
   not save one. A terminal grant has no flows. Chat has no Browser.
@@ -608,8 +617,9 @@ runs, not when it was recorded.
   Browser records (profiles, approvals) travel in none of them.
 - **The person's view.** Settings › Data & storage › Browser flows lists every
   Project's flows with step count and first address and deletes one after a
-  confirmation, from a local window only (`/api/browser/flows`; a paired device
-  is refused). A person may also select an existing active, idle Work or Code task,
+  confirmation, from a local window or a paired device (`/api/browser/flows`;
+  maintainer decision, 2026-11-12; not built yet: today a paired device is
+  refused). A person may also select an existing active, idle Work or Code task,
   review its fixed steps and run-specific text, and start through that task's
   current model and authority. Settings supplies no authority of its own.
 - **Reviewed run.** The server binds the local window, flow version, task/model,
@@ -724,7 +734,9 @@ runs, not when it was recorded.
     A page whose developer tools someone else attached is left alone: touch and
     color scheme are refused there (`Browser automation control is already in
 use`), a size still applies. The person sees the page at the emulated size
-    until it is restored. A paired device cannot resize or emulate, and Plan
+    until it is restored. A paired device resizes and emulates as a local
+    window does (maintainer decision, 2026-11-12; not built yet: today it
+    cannot), and Plan
     mode refuses it ([Plan mode](#plan-mode)).
 - Rationale: emulation is optional fields on `resize` rather than a separate
   operation. The operation already means "change how the page is sized, and
@@ -836,9 +848,10 @@ needed.
   `browser-sign-in-denied`, `-expired`, or `-cancelled`, and the page is the
   agent's again.
 - Refused before anyone is asked on a routine's or a subagent's turn and for a
-  CLI in a thread terminal (`sign-in-needs-a-person`), and on a paired device's
-  turn (`sign-in-needs-this-computer`): nobody there can sign in, or the person
-  there cannot see the page.
+  CLI in a thread terminal (`sign-in-needs-a-person`): nobody there can sign
+  in. A paired device's turn is offered the sign-in, and the person signs in
+  from that device or at the computer (maintainer decision, 2026-11-12; not built
+  yet: today it is refused, `sign-in-needs-this-computer`).
 - While a native page is held for sign-in or take-over, **Login permission**
   lets the person review one 1Password account/vault/item by immutable IDs.
   The review names the exact HTTPS origin and port, top frame, profile and
@@ -996,19 +1009,22 @@ packaged, personal-account or cross-platform acceptance evidence.
   capability and its authority over the thread; the service refuses a routine's
   window and a page that is not there, in another window, or whose authority
   ended. A routine, a subagent, and a terminal CLI never reach it: it is not
-  an operation of the agent tool. A paired device may not take over or hand
-  back, and the gateway does not admit the paths for it.
-- Rationale: a paired device may tap, press, and scroll a Private page today
-  (`remoteBrowserActionReach`), but it cannot type, choose, or navigate, and
-  holding the agent out of a page is only worth something to a person who can
-  use it. Refusing the device keeps the route's authority exactly the local
-  window's, adds no remote surface for the gateway to list, and means a phone
-  can never lock the agent out of the desktop's page. A paired device that
-  wants the agent to stop can stop the turn, as it can today.
+  an operation of the agent tool. A paired device takes over and hands back
+  as a local window does (maintainer decision, 2026-11-12). Not built yet:
+  today a paired device may not, and the gateway does not admit the paths for
+  it.
+- Rationale for what is built today: a paired device may tap, press, and
+  scroll a Private page (`remoteBrowserActionReach`) but cannot type, choose,
+  or navigate, so holding the agent out of a page was worth nothing to it. Once
+  a paired device types and navigates, the hold is as useful to it as to a
+  window.
 
 ### Owner control of an open Code page
 
-An enrolled owner has a separate signed control path. It does not widen the
+An enrolled owner has a separate signed control path. It is what is built
+today; once every paired device controls the Browser as a local window does
+(maintainer decision, 2026-11-12), this unlock gates nothing and the path
+is kept only until that is built. It does not widen the
 ordinary paired-device routes above. The first supported resource is an
 already-open, visible native Code Private page in its original local window.
 Work, Chat, dedicated pages, routine/subagent scopes, stored profiles, embedded
@@ -1276,7 +1292,8 @@ Several threads of one Project may each drive their own page at the same time.
   thread's id and title, and whether an agent drives it. It returns no page text
   and no picture; a selected page's picture is read through its own thread's
   route, under that thread's authority, as the dock's Browser card reads it. A
-  paired device gets a page in a stored profile named by its existence alone.
+  paired device reads the same list (maintainer decision, 2026-11-12; not built yet:
+  today it gets a page in a stored profile named by its existence alone).
 - An agent counts as driving a page while an agent action is queued or running
   on it and for 15 seconds after the last one ends; a CLI in a terminal grant
   is not marked.

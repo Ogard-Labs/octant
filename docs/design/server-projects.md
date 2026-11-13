@@ -96,8 +96,10 @@ checks never change registry/configuration or journal state.
 
 ### Binding
 
-- Only a person at a local window binds, renames, or removes a server Project.
-  A paired device, a routine, and an agent are refused `needs-local-window`.
+- Only a person, at a local window or a paired device, binds, renames, or
+  removes a server Project; a routine and an agent are refused (maintainer decision, 2026-11-12).
+  Not built yet: today a paired device is refused
+  `needs-local-window` too.
 - A binding names a registered server and an absolute folder path. Before it
   is journaled, the host connects and resolves the folder on the server to its
   real path (`cd` then `pwd -P`); a folder that does not exist, is not a
@@ -364,8 +366,9 @@ checks never change registry/configuration or journal state.
   transition as Code, while manual action edits remain available.
 
   The Work server Project's **Show developer tools** switch is off by default
-  in its existing Settings → Permissions → Servers row. A local-only
-  `set-server-work-developer-tools` command journals who and when as
+  in its existing Settings → Permissions → Servers row. A
+  `set-server-work-developer-tools` command, from a local window or a paired
+  device (maintainer decision, 2026-11-12; not built yet: today local-only), journals who and when as
   `server-projects.work-developer-tools-changed@1`. It reveals the action editor,
   saved-action buttons, the person's Project terminal in this Settings row,
   and active Work header/palette entries. It changes no task authority and
@@ -393,7 +396,7 @@ checks never change registry/configuration or journal state.
 ### Work Projects
 
 - **A Work Project on a server** is bound as a Code one is (same command,
-  same folder check, local window only, same catalog) with `mode: "work"`.
+  same folder check, same person-only rule, same catalog) with `mode: "work"`.
   Its threads are Work threads; no Code thread, checkout, Git service, or
   terminal resolves it, and a Code Project there holds no Work thread.
 - **Threads.** A Work thread there is an ordinary Work thread on this host's

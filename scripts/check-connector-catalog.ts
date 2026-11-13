@@ -182,6 +182,31 @@ async function probeServer(
         ? { status: "ok", id: entry.id }
         : (walled(entry, response) ?? unexpected(entry, response, "expected 401 without a key"));
     }
+    case "command": {
+      // No address to probe: the pin must still exist on the registry with the
+      // integrity the catalog holds. A newer latest is a note, not a failure.
+      const { name, version, integrity } = entry.auth.package;
+      const response = await fetcher(`https://registry.npmjs.org/${name.replaceAll("/", "%2F")}`, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (!response.ok) return unexpected(entry, response, "registry did not answer");
+      const document = (await response.json()) as {
+        "dist-tags"?: { latest?: string };
+        versions?: Record<string, { dist?: { integrity?: string } }>;
+      };
+      if (document.versions?.[version]?.dist?.integrity !== integrity) {
+        return {
+          status: "refused",
+          id: entry.id,
+          reason: `${name}@${version} is not on the registry with the pinned integrity`,
+        };
+      }
+      const latest = document["dist-tags"]?.latest;
+      return latest === version
+        ? { status: "ok", id: entry.id }
+        : { status: "ok", id: entry.id, note: `newer version ${latest ?? "unknown"} is published` };
+    }
     case "none": {
       const response = await bareInitialize(fetcher, entry.url);
       return answersMcp(response)

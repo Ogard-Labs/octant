@@ -598,6 +598,56 @@ describe("Agent Plugin MCP session manager", () => {
     return started;
   }
 
+  it("starts one process at a time for a connector that keeps a single login", async () => {
+    let starts = 0;
+    const manager = new AgentPluginMcpSessionManager({
+      store: {
+        contentRoot: () => "/tmp/plugin",
+        pluginDataRoot: () => "/tmp/plugin-data",
+        readVerifiedConfiguration: async () =>
+          JSON.stringify({
+            $schema: AGENT_PLUGINS_MCP_SCHEMA,
+            mcpServers: { local: { type: "stdio", command: "./server" } },
+          }),
+      },
+      exclusiveForSource: () => true,
+      stdioSupervisor: {
+        startInteractive: async () => {
+          starts += 1;
+          const stdin = new PassThrough();
+          const stdout = new PassThrough();
+          stdin.on("data", (chunk) => {
+            const message = JSON.parse(String(chunk).split("\n")[0] ?? "{}") as {
+              id?: number;
+              method?: string;
+            };
+            if (message.id === undefined) return;
+            stdout.write(
+              `${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? { tools: [] } : { ok: true } })}\n`,
+            );
+          });
+          return {
+            receipt: { state: "ready" },
+            process: {
+              pid: 9003,
+              ready: Promise.resolve(),
+              wait: new Promise(() => undefined),
+              stop: async () => undefined,
+              cancel: async () => undefined,
+              stdin,
+              stdout,
+              once: () => undefined,
+            },
+          } as never;
+        },
+      },
+    });
+    await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local", { threadId: "thread-a" }));
+    await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local", { threadId: "thread-b" }));
+    expect(starts).toBe(1);
+    await manager.drainAll();
+  });
+
   it("gives a stdio server only a loopback proxy port when its catalog entry lists hosts", async () => {
     const started = await launchWithEgress(["*.example.com"]);
     expect(started?.sandbox).toMatchObject({ allowNetwork: false });
