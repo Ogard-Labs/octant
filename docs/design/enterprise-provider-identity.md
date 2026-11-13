@@ -72,8 +72,12 @@ These follow from current specifications and are not reopened here:
   renderer, journal, logs, exports, diagnostics, and plugins never receive raw
   material, and broker coordinates are stripped from every child
   ([Credentials](../architecture.md#providers)).
-- A remote principal cannot start a sign-in, acknowledge terms, refresh, sign
-  out, or change broker material; it may run turns on an instance that is
+- A paired device starts a sign-in, acknowledges terms, refreshes and signs out
+  as a local window does (maintainer decision, 2026-11-12); the grant still goes
+  only to the credential broker and is never returned. A hub, a peer host and an
+  agent grant cannot. Not built yet: today no remote principal can start a
+  sign-in, acknowledge terms, refresh, sign out, or change broker material; it
+  may run turns on an instance that is
   already signed in, under the same mode, Project, and approval gates as an
   API-key instance ([host-driven provider sign-in](../architecture.md#security-and-authority)).
 - `delegated-oauth` (a runtime's own login) is untouched: Octant never reads,
@@ -273,8 +277,9 @@ Rules slice 1b resolved in the broker, each the most conservative reading:
   refresh-token reuse, so this dialect never reports `refresh-reused`.
 - **Remote principals.** The broker answers only the server: a loopback peer
   carrying the launch token and no browser `Origin`. The server's principal
-  gate refuses a remote begin, refresh, or sign-out before any broker call,
-  for every dialect.
+  gate refuses a remote begin, refresh, or sign-out before any broker call, for
+  every dialect (what is built today; a paired device's are admitted once the
+  rule above is built).
 - **Left to 1c.** The binding argument on the server's broker client, the
   server contract's `interaction-required`, and how Settings shows the account
   label; slice 1c settled each (below).
@@ -428,7 +433,8 @@ Rules slice 2 resolved, each the most conservative reading of decision 2:
   window capability. The private listener never forwards `/api/desktop`, so a
   paired device cannot reach them, and a browser on the host never holds the
   secret. Settings' `/api/providers/oauth` route never begins a device code,
-  even when a command asks for one: the code is shown only on the host, in the
+  even when a command asks for one: today the code is shown only on the host (a
+  paired device's authenticated session too once built), in the
   terminal where the person typed the command or in a local desktop window
   that reaches the host-local routes above through the desktop app, because a
   code shown on a page someone else can reach is how device-code phishing
@@ -571,8 +577,8 @@ conservative reading of decision 4 and the broker operations above:
   only flow (decision 4). The page must be https, on the portal region's
   `device.sso.<region>.amazonaws.com` or the organization's own access portal
   host, with no port or credentials and only visible ASCII; the command shows
-  slice 2's warning beside the code. Settings' route never begins one, and a
-  remote principal is refused before any broker call. Terms
+  slice 2's warning beside the code. Today Settings' route never begins one, and
+  a remote principal is refused before any broker call. Terms
   (`amazon-bedrock-cloud-iam-1`) are acknowledged once per host in the record
   every host-driven sign-in uses, and the sign-in is journaled in the same
   public records. A sign-in finished after its instance was removed, or

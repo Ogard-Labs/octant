@@ -160,9 +160,10 @@ offered by the device pane only after that refusal: it runs
 `serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
 screen restarts and running apps close) and drops the stream so the next input
 reconnects it. It rides the same Allow input grant as a tap and never runs
-automatically: a person (`local-user` or `remote-device`) or an agent may ask
-for it, the host asking on its own is refused, and `octant_apple` offers it as
-`repair-input` (maintainer request, 2026-11-12).
+automatically: a live Allow input grant covers it like any other input,
+whoever sends it (maintainer decision, 2026-11-12). Built: a person
+(`local-user` or `remote-device`) or an agent may ask for it, the host asking
+on its own is refused, and `octant_apple` offers it as `repair-input`.
 
 ## Open URL
 

@@ -1468,7 +1468,8 @@ Its radio items are **Use default (Low)**
 levels, with short descriptions that fit a phone-width menu: "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
 "Thinking, tool calls, and results open". A client that cannot change the
-level, a paired browser, shows no menu.
+level shows no menu (today a paired browser; not built yet: a paired device
+changes it as a local window does).
 
 **Change reply detail in this thread** (`reply-detail-cycle`, Mod+Shift+D by
 default, remappable in Settings › Keyboard shortcuts) steps the thread in front
@@ -1499,7 +1500,8 @@ The default and the threads' own levels live in the host's shell settings
 (`replyDetail`, `threadReplyDetail`), the document that already holds every
 other per-person presentation choice, keyed maps included. That is the
 narrowest home that keeps it a preference: it is written only by the shell
-route, which only a window on the host reaches; it is not part of any thread's
+route, which a window on the host reaches (a paired device too by maintainer
+decision, 2026-11-12; not built yet); it is not part of any thread's
 journal, so forks, exports and provider context never see it; and host export
 does not carry it. Code's pin is the one per-thread presentation choice kept on
 a thread's own record, and Chat and Work have no such record to share, so a
@@ -1902,7 +1904,7 @@ rail (44px), on which a rail tab and a rail icon control sit on one centreline a
 the band's hairline meets the dock's; the sidebar's header row is its part of
 that rail (`--oct-title-rail-h`), so its controls share the window controls'
 centreline, and below it the sidebar runs navigation, Project, and
-thread rows at the nav row height down to a 40px account row (`--oct-nav-head-h`),
+thread rows at the nav row height down to a 44px account row (`--oct-nav-head-h`),
 with every leading icon on the nav inset and its section labels at 12px in the
 meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
@@ -1958,8 +1960,57 @@ rule:
 - _A foot ends where the rows above it end._ The account row's chevron stands
   on the navigation inset (12px), the edge a thread's status mark ends on.
 - _At a phone's width_ the start screen's composer stands the panel's 20px from
-  each edge, as a thread's composer does (its width is the viewport less 40px),
-  with no margin or padding of its own on top.
+  each edge, and so do a thread's composer and its text column. The panel is
+  already padded 20px at 680px and below, so the thread's gutter token
+  (`--oct-thread-gutter`, 40px for the two sides) is 0 there, and the column
+  and composer take the panel's width: 390, 430 and 680px all show 20px, not
+  the 40px the column's own gutter added inside the panel. Above 680px nothing
+  changes.
+- _The title's text stands on the thread column's edge._ The title band's text
+  starts where the transcript's column starts, at the larger of a 20px gutter
+  and half of the pane less the thread measure, so a centred, narrower column
+  carries the title with it. What could precede the title (the environment
+  mark, the pull-request chip) follows it, because the 20px gutter cannot hold
+  a 20px mark; with content tabs open there is no title and they lead as before.
+  The grip's own 4px padding and 1px border are taken off the start so the text,
+  not the grip's hover fill, stands on the edge. Where the sidebar is collapsed
+  the title clears the window controls instead (the larger of their width and
+  the column's edge). With a Project step in the breadcrumb ("Project / title"),
+  the breadcrumb starts on the edge and the title follows its slash.
+- _Controls are 24, 28, 32 or 44px, and rows 32 or 44._ A segment in a tray is
+  24px (`--oct-tray-segment-h`) inside 2px of padding, so every tray is 28px:
+  the mode switch in the sidebar's header, the thread-list switch under it and
+  the composer's Work and Code switch alike. A tray's inner corner stays the
+  tray's corner less its padding, never under 2px. The icon rail's button takes
+  its face's 32px in the column (its transparent 1px border is given back with
+  a 1px margin: switching the border off is a repaint of the shared button that
+  the UI check refuses), and the account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
+- _The account row's avatar and the Projects toolbar's folder sit on the icon
+  column._ The 20px avatar is centred on the centre line of the 16px navigation
+  icons (the 12px inset plus half an icon), not left-aligned with them, and the
+  Projects toolbar's first button is centred on the same line so its 16px folder
+  starts where the rows' glyphs do.
+- _A toast's dismiss ends on its padding._ The 24px button's box ends on the
+  toast's 12px padding, not 2px from its corner; the title line is 24px tall so
+  the icon, the title and the glyph share a centre, and an action in the message
+  (View host) is inline text, so its line is as tall as the others.
+- _Settings has one rhythm._ The page's band takes the page's 32px gutter at
+  both ends (the close button ends where the content ends), sections are 24px
+  apart, the page ends 48px under its last section, and a section label and a
+  section note each leave 12px under them (a label that carries a note has 12px
+  between them too), with lines set from the role leadings rounded to a pixel.
+- _One hairline._ A 1px dividing line or a quiet control outline on the title
+  band, the thread's disclosures, the sidebar's tiles and the icon rail is
+  `--oct-hairline` (10% ink): the environment mark's edge, the divider between
+  a thread's tool rows, the rail's count badge and divider, a count tile's edge,
+  and the rule beside a reasoning block, which is 1px, not a 2px bar. A
+  deliberately stronger edge stays: a field's border, a focus edge, a status
+  tint, and a Project tile's initial (22%, 40% on hover), which is an
+  identity mark rather than a divider.
+- _A slider's track is the stronger hairline_ (`--oct-hairline-strong`, 14% ink),
+  so it shows on a dark card; the control fill it used is the card's own colour
+  there. Measured against the card, the track is 1.5:1 in dark and 1.3:1 in
+  light, and the thumb carries the value.
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
 their edges and no scrollbar, above a foot (usage, Settings) that stays on
@@ -3541,7 +3592,9 @@ focused, **Remove protection**), because every agent can then read those
 files; the host journals the confirmed removal. Paths the person added follow
 as rows with Remove (no confirmation), then one "Protect another path" row with
 a text field and an **Add** button; a refused path is said in the section's
-feedback line. A paired device sees the section as set on the host machine.
+feedback line. A paired device edits the section as a local window does
+(maintainer decision, 2026-11-12; not built yet: today a paired device sees the
+section as set on the host machine).
 **Worktrees** in Settings › Code, above Open in applications, lists the managed
 worktrees archived threads still keep, largest first: the thread's title, then
 a line of Project, branch in mono, and size ("more than" when the count stopped
@@ -3551,7 +3604,9 @@ focused, **Remove worktree**), saying the folder and its ignored files go and
 the branch and its commits stay. A refusal (uncommitted changes, or a turn
 still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
-line; a paired device sees the section as managed on the host machine
+line; a paired device uses the section as a local window does (maintainer
+decision, 2026-11-12; not built yet: today a paired device sees the section
+as managed on the host machine)
 ([rules](docs/architecture.md#modes-chat-work-and-code)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,
@@ -4105,7 +4160,8 @@ per-row Edit, Export as JSON, and Delete. The editor holds the name and
 description; cases of kind prompt or Code (a Code case adds the Code Project and
 branch or tag), each with a title, prompt, reference answer, rubric line, and a
 checks list for every check kind; and an optional judge model with its rubric.
-A refusal names the case and check. Only a window on this Mac writes, and when
+A refusal names the case and check. A window on this Mac or a paired device writes
+(maintainer decision, 2026-11-12; not built yet: today only a window on this Mac), and when
 the host refuses a write the page says so in a sentence. The run builder
 picks contenders from the enabled provider accounts and their models, the same
 list the composer offers, then repetitions (1 to 5), a token or cost budget, and,

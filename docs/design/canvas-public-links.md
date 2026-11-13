@@ -49,9 +49,10 @@ moved into this repository for one-command deploys (see
 
 - A link is published only through the Canvas export flow, destination
   `public-link`, format `share-document`, and only after the person approves
-  the export approval card in a local window. A paired device may see the
-  links and copy one, but prepare, approve, update, and revoke are refused for
-  it, as minting an authenticated share already is.
+  the export approval card, in a local window or on a paired device (maintainer
+  decision, 2026-11-12). Not built yet: today only a local window approves; a
+  paired device may see the links and copy one, but prepare, approve, update,
+  and revoke are refused for it, as minting an authenticated share already is.
   Paired Chat, Work and Code threads use the same Canvas reader and link list
   as the host. Opening a Canvas exposes its existing public links and Copy link
   through the authenticated device session and current Canvas read grant. Its
@@ -67,9 +68,10 @@ moved into this repository for one-command deploys (see
   Chat thread owned before it was filed stays the thread's. A refusal reads as
   an empty card list or `unauthorized`, the same for a Canvas that does not
   exist, so a device learns nothing about Canvases it cannot read. A window on
-  this host keeps its active-Project rule. Every Canvas write, share, export,
-  public-link change and Settings change keeps the window rule and stays
-  refused to a paired device.
+  this host keeps its active-Project rule. A paired device makes every Canvas
+  write, share, export, public-link change and Settings change as a local window
+  does (maintainer decision, 2026-11-12). Not built yet: today each keeps the
+  window rule and stays refused to a paired device.
   _Rationale:_ a paired device's window has no active Project, and the shell
   route that sets one is local-only, so the window rule left every paired
   thread with no Canvas cards (seen on a real pairing in November 2026).
@@ -226,7 +228,8 @@ gone. Only that pending revocation outlives the purge: it is a
 `canvas-public-share-revocation` aggregate naming the link, its service, and
 the secret's reference, and no Canvas, so the purge's ownership walk leaves it.
 The Settings switch is the `canvas-public-link-settings` aggregate, changed
-only from a local window against the version the window read.
+from a local window or, not built yet, a paired device, against the version it
+read.
 
 ## The service
 

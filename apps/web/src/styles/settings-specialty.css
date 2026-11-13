@@ -17,7 +17,7 @@
 .settings-view #settings-advanced {
   display: grid;
   min-width: 0;
-  gap: 28px;
+  gap: var(--oct-space-6);
   color: var(--octant-text-primary);
 }
 
@@ -230,7 +230,7 @@
 /* Skills and Extensions: cards are bounded only by row rules; the explicit
    review block retains a quiet surface because it is an action checkpoint. */
 .settings-view .extensions-settings {
-  gap: 28px;
+  gap: var(--oct-space-6);
 }
 
 .settings-view .extensions-settings__section {
@@ -254,7 +254,7 @@
 .settings-view .github-settings,
 .settings-view .linear-settings,
 .settings-view .settings-usage-stack {
-  gap: 28px;
+  gap: var(--oct-space-6);
 }
 
 .settings-view .host-settings > .settings-panel,

@@ -20,7 +20,9 @@ cancellation of known active jobs, without promising remote termination.
 
 The Code thread's separate disclosure reviews the exact text and asks for
 remote execution and cost consent per job. No key is entered in that review.
-Only a local window can change the setting or submit a job. Protocol and account
+A local window or a paired device changes the setting or submits a job
+(maintainer decision, 2026-11-12; not built yet: today only a local window can).
+Protocol and account
 eligibility follow [Provider cloud sessions](provider-runtimes.md#provider-cloud-sessions);
 this toggle is not evidence of API access or a successful billed call.
 
@@ -230,11 +232,14 @@ access says the gateway refused the account and names no Azure role.
 
 An Amazon Bedrock endpoint signs in only at the organization's single sign-on
 portal ([Enterprise provider identity](enterprise-provider-identity.md) owns
-the authority and binding rules), and that sign-in begins only on the host: in
-a terminal with `octant provider sign-in "<name>"`, or in a local desktop
-window, which may show the code itself. A device code shown on a
-page someone else can reach is how device-code phishing works, so a paired or
-remote client never begins one or shows a code. The card also offers the
+the authority and binding rules), and that sign-in begins on the host, in a
+terminal with `octant provider sign-in "<name>"` or in a local desktop window,
+which may show the code itself, or from a paired device over its authenticated
+session (maintainer decision, 2026-11-12). A device code shown on a page someone
+else can reach is how device-code phishing works, so no unauthenticated page,
+hub, peer or agent grant begins one or shows a code. Not built yet: today a
+paired or remote client never begins one or shows a code. The card also offers
+the
 opt-in "Use my AWS profile", off by default, which reads the person's existing
 cloud profile in place of the portal sign-in (maintainer request, 2026-11-12).
 Built: a local desktop window's card shows "Sign in with a code" beside the

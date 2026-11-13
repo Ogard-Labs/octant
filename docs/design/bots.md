@@ -59,7 +59,7 @@ Scope hold: bots take no new scope until
 | FR-22  | Removing a login from a bot stops its use at once; deleting a bot or clearing its browser profile removes stored sessions.                                                                                                                                                 | Must     | After removal a fill is refused even in a running turn; after Clear browser data the next visit is signed out.                                                                                                                                                        | S2         |
 | FR-23  | Quick ask: a shortcut opens a small composer to message any bot without leaving the current view, sharing that bot's conversation.                                                                                                                                         | Should   | A message sent from Quick ask appears in the bot's conversation tab.                                                                                                                                                                                                  | S3         |
 | FR-24  | Paying, buying, or sending a message as the person (email, chat, social post, a form that sends a message) always asks the person first, at every access level and in routines; an unattended run waits for the answer.                                                    | Must     | At Full access, submitting a checkout or a send form shows a confirmation card and nothing is sent until it is approved; a routine run reaching one waits with a needs-you badge.                                                                                     | S6         |
-| FR-25  | A paired device and the phone can answer a bot's cards (approvals, questions, sign-in hand-offs) except billed desktop starts and login grants, which stay with a window on the host.                                                                                      | Must     | An approval answered on the phone lets the turn continue; a billed start or a login grant shown on the phone says to answer it on the host.                                                                                                                           | S6         |
+| FR-25  | A paired device and the phone can answer every one of a bot's cards (approvals, questions, sign-in hand-offs, billed desktop starts and login grants), as a window on the host can (maintainer decision, 2026-11-12, which removes the two exceptions S6 kept).            | Must     | An approval, a billed start or a login grant answered on the phone lets the turn continue.                                                                                                                                                                            | S6         |
 | FR-26  | On macOS 26 with Apple silicon, a bot desktop can run in Apple's container tool, one lightweight VM per desktop.                                                                                                                                                           | Should   | With the tool running, a bot desktop starts in it and passes the same isolation and network checks as a Docker-compatible one.                                                                                                                                        | S6         |
 | FR-27  | Bots can ask each other for help by name and work together in shared rooms where one bot owns the task at a time and hands it on in a message.                                                                                                                             | Must     | A bot asks another bot by name and gets its answer in its own conversation; in a room with two bots and the person, a hand-off message moves ownership and the person sees who owns the task.                                                                         | S3, S7     |
 | FR-28  | The person can talk to a bot by voice from the bot's conversation; the lead bot speaks first with what needs the person.                                                                                                                                                   | Should   | A voice call with Navigator opens with what is waiting for the person; a spoken request becomes an ordinary message in the bot's conversation.                                                                                                                        | S3, S7     |
@@ -265,7 +265,7 @@ flowchart LR
 | Bot registry     | `create`, `update`, `delete`, `pin`, `set-lead` (Later), `set-defaults`, `list` (sync, journaled, exactly-once per command id). Guarantees Navigator exists on start and cannot be deleted; a delete runs teardown of the computer, routines and grants before the bot is journaled as deleted. | Work Projects, Bot computers, Bot routines, Login grants |
 | Bot conversation | `send`, `stop`, `read` through the existing Work turn commands on the bot's thread; tool set = Work tools filtered by the bot's tool switches. Guarantees the same admission and refusals as any Work thread.                                                                                   | Work turn service, routines, Project memory              |
 | Bot routines     | Routine definitions whose target is the bot conversation; at-least-once start per scheduled time, deduplicated by run id.                                                                                                                                                                       | Automation service, Bot conversation                     |
-| Project grants   | `grant`, `revoke`, `check(botId, projectId)`; local window only for grant.                                                                                                                                                                                                                      | Bot registry, thread-creation paths                      |
+| Project grants   | `grant`, `revoke`, `check(botId, projectId)`; a local window or a paired device for grant.                                                                                                                                                                                                      | Bot registry, thread-creation paths                      |
 | Bot roster       | Merged read across hosts; per-host timeout; stale marking. Read-only: every command goes to the owning host.                                                                                                                                                                                    | Host federation, each host's bot list read               |
 | Bot computers    | `ensure-running`, `stop`, `screen`, `control`, `browser-channel`, `clear-browser-data`, `destroy` (async; journal before create; verified destroy).                                                                                                                                             | `desktop-provider` seam, container engine, egress proxy  |
 | Login grants     | `add-login`, `grant`, `revoke`, `fill(botId, loginId, frame)`; fill is exactly-once per request and refused unless the page's top-frame origin matches the login's sites.                                                                                                                       | Credential broker, Bot computers (`browser-channel`)     |
@@ -517,8 +517,8 @@ Context: routine turns refuse sign-in today; bots own routines (FR-7,
 FR-20).
 Options: (a) keep refusing; (b) allow it for logins the person marked "use
 when nobody is watching" for that bot.
-Choice: (b), off by default, set only by a person at a local window, every
-use journaled and listed.
+Choice: (b), off by default, set only by a person, at a local window or a paired
+device (maintainer decision, 2026-11-12), every use journaled and listed.
 Consequences: the Browser spec's `sign-in-needs-a-person` rule gains this one
 exception (accepted, S6).
 
@@ -569,7 +569,9 @@ Options: (a) keep bots local-window only; (b) let paired devices create bots
 and answer a bot conversation's cards, keeping a short list local-window only.
 Choice: (b). A bot's home is host-managed, so creating one binds no folder of
 the person's. Billed desktop starts, login grants and unattended-use switches
-stay local-window only, because they spend money or hand over an account.
+were first kept local-window only, because they spend money or hand over an
+account; that short list is removed (maintainer decision, 2026-11-12: an
+authenticated paired device is the person), so a paired device does those too.
 Consequences: remote route policy gains the bot create and card-answer routes
 with the device's grant; the Mobile section of Architecture is updated in
 slice 8; threads keep today's phone rules (CON-2).
@@ -601,7 +603,8 @@ Choice: (c). Giving one login to one bot for named sites is a deliberate act,
 and the value never reaches the model either way.
 Consequences: the Browser's per-use Login permission, Review login form and
 Fill steps do not apply to a bot's own browser; routine turns may sign in
-with a given login; adding and giving logins stays local-window only (D-13).
+with a given login; adding and giving logins is the person's act, at a local
+window or a paired device (D-13).
 
 ### D-16: No site approval and no first-action ask in a bot's own desktop (Accepted, 2026-11-08)
 
