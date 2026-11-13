@@ -43,7 +43,7 @@ photo. Glass panels and the bundled atmosphere photo remain opt-in materials
 
 ## Thread behavior
 
-The thread is conversation-first, following DESIGN.md › Transcript:
+The thread is conversation-first, following docs/design/thread-view.md:
 
 - `ThreadScreen` and `FloatingComposer` keep the transcript and composer clear.
 - `MessageBubble` and `MessageActions` make copy and follow-up actions available.
