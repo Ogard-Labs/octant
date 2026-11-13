@@ -1072,6 +1072,55 @@ describe("Project terminals", () => {
     });
     expect(readRunningProjectTerminals(connection)).toEqual([]);
   });
+
+  it("tells a window that may still use the Project that a restart ended its shell, and starts a new one only as an ordinary start", async () => {
+    const { service, connection, journal } = harness();
+    await service.execute(windowId, "local-window", start());
+    const access = { value: true };
+    const terminals = new FakeTerminals();
+    const restarted = new ProjectTerminalService({
+      terminals,
+      readProject: () => project(),
+      canAccessProject: () => access.value,
+      resolveRoot: async () => root,
+      suggestActions: async () => [],
+      readRunning: () => readRunningProjectTerminals(connection),
+      journal,
+      actor,
+      uuid: () => "92000000-0000-4000-8000-000000000002",
+      clock: () => now,
+    });
+    restarted.reconcile();
+
+    const attach = { kind: "attach", projectId, terminalId } as const;
+    expect(refusal(await restarted.execute(windowId, "local-window", attach))).toBe(
+      "host-restarted",
+    );
+    // The ended shell takes no input; only a new start makes a shell.
+    expect(
+      refusal(
+        await restarted.execute(windowId, "local-window", {
+          kind: "write",
+          projectId,
+          terminalId,
+          data: "ls\n",
+        }),
+      ),
+    ).toBe("host-restarted");
+    expect(terminals.writes).toEqual([]);
+
+    access.value = false;
+    expect(refusal(await restarted.execute(windowId, "local-window", attach))).toBe("unavailable");
+    expect(
+      refusal(
+        await restarted.execute(
+          windowId,
+          "local-window",
+          start({ terminalId: "92000000-0000-4000-8000-000000000003" }),
+        ),
+      ),
+    ).toBe("unauthorized");
+  });
 });
 
 describe("a server Project's terminal", () => {
