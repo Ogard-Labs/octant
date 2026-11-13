@@ -5108,8 +5108,8 @@ or .zip>` write the same files, built by one host command
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
   threads that window can open. Chat and Work turns are continued by the same
-  rule (Chat and Work restart recovery, below); subagent runs, coordinator
-  wakes and goal loops are not continued yet.
+  rule (Chat and Work restart recovery, below), and so are Work goal loops;
+  subagent runs and coordinator wakes are not continued yet.
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5218,6 +5218,25 @@ ls-remote` against the thread's remote and the GitHub reads they already
   messages follow the continuation under the same release as Code. A Chat
   attempt already waiting on a question or approval at the restart is retained
   as before, and answering it still settles it interrupted.
+
+  A Work goal loop is journaled frame by frame (started, each round with
+  whether its spend was seen, paused, resumed, stopped, and each narrowed
+  ceiling) and every start rebuilds loops from those frames, so a restart
+  never widens a loop's ceiling or forgets its rounds. A loop the start finds
+  running follows its thread's decision. When the restart cut off the loop's
+  round turn, the loop's next round is that thread's continuation, behind the
+  same holds and harness lift as a cut-off turn and in place of a separate
+  continuation turn, so the thread never gets two turns at once; the round in
+  flight is not recorded and its spend is not charged to the goal. A loop found
+  running with no cut-off turn continues unless the Work setting, the thread's
+  switch, Work itself or a person's quit holds it. A held loop is paused with
+  `held-after-restart` ("Octant restarted while this loop ran and did not
+  continue it by itself"), journaled, and only a person's Resume runs it again.
+  A loop that continues starts its round through the ordinary round path, where
+  the budget, ceiling and authority checks apply again. Not built yet: a
+  crash-loop count for loop rounds (a round's turn carries no derived identity,
+  so the twice-cut-off hold does not see it; the goal's budget still bounds
+  it), and naming a loop held without a cut-off turn in the restart notice.
 
   A person who quits Octant while turns run chose to stop them, so the next
   start holds those threads instead of continuing them (maintainers decided on

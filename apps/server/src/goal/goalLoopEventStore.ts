@@ -28,6 +28,11 @@ export const GoalLoopStarted = Schema.Struct({
 
 export const GoalLoopRoundRecorded = Schema.Struct({
   round: GoalLoopRound,
+  /**
+   * Whether the runner saw what the round charged. Absent on frames written
+   * before it was kept, which read as seen, as they did before a restart.
+   */
+  spendObserved: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 
 export const GoalLoopPaused = Schema.Struct({
@@ -47,35 +52,116 @@ export const GoalLoopStopped = Schema.Struct({
   roundsRun: Schema.Int.pipe(Schema.nonNegative()),
 }).annotations(strict);
 
+/**
+ * A narrowed ceiling is journaled so a restart cannot widen a running loop
+ * back to the ceiling it started with.
+ */
+export const GoalLoopCeilingNarrowed = Schema.Struct({
+  loopId: Schema.UUID,
+  ceiling: AgentRunAuthority,
+}).annotations(strict);
+
 export function registerGoalLoopEvents(registry: EventRegistry): EventRegistry {
   return registry
     .register(GOAL_LOOP_EVENT_NAMES.started, 1, GoalLoopStarted)
     .register(GOAL_LOOP_EVENT_NAMES.roundRecorded, 1, GoalLoopRoundRecorded)
     .register(GOAL_LOOP_EVENT_NAMES.paused, 1, GoalLoopPaused)
     .register(GOAL_LOOP_EVENT_NAMES.resumed, 1, GoalLoopResumed)
-    .register(GOAL_LOOP_EVENT_NAMES.stopped, 1, GoalLoopStopped);
+    .register(GOAL_LOOP_EVENT_NAMES.stopped, 1, GoalLoopStopped)
+    .register(GOAL_LOOP_EVENT_NAMES.ceilingNarrowed, 1, GoalLoopCeilingNarrowed);
 }
 
+/** One journaled goal-loop frame, decoded, in the order it was written. */
+export type GoalLoopFrame = {
+  readonly occurredAt: UtcTimestamp;
+} & (
+  | { readonly kind: "started"; readonly payload: typeof GoalLoopStarted.Type }
+  | { readonly kind: "round-recorded"; readonly payload: typeof GoalLoopRoundRecorded.Type }
+  | { readonly kind: "paused"; readonly payload: typeof GoalLoopPaused.Type }
+  | { readonly kind: "resumed"; readonly payload: typeof GoalLoopResumed.Type }
+  | { readonly kind: "stopped"; readonly payload: typeof GoalLoopStopped.Type }
+  | { readonly kind: "ceiling-narrowed"; readonly payload: typeof GoalLoopCeilingNarrowed.Type }
+);
+
+const decodeFrame = {
+  [GOAL_LOOP_EVENT_NAMES.started]: (payload: unknown) => ({
+    kind: "started" as const,
+    payload: Schema.decodeUnknownSync(GoalLoopStarted)(payload),
+  }),
+  [GOAL_LOOP_EVENT_NAMES.roundRecorded]: (payload: unknown) => ({
+    kind: "round-recorded" as const,
+    payload: Schema.decodeUnknownSync(GoalLoopRoundRecorded)(payload),
+  }),
+  [GOAL_LOOP_EVENT_NAMES.paused]: (payload: unknown) => ({
+    kind: "paused" as const,
+    payload: Schema.decodeUnknownSync(GoalLoopPaused)(payload),
+  }),
+  [GOAL_LOOP_EVENT_NAMES.resumed]: (payload: unknown) => ({
+    kind: "resumed" as const,
+    payload: Schema.decodeUnknownSync(GoalLoopResumed)(payload),
+  }),
+  [GOAL_LOOP_EVENT_NAMES.stopped]: (payload: unknown) => ({
+    kind: "stopped" as const,
+    payload: Schema.decodeUnknownSync(GoalLoopStopped)(payload),
+  }),
+  [GOAL_LOOP_EVENT_NAMES.ceilingNarrowed]: (payload: unknown) => ({
+    kind: "ceiling-narrowed" as const,
+    payload: Schema.decodeUnknownSync(GoalLoopCeilingNarrowed)(payload),
+  }),
+} satisfies Record<string, (payload: unknown) => Omit<GoalLoopFrame, "occurredAt">>;
+
+const REPLAY_BATCH_SIZE = 1_000;
+
 export interface GoalLoopEventStoreOptions {
-  readonly journal: Pick<Journal, "append">;
+  readonly journal: Pick<Journal, "append" | "replayAggregateType">;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
   readonly actor: { readonly kind: "system" | "local-user"; readonly actorId: string };
 }
 
 /**
- * Appends the loop's frames.
+ * Appends the loop's frames and reads them back after a restart.
  *
- * Written with `expectedVersion: 0` against the loop's own aggregate id: these
- * are records of what happened rather than transitions competing for one head,
- * and a round that ran must never be lost to a conflict with the pause frame
- * that follows it.
+ * Each frame goes on at the loop aggregate's current head. These are records
+ * of what happened rather than transitions competing for one head, so the
+ * store follows the head it last wrote or replayed instead of asking callers
+ * for a version. Appends used to claim version 0 and carry no correlation id,
+ * so the journal refused every frame and a loop left no record a restart could
+ * read.
  */
 export class GoalLoopEventStore {
   readonly #options: GoalLoopEventStoreOptions;
+  readonly #heads = new Map<string, number>();
 
   constructor(options: GoalLoopEventStoreOptions) {
     this.#options = options;
+  }
+
+  /** Every loop frame in the journal, oldest first; a frame that will not decode is skipped. */
+  replay(): ReadonlyArray<GoalLoopFrame> {
+    const frames: GoalLoopFrame[] = [];
+    let afterSequence = 0;
+    for (;;) {
+      const batch = this.#options.journal.replayAggregateType({
+        aggregateType: GOAL_LOOP_AGGREGATE_TYPE,
+        afterSequence,
+        limit: REPLAY_BATCH_SIZE,
+      });
+      for (const envelope of batch) {
+        afterSequence = envelope.globalSequence;
+        this.#heads.set(String(envelope.aggregateId), envelope.aggregateVersion);
+        const decode = Object.hasOwn(decodeFrame, envelope.eventName)
+          ? decodeFrame[envelope.eventName as keyof typeof decodeFrame]
+          : undefined;
+        if (decode === undefined) continue;
+        try {
+          frames.push({ ...decode(envelope.payload), occurredAt: envelope.occurredAt });
+        } catch {
+          // A frame this host cannot read says nothing it can act on.
+        }
+      }
+      if (batch.length < REPLAY_BATCH_SIZE) return frames;
+    }
   }
 
   append(input: {
@@ -83,19 +169,21 @@ export class GoalLoopEventStore {
     readonly eventName: string;
     readonly payload: unknown;
   }): void {
-    this.#options.journal.append({
+    const committed = this.#options.journal.append({
       aggregate: { aggregateType: GOAL_LOOP_AGGREGATE_TYPE, aggregateId: input.aggregateId },
-      expectedVersion: 0,
+      expectedVersion: this.#heads.get(input.aggregateId) ?? 0,
       events: [
         {
           eventId: this.#options.uuid(),
           eventName: input.eventName,
           eventVersion: 1,
+          correlationId: this.#options.uuid(),
           actor: this.#options.actor,
           occurredAt: this.#options.clock(),
           payload: input.payload,
         },
       ],
     });
+    this.#heads.set(input.aggregateId, committed.aggregateVersion);
   }
 }

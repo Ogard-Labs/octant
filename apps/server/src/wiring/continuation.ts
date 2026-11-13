@@ -37,6 +37,7 @@ import {
 } from "../chat/chatService";
 import { WorkTurnServiceError, type WorkTurnService } from "../work/workTurnService";
 import type { WorkTurnCutOffByRestart } from "../work/workTurnProjection";
+import type { GoalLoopService } from "../goal/goalLoopService";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { consumePersonQuit } from "../personQuit";
@@ -72,7 +73,7 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatAttemptsCutOffByRestart" | "chatService"> &
   Pick<HarnessWiring, "liftRestartRecovery"> &
-  Pick<WorkWiring, "threadMessageQueue" | "workTurnService"> &
+  Pick<WorkWiring, "goalLoopService" | "threadMessageQueue" | "workTurnService"> &
   Pick<
     FoundationsWiring,
     | "codeBoardEventStore"
@@ -290,7 +291,8 @@ function startRestartContinuation(
   if (
     deps.persistence.codeTurnsCutOffByRestart.length === 0 &&
     deps.chatAttemptsCutOffByRestart.length === 0 &&
-    deps.workTurnsCutOffByRestart.length === 0
+    deps.workTurnsCutOffByRestart.length === 0 &&
+    deps.goalLoopService.runningLoopThreads().length === 0
   )
     return () => undefined;
   let summary: HostRestartRecovery | undefined;
@@ -323,6 +325,7 @@ function startRestartContinuation(
         cutOff: deps.workTurnsCutOffByRestart,
         quitByPerson,
         work: deps.workTurnService,
+        goalLoops: deps.goalLoopService,
         readThread: (threadId) => deps.workThreadProjection.read(threadId),
         enabled: () => deps.workThreadProjection.settings()?.restartContinuation !== false,
         modeEnabled: () =>
@@ -426,6 +429,11 @@ export interface WorkRestartContinuationDependencies {
   /** The previous host stopped because a person quit it (personQuit.ts). */
   readonly quitByPerson: boolean;
   readonly work: Pick<WorkTurnService, "startFirstTurn" | "restartContinuationReadiness">;
+  /** The goal loops replayed from the journal; a loop the restart found running follows its thread. */
+  readonly goalLoops: Pick<
+    GoalLoopService,
+    "runningLoopThreads" | "continueAfterRestart" | "holdAfterRestart"
+  >;
   readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
   /** Settings › Work › Continue after restart. */
   readonly enabled: () => boolean;
@@ -438,8 +446,42 @@ export interface WorkRestartContinuationDependencies {
   readonly releaseQueue: (threadId: string) => Promise<void>;
 }
 
-/** Continues the Work turns this start settled as cut off (docs/architecture.md, Work restart recovery). */
-export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
+/**
+ * Continues the Work turns this start settled as cut off, and the goal loops
+ * it found running (docs/architecture.md, Work restart recovery).
+ *
+ * A loop follows its thread's decision. On a thread whose round turn the
+ * restart cut off, the loop's next round is the continuation, through the same
+ * holds a cut-off turn passes, so the thread never gets a continuation turn and
+ * a round at once. A loop found running with no cut-off turn (stopped between
+ * rounds) continues unless the setting, the thread's switch, Work itself or a
+ * person's quit holds it. A held loop is paused with `held-after-restart`.
+ */
+export async function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
+  const recovered = await continueCutOffWorkTurns(deps);
+  const decided = new Set(deps.cutOff.map((cut) => String(cut.threadId)));
+  for (const entry of recovered.held) deps.goalLoops.holdAfterRestart(entry.threadId);
+  for (const threadId of deps.goalLoops.runningLoopThreads()) {
+    if (decided.has(threadId)) {
+      // A cut-off turn that read settled was neither continued nor held:
+      // the thread moved on, so the loop takes its next round as usual.
+      if (!recovered.continued.some((entry) => entry.threadId === threadId))
+        deps.goalLoops.continueAfterRestart(threadId);
+      continue;
+    }
+    const thread = deps.readThread(decodeWorkThreadId(threadId));
+    const holds =
+      deps.quitByPerson ||
+      !deps.enabled() ||
+      !deps.modeEnabled() ||
+      thread?.restartContinuationOff === true;
+    if (holds) deps.goalLoops.holdAfterRestart(threadId);
+    else deps.goalLoops.continueAfterRestart(threadId);
+  }
+  return recovered;
+}
+
+function continueCutOffWorkTurns(deps: WorkRestartContinuationDependencies) {
   const { cutOff, work } = deps;
   const byRequest = new Map(cutOff.map((cut) => [String(cut.requestId), cut] as const));
   return continueThreadTurnsCutOffByRestart({
@@ -464,6 +506,7 @@ export function continueWorkTurns(deps: WorkRestartContinuationDependencies) {
     dispatch: async (turn, continuation, prompt) => {
       if (!deps.modeEnabled())
         return { kind: "refused", detail: "Work is turned off on this host." };
+      if (deps.goalLoops.continueAfterRestart(turn.threadId)) return { kind: "dispatched" };
       const thread = deps.readThread(decodeWorkThreadId(turn.threadId));
       if (thread?.bindingRevisionId === undefined)
         return { kind: "refused", detail: "The thread has no bound project revision." };

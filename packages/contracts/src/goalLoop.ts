@@ -57,6 +57,7 @@ export const GoalLoopPauseReason = Schema.Literal(
   "spend-unreported",
   "paused-by-user",
   "stopped-by-user",
+  "held-after-restart",
 );
 export type GoalLoopPauseReason = typeof GoalLoopPauseReason.Type;
 
@@ -192,6 +193,7 @@ export const GOAL_LOOP_EVENT_NAMES = {
   paused: "goal-loop-paused@1",
   resumed: "goal-loop-resumed@1",
   stopped: "goal-loop-stopped@1",
+  ceilingNarrowed: "goal-loop-ceiling-narrowed@1",
 } as const;
 
 export const decodeGoalLoopId = Schema.decodeUnknownSync(GoalLoopId);

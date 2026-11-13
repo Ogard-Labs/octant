@@ -21,6 +21,7 @@ import {
   mayCompleteGoalLoop,
   narrowGoalLoopCeiling,
 } from "@octant/domain";
+import type { GoalLoopFrame } from "./goalLoopEventStore";
 
 /**
  * Running a goal loop.
@@ -113,6 +114,27 @@ export interface GoalLoopDependencies {
   readonly clock: () => UtcTimestamp;
 }
 
+type LoopChanges = Partial<
+  Pick<GoalLoop, "status" | "pauseReason" | "ceiling" | "roundsRun" | "lastRoundAt">
+>;
+
+/** The status a pause or stop frame leaves a loop in. */
+function pausedStatus(
+  reason: GoalLoopPauseReason,
+  stopped: boolean,
+): { readonly status: GoalLoop["status"]; readonly pauseReason: GoalLoopPauseReason } {
+  const status = stopped
+    ? reason === "goal-complete"
+      ? ("complete" as const)
+      : ("stopped" as const)
+    : reason === "approval-required"
+      ? ("awaiting-approval" as const)
+      : reason === "budget-exhausted" || reason === "budget-required"
+        ? ("budget-limited" as const)
+        : ("paused" as const);
+  return { status, pauseReason: reason };
+}
+
 interface LoopRecord {
   readonly loop: GoalLoop;
   readonly rounds: ReadonlyArray<GoalLoopRound>;
@@ -183,12 +205,16 @@ export class GoalLoopService {
             "A running loop's ceiling can only narrow. Stop it and start a new one to widen it.",
           );
         }
-        return this.#result(
-          this.#write({
-            ...record,
-            loop: this.#loopWith(record.loop, { ceiling: change.ceiling }),
-          }),
-        );
+        const next = this.#write({
+          ...record,
+          loop: this.#loopWith(record.loop, { ceiling: change.ceiling }),
+        });
+        this.#dependencies.journal.append({
+          aggregateId: String(record.loop.id),
+          eventName: GOAL_LOOP_EVENT_NAMES.ceilingNarrowed,
+          payload: { loopId: String(record.loop.id), ceiling: change.ceiling },
+        });
+        return this.#result(next);
       }
     }
   }
@@ -305,7 +331,7 @@ export class GoalLoopService {
       this.#dependencies.journal.append({
         aggregateId: String(record.loop.id),
         eventName: GOAL_LOOP_EVENT_NAMES.roundRecorded,
-        payload: { round },
+        payload: { round, spendObserved: outcome.usageReported !== false },
       });
       if (usageRecorded && !complete && record.loop.trigger.kind === "continuous") {
         this.#dependencies.scheduleNextRound?.(threadId);
@@ -314,6 +340,90 @@ export class GoalLoopService {
     } finally {
       this.#inFlight.delete(threadId);
     }
+  }
+
+  /**
+   * Rebuilds every loop from its journaled frames, as the previous host left
+   * them. Each frame advances the loop's version exactly as the change that
+   * wrote it did, so a window's expected version still matches after a
+   * restart. A loop found running was running when the host stopped; it
+   * stays that way until continueAfterRestart or holdAfterRestart decides it,
+   * and nothing schedules it here.
+   */
+  replay(frames: ReadonlyArray<GoalLoopFrame>): void {
+    const byLoop = new Map<string, LoopRecord>();
+    for (const frame of frames) {
+      if (frame.kind === "started") {
+        const previous = this.#byThread.get(String(frame.payload.loop.threadId));
+        const record = { loop: frame.payload.loop, rounds: previous?.rounds ?? [] };
+        byLoop.set(String(frame.payload.loop.id), record);
+        this.#write(record);
+        continue;
+      }
+      const loopId =
+        frame.kind === "round-recorded" ? frame.payload.round.loopId : frame.payload.loopId;
+      const record = byLoop.get(String(loopId));
+      if (record === undefined) continue;
+      const replayed = (changes: LoopChanges) =>
+        this.#loopWithAt(record.loop, changes, frame.occurredAt);
+      let next: LoopRecord;
+      switch (frame.kind) {
+        case "round-recorded":
+          next = {
+            loop: replayed({
+              roundsRun: record.loop.roundsRun + 1,
+              lastRoundAt: frame.payload.round.endedAt,
+            }),
+            rounds: [...record.rounds, frame.payload.round],
+            lastAuthority: frame.payload.round.authority,
+            lastSpendObserved: frame.payload.spendObserved !== false,
+          };
+          break;
+        case "paused":
+          next = { ...record, loop: replayed(pausedStatus(frame.payload.reason, false)) };
+          break;
+        case "stopped":
+          next = { ...record, loop: replayed(pausedStatus(frame.payload.reason, true)) };
+          break;
+        case "resumed":
+          next = { ...record, loop: replayed({ status: "running" }) };
+          break;
+        case "ceiling-narrowed":
+          next = { ...record, loop: replayed({ ceiling: frame.payload.ceiling }) };
+          break;
+      }
+      byLoop.set(String(loopId), next);
+      // Only the thread's newest loop is the one it shows and commands.
+      const current = this.#byThread.get(String(next.loop.threadId));
+      if (current === undefined || String(current.loop.id) === String(loopId)) this.#write(next);
+    }
+  }
+
+  /** The threads whose loop was running when the previous host stopped. */
+  runningLoopThreads(): ReadonlyArray<string> {
+    return [...this.#byThread.values()]
+      .filter((record) => record.loop.status === "running")
+      .map((record) => String(record.loop.threadId));
+  }
+
+  /**
+   * Takes up a loop the restart cut off: its next round starts through the
+   * ordinary round path, where every rule a round answers to applies again.
+   * The round in flight at the restart is not recorded; its Work turn settled
+   * as cut off and its spend is not charged to the goal.
+   */
+  continueAfterRestart(threadId: string): boolean {
+    if (this.#byThread.get(threadId)?.loop.status !== "running") return false;
+    this.#dependencies.scheduleFirstRound?.(threadId);
+    return true;
+  }
+
+  /** Leaves a loop the restart cut off paused for its person, with the reason journaled. */
+  holdAfterRestart(threadId: string): boolean {
+    const record = this.#byThread.get(threadId);
+    if (record?.loop.status !== "running") return false;
+    this.#pause(record, "held-after-restart");
+    return true;
   }
 
   #start(
@@ -417,15 +527,7 @@ export class GoalLoopService {
     reason: GoalLoopPauseReason,
     stopped = false,
   ): { readonly paused: GoalLoopPauseReason } {
-    const status = stopped
-      ? reason === "goal-complete"
-        ? ("complete" as const)
-        : ("stopped" as const)
-      : reason === "approval-required"
-        ? ("awaiting-approval" as const)
-        : reason === "budget-exhausted" || reason === "budget-required"
-          ? ("budget-limited" as const)
-          : ("paused" as const);
+    const { status } = pausedStatus(reason, stopped);
     // Journaled every time, including when the loop was already in this state:
     // a loop that goes quiet for six hours should leave six hours of evidence
     // that it kept deciding not to run, not silence indistinguishable from a
@@ -441,12 +543,11 @@ export class GoalLoopService {
     return { paused: reason };
   }
 
-  #loopWith(
-    loop: GoalLoop,
-    changes: Partial<
-      Pick<GoalLoop, "status" | "pauseReason" | "ceiling" | "roundsRun" | "lastRoundAt">
-    >,
-  ): GoalLoop {
+  #loopWith(loop: GoalLoop, changes: LoopChanges): GoalLoop {
+    return this.#loopWithAt(loop, changes, this.#dependencies.clock());
+  }
+
+  #loopWithAt(loop: GoalLoop, changes: LoopChanges, updatedAt: UtcTimestamp): GoalLoop {
     const status = changes.status ?? loop.status;
     const pauseReason = changes.pauseReason ?? loop.pauseReason;
     return decodeGoalLoop({
@@ -459,7 +560,7 @@ export class GoalLoopService {
       ...(status === "running"
         ? { pauseReason: undefined }
         : { pauseReason: pauseReason ?? "paused-by-user" }),
-      updatedAt: this.#dependencies.clock(),
+      updatedAt,
       version: loop.version + 1,
     });
   }

@@ -1,6 +1,15 @@
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentRunAuthority, ThreadGoal } from "@octant/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WORK_GOAL_LOOP_CEILING } from "@octant/domain";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { GoalLoopEventStore } from "./goalLoopEventStore";
 import { GoalLoopService, type GoalLoopDependencies } from "./goalLoopService";
 
 const threadId = "22222222-0000-4000-8000-000000000001";
@@ -558,5 +567,99 @@ describe("steering a running loop", () => {
     expect(outcome).toEqual({ paused: "stopped-by-user" });
     expect(h.runRound).not.toHaveBeenCalled();
     expect(journaled(h.journal)).toContain("goal-loop-stopped@1");
+  });
+});
+
+describe("a goal loop across a restart", () => {
+  const opened: Array<SqliteConnection> = [];
+  const directories: Array<string> = [];
+  afterEach(() => {
+    for (const connection of opened.splice(0)) connection.close();
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true });
+  });
+
+  /** One host start over the same store: a fresh journal, frame store and loop service. */
+  function hostStart(path: string, scheduleFirstRound = vi.fn()) {
+    const connection = openSqlite(path);
+    opened.push(connection);
+    const at = "2026-08-19T09:00:00.000Z";
+    applyMigrations(connection, MIGRATIONS, () => at);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => at,
+    });
+    const events = new GoalLoopEventStore({
+      journal,
+      uuid: randomUUID,
+      clock: () => at as never,
+      actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000001" },
+    });
+    const h = harness({ scheduleFirstRound });
+    const service = new GoalLoopService({
+      readGoal: () => goal(),
+      recordUsage: async () => {},
+      threadAuthority: () => ceiling,
+      modePosture: () => undefined,
+      pendingApproval: () => undefined,
+      markCheckpoint: async () => "checkpoint-1",
+      runRound: h.runRound,
+      journal: events,
+      scheduleFirstRound,
+      uuid: randomUUID,
+      clock: () => at as never,
+    });
+    service.replay(events.replay());
+    return { service, scheduleFirstRound };
+  }
+
+  it("comes back running with its rounds and narrowed ceiling, and a held loop stays paused on the next start", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-goal-loop-"));
+    directories.push(directory);
+    const path = join(directory, "octant.sqlite3");
+
+    const before = hostStart(path);
+    await before.service.execute({
+      kind: "start-goal-loop",
+      threadId,
+      expectedVersion: 0,
+      loopId,
+      goalId,
+      ceiling,
+      trigger: { kind: "continuous" },
+    });
+    await before.service.advance(threadId);
+    const running = before.service.read(threadId).loop;
+    await before.service.execute({
+      kind: "narrow-goal-loop-ceiling",
+      threadId,
+      expectedVersion: running?.version ?? 0,
+      ceiling: { ...ceiling, tools: false },
+    });
+    const left = before.service.read(threadId);
+
+    const after = hostStart(path);
+    const replayed = after.service.read(threadId);
+    expect(replayed.loop).toMatchObject({
+      status: "running",
+      roundsRun: 1,
+      version: left.loop?.version,
+      ceiling: { tools: false },
+    });
+    expect(replayed.rounds).toEqual(left.rounds);
+    expect(after.service.runningLoopThreads()).toEqual([threadId]);
+    expect(after.scheduleFirstRound).not.toHaveBeenCalled();
+
+    expect(after.service.holdAfterRestart(threadId)).toBe(true);
+    const next = hostStart(path);
+    expect(next.service.read(threadId).loop).toMatchObject({
+      status: "paused",
+      pauseReason: "held-after-restart",
+    });
+    expect(next.service.runningLoopThreads()).toEqual([]);
+    expect(next.service.continueAfterRestart(threadId)).toBe(false);
+    expect(next.scheduleFirstRound).not.toHaveBeenCalled();
   });
 });

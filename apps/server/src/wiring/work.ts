@@ -1216,6 +1216,9 @@ export function wireWork(deps: WorkDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString() as never,
     });
+    // Loops come back as the previous host left them; restart continuation
+    // decides whether one it found running goes on (wiring/continuation.ts).
+    goalLoopService.replay(goalLoopEvents.replay());
     const goalLoopRoutes = createGoalLoopRouteHandler({
       service: goalLoopService,
       windowAuthorityStore,
