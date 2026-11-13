@@ -428,6 +428,10 @@ export interface CodePersistencePort {
   readonly readCodeCheckouts: () => ReadonlyArray<CodeCheckoutIdentity>;
   readonly readCodeFileReference: (fileId: CodeFileId) => CodeFileReference | undefined;
   readonly readCodeFileReferences: (threadId: CodeThreadId) => ReadonlyArray<CodeFileReference>;
+  readonly readCodeFileReferencesByContentId: (contentId: string) => ReadonlyArray<{
+    readonly projectId: ProjectId;
+    readonly reference: CodeFileReference;
+  }>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
   readonly readProject?: (projectId: ProjectId) => Project | undefined;
   readonly readAgentProfileBinding?: (
@@ -2905,12 +2909,14 @@ export class CodeService {
     contentId: CodeEvidenceContentId | string,
   ): Promise<{ readonly bytes: Uint8Array; readonly digest: string; readonly byteLength: number }> {
     let owner: CodeFileReference | undefined;
-    for (const thread of this.#persistence.readCodeThreads()) {
-      if (!(await this.#access.canAccessProject(authenticatedWindowId, thread.projectId))) continue;
-      owner = this.#persistence
-        .readCodeFileReferences(thread.id)
-        .find((reference) => String(reference.contentId) === String(contentId));
-      if (owner !== undefined) break;
+    for (const candidate of this.#persistence.readCodeFileReferencesByContentId(
+      String(contentId),
+    )) {
+      if (!(await this.#access.canAccessProject(authenticatedWindowId, candidate.projectId))) {
+        continue;
+      }
+      owner = candidate.reference;
+      break;
     }
     const expected =
       owner ?? (await this.#openedContentAuthority(authenticatedWindowId, String(contentId)));

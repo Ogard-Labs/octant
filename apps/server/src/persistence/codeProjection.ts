@@ -24,6 +24,7 @@ import {
   decodeCodePlannerProposalUpdated,
   decodeCodePlannerWorkProposal,
   decodeCodeThreadActivity,
+  decodeProjectId,
   type CodePlannerDesignation,
   type CodePlannerProposalId,
   type CodePlannerWorkProposal,
@@ -792,6 +793,43 @@ export function readCodeFileReferences(
       .prepare("SELECT * FROM code_file_projection WHERE thread_id = ? ORDER BY file_id ASC")
       .all(threadId) as ReadonlyArray<CodeFileProjectionRow>
   ).map(decodeFileRow);
+}
+
+export interface ProjectedCodeFileContentCandidate {
+  readonly projectId: ProjectId;
+  readonly reference: CodeFileReference;
+}
+
+interface CodeFileContentCandidateRow extends CodeFileProjectionRow {
+  readonly thread_project_id: string;
+  readonly thread_schema_version: number;
+}
+
+/**
+ * Every projected file reference that points to `contentId`, paired with its
+ * owning thread's project so authority checks can still filter per project.
+ */
+export function readCodeFileReferencesByContentId(
+  connection: SqliteConnection,
+  contentId: string,
+): ReadonlyArray<ProjectedCodeFileContentCandidate> {
+  return (
+    connection
+      .prepare(`
+        SELECT f.*, t.project_id AS thread_project_id, t.schema_version AS thread_schema_version
+        FROM code_file_projection f
+        JOIN code_thread_projection t ON t.thread_id = f.thread_id
+        WHERE f.content_id = ?
+        ORDER BY t.updated_at DESC, t.thread_id ASC, f.file_id ASC
+      `)
+      .all(contentId) as ReadonlyArray<CodeFileContentCandidateRow>
+  ).map((row) => {
+    assertCodeProjectionSchema(row.thread_schema_version);
+    return {
+      projectId: decodeProjectId(row.thread_project_id),
+      reference: decodeFileRow(row),
+    };
+  });
 }
 
 export function readCodeRuntimeWorkAggregateVersion(
