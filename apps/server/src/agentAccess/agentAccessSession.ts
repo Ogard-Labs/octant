@@ -195,6 +195,7 @@ export function agentToolPolicy(
     projectAllowed: (projectId) => grant.scope.projects.some((id) => String(id) === projectId),
     threadAllowed: (threadId) => threadInScope(grant, threadId, deps),
     defaultAccess: grant.scope.highestLevel,
+    allowsFullAccess: grant.scope.highestLevel === "full-access",
     beforeTurn: async (session) => {
       // The place is held before anything is read, so a start checked at the
       // same moment counts this one. Running turns are counted from the

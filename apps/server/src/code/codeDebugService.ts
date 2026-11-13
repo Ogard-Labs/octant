@@ -50,6 +50,7 @@ import {
   type CodeDebugStartResult,
 } from "@octant/contracts/code-debug";
 import {
+  actsAsHostPerson,
   canonicalDebugConfigurationText,
   decideDebugSessionStart,
   proposeDebugConfigurations,
@@ -326,7 +327,7 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     request: CodeDebugConfigurationsRequest,
   ): Promise<CodeDebugConfigurationsResult> {
-    if (caller.principal !== "local-window") return refused("local-host-required");
+    if (!actsAsHostPerson(caller.principal)) return refused("local-host-required");
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
     if (authorized.status === "refused") return authorized;
     const adapters = this.#adapters();
@@ -352,7 +353,8 @@ export class CodeDebugService {
   }
 
   /**
-   * The person at a local window confirms one configuration for this
+   * The host's own person, at a local window or on a device they paired
+   * (maintainer decision, 2026-11-13), confirms one configuration for this
    * checkout or the thread's Project. Every check a start makes runs first,
    * with the confirmation taken as given, so Plan refuses and nothing is
    * recorded for a configuration the thread could not start.
@@ -361,7 +363,7 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     request: CodeDebugApprovalRequest,
   ): Promise<CodeDebugApprovalResult> {
-    if (caller.principal !== "local-window") return refused("local-host-required");
+    if (!actsAsHostPerson(caller.principal)) return refused("local-host-required");
     const authorized = this.#authorize(caller, request.threadId, request.checkoutId);
     if (authorized.status === "refused") return authorized;
     const adapter = this.#adapterFor(request.configuration);
@@ -390,7 +392,10 @@ export class CodeDebugService {
     return { status: "approved", configurationDigest, scope: request.scope };
   }
 
-  /** A person's Start at a local window. Nothing launches until every check passes. */
+  /**
+   * A person's Start, at a local window or on a device they paired. Nothing
+   * launches until every check passes.
+   */
   async start(
     caller: CodeDebugCaller,
     request: CodeDebugStartRequest,
@@ -535,7 +540,7 @@ export class CodeDebugService {
     caller: CodeDebugCaller,
     call: CodeDebugSessionCall,
   ): Promise<CodeDebugSessionResult> {
-    if (caller.principal !== "local-window") return refused("local-host-required");
+    if (!actsAsHostPerson(caller.principal)) return refused("local-host-required");
     const authorized = this.#authorize(caller, call.threadId, call.checkoutId);
     if (authorized.status === "refused") return authorized;
     const record = this.#sessions.get(String(call.sessionId));

@@ -98,8 +98,9 @@ export function classifyProductAction(request: Request): string | undefined {
   }
   if (path.startsWith("/api/code/")) {
     // Debugging runs the program on the host and shows what it holds, which
-    // stays with the person at the machine (decision DB7): no remote action
-    // starts, controls, or observes a session, whatever the method.
+    // stays with the host's own person. A device that person paired never
+    // reaches this catalogue; for every device session that does, no remote
+    // action starts, controls, or observes a session, whatever the method.
     if (path.startsWith("/api/code/debug/")) return undefined;
     if (method === "POST" && path === "/api/code/board") return "project.overview.read";
     if (method === "POST" && path === "/api/code/evidence/batch") {

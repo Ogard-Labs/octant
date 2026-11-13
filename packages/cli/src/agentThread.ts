@@ -605,6 +605,14 @@ export async function createAgentThread(
      */
     readonly access?: PermissionMode | undefined;
     /**
+     * Where a Code thread's Full access is recorded. `project` (the default)
+     * remembers it for the Project, as above. `thread` gives it to this thread
+     * alone and sends no Project command: an agent grant holds no Project
+     * administration, so the host refuses it both the Project command and a
+     * thread that asks for the Project's remembered level.
+     */
+    readonly fullAccessScope?: "project" | "thread" | undefined;
+    /**
      * Opt-in sandbox at Full access: the thread records `fullAccessSandbox`,
      * so its launch stays confined and its network proxied while prompts stay
      * off. The host drops the flag when the resolved posture is not Full access.
@@ -823,10 +831,17 @@ export async function createAgentThread(
   // it. Asking the same way lets a terminal thread follow `octant project
   // access <name> full-access`; anywhere else it starts approval-gated, and
   // the host refuses a remembered request the Project no longer backs.
-  let remembered = project.type === "code" && project.codeAccessPersistence === "project-default";
+  let remembered =
+    input.fullAccessScope !== "thread" &&
+    project.type === "code" &&
+    project.codeAccessPersistence === "project-default";
   let rememberedNow = false;
   const requested = input.access === undefined ? undefined : threadAccessOf(input.access);
-  if (requested?.executionPolicy === "full-access" && !remembered) {
+  if (
+    requested?.executionPolicy === "full-access" &&
+    !remembered &&
+    input.fullAccessScope !== "thread"
+  ) {
     // An explicit --access full-access remembers Full access for the Project
     // first, through the same command `octant project access` sends, so the
     // new thread starts journaled at Full access and works the same on a

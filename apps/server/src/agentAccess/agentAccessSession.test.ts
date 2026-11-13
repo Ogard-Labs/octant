@@ -452,6 +452,18 @@ describe("the running-turn limit", () => {
   });
 });
 
+describe("naming Full access in a tool call", () => {
+  it("is open to a grant the person gave Full access and to no other", () => {
+    const { service, threadProject, threadAccess } = deps();
+    const naming = (highestLevel: AgentGrantScope["highestLevel"]) =>
+      agentToolPolicy(grant({ highestLevel }), { service, threadProject, threadAccess })
+        .allowsFullAccess;
+    expect(naming("full-access")).toBe(true);
+    expect(naming("auto")).toBe(false);
+    expect(naming("ask-first")).toBe(false);
+  });
+});
+
 describe("threads the person made in a granted Project", () => {
   it("are out of reach in a mode the grant does not name", () => {
     const read = { path: `/api/chat/threads/${chatThread}`, method: "GET" as const };

@@ -1102,7 +1102,7 @@ describe("Code routes", () => {
     expect(approve).toHaveBeenCalledOnce();
   });
 
-  it("serves debugging to a local window only, and refuses a paired device before reading its request", async () => {
+  it("serves debugging to the host's own person, and refuses any other device session before reading its request", async () => {
     const session = vi.fn(async () => ({ status: "refused", reason: "no-session" }));
     const debug = {
       configurations: vi.fn(),
@@ -1172,6 +1172,33 @@ describe("Code routes", () => {
     expect(debug.approve).not.toHaveBeenCalled();
     expect(debug.start).not.toHaveBeenCalled();
     expect(session).toHaveBeenCalledOnce();
+
+    // A device the host's own person paired is that person: its request
+    // reaches the service, judged as a local window's and named as the device's.
+    const pairedDeviceId = "00000000-0000-4000-8000-000000000954";
+    const pairedRequest = post("/api/code/debug/session", call);
+    bindPrincipalRouteContext(pairedRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: pairedDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000955" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: pairedDeviceId as never,
+    });
+    expect((await route(pairedRequest))?.status).toBe(200);
+    expect(session).toHaveBeenLastCalledWith(
+      {
+        scopeId: pairedDeviceId,
+        principal: "local-window",
+        actor: { kind: "remote-device", actorId: pairedDeviceId, deviceId: pairedDeviceId },
+      },
+      expect.anything(),
+    );
 
     expect((await routeFixture()(post("/api/code/debug/session", call)))?.status).toBe(503);
   });

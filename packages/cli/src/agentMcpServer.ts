@@ -50,8 +50,10 @@ export type {
  * goes through the same thread routes as the app, and revokes it when the call
  * (and any send it started) has finished. The host keeps every authority
  * decision. Two rules are this server's own, because its caller is another
- * agent rather than the person: it never answers an approval, and it never
- * starts a thread at Full access. Both stay with the person, in Octant.
+ * agent rather than the person: it never answers an approval, and it starts a
+ * thread at Full access only for a caller whose grant the person gave Full
+ * access (maintainer decision, 2026-11-13). The stdio server holds no grant,
+ * so there both stay with the person, in Octant.
  */
 
 export const AGENT_MCP_HELP = [
@@ -84,6 +86,21 @@ const INCOMPLETE_WAITING =
   "Octant could not list everything waiting on the person, so more may be waiting; the person can see it all in Octant.";
 
 const ACCESS_LEVELS = ["ask-first", "accept-edits", "auto", "plan"] as const;
+/** What a caller may name when the person chose Full access for its grant. */
+const ACCESS_LEVELS_WITH_FULL_ACCESS = [...ACCESS_LEVELS, "full-access"] as const;
+
+/**
+ * Whether a call may name Full access: its grant has it, its grant lacks it,
+ * or it has no grant and Full access is the person's alone.
+ */
+type FullAccessStanding = "in-grant" | "not-in-grant" | "person-only";
+
+const FULL_ACCESS_REFUSALS: Readonly<Record<Exclude<FullAccessStanding, "in-grant">, string>> = {
+  "person-only":
+    "Full access is only turned on by the person in Octant; start at another level, or ask them to give the Project Full access.",
+  "not-in-grant":
+    "This agent's grant does not include Full access; start at another level, or ask the person to choose Full access for the grant in Octant.",
+};
 
 const WAIT_PROPERTIES = {
   wait: {
@@ -289,6 +306,8 @@ export interface AgentToolPolicy {
   readonly threadAllowed: (threadId: string) => boolean;
   /** The level a new Work or Code thread starts at when the call names none. */
   readonly defaultAccess: PermissionMode;
+  /** Whether the person chose Full access for this caller's grant, so a call may name it. */
+  readonly allowsFullAccess: boolean;
   /**
    * Whether the caller's limits allow another turn now. An admitted turn holds
    * its place against the limits until `release`, which the caller calls once
@@ -309,11 +328,43 @@ export interface AgentToolCallOptions {
   readonly policy?: AgentToolPolicy;
 }
 
+/** `start_work` as a caller whose grant has Full access sees it: the level is offered. */
+const START_WORK_WITH_FULL_ACCESS: JsonObject = withFullAccessOffered(
+  AGENT_MCP_TOOLS.find((tool) => tool["name"] === "start_work"),
+);
+
+function withFullAccessOffered(tool: JsonObject | undefined): JsonObject {
+  const schema = asJsonObject(tool?.["inputSchema"]);
+  const properties = asJsonObject(schema["properties"]);
+  return {
+    ...tool,
+    inputSchema: {
+      ...schema,
+      properties: {
+        ...properties,
+        access: {
+          ...asJsonObject(properties["access"]),
+          enum: [...ACCESS_LEVELS_WITH_FULL_ACCESS],
+          description:
+            "The level a new Work or Code thread starts at; this grant's highest level when absent. The person chose Full access for this grant.",
+        },
+      },
+    },
+  };
+}
+
+function asJsonObject(value: unknown): JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as JsonObject)
+    : {};
+}
+
 /** The tools a caller may see: all of them, or those its policy lists. */
 export function agentToolList(policy?: AgentToolPolicy): ReadonlyArray<JsonObject> {
-  return policy === undefined
-    ? AGENT_MCP_TOOLS
-    : AGENT_MCP_TOOLS.filter((tool) => policy.tools.has(String(tool["name"])));
+  if (policy === undefined) return AGENT_MCP_TOOLS;
+  const listed = AGENT_MCP_TOOLS.filter((tool) => policy.tools.has(String(tool["name"])));
+  if (!policy.allowsFullAccess) return listed;
+  return listed.map((tool) => (tool["name"] === "start_work" ? START_WORK_WITH_FULL_ACCESS : tool));
 }
 
 /** Runs until the caller closes its input. */
@@ -425,7 +476,15 @@ export async function callAgentTool(
   args: JsonObject,
   options: AgentToolCallOptions,
 ): Promise<ToolAnswer> {
-  const parsed = parseToolArguments(name, args);
+  const parsed = parseToolArguments(
+    name,
+    args,
+    options.policy === undefined
+      ? "person-only"
+      : options.policy.allowsFullAccess
+        ? "in-grant"
+        : "not-in-grant",
+  );
   if (parsed.kind === "invalid") return { value: parsed.message, isError: true };
   if (options.policy !== undefined && !options.policy.tools.has(parsed.call.tool)) {
     return { value: `This agent's grant does not include ${parsed.call.tool}.`, isError: true };
@@ -492,6 +551,7 @@ class InvalidArgument extends Error {}
 export function parseToolArguments(
   name: string,
   args: JsonObject,
+  fullAccess: FullAccessStanding = "person-only",
 ):
   | { readonly kind: "call"; readonly call: ToolCall }
   | { readonly kind: "invalid"; readonly message: string } {
@@ -510,8 +570,8 @@ export function parseToolArguments(
     if (typeof value !== "string" || !(options as ReadonlyArray<string>).includes(value)) {
       // Full access is named on its own so the caller learns why, not just that.
       throw new InvalidArgument(
-        key === "access" && value === "full-access"
-          ? "Full access is only turned on by the person in Octant; start at another level, or ask them to give the Project Full access."
+        key === "access" && value === "full-access" && fullAccess !== "in-grant"
+          ? FULL_ACCESS_REFUSALS[fullAccess]
           : `\`${key}\` must be one of: ${options.join(", ")}.`,
       );
     }
@@ -559,7 +619,13 @@ export function parseToolArguments(
             addProject: flag("addProject"),
             ...optional("title", text("title", false)),
             ...optional("model", text("model", false)),
-            ...optional("access", choice("access", ACCESS_LEVELS)),
+            ...optional(
+              "access",
+              choice(
+                "access",
+                fullAccess === "in-grant" ? ACCESS_LEVELS_WITH_FULL_ACCESS : ACCESS_LEVELS,
+              ),
+            ),
             wait: flag("wait"),
             timeoutSeconds: integer("timeoutSeconds", DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS),
           },
@@ -820,6 +886,8 @@ async function startWork(
     cwd: call.folder,
     model: call.model,
     access: call.access ?? (mode === "chat" ? undefined : policy?.defaultAccess),
+    // A grant cannot remember a level on a Project; its Full access is the thread's.
+    ...(policy === undefined ? {} : { fullAccessScope: "thread" as const }),
   });
   if (created.kind === "refused") {
     admission?.release();

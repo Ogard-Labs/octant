@@ -1008,15 +1008,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
           // Starting, controlling, and reading a session, and confirming what
-          // it runs, are the person's acts at the machine (decision DB7). The
-          // remote gate never forwards these routes; a paired device that
-          // reached one anyway is refused here before its body is read, and
-          // the service refuses it again.
+          // it runs, are the person's own acts: at the machine, or on a device
+          // they paired (maintainer decision, 2026-11-13). The remote gate
+          // forwards these routes for no other device session; one that
+          // reached a route anyway is refused here before its body is read,
+          // and the service refuses it again.
           if (callerAuthority !== "local-window") {
             return failureResponse(
               {
                 category: "unauthorized",
-                message: "Only this host's own windows can debug a program.",
+                message: "Only this host's own person can debug a program.",
               },
               403,
               origin,
