@@ -23,6 +23,8 @@ const INPUT_LINES = 6;
 export interface ExtensionToolApprovalCardProps {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
+  /** What the host said of this session; absent reads as restricted. */
+  readonly actsAsHostPerson?: boolean;
   readonly refreshIntervalMs?: number;
   /** Confirms Allow on this phone; the device's own biometrics when absent. */
   readonly authenticator?: BiometricAuthenticator;
@@ -59,6 +61,9 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
   if (pending === undefined) return null;
 
   const covers = pending.answerCovers ?? "call";
+  // Narrowing to one tool is recorded as a grant, which the host takes only
+  // from a session acting as its own person, so it is offered to no other.
+  const canNarrow = covers === "server" && props.actsAsHostPerson === true;
   const decide = async (decision: "approved" | "denied", narrowToTool = false) => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -148,7 +153,7 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
         }
         busy={busy}
         narrower={
-          covers === "server"
+          canNarrow
             ? {
                 label: MOBILE_COPY.toolApprovalAllowToolOnly,
                 onPress: () => void decide("approved", true),

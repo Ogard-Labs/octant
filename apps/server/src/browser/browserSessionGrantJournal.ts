@@ -37,6 +37,8 @@ export function browserSessionGrantJournal(options: {
   readonly now: () => number;
   readonly personActor: EventActor;
   readonly hostActor: EventActor;
+  /** The paired device a reviewing scope is, when it is one; its record names the device. */
+  readonly deviceActor?: (scopeId: WindowId) => EventActor | undefined;
 }) {
   return (event: {
     readonly kind: keyof typeof BROWSER_SESSION_EVENT_NAMES;
@@ -56,7 +58,10 @@ export function browserSessionGrantJournal(options: {
           eventName: decodeEventName(BROWSER_SESSION_EVENT_NAMES[event.kind]),
           eventVersion: 1,
           correlationId: decodeCorrelationId(event.grant.grantId),
-          actor: event.windowId === undefined ? options.hostActor : options.personActor,
+          actor:
+            event.windowId === undefined
+              ? options.hostActor
+              : (options.deviceActor?.(event.windowId) ?? options.personActor),
           occurredAt: decodeUtcTimestamp(new Date(options.now()).toISOString()),
           payload: event,
         },

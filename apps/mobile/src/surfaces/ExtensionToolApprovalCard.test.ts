@@ -142,6 +142,7 @@ describe("MCP tool prompt on the phone", () => {
           surfaceStyle: "flat",
           children: createElement(ExtensionToolApprovalCard, {
             transport,
+            actsAsHostPerson: true,
             authenticator: confirming(),
             threadId,
             refreshIntervalMs: 60_000,
@@ -163,6 +164,31 @@ describe("MCP tool prompt on the phone", () => {
       (narrow as HTMLElement | undefined)?.click();
     });
     expect(answers).toEqual([{ kind: "decide", approvalId, decision: "approved", remember: true }]);
+  });
+
+  it("does not offer a restricted session the narrower one-tool answer the host would refuse", async () => {
+    const { transport } = hostWithOnePrompt(undefined, "server");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          surfaceStyle: "flat",
+          children: createElement(ExtensionToolApprovalCard, {
+            transport,
+            actsAsHostPerson: false,
+            authenticator: confirming(),
+            threadId,
+            refreshIntervalMs: 60_000,
+          }),
+        }),
+      );
+    });
+
+    expect(choices(container)).toEqual(["Allow all tools of this server", "Deny"]);
   });
 
   it("offers a marked thread's network server for the rest of that thread", async () => {

@@ -15,6 +15,8 @@ import {
 } from "@octant/contracts";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { principalActsAsHostPerson } from "./clientPrincipal";
+import { eventActorForPrincipal } from "./principalEventActor";
 import type { UsageProjectScope } from "./usageProjectScope";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import {
@@ -103,7 +105,8 @@ export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
     }
 
     let windowId: WindowId;
-    let principalKind: "local-window" | "remote-device";
+    let actsAsHostPerson: boolean;
+    let device: { readonly deviceId: string } | undefined;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -111,7 +114,11 @@ export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
         now: now(),
       });
       windowId = context.scopeId;
-      principalKind = context.principal.kind;
+      actsAsHostPerson = principalActsAsHostPerson(context.principal);
+      // The ledger's audit row is the only record of a purge, so it names the
+      // device, under the id the journal's actor for that device carries.
+      const actor = eventActorForPrincipal(context.principal);
+      device = actor.kind === "remote-device" ? { deviceId: String(actor.deviceId) } : undefined;
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse("Usage query is unauthorized.", 401, origin);
@@ -147,14 +154,16 @@ export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
         : handleExport(request, dependencies, EXPORT_BODY_LIMIT, clock, origin, projectScope);
     }
     if (url.pathname === "/api/usage/reset" || url.pathname === "/api/usage/retain") {
-      // Reset and retain purge the host-wide ledger. A remote principal that
-      // reached this loopback handler must not wipe every Project's rows.
-      if (principalKind !== "local-window") {
+      // Reset and retain purge the host-wide ledger, which is the host's own
+      // person's to do, at a window or on a device they paired (maintainer
+      // decision, 2026-11-13). Any other device session that reached this
+      // handler must not wipe every Project's rows.
+      if (!actsAsHostPerson) {
         return failureResponse("Usage ledger changes stay on the host.", 403, origin);
       }
       return url.pathname === "/api/usage/reset"
-        ? handleReset(request, dependencies, bodyLimit, clock, origin)
-        : handleRetain(request, dependencies, bodyLimit, clock, origin);
+        ? handleReset(request, dependencies, bodyLimit, clock, origin, device)
+        : handleRetain(request, dependencies, bodyLimit, clock, origin, device);
     }
     return undefined;
   };
@@ -380,6 +389,7 @@ async function handleReset(
   bodyLimit: number,
   clock: () => string,
   origin: string | null,
+  device: { readonly deviceId: string } | undefined,
 ): Promise<Response> {
   const decoded = await readJson(request, bodyLimit);
   if (decoded.kind === "too-large") {
@@ -398,7 +408,7 @@ async function handleReset(
       recordUsageAuditEvent(dependencies.connection, {
         action: "reset",
         purgedCount,
-        details: { reason: "user-requested-reset" },
+        details: { reason: "user-requested-reset", ...device },
         occurredAt,
       });
       result = { purgedCount, occurredAt: occurredAt as UsagePurgeResult["occurredAt"] };
@@ -418,6 +428,7 @@ async function handleRetain(
   bodyLimit: number,
   clock: () => string,
   origin: string | null,
+  device: { readonly deviceId: string } | undefined,
 ): Promise<Response> {
   const decoded = await readJson(request, bodyLimit);
   if (decoded.kind === "too-large") {
@@ -436,7 +447,7 @@ async function handleRetain(
       recordUsageAuditEvent(dependencies.connection, {
         action: "purge",
         purgedCount,
-        details: { olderThan: retention.olderThan },
+        details: { olderThan: retention.olderThan, ...device },
         occurredAt,
       });
       result = { purgedCount, occurredAt: occurredAt as UsagePurgeResult["occurredAt"] };

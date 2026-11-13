@@ -70,7 +70,11 @@ function setup(
   return { ...opened, handler, kicks, purged };
 }
 
-function post(path: string, body: unknown, options: { readonly remote?: boolean } = {}): Request {
+function post(
+  path: string,
+  body: unknown,
+  options: { readonly remote?: boolean; readonly admittedBy?: "host-person" } = {},
+): Request {
   const request = new Request(`http://127.0.0.1:3100${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-octant-window-capability": capability },
@@ -86,6 +90,7 @@ function post(path: string, body: unknown, options: { readonly remote?: boolean 
         protocolVersion: 1,
         capabilityDigest: "b".repeat(64),
         sessionId: "33333333-3333-4333-8333-333333333333" as never,
+        ...(options.admittedBy === undefined ? {} : { admittedBy: options.admittedBy }),
       }),
       scopeId: windowId as never,
     });
@@ -138,6 +143,33 @@ describe("benchmark routes", () => {
       expect(projection.runs()).toEqual([]);
     });
   }
+
+  it("journals a suite saved and a run started from a device the host's own person paired with the device as their actor, and a local window's as the local user", async () => {
+    const device = {
+      kind: "remote-device",
+      actorId: "22222222-2222-4222-8222-222222222222",
+      deviceId: "22222222-2222-4222-8222-222222222222",
+    };
+    const actorsBy = async (options: {
+      readonly remote?: boolean;
+      readonly admittedBy?: "host-person";
+    }) => {
+      const { handler, journal } = setup();
+      for (const [path, body] of [
+        [BENCHMARK_ROUTE_PATHS.suitesSave, saveBody],
+        [BENCHMARK_ROUTE_PATHS.runsStart, startBody],
+      ] as const) {
+        expect((await handler(post(path, body, options)))?.status).toBe(200);
+      }
+      return journal
+        .replay({ afterSequence: 0 as never, limit: 100 } as never)
+        .filter((event) => String(event.eventName).startsWith("benchmark-"))
+        .map((event) => event.actor);
+    };
+
+    expect(await actorsBy({ remote: true, admittedBy: "host-person" })).toEqual([device, device]);
+    expect((await actorsBy({})).map((actor) => actor.kind)).toEqual(["local-user", "local-user"]);
+  });
 
   it("lets a remote device read suites and runs", async () => {
     const { handler, store } = setup();

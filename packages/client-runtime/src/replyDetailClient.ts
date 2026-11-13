@@ -2,8 +2,12 @@ import {
   decodeHostAnswer,
   REPLY_DETAIL_PATH,
   ReplyDetailReading,
+  SHELL_SETTINGS_PATH,
+  ShellSettingsReading,
+  type ReplyDetailLevel,
   type ReplyDetailReading as ReplyDetailReadingType,
 } from "@octant/contracts";
+import { withThreadReplyDetail, type ReplyDetailThread } from "@octant/domain/reply-detail-policy";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
 
 /**
@@ -40,6 +44,16 @@ export function readMobileReplyDetail(input: {
 
 export interface ReplyDetailClient {
   readonly read: (signal?: AbortSignal) => Promise<ReplyDetailReadingType | undefined>;
+  /**
+   * Sets a thread's own level, or clears it, through the host's shell
+   * settings route, which the host opens only to a device its own person
+   * paired. Answers the reading after the change, or `undefined` when the
+   * host refused or the settings changed underneath (the caller reads again).
+   */
+  readonly setThreadLevel: (
+    thread: ReplyDetailThread,
+    level: ReplyDetailLevel | undefined,
+  ) => Promise<ReplyDetailReadingType | undefined>;
 }
 
 /** Reads over a product fetch port, as a paired browser's clients do. */
@@ -56,5 +70,36 @@ export function createReplyDetailClient(port: {
           ...(signal === undefined ? {} : { signal }),
         }),
       ),
+    setThreadLevel: async (thread, level) => {
+      try {
+        const url = new URL(SHELL_SETTINGS_PATH, port.baseUrl);
+        const current = await port.fetch(url, {
+          method: "GET",
+          headers: { accept: "application/json" },
+        });
+        if (!current.ok) return undefined;
+        const { settings, version } = decodeHostAnswer(ShellSettingsReading)(await current.json());
+        const replaced = await port.fetch(url, {
+          method: "POST",
+          headers: { accept: "application/json", "content-type": "application/json" },
+          body: JSON.stringify({
+            expectedVersion: version,
+            settings: {
+              ...settings,
+              threadReplyDetail: withThreadReplyDetail(settings.threadReplyDetail, thread, level),
+            },
+          }),
+        });
+        if (!replaced.ok) return undefined;
+        const answer: unknown = await replaced.json();
+        const saved = decodeHostAnswer(ShellSettingsReading)({
+          settings: (answer as { readonly settings?: unknown }).settings,
+          version: (answer as { readonly version?: unknown }).version,
+        }).settings;
+        return { defaultLevel: saved.replyDetail, threads: saved.threadReplyDetail };
+      } catch {
+        return undefined;
+      }
+    },
   };
 }

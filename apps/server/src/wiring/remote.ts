@@ -82,6 +82,7 @@ import {
 } from "../remote/remoteGateway";
 import type { PrivateListener } from "../privateListener";
 import { resolvePrincipalRouteContext } from "../principalRouteContext";
+import type { PairedDeviceRoutes } from "../remote/pairedDeviceRouteSlot";
 import {
   createLocalDeviceAdministrationRouteHandler,
   type LocalDeviceAdministrationPort,
@@ -237,6 +238,10 @@ export type RemoteDependencies = {
   readonly onSecretStoreLinkChange?: () => void;
   /** Bound here once the agent access service exists; the product chain asks it. */
   readonly agentGrantRouteSlot: { readonly bind: (routes: AgentGrantRoutes) => void };
+  /** Bound here with the routes this wiring builds that a paired device reaches. */
+  readonly pairedDeviceRouteSlot: {
+    readonly bind: (routes: ReadonlyArray<PairedDeviceRoutes>) => void;
+  };
 } & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
   Pick<HarnessWiring, "beginGoogleCliChange"> &
   Pick<
@@ -2512,6 +2517,14 @@ export function wireRemote(deps: RemoteDependencies) {
       },
     }),
   });
+  // Each of these judges the device itself; the private listener forwards
+  // only the paths among them that a device may ask for.
+  deps.pairedDeviceRouteSlot.bind([
+    providerCredentialRoutes,
+    localDeviceAdministrationRoutes,
+    hostControlRoutes,
+    externalContentRoutes,
+  ]);
   return {
     ownerBrowserControlService,
     composeHostDiagnostics,

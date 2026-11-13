@@ -7,7 +7,7 @@ import {
   type ServerProjectsView,
 } from "@octant/contracts/server-projects";
 import { serverWorkBindingRevisionId } from "./serverWorkThreads";
-import { authenticateRoutePrincipal } from "../principalRouteContext";
+import { authenticateRoutePrincipal, boundPrincipalIsRestricted } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type {
@@ -95,6 +95,10 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
     }
 
     if (request.method === "GET") {
+      // The private listener forwards the catalog read for a device the host's
+      // own person paired; every other device session is refused here too.
+      if (boundPrincipalIsRestricted(request))
+        return failure("Server Projects are read only by the host's own person.", 403, origin);
       return json({ view: catalogView(dependencies.store.projects()) }, 200, origin);
     }
     let command: ServerProjectsCommand;

@@ -5,6 +5,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import { designSystemFolders, type DesignSystemFiles } from "./designSystems/designSystemFiles";
@@ -27,10 +28,12 @@ export interface DesignSystemRouteDependencies {
  * The design systems of a Project the window has open: list, read, create,
  * and save its `DESIGN.md` files.
  *
- * Only a window on this host may use these routes. They read and write the
- * person's folder directly, the way the person's own editor would, so a paired
- * device's narrower reach is not widened by them. The Project must be one the
- * window's bootstrap lists, and the folder one that Project lends.
+ * Only the host's own person may use these routes: at a window on this host,
+ * or on a device that person paired (maintainer decision, 2026-11-13). They
+ * read and write the person's folder directly, the way the person's own
+ * editor would, so every other device session is refused. The Project must be
+ * an active one, and the folder one that Project lends. A save writes the
+ * file and journals nothing, for a window as for a device.
  */
 export function createDesignSystemRouteHandler(dependencies: DesignSystemRouteDependencies) {
   const now = dependencies.now ?? Date.now;
@@ -59,10 +62,10 @@ export function createDesignSystemRouteHandler(dependencies: DesignSystemRouteDe
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
-      if (principal.principal.kind !== "local-window") {
+      if (!principalActsAsHostPerson(principal.principal)) {
         return failure(
           "unauthorized",
-          "Design systems are open only to a window on this host.",
+          "Design systems are open only to the host's own person.",
           403,
           origin,
         );

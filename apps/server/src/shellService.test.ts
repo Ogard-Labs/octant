@@ -1659,6 +1659,28 @@ describe("ShellService", () => {
     expect(append).toHaveBeenCalledTimes(1);
   });
 
+  it("replaces shell settings for a paired device that has no window here, journaled as that device", () => {
+    const { persistence, append } = persistenceStub();
+    const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
+    const deviceId = "00000000-0000-4000-8000-0000000002de";
+    const actor = { kind: "remote-device" as const, actorId: deviceId, deviceId } as never;
+    const settings = decodeShellSettings({
+      ...defaultShellSettings(),
+      threadReplyDetail: [{ mode: "code", threadId: "thread-1", level: "high" }],
+    });
+
+    expect(service.readSettings()).toMatchObject({ version: 0 });
+    expect(service.replaceSettings({ settings, expectedVersion: 0 as never, actor })).toMatchObject(
+      { kind: "settings-replaced", version: 1 },
+    );
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
+        events: [expect.objectContaining({ eventName: "shell.settings-replaced", actor })],
+      }),
+    );
+  });
+
   it("forgets the reply detail of erased threads and leaves every other thread's", () => {
     const kept = { mode: "chat" as const, threadId: "kept", level: "high" as const };
     const settings = {

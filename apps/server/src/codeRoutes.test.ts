@@ -1,3 +1,4 @@
+import { AGENT_ACCESS_ORIGIN } from "./clientPrincipal";
 import { codeLanguageReferencesFixture } from "./code/codeLanguageReferencesTestFixtures";
 import {
   decodeCodeCheckoutIdentity,
@@ -166,7 +167,10 @@ describe("Code routes", () => {
       operationId: operation.operationId,
     });
     // The route speaks for the person at the window, never for an agent.
-    expect(executeOperation).toHaveBeenCalledWith(windowId, operation, { initiator: "user" });
+    expect(executeOperation).toHaveBeenCalledWith(windowId, operation, {
+      initiator: "user",
+      actor: expect.objectContaining({ kind: "local-user" }),
+    });
     expect(execute).not.toHaveBeenCalled();
 
     // The same chain serves the authenticated remote gateway. A paired device
@@ -198,7 +202,10 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledWith(
       remoteDeviceId,
       expect.objectContaining({ kind: "start-terminal" }),
-      { initiator: "agent" },
+      {
+        initiator: "agent",
+        actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+      },
     );
 
     const forged = await route(
@@ -212,7 +219,79 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
-  it("refuses a paired device raising a thread to Full access, and lets it lower one", async () => {
+  it("lets a device the host's own person paired raise a thread and the default to Full access, and an agent grant's session only what its own guard admitted", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
+    const from = (
+      command: Record<string, unknown>,
+      principal: { readonly origin: string; readonly admittedBy?: "host-person" | "hub-roster" },
+    ) => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000941" as never,
+          ...principal,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const raiseThread = {
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "full-access",
+      permissionPersistence: "project-default",
+    };
+    const raiseDefault = {
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "full-access",
+      defaultPermissionPersistence: "current-session",
+    };
+    const paired = { origin: "https://octant.invalid", admittedBy: "host-person" } as const;
+
+    expect((await route(from(raiseThread, paired)))?.status).toBe(200);
+    expect((await route(from(raiseDefault, paired)))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+    // The device is who the journal names for both changes.
+    for (const call of [1, 2]) {
+      expect(execute).toHaveBeenNthCalledWith(
+        call,
+        remoteDeviceId,
+        expect.anything(),
+        expect.anything(),
+        { actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId } },
+      );
+    }
+
+    // The grant's guard runs before this route and holds the agent to the
+    // level the person chose; the route only stops refusing what it admitted.
+    expect((await route(from(raiseThread, { origin: AGENT_ACCESS_ORIGIN })))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(3);
+
+    for (const introduced of [
+      { origin: "https://octant.invalid", admittedBy: "hub-roster" },
+      { origin: "https://octant.invalid" },
+    ] as const) {
+      for (const raise of [raiseThread, raiseDefault]) {
+        expect((await route(from(raise, introduced)))?.status).toBe(403);
+      }
+    }
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses a hub-introduced device raising a thread to Full access, and lets it lower one", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
@@ -295,7 +374,7 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("refuses a paired device changing Continue after restart, and lets a local window", async () => {
+  it("lets a device the host's own person paired change Continue after restart for a Code thread or the Code setting, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
@@ -314,7 +393,7 @@ describe("Code routes", () => {
         restartContinuation: true,
       },
     ];
-    for (const command of commands) {
+    const from = (command: unknown, admittedBy?: "host-person" | "hub-roster") => {
       const remote = request("/api/code/commands", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -329,23 +408,32 @@ describe("Code routes", () => {
           protocolVersion: 1,
           capabilityDigest: "b".repeat(64),
           sessionId: "00000000-0000-4000-8000-000000000942" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
         }),
         scopeId: remoteDeviceId as never,
       });
-      const refused = await route(remote);
-      expect(refused?.status).toBe(403);
-      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      return remote;
+    };
+    for (const command of commands) {
+      for (const restricted of [undefined, "hub-roster"] as const) {
+        const refused = await route(from(command, restricted));
+        expect(refused?.status).toBe(403);
+        expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+      }
     }
     expect(execute).not.toHaveBeenCalled();
-    const local = await route(
-      request("/api/code/commands", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(commands[0]),
-      }),
-    );
-    expect(local?.status).toBe(200);
-    expect(execute).toHaveBeenCalledOnce();
+
+    for (const command of commands) {
+      expect((await route(from(command, "host-person")))?.status).toBe(200);
+      expect(JSON.stringify(execute.mock.lastCall)).toContain(
+        JSON.stringify({
+          kind: "remote-device",
+          actorId: remoteDeviceId,
+          deviceId: remoteDeviceId,
+        }),
+      );
+    }
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it("refuses a paired device choosing the model for automatic calls, and lets a local window", async () => {
@@ -510,7 +598,10 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledWith(
       remoteDeviceId,
       expect.objectContaining({ kind: "start-terminal", browserGrant: "on" }),
-      { initiator: "agent" },
+      {
+        initiator: "agent",
+        actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+      },
     );
   });
 
@@ -974,7 +1065,11 @@ describe("Code routes", () => {
       scope: "checkout",
     });
     expect(approve).toHaveBeenCalledWith(
-      { scopeId: windowId, principal: "local-window" },
+      {
+        scopeId: windowId,
+        principal: "local-window",
+        actor: expect.objectContaining({ kind: "local-user" }),
+      },
       approval,
     );
 
@@ -1007,7 +1102,7 @@ describe("Code routes", () => {
     expect(approve).toHaveBeenCalledOnce();
   });
 
-  it("serves debugging to a local window only, and refuses a paired device before reading its request", async () => {
+  it("serves debugging to the host's own person, and refuses any other device session before reading its request", async () => {
     const session = vi.fn(async () => ({ status: "refused", reason: "no-session" }));
     const debug = {
       configurations: vi.fn(),
@@ -1031,7 +1126,14 @@ describe("Code routes", () => {
     const answered = await route(post("/api/code/debug/session", call));
     expect(answered?.status).toBe(200);
     await expect(answered?.json()).resolves.toEqual({ status: "refused", reason: "no-session" });
-    expect(session).toHaveBeenCalledWith({ scopeId: windowId, principal: "local-window" }, call);
+    expect(session).toHaveBeenCalledWith(
+      {
+        scopeId: windowId,
+        principal: "local-window",
+        actor: expect.objectContaining({ kind: "local-user" }),
+      },
+      call,
+    );
 
     // No request outside the closed list decodes: `attach`, a memory read, or
     // a window named by the caller.
@@ -1070,6 +1172,33 @@ describe("Code routes", () => {
     expect(debug.approve).not.toHaveBeenCalled();
     expect(debug.start).not.toHaveBeenCalled();
     expect(session).toHaveBeenCalledOnce();
+
+    // A device the host's own person paired is that person: its request
+    // reaches the service, judged as a local window's and named as the device's.
+    const pairedDeviceId = "00000000-0000-4000-8000-000000000954";
+    const pairedRequest = post("/api/code/debug/session", call);
+    bindPrincipalRouteContext(pairedRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: pairedDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000955" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: pairedDeviceId as never,
+    });
+    expect((await route(pairedRequest))?.status).toBe(200);
+    expect(session).toHaveBeenLastCalledWith(
+      {
+        scopeId: pairedDeviceId,
+        principal: "local-window",
+        actor: { kind: "remote-device", actorId: pairedDeviceId, deviceId: pairedDeviceId },
+      },
+      expect.anything(),
+    );
 
     expect((await routeFixture()(post("/api/code/debug/session", call)))?.status).toBe(503);
   });
@@ -1695,14 +1824,18 @@ describe("Code routes", () => {
     );
 
     expect(response?.status).toBe(200);
-    expect(saveFile).toHaveBeenCalledWith(windowId, {
-      threadId,
-      checkoutId,
-      relativePath: "src/file.ts",
-      expectedIdentity: { device: "1", inode: "2" },
-      expectedDigest: digest,
-      text: "hello",
-    });
+    expect(saveFile).toHaveBeenCalledWith(
+      windowId,
+      {
+        threadId,
+        checkoutId,
+        relativePath: "src/file.ts",
+        expectedIdentity: { device: "1", inode: "2" },
+        expectedDigest: digest,
+        text: "hello",
+      },
+      expect.objectContaining({ kind: "local-user" }),
+    );
     expect(JSON.stringify(saveFile.mock.calls[0])).not.toContain("rootPath");
   });
 
@@ -1920,7 +2053,11 @@ describe("Code routes", () => {
     release?.();
 
     expect((await responsePromise)?.status).toBe(200);
-    expect(saveFile.mock.calls[0]).toHaveLength(2);
+    // The window, the save and who saved: no signal travels with them.
+    expect(saveFile.mock.calls[0]).toHaveLength(3);
+    expect((saveFile.mock.calls[0] as ReadonlyArray<unknown> | undefined)?.[2]).toMatchObject({
+      kind: "local-user",
+    });
   });
 });
 
@@ -2057,6 +2194,7 @@ describe("Code planner routes", () => {
       windowId,
       { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 7 },
       expect.anything(),
+      expect.objectContaining({ kind: "local-user" }),
     );
   });
 
@@ -2174,6 +2312,7 @@ describe("Code planner routes", () => {
       windowId,
       { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 1 },
       expect.anything(),
+      expect.objectContaining({ kind: "local-user" }),
     );
   });
 
@@ -2548,6 +2687,7 @@ describe("Code project pull-request detail routes", () => {
       { ...detailQuery, method: "squash", headSha: mergeHeadSha },
       expect.any(AbortSignal),
       "local-window",
+      { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
     );
   });
 
@@ -2609,6 +2749,12 @@ describe("Code project pull-request detail routes", () => {
       { ...detailQuery, method: "squash", headSha: mergeHeadSha, confirmed: true },
       expect.any(AbortSignal),
       "remote-device",
+      // The journal names the device.
+      {
+        kind: "remote-device",
+        actorId: "00000000-0000-4000-8000-000000000917",
+        deviceId: "00000000-0000-4000-8000-000000000917",
+      },
     );
   });
 
@@ -2835,6 +2981,7 @@ describe("Code project pull-request detail routes", () => {
       comment,
       expect.any(AbortSignal),
       "local-window",
+      { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
     );
   });
 
@@ -2956,6 +3103,7 @@ describe("Code project pull-request detail routes", () => {
       bodies["/api/code/project-pull-requests/merge-when-ready"],
       expect.any(AbortSignal),
       "local-window",
+      expect.objectContaining({ kind: "local-user" }),
     );
     expect(setProjectPullRequestMergeWhenReady).toHaveBeenNthCalledWith(
       2,
@@ -2963,8 +3111,18 @@ describe("Code project pull-request detail routes", () => {
       bodies["/api/code/project-pull-requests/merge-when-ready"],
       expect.any(AbortSignal),
       "remote-device",
+      expect.objectContaining({
+        kind: "remote-device",
+        deviceId: "00000000-0000-4000-8000-000000000917",
+      }),
     );
     expect(setProjectPullRequestAutoFix).toHaveBeenCalledTimes(1);
+    expect(setProjectPullRequestAutoFix).toHaveBeenCalledWith(
+      windowId,
+      bodies["/api/code/project-pull-requests/auto-fix"],
+      "user",
+      expect.objectContaining({ kind: "local-user" }),
+    );
   });
 });
 

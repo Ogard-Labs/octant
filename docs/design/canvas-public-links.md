@@ -228,8 +228,7 @@ gone. Only that pending revocation outlives the purge: it is a
 `canvas-public-share-revocation` aggregate naming the link, its service, and
 the secret's reference, and no Canvas, so the purge's ownership walk leaves it.
 The Settings switch is the `canvas-public-link-settings` aggregate, changed
-from a local window or, not built yet, a paired device, against the version it
-read.
+from a local window or a device the host's own person paired, against the version it read.
 
 ## The service
 

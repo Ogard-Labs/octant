@@ -1,3 +1,4 @@
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
@@ -12,8 +13,10 @@ import {
   type ProviderExecutionPolicy,
   type ProviderFailure,
   type ProviderModelId,
+  type EventActor,
 } from "@octant/contracts";
-import { readPrincipalRouteContext } from "../principalRouteContext";
+import { boundPrincipalIsRestricted, readPrincipalRouteContext } from "../principalRouteContext";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateProjectRequest } from "../projectBindingRoutes";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -32,7 +35,10 @@ export interface ProviderRouteDependencies {
   /** A thread's own choice about its key provider's native setup. */
   readonly threadNativeSetup?: {
     get(threadId: string): ThreadNativeSetupChoice;
-    set(request: Extract<ThreadNativeSetupRequest, { kind: "set" }>): "recorded" | "refused";
+    set(
+      request: Extract<ThreadNativeSetupRequest, { kind: "set" }>,
+      actor: EventActor,
+    ): "recorded" | "refused";
   };
 }
 
@@ -170,7 +176,7 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
           // Loading a provider's own code and tool servers is the person's
           // decision at a window on this host, as it is for the account.
           const setter = readPrincipalRouteContext(request)?.principal;
-          if (setter !== undefined && setter.kind !== "local-window") {
+          if (setter !== undefined && !principalActsAsHostPerson(setter)) {
             return response(
               {
                 category: "unauthorized",
@@ -180,7 +186,7 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
               origin,
             );
           }
-          if (store.set(threadRequest) === "refused") {
+          if (store.set(threadRequest, eventActorForPrincipal(setter)) === "refused") {
             return response(
               {
                 category: "unsupported",
@@ -195,6 +201,16 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
         return response(
           { threadId: threadRequest.threadId, choice: store.get(threadRequest.threadId) },
           200,
+          origin,
+        );
+      }
+      // Provider administration is the host's own person's, at a local window
+      // or on a device they paired. The product dispatch already holds every
+      // other device session to the catalogue; the route refuses one too.
+      if (isCommands && boundPrincipalIsRestricted(request)) {
+        return response(
+          { category: "unauthorized", message: "Provider request is unauthorized." },
+          401,
           origin,
         );
       }
@@ -227,7 +243,7 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
             command.kind === "set-provider-native-setup" ||
             command.kind === "set-provider-own-memory") &&
           principal !== undefined &&
-          principal.kind !== "local-window"
+          !principalActsAsHostPerson(principal)
         ) {
           return response(
             {
@@ -240,7 +256,11 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
         }
         return response(
           decodeProviderRegistryCommandResult(
-            await dependencies.service.execute(windowId, command),
+            await dependencies.service.execute(
+              windowId,
+              command,
+              eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+            ),
           ),
           200,
           origin,

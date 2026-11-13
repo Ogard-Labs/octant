@@ -83,6 +83,35 @@ it("records typed manifest and use metadata under local-person and host actors",
       Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 10 }),
     );
     expect(rows.map((row) => row.actor.kind)).toEqual(["local-user", "system", "system"]);
+
+    // A grant reviewed on a paired device names that device, not the local person.
+    const deviceScope = decodeWindowId(randomUUID());
+    browserUploadPermissionJournal({
+      connection,
+      journal,
+      now: () => Date.parse(clock()),
+      uuid: randomUUID,
+      personActor: decodeEventActor({ kind: "local-user", actorId }),
+      hostActor: decodeEventActor({ kind: "system", actorId }),
+      deviceActor: (scope) =>
+        String(scope) === String(deviceScope)
+          ? decodeEventActor({
+              kind: "remote-device",
+              actorId: String(scope),
+              deviceId: String(scope),
+            })
+          : undefined,
+    })({
+      kind: "revoked",
+      permission,
+      remainingFiles: 4,
+      remainingBytes: 988,
+      windowId: deviceScope,
+    });
+    const last = journal
+      .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 10 }))
+      .at(-1);
+    expect(last?.actor).toMatchObject({ kind: "remote-device", deviceId: String(deviceScope) });
     expect(rows.map((row) => row.payload)).toMatchObject([
       { kind: "granted" },
       { kind: "consumed", transferredFiles: ["report.txt"] },

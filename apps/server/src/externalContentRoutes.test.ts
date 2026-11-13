@@ -1,3 +1,10 @@
+import {
+  type DeviceId,
+  type RemoteSessionId,
+  type StableHostId,
+} from "@octant/contracts/remote-access";
+import { createAuthenticatedProductDispatch } from "./authenticatedProductRoutes";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -291,30 +298,55 @@ describe("the local-only thread external-content route", () => {
     host.connection.close();
   });
 
-  it("refuses a paired device at the handler, for the read and for the clear", async () => {
+  const deviceId = "55000000-0000-4000-8000-000000000001";
+  const fromDevice = (body: unknown, admittedBy?: "host-person" | "hub-roster") => {
+    const remote = request(body, { "x-octant-window-capability": "" });
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "55000000-0000-4000-8000-000000000002",
+        ...(admittedBy === undefined ? {} : { admittedBy }),
+      } as never,
+      scopeId: decodeWindowId(deviceId),
+    });
+    return remote;
+  };
+
+  it("refuses a hub-introduced device and an unproved pairing at the handler, for the read and for the clear", async () => {
     const host = openHost();
     host.ingest("page-1", "web-fetch");
-    for (const body of [read, clear(1)]) {
-      const remote = request(body, { "x-octant-window-capability": "" });
-      bindPrincipalRouteContext(remote, {
-        principal: {
-          kind: "remote-device",
-          hostId: "local",
-          deviceId: "55000000-0000-4000-8000-000000000001",
-          credentialGeneration: 1,
-          origin: "https://remote.example",
-          protocolVersion: 1,
-          capabilityDigest: "a".repeat(64),
-          sessionId: "55000000-0000-4000-8000-000000000002",
-        } as never,
-        scopeId: decodeWindowId("55000000-0000-4000-8000-000000000001"),
-      });
-      const response = await host.handler(remote);
-      expect(response?.status).toBe(401);
-      expect(await response?.json()).toMatchObject({ category: "unauthorized" });
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      for (const body of [read, clear(1)]) {
+        const response = await host.handler(fromDevice(body, admittedBy));
+        expect(response?.status).toBe(401);
+        expect(await response?.json()).toMatchObject({ category: "unauthorized" });
+      }
     }
     expect(host.asked).not.toHaveBeenCalled();
     expect(host.events()).toHaveLength(1);
+    host.connection.close();
+  });
+
+  it("lets a device the host's own person paired read and clear, and journals the device as the actor", async () => {
+    const host = openHost();
+    host.ingest("page-1", "web-fetch");
+
+    expect((await host.handler(fromDevice(read, "host-person")))?.status).toBe(200);
+    const response = await host.handler(fromDevice(clear(1), "host-person"));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({ kind: "cleared" });
+    expect(host.events().at(-1)).toMatchObject({
+      eventName: THREAD_EXTERNAL_CONTENT_EVENT_NAMES.cleared,
+      actor: { kind: "remote-device", deviceId },
+      payload: { threadId, clearedSources: ["web-fetch"] },
+    });
     host.connection.close();
   });
 
@@ -586,30 +618,46 @@ describe("a thread with a message still in its queue", () => {
 describe("the private listener and the thread external-content route", () => {
   const origin = "https://octant.example:8443";
 
-  it("answers a paired device 404 before authentication and refuses to be configured otherwise", () => {
+  it("forwards the route for the product dispatch to judge, which refuses every device but one the host's own person paired", async () => {
     const policy = createRemoteRoutePolicy({ origin });
-    for (const target of [path, `${path}/clear`]) {
-      const decision = policy.inspect(
-        new Request(`${origin}${target}`, {
-          method: "POST",
-          headers: { host: "octant.example:8443", origin, "content-type": "application/json" },
-          body: JSON.stringify(clear(1)),
-        }),
-      );
-      expect(decision).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
-    }
-    expect(() =>
-      createRemoteRoutePolicy({
+    const forwarded = new Request(`${origin}${path}`, {
+      method: "POST",
+      headers: {
+        host: "octant.example:8443",
         origin,
-        authenticatedRoutes: [
-          {
-            id: "thread-external-content",
-            match: { kind: "exact", path },
-            surface: "authenticated-product",
-            methods: ["POST"],
-          },
-        ],
-      }),
-    ).toThrow("local-only");
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(clear(1)),
+    });
+    expect(policy.inspect(forwarded)).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    const device = (admittedBy?: "host-person" | "hub-roster") =>
+      createRemoteDevicePrincipal({
+        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+        deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
+        credentialGeneration: 1,
+        origin,
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+        ...(admittedBy === undefined ? {} : { admittedBy }),
+      });
+    const ask = (principal: ReturnType<typeof device>) =>
+      product({
+        request: new Request(`${origin}${path}`, { method: "POST", body: "{}" }),
+        principal,
+      });
+
+    expect((await ask(device("hub-roster")))?.status).toBe(403);
+    expect((await ask(device()))?.status).toBe(403);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect((await ask(device("host-person")))?.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledOnce();
   });
 });

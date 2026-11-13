@@ -324,6 +324,30 @@ describe("starting a Code thread from the terminal", () => {
     expect(result).toMatchObject({ projectRemembersFullAccess: true });
   });
 
+  it("starts a grant's thread at Full access for that thread alone, remembering nothing on the Project", async () => {
+    // An agent grant holds no Project administration, so the host refuses it
+    // both the Project command and a thread that asks for the remembered level.
+    for (const projectAccess of ["current-session", "project-default"] as const) {
+      const fake = host(projectAccess);
+
+      const result = await createAgentThread(fake.session, {
+        mode: "code",
+        title: "Run the terminal",
+        projectName: "Repo",
+        access: "full-access",
+        fullAccessScope: "thread",
+      });
+
+      expect(result).toMatchObject({ kind: "created", mode: "code" });
+      expect(result).not.toHaveProperty("projectRemembersFullAccess");
+      expect(fake.projectCommands()).toEqual([]);
+      expect(fake.created()?.thread).toMatchObject({
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+      });
+    }
+  });
+
   it("starts a narrower asked-for mode without touching the Project's remembered access", async () => {
     const fake = host("project-default");
 

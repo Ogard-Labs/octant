@@ -6,12 +6,25 @@ import {
   createDefaultDeviceKeyStore,
   createRemoteProductFetch,
   type RemoteSessionBridge,
+  type RemoteSessionStanding,
 } from "@octant/client-runtime";
+import {
+  createExtensionClient,
+  type ExtensionClient,
+} from "@octant/client-runtime/extension-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
+import {
+  createPairedDeviceAdministrationClient,
+  type PairedDeviceAdministrationClient,
+} from "@octant/client-runtime/paired-device-administration-client";
+import {
+  createProviderCredentialClient,
+  type ProviderCredentialClient,
+} from "@octant/client-runtime/provider-credential-client";
 import {
   createWorkMutationClient,
   type WorkMutationClient,
@@ -36,6 +49,8 @@ import {
 import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browserHubGuest";
 import { platformPasskeys } from "../host/ownerPasskey";
+import { runProviderOAuthCommand } from "../providers/providerOAuthClient";
+import type { ProviderOAuthCommand } from "../providers/ProviderOAuthSignIn";
 
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
@@ -61,6 +76,60 @@ export interface RemoteProductClients {
 // `createRemoteProductFetch`.
 const REMOTE_CLIENT_BASE_URL = "http://127.0.0.1";
 const NO_WINDOW_CAPABILITY = "";
+
+/**
+ * The extension client over the session: a thread's waiting tool prompts and
+ * their answers for every paired browser, and what the host takes only from
+ * its own person (remembering an answer, remembered approvals) when `session`
+ * says this browser acts as that person. Built apart from the other clients
+ * because the host's word on the session arrives after they exist.
+ */
+export function createRemoteExtensionClient(
+  bridge: RemoteSessionBridge,
+  session: RemoteSessionStanding,
+): ExtensionClient {
+  return createExtensionClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+    windowCapability: NO_WINDOW_CAPABILITY,
+    session,
+  });
+}
+
+/** The host's paired devices and pairing requests, administered over the session. */
+export function createRemotePairedDeviceAdministrationClient(
+  bridge: RemoteSessionBridge,
+): PairedDeviceAdministrationClient {
+  return createPairedDeviceAdministrationClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+  });
+}
+
+/** A provider's key on its way to the host's credential store, over the session. */
+export function createRemoteProviderCredentialClient(
+  bridge: RemoteSessionBridge,
+): ProviderCredentialClient {
+  return createProviderCredentialClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+  });
+}
+
+/**
+ * A provider sign-in's start and status over the session, where the local
+ * window's own sender would use the window's fetch and capability.
+ */
+export function createRemoteProviderOAuth(bridge: RemoteSessionBridge) {
+  const fetch = createRemoteProductFetch({ bridge });
+  return (command: ProviderOAuthCommand) =>
+    runProviderOAuthCommand({
+      baseUrl: REMOTE_CLIENT_BASE_URL,
+      windowCapability: NO_WINDOW_CAPABILITY,
+      fetch,
+      command,
+    }).catch(() => undefined);
+}
 
 /**
  * The ordinary product clients, carried over the paired device's

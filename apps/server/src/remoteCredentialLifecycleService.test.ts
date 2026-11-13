@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { decodeStableHostId } from "@octant/contracts/remote-access";
+import { decodeStableHostId, REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
 import { buildRemoteKeyRotationProofPayload } from "@octant/domain";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
@@ -444,6 +444,51 @@ describe("RemoteCredentialLifecycleService", () => {
         .prepare("SELECT state FROM remote_session_store WHERE session_id_digest = ?")
         .get(staleDigest),
     ).toEqual({ state: "revoked" });
+    connection.close();
+  });
+
+  it("journals a revoke made from a paired device as that device, and one made at the host as the host", () => {
+    const { connection, journal } = createFixture();
+    const service = new RemoteCredentialLifecycleService({
+      connection,
+      journal,
+      actorId,
+      uuid: (() => {
+        let next = 0;
+        return () => `15151515-1515-4151-8151-${(next++).toString(16).padStart(12, "0")}`;
+      })(),
+      clock: () => now,
+    });
+    const revoker = "71000000-0000-4000-8000-0000000000de";
+    // The revoke and its receipt, apart from the sessions the host ends for it.
+    const actorsOf = (commandId: string) =>
+      (
+        connection
+          .prepare(
+            `SELECT actor_json FROM event_journal
+             WHERE correlation_id = ? AND event_name IN (?, ?)
+             ORDER BY global_sequence ASC`,
+          )
+          .all(
+            commandId,
+            REMOTE_ACCESS_EVENT_NAMES.deviceRevoked,
+            REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded,
+          ) as ReadonlyArray<{ actor_json: string }>
+      ).map((row) => (JSON.parse(row.actor_json) as { kind: string }).kind);
+
+    service.revokeDevice({
+      commandId: "15151515-1515-4151-8151-111111111111",
+      hostId,
+      deviceId,
+      actor: { kind: "remote-device", actorId: revoker, deviceId: revoker } as never,
+    });
+    expect(actorsOf("15151515-1515-4151-8151-111111111111")).toEqual([
+      "remote-device",
+      "remote-device",
+    ]);
+
+    service.revokeAll({ commandId: "15151515-1515-4151-8151-222222222222", hostId });
+    expect(actorsOf("15151515-1515-4151-8151-222222222222")).toEqual(["system"]);
     connection.close();
   });
 

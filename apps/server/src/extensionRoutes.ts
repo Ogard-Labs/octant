@@ -1,3 +1,5 @@
+import { principalAuthorityKind } from "./clientPrincipal";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import type { McpOAuthClientRegistration } from "@octant/contracts/host-oauth";
 import type {
   ExtensionCommand,
@@ -27,7 +29,8 @@ import {
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
-import { decodeWindowId, SkillFolderPath } from "@octant/contracts";
+import { decodeWindowId, SkillFolderPath, type EventActor } from "@octant/contracts";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { Schema } from "effect";
 import { AgentPluginsError } from "@octant/plugin-host/agent-plugins";
 import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
@@ -44,7 +47,11 @@ import { UserAddedMcpServerError } from "./extensions/userAddedMcpServers";
 
 export interface ExtensionRouteService {
   snapshot(): ExtensionSnapshot;
-  execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult>;
+  execute(
+    command: ExtensionCommand,
+    signal?: AbortSignal,
+    actor?: EventActor,
+  ): Promise<ExtensionCommandResult>;
 }
 
 export function createExtensionRouteHandler(options: {
@@ -63,7 +70,12 @@ export function createExtensionRouteHandler(options: {
   /** Plugins pinned to Projects, and the Projects a local window may pin to. */
   readonly extensionProjectPins?: {
     list(): ExtensionProjectPinListing;
-    set(projectId: string, extensionId: string, pinned: boolean): "recorded" | "refused";
+    set(
+      projectId: string,
+      extensionId: string,
+      pinned: boolean,
+      actor?: EventActor,
+    ): "recorded" | "refused";
   };
   /** Sign-in to a hosted server a person added, through the host OAuth runner. */
   readonly mcpServerSignIn?: {
@@ -93,6 +105,7 @@ export function createExtensionRouteHandler(options: {
       extensionId: string,
       componentId: string,
       principalKind: "local-window" | "remote-device",
+      actor?: EventActor,
     ): Promise<McpServerSignInView>;
     poll(
       extensionId: string,
@@ -104,6 +117,7 @@ export function createExtensionRouteHandler(options: {
       extensionId: string,
       componentId: string,
       principalKind: "local-window" | "remote-device",
+      actor?: EventActor,
     ): Promise<McpServerSignInView>;
   };
   /**
@@ -141,7 +155,7 @@ export function createExtensionRouteHandler(options: {
    */
   readonly toolGrants?: {
     list(): ReadonlyArray<ExtensionToolGrant>;
-    revoke(grantId: string): "revoked" | "not-found";
+    revoke(grantId: string, actor?: EventActor): "revoked" | "not-found";
   };
 }): (request: Request) => Promise<Response | undefined> {
   const now = options.now ?? Date.now;
@@ -235,6 +249,9 @@ export function createExtensionRouteHandler(options: {
     if (request.method !== "POST") {
       return response(failure("invalid", "Extension API requires POST."), 405, origin);
     }
+    // Who the journal names for what this request changes: the device, when a
+    // device asked.
+    const actor = eventActorForPrincipal(principalContext.principal);
     if (url.pathname === "/api/extensions/tool-approvals") {
       if (options.toolApprovals === undefined) {
         return response(
@@ -251,8 +268,9 @@ export function createExtensionRouteHandler(options: {
         return response(failure("invalid", "Extension approval request is invalid."), 400, origin);
       }
       const answerer: ExtensionToolApprovalAnswerer = {
-        kind: principalContext.principal.kind,
+        kind: principalAuthorityKind(principalContext.principal),
         scopeId: principalContext.scopeId,
+        actor,
       };
       if (hasExactKeys(body.value, ["kind"]) && body.value.kind === "list") {
         return response(options.toolApprovals.list(answerer), 200, origin);
@@ -274,7 +292,10 @@ export function createExtensionRouteHandler(options: {
       }
     }
     if (url.pathname === "/api/extensions/tool-grants") {
-      if (principalContext.principal.kind !== "local-window" || options.toolGrants === undefined) {
+      if (
+        !principalActsAsHostPerson(principalContext.principal) ||
+        options.toolGrants === undefined
+      ) {
         return response(
           failure("unauthorized", "Remembered tool approvals are unavailable."),
           401,
@@ -301,7 +322,7 @@ export function createExtensionRouteHandler(options: {
       }
       // Revoking a grant that is already gone is not a failure: it is gone.
       return response(
-        { revoked: options.toolGrants.revoke(grantRequest.grantId) === "revoked" },
+        { revoked: options.toolGrants.revoke(grantRequest.grantId, actor) === "revoked" },
         200,
         origin,
       );
@@ -309,7 +330,7 @@ export function createExtensionRouteHandler(options: {
     if (url.pathname === "/api/extensions/snapshot") {
       try {
         const snapshot = options.service.snapshot();
-        if (principalContext.principal.kind === "local-window")
+        if (principalActsAsHostPerson(principalContext.principal))
           return response(snapshot, 200, origin);
         const { skillRoots: _localRootDiagnostics, ...remoteSnapshot } = snapshot;
         return response(remoteSnapshot, 200, origin);
@@ -427,7 +448,7 @@ export function createExtensionRouteHandler(options: {
       // will send a key to, so only a local window may do it, never a paired
       // device, and the whole add is one local act: the package is written,
       // installed, trusted and enabled without a second prompt.
-      if (principalContext.principal.kind !== "local-window") {
+      if (!principalActsAsHostPerson(principalContext.principal)) {
         return response(
           failure("unauthorized", "Adding an MCP server requires the Octant window on this host."),
           401,
@@ -458,6 +479,7 @@ export function createExtensionRouteHandler(options: {
         added,
         request.signal,
         origin,
+        actor,
       );
     }
     if (url.pathname === "/api/extensions/project-pins") {
@@ -482,7 +504,7 @@ export function createExtensionRouteHandler(options: {
         return response(failure("invalid", "The pin request is invalid."), 400, origin);
       }
       if (pin.kind === "set") {
-        if (principalContext.principal.kind !== "local-window") {
+        if (!principalActsAsHostPerson(principalContext.principal)) {
           return response(
             failure("unauthorized", "Pinning a plugin requires the Octant window on this host."),
             401,
@@ -493,6 +515,7 @@ export function createExtensionRouteHandler(options: {
           String(pin.projectId),
           String(pin.extensionId),
           pin.pinned,
+          actor,
         );
         if (outcome === "refused") {
           return response(
@@ -526,8 +549,10 @@ export function createExtensionRouteHandler(options: {
       } catch {
         return response(failure("invalid", "The sign-in request is invalid."), 400, origin);
       }
-      const principalKind =
-        principalContext.principal.kind === "local-window" ? "local-window" : "remote-device";
+      // A device the host's own person paired is judged as a local window is.
+      const principalKind = principalActsAsHostPerson(principalContext.principal)
+        ? "local-window"
+        : "remote-device";
       const extensionId = String(signIn.extensionId);
       const componentId = String(signIn.componentId);
       try {
@@ -588,7 +613,7 @@ export function createExtensionRouteHandler(options: {
         }
         if (signIn.kind === "begin") {
           return response(
-            await options.mcpServerSignIn.begin(extensionId, componentId, principalKind),
+            await options.mcpServerSignIn.begin(extensionId, componentId, principalKind, actor),
             200,
             origin,
           );
@@ -606,7 +631,7 @@ export function createExtensionRouteHandler(options: {
           );
         }
         return response(
-          await options.mcpServerSignIn.signOut(extensionId, componentId, principalKind),
+          await options.mcpServerSignIn.signOut(extensionId, componentId, principalKind, actor),
           200,
           origin,
         );
@@ -629,8 +654,10 @@ export function createExtensionRouteHandler(options: {
       } catch {
         return response(failure("invalid", "The connection request is invalid."), 400, origin);
       }
-      const principalKind =
-        principalContext.principal.kind === "local-window" ? "local-window" : "remote-device";
+      // A device the host's own person paired is judged as a local window is.
+      const principalKind = principalActsAsHostPerson(principalContext.principal)
+        ? "local-window"
+        : "remote-device";
       // Reconnect drops a live session on this host, so it is a person's act
       // at this machine; a paired device reads the state only.
       if (connection.kind === "reconnect" && principalKind !== "local-window") {
@@ -663,7 +690,7 @@ export function createExtensionRouteHandler(options: {
       // What another tool on this computer knows is read for a local window
       // only, like the folder import it leads to; a paired device sees none
       // of it. Adding a found server is the same act as adding one by hand.
-      if (principalContext.principal.kind !== "local-window") {
+      if (!principalActsAsHostPerson(principalContext.principal)) {
         return response(
           failure(
             "unauthorized",
@@ -742,6 +769,7 @@ export function createExtensionRouteHandler(options: {
           found,
           request.signal,
           origin,
+          actor,
         );
       }
       const path = options.agentToolingDiscovery.pluginPath(discovered.id);
@@ -809,7 +837,7 @@ export function createExtensionRouteHandler(options: {
         origin,
       );
     }
-    if (principalContext.principal.kind !== "local-window") {
+    if (!principalActsAsHostPerson(principalContext.principal)) {
       // Remote forwarding never admits these, and the route refuses them too,
       // so no path from a paired device installs, trusts, or switches on a
       // package. Inspecting an outside provider driver is the first step of
@@ -818,6 +846,16 @@ export function createExtensionRouteHandler(options: {
       if (url.pathname === "/api/extensions/lifecycle") {
         return response(
           failure("unauthorized", "Changing a package requires the Octant window on this host."),
+          401,
+          origin,
+        );
+      }
+      // Skills are read from and written to folders on this computer. Only
+      // the listener's forward list kept a restricted device from them; the
+      // route now forwards for the host's own person, so it refuses the rest.
+      if (url.pathname === "/api/extensions/skills") {
+        return response(
+          failure("unauthorized", "Skills are managed by the host's own person."),
           401,
           origin,
         );
@@ -851,7 +889,7 @@ export function createExtensionRouteHandler(options: {
       }
     }
     try {
-      return response(await options.service.execute(command, request.signal), 200, origin);
+      return response(await options.service.execute(command, request.signal, actor), 200, origin);
     } catch {
       return response(failure("failed", "Extension command failed."), 500, origin);
     }
@@ -1012,6 +1050,7 @@ async function addUserMcpServer(
   added: UserAddedMcpServerRequest,
   signal: AbortSignal,
   origin: string | null,
+  actor: EventActor,
 ): Promise<Response> {
   let source: ExtensionSource;
   try {
@@ -1063,6 +1102,7 @@ async function addUserMcpServer(
         ...(added.installOnly === true ? {} : { trust: true, enable: true }),
       },
       signal,
+      actor,
     );
   } catch {
     return await abandon(failure("failed", "The server could not be installed."));

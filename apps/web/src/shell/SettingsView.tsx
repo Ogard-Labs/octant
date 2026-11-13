@@ -39,10 +39,7 @@ import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
 import { resolveEffectiveThemeMode } from "@octant/domain/theme-policy";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController, LocateBinaryOutcome } from "../providers/useDiscoveryController";
-import {
-  ProviderSettingsView,
-  type ProviderSettingsViewProps,
-} from "../providers/ProviderSettingsView";
+import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
 import { ProviderSettingsList } from "../providers/ProviderSettingsList";
@@ -218,7 +215,7 @@ import {
   agentAccessAdministrationOf,
   type OctantHostBridge,
 } from "./hostBridge";
-import { openExternalUrl } from "./openExternalUrl";
+import { providerSettingsViewProps } from "../providers/providerSettingsViewProps";
 import { ApplicationIdentity } from "./ApplicationIdentity";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import "../styles/settings.css";
@@ -2083,81 +2080,6 @@ function ProviderCatalogSection(props: {
  * instances shares: Providers & Models lists agent runtimes and Octant
  * Harness lists model endpoints, over the same controller.
  */
-function providerSettingsViewProps(
-  controller: ProviderController,
-  hostBridge: OctantHostBridge | undefined,
-): Omit<ProviderSettingsViewProps, "discovery" | "discoverySnapshot"> {
-  return {
-    busy: controller.busy,
-    credentialManagementAvailable: controller.credentialManagementAvailable,
-    defaults: controller.defaults,
-    instances: controller.instances,
-    ...(controller.message === undefined ? {} : { message: controller.message }),
-    observedByInstance: controller.observedByInstance,
-    presentationObservedByInstance: controller.presentationObservedByInstance,
-    onOpenExternalUrl: (url) => openExternalUrl(hostBridge, url),
-    ...(hostBridge === undefined ? {} : { hostBridge: hostBridge }),
-    onChangeBinary: controller.changeBinary,
-    onChangeClaudeConfiguration: controller.changeClaudeConfiguration,
-    onChangeCodexConfiguration: controller.changeCodexConfiguration,
-    onChangeAcpAgentConfiguration: controller.changeAcpAgentConfiguration,
-    onChangePiConfiguration: controller.changePiConfiguration,
-    onChangeOhMyPiConfiguration: controller.changeOhMyPiConfiguration,
-    onChangeOllamaConfiguration: controller.changeOllamaConfiguration,
-    onChangeOutsideHarnessEndpointConfiguration:
-      controller.changeOutsideHarnessEndpointConfiguration,
-    onChangeOpenAiCompatibleConfiguration: controller.changeOpenAiCompatibleConfiguration,
-    onChangeOpenAiImageConfiguration: controller.changeOpenAiImageConfiguration,
-    onChangeGeminiImageConfiguration: controller.changeGeminiImageConfiguration,
-    onChangeBflImageConfiguration: controller.changeBflImageConfiguration,
-    onChangeIdeogramImageConfiguration: controller.changeIdeogramImageConfiguration,
-    onChangeAnthropicCompatibleConfiguration: controller.changeAnthropicCompatibleConfiguration,
-    onChangeAzureFoundryConfiguration: controller.changeAzureFoundryConfiguration,
-    onChangeAmazonBedrockConfiguration: controller.changeAmazonBedrockConfiguration,
-    onClearProviderCredential: controller.clearProviderCredential,
-    ...(controller.providerOAuth === undefined
-      ? {}
-      : { onProviderOAuth: controller.providerOAuth }),
-    onBeginProviderAuthentication: controller.beginProviderAuthentication,
-    onCompleteProviderAuthentication: controller.completeProviderAuthentication,
-    onUpdateProviderCli: controller.updateProviderCli,
-    onCreate: controller.create,
-    onCreateClaude: controller.createClaude,
-    onCreateAcpAgent: controller.createAcpAgent,
-    onCreateOllama: controller.createOllama,
-    onCreateOpenAiCompatible: controller.createOpenAiCompatible,
-    onCreateAnthropicCompatible: controller.createAnthropicCompatible,
-    onCreateAzureFoundry: controller.createAzureFoundry,
-    onCreateAmazonBedrock: controller.createAmazonBedrock,
-    onCreateOpenAiImage: controller.createOpenAiImage,
-    onCreateGeminiImage: controller.createGeminiImage,
-    onCreateBflImage: controller.createBflImage,
-    onCreateIdeogramImage: controller.createIdeogramImage,
-    onPermissionPersistenceChange: controller.updatePermissionPersistence,
-    onProbe: controller.probe,
-    onProviderOrderChange: controller.updateProviderOrder,
-    onAgentEligibleModelsChange: controller.updateAgentEligibleModels,
-    onHiddenModelsChange: controller.updateHiddenModels,
-    onVerifyModelTools: controller.verifyModelTools,
-    onProviderCredentialStatus: controller.providerCredentialStatus,
-    onRemove: controller.remove,
-    onRename: controller.rename,
-    onRetry: controller.retry,
-    onSetEnabled: controller.setEnabled,
-    onSetClaudeArtifactDelivery: controller.setClaudeArtifactDelivery,
-    onSetProviderNativeSetup: controller.setProviderNativeSetup,
-    onSetProviderOwnMemory: controller.setProviderOwnMemory,
-    onDataTagsChange: controller.setDataTags,
-    onModelDataTagsChange: controller.setModelDataTags,
-    onModelContextWindowChange: controller.setModelContextWindow,
-    probingIds: controller.probingIds,
-    updatingIds: controller.updatingIds,
-    latestVersions: controller.latestVersions,
-    onCheckLatestVersions: controller.checkLatestVersions,
-    status: controller.status,
-  };
-}
-
 interface SectionProps {
   readonly focusedSetting: SettingsSettingId | undefined;
   readonly props: SettingsViewProps;

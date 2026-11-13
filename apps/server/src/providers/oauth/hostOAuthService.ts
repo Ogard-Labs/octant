@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   decodeHostOAuthDescriptor,
   decodeHostOAuthJournalRecord,
@@ -30,17 +31,29 @@ type TermsKey = Pick<HostOAuthDescriptor, "descriptorId" | "termsId">;
 
 export interface HostOAuthService {
   readonly offer: (descriptor: TermsKey) => HostOAuthSignInOffer;
+  /**
+   * On each call, `actor` is who asked, as the route resolved it from the
+   * authenticated principal, and is who the call's records are journaled as.
+   * Absent means the person at this host.
+   */
   readonly acknowledgeTerms: (input: {
     readonly principalKind: PrincipalKind;
     readonly actorId: string;
+    readonly actor?: EventActor | undefined;
     readonly descriptor: TermsKey;
   }) =>
     | { readonly kind: "recorded"; readonly acknowledgment: HostOAuthTermsAcknowledgment }
     | Refused;
   readonly restoreAcknowledgment: (acknowledgment: HostOAuthTermsAcknowledgment) => void;
+  /**
+   * The attempt keeps the actor that began it. Consent arrives later, at the
+   * issuer, and is found by whichever status read comes next; that read
+   * journals the sign-in's end as its starter's, not as the reader's.
+   */
   readonly begin: (input: {
     readonly principalKind: PrincipalKind;
     readonly actorId: string;
+    readonly actor?: EventActor | undefined;
     readonly descriptor: HostOAuthDescriptor;
     /** ChatGPT plan reauthorization: the instance's stored grant. Optional. */
     readonly credentialRef?: string;
@@ -53,11 +66,13 @@ export interface HostOAuthService {
   }) => Promise<{ readonly kind: "cancelled" } | { readonly kind: "unavailable" } | Refused>;
   readonly status: (input: {
     readonly principalKind: PrincipalKind;
+    readonly actor?: EventActor | undefined;
     readonly attemptId: string;
     readonly descriptor: HostOAuthDescriptor;
   }) => Promise<HostOAuthSignInState>;
   readonly refresh: (input: {
     readonly principalKind: PrincipalKind;
+    readonly actor?: EventActor | undefined;
     readonly descriptor: HostOAuthDescriptor;
     readonly credentialRef: string;
   }) => Promise<
@@ -76,6 +91,7 @@ export interface HostOAuthService {
    */
   readonly signOut: (input: {
     readonly principalKind: PrincipalKind;
+    readonly actor?: EventActor | undefined;
     readonly descriptor: HostOAuthDescriptor;
     readonly credentialRef: string;
     readonly forgetWhenNotRevoked?: boolean;
@@ -104,7 +120,11 @@ export function extAgentHostIdFor(dataDirectory: string): string {
 }
 
 export function createHostOAuthService(options: {
-  readonly journal: { readonly append: (record: HostOAuthJournalRecord) => void };
+  readonly journal: {
+    readonly append: (record: HostOAuthJournalRecord, actor?: EventActor) => void;
+    /** Who the journal says began an attempt; asked once this process no longer remembers. */
+    readonly startedBy?: (attemptId: string) => EventActor | undefined;
+  };
   readonly broker: HostOAuthBrokerPort;
   readonly now?: () => Date;
   /**
@@ -133,16 +153,30 @@ export function createHostOAuthService(options: {
   const terms = new Map<string, HostOAuthTermsAcknowledgment>();
   const completed = new Set<string>();
   const refusedAttempts = new Set<string>();
+  // Who began each attempt still waiting on consent, held with the attempt
+  // until it ends. A restart forgets it while the broker still holds the
+  // attempt, so the journal's own record of the start is asked next; a
+  // sign-in finished after a restart was once journaled as whoever read it.
+  const startedBy = new Map<string, EventActor>();
+  const starterOf = (attemptId: string, caller: EventActor | undefined): EventActor | undefined => {
+    const held = startedBy.get(attemptId);
+    if (held !== undefined) return held;
+    try {
+      return options.journal.startedBy?.(attemptId) ?? caller;
+    } catch {
+      return caller;
+    }
+  };
 
   // A record that cannot be journaled is reported, never dropped silently:
   // a live sign-in once finished at the issuer while nothing was recorded.
   // The error itself is not logged because it may echo the record.
-  const append = (record: {
-    readonly name: string;
-    readonly [field: string]: unknown;
-  }): boolean => {
+  const append = (
+    record: { readonly name: string; readonly [field: string]: unknown },
+    actor?: EventActor,
+  ): boolean => {
     try {
-      options.journal.append(decodeHostOAuthJournalRecord(record));
+      options.journal.append(decodeHostOAuthJournalRecord(record), actor);
       return true;
     } catch (error) {
       log(
@@ -156,13 +190,17 @@ export function createHostOAuthService(options: {
     descriptor: TermsKey,
     reason: "local-host-required" | "terms-required" | "unavailable" | "invalid",
     attemptId?: string,
+    actor?: EventActor,
   ): Refused => {
-    append({
-      name: "host-oauth.sign-in-refused",
-      descriptorId: descriptor.descriptorId,
-      reason,
-      ...(attemptId === undefined ? {} : { attemptId }),
-    });
+    append(
+      {
+        name: "host-oauth.sign-in-refused",
+        descriptorId: descriptor.descriptorId,
+        reason,
+        ...(attemptId === undefined ? {} : { attemptId }),
+      },
+      actor,
+    );
     const decoded = decodeHostOAuthSignInState({
       kind: "refused",
       descriptorId: descriptor.descriptorId,
@@ -182,14 +220,18 @@ export function createHostOAuthService(options: {
   const noteState = (
     descriptor: HostOAuthDescriptor,
     state: HostOAuthSignInState,
+    caller?: EventActor,
   ): HostOAuthSignInState => {
     if (state.kind === "signed-in" && !completed.has(state.attemptId)) {
-      const recorded = append({
-        name: "host-oauth.sign-in-completed",
-        descriptorId: descriptor.descriptorId,
-        attemptId: state.attemptId,
-        credentialRef: state.credentialRef,
-      });
+      const recorded = append(
+        {
+          name: "host-oauth.sign-in-completed",
+          descriptorId: descriptor.descriptorId,
+          attemptId: state.attemptId,
+          credentialRef: state.credentialRef,
+        },
+        starterOf(state.attemptId, caller),
+      );
       if (!recorded) {
         return decodeHostOAuthSignInState({
           kind: "refused",
@@ -199,6 +241,7 @@ export function createHostOAuthService(options: {
         });
       }
       completed.add(state.attemptId);
+      startedBy.delete(state.attemptId);
     }
     if (
       state.kind === "refused" &&
@@ -206,12 +249,16 @@ export function createHostOAuthService(options: {
       !refusedAttempts.has(state.attemptId)
     ) {
       refusedAttempts.add(state.attemptId);
-      append({
-        name: "host-oauth.sign-in-refused",
-        descriptorId: descriptor.descriptorId,
-        attemptId: state.attemptId,
-        reason: state.reason,
-      });
+      append(
+        {
+          name: "host-oauth.sign-in-refused",
+          descriptorId: descriptor.descriptorId,
+          attemptId: state.attemptId,
+          reason: state.reason,
+        },
+        starterOf(state.attemptId, caller),
+      );
+      startedBy.delete(state.attemptId);
     }
     return state;
   };
@@ -244,7 +291,8 @@ export function createHostOAuthService(options: {
         principalKind: input.principalKind,
         action: "provider.oauth.acknowledge-terms",
       });
-      if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
+      if (decision.kind === "deny")
+        return refuse(input.descriptor, "local-host-required", undefined, input.actor);
       let acknowledgment: HostOAuthTermsAcknowledgment;
       try {
         acknowledgment = decodeHostOAuthTermsAcknowledgment({
@@ -254,10 +302,10 @@ export function createHostOAuthService(options: {
           acknowledgedAt: now().toISOString(),
         });
       } catch {
-        return refuse(input.descriptor, "invalid");
+        return refuse(input.descriptor, "invalid", undefined, input.actor);
       }
       terms.set(termsKey(acknowledgment.descriptorId, acknowledgment.termsId), acknowledgment);
-      append({ name: "host-oauth.terms-acknowledged", ...acknowledgment });
+      append({ name: "host-oauth.terms-acknowledged", ...acknowledgment }, input.actor);
       return { kind: "recorded", acknowledgment };
     },
     restoreAcknowledgment: (acknowledgment) => {
@@ -268,11 +316,13 @@ export function createHostOAuthService(options: {
         principalKind: input.principalKind,
         action: "provider.oauth.begin",
       });
-      if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
+      if (decision.kind === "deny")
+        return refuse(input.descriptor, "local-host-required", undefined, input.actor);
       const acknowledgment = terms.get(
         termsKey(input.descriptor.descriptorId, input.descriptor.termsId),
       );
-      if (acknowledgment === undefined) return refuse(input.descriptor, "terms-required");
+      if (acknowledgment === undefined)
+        return refuse(input.descriptor, "terms-required", undefined, input.actor);
       // The ChatGPT plan dialect needs the stable host id on the descriptor
       // before the first sign-in; the catalog entry never carries one.
       const descriptor =
@@ -288,19 +338,24 @@ export function createHostOAuthService(options: {
           ...(input.credentialRef === undefined ? {} : { credentialRef: input.credentialRef }),
         });
       } catch {
-        return refuse(input.descriptor, "unavailable");
+        return refuse(input.descriptor, "unavailable", undefined, input.actor);
       }
       const state = decodeState(raw);
-      if (state === undefined) return refuse(input.descriptor, "unavailable");
+      if (state === undefined)
+        return refuse(input.descriptor, "unavailable", undefined, input.actor);
       if (state.kind === "awaiting-consent") {
-        append({
-          name: "host-oauth.sign-in-started",
-          descriptorId: input.descriptor.descriptorId,
-          attemptId: state.attemptId,
-          flow: state.flow,
-        });
+        if (input.actor !== undefined) startedBy.set(state.attemptId, input.actor);
+        append(
+          {
+            name: "host-oauth.sign-in-started",
+            descriptorId: input.descriptor.descriptorId,
+            attemptId: state.attemptId,
+            flow: state.flow,
+          },
+          input.actor,
+        );
       }
-      return noteState(input.descriptor, state);
+      return noteState(input.descriptor, state, input.actor);
     },
     cancel: async (input) => {
       const decision = authorize({
@@ -327,7 +382,8 @@ export function createHostOAuthService(options: {
         principalKind: input.principalKind,
         action: "provider.oauth.begin",
       });
-      if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
+      if (decision.kind === "deny")
+        return refuse(input.descriptor, "local-host-required", undefined, input.actor);
       let raw: unknown;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -339,20 +395,22 @@ export function createHostOAuthService(options: {
           }),
         ]);
       } catch {
-        return refuse(input.descriptor, "unavailable", input.attemptId);
+        return refuse(input.descriptor, "unavailable", input.attemptId, input.actor);
       } finally {
         if (timer !== undefined) clearTimeout(timer);
       }
       const state = decodeState(raw);
-      if (state === undefined) return refuse(input.descriptor, "unavailable", input.attemptId);
-      return noteState(input.descriptor, state);
+      if (state === undefined)
+        return refuse(input.descriptor, "unavailable", input.attemptId, input.actor);
+      return noteState(input.descriptor, state, input.actor);
     },
     refresh: async (input) => {
       const decision = authorize({
         principalKind: input.principalKind,
         action: "provider.oauth.refresh",
       });
-      if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
+      if (decision.kind === "deny")
+        return refuse(input.descriptor, "local-host-required", undefined, input.actor);
       let raw: unknown;
       try {
         raw = await options.broker.refresh(input.credentialRef);
@@ -370,12 +428,15 @@ export function createHostOAuthService(options: {
         reason: raw.reason,
       });
       if (state === undefined || state.kind !== "sign-in-again") return { kind: "unavailable" };
-      append({
-        name: "host-oauth.sign-in-again",
-        descriptorId: input.descriptor.descriptorId,
-        credentialRef: state.credentialRef,
-        reason: state.reason,
-      });
+      append(
+        {
+          name: "host-oauth.sign-in-again",
+          descriptorId: input.descriptor.descriptorId,
+          credentialRef: state.credentialRef,
+          reason: state.reason,
+        },
+        input.actor,
+      );
       return state;
     },
     signOut: async (input) => {
@@ -383,7 +444,8 @@ export function createHostOAuthService(options: {
         principalKind: input.principalKind,
         action: "provider.oauth.sign-out",
       });
-      if (decision.kind === "deny") return refuse(input.descriptor, "local-host-required");
+      if (decision.kind === "deny")
+        return refuse(input.descriptor, "local-host-required", undefined, input.actor);
       let result: { readonly kind: "signed-out" } | { readonly kind: "signed-out-locally" };
       try {
         // The ChatGPT plan dialect revokes the refresh token at the issuer's
@@ -422,11 +484,14 @@ export function createHostOAuthService(options: {
       } catch {
         return { kind: "unavailable" };
       }
-      append({
-        name: "host-oauth.signed-out",
-        descriptorId: input.descriptor.descriptorId,
-        credentialRef: input.credentialRef,
-      });
+      append(
+        {
+          name: "host-oauth.signed-out",
+          descriptorId: input.descriptor.descriptorId,
+          credentialRef: input.credentialRef,
+        },
+        input.actor,
+      );
       return result;
     },
     revokesOnSignOut: (descriptor) => descriptor.dialect === "chatgpt-plan-siwc",
@@ -437,7 +502,11 @@ export function createHostOAuthService(options: {
 export function openHostOAuthService(options: {
   readonly brokerUrl: string;
   readonly brokerToken: string;
-  readonly journal: { readonly append: (record: HostOAuthJournalRecord) => void };
+  readonly journal: {
+    readonly append: (record: HostOAuthJournalRecord, actor?: EventActor) => void;
+    /** Who the journal says began an attempt; asked once this process no longer remembers. */
+    readonly startedBy?: (attemptId: string) => EventActor | undefined;
+  };
   readonly fetch?: typeof fetch;
   readonly now?: () => Date;
 }): HostOAuthService {

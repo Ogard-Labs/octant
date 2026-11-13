@@ -857,7 +857,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "agent mcp --connection <file>  (on another machine, after agent-access join)" },
   {
     octant:
-      "agent-access create <name> --project <name>[,<name>] [--mode chat,work,code] [--access ask-first|accept-edits|auto|plan] [--threads own|project] [--allow-answers] [--models <id>,…] [--days <n>] [--direct] [--turns-per-day <n>] [--running-turns <n>] [--requests-per-minute <n>] [--json]",
+      "agent-access create <name> --project <name>[,<name>] [--mode chat,work,code] [--access ask-first|accept-edits|auto|plan|full-access] [--threads own|project] [--allow-answers] [--models <id>,…] [--days <n>] [--direct] [--turns-per-day <n>] [--running-turns <n>] [--requests-per-minute <n>] [--json]",
   },
   { octant: "agent-access list|show <grant> [--json]" },
   { octant: "agent-access code|rotate-key <grant>" },

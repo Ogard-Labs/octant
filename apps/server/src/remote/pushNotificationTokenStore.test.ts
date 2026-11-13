@@ -235,10 +235,10 @@ describe("push registrations on the host", () => {
         return payload.change ?? payload.reason;
       }),
     ).toEqual(["added", "changed", "device-cleared"]);
-    expect(JSON.parse(events[2]?.actor_json ?? "{}")).toMatchObject({
-      kind: "remote-device",
-      deviceId: phone,
-    });
+    // The device is named by its own id, as in every other record it makes.
+    expect(events.map((event) => JSON.parse(event.actor_json ?? "{}"))).toEqual(
+      events.map(() => ({ kind: "remote-device", actorId: phone, deviceId: phone })),
+    );
     expect(JSON.stringify(events)).not.toMatch(/token-[ab]/);
     expect(existsSync(join(dataDirectory, PUSH_REGISTRATIONS_FILE))).toBe(false);
     expect(open().get({ hostId, deviceId: phone })).toBeUndefined();

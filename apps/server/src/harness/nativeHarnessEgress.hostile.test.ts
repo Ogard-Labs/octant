@@ -3185,6 +3185,55 @@ describe("native harness tool egress grants and learn mode", () => {
       });
     });
 
+    it("lets a device the host's own person paired grant a Project rule over the route, and journals the device as who granted it", async () => {
+      const host = egressHost();
+      const windowId = decodeWindowId("00000000-0000-4000-8000-000000000468");
+      const handler = createNativeHarnessEgressRouteHandler({
+        windowAuthorityStore: new WindowAuthorityStore(),
+        rules: host.rules,
+        authorizeThread: () => true,
+        now: () => 1,
+      });
+      const url = `http://127.0.0.1/api/native-harness/egress/threads/${String(egressThread)}`;
+      const send = (method: "GET" | "POST", body?: unknown) => {
+        const request = new Request(url, {
+          method,
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+        bindPrincipalRouteContext(request, {
+          principal: {
+            kind: "remote-device",
+            deviceId: device.deviceId,
+            admittedBy: "host-person",
+          } as never,
+          scopeId: windowId,
+        });
+        return handler(request);
+      };
+      expect(await (await send("GET"))?.json()).toMatchObject({
+        view: { projectGrant: "allowed" },
+      });
+      const granted = await send("POST", {
+        kind: "grant-rules",
+        grants: [
+          { host: "registry.example.com", port: 443, choice: { kind: "project", lifetime: "7d" } },
+        ],
+        declineProposalIds: [],
+      });
+      expect(granted?.status).toBe(200);
+      expect(
+        host.events(TOOL_EGRESS_PROJECT_AGGREGATE).map((event) => ({
+          actor: event.actor,
+          principal: (event.payload as { readonly principal: unknown }).principal,
+        })),
+      ).toEqual([
+        {
+          actor: { kind: "remote-device", actorId: device.deviceId, deviceId: device.deviceId },
+          principal: { kind: "remote-device", deviceId: device.deviceId },
+        },
+      ]);
+    });
+
     it("lets a tainted thread grant only call rules, and stops its standing rules", async () => {
       const host = egressHost();
       const origin = await tcpFixture();
@@ -4769,6 +4818,18 @@ describe("native harness tool egress grants and learn mode", () => {
           principal: { kind: "remote-device", deviceId: device.deviceId },
         }),
       ]);
+      // A restricted device is journaled under the same actor id as a device
+      // the person paired: its own.
+      expect(
+        host
+          .events(TOOL_EGRESS_THREAD_AGGREGATE)
+          .filter(
+            (event) =>
+              event.eventName === TOOL_EGRESS_EVENT_NAMES.threadRuleGranted &&
+              (event.payload as { scope: { kind: string } }).scope.kind === "call",
+          )
+          .map((event) => event.actor),
+      ).toEqual([{ kind: "remote-device", actorId: device.deviceId, deviceId: device.deviceId }]);
     });
 
     it("offers no proposal on a thread whose revocations cannot be read, as nothing can be granted there", async () => {

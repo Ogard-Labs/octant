@@ -193,6 +193,69 @@ describe("the agent grant guard", () => {
     ).toBe("allowed");
   });
 
+  it("runs at Full access only when the person chose Full access for the grant, and never remembers it on a Project", () => {
+    const thread = {
+      id: "t",
+      projectId: granted,
+      modelId: "m",
+      permissionPersistence: "current-session",
+      executionPolicy: "full-access",
+    };
+    const createCode = (overrides: Record<string, unknown>, scope: Partial<AgentGrantScope>) =>
+      guard(
+        {
+          path: "/api/code/commands",
+          method: "POST",
+          body: { kind: "create-code-thread", thread: { ...thread, ...overrides } },
+        },
+        scope,
+      );
+    const raiseWork = (scope: Partial<AgentGrantScope>) =>
+      guard(
+        {
+          path: "/api/work/threads/commands",
+          method: "POST",
+          body: { kind: "change-work-thread-access", threadId: ownThread, access: "full-access" },
+        },
+        scope,
+      );
+
+    expect(createCode({}, { highestLevel: "full-access" })).toBe("allowed");
+    expect(createCode({ fullAccessSandbox: true }, { highestLevel: "full-access" })).toBe(
+      "allowed",
+    );
+    expect(raiseWork({ highestLevel: "full-access" })).toBe("allowed");
+    // Every lower level still stops below Full access.
+    expect(createCode({}, { highestLevel: "auto" })).toBe("refused");
+    expect(createCode({ fullAccessSandbox: true }, { highestLevel: "auto" })).toBe("refused");
+    expect(raiseWork({ highestLevel: "auto" })).toBe("refused");
+    // Remembering it on the Project is administration, which no grant holds.
+    expect(
+      createCode({ permissionPersistence: "project-default" }, { highestLevel: "full-access" }),
+    ).toBe("refused");
+    expect(
+      guard(
+        {
+          path: "/api/projects/commands",
+          method: "POST",
+          body: { kind: "change-code-project-access", projectId: granted },
+        },
+        { highestLevel: "full-access" },
+      ),
+    ).toBe("refused");
+    // Approvals, terminals, and the host Browser stay off the grant's list.
+    for (const path of [
+      "/api/extensions/tool-approvals",
+      "/api/code/project-terminals",
+      "/api/browser/actions",
+      "/api/extensions/lifecycle",
+    ]) {
+      expect(guard({ path, method: "POST", body: {} }, { highestLevel: "full-access" })).toBe(
+        "refused",
+      );
+    }
+  });
+
   it("reaches only its own threads, or its Projects' threads when the grant says so", () => {
     const read = (threadId: string, threads: "own" | "project" = "own") =>
       guard({ path: `/api/code/threads/${threadId}`, method: "GET" }, { threads });
@@ -386,6 +449,18 @@ describe("the running-turn limit", () => {
     if (first.kind === "admitted") first.release();
     if (second.kind === "admitted") second.release();
     expect((await policy.beforeTurn(session)).kind).toBe("admitted");
+  });
+});
+
+describe("naming Full access in a tool call", () => {
+  it("is open to a grant the person gave Full access and to no other", () => {
+    const { service, threadProject, threadAccess } = deps();
+    const naming = (highestLevel: AgentGrantScope["highestLevel"]) =>
+      agentToolPolicy(grant({ highestLevel }), { service, threadProject, threadAccess })
+        .allowsFullAccess;
+    expect(naming("full-access")).toBe(true);
+    expect(naming("auto")).toBe(false);
+    expect(naming("ask-first")).toBe(false);
   });
 });
 

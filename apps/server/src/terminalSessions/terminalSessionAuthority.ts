@@ -1,4 +1,4 @@
-import { readPrincipalRouteContext } from "../principalRouteContext";
+import { boundPrincipalIsRestricted } from "../principalRouteContext";
 
 /** What a paired device is told when it tries to start a thread from a terminal session. */
 export const TERMINAL_SESSION_LOCAL_ONLY =
@@ -16,6 +16,5 @@ export function refusesTerminalSessionImport(
   command: { readonly terminalSession?: unknown },
 ): boolean {
   if (command.terminalSession === undefined) return false;
-  const principal = readPrincipalRouteContext(request)?.principal;
-  return principal !== undefined && principal.kind !== "local-window";
+  return boundPrincipalIsRestricted(request);
 }

@@ -88,13 +88,18 @@ export class BundledPluginSwitchStore {
   /**
    * Records the person's switch. `expectedStateVersion` must be the version
    * the person saw, as for an installed package's desired state; a switch
-   * already in the asked position records nothing.
+   * already in the asked position records nothing. `actor` is who switched
+   * it, resolved from the authenticated principal; absent means the person at
+   * this host.
    */
-  setDesired(command: {
-    readonly extensionId: string;
-    readonly expectedStateVersion: number;
-    readonly desired: boolean;
-  }): BundledPluginSwitchResult {
+  setDesired(
+    command: {
+      readonly extensionId: string;
+      readonly expectedStateVersion: number;
+      readonly desired: boolean;
+    },
+    actor: EventActorValue = this.#actor,
+  ): BundledPluginSwitchResult {
     if (!this.holds(command.extensionId)) return { status: "refused" };
     const current = readBundledPluginSwitch(this.#connection, command.extensionId);
     if (current.stateVersion !== command.expectedStateVersion) return { status: "stale" };
@@ -113,7 +118,7 @@ export class BundledPluginSwitchStore {
             eventName: decodeEventName(BUNDLED_PLUGIN_SWITCH_EVENT_NAMES.switched),
             eventVersion: 1,
             correlationId: eventId,
-            actor: this.#actor,
+            actor,
             occurredAt: decodeTimestamp(this.#clock()),
             payload: decodeBundledPluginSwitched({
               extensionId: command.extensionId,

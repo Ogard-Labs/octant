@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as agentThreads from "./agentThread";
-import { runAgentMcpServer } from "./agentMcpServer";
+import {
+  agentToolList,
+  callAgentTool,
+  runAgentMcpServer,
+  type AgentToolPolicy,
+} from "./agentMcpServer";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
 
 const now = "2026-11-11T09:00:00.000Z";
@@ -356,6 +361,60 @@ describe("octant agent mcp", () => {
     expect(create).not.toHaveBeenCalled();
     expect(fake.opened()).toBe(0);
     await server.end();
+  });
+
+  it("starts a thread at Full access for a grant the person gave Full access, and refuses it for any other grant", async () => {
+    const fake = host({ projects: [codeProject()] });
+    const work = thread("code");
+    const create = vi.spyOn(agentThreads, "createAgentThread").mockResolvedValue({
+      kind: "created",
+      threadId,
+      mode: "code",
+      projectName: "Repo",
+    });
+    vi.spyOn(agentThreads, "agentThreadPort").mockReturnValue(work.port);
+    const grant = (allowsFullAccess: boolean): AgentToolPolicy => ({
+      tools: new Set(["start_work"]),
+      projectAllowed: () => true,
+      threadAllowed: () => true,
+      defaultAccess: allowsFullAccess ? "full-access" : "auto",
+      allowsFullAccess,
+      beforeTurn: async () => ({ kind: "admitted", release: () => undefined }),
+    });
+    const ask = (allowsFullAccess: boolean) =>
+      callAgentTool(
+        "start_work",
+        { prompt: "Fix it", folder: repo, access: "full-access" },
+        {
+          openSession: fake.openSession,
+          signal: new AbortController().signal,
+          pollIntervalMs: 1,
+          policy: grant(allowsFullAccess),
+        },
+      );
+
+    const refused = await ask(false);
+    expect(refused.isError).toBe(true);
+    expect(refused.value).toContain("grant does not include Full access");
+    expect(create).not.toHaveBeenCalled();
+    expect(fake.opened()).toBe(0);
+
+    const started = await ask(true);
+    expect(started.isError).toBeFalsy();
+    expect(create).toHaveBeenCalledWith(
+      expect.anything(),
+      // A grant cannot remember a level on a Project, so the thread alone gets it.
+      expect.objectContaining({ access: "full-access", fullAccessScope: "thread" }),
+    );
+    await started.keepOpenUntil;
+
+    // Each grant's tool list offers only the levels it may name.
+    const offered = (allowsFullAccess: boolean) =>
+      JSON.stringify(
+        agentToolList(grant(allowsFullAccess)).find((tool) => tool["name"] === "start_work"),
+      );
+    expect(offered(true)).toContain('"full-access"');
+    expect(offered(false)).not.toContain('"full-access"');
   });
 
   it("answers the thread's question but lists its approval as the person's to answer in Octant", async () => {

@@ -2,7 +2,7 @@ import {
   decideExtensionToolGrant,
   type ExtensionToolGrantDecision,
 } from "@octant/domain/extension-tool-grant-policy";
-import type { ApprovalOutsideContent, WindowId } from "@octant/contracts";
+import type { ApprovalOutsideContent, EventActor, WindowId } from "@octant/contracts";
 import type { ExtensionToolGrantSubject } from "../persistence/extensionToolGrantProjection";
 import type { ExtensionToolCall } from "./agentPluginMcpSessionManager";
 import type { ExtensionToolApprovalService } from "./extensionToolApprovalService";
@@ -140,38 +140,49 @@ export function createExtensionToolCallAuthorizer(options: {
   // Judged again when the person answers: the prompt may have been open while
   // another call brought outside content onto the thread, and what would have
   // been kept for the Project when it was raised is then kept for the thread.
-  const remember = (call: ExtensionToolCall, scope: "tool" | "server"): boolean => {
+  const remember = (
+    call: ExtensionToolCall,
+    scope: "tool" | "server",
+    actor: EventActor | undefined,
+  ): boolean => {
     const { server, decision } = judge(call);
     if (decision.kind === "covered") return true;
     if (decision.answerCovers !== "server") return false;
     const recorded =
       scope === "server"
-        ? options.grants.record({ ...server, version: call.version, digest: call.digest })
-        : options.grants.record({
-            ...server,
-            mcpToolName: call.mcpToolName,
-            ...offeredBinding(call),
-          });
+        ? options.grants.record({ ...server, version: call.version, digest: call.digest }, actor)
+        : options.grants.record(
+            {
+              ...server,
+              mcpToolName: call.mcpToolName,
+              ...offeredBinding(call),
+            },
+            actor,
+          );
     return recorded === "recorded";
   };
 
-  // Only the local window whose own turn raised a prompt can answer one whose
-  // approval is kept: a host-owned or a paired device's turn is judged to
-  // cover its call alone. An answer that already narrowed itself to this tool
+  // Only the host's own person, at the local window or the device they paired
+  // whose own turn raised a prompt, can answer one whose approval is kept, and
+  // it is journaled as that window or device: a host-owned or a hub-introduced
+  // device's turn is judged to cover its call alone. An answer that already narrowed itself to this tool
   // is judged covered here and records nothing wider.
-  const keepApproval = (call: ExtensionToolCall): void => {
+  const keepApproval = (call: ExtensionToolCall, actor: EventActor | undefined): void => {
     const { server, decision } = judge(call);
     if (decision.kind === "covered") return;
     if (decision.answerCovers === "server") {
       // A grant the journal refuses leaves this call approved and the next asked.
-      options.grants.record({ ...server, version: call.version, digest: call.digest });
+      options.grants.record({ ...server, version: call.version, digest: call.digest }, actor);
     } else if (decision.answerCovers === "server-on-thread") {
-      options.grants.record({
-        ...server,
-        threadId: call.thread.id,
-        version: call.version,
-        digest: call.digest,
-      });
+      options.grants.record(
+        {
+          ...server,
+          threadId: call.thread.id,
+          version: call.version,
+          digest: call.digest,
+        },
+        actor,
+      );
     }
   };
 
@@ -184,6 +195,7 @@ export function createExtensionToolCallAuthorizer(options: {
     const { windowId } = call;
     // Asked before the server is called: while it waits, the call's record
     // says nothing ran, so a restart continues the turn and asks again.
+    let approvedBy: EventActor | undefined;
     const approved = await whileAwaitingToolApproval(() =>
       options.approvals.request({
         windowId,
@@ -198,13 +210,19 @@ export function createExtensionToolCallAuthorizer(options: {
         inputJson: call.inputJson,
         ...(outsideContent === undefined ? {} : { outsideContent }),
         answerCovers: decision.answerCovers,
+        approvedBy: (actor: EventActor | undefined) => {
+          approvedBy = actor;
+        },
         ...(decision.answerCovers === "server"
-          ? { remember: (scope: "tool" | "server") => remember(call, scope) }
+          ? {
+              remember: (scope: "tool" | "server", actor?: EventActor) =>
+                remember(call, scope, actor),
+            }
           : {}),
         ...(call.signal === undefined ? {} : { signal: call.signal }),
       }),
     );
-    if (approved) keepApproval(call);
+    if (approved) keepApproval(call, approvedBy);
     return approved;
   };
 }

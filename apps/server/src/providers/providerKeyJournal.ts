@@ -6,6 +6,7 @@ import {
   CorrelationId,
   EventId,
   LOCAL_HOST_ID,
+  type EventActor,
   type ProviderInstance,
   type ProviderInstanceId,
   type WindowId,
@@ -53,6 +54,8 @@ export interface ProviderKeyJournal {
     readonly action: ProviderKeyChangeAction;
     readonly instanceVersion: number;
     readonly windowId: WindowId;
+    /** The paired device the key came from. Absent, the change is the local person's. */
+    readonly actor?: EventActor;
   }) => ProviderKeyChangeRecorder;
   readonly unsettled: () => ReadonlyArray<UnsettledProviderKeyChange>;
   /** Records the outcome of a request found without one. */
@@ -72,7 +75,11 @@ export function providerKeyJournal(options: {
   readonly uuid: () => string;
   readonly now: () => string;
 }): ProviderKeyJournal {
-  const append = (instanceId: ProviderInstanceId, record: ProviderKeyJournalRecord): void => {
+  const append = (
+    instanceId: ProviderInstanceId,
+    record: ProviderKeyJournalRecord,
+    actor?: EventActor,
+  ): void => {
     const decoded = decodeProviderKeyJournalRecord(record);
     options.journal.append({
       aggregate: {
@@ -91,16 +98,20 @@ export function providerKeyJournal(options: {
           eventVersion: 1,
           hostId: LOCAL_HOST_ID,
           correlationId: decodeCorrelationId(options.uuid()),
-          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor: actor ?? { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
           occurredAt: options.now(),
           payload: decoded,
         },
       ],
     });
   };
-  const bestEffort = (instanceId: ProviderInstanceId, record: ProviderKeyJournalRecord): void => {
+  const bestEffort = (
+    instanceId: ProviderInstanceId,
+    record: ProviderKeyJournalRecord,
+    actor?: EventActor,
+  ): void => {
     try {
-      append(instanceId, record);
+      append(instanceId, record, actor);
     } catch {
       // The request stays unsettled, and the next host start settles it.
     }
@@ -109,24 +120,32 @@ export function providerKeyJournal(options: {
   return {
     request: (input) => {
       const requestId = options.uuid();
-      append(input.instanceId, {
-        name: "provider-key.change-requested",
-        requestId,
-        instanceId: input.instanceId,
-        action: input.action,
-        instanceVersion: decodeAggregateVersion(input.instanceVersion),
-        windowId: input.windowId,
-      });
+      append(
+        input.instanceId,
+        {
+          name: "provider-key.change-requested",
+          requestId,
+          instanceId: input.instanceId,
+          action: input.action,
+          instanceVersion: decodeAggregateVersion(input.instanceVersion),
+          windowId: input.windowId,
+        },
+        input.actor,
+      );
       const common = { requestId, instanceId: input.instanceId, action: input.action };
       return {
         complete: (outcome) =>
-          bestEffort(input.instanceId, {
-            name: "provider-key.change-completed",
-            ...common,
-            outcome,
-          }),
+          bestEffort(
+            input.instanceId,
+            { name: "provider-key.change-completed", ...common, outcome },
+            input.actor,
+          ),
         fail: (reason) =>
-          bestEffort(input.instanceId, { name: "provider-key.change-failed", ...common, reason }),
+          bestEffort(
+            input.instanceId,
+            { name: "provider-key.change-failed", ...common, reason },
+            input.actor,
+          ),
       };
     },
     unsettled: () => {

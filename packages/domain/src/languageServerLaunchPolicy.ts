@@ -1,7 +1,7 @@
 import type { CodeLanguageRefusalReason } from "@octant/contracts/code-language";
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
-import type { PrincipalKind } from "./remoteAccessPolicy";
+import { actsAsHostPerson, type PrincipalKind } from "./remoteAccessPolicy";
 
 /**
  * Whether a language server may start for a Code checkout, and how it is
@@ -95,10 +95,10 @@ export function decideLanguageServerLaunch(
     };
   }
   if (request.posture === "plan") return { status: "refused", reason: "plan-read-only" };
-  // Running the repository's tooling on the host stays with the person at the
-  // machine, as terminal input does, so an approval on record does not let a
-  // paired device start one.
-  if (request.startedBy !== "local-window") {
+  // Running the repository's tooling on the host is the person's to start, at
+  // the machine or on a device they paired, as terminal input is. An approval
+  // on record does not let any other device session start one.
+  if (!actsAsHostPerson(request.startedBy)) {
     return { status: "refused", reason: "local-host-required" };
   }
   if (request.shellCommandApproval !== "granted") {

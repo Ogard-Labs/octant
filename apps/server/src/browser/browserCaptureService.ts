@@ -71,6 +71,11 @@ export interface KeepBrowserCaptureInput {
   readonly url: string | undefined;
   readonly title: string | undefined;
   readonly takenBy: BrowserCaptureTaker;
+  /**
+   * Who took a person's capture, as the route resolved them; absent, the
+   * host's own person. Not read for an agent's capture.
+   */
+  readonly takenByActor?: EventActor | undefined;
   /** The stored profile the page lived in, recorded with the capture. */
   readonly profile?: StoredBrowserProfile | undefined;
   /** The provider instance driving the tool; the journal actor for an agent capture. */
@@ -388,8 +393,9 @@ export class BrowserCaptureService {
     readonly threadId: BrowserThreadId;
     readonly providerInstanceId: ProviderInstanceId;
     readonly takenBy?: BrowserCaptureTaker;
+    readonly takenByActor?: EventActor | undefined;
   }): EventActor {
-    if (input.takenBy === "person") return this.#personActor;
+    if (input.takenBy === "person") return input.takenByActor ?? this.#personActor;
     return decodeEventActor({
       kind: "agent",
       actorId: input.providerInstanceId,

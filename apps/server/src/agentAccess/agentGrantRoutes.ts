@@ -1,16 +1,15 @@
 import {
   AGENT_GRANT_ROUTES,
   decodeAgentGrantRevokeRequest,
-  decodeEventActor,
   type AgentAccessResult,
   type AgentThreadAttributions,
 } from "@octant/contracts";
-import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import { AGENT_ACCESS_ORIGIN } from "./agentAccessSession";
-import { AGENT_ACCESS_LOCAL_ACTOR, type AgentAccessService } from "./agentAccessService";
+import type { AgentAccessService } from "./agentAccessService";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -100,13 +99,7 @@ export function createAgentGrantRouteHandler(options: AgentGrantRouteOptions): A
     }
     const result = options.service.execute(
       { kind: "revoke", grantId: revoke.grantId, stopRunningTurns: revoke.stopRunningTurns },
-      principal.kind === "remote-device"
-        ? decodeEventActor({
-            kind: "remote-device",
-            actorId: OCTANT_LOCAL_ACTOR_ID,
-            deviceId: String(principal.deviceId),
-          })
-        : AGENT_ACCESS_LOCAL_ACTOR,
+      eventActorForPrincipal(principal),
     );
     if (revoke.stopRunningTurns && result.kind === "done") {
       await options.stopRunningTurns(String(revoke.grantId)).catch(() => undefined);

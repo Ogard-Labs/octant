@@ -2,6 +2,7 @@ import {
   ActorId,
   CorrelationId,
   EventId,
+  type EventActor,
   LOCAL_HOST_ID,
   SPEND_CEILING_AGGREGATE_TYPE,
   SPEND_CEILING_EVENT_NAMES,
@@ -224,7 +225,16 @@ export class SpendCeilingService {
     };
   }
 
-  execute(principalKind: PrincipalKind, command: SpendCeilingCommand): SpendCeilingCommandResult {
+  /**
+   * `actor` is who asked, as the route resolved it from the authenticated
+   * principal: a paired device's ceiling is journaled as that device and
+   * names it as who set it. Absent means the person at this host.
+   */
+  execute(
+    principalKind: PrincipalKind,
+    command: SpendCeilingCommand,
+    actor: EventActor = { kind: "local-user", actorId: LOCAL_ACTOR_ID },
+  ): SpendCeilingCommandResult {
     const current = readSpendCeiling(this.#connection, command.scope);
     const aggregateVersion = this.#aggregateVersion(command.scope);
     const decision = decideSpendCeilingCommand({
@@ -234,16 +244,19 @@ export class SpendCeilingService {
       aggregateVersion,
       scopeExists: this.#scopeExists(command.scope),
       now: decodeUtcTimestamp(this.#clock()),
-      actor: { kind: "local-user", actorId: LOCAL_ACTOR_ID },
+      actor,
     });
     if (decision.status === "refused") {
       return { kind: "refused", refusal: decision.refusal };
     }
     if (decision.status === "cleared") {
-      this.#append(command.scope, aggregateVersion, SPEND_CEILING_EVENT_NAMES.cleared, {
-        scope: command.scope,
-        clearedAt: decodeUtcTimestamp(this.#clock()),
-      });
+      this.#append(
+        command.scope,
+        aggregateVersion,
+        SPEND_CEILING_EVENT_NAMES.cleared,
+        { scope: command.scope, clearedAt: decodeUtcTimestamp(this.#clock()) },
+        actor,
+      );
       return { kind: "cleared", scope: command.scope };
     }
     const eventName =
@@ -264,10 +277,13 @@ export class SpendCeilingService {
         ? {}
         : { previousCostBudgetUsdCents: decision.previousCostBudgetUsdCents }),
     };
-    this.#append(command.scope, aggregateVersion, eventName, {
-      ceiling: decision.next,
-      ...previous,
-    });
+    this.#append(
+      command.scope,
+      aggregateVersion,
+      eventName,
+      { ceiling: decision.next, ...previous },
+      actor,
+    );
     return command.kind === "raise-spend-ceiling"
       ? { kind: "raised", ceiling: decision.next, ...previous }
       : { kind: "set", ceiling: decision.next };
@@ -699,6 +715,7 @@ export class SpendCeilingService {
     expectedVersion: number,
     eventName: string,
     payload: unknown,
+    actor?: EventActor,
   ): void {
     this.#appendTo(
       SPEND_CEILING_AGGREGATE_TYPE,
@@ -706,6 +723,7 @@ export class SpendCeilingService {
       expectedVersion,
       eventName,
       payload,
+      actor,
     );
   }
 
@@ -715,6 +733,9 @@ export class SpendCeilingService {
     expectedVersion: number,
     eventName: string,
     payload: unknown,
+    // A turn the host counts and an overrun it records name nobody and keep
+    // the local user they always carried; a person's command names who asked.
+    actor: EventActor = { kind: "local-user", actorId: LOCAL_ACTOR_ID },
   ): void {
     this.#journal.append({
       aggregate: { aggregateType, aggregateId },
@@ -726,7 +747,7 @@ export class SpendCeilingService {
           eventVersion: 1,
           hostId: LOCAL_HOST_ID,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: "local-user" as const, actorId: LOCAL_ACTOR_ID },
+          actor,
           occurredAt: decodeUtcTimestamp(this.#clock()),
           payload,
         },

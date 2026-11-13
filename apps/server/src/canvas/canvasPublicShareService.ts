@@ -167,7 +167,15 @@ export class CanvasPublicShareService {
     return this.#dependencies.secrets !== undefined;
   }
 
-  changeSettings(command: CanvasPublicLinkSettingsCommand): CanvasPublicLinkSettingsResult {
+  /**
+   * `actor` is who changed them, as the route resolved it from the
+   * authenticated principal: a paired device's change is journaled as that
+   * device. Absent means the person at this host.
+   */
+  changeSettings(
+    command: CanvasPublicLinkSettingsCommand,
+    actor?: EventActor,
+  ): CanvasPublicLinkSettingsResult {
     if (command.expectedVersion !== this.#settings.version) {
       return refusedSettings("stale-version", "Public link settings changed since you read them.");
     }
@@ -179,6 +187,7 @@ export class CanvasPublicShareService {
         this.#settings.version,
         CANVAS_PUBLIC_LINK_SETTINGS_CHANGED,
         changed,
+        actor,
       );
     } catch (error) {
       if (error instanceof ConcurrencyConflict) {
@@ -406,8 +415,11 @@ export class CanvasPublicShareService {
   revoke(
     canvasId: CanvasId,
     publicShareId: CanvasPublicShareId,
+    // Who asked: the record that a revoke is owed names them. The host's own
+    // later settling of it does not.
+    actor?: EventActor,
   ): Promise<CanvasPublicShareRevokeResult> {
-    return this.#serialized(canvasId, () => this.#revokeNow(canvasId, publicShareId));
+    return this.#serialized(canvasId, () => this.#revokeNow(canvasId, publicShareId, actor));
   }
 
   /**
@@ -465,6 +477,7 @@ export class CanvasPublicShareService {
   async #revokeNow(
     canvasId: CanvasId,
     publicShareId: CanvasPublicShareId,
+    actor: EventActor | undefined,
   ): Promise<CanvasPublicShareRevokeResult> {
     const held = [...this.#shares.values()].find(
       (candidate) =>
@@ -481,7 +494,7 @@ export class CanvasPublicShareService {
     if (held.record.status === "revoked") {
       return decodeCanvasPublicShareRevokeResult({ kind: "revoked", share: held.record });
     }
-    this.#owe(held);
+    this.#owe(held, actor);
     const settled = await this.#settle(held.credentialRef);
     // The service was just tried; the next listing waits out the interval
     // rather than asking again at once.
@@ -616,7 +629,7 @@ export class CanvasPublicShareService {
   }
 
   /** Record that a revoke is owed, once, before any attempt is made. */
-  #owe(held: HeldShare): void {
+  #owe(held: HeldShare, actor?: EventActor): void {
     if (this.#pending.has(held.credentialRef)) return;
     const pending: PendingRevocation = {
       publicShareId: held.record.publicShareId,
@@ -629,6 +642,7 @@ export class CanvasPublicShareService {
       this.#pendingVersions.get(held.credentialRef) ?? 0,
       CANVAS_PUBLIC_SHARE_REVOCATION_PENDING,
       pending,
+      actor,
     );
     this.#pending.set(held.credentialRef, pending);
     this.#pendingVersions.set(
@@ -714,6 +728,7 @@ export class CanvasPublicShareService {
     expectedVersion: number,
     eventName: string,
     payload: unknown,
+    actor: EventActor = this.#dependencies.actor,
   ): void {
     this.#dependencies.journal.append({
       aggregate: { aggregateType, aggregateId },
@@ -724,7 +739,7 @@ export class CanvasPublicShareService {
           eventName,
           eventVersion: 1,
           correlationId: this.#dependencies.uuid(),
-          actor: this.#dependencies.actor,
+          actor,
           occurredAt: this.#dependencies.clock(),
           payload,
         },

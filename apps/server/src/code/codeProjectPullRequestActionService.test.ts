@@ -123,10 +123,11 @@ function fixture(
     authority,
     forge,
     merge,
-    record: (record) =>
+    record: (record, actor) =>
       journalPullRequestAction(store.journal, record, {
         uuid: () => crypto.randomUUID(),
         clock: () => now,
+        ...(actor === undefined ? {} : { actor }),
       }),
   });
   return { service, forge, authority, merge, store };
@@ -311,6 +312,23 @@ describe("project pull-request actions", () => {
       const text = JSON.stringify(store.recorded());
       expect(text).not.toContain("secret plan");
       expect(store.recorded()[0]?.payload).toMatchObject({ bodyBytes: 27 });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("journals an action from a device the host's own person paired with the device as its actor, and a local window's as the local user", async () => {
+    const { service, store } = fixture();
+    try {
+      const deviceId = "00000000-0000-4000-8000-0000000000d1";
+      const device = { kind: "remote-device", actorId: deviceId, deviceId };
+      const comment = { kind: "comment", ...target, body: "Looks right." } as const;
+      await service.act(windowId, comment, signal(), "local-window", device as never);
+      await service.act(windowId, comment, signal(), "local-window");
+      expect(store.recorded().map((event) => event.actor)).toEqual([
+        device,
+        expect.objectContaining({ kind: "local-user" }),
+      ]);
     } finally {
       store.close();
     }

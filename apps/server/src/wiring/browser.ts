@@ -31,6 +31,11 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import { createHostPersonScopes, createPersonProjectReach } from "../hostPersonScope";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
 import { createProductFeedbackRouteHandler } from "../productFeedbackRoutes";
 import {
   decodeBrowserContextId,
@@ -383,15 +388,32 @@ export function wireBrowser(deps: BrowserDependencies) {
           approvedWorkingFolderRoot(project, folderId),
       };
     };
+    // Session, upload and download permissions are reviewed by the host's own
+    // person: at a live window, or on a device that person paired, whose
+    // record then names the device.
+    const hostPersonScopes = createHostPersonScopes({
+      localWindows: () => windowAuthorityStore.listWindowIds(),
+      devices: () => readDeviceRegistrations(persistence.connection),
+      approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+    });
+    const personHoldsProject = createPersonProjectReach<ProjectId, "work" | "code">({
+      windowHoldsProject: (scopeId, projectId, mode) =>
+        windowHoldsProject(scopeId, projectId, mode),
+      isPersonPairedDevice: (scopeId) => hostPersonScopes.deviceActor(scopeId) !== undefined,
+      isActiveProject: (projectId, mode) => {
+        const project = persistence.readProject(projectId);
+        return project !== undefined && project.type === mode && project.lifecycle === "active";
+      },
+    });
     // Upload and download permissions live only in this process, so their
     // review windows and their minutes run on the authority clock.
     const browserUploadPermissions = new BrowserUploadPermissions({
       now: processAuthorityTime,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
-        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+        personHoldsProject(windowId, target.authority.projectId, target.authority.mode),
       current: transferRecipient,
       targets: () =>
         persistence.automationProjection.listDefinitions().flatMap((definition) => {
@@ -405,16 +427,17 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => browserUploadPermissions.close()));
     const browserDownloadPermissions = new BrowserDownloadPermissions({
       now: processAuthorityTime,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       canReview: (windowId, target) =>
         target.authority.mode !== "chat" &&
-        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+        personHoldsProject(windowId, target.authority.projectId, target.authority.mode),
       current: transferRecipient,
       targets: () =>
         persistence.automationProjection.listDefinitions().flatMap((definition) => {
@@ -428,6 +451,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => browserDownloadPermissions.close()));
@@ -456,23 +480,33 @@ export function wireBrowser(deps: BrowserDependencies) {
           : { status: "disabled" },
       now: processAuthorityTime,
       uuid: randomUUID,
-      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      isLocalWindow: hostPersonScopes.actsAsHostPerson,
       localWindows: () => windowAuthorityStore.listWindowIds(),
       canReview: (windowId, target) => {
         if (target.grantee.kind === "routine" || target.grantee.kind === "terminal")
           return (
             target.authority.mode !== "chat" &&
-            windowHoldsProject(windowId, target.authority.projectId, target.authority.mode)
+            personHoldsProject(windowId, target.authority.projectId, target.authority.mode)
           );
         if (target.grantee.kind !== "child") return false;
         const run = persistence.agentRunProjection.getById(target.grantee.runId);
+        if (run === undefined) return false;
+        const parentThreadId = decodeBrowserThreadId(String(run.parentThreadId));
+        if (browserAuthority.canAccessWindow(windowId, parentThreadId, target.authority.mode))
+          return true;
+        // A device the person paired has no workspace for the window check to
+        // read; it reviews a child's page where the parent thread's Project
+        // is one it reaches.
+        const projectId = browserAuthority.resolve(
+          parentThreadId,
+          target.authority.mode,
+        )?.projectId;
         return (
-          run !== undefined &&
-          browserAuthority.canAccessWindow(
-            windowId,
-            decodeBrowserThreadId(String(run.parentThreadId)),
-            target.authority.mode,
-          )
+          target.authority.mode !== "chat" &&
+          projectId !== undefined &&
+          projectId !== null &&
+          hostPersonScopes.deviceActor(windowId) !== undefined &&
+          personHoldsProject(windowId, projectId, target.authority.mode)
         );
       },
       targets: () => [
@@ -497,6 +531,7 @@ export function wireBrowser(deps: BrowserDependencies) {
         now: Date.now,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        deviceActor: hostPersonScopes.deviceActor,
       }),
       held: heldBrowserSessionGrants(persistence.journal),
       onRevoked: (grantId) => {

@@ -99,6 +99,10 @@ export class ExtensionToolGrantStore {
   /**
    * Journals a grant. One for a whole server carries neither a tool name nor
    * a listing digest; the payload schema refuses one without the other.
+   *
+   * `actor` is the person who answered "always allow", as the route resolved
+   * them from the authenticated principal: a paired device's remembered
+   * approval is journaled as that device. Absent means the person at this host.
    */
   record(
     grant: ExtensionToolGrantSubject & {
@@ -106,6 +110,7 @@ export class ExtensionToolGrantStore {
       readonly digest: string;
       readonly definitionDigest?: string | undefined;
     },
+    actor?: EventActorValue,
   ): "recorded" | "refused" {
     let payload: ReturnType<typeof decodeExtensionToolGrantRecorded>;
     try {
@@ -126,19 +131,21 @@ export class ExtensionToolGrantStore {
     } catch {
       return "refused";
     }
-    return this.#append(payload.projectId, [
-      { eventName: EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, payload },
-    ])
+    return this.#append(
+      payload.projectId,
+      [{ eventName: EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, payload }],
+      actor,
+    )
       ? "recorded"
       : "refused";
   }
 
   /** A person takes one grant away. */
-  revoke(grantId: string): "revoked" | "not-found" {
+  revoke(grantId: string, actor?: EventActorValue): "revoked" | "not-found" {
     const stored = readExtensionToolGrant(this.#connection, grantId);
     const grant = stored === undefined ? undefined : this.#standing(stored);
     if (grant === undefined || grant.revocationReason !== undefined) return "not-found";
-    return this.#revoke([grant], "person") > 0 ? "revoked" : "not-found";
+    return this.#revoke([grant], "person", actor) > 0 ? "revoked" : "not-found";
   }
 
   /**
@@ -187,6 +194,7 @@ export class ExtensionToolGrantStore {
   #revoke(
     grants: ReadonlyArray<ProjectedExtensionToolGrant>,
     reason: ExtensionToolGrantRevocationReason,
+    actor?: EventActorValue,
   ): number {
     const byProject = new Map<string | undefined, Array<ProjectedExtensionToolGrant>>();
     for (const grant of grants) {
@@ -205,6 +213,7 @@ export class ExtensionToolGrantStore {
             reason,
           }),
         })),
+        actor,
       );
       if (appended) revoked += projectGrants.length;
     }
@@ -218,6 +227,7 @@ export class ExtensionToolGrantStore {
   #append(
     projectId: string | undefined,
     events: ReadonlyArray<{ readonly eventName: string; readonly payload: unknown }>,
+    actor: EventActorValue = this.#actor,
   ): boolean {
     const aggregateId = decodeAggregateId(extensionToolGrantAggregateId(projectId));
     for (let attempt = 0; attempt < MAX_APPEND_ATTEMPTS; attempt += 1) {
@@ -235,7 +245,7 @@ export class ExtensionToolGrantStore {
               eventName: decodeEventName(event.eventName),
               eventVersion: 1,
               correlationId: eventId,
-              actor: this.#actor,
+              actor,
               occurredAt: decodeTimestamp(this.#clock()),
               payload: event.payload,
             };

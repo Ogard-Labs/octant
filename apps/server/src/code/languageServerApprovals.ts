@@ -92,6 +92,8 @@ export class LanguageServerApprovalStore {
   /** Journals an approval; it is in force only once appended. */
   record(
     subject: LanguageServerApprovalSubject & { readonly scope: CodeLanguageApprovalScope },
+    /** Who approved, as the route resolved it; absent means the person at this host. */
+    actor: EventActorValue = this.#personActor,
   ): "recorded" | "not-recorded" {
     const projectKey = String(subject.projectId);
     const held = this.#projects.get(projectKey);
@@ -119,7 +121,7 @@ export class LanguageServerApprovalStore {
             eventName: decodeEventName(CODE_LANGUAGE_SERVER_EVENT_NAMES.approvalGranted),
             eventVersion: 1,
             correlationId: decodeCorrelationId(this.#uuid()),
-            actor: this.#personActor,
+            actor,
             occurredAt: decodeTimestamp(this.#clock()),
             payload,
           },

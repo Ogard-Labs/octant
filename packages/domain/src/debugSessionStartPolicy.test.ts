@@ -94,7 +94,14 @@ const postures: ReadonlyArray<ProviderExecutionPolicy> = [
   "auto-accept-edits",
   "full-access",
 ];
-const starters: ReadonlyArray<DebugSessionStarter> = ["local-window", "remote-device", "agent"];
+const starters: ReadonlyArray<DebugSessionStarter> = [
+  "local-window",
+  "person-paired-device",
+  "remote-device",
+  "agent",
+];
+/** The host's own person: at a window of the host, or on a device they paired. */
+const hostPerson: ReadonlyArray<DebugSessionStarter> = ["local-window", "person-paired-device"];
 const configurationStates = ["resolve", "unresolved"] as const;
 const debugPortCounts = [0, 1] as const;
 
@@ -142,7 +149,7 @@ describe("debug session start policy", () => {
                       ? "mode-prohibited"
                       : posture === "plan"
                         ? "plan-read-only"
-                        : startedBy === "remote-device"
+                        : startedBy !== "agent" && !hostPerson.includes(startedBy)
                           ? "local-host-required"
                           : posture !== "full-access" && !approval.covers
                             ? "approval-required"
@@ -160,7 +167,7 @@ describe("debug session start policy", () => {
         }
       }
     }
-    expect(combinations).toBe(4 * 3 * 4 * 3 * approvalStates.length * 2);
+    expect(combinations).toBe(4 * 3 * 4 * starters.length * approvalStates.length * 2);
   });
 
   it("starts for an agent unasked at Full access, only for a confirmed configuration below it, and never in Plan", () => {

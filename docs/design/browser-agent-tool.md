@@ -284,10 +284,7 @@ the page, the workspace, or the person is reached.
   front the agent can still list tabs and switch to another. On the headless
   Browser, a tab that followed a redirect off the allowed origins after its own
   action is sent to a blank page before it is listed.
-- A paired device does all of this as a local window does: hover, list tabs,
-  choose an option, drag, upload, save a download, open, switch, and close a
-  tab, navigate and type (maintainer decision, 2026-11-12). Not built yet: today
-  it may hover and list tabs only
+- A device the host's own person paired does all of this as a local window does: hover, list tabs, choose an option, drag, upload, save a download, open, switch, and close a tab, navigate and type (maintainer decision, 2026-11-12; built for every page action the route takes). A device the host knows only through the hub's roster may hover and list tabs only
   ([Architecture: remote access](../architecture.md#security-and-authority)).
 
 ### Upload
@@ -425,8 +422,7 @@ desktop pane's download handler, has not been run in a packaged window.
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default below Full access and on by default for a thread at Full access.
   It is a host setting in the shell settings, which a window of this computer
-  or a paired device writes (maintainer decision, 2026-11-12; not built yet:
-  today the shell route is local-only and a paired device cannot); a
+  or a device the host's own person paired writes (maintainer decision, 2026-11-12; built on the shell settings route); a
   routine, a subagent, a plugin, a CLI in a thread terminal, and an agent have
   no way to set it, and a change is journaled like every shell setting. Off,
   every download on every page of a thread below Full access stays blocked, as

@@ -1,3 +1,4 @@
+import { actsAsHostPerson, type PrincipalKind } from "./remoteAccessPolicy";
 import {
   MAX_TOOL_EGRESS_HOST_LENGTH,
   TOOL_EGRESS_HOST_NAME_PATTERN,
@@ -200,7 +201,7 @@ function isPort(port: number): boolean {
 }
 
 /** Who answered a `network-access` approval. */
-export type ToolEgressGrantPrincipalKind = "local-window" | "remote-device" | "reviewer";
+export type ToolEgressGrantPrincipalKind = PrincipalKind | "reviewer";
 
 export type ToolEgressGrantDecision =
   | { readonly kind: "grant" }
@@ -209,7 +210,7 @@ export type ToolEgressGrantDecision =
       readonly reason:
         /** A tainted thread may be granted `call` rules only. */
         | "thread-tainted"
-        /** Project rules need the person at a local window. */
+        /** Project rules need the host's own person: a local window or a device they paired. */
         | "needs-local-window"
         /** A reviewer's answer yields `call` rules for one launch, nothing wider. */
         | "reviewer-call-only"
@@ -236,7 +237,7 @@ export function decideToolEgressGrant(input: {
   if (input.threadTainted && input.scope !== "call") {
     return { kind: "refuse", reason: "thread-tainted" };
   }
-  if (input.scope === "project" && input.principal !== "local-window") {
+  if (input.scope === "project" && !actsAsHostPerson(input.principal)) {
     return { kind: "refuse", reason: "needs-local-window" };
   }
   return { kind: "grant" };

@@ -6,6 +6,7 @@ import {
   decodeWindowId,
   type DiscoveryCommand,
   type DiscoveryCandidate,
+  type EventActor,
   type FirstRunOnboardingStatus,
   type ProviderInstance,
   type ProviderInstanceId,
@@ -13,6 +14,8 @@ import {
 } from "@octant/contracts";
 import { canLocateRuntimeBinary } from "@octant/domain";
 import { isLoopbackHostname } from "../shellRoutes";
+import { eventActorForPrincipal } from "../principalEventActor";
+import { boundPrincipalIsRestricted, readPrincipalRouteContext } from "../principalRouteContext";
 import type { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { admitDesktopBroker, admitsWindow } from "../desktopBrokerAdmission";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -32,12 +35,15 @@ export interface DiscoveryRouteDependencies {
   readonly onConnect?: (
     command: Extract<DiscoveryCommand, { kind: "connect" }>,
     windowId: string,
+    /** The paired device the provider's record names; absent for a window. */
+    actor?: EventActor,
   ) => Promise<{ instanceId: string }>;
   readonly listInstances?: (windowId: string) => Promise<ReadonlyArray<ProviderInstance>>;
   readonly createFromDiscovery?: (
     candidate: DiscoveryCandidate,
     windowId: string,
     options: { readonly enabled: boolean },
+    actor?: EventActor,
   ) => Promise<{ instanceId: ProviderInstanceId }>;
   readonly readFirstRunOnboarding?: () =>
     | FirstRunOnboardingStatus
@@ -54,6 +60,7 @@ export interface DiscoveryRouteDependencies {
   readonly applyProviderCommand?: (
     windowId: string,
     command: ProviderRegistryCommand,
+    actor?: EventActor,
   ) => Promise<unknown>;
   /** Whether a saved binary path still names a file; the filesystem by default. */
   readonly binaryExists?: (binaryPath: string) => Promise<boolean>;
@@ -167,6 +174,36 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
       );
     }
 
+    // Scanning the host and connecting what the scan found are the host's own
+    // person's, at a window or on a device that person paired (maintainer
+    // decision, 2026-11-13). The private listener forwards them, so every
+    // other device session is refused here as well as at the dispatch.
+    if (boundPrincipalIsRestricted(request))
+      return response(
+        {
+          category: "unauthorized",
+          message: "Provider discovery is run only by the host's own person.",
+        },
+        403,
+        origin,
+      );
+    const principal = readPrincipalRouteContext(request)?.principal;
+    // A provider the scan registers or a connect creates is journaled as the
+    // device that asked; a window's stays the local person's.
+    const deviceActor =
+      principal?.kind === "remote-device" ? [eventActorForPrincipal(principal)] : [];
+    // Pointing a runtime at an executable goes through the host's native file
+    // picker and the desktop broker, which a device cannot reach.
+    if (isLocate && principal?.kind === "remote-device")
+      return response(
+        {
+          category: "unauthorized",
+          message: "Locate a runtime's binary from the Octant window on this host.",
+        },
+        403,
+        origin,
+      );
+
     try {
       if (isScan) {
         let snapshot = await dependencies.discoveryService.scan();
@@ -179,7 +216,7 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
             snapshot,
             listInstances: () => listInstances(windowId),
             createFromDiscovery: async (candidate, options) =>
-              (await createFromDiscovery(candidate, windowId, options)).instanceId,
+              (await createFromDiscovery(candidate, windowId, options, ...deviceActor)).instanceId,
             // Missing onboarding is fail-closed: never enable from an unwired host.
             firstRunOnboarding: (await dependencies.readFirstRunOnboarding?.()) ?? "completed",
             ...(applyProviderCommand === undefined
@@ -189,7 +226,8 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
                     exists: binaryExists,
                     repoint: async (instance, binaryPath) => {
                       const command = locatedBinaryCommand(instance, binaryPath);
-                      if (command !== undefined) await applyProviderCommand(windowId, command);
+                      if (command !== undefined)
+                        await applyProviderCommand(windowId, command, ...deviceActor);
                     },
                   },
                 }),
@@ -261,7 +299,7 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
       if (configured !== undefined) {
         return response({ kind: "candidate-connected", instanceId: configured.id }, 200, origin);
       }
-      const result = await dependencies.onConnect(command, windowId);
+      const result = await dependencies.onConnect(command, windowId, ...deviceActor);
       return response({ kind: "candidate-connected", instanceId: result.instanceId }, 200, origin);
     } catch {
       return response(

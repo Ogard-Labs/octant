@@ -678,6 +678,27 @@ describe("public links", () => {
     expect(service.calls.map((call) => call.kind)).toEqual(["create"]);
   });
 
+  it("journals a paired device's public-link settings change with the device as its actor, and a local window's as the local user", () => {
+    const deviceId = "00000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId };
+    const h = harness();
+    const change = () => ({
+      schemaVersion: 1 as const,
+      kind: "set-canvas-public-link-settings" as const,
+      enabled: true,
+      serviceUrl: "https://share.example",
+      expectedVersion: h.links.settings().version,
+    });
+    h.links.changeSettings(change(), device as never);
+    h.links.changeSettings({ ...change(), enabled: false });
+    const actors = (
+      JSON.parse(h.journalText()) as ReadonlyArray<{ eventName: string; actor: unknown }>
+    )
+      .filter((event) => event.eventName.startsWith("canvas.public-link-settings"))
+      .map((event) => event.actor);
+    expect(actors).toEqual([device, expect.objectContaining({ kind: "local-user" })]);
+  });
+
   it("refuses a stale settings change instead of overwriting another window's", () => {
     const h = harness();
     h.turnOn();

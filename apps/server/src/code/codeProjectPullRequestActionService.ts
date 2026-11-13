@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   type CodeProjectPullRequestActionCommand,
@@ -30,6 +31,7 @@ export type CodeProjectPullRequestMergeAction = (
   command: CodeProjectPullRequestMergeCommand,
   signal: AbortSignal,
   caller: CodeProjectPullRequestCaller,
+  actor?: EventActor,
 ) => Promise<CodeProjectPullRequestMergeOutcome>;
 
 export interface CodeProjectPullRequestActionForge {
@@ -95,7 +97,16 @@ export interface CodeProjectPullRequestActionAuthority {
 export function journalPullRequestAction(
   journal: Pick<Journal, "append">,
   record: CodeProjectPullRequestActionRecorded,
-  options: { readonly uuid: () => string; readonly clock: () => string },
+  options: {
+    readonly uuid: () => string;
+    readonly clock: () => string;
+    /**
+     * Who asked, as the route resolved it from the authenticated principal: a
+     * paired device's act is journaled as that device. Absent means the
+     * person at this host.
+     */
+    readonly actor?: EventActor;
+  },
 ): void {
   journal.append({
     aggregate: { aggregateType: "code-project-pull-request-action", aggregateId: options.uuid() },
@@ -106,7 +117,7 @@ export function journalPullRequestAction(
         eventName: CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
         eventVersion: 1,
         correlationId: options.uuid(),
-        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        actor: options.actor ?? { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         occurredAt: options.clock(),
         payload: record,
       },
@@ -125,13 +136,13 @@ export class CodeProjectPullRequestActionService {
   readonly #authority: CodeProjectPullRequestActionAuthority;
   readonly #forge: CodeProjectPullRequestActionForge;
   readonly #merge: CodeProjectPullRequestMergeAction;
-  readonly #record: (record: CodeProjectPullRequestActionRecorded) => void;
+  readonly #record: (record: CodeProjectPullRequestActionRecorded, actor?: EventActor) => void;
 
   constructor(options: {
     readonly authority: CodeProjectPullRequestActionAuthority;
     readonly forge: CodeProjectPullRequestActionForge;
     readonly merge: CodeProjectPullRequestMergeAction;
-    readonly record: (record: CodeProjectPullRequestActionRecorded) => void;
+    readonly record: (record: CodeProjectPullRequestActionRecorded, actor?: EventActor) => void;
   }) {
     this.#authority = options.authority;
     this.#forge = options.forge;
@@ -144,25 +155,29 @@ export class CodeProjectPullRequestActionService {
     command: CodeProjectPullRequestActionCommand,
     signal: AbortSignal,
     caller: CodeProjectPullRequestCaller,
+    actor?: EventActor,
   ): Promise<CodeProjectPullRequestActionOutcome> {
     const record = (result: CodeProjectPullRequestActionRecorded["result"]) =>
-      this.#record({
-        projectId: command.projectId,
-        repositoryOwner: command.repositoryOwner,
-        repositoryName: command.repositoryName,
-        number: command.number,
-        action: command.kind,
-        ...(command.kind === "labels"
-          ? { labels: { add: command.add, remove: command.remove } }
-          : {}),
-        ...(command.kind === "comment" ||
-        command.kind === "reply" ||
-        command.kind === "request-changes" ||
-        (command.kind === "approve" && command.body !== undefined)
-          ? { bodyBytes: Buffer.byteLength(command.body ?? "") }
-          : {}),
-        result,
-      });
+      this.#record(
+        {
+          projectId: command.projectId,
+          repositoryOwner: command.repositoryOwner,
+          repositoryName: command.repositoryName,
+          number: command.number,
+          action: command.kind,
+          ...(command.kind === "labels"
+            ? { labels: { add: command.add, remove: command.remove } }
+            : {}),
+          ...(command.kind === "comment" ||
+          command.kind === "reply" ||
+          command.kind === "request-changes" ||
+          (command.kind === "approve" && command.body !== undefined)
+            ? { bodyBytes: Buffer.byteLength(command.body ?? "") }
+            : {}),
+          result,
+        },
+        actor,
+      );
     // These are the person's own controls on a desktop window; a paired device
     // is refused before the Project is even looked at, and the refusal is kept.
     if (caller !== "local-window") {
@@ -219,6 +234,7 @@ export class CodeProjectPullRequestActionService {
     command: CodeProjectPullRequestStackMergeCommand,
     signal: AbortSignal,
     caller: CodeProjectPullRequestCaller,
+    actor?: EventActor,
   ): Promise<CodeProjectPullRequestStackMergeOutcome> {
     const target = (number: number): CodeProjectPullRequestDetailQuery => ({
       projectId: command.projectId,
@@ -298,6 +314,7 @@ export class CodeProjectPullRequestActionService {
         },
         signal,
         caller,
+        actor,
       );
       if (outcome.status === "merged") {
         merged.push(item.number);

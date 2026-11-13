@@ -4017,6 +4017,49 @@ describe("ProviderService", () => {
     });
   });
 
+  it("journals a paired device's provider changes with the device as their actor, and a local window's as the local user", async () => {
+    const deviceId = "80000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const actorsOf = async (actor?: never) => {
+      const fixture = serviceFixture({ instances: [provider()] });
+      await fixture.service.execute(
+        windowId,
+        {
+          kind: "update-provider-defaults",
+          expectedVersion: 0,
+          permissionPersistence: "project-default",
+        },
+        actor,
+      );
+      await fixture.service.execute(
+        windowId,
+        { kind: "rename-provider", instanceId, expectedVersion: 1, displayName: "Primary" },
+        actor,
+      );
+      // Read through JSON: the fixture's append is typed for the payloads its
+      // own tests read, not for the envelope.
+      const appended: ReadonlyArray<
+        readonly [{ readonly events: ReadonlyArray<{ eventName: string; actor: unknown }> }]
+      > = JSON.parse(JSON.stringify(fixture.append.mock.calls));
+      return appended.flatMap(([request]) =>
+        request.events.map((event) => [event.eventName, event.actor]),
+      );
+    };
+
+    const byDevice = await actorsOf(device);
+    expect(byDevice.map(([eventName]) => eventName)).toEqual([
+      "provider.defaults-updated@1",
+      "provider.instance-renamed@1",
+    ]);
+    expect(byDevice.map(([, actor]) => actor)).toEqual([device, device]);
+    expect((await actorsOf()).map(([, actor]) => actor)).toEqual(
+      Array.from({ length: 2 }, () => ({
+        kind: "local-user",
+        actorId: "00000000-0000-4000-8000-000000000002",
+      })),
+    );
+  });
+
   it("persists and clears the Settings-defined agent-eligible model defaults", async () => {
     const fixture = serviceFixture();
     const agentEligibleModels = [

@@ -159,6 +159,8 @@ export class CodePlannerService {
   async execute(
     authenticatedWindowId: WindowId,
     input: unknown,
+    /** Who asked, as the route resolved it; absent means the person at this host. */
+    actor?: EventActor,
   ): Promise<CodePlannerCommandOutcome> {
     let command: ReturnType<typeof decodeCodePlannerCommand>;
     try {
@@ -224,6 +226,7 @@ export class CodePlannerService {
         command.projectId,
         command.expectedVersion,
         designation,
+        actor,
       );
       if (appended === "conflict") return designationChanged();
       return {
@@ -246,6 +249,7 @@ export class CodePlannerService {
       command.projectId,
       command.expectedVersion,
       designation,
+      actor,
     );
     if (appended === "conflict") return designationChanged();
     return {
@@ -403,6 +407,8 @@ export class CodePlannerService {
     authenticatedWindowId: WindowId,
     input: unknown,
     signal?: AbortSignal,
+    /** Who resolved it, as the route resolved them; absent means the person at this host. */
+    actor?: EventActor,
   ): Promise<CodePlannerProposalOutcome> {
     let command: ReturnType<typeof decodeCodePlannerProposalCommand>;
     try {
@@ -473,7 +479,7 @@ export class CodePlannerService {
         resolvedAt: decodeTimestamp(this.#clock()),
       };
       try {
-        this.#appendProposal(declined, command.expectedVersion);
+        this.#appendProposal(declined, command.expectedVersion, actor);
       } catch (error) {
         // A concurrent resolution between the version check and this append is
         // the same expected race the confirm path answers with a value.
@@ -511,7 +517,7 @@ export class CodePlannerService {
     try {
       // The journal CAS is the admission owner across windows and restarts.
       // It runs synchronously before ordinary creation can await anything.
-      this.#appendProposal(admitted, command.expectedVersion);
+      this.#appendProposal(admitted, command.expectedVersion, actor);
       admittedVersion = Number(command.expectedVersion) + 1;
       const creation = await this.#createThread(
         authenticatedWindowId,
@@ -564,7 +570,7 @@ export class CodePlannerService {
         resolvedAt: decodeTimestamp(this.#clock()),
         createdThreadId: submittedId,
       };
-      this.#appendProposal(confirmed, admittedVersion);
+      this.#appendProposal(confirmed, admittedVersion, actor);
       return { status: "confirmed", proposal: this.#requireProposal(confirmed.id), creation };
     } catch (error) {
       if (admittedVersion !== undefined) this.#recoverCreatedProposal(admitted, admittedVersion);
@@ -669,13 +675,18 @@ export class CodePlannerService {
     projectId: ProjectId,
     expectedVersion: number,
     designation: CodePlannerDesignation,
+    actor?: EventActor,
   ): "appended" | "conflict" {
     try {
       this.#persistence.journal.append({
         aggregate: { aggregateType: CODE_PLANNER_AGGREGATE_TYPE, aggregateId: projectId },
         expectedVersion,
         events: [
-          this.#event(DESIGNATION_EVENT, { kind: "planner-designation-updated", designation }),
+          this.#event(
+            DESIGNATION_EVENT,
+            { kind: "planner-designation-updated", designation },
+            actor,
+          ),
         ],
       });
       return "appended";

@@ -296,6 +296,10 @@ export class WorkRequestService {
   async resolve(
     command: Extract<WorkRequestCommand, { kind: "resolve-work-request" }>,
     ownerCurrent?: () => boolean,
+    // Who answered, as the route resolved it from the authenticated
+    // principal: a paired device's answer is journaled as that device. Absent
+    // means the person at this host.
+    answeredBy: typeof EventActor.Type = this.#userActor,
   ): Promise<WorkRequestServiceResult> {
     if (ownerCurrent !== undefined && !ownerCurrent())
       return failure("stale", "Owner approval target changed.");
@@ -352,14 +356,19 @@ export class WorkRequestService {
       }
     }
     const delivery: WorkRequestDelivery = { kind: "resolve", resolution: command.resolution };
-    const prepared = this.#prepareDelivery(entry.request, command.expectedVersion, delivery);
+    const prepared = this.#prepareDelivery(
+      entry.request,
+      command.expectedVersion,
+      delivery,
+      answeredBy,
+    );
     if (!("deliver" in prepared)) return prepared;
     if (!prepared.deliver) {
       return this.#settle(
         prepared.request,
         "resolved",
         { resolution: command.resolution },
-        this.#userActor,
+        answeredBy,
       );
     }
     try {
@@ -381,15 +390,15 @@ export class WorkRequestService {
           });
         }
       } catch {
-        return this.#deliveryFailure(prepared.request, "resolution");
+        return this.#deliveryFailure(prepared.request, "resolution", answeredBy);
       }
-      const confirmed = this.#confirmDelivery(prepared.request);
+      const confirmed = this.#confirmDelivery(prepared.request, answeredBy);
       if (confirmed.status !== "ok") return confirmed;
       return this.#settle(
         confirmed.request,
         "resolved",
         { resolution: command.resolution },
-        this.#userActor,
+        answeredBy,
       );
     } finally {
       this.#releaseActiveDelivery(prepared.request);
@@ -399,6 +408,7 @@ export class WorkRequestService {
   /** The user cancels a pending approval or user-input request. */
   async cancel(
     command: Extract<WorkRequestCommand, { kind: "cancel-work-request" }>,
+    answeredBy: typeof EventActor.Type = this.#userActor,
   ): Promise<WorkRequestServiceResult> {
     if (this.#userActor.kind !== "local-user") {
       return failure(
@@ -427,11 +437,14 @@ export class WorkRequestService {
         "The thread's provider has changed since this request was recorded.",
       );
     }
-    const prepared = this.#prepareDelivery(entry.request, command.expectedVersion, {
-      kind: "cancel",
-    });
+    const prepared = this.#prepareDelivery(
+      entry.request,
+      command.expectedVersion,
+      { kind: "cancel" },
+      answeredBy,
+    );
     if (!("deliver" in prepared)) return prepared;
-    if (!prepared.deliver) return this.#settle(prepared.request, "cancelled", {}, this.#userActor);
+    if (!prepared.deliver) return this.#settle(prepared.request, "cancelled", {}, answeredBy);
     try {
       try {
         await this.#providerSessions.cancel({
@@ -441,11 +454,11 @@ export class WorkRequestService {
           kind: prepared.request.detail.kind,
         });
       } catch {
-        return this.#deliveryFailure(prepared.request, "cancellation");
+        return this.#deliveryFailure(prepared.request, "cancellation", answeredBy);
       }
-      const confirmed = this.#confirmDelivery(prepared.request);
+      const confirmed = this.#confirmDelivery(prepared.request, answeredBy);
       if (confirmed.status !== "ok") return confirmed;
-      return this.#settle(confirmed.request, "cancelled", {}, this.#userActor);
+      return this.#settle(confirmed.request, "cancelled", {}, answeredBy);
     } finally {
       this.#releaseActiveDelivery(prepared.request);
     }
@@ -693,6 +706,7 @@ export class WorkRequestService {
     current: WorkRequest,
     expectedVersion: number,
     delivery: WorkRequestDelivery,
+    actor: typeof EventActor.Type,
   ):
     | { readonly status: "ok"; readonly request: WorkRequest; readonly deliver: boolean }
     | WorkRequestServiceResult {
@@ -724,7 +738,7 @@ export class WorkRequestService {
         expectedVersion: current.version,
         frame,
         occurredAt,
-        actor: this.#userActor,
+        actor,
       });
     } catch {
       return failure(
@@ -742,7 +756,7 @@ export class WorkRequestService {
    * makes an otherwise failed terminal append recoverable without guessing
    * whether a callback was already delivered.
    */
-  #confirmDelivery(current: WorkRequest): WorkRequestServiceResult {
+  #confirmDelivery(current: WorkRequest, actor: typeof EventActor.Type): WorkRequestServiceResult {
     if (current.delivery === undefined) {
       return failure("invalid", "Work request delivery is missing.");
     }
@@ -760,7 +774,7 @@ export class WorkRequestService {
         expectedVersion: current.version,
         frame,
         occurredAt,
-        actor: this.#userActor,
+        actor,
       });
     } catch {
       return failure(
@@ -772,7 +786,11 @@ export class WorkRequestService {
     return ok(confirmed);
   }
 
-  #deliveryFailure(current: WorkRequest, action: "resolution" | "cancellation") {
+  #deliveryFailure(
+    current: WorkRequest,
+    action: "resolution" | "cancellation",
+    actor: typeof EventActor.Type,
+  ) {
     const { delivery: _delivery, ...withoutDelivery } = current;
     const released = decodeWorkRequest({
       ...withoutDelivery,
@@ -786,7 +804,7 @@ export class WorkRequestService {
         expectedVersion: current.version,
         frame,
         occurredAt,
-        actor: this.#userActor,
+        actor,
       });
     } catch {
       return failure(

@@ -1,4 +1,44 @@
-import { classifyRemoteAction } from "@octant/domain";
+import { RemoteOwnDeviceMetadataV1, decodeHostAnswer } from "@octant/contracts";
+import { authorizePrincipalAction, classifyRemoteAction } from "@octant/domain";
+
+/**
+ * What the host says an authenticated session is. A session that acts as the
+ * host's own person (a device that person paired) is let through every route
+ * the host forwards; every other session is held to the remote action
+ * catalogue. Read it from the host's own-device answer and never assume it:
+ * the host decides each request from its own record whatever a client holds.
+ */
+export interface RemoteSessionStanding {
+  readonly actsAsHostPerson: boolean;
+}
+
+/** A session the host has not said acts as its person, and one whose host does not say. */
+export const RESTRICTED_REMOTE_SESSION: RemoteSessionStanding = { actsAsHostPerson: false };
+
+/**
+ * Ask the host what this session is. Anything but a plain yes reads as
+ * restricted: an older host that does not say, a refusal, an answer that does
+ * not decode, and a host that cannot be reached. A client then hides what a
+ * person-paired device could have done, which the next read puts back.
+ */
+export async function readRemoteSessionStanding(transport: {
+  readonly authenticatedFetch: (input: {
+    readonly method: string;
+    readonly path: string;
+  }) => Promise<Response>;
+}): Promise<RemoteSessionStanding> {
+  try {
+    const response = await transport.authenticatedFetch({
+      method: "GET",
+      path: "/api/remote/auth/device",
+    });
+    if (!response.ok) return RESTRICTED_REMOTE_SESSION;
+    const device = decodeHostAnswer(RemoteOwnDeviceMetadataV1)(await response.json());
+    return { actsAsHostPerson: device.actsAsHostPerson === true };
+  } catch {
+    return RESTRICTED_REMOTE_SESSION;
+  }
+}
 
 export type RemoteShellSurfaceKind =
   | "chat"
@@ -7,9 +47,17 @@ export type RemoteShellSurfaceKind =
   | "preview"
   | "provider-models"
   | "settings-read"
+  | "shell-settings"
+  | "design-systems"
+  | "usage-ledger"
+  | "file-event-routines"
+  | "provider-discovery"
+  | "server-projects"
   | "approvals"
   | "extension-install"
+  | "provider-setup"
   | "provider-credentials"
+  | "device-management"
   | "listener-controls"
   | "host-controls";
 
@@ -21,6 +69,13 @@ export interface RemoteShellSurfaceDescriptor {
   readonly description: string;
   readonly availability: RemoteShellSurfaceAvailability;
   readonly catalogAction: string;
+  /**
+   * Set where the host forwards none of the surface's routes to any device, a
+   * person-paired one included: the desktop bridge and the secret stores sit
+   * behind the private listener's local-only prefixes. Such a surface stays
+   * unavailable to every session.
+   */
+  readonly keptOnHost?: true;
 }
 
 const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
@@ -67,6 +122,57 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     catalogAction: "settings.read-non-secret",
   },
   {
+    id: "shell-settings",
+    label: "Shell settings",
+    description: "Change the host's shell settings, a thread's Reply detail included.",
+    availability: "local-host-only",
+    // No catalogued action: the host opens the route only to a session that
+    // acts as its person, so a restricted session reads it as unavailable.
+    catalogAction: "shell.settings.replace",
+  },
+  {
+    id: "design-systems",
+    label: "Design systems",
+    description: "List, read, create, and save a Project's design systems.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "project.design-system.write",
+  },
+  {
+    id: "usage-ledger",
+    label: "Usage history and reset",
+    description: "Read the local provider usage history and reset or trim the usage ledger.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "usage.ledger.purge",
+  },
+  {
+    id: "file-event-routines",
+    label: "File and event routines",
+    description:
+      "Set up a routine that starts when a file arrives or a connected source reports an event.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "automation.source.configure",
+  },
+  {
+    id: "provider-discovery",
+    label: "Provider discovery",
+    description: "Scan the host for installed provider commands and connect what the scan found.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "provider.discovery.scan",
+  },
+  {
+    id: "server-projects",
+    label: "Server Projects",
+    description:
+      "Read the Projects bound to a folder on a server, their files and the server's load.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "server.project.read",
+  },
+  {
     id: "approvals",
     label: "Approvals",
     description: "High-risk approvals require the local packaged host.",
@@ -81,11 +187,25 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     catalogAction: "extension.install",
   },
   {
+    id: "provider-setup",
+    label: "Provider setup",
+    description: "Add, change, and remove providers and start a provider sign-in.",
+    availability: "local-host-only",
+    catalogAction: "provider.oauth.begin",
+  },
+  {
     id: "provider-credentials",
     label: "Provider credentials",
-    description: "Keychain-backed provider credentials stay on the local host.",
+    description: "Store, replace, and clear a provider key in the host's credential store.",
     availability: "local-host-only",
     catalogAction: "provider.credentials.write",
+  },
+  {
+    id: "device-management",
+    label: "Paired devices",
+    description: "List, rename, and revoke paired devices, and approve a new device.",
+    availability: "local-host-only",
+    catalogAction: "desktop.approve-device",
   },
   {
     id: "listener-controls",
@@ -93,11 +213,13 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     description: "Enable, disable, and configure the HTTPS listener locally.",
     availability: "local-host-only",
     catalogAction: "desktop.enable-listener",
+    keptOnHost: true,
   },
   {
     id: "host-controls",
     label: "Host controls",
-    description: "Start, stop, restart, and startup policy stay on the local host.",
+    description:
+      "Stop and restart the host, its startup policy, backups, memory limits, and retention.",
     availability: "local-host-only",
     catalogAction: "host.service.stop",
   },
@@ -107,9 +229,20 @@ export function listRemoteShellSurfaces(): ReadonlyArray<RemoteShellSurfaceDescr
   return REMOTE_SHELL_SURFACES;
 }
 
+/**
+ * A restricted session reaches what the catalogue calls remote work. A session
+ * that acts as the host's person reaches every surface but the ones whose
+ * routes the host forwards to no device: the host hands such a session each
+ * forwarded route without asking the catalogue, so the catalogue's class says
+ * nothing about it and the route boundary is the whole answer.
+ */
 export function remoteShellSurfaceAvailability(
   descriptor: RemoteShellSurfaceDescriptor,
+  session: RemoteSessionStanding = RESTRICTED_REMOTE_SESSION,
 ): RemoteShellSurfaceAvailability {
+  if (session.actsAsHostPerson) {
+    return descriptor.keptOnHost === true ? "local-host-only" : "remote";
+  }
   const decision = classifyRemoteAction(descriptor.catalogAction);
   if (decision.kind === "remote-approvable") return "remote";
   return "local-host-only";
@@ -117,9 +250,10 @@ export function remoteShellSurfaceAvailability(
 
 export function listRemoteShellSurfacesByAvailability(
   availability: RemoteShellSurfaceAvailability,
+  session: RemoteSessionStanding = RESTRICTED_REMOTE_SESSION,
 ): ReadonlyArray<RemoteShellSurfaceDescriptor> {
   return listRemoteShellSurfaces().filter(
-    (surface) => remoteShellSurfaceAvailability(surface) === availability,
+    (surface) => remoteShellSurfaceAvailability(surface, session) === availability,
   );
 }
 
@@ -209,20 +343,25 @@ export function listRemoteThreadSurfaces(): ReadonlyArray<RemoteThreadSurfaceDes
  */
 export function remoteThreadSurfaceReach(
   descriptor: RemoteThreadSurfaceDescriptor,
+  session: RemoteSessionStanding = RESTRICTED_REMOTE_SESSION,
 ): RemoteThreadSurfaceReach {
-  if (classifyRemoteAction(descriptor.observeAction).kind !== "remote-approvable") {
-    return "unavailable";
-  }
+  // The host's own rule for the two kinds of session: a person-paired device
+  // also passes the actions the catalogue keeps for the host's person.
+  const allowed = (action: string) =>
+    authorizePrincipalAction({
+      principalKind: session.actsAsHostPerson ? "person-paired-device" : "remote-device",
+      action,
+    }).kind === "allow";
+  if (!allowed(descriptor.observeAction)) return "unavailable";
   if (descriptor.interactAction === undefined) return "read-only";
-  return classifyRemoteAction(descriptor.interactAction).kind === "remote-approvable"
-    ? "interactive"
-    : "read-only";
+  return allowed(descriptor.interactAction) ? "interactive" : "read-only";
 }
 
 export function listRemoteThreadSurfacesByReach(
   reach: RemoteThreadSurfaceReach,
+  session: RemoteSessionStanding = RESTRICTED_REMOTE_SESSION,
 ): ReadonlyArray<RemoteThreadSurfaceDescriptor> {
   return listRemoteThreadSurfaces().filter(
-    (surface) => remoteThreadSurfaceReach(surface) === reach,
+    (surface) => remoteThreadSurfaceReach(surface, session) === reach,
   );
 }

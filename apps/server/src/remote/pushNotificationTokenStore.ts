@@ -259,7 +259,7 @@ export function createPushNotificationTokenStore(
       payload,
       actor:
         reason === "device-cleared"
-          ? { kind: "remote-device", actorId: options.hostActorId, deviceId: record.deviceId }
+          ? { kind: "remote-device", actorId: record.deviceId, deviceId: record.deviceId }
           : hostActor,
       occurredAt: now,
     });
@@ -308,7 +308,7 @@ export function createPushNotificationTokenStore(
           deviceId: input.deviceId,
           eventName: REMOTE_PUSH_REGISTRATION_EVENT_NAMES.recorded,
           payload,
-          actor: { kind: "remote-device", actorId: options.hostActorId, deviceId: input.deviceId },
+          actor: { kind: "remote-device", actorId: input.deviceId, deviceId: input.deviceId },
           occurredAt: input.now,
           beforeEvents: () => write(next),
         });

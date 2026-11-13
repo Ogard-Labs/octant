@@ -70,7 +70,13 @@ export class ExtensionProjectPinStore {
     return readExtensionProjectPins(this.#connection);
   }
 
-  set(projectId: string, extensionId: string, pinned: boolean): "recorded" | "refused" {
+  /** `actor` is who pinned it, resolved from the authenticated principal; absent means the person at this host. */
+  set(
+    projectId: string,
+    extensionId: string,
+    pinned: boolean,
+    actor?: EventActorValue,
+  ): "recorded" | "refused" {
     let payload: ReturnType<typeof decodeExtensionProjectPinChanged>;
     try {
       payload = decodeExtensionProjectPinChanged({ projectId, extensionId, pinned });
@@ -79,7 +85,7 @@ export class ExtensionProjectPinStore {
     }
     const current = this.list(projectId).includes(extensionId);
     if (current === pinned) return "recorded";
-    return this.#append(projectId, payload) ? "recorded" : "refused";
+    return this.#append(projectId, payload, actor) ? "recorded" : "refused";
   }
 
   /** Unpins a plugin everywhere, once it is gone. */
@@ -89,7 +95,7 @@ export class ExtensionProjectPinStore {
     }
   }
 
-  #append(projectId: string, payload: unknown): boolean {
+  #append(projectId: string, payload: unknown, actor: EventActorValue = this.#actor): boolean {
     const aggregateId = decodeAggregateId(projectId);
     for (let attempt = 0; attempt < MAX_APPEND_ATTEMPTS; attempt += 1) {
       const expectedVersion = decodeAggregateVersion(
@@ -106,7 +112,7 @@ export class ExtensionProjectPinStore {
               eventName: decodeEventName(EXTENSION_PROJECT_PIN_EVENT_NAMES.changed),
               eventVersion: 1,
               correlationId: eventId,
-              actor: this.#actor,
+              actor,
               occurredAt: decodeTimestamp(this.#clock()),
               payload,
             },

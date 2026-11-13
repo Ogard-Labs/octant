@@ -9,6 +9,7 @@ import {
   type AgentGrantView,
 } from "@octant/contracts";
 import { SidebarThreadRowContent } from "../projects/SidebarThreadRowContent";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import type { AgentAccessAdministrationBridge } from "../shell/hostBridge";
 import { AgentAccessSettingsSection } from "./AgentAccessSettingsSection";
 import {
@@ -102,6 +103,56 @@ describe("Settings › Agent access", () => {
         scope: { projects: [projectId], highestLevel: "ask-first" },
       },
     });
+  });
+
+  it("warns once before the first Full access pick for a grant, and gives the grant Full access once confirmed", async () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => void stored.set(key, value),
+    });
+    try {
+      const { bridge, commands } = administration((command) =>
+        command.kind === "create"
+          ? { kind: "grant", grant: view }
+          : {
+              kind: "ticket",
+              connectionCode: "octant-agent-1.abc",
+              expiresAt: "2026-11-11T10:05:00.000Z",
+            },
+      );
+      const user = userEvent.setup();
+      render(<AgentAccessSettingsSection administration={bridge} projectNames={projectNames} />);
+      await user.click(await screen.findByRole("button", { name: "New agent grant…" }));
+      await user.type(screen.getByLabelText("Name"), "Laptop agent");
+      await user.click(screen.getByRole("checkbox", { name: "repo" }));
+      const level = () => screen.getByRole("combobox", { name: "Highest access level" });
+
+      // Cancelling leaves the level where it was.
+      await chooseSelectFieldOption(user, level(), "Full access");
+      const warning = await screen.findByRole("dialog", { name: "Use Full access?" });
+      expect(warning).toHaveTextContent("without asking, with no sandbox");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(level()).toHaveTextContent("Ask first");
+
+      await chooseSelectFieldOption(user, level(), "Full access");
+      await user.click(await screen.findByRole("button", { name: "Use Full access" }));
+      expect(level()).toHaveTextContent("Full access");
+
+      // Seen once on this machine, it does not ask again.
+      await chooseSelectFieldOption(user, level(), "Auto");
+      await chooseSelectFieldOption(user, level(), "Full access");
+      expect(screen.queryByRole("dialog", { name: "Use Full access?" })).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: "Make grant" }));
+      await waitFor(() =>
+        expect(commands[0]).toMatchObject({
+          draft: { scope: { highestLevel: "full-access" } },
+        }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("lets a paired device revoke a grant and stop its turns, and offers nothing else", async () => {

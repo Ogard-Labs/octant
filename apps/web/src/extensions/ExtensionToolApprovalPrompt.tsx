@@ -92,7 +92,8 @@ export function ExtensionToolApprovalPrompt(props: {
   // server is asked about once more, for that thread.
   const covers = pending.answerCovers ?? "call";
   // Narrowing the answer to one tool is recorded as a grant, which the host
-  // takes from a local window alone, so it is not offered anywhere else.
+  // takes from a local window and a device its own person paired, so it is
+  // not offered to any other session.
   const canNarrow = covers === "server" && client.toolGrantsAvailable;
   // A thread outside a Project has no Project to remember in: the host keeps
   // its answer for the account, where only such threads use it.

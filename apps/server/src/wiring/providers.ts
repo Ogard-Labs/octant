@@ -24,6 +24,7 @@ import {
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
   type DiscoveryCandidate,
+  type EventActor,
   LOCAL_HOST_ID,
   type OutsideProviderDriverReference,
   type PermissionPersistence,
@@ -606,7 +607,7 @@ export type ProvidersDependencies = Pick<
   Pick<
     AuthorityWiring,
     | "extensionToolApprovalService"
-    | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "processAuthorityNow"
     | "processAuthorityTime"
     | "windowAuthorityStore"
@@ -635,7 +636,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     extensionToolApprovalService,
     externalContentIngestionStore,
     githubExtensionSnapshot,
-    isPairedDeviceScope,
+    isRestrictedDeviceScope,
     managedWorktreeReceipts,
     nativeHarnessRouter,
     nativeHarnessSessions,
@@ -1035,7 +1036,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           grants: extensionToolGrantStore,
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
-          isPairedDeviceScope,
+          isPairedDeviceScope: isRestrictedDeviceScope,
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
               .externalContentIngested,
@@ -1269,12 +1270,12 @@ export function wireProviders(deps: ProvidersDependencies) {
               pin.extensionId as ExtensionProjectPinListing["pins"][number]["extensionId"],
           })),
         }),
-        set: (projectId, extensionId, pinned) => {
+        set: (projectId, extensionId, pinned, actor) => {
           const project = persistence.readProject(decodeProjectId(projectId));
           if (project === undefined || project.lifecycle !== "active" || project.type === "chat") {
             return "refused";
           }
-          return extensionProjectPinStore.set(projectId, extensionId, pinned);
+          return extensionProjectPinStore.set(projectId, extensionId, pinned, actor);
         },
       },
       mcpServerSignIn: {
@@ -1294,17 +1295,17 @@ export function wireProviders(deps: ProvidersDependencies) {
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.status(extensionId, componentId, principalKind),
           ),
-        begin: (extensionId, componentId, principalKind) =>
+        begin: (extensionId, componentId, principalKind, actor) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.begin(extensionId, componentId, principalKind),
+            signIn.begin(extensionId, componentId, principalKind, actor),
           ),
         poll: (extensionId, componentId, attemptId, principalKind) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.poll(extensionId, componentId, attemptId, principalKind),
           ),
-        signOut: (extensionId, componentId, principalKind) =>
+        signOut: (extensionId, componentId, principalKind, actor) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.signOut(extensionId, componentId, principalKind),
+            signIn.signOut(extensionId, componentId, principalKind, actor),
           ),
       },
       mcpServerConnections: {
@@ -1875,12 +1876,12 @@ export function wireProviders(deps: ProvidersDependencies) {
     const providerRoutes = createProviderRouteHandler({
       threadNativeSetup: {
         get: (threadId) => threadNativeSetupStore.get(threadId),
-        set: (request) => {
+        set: (request, actor) => {
           const instance = persistence.readProviderInstance(request.providerInstanceId);
           if (instance === undefined || !isKeyProviderDriverKind(instance.driverKind)) {
             return "refused";
           }
-          return threadNativeSetupStore.set(request.threadId, request.choice);
+          return threadNativeSetupStore.set(request.threadId, request.choice, actor);
         },
       },
       service: providerService,
@@ -1957,11 +1958,12 @@ export function wireProviders(deps: ProvidersDependencies) {
       candidate: DiscoveryCandidate,
       windowId: string,
       options: { readonly enabled: boolean },
+      actor?: EventActor,
     ) => {
       const { command } = createProviderFromDiscoveryCandidate(candidate, {
         enabled: options.enabled,
       });
-      const result = await providerService.execute(windowId as never, command);
+      const result = await providerService.execute(windowId as never, command, actor);
       if (result.kind !== "provider-created") {
         throw new Error("Provider discovery auto-register did not create a provider instance.");
       }
@@ -1976,13 +1978,13 @@ export function wireProviders(deps: ProvidersDependencies) {
         : { desktopBridgeSecret: options.desktopBridgeSecret }),
       binaryReceipts: new LocalPluginImportReceiptStore(),
       readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
-      applyProviderCommand: (windowId, command) =>
-        providerService.execute(decodeWindowId(windowId), command),
+      applyProviderCommand: (windowId, command, actor) =>
+        providerService.execute(decodeWindowId(windowId), command, actor),
       listInstances: async () => persistence.readProviderInstances(),
       createFromDiscovery: createProviderFromDiscovery,
       readFirstRunOnboarding: () =>
         persistence.readShellSettings()?.settings.firstRunOnboarding ?? "pending",
-      onConnect: async (command, windowId) => {
+      onConnect: async (command, windowId, actor) => {
         // The renderer names the canonical file; the launcher that reaches it
         // comes from the host's own scan, never from the request.
         const scanned = discoveryService
@@ -1998,7 +2000,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             : { ...command, discoveredPath: scanned.discoveredPath },
           { enabled: true },
         );
-        const result = await providerService.execute(windowId as never, providerCommand);
+        const result = await providerService.execute(windowId as never, providerCommand, actor);
         if (result.kind !== "provider-created") {
           throw new Error("Provider discovery connect did not create a provider instance.");
         }
