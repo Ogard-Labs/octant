@@ -4398,6 +4398,9 @@ export class CodeOperationService {
             : cancelled,
         );
       }
+      case "resolve-unconfirmed-step":
+        // Settled before execution, on the person's word alone; it never runs here.
+        return this.#failed(command.operationId, "invalid", "This step is not run here.");
     }
   }
 
