@@ -1,0 +1,33 @@
+/* A running coordinator's three limits: one row each, so the steppers wrap
+   under their labels on a phone rather than pushing the dialog wider. */
+.coordinator-bounds-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+}
+
+.coordinator-bounds-dialog__title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+}
+
+.coordinator-bounds-dialog .oct-row-detail {
+  margin: 0;
+}
+
+.coordinator-bounds-dialog__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.coordinator-bounds-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}

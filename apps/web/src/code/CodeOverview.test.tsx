@@ -972,6 +972,7 @@ function controller(): CodeController {
     renameThread: vi.fn(async () => true),
     pinThread: vi.fn(async () => true),
     setThreadCoordinator: vi.fn(async () => ({ status: "ok" as const })),
+    setThreadCoordinatorBounds: vi.fn(async () => ({ status: "ok" as const })),
     setThreadCoordinatorWake: vi.fn(async () => ({ status: "ok" as const })),
     setThreadMessageWake: vi.fn(async () => ({ status: "ok" as const })),
     setThreadRestartContinuation: vi.fn(async () => ({ status: "ok" as const })),

@@ -1361,8 +1361,21 @@ describe("coordinator threads in a thread row's menu", () => {
     );
     await openMenu(/Controller foundation/);
     expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Make coordinator" }));
-    expect(onSetCoordinator).toHaveBeenCalledWith("thread-one", true);
+    // Make coordinator offers the worker-level choice the New coordinator draft offers.
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "Make coordinator" }));
+    await userEvent.click(
+      await screen.findByRole("menuitem", {
+        name: "Workers start at this thread's level or lower",
+      }),
+    );
+    expect(onSetCoordinator).toHaveBeenCalledWith("thread-one", true, undefined);
+
+    await openMenu(/Controller foundation/);
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "Make coordinator" }));
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Workers always start at Full access" }),
+    );
+    expect(onSetCoordinator).toHaveBeenLastCalledWith("thread-one", true, "full-access");
 
     rerender(
       <ProjectThreadRows
@@ -1374,6 +1387,29 @@ describe("coordinator threads in a thread row's menu", () => {
     await openMenu(/Controller foundation/);
     await userEvent.click(await screen.findByRole("menuitem", { name: "Stop coordinating" }));
     expect(onSetCoordinator).toHaveBeenLastCalledWith("thread-one", false);
+  });
+
+  it("offers Coordinator limits on a coordinator and on no other thread", async () => {
+    const onEditCoordinatorBounds = vi.fn();
+    const actions = { onSetCoordinator: vi.fn(), onEditCoordinatorBounds };
+    const { rerender } = render(
+      <ProjectThreadRows actions={actions} onSelectThread={vi.fn()} threads={[thread]} />,
+    );
+    await openMenu(/Controller foundation/);
+    await screen.findByRole("menuitem", { name: "Make coordinator" });
+    expect(screen.queryByRole("menuitem", { name: "Coordinator limits…" })).toBeNull();
+    await userEvent.keyboard("{Escape}");
+
+    rerender(
+      <ProjectThreadRows
+        actions={actions}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, coordinator: true }]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Coordinator limits…" }));
+    expect(onEditCoordinatorBounds).toHaveBeenCalledExactlyOnceWith("thread-one");
   });
 
   it("turns Wake when a message arrives on and off from its checked state", async () => {

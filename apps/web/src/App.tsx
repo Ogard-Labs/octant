@@ -359,6 +359,7 @@ import { OctantToast } from "./ui/base/OctantToast";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -1816,6 +1817,9 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  // The running coordinator whose limits a person is changing, from its row
+  // menu or its pane's header menu.
+  const [coordinatorBoundsThreadId, setCoordinatorBoundsThreadId] = useState<CodeThreadId>();
   const [preparationTarget, setPreparationTarget] = useState<PreparationTarget>();
   const [projectActionRun, setProjectActionRun] = useState<{
     readonly target: ProjectActionTarget;
@@ -5432,6 +5436,7 @@ function LaunchedShell(
       setWorkBoardOpen,
       setWorkComposerSelection,
       setCodeThreadCoordinator: codeController.setThreadCoordinator,
+      editCodeThreadCoordinatorBounds: setCoordinatorBoundsThreadId,
       setCodeThreadCoordinatorWake: codeController.setThreadCoordinatorWake,
       setCodeThreadMessageWake: codeController.setThreadMessageWake,
       setCodeThreadRestartContinuation: codeController.setThreadRestartContinuation,
@@ -8276,6 +8281,29 @@ function LaunchedShell(
         hostBridge={props.hostBridge}
         onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
       />
+      {(() => {
+        const coordinator = codeController.bootstrap?.threads.find(
+          (thread) => String(thread.id) === String(coordinatorBoundsThreadId),
+        );
+        // A thread that stopped coordinating, or left the list, has no limits to change.
+        if (coordinator === undefined || coordinator.coordinator !== true) return null;
+        return (
+          <CoordinatorBoundsDialog
+            bounds={coordinator.coordinatorBounds}
+            key={String(coordinator.id)}
+            onClose={() => setCoordinatorBoundsThreadId(undefined)}
+            onSave={(bounds) => {
+              setCoordinatorBoundsThreadId(undefined);
+              void codeController
+                .setThreadCoordinatorBounds(coordinator.id, bounds)
+                .then((outcome) => {
+                  if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+                });
+            }}
+            title={coordinator.title}
+          />
+        );
+      })()}
       {threadExportNotice !== undefined ||
       replyDetailNotice !== undefined ||
       updateReadyNotice ||

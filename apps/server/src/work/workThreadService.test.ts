@@ -1532,6 +1532,40 @@ describe("WorkThreadService", () => {
     expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
   });
 
+  it("journals a person turning Wake when a message arrives on and off for a Work thread", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+
+    const on = await fixture.service.execute(ids.window, {
+      kind: "set-work-thread-message-wake",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      wake: true,
+    });
+    expect(on).toEqual({
+      kind: "thread-updated",
+      thread: thread({ messageWake: true, version: 2 as AggregateVersion, updatedAt: now }),
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledOnce();
+
+    // Setting it to what it already is journals nothing.
+    await fixture.service.execute(ids.window, {
+      kind: "set-work-thread-message-wake",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      wake: true,
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledOnce();
+
+    const off = await fixture.service.execute(ids.window, {
+      kind: "set-work-thread-message-wake",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      wake: false,
+    });
+    expect("thread" in off ? off.thread.messageWake : "missing").toBeUndefined();
+    expect("thread" in off ? off.thread.version : 0).toBe(3);
+  });
+
   it("updates thread metadata with optimistic versions and maps concurrency conflicts", async () => {
     const current = thread();
     const fixture = serviceFixture({ threads: [current] });

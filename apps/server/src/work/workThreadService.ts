@@ -939,6 +939,24 @@ export class WorkThreadService {
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
       }
+      if (command.kind === "set-work-thread-message-wake") {
+        if ((current.messageWake === true) === command.wake) {
+          return { kind: "thread-updated", thread: current };
+        }
+        const { messageWake: _wake, ...rest } = current;
+        const updated = decodeWorkThread({
+          ...rest,
+          ...(command.wake ? { messageWake: true } : {}),
+          version: command.expectedVersion + 1,
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
+          kind: "thread-updated",
+          thread: updated,
+        });
+        this.#projection.apply({ kind: "thread-updated", thread: updated });
+        return { kind: "thread-updated", thread: updated };
+      }
       if (command.kind === "change-work-thread-browser-profile") {
         if (current.lifecycle !== "active")
           throw this.#failure(

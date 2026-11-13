@@ -6,6 +6,9 @@ import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthorit
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
+import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
+import { WorkMessageWake } from "../work/workMessageWake";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { mkdirSync, rmSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
@@ -1552,6 +1555,70 @@ export function wireWork(deps: WorkDependencies) {
         .onCommittedAppend(append)
         .catch(() => console.error("The message queue could not process a thread change."));
     });
+    // A message wakes a Work thread whose switch is on, as it wakes a Code
+    // thread, counted in the store Code's wakes use so a restart keeps the
+    // hourly and round bounds.
+    const workMessageWake = new WorkMessageWake({
+      readThread: (threadId) => {
+        let thread: ReturnType<typeof workThreadProjection.read>;
+        try {
+          thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        } catch {
+          return undefined;
+        }
+        return thread === undefined
+          ? undefined
+          : {
+              lifecycle: thread.lifecycle,
+              messageWake: thread.messageWake === true,
+              completed: thread.completedAt !== undefined,
+            };
+      },
+      turnActive: (threadId) => workTurnService.isTurnActive(decodeWorkThreadId(threadId)),
+      latestTurnId: (threadId) => {
+        const latest = workTurnProjection.latestForThread(decodeWorkThreadId(threadId));
+        return latest === undefined ? undefined : String(latest.requestId);
+      },
+      startHostTurn: async (threadId, prompt) => {
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        if (thread === undefined || thread.bindingRevisionId === undefined) {
+          return { status: "refused", message: "The Work thread is unavailable." };
+        }
+        const requestId = randomUUID();
+        // The host starts the turn as itself, as a routine's run is started;
+        // admission rechecks the thread, its Project and its authority, and
+        // the turn runs at the thread's own level.
+        const result = await workTurnService.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(requestId),
+          threadId: thread.id,
+          turnId: decodeWorkTurnId(randomUUID()),
+          prompt,
+          authority: {
+            hostId: LOCAL_HOST_ID,
+            projectId: thread.projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: thread.workingDirectory ?? ".",
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+        });
+        return result.kind === "accepted"
+          ? { status: "started", turnId: requestId }
+          : { status: "refused", message: "The turn was not admitted." };
+      },
+      counts: createCoordinatorCountStore(persistence.connection),
+      now: () => Date.now(),
+      onError: (message, error) => console.error(`[work-wake] ${message}`, error),
+    });
+    const unsubscribeWorkMessageWake = persistence.journal.subscribeCommitted((append) =>
+      workMessageWake.onCommittedEvents(append.events),
+    );
+    yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeWorkMessageWake()));
     const messageQueueTimer = setInterval(advanceMessageQueue, 1000);
     const stopEventLoopLagDetector = startEventLoopLagDetector();
     yield* Effect.addFinalizer(() =>

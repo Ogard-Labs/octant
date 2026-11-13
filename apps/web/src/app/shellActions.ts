@@ -325,6 +325,10 @@ export type ShellActions = {
     >
   >;
   readonly setCodeThreadCoordinator: CodeController["setThreadCoordinator"];
+  /** Opens the limits of a running coordinator for a person to change. */
+  readonly editCodeThreadCoordinatorBounds: (
+    threadId: Parameters<CodeController["setThreadCoordinator"]>[0],
+  ) => void;
   readonly setCodeThreadCoordinatorWake: CodeController["setThreadCoordinatorWake"];
   readonly setCodeThreadMessageWake: CodeController["setThreadMessageWake"];
   readonly setCodeThreadRestartContinuation: CodeController["setThreadRestartContinuation"];

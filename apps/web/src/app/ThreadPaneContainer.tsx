@@ -69,6 +69,7 @@ export interface ThreadPaneContainerProps {
   readonly actions: Pick<
     ShellActions,
     | "setCodeThreadCoordinator"
+    | "editCodeThreadCoordinatorBounds"
     | "setCodeThreadCoordinatorWake"
     | "setCodeThreadMessageWake"
     | "setCodeThreadRestartContinuation"
