@@ -731,6 +731,15 @@ export interface ChatServiceOptions {
   }) => AppManagedToolSet | undefined;
   readonly resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   /**
+   * Runs Verify tools for a direct-endpoint model nobody has verified yet,
+   * where a turn starts. Never rejects: a model it could not verify takes the
+   * turn without tools.
+   */
+  readonly verifyModelToolsOnFirstUse?: (
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ) => Promise<void>;
+  /**
    * The turn's Computer tool, offered on every eligible turn without a
    * composer selection; undefined when the turn cannot use it.
    */
@@ -1121,6 +1130,7 @@ export class ChatService {
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
+  readonly #verifyModelToolsOnFirstUse: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
@@ -1196,6 +1206,7 @@ export class ChatService {
     if (options.resolveExtensionSelectionContext !== undefined) {
       this.#resolveExtensionSelectionContext = options.resolveExtensionSelectionContext;
     }
+    this.#verifyModelToolsOnFirstUse = options.verifyModelToolsOnFirstUse;
     if (options.resolveComputerUseTools !== undefined)
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
     if (options.personMemoryBlock !== undefined)
@@ -2778,6 +2789,14 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "send-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
+    // Before the turn is admitted and its tools are chosen: one check at most
+    // per send, and a check that fails leaves the turn to run without tools.
+    const used = this.#persistence.readChatThread(command.threadId);
+    if (used !== undefined) {
+      await this.#verifyModelToolsOnFirstUse?.(used.providerInstanceId, used.modelId).catch(
+        () => undefined,
+      );
+    }
     const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#admitHarnessTurn(thread);

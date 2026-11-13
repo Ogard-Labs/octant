@@ -1,4 +1,5 @@
 import {
+  ANY_BROWSER_ORIGIN,
   decodeBrowserAccountProfileId,
   type BrowserProfileChoice,
   type ProjectId,
@@ -164,8 +165,27 @@ export function evaluateBrowserProfileUse(input: {
   return { kind: "allowed" };
 }
 
-/** Whether a site was remembered for exactly this profile. */
+/**
+ * Whether the person's remembered answers cover a site in exactly this
+ * profile: the pair itself, or "Allow all sites in this profile".
+ */
 export function isBrowserProfileSiteRemembered(
+  remembered: ReadonlyArray<RememberedBrowserProfileSite>,
+  origin: string,
+  profile: StoredBrowserProfile,
+): boolean {
+  return (
+    browserProfileSiteListed(remembered, origin, profile) ||
+    browserProfileSiteListed(remembered, ANY_BROWSER_ORIGIN, profile)
+  );
+}
+
+/**
+ * Whether this exact entry is in the list. Growing and forgetting compare
+ * entries, not coverage: a profile allowed for all sites must not let a
+ * settings write add a pair the approval never showed.
+ */
+export function browserProfileSiteListed(
   remembered: ReadonlyArray<RememberedBrowserProfileSite>,
   origin: string,
   profile: StoredBrowserProfile,
@@ -191,7 +211,7 @@ export function resolveRememberedBrowserProfileSites(
     } {
   if (replacement === undefined) return { kind: "kept", sites: current };
   const added = replacement.some(
-    (entry) => !isBrowserProfileSiteRemembered(current, entry.origin, entry.profile),
+    (entry) => !browserProfileSiteListed(current, entry.origin, entry.profile),
   );
   return added ? { kind: "rejected" } : { kind: "kept", sites: replacement };
 }

@@ -196,6 +196,14 @@ export interface WorkThreadServiceDependencies {
   readonly probeProvider?: (
     providerInstanceId: WorkThread["providerInstanceId"],
   ) => Promise<ProviderProbeResult>;
+  /**
+   * Runs Verify tools for a direct-endpoint model nobody has verified yet,
+   * before its tool authority is read. Never rejects.
+   */
+  readonly verifyModelToolsOnFirstUse?: (
+    providerInstanceId: WorkThread["providerInstanceId"],
+    modelId: ProviderModelId,
+  ) => Promise<void>;
   readonly readProviderModel?: (
     providerInstanceId: WorkThread["providerInstanceId"],
     modelId: ProviderModelId,
@@ -288,6 +296,7 @@ export class WorkThreadService {
   readonly #turnProjection: WorkThreadServiceDependencies["turnProjection"];
   readonly #isMarked: WorkThreadServiceDependencies["isMarked"];
   readonly #probeProvider: WorkThreadServiceDependencies["probeProvider"];
+  readonly #verifyModelToolsOnFirstUse: WorkThreadServiceDependencies["verifyModelToolsOnFirstUse"];
   readonly #readProviderModel: WorkThreadServiceDependencies["readProviderModel"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -308,6 +317,7 @@ export class WorkThreadService {
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
     this.#probeProvider = dependencies.probeProvider;
+    this.#verifyModelToolsOnFirstUse = dependencies.verifyModelToolsOnFirstUse;
     this.#readProviderModel = dependencies.readProviderModel;
     this.#turnProjection = dependencies.turnProjection;
     this.#isMarked = dependencies.isMarked;
@@ -1580,6 +1590,11 @@ export class WorkThreadService {
       validateOptions(this.#readProviderModel?.(providerInstanceId, modelId));
       return;
     }
+    // Selecting a model for a Work thread is its first use here: Work needs
+    // tools, so the host verifies a direct-endpoint model itself before the
+    // probe below reads the record. A check that fails leaves the model
+    // unverified and the selection refused, as it was before.
+    await this.#verifyModelToolsOnFirstUse?.(providerInstanceId, modelId).catch(() => undefined);
     let probe: ProviderProbeResult;
     try {
       probe = await this.#probeProvider(providerInstanceId);

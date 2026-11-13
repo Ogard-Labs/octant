@@ -1162,7 +1162,10 @@ export class WorkTurnService {
           ? undefined
           : await this.#resolveSelectedExtensions?.({
               mode: "work",
-              thread,
+              // The turn's own level, not the thread's stored one: a routine
+              // or goal-loop round under a lower ceiling must be asked about
+              // an extension tool as that level asks.
+              thread: { ...thread, access: turnAccess },
               selections,
               pinnedExtensionIds,
               windowId: authenticatedWindowId,

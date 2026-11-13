@@ -1,13 +1,22 @@
 import { Schema } from "effect";
-import { BrowserThreadId, MAX_BROWSER_UPLOAD_FILE_BYTES } from "./browserAutomation";
+import {
+  BrowserThreadId,
+  MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
+  MAX_BROWSER_UPLOAD_FILE_BYTES,
+} from "./browserAutomation";
 import { ProjectWorkingFolderId } from "./workingDirectory";
 import { UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
-/** The largest file an agent's download may hold or save; the same bound as an upload. */
+/**
+ * The largest file an agent's download may hold or save unless the person
+ * chose another limit in Settings; the same default as an upload.
+ */
 export const MAX_BROWSER_DOWNLOAD_FILE_BYTES = MAX_BROWSER_UPLOAD_FILE_BYTES;
-/** How many downloads one browsing context holds at once; the oldest is discarded. */
+/** The largest saved file a receipt can record: the highest limit a person may choose. */
+export const MAX_BROWSER_DOWNLOAD_RECEIPT_BYTES =
+  MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES * 1024 * 1024;
 /** The folder, at the root of the thread's workspace, a saved download lands in. */
 export const BROWSER_DOWNLOAD_FOLDER = "downloads";
 
@@ -37,7 +46,7 @@ export const BrowserDownloadSaved = Schema.Struct({
   path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
   sizeBytes: Schema.Int.pipe(
     Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(MAX_BROWSER_DOWNLOAD_FILE_BYTES),
+    Schema.lessThanOrEqualTo(MAX_BROWSER_DOWNLOAD_RECEIPT_BYTES),
   ),
   mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   sha256: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),

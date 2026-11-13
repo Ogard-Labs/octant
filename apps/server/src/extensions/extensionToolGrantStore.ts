@@ -15,14 +15,12 @@ import {
   type ExtensionToolGrantRevocationReason,
 } from "@octant/contracts/extension-events";
 import type { ExtensionToolGrant } from "@octant/contracts/extension-rpc";
-import {
-  extensionToolGrantRevocationReason,
-  type ExtensionToolBinding,
-} from "@octant/domain/extension-tool-grant-policy";
+import { extensionToolGrantRevocationReason } from "@octant/domain/extension-tool-grant-policy";
 import { Schema } from "effect";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import { readExtensionRecord } from "../persistence/extensionProjection";
 import {
+  extensionToolGrantAggregateId,
   extensionToolGrantId,
   readActiveExtensionToolGrants,
   readExtensionToolGrant,
@@ -78,13 +76,13 @@ export class ExtensionToolGrantStore {
     this.#actor = decodeActor(options.actor);
   }
 
-  /** The Project's stored grant for a tool, revoked or not. */
+  /** The stored grant for a tool or a whole server, revoked or not. */
   read(subject: ExtensionToolGrantSubject): ProjectedExtensionToolGrant | undefined {
     const grant = readExtensionToolGrant(this.#connection, extensionToolGrantId(subject));
     return grant === undefined ? undefined : this.#standing(grant);
   }
 
-  /** Every grant a call could still use, across Projects. */
+  /** Every grant a call could still use, across Projects and the account. */
   list(): ReadonlyArray<ExtensionToolGrant> {
     return readActiveExtensionToolGrants(this.#connection)
       .map((grant) => this.#standing(grant))
@@ -95,32 +93,41 @@ export class ExtensionToolGrantStore {
   }
 
   /**
+   * Journals a grant. One for a whole server carries neither a tool name nor
+   * a listing digest; the payload schema refuses one without the other.
+   *
    * `actor` is the person who answered "always allow", as the route resolved
    * them from the authenticated principal: a paired device's remembered
    * approval is journaled as that device. Absent means the person at this host.
    */
   record(
-    grant: ExtensionToolGrantSubject & ExtensionToolBinding,
+    grant: ExtensionToolGrantSubject & {
+      readonly version: string;
+      readonly digest: string;
+      readonly definitionDigest?: string | undefined;
+    },
     actor?: EventActorValue,
   ): "recorded" | "refused" {
     let payload: ReturnType<typeof decodeExtensionToolGrantRecorded>;
     try {
       payload = decodeExtensionToolGrantRecorded({
         grantId: extensionToolGrantId(grant),
-        projectId: grant.projectId,
+        ...(grant.projectId === undefined ? {} : { projectId: grant.projectId }),
         extensionId: grant.extensionId,
         packageId: grant.packageId,
         componentId: grant.componentId,
-        mcpToolName: grant.mcpToolName,
+        ...(grant.mcpToolName === undefined ? {} : { mcpToolName: grant.mcpToolName }),
         version: grant.version,
         digest: grant.digest,
-        definitionDigest: grant.definitionDigest,
+        ...(grant.definitionDigest === undefined
+          ? {}
+          : { definitionDigest: grant.definitionDigest }),
       });
     } catch {
       return "refused";
     }
     return this.#append(
-      String(payload.projectId),
+      payload.projectId,
       [{ eventName: EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, payload }],
       actor,
     )
@@ -137,8 +144,8 @@ export class ExtensionToolGrantStore {
   }
 
   /**
-   * Ends every grant of one extension's tools, in every Project, and reports
-   * how many it ended. Called when the package is uninstalled, rolled back, or
+   * Ends every grant of one extension's tools and servers, in every Project
+   * and for the account, and reports how many it ended. Called when the package is uninstalled, rolled back, or
    * loses its trust.
    */
   revokeExtension(
@@ -183,9 +190,9 @@ export class ExtensionToolGrantStore {
     reason: ExtensionToolGrantRevocationReason,
     actor?: EventActorValue,
   ): number {
-    const byProject = new Map<string, Array<ProjectedExtensionToolGrant>>();
+    const byProject = new Map<string | undefined, Array<ProjectedExtensionToolGrant>>();
     for (const grant of grants) {
-      const projectId = String(grant.projectId);
+      const projectId = grant.projectId === undefined ? undefined : String(grant.projectId);
       byProject.set(projectId, [...(byProject.get(projectId) ?? []), grant]);
     }
     let revoked = 0;
@@ -196,7 +203,7 @@ export class ExtensionToolGrantStore {
           eventName: EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked,
           payload: decodeExtensionToolGrantRevoked({
             grantId: grant.grantId,
-            projectId: grant.projectId,
+            ...(grant.projectId === undefined ? {} : { projectId: grant.projectId }),
             reason,
           }),
         })),
@@ -207,13 +214,16 @@ export class ExtensionToolGrantStore {
     return revoked;
   }
 
-  /** One append per Project; a concurrent writer to the same Project is retried. */
+  /**
+   * One append per Project, or for the account when there is none; a
+   * concurrent writer to the same aggregate is retried.
+   */
   #append(
-    projectId: string,
+    projectId: string | undefined,
     events: ReadonlyArray<{ readonly eventName: string; readonly payload: unknown }>,
     actor: EventActorValue = this.#actor,
   ): boolean {
-    const aggregateId = decodeAggregateId(projectId);
+    const aggregateId = decodeAggregateId(extensionToolGrantAggregateId(projectId));
     for (let attempt = 0; attempt < MAX_APPEND_ATTEMPTS; attempt += 1) {
       const expectedVersion = decodeAggregateVersion(
         readAggregateVersion(this.#connection, EXTENSION_TOOL_GRANT_AGGREGATE, aggregateId),

@@ -255,6 +255,11 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     enabled: boolean,
   ) => Promise<boolean>;
+  /** Turns one Claude Code or Codex account's own memory on or off. */
+  readonly onSetProviderOwnMemory?: (
+    instanceId: ProviderInstanceId,
+    enabled: boolean,
+  ) => Promise<boolean>;
   readonly onDataTagsChange: (
     instanceId: ProviderInstanceId,
     dataTags: ProviderDataTags,
@@ -514,6 +519,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         {...(props.onSetProviderNativeSetup === undefined
           ? {}
           : { onSetProviderNativeSetup: props.onSetProviderNativeSetup })}
+        {...(props.onSetProviderOwnMemory === undefined
+          ? {}
+          : { onSetProviderOwnMemory: props.onSetProviderOwnMemory })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined

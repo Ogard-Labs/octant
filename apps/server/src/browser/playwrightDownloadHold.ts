@@ -4,6 +4,7 @@ import {
   BROWSER_DOWNLOAD_SNIFF_BYTES,
   safeBrowserDownloadName,
   sniffBrowserDownload,
+  type BrowserTransferLimits,
 } from "@octant/domain";
 import type { BrowserDownloadReport } from "@octant/contracts/browser-automation";
 import { MAX_BROWSER_HELD_DOWNLOADS } from "@octant/contracts/browser-automation";
@@ -32,6 +33,10 @@ interface PendingDownload extends WatchedDownload {
 /** How long an action waits for a download it started to finish. */
 const FINISH_WAIT_MS = 10_000;
 const WATCH_INTERVAL_MS = 50;
+const DEFAULT_LIMITS: BrowserTransferLimits = {
+  maxFileBytes: MAX_BROWSER_DOWNLOAD_FILE_BYTES,
+  maxHeldDownloads: MAX_BROWSER_HELD_DOWNLOADS,
+};
 
 /**
  * The files one headless browsing context holds for the agent.
@@ -49,6 +54,7 @@ export class PlaywrightDownloadHold {
   readonly #held: HeldDownload[] = [];
   #reports: BrowserDownloadReport[] = [];
   #holding = false;
+  #limits: BrowserTransferLimits = DEFAULT_LIMITS;
   #nextOrdinal = 1;
 
   /** `watch` measures the browser's download folder; absent, only a finished file is measured. */
@@ -56,9 +62,13 @@ export class PlaywrightDownloadHold {
     this.#watch = watch;
   }
 
-  /** Start holding the downloads the page starts, for the length of one agent action. */
-  begin(): void {
+  /**
+   * Start holding the downloads the page starts, for the length of one agent
+   * action, under the person's limits (the defaults when none are passed).
+   */
+  begin(limits: BrowserTransferLimits = DEFAULT_LIMITS): void {
     this.#holding = true;
+    this.#limits = limits;
   }
 
   onDownload(download: PlaywrightDownloadPort): void {
@@ -70,6 +80,7 @@ export class PlaywrightDownloadHold {
       download,
       cancelledFor: undefined,
       file: undefined,
+      maxFileBytes: this.#limits.maxFileBytes,
       cancelForSize: () => this.#cancel(entry, "too-large"),
     };
     const task = this.#hold(entry).finally(() => {
@@ -159,13 +170,13 @@ export class PlaywrightDownloadHold {
     let head: Uint8Array;
     try {
       sizeBytes = (await stat(path)).size;
-      head = sizeBytes > MAX_BROWSER_DOWNLOAD_FILE_BYTES ? new Uint8Array() : await readHead(path);
+      head = sizeBytes > entry.maxFileBytes ? new Uint8Array() : await readHead(path);
     } catch {
       await entry.download.delete().catch(() => undefined);
       this.#reports.push({ state: "refused", name, reason: "failed" });
       return;
     }
-    if (sizeBytes > MAX_BROWSER_DOWNLOAD_FILE_BYTES) {
+    if (sizeBytes > entry.maxFileBytes) {
       await entry.download.delete().catch(() => undefined);
       this.#reports.push({ state: "refused", name, reason: "too-large" });
       return;
@@ -180,7 +191,7 @@ export class PlaywrightDownloadHold {
     const id = `d${String(this.#nextOrdinal)}`;
     this.#nextOrdinal += 1;
     this.#held.push({ id, download: entry.download, path });
-    while (this.#held.length > MAX_BROWSER_HELD_DOWNLOADS) {
+    while (this.#held.length > this.#limits.maxHeldDownloads) {
       void this.#held
         .shift()
         ?.download.delete()
@@ -205,6 +216,8 @@ export class PlaywrightDownloadHold {
 interface WatchedDownload {
   /** The folder entry this download writes, once the watch could tell it was this one's. */
   file: string | undefined;
+  /** The cap this download was started under. */
+  readonly maxFileBytes: number;
   readonly cancelForSize: () => void;
 }
 
@@ -285,13 +298,14 @@ export class DownloadFolderWatch {
       ) {
         only.file = file;
       }
-      if (fresh.some((name) => (sizes.get(name)?.size ?? 0) > MAX_BROWSER_DOWNLOAD_FILE_BYTES)) {
-        for (const download of unattributed) download.cancelForSize();
+      const largestFresh = Math.max(0, ...fresh.map((name) => sizes.get(name)?.size ?? 0));
+      for (const download of unattributed) {
+        if (largestFresh > download.maxFileBytes) download.cancelForSize();
       }
       for (const download of observed) {
         if (!this.#running.has(download) || download.file === undefined) continue;
         const seen = sizes.get(download.file);
-        if (seen !== undefined && seen.size > MAX_BROWSER_DOWNLOAD_FILE_BYTES) {
+        if (seen !== undefined && seen.size > download.maxFileBytes) {
           download.cancelForSize();
         }
       }

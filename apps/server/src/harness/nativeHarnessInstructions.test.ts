@@ -44,7 +44,7 @@ describe("native harness instructions", () => {
     const text = chatText();
     expect(text).toContain("When a memory tool is offered");
     expect(text).toContain("When a skill tool is offered");
-    expect(text).toContain("the person approves each change");
+    expect(text).toContain("below Full access the person approves each change");
   });
 
   it("names the helper-agent tool when the thread is offered it", () => {

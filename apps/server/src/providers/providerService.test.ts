@@ -2437,6 +2437,57 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({ failure: { category: "unsupported" } });
   });
 
+  it("journals a Claude Code account's own-memory switch without restarting it, and refuses an account with no such memory", async () => {
+    const piId = decodeProviderInstanceId("70000000-0000-4000-8000-0000000000ab");
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        decodeProviderInstance({
+          id: piId,
+          displayName: "Pi",
+          driverKind: "pi",
+          configuration: { kind: "pi-rpc", binaryPath: "/opt/homebrew/bin/pi" },
+          enabled: true,
+          environmentPolicy: "inherit-host",
+          version: 1,
+          createdAt: "2026-07-14T10:00:00.000Z",
+          updatedAt: "2026-07-14T10:00:00.000Z",
+        }),
+      ],
+    });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-own-memory",
+        instanceId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-updated", instance: { ownMemory: true } });
+    expect(fixture.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        events: [expect.objectContaining({ eventName: "provider.instance-own-memory-changed@1" })],
+      }),
+    );
+    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
+      ownMemory: true,
+    });
+    expect(fixture.persistence.readProviderInstance(instanceId)).not.toHaveProperty("nativeSetup");
+    expect(invalidate).not.toHaveBeenCalled();
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-own-memory",
+        instanceId: piId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+  });
+
   it("assigns a separate Claude-owned directory to each additional Claude account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {
@@ -5194,6 +5245,143 @@ describe("ProviderService", () => {
         verifyToolCapability: ({ modelId }: { modelId: never }) =>
           Effect.succeed({ instanceId, modelId, appManagedTools }),
       }));
+
+    describe("the first time a model is used", () => {
+      const model = decodeProviderModelId("model-1");
+      /** A driver whose Verify tools answer the test chooses, counting the requests it sent. */
+      const countingDriver = (
+        answer: () => Effect.Effect<"supported" | "unsupported", unknown>,
+      ) => {
+        const verify = vi.fn(({ modelId }: { modelId: never }) =>
+          answer().pipe(
+            Effect.map((appManagedTools) => ({ instanceId, modelId, appManagedTools })),
+          ),
+        );
+        const driver = (instance: ProviderInstance) => ({
+          kind: instance.driverKind,
+          probe: () => Effect.die("unused"),
+          acquire: () => Effect.die("unused"),
+          verifyToolCapability: verify,
+        });
+        return { verify, driver };
+      };
+      const reportedChecks = async (fixture: ReturnType<typeof serviceFixture>) =>
+        (await fixture.service.bootstrap(windowId)).observedStates[0]?.toolChecks;
+
+      it("verifies the model by itself, once, and records it as the Verify tools button does", async () => {
+        const { verify, driver } = countingDriver(() => Effect.succeed("supported"));
+        const fixture = serviceFixture({
+          instances: [httpProvider()],
+          withCatalogPersistence: true,
+          driver: driver as never,
+        });
+        fixture.runtime.setObservedState(observation());
+
+        await fixture.service.verifyModelToolsOnFirstUse(instanceId, model);
+        await fixture.service.verifyModelToolsOnFirstUse(instanceId, model);
+
+        expect(verify).toHaveBeenCalledOnce();
+        expect(
+          fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String),
+        ).toEqual(["model-1"]);
+        expect(fixture.catalogs()[0]).toMatchObject({ verifiedToolModelIds: ["model-1"] });
+        expect(await reportedChecks(fixture)).toBeUndefined();
+      });
+
+      it("leaves a model that did not call the tool without tools, says why, and asks it again only from the button", async () => {
+        const { verify, driver } = countingDriver(() => Effect.succeed("unsupported"));
+        const fixture = serviceFixture({ instances: [httpProvider()], driver: driver as never });
+        fixture.runtime.setObservedState(observation());
+
+        await fixture.service.verifyModelToolsOnFirstUse(instanceId, model);
+        await fixture.service.verifyModelToolsOnFirstUse(instanceId, model);
+
+        expect(verify).toHaveBeenCalledOnce();
+        expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds ?? []).toEqual([]);
+        expect(await reportedChecks(fixture)).toEqual([
+          expect.objectContaining({
+            modelId: "model-1",
+            outcome: "unsupported",
+            message: expect.stringMatching(/did not call the test tool/),
+          }),
+        ]);
+
+        await fixture.service.execute(windowId, {
+          kind: "verify-model-tools",
+          instanceId,
+          modelId: model,
+        });
+        expect(verify).toHaveBeenCalledTimes(2);
+      });
+
+      it("does not fail the use when the check is refused, says why, and tries again at a later use", async () => {
+        let answers = 0;
+        const { verify, driver } = countingDriver(() => {
+          answers += 1;
+          return answers === 1
+            ? Effect.fail({ category: "rate-limited", message: "The endpoint is rate limited." })
+            : Effect.succeed("supported" as const);
+        });
+        const fixture = serviceFixture({ instances: [httpProvider()], driver: driver as never });
+        fixture.runtime.setObservedState(observation());
+
+        await expect(
+          fixture.service.verifyModelToolsOnFirstUse(instanceId, model),
+        ).resolves.toBeUndefined();
+        expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds ?? []).toEqual([]);
+        expect(await reportedChecks(fixture)).toEqual([
+          expect.objectContaining({
+            modelId: "model-1",
+            outcome: "failed",
+            message: "The endpoint is rate limited.",
+          }),
+        ]);
+
+        await fixture.service.verifyModelToolsOnFirstUse(instanceId, model);
+        expect(verify).toHaveBeenCalledTimes(2);
+        expect(
+          fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String),
+        ).toEqual(["model-1"]);
+        expect(await reportedChecks(fixture)).toBeUndefined();
+      });
+
+      it("sends one request for uses that arrive together", async () => {
+        const { verify, driver } = countingDriver(() =>
+          Effect.promise(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            return "supported" as const;
+          }),
+        );
+        const fixture = serviceFixture({ instances: [httpProvider()], driver: driver as never });
+        fixture.runtime.setObservedState(observation());
+
+        await Promise.all([
+          fixture.service.verifyModelToolsOnFirstUse(instanceId, model),
+          fixture.service.verifyModelToolsOnFirstUse(instanceId, model),
+        ]);
+        expect(verify).toHaveBeenCalledOnce();
+      });
+
+      it("sends nothing for a provider that is off or a model the provider does not list", async () => {
+        const { verify, driver } = countingDriver(() => Effect.succeed("supported"));
+        const off = serviceFixture({
+          instances: [httpProvider({ enabled: false })],
+          driver: driver as never,
+        });
+        off.runtime.setObservedState(observation());
+        await off.service.verifyModelToolsOnFirstUse(instanceId, model);
+
+        const unlisted = serviceFixture({ instances: [httpProvider()], driver: driver as never });
+        unlisted.runtime.setObservedState(observation());
+        await unlisted.service.verifyModelToolsOnFirstUse(
+          instanceId,
+          decodeProviderModelId("not-a-listed-model"),
+        );
+
+        expect(verify).not.toHaveBeenCalled();
+        expect(await reportedChecks(unlisted)).toBeUndefined();
+      });
+    });
 
     it("records a verified model of an OpenAI-compatible provider and keeps its siblings unverified", async () => {
       const driver = toolDriver("supported");

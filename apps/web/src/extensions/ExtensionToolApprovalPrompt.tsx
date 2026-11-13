@@ -90,8 +90,11 @@ export function ExtensionToolApprovalPrompt(props: {
   // The host remembers an answer for a local window and for a device its own
   // person paired; it refuses every other session, which is not offered it.
   const canRemember = pending.rememberable && client.toolGrantsAvailable;
+  // A thread outside a Project has no Project to remember in: the host keeps
+  // its answer for the account, where only such threads use it.
+  const inProject = pending.projectId !== undefined;
 
-  async function decide(decision: "approved" | "denied", remember?: true) {
+  async function decide(decision: "approved" | "denied", remember?: "tool" | "server") {
     if (pending === undefined || client === undefined || busy) return;
     setBusy(true);
     setMessage(undefined);
@@ -99,7 +102,8 @@ export function ExtensionToolApprovalPrompt(props: {
       await client.decideToolApproval({
         approvalId: pending.approvalId,
         decision,
-        ...(remember === undefined ? {} : { remember }),
+        ...(remember === undefined ? {} : { remember: true }),
+        ...(remember === "server" ? { rememberScope: "server" } : {}),
       });
       setApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pending.approvalId),
@@ -127,15 +131,26 @@ export function ExtensionToolApprovalPrompt(props: {
             Approve once
           </OctantButton>
           {canRemember ? (
-            <OctantButton
-              disabled={busy}
-              onClick={() => void decide("approved", true)}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Always allow in this Project
-            </OctantButton>
+            <>
+              <OctantButton
+                disabled={busy}
+                onClick={() => void decide("approved", "tool")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                {inProject ? "Always allow in this Project" : "Always allow for this account"}
+              </OctantButton>
+              <OctantButton
+                disabled={busy}
+                onClick={() => void decide("approved", "server")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Allow all tools of this server
+              </OctantButton>
+            </>
           ) : null}
           <OctantButton
             disabled={busy}
@@ -156,7 +171,9 @@ export function ExtensionToolApprovalPrompt(props: {
       }
       detail={
         canRemember
-          ? `${server} Always allow means Octant will run this tool in this Project without asking.`
+          ? `${server} Always allow means Octant will run this tool ${
+              inProject ? "in this Project" : "in Chat threads outside a Project"
+            } without asking. Allow all tools covers every tool of this server there, until its plugin is updated.`
           : server
       }
       error={message}

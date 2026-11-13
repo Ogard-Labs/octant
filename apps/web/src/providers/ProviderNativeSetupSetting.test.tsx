@@ -2,7 +2,7 @@ import type { ProviderCapabilities } from "@octant/contracts";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ProviderNativeSetupSetting } from "./ProviderNativeSetupSetting";
+import { ProviderNativeSetupSetting, ProviderOwnMemorySetting } from "./ProviderNativeSetupSetting";
 
 const codex = {
   id: "80000000-0000-4000-8000-000000000911",
@@ -15,6 +15,25 @@ function capabilities(nativeSetup?: ProviderCapabilities["nativeSetup"]) {
     readonly capabilities: ProviderCapabilities;
   };
 }
+
+describe("A provider's own memory", () => {
+  it("starts off, says where it stays off and what stays off with it, and turns on with one switch", async () => {
+    const onChange = vi.fn(async () => true);
+    const view = (instance: React.ComponentProps<typeof ProviderOwnMemorySetting>["instance"]) => (
+      <ProviderOwnMemorySetting disabled={false} instance={instance} onChange={onChange} />
+    );
+    const { rerender } = render(view(codex));
+    const toggle = screen.getByRole("switch", { name: "Use Codex work’s own memory" });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toHaveAccessibleDescription(/stays off in Plan and in Chat/);
+    expect(toggle).toHaveAccessibleDescription(/telemetry and self-update stay off either way/);
+    await userEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith(true);
+
+    rerender(view({ ...codex, ownMemory: true }));
+    expect(screen.getByRole("switch", { name: "Use Codex work’s own memory" })).toBeChecked();
+  });
+});
 
 describe("Run a key provider as itself", () => {
   it("starts off, says what it loads, and turns on with one switch", async () => {

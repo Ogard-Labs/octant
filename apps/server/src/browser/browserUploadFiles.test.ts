@@ -37,3 +37,43 @@ it("binds upload approval to the exact bounded private copy even when the source
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("holds an upload to the per-file limit the person set, and to the default without one", async () => {
+  const root = await mkdtemp(join(tmpdir(), "octant-upload-limit-"));
+  try {
+    await writeFile(join(root, "report.txt"), "reviewed report");
+    expect(
+      await prepareBrowserUpload({ workspaceRoot: root, files: ["report.txt"], maxFileBytes: 14 }),
+    ).toEqual({ status: "refused", reason: "upload-too-large" });
+    const prepared = await prepareBrowserUpload({
+      workspaceRoot: root,
+      files: ["report.txt"],
+      maxFileBytes: 15,
+    });
+    expect(prepared.status).toBe("prepared");
+    if (prepared.status === "prepared") await prepared.release();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("holds an upload to the file count the person set, and to five without one", async () => {
+  const root = await mkdtemp(join(tmpdir(), "octant-upload-count-"));
+  try {
+    const names = Array.from({ length: 6 }, (_, index) => `file-${String(index)}.txt`);
+    for (const name of names) await writeFile(join(root, name), name);
+    expect(await prepareBrowserUpload({ workspaceRoot: root, files: names })).toMatchObject({
+      status: "refused",
+      reason: "upload-invalid-files",
+    });
+    const widened = await prepareBrowserUpload({ workspaceRoot: root, files: names, maxFiles: 6 });
+    if (widened.status !== "prepared") throw Error(JSON.stringify(widened));
+    expect(widened.paths).toHaveLength(6);
+    await widened.release();
+    expect(
+      await prepareBrowserUpload({ workspaceRoot: root, files: names.slice(0, 2), maxFiles: 1 }),
+    ).toMatchObject({ status: "refused", reason: "upload-invalid-files" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

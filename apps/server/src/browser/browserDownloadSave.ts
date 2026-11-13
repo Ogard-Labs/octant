@@ -83,6 +83,13 @@ type SaveInput = {
   /** Synchronous final source/authority/quota admission; called once, immediately before dispatch. */
   readonly finalAdmission?: (facts: BrowserDownloadFacts) => BrowserDownloadSaveDecision;
   readonly isHeldPath?: (path: string) => Promise<boolean>;
+  /**
+   * Set for a turn at Full access, whose shell could already fetch and run any
+   * file: a program or installer is then saved like any other download.
+   */
+  readonly programsAllowed?: true;
+  /** The person's per-file limit; absent, the default. */
+  readonly maxFileBytes?: number;
 };
 
 function refused(
@@ -141,7 +148,7 @@ export async function saveBrowserDownload(input: SaveInput): Promise<BrowserDown
   if (typeof initialTarget === "string") return refused(`download-${initialTarget}`, initialTarget);
 
   const name = safeBrowserDownloadName(input.name);
-  if (browserDownloadNameIsExecutable(name)) {
+  if (input.programsAllowed !== true && browserDownloadNameIsExecutable(name)) {
     return refused("download-executable", "executable", { name, sizeBytes: 0, mediaType: "" });
   }
   const heldPath = await input.claim();
@@ -161,7 +168,7 @@ export async function saveBrowserDownload(input: SaveInput): Promise<BrowserDown
     const stats = await handle.stat();
     if (!current(input)) return decisionRefusal("cancelled");
     if (!stats.isFile()) return refused("download-unavailable", "unavailable");
-    if (stats.size > MAX_BROWSER_DOWNLOAD_FILE_BYTES) {
+    if (stats.size > (input.maxFileBytes ?? MAX_BROWSER_DOWNLOAD_FILE_BYTES)) {
       return refused("download-too-large", "too-large", {
         name,
         sizeBytes: stats.size,
@@ -173,7 +180,7 @@ export async function saveBrowserDownload(input: SaveInput): Promise<BrowserDown
     if (!current(input)) return decisionRefusal("cancelled");
     const mediaType = sniffBrowserDownload(head).mediaType;
     const facts: BrowserDownloadFacts = { name, sizeBytes: stats.size, mediaType };
-    if (refuseBrowserDownloadType(name, head) !== undefined) {
+    if (input.programsAllowed !== true && refuseBrowserDownloadType(name, head) !== undefined) {
       return refused("download-executable", "executable", facts);
     }
     const answer = await input.ask(facts);

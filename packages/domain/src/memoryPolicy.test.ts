@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   MemoryPolicyRejected,
+  agentProjectMemoryWrite,
   createMemoryEntry,
   retractMemoryEntry,
   supersedeMemoryEntry,
@@ -91,6 +92,62 @@ describe("agent-proposed Project memory", () => {
         expectedVersion: version(1),
       }).provenance,
     ).toEqual(agentOrigin);
+  });
+
+  it("keeps the unconfirmed mark on an entry nobody was asked about, and names the thread on its retraction", () => {
+    const unasked = { ...agentOrigin, unconfirmed: true } as const;
+    const created = createMemoryEntry({
+      id: ids.entry,
+      projectId: ids.sourceProject,
+      kind: "fact",
+      content: "Invoices go out on the 1st.",
+      actor,
+      createdAt,
+      expectedVersion: version(0),
+      agentOrigin: unasked,
+    });
+    expect(created.provenance).toEqual(unasked);
+
+    const retracted = retractMemoryEntry(activeEntry(), {
+      reason: "No longer true",
+      actor,
+      retractedAt: laterAt,
+      expectedVersion: version(1),
+      agentOrigin: unasked,
+    });
+    expect(retracted.provenance).toEqual({ kind: "user-authored" });
+    expect(retracted.retractionOrigin).toEqual(unasked);
+    expect(
+      retractMemoryEntry(activeEntry(), {
+        reason: "No longer true",
+        actor,
+        retractedAt: laterAt,
+        expectedVersion: version(1),
+      }),
+    ).not.toHaveProperty("retractionOrigin");
+  });
+});
+
+describe("whether an agent's Project memory write asks", () => {
+  const attended = { plan: false, fullAccess: false, projectAllows: false, somebodyAtWindow: true };
+
+  it("writes without asking at Full access, and below it only when the Project allows", () => {
+    expect(agentProjectMemoryWrite({ ...attended, fullAccess: true })).toBe("write");
+    expect(agentProjectMemoryWrite({ ...attended, projectAllows: true })).toBe("write");
+    expect(agentProjectMemoryWrite(attended)).toBe("ask");
+  });
+
+  it("refuses every write in Plan, at Full access and with the Project's setting on", () => {
+    expect(
+      agentProjectMemoryWrite({ ...attended, plan: true, fullAccess: true, projectAllows: true }),
+    ).toBe("refuse-plan");
+  });
+
+  it("refuses a write that needs a card when nobody is at a window, and writes one that needs none", () => {
+    const unattended = { ...attended, somebodyAtWindow: false };
+    expect(agentProjectMemoryWrite(unattended)).toBe("refuse-nobody-to-confirm");
+    expect(agentProjectMemoryWrite({ ...unattended, fullAccess: true })).toBe("write");
+    expect(agentProjectMemoryWrite({ ...unattended, projectAllows: true })).toBe("write");
   });
 });
 

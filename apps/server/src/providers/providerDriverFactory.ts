@@ -84,6 +84,8 @@ export interface ProviderDriverFactoryOptions {
    * journal at each call. Absent leaves artifact delivery off.
    */
   readonly claudeArtifactDelivery?: (instanceId: ProviderInstanceId) => boolean;
+  /** The person's current own-memory switch for a Claude Code or Codex account. */
+  readonly providerOwnMemory?: (instanceId: ProviderInstanceId) => boolean;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
   readonly claudeHostEnvironment?: NodeJS.ProcessEnv;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
@@ -190,7 +192,11 @@ export function makeProviderDriver(
         );
       }
       const codexHome = effectiveCodexAccountHome(instance, hostEnvironment, homedir());
+      const readCodexOwnMemory = options.providerOwnMemory;
       return makeCodexDriver({
+        ...(readCodexOwnMemory === undefined
+          ? {}
+          : { ownMemory: () => readCodexOwnMemory(instance.id) }),
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         process: options.codexProcess,
@@ -256,7 +262,11 @@ export function makeProviderDriver(
       // account as "requires an assigned account directory".
       const configDirectory = effectiveClaudeAccountConfigDirectory(instance, homedir());
       const readArtifactDelivery = options.claudeArtifactDelivery;
+      const readClaudeOwnMemory = options.providerOwnMemory;
       return makeClaudeDriver({
+        ...(readClaudeOwnMemory === undefined
+          ? {}
+          : { ownMemory: () => readClaudeOwnMemory(instance.id) }),
         ...(readArtifactDelivery === undefined
           ? {}
           : { artifactDelivery: () => readArtifactDelivery(instance.id) }),

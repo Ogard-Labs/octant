@@ -59,6 +59,7 @@ export const ISOLATED_CLAUDE_LAUNCH_GUARDS = {
   DISABLE_FEEDBACK_COMMAND: "1",
   /** The session-quality survey the runtime would otherwise raise. */
   CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
+  /** The runtime's own memory; the one guard an account's setting lifts. */
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
   CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
   CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1",
@@ -133,6 +134,29 @@ export function claudeArtifactLaunchEnvironment(environment: NodeJS.ProcessEnv):
   if (disablesNonessentialTraffic(environment)) return environment;
   const { [CLAUDE_ARTIFACT_LIFTED_GUARD]: _lifted, ...kept } = environment;
   return { ...kept, CLAUDE_CODE_ARTIFACT: "1" };
+}
+
+/**
+ * The guard a launch goes without when the person turned the account's own
+ * memory on.
+ *
+ * Read from the bundled Claude Code binary (Agent SDK 0.3.211): auto-memory
+ * is off when `CLAUDE_CODE_DISABLE_AUTO_MEMORY` is truthy and otherwise on
+ * unless a setting says `autoMemoryEnabled: false`; it keeps its files under
+ * the account's configuration directory, in
+ * `projects/<the session's folder>/memory/`, and the runtime's own permission
+ * check lets its file tools write `.md` files there without asking. No other
+ * guard is read on that path, so telemetry, error reports, and the
+ * self-update stay off.
+ */
+export const CLAUDE_OWN_MEMORY_LIFTED_GUARD = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+
+/** The environment of a launch whose account keeps Claude's own memory: every guard but that one. */
+export function claudeOwnMemoryLaunchEnvironment(
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const { [CLAUDE_OWN_MEMORY_LIFTED_GUARD]: _lifted, ...kept } = environment;
+  return kept;
 }
 
 export interface IsolatedClaudeAccountEnvironmentInput {

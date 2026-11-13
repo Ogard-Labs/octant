@@ -259,3 +259,35 @@ function shannonBitsPerCharacter(text: string): number {
   }
   return bits;
 }
+
+/**
+ * Whether outside content on a thread stops it starting, resuming, or
+ * continuing to wait on a helper agent. Below Full access it does: the
+ * content may be steering the lead, and a helper would carry that further
+ * unreviewed. At Full access the mark is recorded and follows into the
+ * helper without gating anything, because the lead already acts unasked and
+ * a helper never holds more authority than its parent.
+ */
+export function outsideContentRefusesDelegation(input: {
+  readonly externalContentIngested: boolean;
+  readonly fullAccessThread: boolean;
+}): boolean {
+  return input.externalContentIngested && !input.fullAccessThread;
+}
+
+/**
+ * Whether an answer a person gave once for a thread covers `subject` now. An
+ * answer given after the thread read outside content covers it from then on.
+ * One given before does not cover the thread once it is marked: the person
+ * allowed an agent that had read nothing from outside, and what it does next
+ * may be steered by what it has read since.
+ */
+export function threadStandingAnswerCovers(
+  answers: ReadonlyArray<{ readonly subject: string; readonly threadMarked: boolean }>,
+  subject: string,
+  markedNow: boolean,
+): boolean {
+  return answers.some(
+    (answer) => answer.subject === subject && (answer.threadMarked || !markedNow),
+  );
+}

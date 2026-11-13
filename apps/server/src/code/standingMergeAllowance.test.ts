@@ -1,7 +1,7 @@
 import type { AutomationDefinition, AutomationRun, Project } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 
-import { standingMergeAllowanceFor } from "./standingMergeAllowance";
+import { projectForgeChoicesFor, standingMergeAllowanceFor } from "./standingMergeAllowance";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const otherProjectId = "22222222-2222-4222-8222-222222222222";
@@ -66,5 +66,30 @@ describe("standing merge allowance", () => {
     ]) {
       expect(standingMergeAllowanceFor({ ...base, ...input })).toEqual([]);
     }
+  });
+});
+
+describe("the Project's choices for comments and default-branch pushes", () => {
+  it("allows neither until the person stored that choice, and keeps each apart from the merge choice", () => {
+    const none = { comments: false, defaultBranchPush: false };
+    expect(projectForgeChoicesFor(undefined)).toEqual(none);
+    expect(projectForgeChoicesFor(project("enabled"))).toEqual(none);
+    expect(
+      projectForgeChoicesFor({ ...project(), agentPullRequestComments: "enabled" } as Project),
+    ).toEqual({ comments: true, defaultBranchPush: false });
+    expect(
+      projectForgeChoicesFor({
+        ...project(),
+        agentPullRequestComments: "disabled",
+        agentDefaultBranchPush: "enabled",
+      } as Project),
+    ).toEqual({ comments: false, defaultBranchPush: true });
+    expect(
+      projectForgeChoicesFor({
+        type: "work",
+        agentPullRequestComments: "enabled",
+        agentDefaultBranchPush: "enabled",
+      } as never),
+    ).toEqual(none);
   });
 });

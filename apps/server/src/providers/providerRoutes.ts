@@ -230,7 +230,8 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
         // Turning on Claude artifacts sends this host's documents to a
         // claude.ai account, so it is the same person's decision, and so is
         // letting a key provider run as itself, which loads code and tool
-        // servers Octant did not review. Remote
+        // servers Octant did not review, and turning on a provider's own
+        // memory, which follows the provider's rules into every Project. Remote
         // forwarding never admits provider commands; the route refuses these
         // too.
         const principal = readPrincipalRouteContext(request)?.principal;
@@ -239,7 +240,8 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
             command.kind === "change-outside-harness-endpoint-configuration" ||
             command.kind === "verify-model-tools" ||
             command.kind === "set-claude-artifact-delivery" ||
-            command.kind === "set-provider-native-setup") &&
+            command.kind === "set-provider-native-setup" ||
+            command.kind === "set-provider-own-memory") &&
           principal !== undefined &&
           !principalActsAsHostPerson(principal)
         ) {

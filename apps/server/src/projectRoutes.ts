@@ -381,18 +381,61 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
-      // Letting an agent merge without asking each time is the person's
-      // standing permission, so only a window on this host sets it, and a paired
-      // device cannot widen it on their behalf.
+      // Letting an agent merge, comment, or push to the default branch without
+      // asking each time is the person's standing permission, so only a window
+      // on this host sets it, and a paired device cannot widen it on their
+      // behalf.
       if (
-        command.kind === "change-code-project-agent-merge" &&
+        (command.kind === "change-code-project-agent-merge" ||
+          command.kind === "change-code-project-agent-pull-request-comments" ||
+          command.kind === "change-code-project-agent-default-branch-push") &&
         principal !== undefined &&
         !principalActsAsHostPerson(principal)
       ) {
         return response(
           {
             category: "unauthorized",
-            message: "Whether agents may merge is set on the host.",
+            message:
+              command.kind === "change-code-project-agent-merge"
+                ? "Whether agents may merge is set on the host."
+                : command.kind === "change-code-project-agent-pull-request-comments"
+                  ? "Whether agents may comment on pull requests is set on the host."
+                  : "Whether agents may push to the default branch is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
+      // Memory reaches every later turn in the Project, so letting agents
+      // write it unreviewed is the person's standing permission: a paired
+      // device cannot give it on their behalf.
+      if (
+        command.kind === "change-project-agent-memory-writes" &&
+        principal !== undefined &&
+        principal.kind !== "local-window"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "Whether agents may write Project memory without asking is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
+      // A kept image choice lets every later agent call in the Project spend at
+      // the person's image provider without a card, so it is the person's
+      // standing permission like the ones above. The image card that normally
+      // sets it is answered only at a window on the host.
+      if (
+        command.kind === "change-project-image-generation-choice" &&
+        principal !== undefined &&
+        principal.kind !== "local-window"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "The image model agents use without asking is set on the host.",
           },
           403,
           origin,
