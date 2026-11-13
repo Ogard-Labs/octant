@@ -58,9 +58,10 @@ interface PendingOffer {
  * asked, settled by exactly one answer, and given up when the turn stops, the
  * window goes away, or ten minutes pass.
  *
- * "Don't ask again in this thread" is remembered here, in memory, together
- * with the model the person chose. A host restart forgets it, so a thread asks
- * once more rather than spending on a choice nobody can see being kept.
+ * "Don't ask again" from a thread outside a Project is remembered here, in
+ * memory, together with the model the person chose; a host restart forgets
+ * it. A thread in a Project keeps its choice on the Project instead, journaled
+ * (`createKeptImageGenerationChoices`).
  */
 export class ImageGenerationOfferService {
   readonly #pending = new Map<string, PendingOffer>();

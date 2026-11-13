@@ -43,3 +43,22 @@ export function standingMergeAllowanceFor(input: {
   }
   return allowances;
 }
+
+/**
+ * The Project's two stored choices about what reaches the forge without the
+ * person's approval for the act: a comment or review reply below Full access,
+ * and an ordinary push to the default branch. Like the merge choice, the host
+ * reads them again at every post and push, so switching one off stops the
+ * next act. A Project that is gone or is not a Code Project allows neither.
+ */
+export interface ProjectForgeChoices {
+  readonly comments: boolean;
+  readonly defaultBranchPush: boolean;
+}
+
+export function projectForgeChoicesFor(project: Project | undefined): ProjectForgeChoices {
+  return {
+    comments: project?.type === "code" && project.agentPullRequestComments === "enabled",
+    defaultBranchPush: project?.type === "code" && project.agentDefaultBranchPush === "enabled",
+  };
+}

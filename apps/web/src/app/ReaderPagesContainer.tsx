@@ -64,6 +64,8 @@ export interface ReaderPagesContainerProps {
     | "setCodeBoardOpen"
     | "setCodePullRequestBackgroundRefresh"
     | "setCodeAgentMerge"
+    | "setCodeAgentPullRequestComments"
+    | "setCodeAgentDefaultBranchPush"
     | "setCodePullRequestsOpen"
     | "setGithubIssuesOpen"
     | "setImageLibraryOpen"
@@ -505,6 +507,30 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
             ),
           setEnabled: (projectId, enabled) =>
             actions.setCodeAgentMerge(projectId, enabled ? "enabled" : "disabled"),
+        }}
+        agentForgeChoices={{
+          comments: {
+            enabledFor: (projectId) =>
+              projects.some(
+                (project) =>
+                  String(project.id) === String(projectId) &&
+                  project.type === "code" &&
+                  project.agentPullRequestComments === "enabled",
+              ),
+            setEnabled: (projectId, enabled) =>
+              actions.setCodeAgentPullRequestComments(projectId, enabled ? "enabled" : "disabled"),
+          },
+          defaultBranchPush: {
+            enabledFor: (projectId) =>
+              projects.some(
+                (project) =>
+                  String(project.id) === String(projectId) &&
+                  project.type === "code" &&
+                  project.agentDefaultBranchPush === "enabled",
+              ),
+            setEnabled: (projectId, enabled) =>
+              actions.setCodeAgentDefaultBranchPush(projectId, enabled ? "enabled" : "disabled"),
+          },
         }}
         {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         onCloseWorkBoard={() => actions.setWorkBoardOpen(false)}

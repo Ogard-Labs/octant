@@ -24,6 +24,7 @@ import type {
   AutomationEditorCatalog,
   AutomationThreadTarget,
 } from "../automation/automationCenterModel";
+import type { CodeProjectPullRequestsProps } from "../code/CodeProjectPullRequests";
 import type { CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import { resolveUnconfirmedStep } from "../code/resolveUnconfirmedStep";
 import type { CodeBoardCoordinators, CodeBoardProjectRef } from "../code/codeBoardGrouping";
@@ -122,6 +123,7 @@ export interface WorkspaceRailLayersProps {
     readonly enabledFor: (projectId: ProjectId) => boolean;
     readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   };
+  readonly agentForgeChoices?: CodeProjectPullRequestsProps["agentForgeChoices"];
   readonly onSelectBoardPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
@@ -271,6 +273,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
                 ? {}
                 : { backgroundRefresh: props.pullRequestBackgroundRefresh })}
               {...(props.agentMerge === undefined ? {} : { agentMerge: props.agentMerge })}
+              {...(props.agentForgeChoices === undefined
+                ? {}
+                : { agentForgeChoices: props.agentForgeChoices })}
               {...(props.onSelectProjectPullRequest === undefined
                 ? {}
                 : { onSelectRow: props.onSelectProjectPullRequest })}

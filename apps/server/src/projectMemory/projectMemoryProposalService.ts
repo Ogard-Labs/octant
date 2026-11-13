@@ -4,6 +4,7 @@ import {
   decodeProjectMemoryProposalId,
   type AgentAuthoredMemoryProvenance,
   type MemoryCommandResult,
+  type MemoryEntryId,
   type ProjectMemoryProposal,
   type ProjectMemoryProposalDecision,
   type ProjectMemoryProposalDecisionResult,
@@ -54,9 +55,10 @@ interface PendingProposal {
 
 /**
  * Changes to Project memory a thread's agent asked for, held until the person
- * answers. Memory reaches every later turn in the Project, so an unreviewed
- * write would be a lasting way to plant instructions; every write waits here,
- * and no answer is ever remembered for a later one. A proposal is visible only
+ * answers. Memory reaches every later turn in the Project, so below Full
+ * access an unreviewed write would be a lasting way to plant instructions;
+ * every write the thread's level and the Project's setting do not accept
+ * waits here, and no answer is ever remembered for a later one. A proposal is visible only
  * to the window whose turn raised it, until that window confirms or declines
  * it, the turn stops, the window goes away, or ten minutes pass. Only a
  * confirm writes, as that person, through the ordinary memory command path.
@@ -140,7 +142,10 @@ export class ProjectMemoryProposalService {
       threadId: proposal.threadId,
     };
     try {
-      const result = await this.#options.apply(this.#commandFor(proposal), origin);
+      const result = await this.#options.apply(
+        agentMemoryCommandFor(proposal, () => decodeMemoryEntryId(this.#options.uuid())),
+        origin,
+      );
       pending.settle({ status: "confirmed", result });
       return { kind: "project-memory-proposal-confirmed", result };
     } catch (error) {
@@ -162,36 +167,44 @@ export class ProjectMemoryProposalService {
   close(): void {
     for (const pending of this.#pending.values()) pending.settle({ status: "cancelled" });
   }
+}
 
-  #commandFor(proposal: ProjectMemoryProposal): AgentMemoryCommand {
-    const { change, projectId, expectedVersion } = proposal;
-    switch (change.kind) {
-      case "create":
-        return {
-          kind: "create-memory-entry",
-          projectId,
-          entryId: decodeMemoryEntryId(this.#options.uuid()),
-          memoryKind: change.memoryKind,
-          content: change.content,
-          expectedVersion,
-        };
-      case "supersede":
-        return {
-          kind: "supersede-memory-entry",
-          projectId,
-          entryId: change.entryId,
-          successorEntryId: decodeMemoryEntryId(this.#options.uuid()),
-          content: change.content,
-          expectedVersion,
-        };
-      case "retract":
-        return {
-          kind: "retract-memory-entry",
-          projectId,
-          entryId: change.entryId,
-          reason: change.reason,
-          expectedVersion,
-        };
-    }
+/**
+ * The memory command for a change an agent asked for, against the memory
+ * version the agent saw, so a change made against memory that moved since is
+ * refused by the command path whether or not a person was asked.
+ */
+export function agentMemoryCommandFor(
+  write: Pick<ProjectMemoryProposal, "change" | "projectId" | "expectedVersion">,
+  newEntryId: () => MemoryEntryId,
+): AgentMemoryCommand {
+  const { change, projectId, expectedVersion } = write;
+  switch (change.kind) {
+    case "create":
+      return {
+        kind: "create-memory-entry",
+        projectId,
+        entryId: newEntryId(),
+        memoryKind: change.memoryKind,
+        content: change.content,
+        expectedVersion,
+      };
+    case "supersede":
+      return {
+        kind: "supersede-memory-entry",
+        projectId,
+        entryId: change.entryId,
+        successorEntryId: newEntryId(),
+        content: change.content,
+        expectedVersion,
+      };
+    case "retract":
+      return {
+        kind: "retract-memory-entry",
+        projectId,
+        entryId: change.entryId,
+        reason: change.reason,
+        expectedVersion,
+      };
   }
 }

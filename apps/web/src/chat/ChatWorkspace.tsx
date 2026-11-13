@@ -1434,6 +1434,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <ImageGenerationOfferPrompt
             className="chat-workspace__tool-approval thread-column"
             client={props.imageGenerationClient}
+            keptIn={view?.thread.projectId === undefined ? "thread" : "project"}
             profiles={props.imageGenerationProfiles ?? []}
             scopeId={
               activeThreadId === undefined

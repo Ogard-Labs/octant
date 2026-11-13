@@ -54,6 +54,11 @@ import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjectio
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { ProjectionRegistry } from "../persistence/projection";
+import {
+  registerToolEffectEvents,
+  ToolEffectLedger,
+  uncertainToolCallHold,
+} from "../toolEffects/toolEffectLedger";
 import { leadApprovalFor } from "../harness/leadApprovalAttention";
 import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
@@ -2411,6 +2416,42 @@ describe("WorkTurnService", () => {
     );
     expect(offered).toEqual([["octant_browser", "notes_search"]]);
     expect(answers).toEqual([{ result: "framed notes" }]);
+  });
+
+  it("tells a selected extension's tools the level the turn runs at, not the thread's stored one", async () => {
+    const resolveSelectedExtensions = vi.fn<
+      NonNullable<WorkTurnServiceDependencies["resolveSelectedExtensions"]>
+    >(async () => ({ kind: "resolved", context: [] }));
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      resolveSelectedExtensions,
+      turnRuntime: { run: async () => ({ kind: "completed", response: "Ready" }) },
+    });
+    // A routine or goal-loop round runs under a ceiling below the thread's
+    // own Full access, and an extension tool must be asked about at that level.
+    await fixture.service.startFirstTurn(
+      ids.window,
+      {
+        ...startCommand(),
+        extensionSelections: [
+          {
+            kind: "plugin",
+            extensionId: "94000000-0000-4000-8000-000000000011",
+            packageId: "94000000-0000-4000-8000-000000000012",
+            componentId: "notes-server",
+            packageVersion: "1.0.0",
+            packageDigest: `sha256:${"a".repeat(64)}`,
+            catalogEpoch: `sha256:${"b".repeat(64)}`,
+            origin: { kind: "draft", reference: "notes" },
+          },
+        ],
+      },
+      { accessCeiling: "ask-first" },
+    );
+    await fixture.waitForIdle();
+    expect(resolveSelectedExtensions).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ access: "ask-first" }) }),
+    );
   });
 
   it("refuses selected skill instructions that exceed the Work input budget", async () => {
@@ -6213,6 +6254,7 @@ describe("continuing a Work turn a restart cut off", () => {
       modeEnabled: () => true,
       connection,
       liftHarnessRecovery: async () => ({ kind: "none" as const }),
+      uncertainToolCall: () => undefined,
       releaseQueue,
       ...options.recovery,
     });
@@ -6280,6 +6322,76 @@ describe("continuing a Work turn a restart cut off", () => {
     expect(second.cutOff).toEqual([]);
     expect(second.recovery).toEqual({ continued: [], held: [] });
     expect(continuations(second.host)).toHaveLength(1);
+  });
+
+  /**
+   * The host's record of tool calls, over the store that outlives a restart,
+   * and one call of a turn that the host stopped inside of.
+   */
+  function toolCallCutOff(
+    connection: ReturnType<typeof openSqlite>,
+    turnId: string,
+    toolName: string,
+  ) {
+    const ledger = new ToolEffectLedger({
+      journal: new Journal({
+        connection,
+        registry: registerToolEffectEvents(new EventRegistry()),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => now,
+      }),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => now,
+    });
+    const tools = ledger.forTurn({ threadId: String(ids.thread), turnId }).tools({
+      definitions: [{ name: toolName, inputSchema: { type: "object" } }],
+      execute: () => new Promise(() => {}),
+    });
+    void tools.execute({ name: toolName, inputJson: "{}", toolCallId: "call-1" });
+    return (turn: { readonly turnId: string }) =>
+      uncertainToolCallHold(ledger.certainty(turn.turnId));
+  }
+
+  it("holds a cut-off turn whose tool call nobody saw finish and names the tool", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const uncertainToolCall = toolCallCutOff(connection, String(ids.request), "shell");
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { uncertainToolCall },
+    });
+
+    expect(recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "work",
+          threadId: String(ids.thread),
+          reason: "uncertain-tool-call",
+          detail:
+            'Octant stopped while the tool "shell" was running, so it may or may not have taken effect. Check it, then continue.',
+        },
+      ],
+    });
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("continues a cut-off turn whose only unfinished tool call reads", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const uncertainToolCall = toolCallCutOff(connection, String(ids.request), "grep");
+
+    const { host, recovery } = await hostStart([before], connection, {
+      recovery: { uncertainToolCall },
+    });
+
+    expect(recovery).toEqual({
+      continued: [{ mode: "work", threadId: String(ids.thread) }],
+      held: [],
+    });
+    expect(continuations(host)).toHaveLength(1);
   });
 
   it("lets a goal loop's next round continue a thread whose round turn a restart cut off, instead of a second turn", async () => {

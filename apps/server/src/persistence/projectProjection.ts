@@ -10,8 +10,10 @@ import {
   decodeCodeProjectNewThreadWorkspaceChanged,
   decodeCodeProjectPermissionModeChanged,
   decodeCodeProjectAutoReviewerChanged,
+  decodeCodeProjectAgentDefaultBranchPushChanged,
   decodeCodeProjectAgentMergeChanged,
   decodeCodeProjectOwnToolchainChanged,
+  decodeCodeProjectAgentPullRequestCommentsChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
   decodeProjectNativeProvidersChanged,
@@ -23,6 +25,8 @@ import {
   decodeProjectColorChanged,
   decodeProjectRenamed,
   decodeWorkProjectStatusFileChanged,
+  decodeProjectAgentMemoryWritesChanged,
+  decodeProjectImageGenerationChoiceChanged,
   decodeProjectBrandKitChanged,
   decodeProjectDesignSystemChanged,
   decodeWorkProjectDeveloperToolsChanged,
@@ -192,6 +196,10 @@ const projectDecoders = {
     decodeCodeProjectAgentMergeChanged(payload).project,
   "project.code-own-toolchain-changed@1": (payload: unknown) =>
     decodeCodeProjectOwnToolchainChanged(payload).project,
+  "project.code-agent-pull-request-comments-changed@1": (payload: unknown) =>
+    decodeCodeProjectAgentPullRequestCommentsChanged(payload).project,
+  "project.code-agent-default-branch-push-changed@1": (payload: unknown) =>
+    decodeCodeProjectAgentDefaultBranchPushChanged(payload).project,
   "project.provider-policy-changed@1": (payload: unknown) =>
     decodeProjectProviderPolicyChanged(payload).project,
   "project.native-providers-changed@1": (payload: unknown) =>
@@ -204,6 +212,10 @@ const projectDecoders = {
     decodeWorkProjectPermissionModeChanged(payload).project,
   "project.work-actions-changed@1": (payload: unknown) =>
     decodeWorkProjectActionsChanged(payload).project,
+  "project.agent-memory-writes-changed@1": (payload: unknown) =>
+    decodeProjectAgentMemoryWritesChanged(payload).project,
+  "project.image-generation-choice-changed@1": (payload: unknown) =>
+    decodeProjectImageGenerationChoiceChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>
     decodeProjectBrandKitChanged(payload).project,
   "project.design-system-changed@1": (payload: unknown) =>

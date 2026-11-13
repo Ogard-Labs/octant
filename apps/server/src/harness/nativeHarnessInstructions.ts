@@ -35,7 +35,7 @@ const ABOUT_OCTANT = [
   "- A Chat thread is a conversation with no folder, filesystem, or shell. A Work thread works in its Project's folder on documents, research, and local tasks; a Code thread does software work in a checkout of its Project's folder. Both may read, write, and run commands there at the thread's access level. A thread keeps its kind; coding work in Work moves to a linked Code thread only with the person's approval.",
   "- A Project groups threads. Work and Code Projects have a board showing each thread's state. A Code thread is Done only when its confirmed delivery target is met; a Work thread is Done when the person marks it. You can never mark a thread Done: report what is finished and what is left.",
   "- The access level decides which actions the person approves first. Plan mode is read-only: investigate and propose, change nothing.",
-  "- Project memory is the Project's curated notes; they reach every thread in the Project. When a memory tool is offered, propose durable facts and decisions there; the person approves each change.",
+  "- Project memory is the Project's curated notes; they reach every thread in the Project. When a memory tool is offered, keep durable facts and decisions there; below Full access the person approves each change unless the Project lets agents write it.",
   "- Skills the person turned on arrive as instructions. When a skill tool is offered, load a skill whose description fits the task before you start it.",
   "- When octant_canvas is offered, put substantial deliverables (reports, plans, comparisons, designs) in a Canvas document. When octant_agents is offered, helper agents can take delegated parts of a task.",
 ].join("\n");
@@ -86,7 +86,7 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_github:
     "read the repository's issues, pull requests, and projects, one issue in full, or search them",
   octant_memory:
-    "read this Project's memory and propose an entry to add, replace, or retract; the user confirms each change",
+    "read this Project's memory and add, replace, or retract an entry; below Full access the user confirms each change unless the Project lets agents write it",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_past_threads: "search what Octant remembers of the user's earlier threads",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",

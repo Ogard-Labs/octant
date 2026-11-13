@@ -11,6 +11,7 @@ import {
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   USAGE_RESUME_SETTLED,
+  type AgentRun,
   type HostRestartRecovery,
   type HostRestartRecoveryHold,
   type WorkThread,
@@ -45,6 +46,7 @@ import type { GoalLoopService } from "../goal/goalLoopService";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { consumePersonQuit } from "../personQuit";
+import { uncertainToolCallHold, type ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 import type { HarnessWiring } from "./harness";
 import { createChatAgentResultDeliveryPort } from "../chat/chatAgentResultDeliveryPort";
 import { UsageResumeService } from "../usage/usageResumeService";
@@ -72,7 +74,10 @@ import type { WorkWiring } from "./work";
 export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AuthorityWiring,
-    "agentRunParentAuthority" | "agentRunPersistence" | "agentRunsCutOffByRestart"
+    | "agentRunParentAuthority"
+    | "agentRunPersistence"
+    | "agentRunsCutOffByRestart"
+    | "toolEffectLedger"
   > &
   Pick<
     AgentRunsWiring,
@@ -317,6 +322,7 @@ function startRestartContinuation(
       console.error(`[restart-continuation] ${mode} recovery did not finish.`, error);
       return undefined;
     });
+  const uncertainToolCall = cutOffToolCallHold(deps);
   void (async () => {
     const code = await settled(continueCodeTurns(deps, quitByPerson), "Code");
     const chat = await settled(
@@ -327,6 +333,7 @@ function startRestartContinuation(
         enabled: () => deps.persistence.readChatSettings()?.settings.restartContinuation !== false,
         connection: deps.persistence.connection,
         liftHarnessRecovery: (threadId) => deps.liftRestartRecovery(threadId),
+        uncertainToolCall,
         releaseQueue: (threadId) =>
           releaseQueueBehindRestartContinuation(deps.threadMessageQueue, {
             scopeId: ROUTINE_HOST_SCOPE_ID,
@@ -350,6 +357,7 @@ function startRestartContinuation(
           ).includes("work"),
         connection: deps.persistence.connection,
         liftHarnessRecovery: (threadId) => deps.liftRestartRecovery(threadId),
+        uncertainToolCall,
         releaseQueue: (threadId) =>
           releaseQueueBehindRestartContinuation(deps.threadMessageQueue, {
             scopeId: ROUTINE_HOST_SCOPE_ID,
@@ -405,6 +413,34 @@ function startRestartContinuation(
 }
 
 /** What continuing Chat answers after a restart reads and does. */
+/** A turn a restart cut off, as its mode names it: a Code operation, a Chat attempt, a Work turn request. */
+interface CutOffTurn {
+  readonly threadId: string;
+  readonly turnId: string;
+}
+
+/**
+ * Why a cut-off turn waits for a tool call nobody saw finish: one of its own,
+ * or one of a child run of its thread that this start also found cut off. A
+ * child runs its tools outside the turn that started it, and continuing the
+ * parent could start the same child work again.
+ */
+export function cutOffToolCallHold(deps: {
+  readonly agentRunsCutOffByRestart: ReadonlyArray<Pick<AgentRun, "id" | "parentThreadId">>;
+  readonly toolEffectLedger: Pick<ToolEffectLedger, "certainty">;
+}): (turn: CutOffTurn) => string | undefined {
+  return (turn) => {
+    const own = uncertainToolCallHold(deps.toolEffectLedger.certainty(turn.turnId));
+    if (own !== undefined) return own;
+    for (const run of deps.agentRunsCutOffByRestart) {
+      if (String(run.parentThreadId) !== turn.threadId) continue;
+      const child = uncertainToolCallHold(deps.toolEffectLedger.certainty(String(run.id)), "child");
+      if (child !== undefined) return child;
+    }
+    return undefined;
+  };
+}
+
 export interface ChatRestartContinuationDependencies {
   readonly cutOff: ReadonlyArray<ChatAttemptCutOffByRestart>;
   /** The previous host stopped because a person quit it (personQuit.ts). */
@@ -416,6 +452,8 @@ export interface ChatRestartContinuationDependencies {
   readonly connection: SqliteConnection;
   /** Lifts the thread's harness session out of its restart recovery (threadRestartContinuation.ts). */
   readonly liftHarnessRecovery: ThreadRestartContinuationPorts["liftHarnessRecovery"];
+  /** Why the cut-off turn must wait for a tool call nobody saw finish. */
+  readonly uncertainToolCall: (turn: CutOffTurn) => string | undefined;
   readonly releaseQueue: (threadId: string) => Promise<void>;
 }
 
@@ -437,6 +475,7 @@ export function continueChatTurns(deps: ChatRestartContinuationDependencies) {
     enabled: deps.enabled,
     attempts: createCodeRestartContinuationAttempts(deps.connection),
     liftHarnessRecovery: deps.liftHarnessRecovery,
+    uncertainToolCall: (turn) => deps.uncertainToolCall(turn),
     // A host continuation is an ordinary send under its one submission
     // identity: a repeated recovery finds the turn the first one made, and
     // the send's own admission rechecks the thread's authority and spend.
@@ -500,6 +539,8 @@ export interface WorkRestartContinuationDependencies {
   readonly connection: SqliteConnection;
   /** Lifts the thread's harness session out of its restart recovery (threadRestartContinuation.ts). */
   readonly liftHarnessRecovery: ThreadRestartContinuationPorts["liftHarnessRecovery"];
+  /** Why the cut-off turn must wait for a tool call nobody saw finish. */
+  readonly uncertainToolCall: (turn: CutOffTurn) => string | undefined;
   readonly releaseQueue: (threadId: string) => Promise<void>;
 }
 
@@ -607,6 +648,7 @@ function continueCutOffWorkTurns(deps: WorkRestartContinuationDependencies) {
     enabled: deps.enabled,
     attempts: createCodeRestartContinuationAttempts(deps.connection),
     liftHarnessRecovery: deps.liftHarnessRecovery,
+    uncertainToolCall: (turn) => deps.uncertainToolCall(turn),
     dispatch: async (turn, continuation, prompt) => {
       if (!deps.modeEnabled())
         return { kind: "refused", detail: "Work is turned off on this host." };
@@ -696,6 +738,8 @@ function continueAgentRuns(deps: ContinuationDependencies, quitByPerson: boolean
       enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
         mode,
       ),
+    uncertainToolCall: (run) =>
+      uncertainToolCallHold(deps.toolEffectLedger.certainty(String(run.id)), "child"),
     latestStartVersion: (run) => agentRunPersistence.latestStartVersion(run.id),
     attempts: createCodeRestartContinuationAttempts(persistence.connection),
     // The parent's live grant is read again inside the resume, after its
@@ -740,6 +784,7 @@ function continueCodeTurns(
     readThread: (threadId) => persistence.readCodeThread(threadId),
     runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
     enabled: () => persistence.readCodeSettings()?.settings.restartContinuation !== false,
+    uncertainToolCall: cutOffToolCallHold(deps),
     attempts: createCodeRestartContinuationAttempts(persistence.connection),
     resumability: (thread, continuation, cutOffOperationId) =>
       codeRestartResumability(

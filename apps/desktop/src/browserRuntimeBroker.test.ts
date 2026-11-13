@@ -527,6 +527,34 @@ describe("BrowserRuntimeBroker", () => {
         }),
       );
       expect(other.status).toBe(400);
+      // The person's limits travel beside it, and only inside what Settings allows.
+      const limits = { maxFileBytes: 100 * 1024 * 1024, maxHeldDownloads: 10 };
+      const limited = await broker.fetchForTest(
+        request(broker.url, broker.token, {
+          contextId,
+          request: { kind: "click", target: "#get", downloads: "hold", downloadLimits: limits },
+        }),
+      );
+      expect(limited.status).toBe(200);
+      expect(surface.act).toHaveBeenLastCalledWith(contextId, {
+        kind: "click",
+        target: "#get",
+        downloads: "hold",
+        downloadLimits: limits,
+      });
+      for (const outside of [
+        { maxFileBytes: 2 * 1024 * 1024 * 1024, maxHeldDownloads: 10 },
+        { maxFileBytes: 1024, maxHeldDownloads: 51 },
+        { maxFileBytes: 1024 },
+      ]) {
+        const refused = await broker.fetchForTest(
+          request(broker.url, broker.token, {
+            contextId,
+            request: { kind: "click", target: "#get", downloads: "hold", downloadLimits: outside },
+          }),
+        );
+        expect(refused.status).toBe(400);
+      }
 
       const claimed = await broker.fetchForTest(
         request(

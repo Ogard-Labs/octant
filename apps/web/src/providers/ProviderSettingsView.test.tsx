@@ -1910,6 +1910,33 @@ describe("ProviderSettingsView", () => {
     },
   );
 
+  it("says why a model stayed Chat only after a tool check the host ran by itself, and keeps Verify tools", () => {
+    const props = fixture({
+      instance: httpProvider(),
+      observed: observation({
+        toolChecks: [
+          {
+            modelId: "model-1" as never,
+            outcome: "failed",
+            message: "The provider request failed with HTTP 429.",
+            checkedAt: "2026-11-12T10:00:00.000Z" as never,
+          },
+        ],
+      }),
+    });
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    const models = screen.getByRole("list", { name: "Private gateway models" });
+    expect(
+      within(models).getByText(
+        "Last tool check: The provider request failed with HTTP 429. Octant tries again the next time this model is used.",
+      ),
+    ).toBeVisible();
+    expect(
+      within(models).getByRole("button", { name: "Verify tools for Model One" }),
+    ).toBeEnabled();
+  });
+
   it("drops the Chat only tag from a model verified for tools and keeps it on the others", () => {
     const props = fixture({
       instance: httpProvider(),

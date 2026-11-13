@@ -79,7 +79,6 @@ import {
   type ShieldDecision,
   type ComputerUseDestinationSelection,
   type CodeMergeStandingSource,
-  type CodeProjectPullRequestSwitchTarget,
   type CodeThreadId,
   type AutomationRunReference,
   type EventActor,
@@ -90,8 +89,6 @@ import {
   type ProviderResumeCursor,
   type ProviderProbeResult,
   type WindowId,
-  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS,
-  CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
@@ -176,6 +173,7 @@ import {
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { PullRequestWatchPort } from "./pullRequestWatchPort";
+import type { ProjectForgeChoices } from "./standingMergeAllowance";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import type {
   NativeHarnessTurnAdmission,
@@ -245,6 +243,7 @@ import {
 } from "./codeAppManagedTools";
 import type { CodePlannerToolPort } from "./codePlannerTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import {
   PROVIDER_CONTEXT_RESTATED,
@@ -339,6 +338,15 @@ export interface CodeOperationRuntimeOptions {
    * arriving and not yet committed. A held thread starts no turn.
    */
   readonly moveHold?: (threadId: string) => boolean;
+  /**
+   * Runs Verify tools for a direct-endpoint model nobody has verified yet,
+   * where a turn starts. Never rejects: a model it could not verify takes the
+   * turn without tools.
+   */
+  readonly verifyModelToolsOnFirstUse?: (
+    providerInstanceId: CodeThread["providerInstanceId"],
+    modelId: CodeThread["modelId"],
+  ) => Promise<void>;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -413,6 +421,8 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<GhDeliveryTarget | undefined>;
   /** The standing merge permissions the person has stored for a thread; absent reads none. */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
+  /** The Project's stored choices for comments and default-branch pushes; absent reads neither. */
+  readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
   /** A thread's watch on its own pull request; absent, the tool refuses watch and unwatch. */
   readonly pullRequestWatch?: PullRequestWatchPort;
   readonly reviewFiles: ReviewFindingFilePort;
@@ -566,6 +576,13 @@ export interface CodeOperationRuntimeOptions {
    * live so a grant forgotten in Settings stops satisfying it at once.
    */
   readonly isBrowserOriginRemembered?: (origin: string) => boolean;
+  /** The person's per-file Browser upload limit in bytes, read for each upload. */
+  readonly browserUploadFileLimitBytes?: () => number;
+  readonly browserUploadFileCountLimit?: () => number;
+  /** The Browser approval card an upload or a download save asks on below Full access. */
+  readonly browserTransferApprovals?: NonNullable<
+    CodeAppManagedToolsOptions["browserUpload"]
+  >["approvals"];
   /** The Browser approvals a sign-in handoff asks through; see the Code tools. */
   readonly browserSignIn?: CodeAppManagedToolsOptions["browserSignIn"];
   /** Who may not be asked to save a download: a paired device. */
@@ -646,6 +663,8 @@ export interface CodeOperationRuntimeOptions {
   readonly agents?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    /** Asks the turn's person, in the thread; absent in Plan, which stays refused. */
+    readonly ask?: (summary: string) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }) => AppManagedToolSet | undefined;
   /**
    * The native harness tool set for a direct-endpoint provider: reads, edits,
@@ -713,6 +732,11 @@ export interface CodeOperationRuntimeOptions {
   }) => Promise<DesignSystemTurnContext | undefined>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** The turn's record of tool calls about to take effect (toolEffects/toolEffectLedger.ts). */
+    readonly toolEffects?: (turn: {
+      readonly threadId: string;
+      readonly turnId: string;
+    }) => TurnToolEffects;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
     readonly observeRemoteCommand?: (
       threadId: string,
@@ -1403,6 +1427,15 @@ export function createCodeOperationRuntime(
     ...(options.standingMergeAllowance === undefined
       ? {}
       : { standingMergeAllowance: options.standingMergeAllowance }),
+    ...(options.projectForgeChoices === undefined
+      ? {}
+      : { projectForgeChoices: options.projectForgeChoices }),
+    ...(options.readThreadExternalContentTaint === undefined
+      ? {}
+      : {
+          threadReadOutsideContent: (thread: CodeThread) =>
+            options.readThreadExternalContentTaint?.(thread.id).externalContentIngested !== false,
+        }),
     ...(options.recordExternalContentIngestion === undefined
       ? {}
       : { recordReviewContent: options.recordExternalContentIngestion }),
@@ -3029,6 +3062,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         reason === undefined ? undefined : { category: "failed", message: reason },
       );
     };
+    // Before the turn's standing is read and its tools are chosen: one check
+    // at most per start, and a check that fails leaves the turn without tools.
+    await this.#options
+      .verifyModelToolsOnFirstUse?.(input.thread.providerInstanceId, input.thread.modelId)
+      .catch(() => undefined);
     const command = this.#pending.get(String(input.operationId));
     const root = this.#roots.get(key);
     if (
@@ -4514,25 +4552,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
-   * One watch the thread's agent asked for, asked of the person in the thread
-   * with the pull request and the watch's bounds named. Nothing is minted: the
-   * watch turns on inside this same tool call, right after the answer, and the
-   * switch service checks the window and the thread again before it does.
-   */
-  #askPullRequestWatchApproval(
-    active: ActiveTurn,
-    target: CodeProjectPullRequestSwitchTarget,
-    signal?: AbortSignal,
-  ): Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable"> {
-    const summary = boundProviderSummary(
-      `Let this thread's agent watch pull request #${target.number} in ${target.repositoryOwner}/${target.repositoryName}? Octant will start a new turn here when its checks finish, a review or comment arrives, or a merge conflict appears: at most ${CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES} times, for up to ${CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS / 86_400_000} days, ending when it merges or closes. Each turn runs at this thread's access level.`,
-    );
-    return summary === undefined
-      ? Promise.resolve("unavailable")
-      : this.#askToolApproval(active, summary, undefined, signal);
-  }
-
-  /**
    * The wording and binding context of one device approval. A Simulator,
    * emulator, or device effect is asked only while the turn's posture decides
    * effects by approval; a device lease is asked under every posture, Full
@@ -5123,16 +5142,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               ? undefined
               : this.#options.standingMergeAllowance?.(current)[0];
           },
+          projectAllowsComments: () => {
+            const current = this.#effectiveThread(active.windowId, active.thread.id);
+            return (
+              current !== undefined &&
+              this.#options.projectForgeChoices?.(current).comments === true
+            );
+          },
+          threadReadOutsideContent: () =>
+            this.#options.readThreadExternalContentTaint?.(active.thread.id)
+              .externalContentIngested !== false,
           ...(pullRequestWatch === undefined
             ? {}
             : {
                 pullRequestWatch: {
-                  watch: (ask, signal) =>
+                  watch: (signal) =>
                     pullRequestWatch.watch({
                       windowId: active.windowId,
                       threadId: active.thread.id,
                       providerInstanceId: String(active.thread.providerInstanceId),
-                      ask,
                       signal: signal ?? active.abort.signal,
                     }),
                   unwatch: () =>
@@ -5140,38 +5168,36 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                       threadId: active.thread.id,
                       providerInstanceId: String(active.thread.providerInstanceId),
                     }),
-                  request: (target, signal) =>
-                    this.#askPullRequestWatchApproval(active, target, signal),
                 },
               }),
           terminalApproval: {
             request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
-          // An upload sends files from this thread's checkout only, and asks
-          // every time, at every access level, as the first Browser action on
-          // a site does.
+          // An upload sends files from this thread's checkout only. The tool
+          // asks on the Browser approval card below Full access and not at
+          // all at it.
           browserUpload: {
             root: active.checkoutRoot,
-            request: (summary, signal) => {
-              const bounded = boundProviderSummary(summary);
-              return bounded === undefined
-                ? Promise.resolve("cancelled" as const)
-                : this.#askToolApproval(active, bounded, undefined, signal);
-            },
+            ...(this.#options.browserUploadFileLimitBytes === undefined
+              ? {}
+              : { fileLimitBytes: this.#options.browserUploadFileLimitBytes }),
+            ...(this.#options.browserUploadFileCountLimit === undefined
+              ? {}
+              : { fileCountLimit: this.#options.browserUploadFileCountLimit }),
+            ...(this.#options.browserTransferApprovals === undefined
+              ? {}
+              : { approvals: this.#options.browserTransferApprovals }),
           },
           // A saved download lands in this thread's checkout only, and the
-          // person is asked every time, as for an upload.
+          // person is asked below Full access, as for an upload.
           browserDownload: {
             root: active.checkoutRoot,
             ...(this.#options.browserDownloadRefusal === undefined
               ? {}
               : { refusal: this.#options.browserDownloadRefusal }),
-            request: (summary, signal) => {
-              const bounded = boundProviderSummary(summary);
-              return bounded === undefined
-                ? Promise.resolve("cancelled" as const)
-                : this.#askToolApproval(active, bounded, undefined, signal);
-            },
+            ...(this.#options.browserTransferApprovals === undefined
+              ? {}
+              : { approvals: this.#options.browserTransferApprovals }),
           },
           ...(browserProfiles === undefined
             ? {}
@@ -5301,7 +5327,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
-        this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
+        this.#options.agents?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          // The level is the turn's: a Plan turn on a wider thread asks nobody.
+          ...(active.thread.executionPolicy === "plan"
+            ? {}
+            : {
+                ask: (summary: string) => {
+                  const bounded = boundProviderSummary(summary);
+                  return bounded === undefined
+                    ? Promise.resolve("cancelled" as const)
+                    : this.#askToolApproval(active, bounded, undefined);
+                },
+              }),
+        }),
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.providerRoot,
@@ -5385,6 +5425,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     this.#options.nativeHarness?.turnStarted(harnessScope);
     let endedTurn: TurnEndSummary | undefined;
     const appManagedTools = this.#appManagedTools(active);
+    const toolEffects = this.#options.nativeHarness?.toolEffects?.({
+      threadId: String(active.thread.id),
+      turnId: String(active.operationId),
+    });
     // Only a thread whose person chose the runtime's artifact tool is told to
     // use it; the turn runner starts that thread's session with the same
     // choice, and every other thread keeps Canvas.
@@ -5703,6 +5747,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               };
             }),
           ...(appManagedTools === undefined ? {} : { appManagedTools }),
+          ...(toolEffects === undefined ? {} : { toolEffects }),
           ...(active.onContextDelivered === undefined
             ? {}
             : { onPromptSent: active.onContextDelivered }),

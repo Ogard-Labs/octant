@@ -834,6 +834,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "run as itself own setup native subagents web search fetch skills mcp servers plugins hooks settings home folder claude code codex opencode mistral vibe trusted project",
         },
+        {
+          id: settingId("provider-own-memory"),
+          label: "Use the provider's own memory",
+          scope: "host",
+          keywords:
+            "provider own memory memories remember auto-memory claude code codex account across projects work code plan chat off telemetry self-update",
+        },
       ],
     },
     {
@@ -1196,6 +1203,24 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "browser downloads agents download files save workspace downloads folder allow block switch",
+        },
+        {
+          id: settingId("browser-transfer-file-limit"),
+          label: "Largest file",
+          scope: "host",
+          keywords: "browser upload download largest file size limit megabytes cap agents transfer",
+        },
+        {
+          id: settingId("browser-held-download-limit"),
+          label: "Downloads kept waiting",
+          scope: "host",
+          keywords: "browser downloads kept waiting held files limit count cap agents page",
+        },
+        {
+          id: settingId("browser-upload-file-count-limit"),
+          label: "Files per upload",
+          scope: "host",
+          keywords: "browser upload files per upload count limit cap agents send page how many",
         },
         {
           id: settingId("tool-approvals"),

@@ -30,9 +30,13 @@ import {
   changeCodeProjectPermissionMode,
   changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
+  changeCodeProjectAgentDefaultBranchPush,
   changeCodeProjectAgentMerge,
   changeCodeProjectOwnToolchain,
+  changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
+  changeProjectAgentMemoryWrites,
+  changeProjectImageGenerationChoice,
   changeProjectBrandKit,
   changeProjectColor,
   changeProjectDesignSystem,
@@ -314,6 +318,68 @@ describe("Project creation and lifecycle", () => {
         updatedAt,
       ),
     ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("keeps, replaces, and drops a Project's image generation choice, and refuses a change that changes nothing", () => {
+    const choice = {
+      profileInstanceId: "a3000000-0000-4000-8000-000000000001",
+      modelId: "gpt-image-2",
+    } as never;
+    for (const type of ["chat", "work", "code"] as const) {
+      const project = makeProject(ids[type], "0/1", { type });
+      const kept = changeProjectImageGenerationChoice(project, choice, updatedAt);
+      expect(kept).toMatchObject({ type, imageGenerationChoice: choice, version: 2 });
+      expect(() => changeProjectImageGenerationChoice(kept, choice, updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+      const dropped = changeProjectImageGenerationChoice(kept, undefined, updatedAt);
+      expect(dropped.version).toBe(3);
+      expect("imageGenerationChoice" in dropped).toBe(false);
+      expect(() => changeProjectImageGenerationChoice(project, undefined, updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+    }
+  });
+
+  it("lets a Project of any mode allow agents to write its memory without asking, which starts off", () => {
+    for (const type of ["chat", "work", "code"] as const) {
+      const project = makeProject(ids[type], "0/1", { type });
+      const allowed = changeProjectAgentMemoryWrites(project, "enabled", updatedAt);
+      expect(allowed).toMatchObject({ type, agentMemoryWrites: "enabled", version: 2 });
+      expect(changeProjectAgentMemoryWrites(allowed, "disabled", updatedAt)).toMatchObject({
+        agentMemoryWrites: "disabled",
+        version: 3,
+      });
+      expect(() => changeProjectAgentMemoryWrites(project, "disabled", updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+    }
+  });
+
+  it("lets a Code Project allow agent comments and default-branch pushes, each off until chosen", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const comments = changeCodeProjectAgentPullRequestComments(project, "enabled", updatedAt);
+    expect(comments).toMatchObject({ agentPullRequestComments: "enabled", version: 2 });
+    expect(comments).not.toHaveProperty("agentDefaultBranchPush");
+    const pushes = changeCodeProjectAgentDefaultBranchPush(comments, "enabled", updatedAt);
+    expect(pushes).toMatchObject({
+      agentPullRequestComments: "enabled",
+      agentDefaultBranchPush: "enabled",
+      version: 3,
+    });
+    expect(() => changeCodeProjectAgentPullRequestComments(project, "disabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() => changeCodeProjectAgentDefaultBranchPush(project, "disabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    const work = makeProject(ids.work, "0/1", { type: "work" });
+    expect(() => changeCodeProjectAgentPullRequestComments(work, "enabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() => changeCodeProjectAgentDefaultBranchPush(work, "enabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
   });
 
   it("lets a Work Project opt into a status file, which starts off for every Project", () => {
