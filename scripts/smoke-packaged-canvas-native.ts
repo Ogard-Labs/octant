@@ -674,6 +674,17 @@ const timer = setInterval(() => {
       process.env,
       8000,
     );
+    // The click leaves the pointer on the sidebar row, whose hover card opens
+    // over the start of the transcript. In the hosted runner's window that card
+    // was observed covering the start of the Canvas sentence this stage reads
+    // ("...week running."), so the pointer is moved onto the Canvas first.
+    await observeUntil("fixture-canvas-drawn", (snapshot) => hasText(snapshot, "Worth watching"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["hover", String(ownPid), join(artifacts, "fixture-canvas-hover.png"), "Worth watching"],
+      process.env,
+      8000,
+    );
     await observeUntil(
       "fixture-canvas",
       (snapshot) =>
@@ -815,14 +826,22 @@ const timer = setInterval(() => {
       process.env,
       8000,
     );
-    await observeUntil(
+    const exportPanel = await observeUntil(
       "canvas-export",
       (snapshot) => hasText(snapshot, "Review export") && hasText(snapshot, "Public link"),
     );
     // This is the selected trigger actually observed in the first export
     // panel. Opening its native menu grants nothing; only the exact owned
-    // Public link card below is eligible for approval.
-    await nativeInput("destination-trigger", "click", "sharehtml.org — Ready");
+    // Public link card below is eligible for approval. OCR reads the trigger's
+    // em dash as a hyphen at the 13px interface size ("sharehtml.org - Ready"
+    // on the hosted runner), so the row is matched as the menu row below is
+    // and clicked by the text actually observed.
+    const destinationTrigger = exportPanel.texts.find((row) =>
+      /^sharehtml\.org [—-] Ready$/.test(row.text),
+    );
+    if (destinationTrigger === undefined)
+      throw Error("The observed sharehtml.org destination trigger is absent.");
+    await nativeInput("destination-trigger", "click", destinationTrigger.text);
     const destinationMenu = await observeUntil("destination-native-menu", (snapshot) =>
       snapshot.texts.some((row) => /^Public link [—-] Ready$/.test(row.text)),
     );
@@ -1110,15 +1129,27 @@ const timer = setInterval(() => {
       ),
     );
     const updatedLinks = await showPublicLinks("updated");
-    const actionRows = updatedLinks.texts.filter(
-      (row) =>
-        row.text.includes("Copy link") &&
-        row.text.includes("Update") &&
-        row.text.endsWith("Revoke"),
+    // OCR used to read the link's actions as one row ("Copy link Update
+    // Revoke"); with the current control spacing the hosted runner reads
+    // "Copy link", "Update" and "Revoke" as three rows. Either shape is
+    // accepted, but there must be exactly one owned link's actions, and the
+    // click stays bound to that one row.
+    const rowTexts = updatedLinks.texts.map((row) => row.text.trim());
+    const joinedRows = rowTexts.filter(
+      (text) => text.includes("Copy link") && text.includes("Update") && text.endsWith("Revoke"),
     );
-    if (actionRows.length !== 1 || actionRows[0] === undefined)
+    const countOf = (value: string) => rowTexts.filter((text) => text === value).length;
+    const separateRows =
+      countOf("Copy link") === 1 && countOf("Update") === 1 && countOf("Revoke") === 1;
+    const actionRow =
+      joinedRows.length === 1 && !separateRows
+        ? joinedRows[0]
+        : joinedRows.length === 0 && separateRows
+          ? "Revoke"
+          : undefined;
+    if (actionRow === undefined)
       throw Error("The single owned public-link action row is unavailable.");
-    await nativeInput("native-revoke", "click", "Revoke", actionRows[0].text);
+    await nativeInput("native-revoke", "click", "Revoke", actionRow);
     await observeUntil(
       "native-revoke-card",
       (snapshot) =>

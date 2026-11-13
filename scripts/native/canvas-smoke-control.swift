@@ -123,7 +123,7 @@ _ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "choose-native-menu-item" || mode == "click" || mode == "click-described" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
+if mode == "choose-native-menu-item" || mode == "click" || mode == "hover" || mode == "click-described" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -164,7 +164,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 var clicked = false
 var pointerProof: String?
 var nativeText: String?
-if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "click-described" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
+if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "hover" || mode == "click-described" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let rowContext = mode == "click" && CommandLine.arguments.count == 6 ? CommandLine.arguments[5] : nil
     let observedRows = (request.results ?? []).filter { result in
@@ -287,6 +287,11 @@ if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" |
         }
         pointerProof = "owned-native-menu-item-press"
         clicked = true
+    } else if mode == "hover" {
+        // Only moves the pointer: resting it on owned content closes a hover
+        // card a previous click left open over the text the next stage reads.
+        guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) else { refuse("Native pointer events are unavailable.") }
+        move.post(tap: .cghidEventTap)
     } else {
         guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
               let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
