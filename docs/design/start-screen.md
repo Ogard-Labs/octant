@@ -466,8 +466,9 @@ Inbox also list the host's waiting asks (an MCP tool approval, a Project
 memory or routine proposal, an image offer, a Browser approval or sign-in
 card) as `WaitingAskRow`s: the thread, the Project, the wait, one line of
 what is asked and the detail its card shows. A row offers the ask's two plain
-answers only when the host marks it answerable in place (never a Browser
-ask, whose row names its profile and whether a terminal asked), and **Open thread**
+answers only when the host marks it answerable in place, which the host
+does for no kind today because each ask's card shows more than its row (a
+Browser row names its profile and whether a terminal asked), and **Open thread**
 always; on the card these rows take the places the requests leave under its
 row limit, and the Inbox files them under their Project and counts them
 under All and Stuck. The board, the command palette and the Review page list

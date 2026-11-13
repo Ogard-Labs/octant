@@ -12973,20 +12973,20 @@ approval-gated` command that undoes it. The terminal shows no one-time
   id (the one its own decide route takes), mode, Project, thread and title,
   when it was asked, one line of text, and, when it fits, the detail its
   card shows (a tool's input, the words a memory entry would hold, an
-  upload's files). The host sets `inPlace` only when that line and detail
-  are everything the ask's card shows and the card's answer is a plain
-  approve or decline: a tool approval and a memory proposal, each only
-  while nothing was cut and while the thread has read no outside content
-  (the card names those sources). A list offers the two plain answers for
-  such an entry and sends them through the ask's own route
-  (`/api/extensions/tool-approvals`,
-  `/api/projects/memory/proposals/decide`), once and never remembered;
-  every other entry (a Browser approval, a routine proposal, an image
-  offer, a sign-in card, an ask too long for a row) opens its thread, whose
-  card decides it. A Browser approval is never `inPlace`: its card words
-  what the answer authorizes (the account a profile page acts as, that
-  uploaded files leave the computer, what a script may reach), and the row
-  does not restate that. Its row names the site, the profile when the page
+  upload's files). An entry may be answered from the list (`inPlace`) only
+  when its line and detail are everything the ask's card shows; no kind
+  meets that today, so the host sets `inPlace` on none and every row opens
+  its thread, whose card decides it. An MCP tool card names the installed
+  plugin that owns the tool, which only the client's package list resolves,
+  and two plugins may expose the same server and tool names while running
+  different code; a memory card names the kind of entry and that every
+  later thread in the Project starts with it; a Browser card words what the
+  answer authorizes (the account a profile page acts as, that uploaded
+  files leave the computer, what a script may reach); a routine proposal,
+  an image offer and the sign-in card take a choice or an action a row does
+  not offer. A list that is given an `inPlace` entry offers its two plain
+  answers through the ask's own route, once and never remembered. A Browser
+  row names the site, the profile when the page
   is in one (Personal, Project, or an account profile's own name) with the
   words "signed in as you", and the asker: a site ask held for a Code
   thread came from a program in one of its terminals, not from the thread's

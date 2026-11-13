@@ -42,17 +42,17 @@ interface AskWords {
   readonly requestedAt: string;
   readonly text: string;
   readonly detail?: string;
-  /**
-   * The card shows nothing beyond `text` and `detail`, and its answer is a
-   * plain approve or decline. False where the card offers a choice a row does
-   * not (a model, a schedule), asks the person to act (a sign-in), or names
-   * the outside content that marked the thread.
-   */
-  readonly wholeAsk: boolean;
 }
 
 /**
- * Every waiting ask as a Needs you row, oldest first. An ask whose thread the
+ * Every waiting ask as a Needs you row, oldest first. No row is answerable
+ * from the list (`inPlace` is never set): each ask's card in its thread shows
+ * more than a row holds. An MCP tool card names the installed plugin that owns
+ * the tool, which only the client's package list resolves, and two plugins may
+ * expose the same server and tool names while running different code; a
+ * memory card names the kind of entry and that every later thread in the
+ * Project starts with it; a Browser card words the account and authority the
+ * answer covers. So every row opens its thread, whose card decides. An ask whose thread the
  * reader's lists do not hold (hidden, deleted, or in a mode that is off) is
  * left out: a row that opens nothing helps nobody, and the ask still waits in
  * its service.
@@ -74,10 +74,6 @@ export function waitingAsksFrom(
     if (thread === undefined) continue;
     const text = ask.text.trim();
     const detail = ask.detail?.trim() ?? "";
-    // Words past a bound are never cut to fit: a row either carries the whole
-    // ask or sends the person to the card that does.
-    const fits =
-      text.length <= MAX_WAITING_ASK_TEXT_LENGTH && detail.length <= MAX_WAITING_ASK_DETAIL_LENGTH;
     asks.push(
       decodeWaitingAsk({
         kind: ask.kind,
@@ -89,7 +85,6 @@ export function waitingAsksFrom(
         requestedAt: ask.requestedAt,
         text: text.slice(0, MAX_WAITING_ASK_TEXT_LENGTH).trim(),
         ...(detail.length > 0 && detail.length <= MAX_WAITING_ASK_DETAIL_LENGTH ? { detail } : {}),
-        ...(ask.wholeAsk && fits ? { inPlace: true } : {}),
       }),
     );
   }
@@ -107,7 +102,6 @@ function toolApprovalWords(approval: ExtensionToolApproval): AskWords {
     requestedAt: approval.requestedAt,
     text: `Run ${approval.mcpToolName} from ${approval.serverName}?`,
     detail: approval.inputJson,
-    wholeAsk: approval.outsideContent === undefined,
   };
 }
 
@@ -149,7 +143,6 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
       kind: "browser-sign-in",
       text: `Sign in at ${where}`,
       ...(approval.signIn.reason === undefined ? {} : { detail: approval.signIn.reason }),
-      wholeAsk: false,
     };
   }
   if (approval.upload !== undefined) {
@@ -159,7 +152,6 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
       kind: "browser-approval",
       text: `Upload ${String(files.length)} ${files.length === 1 ? "file" : "files"} to ${where}?`,
       detail: lines(...files.map((file) => `${file.name} (${bytes(file.sizeBytes)})`), extensions),
-      wholeAsk: false,
     };
   }
   if (approval.download !== undefined) {
@@ -173,7 +165,6 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
         source === undefined ? undefined : `Came through ${source.origins.join(", then ")}`,
         extensions,
       ),
-      wholeAsk: false,
     };
   }
   if (approval.script !== undefined) {
@@ -182,7 +173,6 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
       kind: "browser-approval",
       text: `Run a script on ${where}?`,
       detail: lines(approval.script.source, extensions),
-      wholeAsk: false,
     };
   }
   // In Code the thread's own agent asks for a site through its turn's
@@ -194,7 +184,6 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
       kind: "browser-approval",
       text: `A program in a terminal, not this thread's agent, asks to open ${where} in the Browser`,
       ...(extensions === undefined ? {} : { detail: extensions }),
-      wholeAsk: false,
     };
   }
   return {
@@ -205,7 +194,6 @@ function browserApprovalWords(approval: BrowserToolApproval): AskWords {
         ? `Let the agent use ${where} in the Browser?`
         : `Let the agent use ${where}?`,
     ...(extensions === undefined ? {} : { detail: extensions }),
-    wholeAsk: false,
   };
 }
 
@@ -216,7 +204,6 @@ function memoryProposalWords(proposal: ProjectMemoryProposal): AskWords {
     askId: String(proposal.proposalId),
     threadId: proposal.threadId,
     requestedAt: proposal.requestedAt,
-    wholeAsk: proposal.outsideContent === undefined,
   };
   switch (change.kind) {
     case "create":
@@ -243,7 +230,6 @@ function routineProposalWords(request: RoutineAgentRequest): AskWords {
     threadId: String(request.threadId),
     requestedAt: request.requestedAt,
     // The card shows the schedule and the task; a row names the routine only.
-    wholeAsk: false,
   };
   if ("kind" in request) {
     const verb = request.change === "pause" ? "Pause" : "Archive";
@@ -260,7 +246,6 @@ function imageOfferWords(offer: ImageGenerationOffer): AskWords {
     requestedAt: offer.requestedAt,
     // Generating takes the person's choice of model; saving names a path the
     // card shows beside the picture.
-    wholeAsk: false,
   };
   return offer.kind === "save"
     ? { ...base, text: `Save a generated image as ${offer.relativePath}?` }

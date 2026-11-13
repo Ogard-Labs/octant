@@ -41,7 +41,7 @@ const none = {
 };
 
 describe("waiting asks", () => {
-  it("lists a tool approval with its whole input, answerable from the list", () => {
+  it("lists a tool approval with its whole input, for its thread to answer", () => {
     expect(waitingAsksFrom({ ...none, toolApprovals: [toolApproval()] }, readThread)).toEqual([
       {
         kind: "tool-approval",
@@ -53,9 +53,27 @@ describe("waiting asks", () => {
         requestedAt: "2026-11-13T08:02:00.000Z",
         text: "Run search_issues from Linear?",
         detail: '{"query":"renewals"}',
-        inPlace: true,
       },
     ]);
+  });
+
+  it("answers neither of two plugins' same-named tools from the list, since the row cannot tell them apart", () => {
+    const asks = waitingAsksFrom(
+      {
+        ...none,
+        toolApprovals: [
+          toolApproval(),
+          toolApproval({
+            approvalId: "00000000-0000-4000-8000-000000000b03",
+            extensionId: "00000000-0000-4000-8000-000000000b20",
+            packageId: "00000000-0000-4000-8000-000000000b21",
+          }),
+        ],
+      },
+      readThread,
+    );
+    expect(asks).toHaveLength(2);
+    expect(asks.map((ask) => ask.inPlace)).toEqual([undefined, undefined]);
   });
 
   it("sends the person to the thread when a row cannot show all the card shows", () => {
@@ -217,7 +235,7 @@ describe("waiting asks", () => {
         kind: "memory-proposal",
         text: "Add to Project memory?",
         detail: "Invoices are due on the 5th.",
-        inPlace: true,
+        inPlace: undefined,
       },
       {
         kind: "routine-proposal",
