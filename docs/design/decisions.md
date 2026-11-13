@@ -2301,7 +2301,7 @@ Every list, board, reader and preference page is one `Surface`. Settings groups 
 - A destination page and Settings show their own outline while they load (a title bar and rows; a rail and a page), not a line of text, so nothing changes place when they arrive. The words stay for assistive technology, and the skeleton's sheen stops under reduced motion.
 - Background refresh preserves loaded controls and active drafts; status slots are bounded so a changed status never pushes the form below it.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell) and [Settings stability](../../DESIGN.md#settings-stability).
+Status: Built. Since: —. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell) and [Settings stability](settings.md#settings-stability).
 
 ### User profile
 
@@ -2356,7 +2356,7 @@ A new window, its background and its drafts behave predictably.
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
 - If first-turn startup fails after the task opens, the provisional prompt is withdrawn and its text returns to the composer with the refusal reason. _Here only._
 
-Status: Built. Since: —. Detail: [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout), [Shapes and depth](../../DESIGN.md#shapes-and-depth), [Welcome and composer](../../DESIGN.md#welcome-and-composer) and [Draft continuity and composer notices](../../DESIGN.md#draft-continuity-and-composer-notices).
+Status: Built. Since: —. Detail: [DESIGN.md: Shell and layout](../../DESIGN.md#shell-and-layout), [Shapes and depth](../../DESIGN.md#shapes-and-depth), [Welcome and composer](../../DESIGN.md#welcome-and-composer) and [Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
 
 ### Usage reading and provider marks
 
@@ -2367,7 +2367,7 @@ The Usage page reports what was measured and shows each provider with a bundled 
 - Provider logos are locally bundled and licensed, never fetched at runtime, and never drawn approximately. Unknown providers get a truthful fallback.
 - Interface icons use four sizes (12, 14, 16, 20) and one stroke (1.5), set once for the app; a contract test refuses any other.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](../../DESIGN.md#usage-surface-ownership) and [Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks).
+Status: Built. Since: —. Detail: [DESIGN.md: Usage surface ownership](settings.md#usage) and [Iconography and provider marks](../../DESIGN.md#iconography-and-provider-marks).
 
 ### Reply detail
 

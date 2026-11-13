@@ -604,7 +604,7 @@ Project and branch there.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under
-[Content tabs](../../DESIGN.md#content-tabs).
+[Content tabs](#content-tabs).
 
 These tabs add no persisted layout or authority.
 
@@ -1966,3 +1966,947 @@ eligible untracked paths; **Use this snapshot** is the separate enabling
 choice. It shows the selected source and an actionable stale-source refusal.
 Existing children retain their recorded source. The rule belongs to
 [Code child workspaces](../architecture.md#modes-chat-work-and-code).
+
+## Presentation
+
+This section is how the workspace's screens look. Shared foundations, components and patterns are in [DESIGN.md](../../DESIGN.md); this section uses them and adds what belongs to one screen or tool.
+
+### Shell grid and tool row
+
+The shell is a CSS grid: sidebar, central workspace, optional right dock, and a
+full-width status bar. A horizontal bottom panel is an optional sibling below
+the central workspace. The central pane remains the thread, board, Project
+overview, or Project-level list. An unsplit conversation uses the title band
+for the Project/thread breadcrumb and compact thread strip, so the transcript
+does not repeat a second title block. Split panes and utility surfaces retain
+their own pane headers and lifecycle controls. Capability-gated toggles for
+Open in, bottom panel, and right dock remain window chrome. Several Browsers are one Browser
+tool: their pages sit in a row of their own at the top of the Browser, with a +
+for a new page, and closing the Browser closes every page.
+The Browser's toolbar is one row of plain icon buttons, the address field and
+trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the right of the
+title band, before the bottom-panel and dock toggles: icon buttons for
+Environment, Terminal, Review, Browser, Files, then a **More tools** menu of
+checkbox items for every other tool the thread can use (grouped as the launcher
+groups them), then the pull requests the thread is about under "Relevant to this
+thread"; each button only where the thread can use the tool. A button is the
+shell's icon button with the tool's own icon and its name as a tooltip,
+`aria-pressed` while the tool is on screen, a quiet 4px dot while the tool is
+open but not shown. At the tile caps a press shows a tool that is not shown in
+the focused tile's place and the button says "Shows in place of <the focused
+tool>"; on a new Code task the buttons are disabled with "Available once the
+task starts". The row is a
+toolbar named "Tools" with one Tab stop and arrow-key movement. The dock's own
+header is an empty band as tall as the title rail, so its panes start below it
+whatever the width; it holds no strip, Add tool, Show another tool or quick
+tools (the bottom panel keeps its strip and Add tool). At 960px and under the
+dock is a modal drawer over an inert band, so the same row stands in the
+drawer's header, a press replaces the one tool shown, and there is no dragging. Zen
+remains in the bottom-left identity menu.
+
+### Content tabs
+
+Workspace content and dock tool tabs share a compact 26px recipe for height,
+spacing, selected fill and edge, and close controls. A pane's conversation tabs
+then become a row of equal soft tabs with the control corner, 28px tall at a shared 196px (never
+narrower than 112px), 8px apart: every tab carries a faint wash of the ink, the
+hovered one a little more, and the open one the brightest wash with a hairline
+edge, so the row reads as a set of open conversations rather than a line of
+links with one highlighted. A pane tab's own button spans the whole tab with
+the × laid over its end, so the shared keyboard focus edge outlines the whole
+tab: drawn on the label alone it boxed the title and left the × outside. A tab whose
+thread runs shows a spinner in place of its provider mark; one waiting on the
+person ends in a small dot in the warning ink. A tab picked for side by side (Cmd/Ctrl- or
+Shift-click) sits a step between the two, with a fainter edge. Dock tool tabs
+keep the bare recipe. Close controls retain their
+width; inactive controls appear on hover or keyboard focus and stay visible on
+touch devices. Thread tabs retain provider marks when enabled. The pane's drag
+handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
+computer, cloud for another host), the thread title as a navigation name (13px,
+regular weight), a chip naming the Project in meta ink, and in Code a second
+chip naming the checkout's branch in the mono identifier face — no provider
+mark. The two chips shrink before the title does. While the host projects the
+thread as executing, a "Running" chip with a small spinner follows the chips.
+The host reports that a turn is executing but not when it began, so the chip
+names the state and claims no elapsed time. A thread parked on the agent's own
+approval, or on a question its turn asked, shows "Needs you" in its place,
+without the spinner. See
+[Workspace](workspace.md).
+
+Main-pane content opens in a closable tab beside its conversation. Files, previews,
+and canvases retain navigation references, and selecting one uses the ordinary
+host-authorized open command. Image creation is a pane-owned view that retains
+its draft while the user switches back to the conversation. The strip occupies
+the existing pane title row rather than adding a second header.
+
+### Sidebar
+
+The app has three server-enforced modes—Chat, Work, and Code—shown as two:
+**Work**, which lists Chat and Work threads together and whose new-thread
+composer opens with a Chat / In a folder switch in its context tray, and
+**Code**. Work reopens on the kind last used. Mode switching is two compact icon buttons at the top of the sidebar, never in the title band, when Work
+and Code are both on: a conversation mark for Work and a code mark for Code.
+A tooltip names the mode on hover and keyboard focus; the label is clipped
+from view and stays the button's accessible name. The active mode carries
+`aria-current="page"` and a fill plus hairline, not colour alone. The fill is
+the primary text at 12%, one step over the tray's 6%: the selection role drew
+as the tray itself (1.01:1 in light). With one
+mode enabled the header is a single label and no control. Settings still
+offers a dropdown that names the current mode; a host that stored that choice
+keeps it. Code and Work keep separate Project View sets. The
+sidebar keeps Projects as a first-class destination alongside the active mode's
+compact thread list. When Work has no Chat or Work Projects but Code does, the
+empty Projects line says "Your Projects are in Code." with a Switch to Code
+link; starting a Work Project stays on the section header. Code does not
+mirror that hint. The Projects directory and the selected Project overview
+occupy the main workspace in turn, following the
+[workspace navigation rule](#navigation-and-projects).
+The directory provides search and All, Chat, Work, and Code filters. Project
+detail is thread-first, with memory, provider access, and canvases in compact
+expandable rows below the primary work; its layout is in
+[Workspace](#navigation-and-projects). A Work Project other than the default
+folder also has a **Status file** row whose switch sits in place of the expand
+control: off by default, its copy says what turning it on keeps in the folder. Threads without a listed Project appear once in **No Project**, a collapsible
+folder row in the Project tree with the same nested-thread layout as Projects.
+It has no horizontal divider or separate section heading and is absent when empty.
+It is a navigation group, not a persisted Project. Rows are hairline rails, never cards;
+provider marks are fixed-size inline and can be hidden without changing row
+height or indentation. What a thread row carries — its Project
+attribution, branch, linked pull request, last updated, or status mark — is the
+view's own choice, edited in Settings › Sidebar › Thread rows or the
+view filter menu's Property visibility submenu; a hidden property is omitted
+rather than left as a gap. The Project tree and the Activity feed draw the same
+row: the provider mark in the icon column every navigation row uses, the title
+alone on its line, and the shown facts on one line beneath it in a fixed order
+(Project, pull request, branch, then the age at the end); with no facts shown
+the age sits beside the status instead of opening a line of its own. Thread rows
+are not indented under their Project, so every row's fill sits the same
+distance from both edges of the sidebar. In Code, a Project whose threads run
+in two or more checkouts nests them under one heading per checkout, primary
+checkouts first: a branch glyph, the branch in a small mono chip, and a quiet
+"Primary checkout" or "Worktree" label. The heading is inert text, not a
+button, so keyboard focus skips it; its threads take one more step of indent on
+their content, never on their fill, and drop the branch fact the heading already
+states. A Project with a single checkout shows no heading. The Activity feed
+and Status stay flat. A hovered row takes the soft ink wash and the row
+the workspace is showing takes a stronger neutral ink wash (never the
+theme-tinted selection or control fill, which drew a coloured slab on tinted
+presets), the same two states the thread tab strip draws, so pointing never looks like
+being there. Provider identity remains at the leading edge. A Project row leads with a 20px
+rounded letter tile: the Project's first letter, white, on the colour the person
+picked from the theme palette, or a neutral tile when none is set. The same tile
+heads the Project overview, where it is the colour picker; the row's actions menu
+offers Colour with a No colour choice, and an archived Project cannot change it.
+A Project whose folder holds a favicon or app icon shows that picture, drawn as
+an image at the same 20px, in place of the tile (and in place of the folder
+glyph in lists); the tile and glyph remain for a Project without one.
+The colour is identity, never status: it never stands in for a warning, a
+selection, or an activity mark. One fixed trailing
+status position shows a working spinner, an attention symbol, a clock when a
+snooze ends, or a neutral unread dot, in that priority order. Its accessible
+label and hover details retain overlapping states; a row never renders a
+second activity dot or a separate "Woke" label. A list longer than eight rows folds behind one quiet "Show
+more (n)" row that becomes "Show less"; the active thread stays visible while
+folded. Under checkout headings each checkout folds its own list, so a worktree's
+threads are never hidden behind the primary checkout's Show more. Project View and
+Project Overview are real features, not
+decorative shortcuts.
+
+The sidebar header carries the mode switcher, Search, and New thread (New
+chat in Chat, New task in Work and Code); no New thread row repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
+threads that need the person: an approval, a question, a follow-up that is due,
+or a subagent request waiting on them; a finished turn is not one, and the
+dock badge counts the same threads), Running (threads the host projects as
+executing), To review (finished turns not opened since), and Done today
+(threads put away since local midnight). Each tile is one button whose name
+carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
+Board (the Activity feed in Chat, which has no board), To review opens the
+Review page, and Done today opens the Put away shelf (see [Workspace](#thread-visibility-and-completion)). With the tiles on,
+the Inbox and Board rows are left out because their tiles go to the same
+place. Settings › Sidebar › Count tiles turns them off and brings the rows
+back. Tiles show only where the sidebar stands without a rail in a window wider
+than 960px, that is, when Settings › Sidebar › Icon rail is Never, or When
+hidden while the sidebar is open. They are neutral faces under Mono; under
+Colour each takes a palette hue, as a solid face with primary-foreground text in
+the light theme and as a tint with a coloured count in the dark one. At 960px and
+narrower, where no rail shows (the same breakpoint as the rail's own, one
+number), and in the phone drawer, the four destinations are compact rows
+instead: icon, name, and the count at the trailing edge, with no fill, so they
+sit quieter than the thread list under them. The row's icon, like every icon in
+the rail, stays in the sidebar ink in every style, and each count has one mark
+wherever it shows (Inbox, a play circle for Running, an eye for To review, a
+ticked circle for Done today); the name and the count stay in the sidebar ink. Each row keeps its name with its
+count and its destination. The drawer itself paints the opaque sidebar surface
+in every material, since it overlays the page and a transparent drawer let the
+page's text show through it.
+
+Primary sidebar destinations are Board and Pull requests when valid for the
+active mode. The destinations a person placed under Menu
+only wait in a More row that closes the destination list (the rail's More
+button when the rail stands beside the sidebar) — an ellipsis opening a popup
+beside the rail with those destinations and Customize sidebar; the
+setting that turns the More row off returns them to the bottom-left identity
+menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
+Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
+above its identity row, aligned to the
+row’s leading edge. Search is a compact in-place filter for the current mode's visible
+threads: the header's Search icon opens a Filter threads field under the
+header, Escape or its close control clears and hides it, and Settings ›
+Sidebar › Thread filter can keep the field always shown. Enter in the field
+hands its text to the command-style overlay, which searches every thread of
+the mode; the overlay also stays in the command palette. The list's three
+arrangements, Status (the default), the Project tree, and the Activity feed,
+are a visible Status/Projects/Activity switch on the row the Project view
+picker uses, not an icon in the header. That row stands in the same place in
+all three, with the Project tree's own Projects heading under it, so pressing
+the switch moves nothing but the list. Status headings carry their count in
+meta ink after the label ("Needs input 2"), the same face as the feed's folded
+Earlier count. A row whose pull request's checks pass adds a 12px check in the
+success ink after the PR number.
+
+### Icon rail and title band navigation
+
+**Icon rail foot.** The rail's destinations scroll, with the same short fade at
+their edges and no scrollbar, above a foot (usage, Settings) that stays on
+screen. One column that scrolled as a whole put Settings out of reach in a short
+window and cut the last destination through its icon at the window's edge.
+
+**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
+rail stands in its own column in front of the open sidebar. It is exactly as
+wide as the title band is tall (44px), open or collapsed, so the frame's two
+arms match. In the desktop app the traffic lights sit in the title band above
+it, and the sidebar's head, or with the sidebar hidden the window chrome,
+keeps the rest of their width clear. Beside the sidebar it
+carries the places: the count tiles as icons with badges (under Colour the
+four icons take the tiles' hues, Inbox blue, Running amber, To review purple,
+and Done green, from the same palette roles; the hover and current fills and the
+count badge stay neutral, and under Mono and increased contrast the icons stay
+grey), the destination
+rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
+which and in what order, for the rail as for the sidebar), the Activity feed,
+Projects, a tile for each Project the person pinned (its icon or initial on the
+same 32px face, after the divider; a context menu on the tile unpins it; the
+collapsed rail lists pinned Projects first and draws six Project tiles at most
+so Settings and the rings stay in the window), More (the menu-only destinations and Customize sidebar), the usage
+rings, and Settings. The sidebar keeps its header (modes, search, new thread,
+hide), the Project list with its view, filter, and Activity controls, the
+threads, and the profile, so nothing is offered twice. Rail icons are 16px on
+a 32px face; every rail control names itself in its accessible name and in a
+label that opens beside the rail on hover or keyboard focus. Destinations
+have their own marks: Inbox a tray, Running a spinner, To review a checked
+clipboard, Done today a double check, Board a kanban, Issues the issue dot,
+Pull requests the pull-request arrow, Linear a checklist, Projects stacked
+folders, Agents a bot, Automations a calendar clock, Artifacts layers, Image
+generator images, Plugins blocks, and the Activity feed a pulse line.
+
+**Sidebar header width.** The mode tray never shrinks. Where the sidebar header
+(modes, Home when no rail stands beside it, Search, New thread, Hide, Back and
+Forward) cannot fit one row, which is a sidebar of 220-236px (also the width a
+1100px window leaves it beside an open dock), the actions wrap to a second row
+under the tray instead of sliding beneath it. The tray's row stays first at the
+top of the sidebar, and the header keeps its full wrapped height however long
+the thread list is, so the list always starts under both rows.
+
+**Usage rings.** Above Settings, at the foot of either rail, each provider
+that reports a plan window with a figure gets a ring in its identity colour
+around its 12px logo:
+the outer arc is what is left of the longest window (the week), the inner arc
+what is left of the shortest (five hours), chosen by each window's length, and
+a window near or at its limit takes the danger ink. Hovering or focusing a
+ring opens a card with every window, its share left, and when it resets;
+clicking opens Settings › Usage. A provider with no figure gets no ring,
+because an empty ring would claim a limit nobody reported. The rings read the
+host's last observation every few minutes, never a fresh provider call. The
+host keeps that observation across restarts, so the rings are there on launch;
+when the reading is more than a few hours old the card says "Last read 5h ago".
+
+**Back and forward.** Back and Forward sit in the title band beside the
+sidebar control (beside Show sidebar while the sidebar is hidden, with or
+without the icon rail, and in the sidebar's header in a browser). They step
+through the pages (Inbox, Board, Pull requests, Projects, the other sidebar
+places, Review, and the archive) and the tabs (threads, drafts, canvases) this
+window opened. A step in another mode switches to that exact mode (Chat and
+Work keep separate layouts though they share one visible mode) and opens the
+page or tab once that mode is on screen, without the home landing a person's
+own mode switch makes. The history belongs to the window and is never stored; it holds
+the last 50 steps, a new place drops the steps ahead of the current one, and
+a step whose tab was closed since is skipped. Each button stays in place,
+disabled, at its end of the history.
+
+**Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
+the sidebar", answered in text fields too and leaving focus where it was),
+collapses the sidebar to the rail alone, which then also shows New thread and
+Search at the top, the modes (with the same marks as the sidebar's mode switcher, so Work keeps one icon), and up to six Project letters (outlined at icon
+size in the icons' muted ink) with a Projects button for the rest; Show sidebar, Back, and Forward move into the
+title band, so the rail stays one icon wide. Icon rail: When hidden shows the
+rail only in that state; Never removes the sidebar completely when hidden and
+leaves Show sidebar and New thread in the native title rail. Neither rail
+appears below the narrow-window breakpoint (960px): there the width belongs to
+the page, and below the drawer breakpoint a collapsed sidebar is a closed
+drawer.
+
+### Right dock and bottom panel
+
+The right dock defaults to 640px when open, and opening a Browser or a
+Terminal widens a narrower dock to 640px once (the person can drag it back;
+the next such opening widens it again). A terminal in the dock is an inset,
+rounded plate rather than an edge-to-edge slab; under Glass the plate and
+its cells are the page colour with 12% of the ink, a grey that sits with the
+frosted panels instead of a black slab. A fresh window
+starts with it
+closed; choosing a tool or restoring an explicit prior choice opens it. The
+pane/title control rail is `--oct-title-rail-h` in the native host and the status
+bar is `--oct-statusbar-h`.
+
+The right dock follows the active pane and never leaks another pane's content.
+The dock and the bottom panel both step aside while a reader route (Board,
+Inbox, pull requests, issues, Archive) holds the pane: a reader is a page about
+many threads and shows none of them, so one thread's tools do not keep a
+quarter of the viewport there. Both keep their tabs and their height and return
+with the thread, and their toggle leaves the reader rather than closing a
+region that was only stepped aside.
+On wide windows it may use at most half of the workspace beside the sidebar
+(`dockWidthCeiling`, never under the sidebar minimum or over its maximum), which
+keeps the thread readable beside any tool, and the resize handle stops there
+too; with two columns of tool tiles shown it may take all the thread's own
+minimum leaves (the thread keeps 440px beside two columns from 1100px up and
+360px below, which the stylesheet's grid mirrors as `--octant-tiled-primary-min`;
+one column keeps 560px from 1100px up. At 560px two tools could never stand side by
+side in a 1440px window, so a second column asks the thread for less); the bottom panel may use at most 38 percent of the
+viewport height while preserving 320px for the primary workspace, and it hosts
+exactly Review, Terminal, Browser, Files and Side chat. The dock can host
+Review, Pull requests (open rows for a Code thread's Project), Files, Document
+(only once a turn has written one), Browser, Terminal, Canvas, Plan (only for a
+real plan artifact), Delivery (only for a configured target), Agents (when
+children exist or explicitly invoked), Simulator, and Side chat. A Markdown or
+text file a Code turn creates or rewrites, and a Canvas a Work or Code turn
+authors, open in the dock beside the transcript once, the first time they appear: the
+offer never moves focus from the composer, a rewrite never reopens a tab, and a
+tab the person closed stays closed. Document
+reads the file through the same host-authorized open the editor uses and
+renders Markdown with the preview's own viewer. With no open tab, the dock
+opens on a stack of cards, one fact group each and each omitted when the window
+has nothing true to put in it. A card is the overview's own recipe: the surface
+fill, a hairline, a medium-weight title, and rows at the 28px step, with a
+figure or word in meta ink at the title's right. **Environment** names where
+the thread runs (the host, the Project, the branch with Worktree when it runs
+in one) and the mode at its right, and, in the desktop app's own window for a
+thread on this computer, a **Remote access** switch read once from the host's
+listener status: on turns the listener off through the same host action
+Settings uses, and off opens Settings › Remote access, where the address and
+certificate enabling needs are chosen and confirmed; **Local servers** lists the servers this
+thread's checkout is serving, each a dot (the success ink when it answers) and
+its name with the port, from one observation when the overview opens, never a
+poll; both titles open the Environment tool. **Context** shows the share used
+at its right beside a short neutral bar, with used of total under it, from the
+composer meter's own source. **Changes** (Code only) shows the board's observed
+`+`/`-` totals over the file count, never a stale observation, as the row that
+opens Review, and the thread's pull request with its checks in words.
+**Outputs** lists the documents and Canvases the window knows the thread has
+(those it had when opened and those its turns wrote since, never a deleted
+file), newest first and at most five, each a row that opens it in Document or
+Canvas, with the count at the title's right. **Background tasks** lists the
+runs the thread's agent handed work to, from the same read and cadence as the
+Environment tab's Subagents row: each running one a spinner, task, and age,
+with the running count at the title's right, and the finished ones folded under
+one "N finished" row; a row opens that run in Agents.
+**Running now** lists the other threads the window knows are working (any
+mode, at most five, newest first, never the thread on screen), each a spinner,
+title, Project, and age, and opens that thread. Model and access are not
+repeated here: they are on the composer. Tools open from the title band's tool row. More tools opens a menu in a
+portal anchored to its button, aligned to its end edge and kept inside the
+window by collision handling; it takes focus on its first item, closes on a pick,
+on Escape or on an outside press, and returns focus to its button. The bottom
+panel uses the compact tool-tab and Add tool model for Review, Terminal, Browser,
+Files, and Side chat where supported. Opening a tool in the dock leaves the
+bottom panel open: a Terminal below and a simulator and a page beside it are the
+point of having both regions. Only a tool the panel is already showing moves out
+of it, because one instance appears in one region at a time; Terminal
+immediately attaches or starts and preserves one server session when moved.
+
+Browser and Terminal are repeatable right-dock workspaces: New Terminal and New Browser page on the tool's button menu create a
+new tab identity, an isolated Browser context or Terminal session, and a stable
+numbered label when siblings are open. Files, Document, Review, Agents, Canvas,
+Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
+still appears in only one region at a time.
+
+The right dock has one width whatever it shows, so a click inside it moves
+nothing: the launcher and every tool use the width the person last dragged it to.
+It never takes more than half the workspace, and its handle stops at the same
+half. A Browser or Terminal tab that needs more holds 640px while that tab stays
+open, including one restored after a restart, and does not save it. A width the
+person drags to stands until the next Browser or Terminal opens.
+
+Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
+
+A welcome, Project, or other pane with neither a bound thread nor a valid
+launchable tool keeps the dock closed and omits its toggle. A new Code task's
+pane before its thread exists keeps the toggle but starts closed, whatever the
+window's saved choice: it has nothing of a thread's to show, and opened by
+default it covered a third of a blank start screen to say its tools were not
+available yet. Opened there by the person, its title band shows the common
+tools disabled ("Available once the task starts") and its body says so (or,
+once the start screen has a Project, holds that Project's quick tools). That
+show or hide belongs to the draft and is never saved as the window's choice;
+once the task has a thread the window's own choice applies again. Restored presentation for another subject never makes unavailable
+chrome visible.
+
+The right Tools launcher starts directly beneath the window control rail, without an extra top spacer.
+
+### Tool tiles
+
+**Tool tiles.** The dock body shows one open tool by default. A maintainer
+testing an app in the simulator beside the page it served had to choose between
+them, so open tools can also be shown together as tiles, each one live, beside
+the one tool row. At most two columns of at most three tiles are shown; a
+request past either cap is refused, except that "beside" with two columns present
+puts the tool below in the last column. A tile is a region named for its tool
+with **one bar**, the tool's own header, 32px high in every tile so neighbouring
+bars line up. Its leading edge names the tool once (the icon and name; for the
+Browser the bar is its row of pages, each with its close, and the new-page
+control, and with one page the page's title is the name) and its trailing edge
+holds the tile's controls: an **Arrange <tool>** menu button and a **Close
+<tool>** button that closes the tool as pressing its button again does (every
+page for the Browser). Stacked, a page showed four bars (a strip, a "Browser"
+caption, the Browser's own page row and its toolbar) and named the tool three
+times, so the dock has no strip and a tile has no caption over its bar. A tool alone has no tile bar and keeps the one slim row below. The Arrange menu holds **Move
+left**, **Move right**, **Move up** and **Move down**, each present only when
+that move is possible within the caps (a one-column layout moved sideways makes the
+second column, and a column left empty goes), then **Show alone**, **Hide
+from view** and, for the Browser and Terminal only, **Minimise to card**; a move keeps every tool mounted and the native Browser page
+follows its tile. The focused tile (the one whose tab is selected) is told apart by its bar
+reading in the full ink, with no ring and no fill, so a see-through theme shows
+through every tile; the dock's own surface is the tiles' ground. Dividers
+between columns and between a column's tiles are hairline separators with an 8px
+hit area, a hairline at rest, in the quiet strong-divider role while hovered or
+held, and never an accent line after a click (only keyboard focus shows a mark,
+the app's own focus outline), that resize by pointer drag or arrow keys (Home and End go to the ends
+of the range the floors allow), each named for the two tools it sits between
+("Resize Environment and Vitals") and reporting the range it can really reach; no tile
+is shorter than 140px or column narrower than 280px (the dock's own minimum
+width) while the dock has the room, and the columns stack when the tile area
+cannot give two columns 280px each. Columns therefore stand side by side only
+when the tile area has the width: at 1440px with the sidebar open a second
+column widens the dock to about 620px and the columns stand side by side at about
+306px each (they stacked at 500px while the thread kept 560px), and in a narrower
+window "beside" stacks, which is why the head control promises no direction;
+a tool button's menu keeps an explicit Show below. Stacked columns stay
+resizable by a separator between them along the vertical axis, and no tile is
+ever under its floor: when stacked tiles cannot all fit the dock, the tile area
+scrolls with every tile at the floor. Pressing the button of a shown tool closes it; pressing one that is open but not
+shown shows it beside the focused tile; a drop on the middle of the dock replaces
+the focused tile's tool.
+All Browser tabs are pages of one Browser tool, so there is at most one Browser
+tile and choosing another page changes that tile's page; the dock remembers the
+page last shown and returns to it whenever the Browser is shown again, from its
+button or a drag. A tile clips its tool to its box (it has no fill of
+its own), and gives the tool a definite height to scroll within, so one tool's
+rows are never painted over the next tile. A tile resolves its own
+tool: one that cannot be described for the active pane says so inside its tile,
+never shows another pane's content, and leaves the other tiles on screen. The
+single-tool view is the same tile area with one bar-less tile, and tiles are
+positioned children of one element, so a tool is never remounted when a
+neighbour joins or leaves, when it moves between columns, or when focus or a
+divider moves; only choosing another tool for a tile replaces it.
+
+A tool's button carries the placement a tab menu once did. Its context
+menu (right click, the menu key or Shift+F10) offers **Show below** for an open
+tool that is not on screen (disabled when the caps refuse it), and, for a tile in
+a layout, **Show alone**, **Hide from view** and the moves that are possible,
+then **New Terminal** on Terminal and **New Browser page** on Browser, then
+**Close <tool>**; what does not apply is absent. These menus, and dragging,
+belong to the five tools with a button of their own (Environment, Terminal,
+Review, Browser, Files); a tool opened from More tools is shown the same way
+and is then arranged, hidden and closed from its own tile's bar, a tool alone
+having no bar and being closed by picking it again in More tools. Pressing a
+button shows a tool beside the focused tile in one step (opening it first when
+needed), beside it when the columns stand side by side and below it when they
+stack; when the tile caps are full it shows the tool in the focused tile's place
+and the tool it replaces stays open, hidden from view. Dragging an open tool's
+button onto the dock body does the same: the right third shows it
+beside, the lower third below, and anywhere else replaces the focused tile. With two columns shown and no width the person
+has chosen, the dock widens to 840px (not saved), under the ceiling above;
+showing a tool beside, which makes the second column, clears the person's
+sizing the way opening a Browser or Terminal does, and a drag afterwards holds. The
+narrow modal presentation has room for one tool and draws only the focused tile;
+the layout stays stored. The layout is window-local presentation, stored with
+each thread's open tools, and the bottom panel never has one. Tile changes are
+made on the tools on screen, so a tool the bottom panel holds never counts
+toward a cap or a divider's shares. A tool the bottom panel takes, or one that
+becomes unavailable, loses its tile and comes back as a tab, not as a tile.
+
+### Minimised tools
+
+**Minimised tools.** A thread's Browser and Terminal can stand as small live
+cards at the foot of the dock, so a page or a shell can be watched while another
+tool, or only the overview, is in front. A floating preview drawn over the thread
+covered the thread's own text and could not show a shell at all, so it is gone;
+the cards replace it. The shelf is a group named **Minimised tools** at the foot
+of the dock body, under the overview when no tool is shown and under the tiles
+when tools are shown (the tiles measure what is left and keep their floors). It
+takes its natural height and holds at most two cards (Browser, then Terminal),
+side by side at half the width each (8px gap) once each can have 160px, a dock
+about 352px wide or wider, and stacked below that; one card takes the whole width.
+It is never more than two fifths of the dock (it scrolls inside past that, which
+two side-by-side cards do not reach in a dock 420px tall or taller) and is not
+drawn in the narrow modal dock, where the state is kept and the tool's button in
+the drawer's row reads as any open tool's. A card is a `.dock-card` like the overview's, with no
+frosted parts and no new fill, an 8px inset round a 28px bar over a 104px preview,
+152px in all: a head with the tool's icon, a title (the page's
+title or host with the profile name beside it where the page lives in one, or
+"Terminal"), a detail word (such as "Exited (1)"), a quiet 6px dot named "New
+output" for a shell that printed while nobody looked, an expand icon button
+(**Show Browser**, **Show Terminal**) and a hide icon button (**Hide Browser card**,
+**Hide Terminal card**, which removes the card and closes or stops nothing: the
+tool stays open and its button in the title band's tool row reads open but not shown; every button a 24px target), then a preview that is itself the expand button (named
+"Show Browser, live preview"; its corner is the card's 12px minus the 8px inset, 4px). The name truncates with an ellipsis
+before a detail word or a button moves. The Browser's picture is cropped to the preview from its top left, never stretched, a neutral skeleton while stale or missing; the
+Terminal shows its last lines in the smallest terminal type, read-only, or "No
+terminal running" or "Preview unavailable". The picture and the terminal keep
+their own content fill, inside the card. A minimised tool's button in the title
+band's row is not pressed, carries the open dot, and reads "Minimised to a card";
+pressing it shows the tool. A tile's **Arrange <tool>** menu offers **Minimise to
+card** (Browser and Terminal only, after **Hide from view**), and so does the
+context menu of the Browser and Terminal buttons; pressing a pressed Browser or
+Terminal button minimises it instead of closing it. The tile bar gains no
+button for it. Show on a card returns the tool as a
+tile of its own, to the place it left while that place still exists and else as
+the last tile, focused, without taking a shown tool's tile.
+While an agent's Browser session is live and the thread's Browser is out of sight
+the Browser shows as a card without being minimised; with the dock closed, the
+window's dock toggle (not in the modal dock, which has no shelf) carries one quiet
+dot described as "Browser is active". The
+rules, reads and limits are in [Workspace](#tool-lifecycles).
+
+### Environment tool
+
+Environment is a right-dock tool, opened from the title band's tool row and
+nowhere else. It reads
+top to bottom as cards in the Settings kit's grouped-card look: one header card,
+then two captioned cards of rows. A card is a faint wash of the ink over the
+dock with no ring (increased contrast adds one), so it never paints the opaque
+page colour onto the glass. The header card names what the thread works
+in: the name on its own line, then the branch glyph, the branch, a dot, and the
+home-relative folder in mono, with the full summary (working folder, running
+servers) kept as one sentence for assistive technology. Inside it, an inner
+soft box says what the checkout holds (a file-diff glyph tile, Uncommitted
+changes with its added and removed counts under it, and a chevron, opening
+Review; No uncommitted changes when clean), a detached HEAD or separate
+worktree when true, and Commit or push and Create pull request sit under it as
+two equal buttons. The rows follow in two cards, Running (Local servers, open by
+default only when this checkout is serving something; Subagents, one row with
+its working / to review / done counts that opens the Agents tool — reading and
+steering a subagent belongs there; Computer use) and Delivery (Pull requests,
+Sources, Delivers, Working folder, and Usage, closed by default; totals, the
+spend ceiling form for tokens, turns, hours, and US dollars, whose fields wrap
+two by two in a narrow rail, and Open Usage dashboard inside). A card with no
+rows to show is omitted with its caption. Every row has one grammar: a 26px
+glyph tile, the name, the row's state as a small neutral chip, and a trailing
+chevron where the row opens (a row's own action, such as All pull requests,
+wraps under it when the dock is narrow rather than squeezing the chip). Rows are 44px, lift their ink on hover
+rather than taking a fill, and an open row's content starts under its name.
+Other servers stay behind a nested disclosure; none are stopped or removed by
+hiding them. The cards sit one step above the dock's own background. Sources list the current thread's journaled image attachments when present.
+Computer use offers Picture in Picture show/hide for its live activity card
+that floats over the main conversation. The Browser's live preview is separate:
+it is a card on the dock's shelf and follows the thread's Browser, not this
+control (see [Shell and layout](#minimised-tools) and
+[Workspace](#tool-lifecycles)). Neither preview occupies
+Environment, and hiding one never stops its session. Computer-use approval and
+stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
+is neutral explanatory text rather than a warning callout.
+
+### Browser toolbar
+
+The Browser toolbar is one row under the tile bar and never wraps. It holds back,
+forward and reload as plain icon buttons (no capsule, no fill at rest, the
+standard hover fill and disabled look); then the address field, which takes the
+rest of the width; then icon-only buttons. The field is the system's text field:
+the control corner (`--oct-radius-sm`, never a pill), the field border, the hover
+edge and the keyboard-focus fill, at the 28px rail height. It holds at most one
+mark: the connection mark (lock or globe) of a loaded page. With no page it is
+empty but for its placeholder. After the field, in this order and each only when
+it applies: a **status** icon (who may use the page, who holds it, how long it
+idles, or that the agent cannot use it, as its name and tooltip; a spinner while
+the page loads or the agent drives it), **Take over** or **Hand back**, the
+extensions button (when an extension is on in the page's profile), and the
+**profile** icon, a menu button named for the page's profile that also signs out
+of a stored profile. The status icon is not drawn at rest; the availability
+sentence is then part of the profile icon's tooltip. The last button is **More
+Browser actions**, which holds Screenshot, Draw on page (only in a Work or Code
+thread's Browser), Open in default browser (desktop), Login permission, Hand
+back while a remote owner holds the page, the agent-availability recovery
+action, Dock in the focus zone and Stop this Browser session, each only when it
+applies; the menu is absent when it would be empty. While a remote owner holds
+the page, **Reclaim locally** replaces Take over and Hand back as the trailing
+button, because a hand back is refused until the page is reclaimed. The profile
+icon names a signed-in profile (Project, Personal or a named account) beside
+itself in the meta ink and extra-small size the dock's cards use, so a page that
+acts as the person's own account is named at rest as it is everywhere else; a
+Private page, which signs nothing in, stays an icon. The name shortens with an
+ellipsis before the address gives up width, and the icon and tooltip stay. No
+more than three icons trail the field besides More. When there would be more, or
+the address would otherwise be narrower than 120px, the left-most move into More
+(status as a non-interactive first line, then Take over, then the extensions),
+each counted at its own width (the extensions button grows a count while the
+agent drives). When only the profile is left and the floor still fails, the
+profile's choices and its sign-out move into More as well. Back, forward and
+reload always stay. The row's inset follows the tile bar: its first glyph
+stands on the bar's 12px lead inset and its last button ends 8px from the edge,
+as the bar's does, with 4px between controls. With no page open the row is the history buttons, the
+empty field and the profile icon.
+
+### Board
+
+The Board is an operational reading surface with four fixed,
+server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
+four lanes show by default as soft wells: a faint tint of the text ink (3%)
+over the workspace colour, one soft hairline, `--oct-radius-md`, 8px of inner
+padding, and 12px between wells. A well's head names it once by mark, name,
+and count, with no rule under it: the name at the section-label step in the
+secondary ink and the count pinned to the trailing edge in the meta ink. The
+mark is told apart by shape, not hue: Ready a hollow ring, In Progress a small
+turning arc while any card in the column is executing and a filled dot when
+none is, Waiting a filled dot, Done a check. Under the Colour style the marks
+take palette colours (Ready stays grey, In Progress orange, Waiting purple,
+Done green). A Board/List toggle leads the toolbar, and every control on it
+(the segmented choices, search, Filters, Refresh, View) is one rail control
+(`--oct-rail-button-h`). A card is a raised object inside its well: the card fill, a hairline,
+`--oct-radius-inset`, and 12px of padding. It carries the Project as an
+eyebrow, the title, and, while the thread is executing, a live line under the
+title (a small turning arc and the latest sub-agent line in the mono meta voice,
+or "Working…" before one reports). Under that come what the thread waits on,
+active runs and failing checks, and each linked pull request as a compact
+preview box (the PR mark and title, then the repository, state, and checks).
+The card ends with a footer row: the provider mark (the same glyph as the
+sidebar's, 16px, named for assistive technology), the worktree branch in a mono
+chip and the diff size in the existing green and red roles (Code only, and only
+when the tree changed), and the age at the trailing edge. Checkout, plan, and
+review facts live on the list view and the thread. Waiting does not become a
+warning wall. Labels and facts use the selected
+interface typography. Thread listing, pull-request snapshot, and per-thread
+runtime reads overlap where independent.
+
+### Zen
+
+Zen is a desk. Every card is a window: its title bar moves it, every edge and
+corner resizes it, the arrow keys nudge it and Alt with the arrows resizes it,
+and it stays exactly where it was left. There is no pan or zoom; everything is
+on the one screen. **Tidy**, top right, re-tiles every window in reading order
+into the room the surface has, leaving the spaces bar and the Navigator bar
+their own edges; the column count follows the window count and drops when the
+area is too narrow for a readable measure. A space that has never been arranged
+is tiled once when it opens and that tiling is written down as each window's
+own geometry, so nothing jumps when a person first drags one.
+
+A window's title bar is one quiet line: a small mark for its kind, its name,
+how long ago it moved for a thread, and two icons, minimize and remove, that
+brighten on hover. The corner handle shows a small bracket on hover so a person
+can tell windows resize. Windows are glass panes: the regular step of the glass ladder over a lighter
+floor, so the ground's colour reads through the blur, with a one-pixel light
+edge along the top, a hairline stroke, and a long soft shadow; the window in
+front takes a brighter edge and a stronger lift, and reduced transparency or
+increased contrast turns them opaque. A new space stands on a first-party picture rather than
+a flat colour, and a space still carrying the old flat default is shown on that
+picture too. Add terminal and Add browser list the threads they can open in,
+the focused card's first: a terminal runs in a Code thread's checkout and a
+browser in a Work or Code thread's browsing context, under that thread's
+authority. The browser is a window too; it moves by its bar and resizes from
+the edges away from its anchor, for the session.
+
+A card is a reading of one thread. Its head carries the thread's name in the
+interface face at the body size, and beside it how long ago that thread last
+moved; the editor face and the metadata ink are for code, paths, and
+identifiers, not for the one label that says which thread this is. A card that is not streaming
+reads its host, mode, Project, and the model that answers, in that order. It
+does not print a stored ISO timestamp or a provider instance id.
+
+Zen's own chrome is one dock and one sheet. The dock is a row of icon keys,
+each named in a tooltip and to assistive technology: Threads, Add, Navigator,
+Appearance, then Hide and Exit Zen after a divider. Asking the Navigator lives
+in the Navigator panel, which has the field and shows the answer. Putting
+something on the desk is one destination, not two: the Add sheet shows each
+kind of window as a tile (Thread, Terminal, Browser, Notes, Checklist) and the
+two that take a value, a timer's minutes and a link, as one line each. A panel
+is a page in a sheet, so its title is the page title and its close is an icon,
+and it stops above the dock. The dock, the bars, the sheets, and the empty
+space's guidance wear the windows' glass one step lighter and with a larger
+radius, the same step for every floating object. The Appearance sheet reads
+Look (one Dim dial that darkens every ground, window opacity, picture fit),
+Effect (Off, Pixelate, or Dither, with pixel size and tones), then Background
+as one grid of pictures that opens on App background and Your picture. Pixelate
+and Dither print a picture ground at one canvas pixel per cell and upscale it
+without smoothing; dither quantizes each cell through the same ordered
+threshold as the application ground. They print pictures only; the app ground
+keeps its own dither in Settings. Escape closes the open panel and only leaves
+Zen when none is open. Pinning shows no notice: the card that arrives says the
+same thing, and the notice landed on top of it.
+
+### File editors
+
+File editors share a compact command toolbar and one Editor settings disclosure.
+The primary Save and the unsaved/saving/error state stay visible above the
+source; preferences are secondary. Source/preview switching retains selection
+and undo, and a Markdown split stacks at narrow widths. Each source/preview
+region owns its scrolling. Conflicts show a bounded disk-versus-draft comparison
+with explicit keep-draft or discard actions. A selection proposal or replacement
+review remains a separate disclosure above the editor, with its own before/after
+comparison and an explicit apply action. Colors and typography come from the
+existing editor projection and shared controls. Behavioral detail is in
+[Workspace: File editing](#file-editing).
+
+### Pull requests and issues
+
+Pull requests and usage surfaces use explicit loaded, refreshing, stale,
+rate-limited, empty, unavailable, and error states. GitHub refresh is user
+triggered and asks `gh` only for open/draft rows. Connected repositories refresh
+with at most four concurrent reads, then reconcile in stable Project order under
+the global preview bound. Known closed or merged identities are recovered
+separately. Stale cached data is visibly stale. Provider usage follows the same
+provider-neutral context/limit model and preserves unavailable values.
+
+The Issues surface reads like GitHub's issue list: one toolbar with a
+repository chooser (All recent repositories, or one repository, from the same
+popover), state, sort, and search; then a bordered two-pane card with rows on
+the left (state glyph, `#number title`, repository and author beneath) and the
+reader on the right (kicker, title, state and dates, labels, Start a Code
+thread, the body and each comment in their own cards). With no recent
+repository the page asks for one in a single panel rather than opening on the
+whole catalogue. Start a Code thread leaves the surface with the issue
+attached to a new draft as its Create from context.
+
+The Pull requests page is a dense list in a 720px reading measure at the
+page's leading edge: a title band with the count and Sort, Filter, Repository
+settings and Refresh icon buttons; rows of a medium-weight title (two lines at
+most) and one 12px meta line (state glyph, repository, author, age, and the
+number in tabular numerals at the trailing edge); one quiet chip or a success
+check at the trailing edge of the title line instead of three chips; no hairline
+between rows and the control hover fill with the row radius under the pointer.
+Grouping by repository gives each group a slim header with a "..." menu holding
+Auto-refresh, Agents may merge and Refresh. A Project that is not on GitHub is
+one notice at the foot, never an empty block. Where agents may merge is on, the
+group shows a quiet chip and the Repository settings button a dot. The Issues
+place uses the same row, group head and Sort menu. The dock packs its search,
+freshness and rows at the top of its scroll area in the same row anatomy, one
+flat list with no menus.
+
+The pull-request merge warning stays inline and nonmodal. Opening it focuses
+Cancel; Tab can leave the warning to continue reviewing. Escape within the warning
+or Cancel returns focus to Merge (or the review heading if Merge is unavailable).
+An attempted merge keeps its existing freshness and reviewed-head checks, and
+focus moves to its result when the attempt completes. It is not a trusted task
+approval surface. Who may merge (a person, or a Code thread the person
+allowed) and what the host checks are owned by
+[architecture](../architecture.md#modes-chat-work-and-code).
+
+### Git history in Review
+
+History uses the existing interface face and monospace identifiers, semantic
+text/status tokens, and shared `OctantInput`, `OctantSelectField`,
+`OctantToggleGroup`, and `OctantButton` controls. A semantic commit table owns
+its vertical scroller and virtualizes fixed-height rows. Author, date, and SHA
+columns progressively give space to the commit message in narrow docks.
+
+A row opens an immutable commit comparison inside Review. Back restores the
+history list and keyboard focus; search, branch choice, and loaded pages stay
+within that thread/checkout presentation, not the URL or journal. Search results
+show individual nodes rather than inventing graph edges across omitted commits.
+Loading, unavailable, no-result, shallow, and truncated states remain explicit.
+Historical file inspection is read-only. Existing unified diffs and Monaco own
+diff presentation; file disclosures mount only their open preview. Unified and
+Side by side are a compact Settings row on Code, used only until this window
+stores a layout for that thread.
+
+### What's new card and announcement
+
+After an update the person chose finishes applying, the full sidebar shows one
+small raised card above the profile row. A 64px band carries the Octant
+aperture on a soft wash of the theme's ink with a hint of the accent, so the
+card is depth and not an accent banner. Under it sit a "New · v{version}" line,
+the notes' first line as a one-line strong headline, the next paragraph as a
+muted two-line summary, and a quiet "Find out what's new" button with a
+trailing arrow that opens the notes dialog. A "Dismiss" icon button sits top
+right. Either one acknowledges
+the update, so the card shows once. The collapsed icon rail never draws the
+card and does not acknowledge it; it waits for the sidebar to open. A browser
+or remote client has no card.
+
+A release may bundle announcements beside its notes: one to five, shown in a
+row. They replace the card as a modal dialog laid out as a poster: a 200px
+picture running to the dialog's edges at its top (the aperture band with the
+mark at 56px when there is none), then a title, a body and the answers, all
+centred. (With the picture inset and the text ranged left it read as a settings
+dialog that happened to hold an image.) The dialog shows one announcement at a
+time. "Not now" is the quiet filled button on every step, and the primary
+button opens the notes, labelled "See what's new" unless the announcement names
+its own. With a single announcement that is the whole dialog: it opens with
+focus on the primary button and has no paging.
+
+With several, a position line ("2 of 3") sits under the body and is part of the
+dialog's accessible description; it is a polite status, so each step is read
+out. A "Back" button (a ghost button before "Not now") is absent on the first
+announcement. "Next" is the primary button on every announcement but the last;
+on the last the announcement's own button (or "See what's new") takes its
+place. An announcement that names its own action keeps that button, quiet,
+beside "Next" on its step. Left and Right arrow move between announcements
+unless focus is in a field or widget that uses them, and stop at the ends;
+Escape closes. Focus stays in the dialog and lands on the primary button after
+each step. The step changes with no animation of its own, so reduced motion
+needs nothing extra; the dialog's open and close follow the overlay rules.
+
+The set is acknowledged once, however it ends: closing at any step, pressing an
+action, or finishing the last announcement acknowledges the update, and neither
+the dialog nor the card is shown afterwards. The acknowledgement is the app
+version, which names the whole bundle, so changing, adding or removing an
+announcement means a new release and the set shows again. Reason: a row of
+announcements is one message from one release, and asking again for each one
+would turn a courtesy into a chore.
+
+The announcements are one bounded file and optional bundled pictures; none of
+them can run code or name anything outside the resources folder. The file is
+`{ "schemaVersion": 2, "announcements": [ ... ] }` with entries of `title` (80
+characters), `body` (600), and optionally `actionLabel` (32), `picture` (a bare
+png, jpg or webp name, 524,288 bytes at most, whose bytes must match its
+name) and `pictureAlt` (160). The file is at most 16,384 characters: five full
+entries, pretty-printed and escaped, come to about 3,000 characters each. A
+version 1 file (one announcement object) still works as a list of one. A file
+that is not valid as a whole (bad JSON, an unknown top-level field, a wrong
+shape) shows nothing. Inside a valid version 2 file an entry that is invalid by
+itself, including one whose picture is missing, too large or the wrong format,
+is skipped and the others still show in order; beyond five, the first five
+valid ones show. Pictures are read only for entries that will be shown, and all
+of them cross to the renderer together as data URLs (at most about 3.5 MB, once
+per launch, only when the notes are due), because a second round trip would
+make the Next button wait on disk. The rule is in
+[Decisions and requirements](decisions.md#whats-new-after-an-update).
+
+When a verified app update finishes downloading, its notice offers a direct
+link to the Updates control; applying the update still requires an explicit
+request from the person.
+
+### Mode-specific utility chrome
+
+Chat admits only the Agents dock when helpers exist, it was explicitly requested,
+or its tab is retained; see the [workspace rule](#subagents).
+Chat has no bottom panel. With the dock closed, the conversation uses the available
+workspace width. A Chat
+Canvas opens as a content tab beside the thread (**Open Canvas**). Work shares
+Code's quiet transcript edge: Browser is a dock tool and completion lives in the
+add menu's Mark done, preserving its confirmation flow.
+
+### Shell edge cases
+
+- The native window is transparent; the shell root paints the one window
+  surface, so no column may leave its own opaque backing. Without Cover the
+  sidebar, the application ground starts at the workspace's leading edge, and
+  covers the whole window when the sidebar is collapsed.
+- Dock tab fitting subtracts window-control padding and measures actual tab
+  widths. Overflow and Add tool controls must never sit under window controls.
+- A selected Project pull request may keep Review open beside its list. Other
+  global destinations hide unrelated dock content and are mutually exclusive.
+- PR readers own a compact, scrollable hierarchy. Descriptions and discussion
+  use shared Markdown without executing HTML or fetching remote images. The
+  original description remains available when unsupported HTML is omitted;
+  diffs use the shared code block.
+- Surface actions wrap before titles are squeezed into narrow columns. Settings
+  navigation remains a vertical, full-width list inside its narrow drawer.
+
+### Readability and scroll containment
+
+Activity group labels align with their thread titles at the same content inset.
+Titles use primary text; project attribution uses secondary text and a separate
+line with comfortable leading. Native document scrolling is clipped: Settings
+occupies a fixed viewport while content and navigation scroll independently.
+A terminal turn cannot present an unresolved tool call as still running; it
+shows Unfinished unless the tool has its own recorded outcome. Usage resolves
+known provider and task names locally, with original identifiers in tooltips.
+
+### Sidebar operation progress
+
+Sidebar operation progress and results stay visible until dismissed or replaced
+by a later operation, rather than expiring while work is still running. The
+compact notice has a keyboard-accessible Dismiss action. Export files remain in
+downloads and hand-off documents remain in the dock; this single latest-result
+surface is not a notification history or queue.
+
+### Command palette and agent-page strip
+
+The command palette groups results and shows a shortcut badge when a row maps to a user-bindable chord.
+
+The Project browser's agent-page strip is one `OctantTabs` rail whose tabs hold
+two lines (the page, then the thread that owns it, with an "Agent active"
+badge). In a narrow dock it wraps onto further rows rather than scrolling, so
+no tab hides past an edge.
+
+### Code editor and terminal scrollbars
+
+The code editor and the terminal draw their scrollbars as elements of their
+own, out of reach of that rule, and are set to the same picture through each
+library's own options and theme colours: a thumb 6px wide with round ends,
+standing 2px in from the edge, in the strong border role. The role travels
+through the editor and terminal projections, so both modes and a custom
+theme reach it.
+Nothing else is painted at the edge: no track, no shadow where the text has
+scrolled, no outline or cursor mark on the editor's ruler, and no strip
+beside a comparison for a map of its changes. The editor's ruler still marks
+errors and search matches under the thumb. Where the system floats
+scrollbars the thumb shows while the surface scrolls or the pointer is over
+it and hides at rest; where the system keeps a strip for them the editor's
+thumb stays for as long as its text overflows. Three things still differ
+from a pane, because neither library has an option for them. The thumb
+cannot widen under the pointer as a floating system thumb does, so it takes
+the strong divider role there and while it is dragged. The terminal's thumb
+hides at rest even where the system keeps scrollbars on screen. And the
+terminal keeps its engine's 14px lane clear of text, where a pane's text
+runs under a floating thumb: the one option that narrows that lane stops the
+terminal opening where a canvas is refused. A fourth is not built: under
+forced colours a pane's scrollbar falls back to the system's, and theirs
+keeps the theme's roles. The measurements are in
+`apps/web/src/code/scrollbarTreatment.ts`; the two rules that shape the
+thumb where no option exists are in `styles/code.css` and name the library
+classes they hold on.
+
+### Terminal keyboard exit
+
+A surface that takes Tab and Escape for its own use is never a keyboard trap.
+The terminal sends every key to its shell, so it has one documented way out:
+`Mod+Escape` moves focus to the next control and `Mod+Shift+Escape` to the
+previous one (Command on Apple hardware, Control elsewhere), sending nothing
+to the shell, and both are remappable under Settings › Keyboard shortcuts.
+Chosen because a shell reads a bare Escape and Control letters but nothing
+distinctive from a modified Escape, Command chords never reach a shell on
+Apple hardware, and no application-menu accelerator claims it; Windows and
+KDE take Control+Escape and Control+Shift+Escape for the OS, which is why the
+chord can be rebound. The terminal draws the chord in a muted line under its
+output only while it holds the keyboard (the row keeps its height, so
+focusing never moves the output) and always lists it in the terminal's
+accessible description. Tab, Shift+Tab, a bare Escape and function keys still
+reach the shell.
+
+### Quitting
+
+- The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
+  Fully quit share one guarded shutdown: refresh current host activity, ask for
+  confirmation when provider sessions remain open or the desktop cannot confirm
+  what the host is running, then stop only the
+  desktop-owned host and its child resources. Cancellation leaves both app and
+  host running. The session count can include idle sessions kept for another turn;
+  the warning names open sessions without claiming they are executing turns.
+  When this host is in a hub and another member can take one of its threads,
+  the confirmation adds **Move threads first…**, which opens Prepare to shut
+  down (above) instead of quitting; Cancel stays the default.
+  Once the person confirms, quitting never waits on a person: a
+  failed or stalled window-state save or host stop is logged rather than shown
+  in an alert, and a fixed deadline ends the app (after force-stopping the
+  managed server) if shutdown has not finished.
+- The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds while
+  the setting "Press ⌘Q twice to quit" is on, which is its default; with it
+  off, one press enters the guarded shutdown (maintainer request, 2026-11-12;
+  not built yet: today the double press cannot be turned off). The
+  first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
+  toast in the focused window; the second enters the guarded shutdown above
+  unchanged, including its session confirmation. With no window open, the first
+  press quits directly. Choosing Quit with the pointer (app menu, Dock, status
+  menu's Fully quit), OS shutdown or logout, updater restarts and signals stay
+  immediate. A menu accelerator cannot tell a held key from a tap, so a
+  double press stands in for hold-to-quit.
