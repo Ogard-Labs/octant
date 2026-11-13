@@ -13030,7 +13030,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   and five-minute app grants, Claude's pre-tool grants, credential command
   requests, Browser upload and download permissions (which are not restored
   after a restart), Browser tool approvals, Browser session grants and
-  Browser credential use, and server preview tunnels. A grant that is stored and
+  Browser credential use, and server preview tunnels. A deadline that
+  crosses to the desktop app crosses as time remaining, restated in the
+  desktop's wall time, and the desktop's own wall deadline stays its local
+  check; the server never compares one clock's deadline with the other's. A grant that is stored and
   must outlive a restart cannot use a process epoch and stays on wall time,
   stated in UTC: a paired device's registration expiry, and any stored
   `expiresAt` a later process reads back. Such a grant stays revocable by the

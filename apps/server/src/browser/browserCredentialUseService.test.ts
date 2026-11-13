@@ -33,6 +33,7 @@ function fixture(
   ) => NonNullable<BrowserCredentialUseOptions["fill"]>,
   additionalOrigins: ReadonlyArray<string> = [],
   clock?: () => number,
+  wallNow?: () => number,
 ) {
   let now = Date.parse("2026-11-03T10:00:00Z");
   let sequence = 10;
@@ -59,6 +60,7 @@ function fixture(
     metadata: readMetadata,
     record,
     now: () => clock?.() ?? now,
+    ...(wallNow === undefined ? {} : { wallNow }),
     uuid: () => id(sequence++),
   });
   const review = () =>
@@ -334,6 +336,99 @@ describe("explicit Browser credential filling", () => {
     );
     expect(submitted).toMatchObject({ status: "authentication-required", effect: "completed" });
     expect(release).toHaveBeenCalledTimes(2);
+  });
+  it("keeps a fresh fill usable and sends the desktop its own wall deadline after the wall clock was set back", async () => {
+    let wallClockMs = Date.parse("2026-11-03T10:00:00Z");
+    let elapsedMs = 1_000;
+    const clock = new ProcessAuthorityClock({
+      wallClock: () => wallClockMs,
+      suspendAwareElapsedSource: () => elapsedMs,
+    });
+    const host = vi.fn(async (command: BrowserCredentialHostCommand) =>
+      decodeBrowserCredentialHostResult(
+        command.kind === "stage-browser-credential-fill"
+          ? { status: "ready", custodyId: id(90) }
+          : command.kind === "commit-browser-credential-fill"
+            ? { status: "filled", effect: "completed" }
+            : { status: "cancelled", effect: "none" },
+      ),
+    );
+    const submit = vi.fn(async () => ({
+      status: "authentication-required" as const,
+      effect: "completed" as const,
+    }));
+    const f = fixture(
+      (readTarget) => ({
+        // The desktop stamps its plan from its own wall clock.
+        prepare: async () => {
+          const result = decodeBrowserCredentialNativeResult({
+            status: "prepared",
+            planId: id(99),
+            usernameLabel: "Email",
+            passwordLabel: "Password",
+            submissionOrigin: "https://identity.example",
+            expiresAt: new Date(wallClockMs + 180_000).toISOString(),
+          });
+          if (result.status !== "prepared") throw new Error("Expected plan");
+          return result;
+        },
+        hold: () => ({
+          kind: "held",
+          current: readTarget,
+          signal: new AbortController().signal,
+          release: () => undefined,
+        }),
+        host,
+        cancel: async () => undefined,
+        submit,
+      }),
+      ["https://identity.example"],
+      clock.now(),
+      () => wallClockMs,
+    );
+    const allowed = await f.allow(reviewId(await f.review()));
+    if (allowed.kind !== "browser-credential-grants" || allowed.grants[0] === undefined)
+      throw new Error("Expected grant");
+    wallClockMs -= 60 * 60_000;
+    const plan = await f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "prepare-browser-credential-fill",
+        ...context,
+        grantId: allowed.grants[0].grantId,
+      }),
+    );
+    if (plan.kind !== "browser-credential-fill-review") throw new Error("Expected form review");
+    elapsedMs += 60_000;
+    wallClockMs += 60_000;
+    const filled = await f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "confirm-browser-credential-fill",
+        ...context,
+        planId: plan.planId,
+      }),
+    );
+    expect(filled).toMatchObject({ status: "filled", effect: "completed" });
+    const staged = host.mock.calls[0]?.[0];
+    expect(staged).toMatchObject({ kind: "stage-browser-credential-fill" });
+    expect(staged && "expiresAt" in staged ? Date.parse(staged.expiresAt ?? "") : NaN).toBe(
+      wallClockMs + 120_000,
+    );
+    await f.service.execute(
+      windowId,
+      decodeBrowserCredentialCommand({
+        kind: "submit-browser-credential-fill",
+        ...context,
+        planId: plan.planId,
+      }),
+    );
+    expect(submit).toHaveBeenCalledWith(
+      windowId,
+      expect.anything(),
+      plan.planId,
+      new Date(wallClockMs + 120_000).toISOString(),
+    );
   });
   it("cancels a private read when permission is revoked and never commits its late receipt", async () => {
     let finish: (() => void) | undefined;
