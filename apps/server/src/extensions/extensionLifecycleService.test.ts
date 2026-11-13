@@ -455,6 +455,31 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     expect(service.snapshot().packages[0]?.updated).toMatchObject({ previousVersion: "1.1.0" });
   });
 
+  it("still resolves a scope's effective state after an update kept from the trusted source", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    await service.install(inspection("1.0.0", "known good"), { trust: true, enable: true });
+    const updated = await service.update(inspection("1.1.0", "newer"));
+    expect(updated.packages[0]?.updated).toMatchObject({ previousVersion: "1.0.0" });
+
+    const effective = new ExtensionActivationService({
+      policy: LOCAL_EXTENSION_ACTIVATION_POLICY,
+      catalogStatus: () => "available",
+    }).resolve(updated, {
+      scope: {
+        hostId: LOCAL_HOST_ID,
+        mode: "code",
+        projectId: null,
+        threadId: null,
+        providerFamily: "openai-compatible" as never,
+      },
+    });
+    expect(effective.packages[0]).toMatchObject({
+      version: "1.1.0",
+      activation: { trusted: true, pluginDesired: true },
+    });
+  });
+
   it("asks again for an unsigned update that may do more, or that follows one nobody trusted", async () => {
     const context = await setup();
     const service = context.makeService();
