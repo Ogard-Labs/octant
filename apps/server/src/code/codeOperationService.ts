@@ -1271,7 +1271,8 @@ export interface CodeOperationServiceOptions {
    */
   readonly unconfirmedSteps?: {
     readonly list: (threadId: CodeThread["id"]) => ReadonlyArray<CodeRuntimeWork>;
-    readonly settle: (work: CodeRuntimeWork, state: "completed" | "failed") => void;
+    /** `interrupted`: the person stopped waiting without saying how it ended. */
+    readonly settle: (work: CodeRuntimeWork, state: "completed" | "failed" | "interrupted") => void;
     /**
      * Record on a running step's work what it will be settled by, before the
      * step reaches the remote: a comment's pull request and prior matches.
@@ -1587,6 +1588,11 @@ export class CodeOperationService {
     // it, and nothing about the folder.
     if (command.kind === "revoke-terminal-browser-grant") {
       return this.#switchOffTerminalBrowserGrant(windowId, command);
+    }
+    // Settling a step only records the person's word about the remote, so,
+    // like switching a grant off, it needs the thread and not the folder.
+    if (command.kind === "resolve-unconfirmed-step") {
+      return this.#resolveUnconfirmedStep(windowId, command, initiator);
     }
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
@@ -3402,6 +3408,83 @@ export class CodeOperationService {
       snapshot === undefined
         ? this.#terminalUnavailable(command.operationId, command.terminalId, outcome)
         : this.#terminal(command.operationId, snapshot, false, outcome);
+    this.#options.events.append({
+      threadId: command.threadId,
+      operationId: command.operationId,
+      expectedCursor: replay.nextCursor,
+      event: { kind: "operation-result", result },
+    });
+    return result;
+  }
+
+  /**
+   * Settle a pull request update or merge a restart left unconfirmed on the
+   * person's word. GitHub cannot tell such a step from an earlier identical
+   * one, so the host never settles it by itself; the person checks and says.
+   * Only the person at a local window may: an agent or a paired device saying
+   * "it happened" would release a thread on a claim nobody checked.
+   */
+  async #resolveUnconfirmedStep(
+    windowId: WindowId,
+    command: Extract<CodeOperationCommand, { readonly kind: "resolve-unconfirmed-step" }>,
+    initiator: CodeOperationInitiator,
+  ): Promise<CodeOperationResult> {
+    if (initiator !== "user")
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Only the person at an Octant window can mark an unconfirmed step resolved.",
+      );
+    const stored = this.#options.authority.readThread(command.threadId);
+    const thread =
+      stored === undefined
+        ? undefined
+        : (this.#options.authority.effectiveThread?.(windowId, stored) ?? stored);
+    if (
+      thread === undefined ||
+      thread.id !== command.threadId ||
+      thread.checkoutId !== command.checkoutId
+    )
+      return this.#failed(command.operationId, "invalid", "Code thread or checkout is invalid.");
+    if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId)))
+      return this.#failed(command.operationId, "unauthorized", "Code thread is unauthorized.");
+    const replay = this.#replay(command.threadId, command.operationId, 0, 256);
+    const recorded = replay.frames.find(
+      (
+        frame,
+      ): frame is CodeOperationEventFrame & {
+        readonly event: { readonly kind: "operation-result"; readonly result: CodeOperationResult };
+      } => frame.event.kind === "operation-result",
+    );
+    if (recorded !== undefined) return recorded.event.result;
+    const steps = this.#options.unconfirmedSteps;
+    const work = steps
+      ?.list(thread.id)
+      .find(
+        (entry) =>
+          String(entry.id) === String(command.workId) &&
+          entry.state === "ambiguous" &&
+          entry.remoteStep?.kind === "pull-request" &&
+          (entry.remoteStep.action === "update" || entry.remoteStep.action === "merge"),
+      );
+    if (steps === undefined || work === undefined)
+      return this.#failed(
+        command.operationId,
+        "stale",
+        "This step is no longer waiting to be confirmed.",
+      );
+    steps.settle(
+      work,
+      command.outcome === "happened"
+        ? "completed"
+        : command.outcome === "did-not-happen"
+          ? "failed"
+          : "interrupted",
+    );
+    const result = decodeCodeOperationResult({
+      kind: "operation-accepted",
+      operationId: command.operationId,
+    });
     this.#options.events.append({
       threadId: command.threadId,
       operationId: command.operationId,

@@ -5128,7 +5128,16 @@ or .zip>` write the same files, built by one host command
   ("Fixed.") never stands in for it. A comment record without that pull request
   or count, or one whose branch now carries a different pull request, is never
   judged against another pull request: it stays unconfirmed. An unconfirmed
-  update or merge stays unconfirmed.
+  update or merge cannot be told from an earlier one on GitHub, so the host
+  never settles it; the thread's board card offers Mark resolved instead. The
+  person checks GitHub and says it went through (`completed`), it did not
+  (`failed`), or just stops waiting (`interrupted`). That is the
+  `resolve-unconfirmed-step` operation: never gated, since it changes nothing
+  on GitHub, but accepted only from the person at a local window (an agent or
+  a paired device is refused), only for the thread's own still-unconfirmed
+  update or merge, after the same Project access check as any operation. The
+  runtime-work record and the operation result are journaled, and a repeat
+  on a step already settled is refused as stale.
   File, terminal, test, review, and local Git work, whose result is in the
   checkout, becomes `interrupted`.
 

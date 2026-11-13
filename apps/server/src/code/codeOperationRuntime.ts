@@ -1309,7 +1309,7 @@ export function createCodeOperationRuntime(
               readRuntimeWorks(threadId)
                 .map((entry) => entry.work)
                 .filter((work) => work.state === "ambiguous"),
-            settle: (work: CodeRuntimeWork, state: "completed" | "failed") =>
+            settle: (work: CodeRuntimeWork, state: "completed" | "failed" | "interrupted") =>
               observeRuntimeWorkOutcome(
                 runtimeWork.settleOrphaned({
                   // A push is recorded under its Git operation, a pull request

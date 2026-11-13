@@ -438,6 +438,49 @@ describe("CodeThreadBoard", () => {
     expect(within(cardFor("Flagged thread")).queryAllByRole("button")).toHaveLength(1);
   });
 
+  it("lets the person mark an unconfirmed merge resolved and re-reads the board", async () => {
+    const workId = "00000000-0000-4000-8000-0000000052a1";
+    const waiting = {
+      ...card({ id: "11", status: "waiting", title: "Merged maybe" }),
+      unconfirmedPullRequestSteps: [{ workId, action: "merge" }],
+    } as unknown as CodeBoardCard;
+    const loadBoard = vi
+      .fn<(query: CodeBoardQuery) => Promise<CodeBoardView>>()
+      .mockResolvedValueOnce(view([waiting]))
+      .mockResolvedValue(view([card({ id: "11", status: "ready", title: "Merged maybe" })]));
+    const resolveUnconfirmedStep = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "refused", message: "Code thread is unauthorized." })
+      .mockResolvedValue({ status: "resolved" });
+    render(
+      <CodeThreadBoard
+        loadBoard={loadBoard}
+        projects={projects}
+        resolveUnconfirmedStep={resolveUnconfirmedStep}
+        storage={memoryStorage()}
+      />,
+    );
+
+    await screen.findByText("Merged maybe");
+    await userEvent.click(
+      within(cardFor("Merged maybe")).getByRole("button", {
+        name: "Mark the unconfirmed merge resolved",
+      }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "It went through" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Code thread is unauthorized.");
+    expect(loadBoard).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "It went through" }));
+    await waitFor(() => expect(loadBoard).toHaveBeenCalledTimes(2));
+    expect(resolveUnconfirmedStep).toHaveBeenLastCalledWith(waiting, workId, "happened");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Mark the unconfirmed merge resolved" }),
+      ).toBeNull(),
+    );
+  });
+
   it("leaves a coordinator off the board and names a worker's coordinator on its card", async () => {
     const loadBoard = vi.fn(async () =>
       view([
