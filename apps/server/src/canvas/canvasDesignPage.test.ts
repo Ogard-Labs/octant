@@ -70,14 +70,22 @@ describe("a running design's page", () => {
 describe("a running design's page with its Canvas's network on", () => {
   const base = canvasDesignPageNetworkBase("http://127.0.0.1:4455", "t".repeat(43));
 
-  it("names its own proxy path for a script's requests and leaves every other directive alone", () => {
+  it("names its own proxy paths for a script, an image, and a font, and leaves every other directive alone", () => {
     expect(base).toBe(`http://127.0.0.1:4455/api/canvas/network/${"t".repeat(43)}/`);
     const policy = canvasDesignPageHeaders("text/html", base)["content-security-policy"] ?? "";
+    // A script asks anywhere under the page's own path; an image and a font
+    // load from one path each. Media, frames, forms, and the sandbox are as
+    // they were, so there is still no WebSocket, media, or navigation.
+    const changed: Record<string, string> = {
+      "connect-src 'none'": `connect-src ${base}`,
+      "img-src data: blob:": `img-src data: blob: ${base}image`,
+      "font-src data:": `font-src data: ${base}font`,
+    };
     expect(policy.split("; ")).toEqual(
-      CANVAS_DESIGN_PAGE_POLICY.split("; ").map((directive) =>
-        directive === "connect-src 'none'" ? `connect-src ${base}` : directive,
-      ),
+      CANVAS_DESIGN_PAGE_POLICY.split("; ").map((directive) => changed[directive] ?? directive),
     );
+    expect(policy).toContain("media-src data: blob:;");
+    expect(policy).not.toMatch(/wss?:/);
     // Without a base, the page keeps the policy that names nothing.
     expect(canvasDesignPageHeaders("text/html")["content-security-policy"]).toBe(
       CANVAS_DESIGN_PAGE_POLICY,
@@ -88,11 +96,12 @@ describe("a running design's page with its Canvas's network on", () => {
     const block = checkout("<p>Cart</p><script>function pay() {}</script>");
     expect(renderCanvasDesignPage(block, "cart", [])).not.toContain("/api/canvas/network/");
     const page = renderCanvasDesignPage(block, "cart", [], base);
-    expect(page).toContain(JSON.stringify(`${base}fetch?url=`));
+    expect(page).toContain(`var base = ${JSON.stringify(base)};`);
     expect(page.indexOf(base)).toBeLessThan(page.indexOf("function pay()"));
   });
 
-  it("sends a page's fetch of another address to the proxy as a bare GET, and offers no other method", async () => {
+  /** The host's script, run as a page would run it, over a stand-in for the page. */
+  function runNetworkScript(images: ReadonlyArray<{ src: string }> = []) {
     const page = renderCanvasDesignPage(checkout("<p>Cart</p>"), "cart", [], base);
     const script = page.split("<script>")[2]?.split("</script>")[0] ?? "";
     const calls: Array<readonly [unknown, unknown]> = [];
@@ -102,13 +111,31 @@ describe("a running design's page with its Canvas's network on", () => {
         return Promise.resolve("answered");
       },
     };
-    // The host's script, run as the page would run it.
+    const elements = images.map((image) => ({
+      tagName: "IMG",
+      getAttribute: () => image.src,
+      setAttribute: (_name: string, value: string) => {
+        image.src = value;
+      },
+    }));
+    let loaded: (() => void) | undefined;
     new Function("window", "document", "location", script)(
       pageWindow,
-      { baseURI: "http://127.0.0.1:4455/api/canvas/design-page?ticket=x" },
-      { origin: "http://127.0.0.1:4455" },
+      {
+        baseURI: "http://127.0.0.1:4455/api/canvas/design-page?ticket=x",
+        addEventListener: (_name: string, listener: () => void) => {
+          loaded = listener;
+        },
+        querySelectorAll: (selector: string) => (selector === "img[src]" ? elements : []),
+      },
+      { origin: "null" },
     );
+    loaded?.();
+    return { pageWindow, calls };
+  }
 
+  it("sends a page's fetch of another address to the proxy as a bare GET", async () => {
+    const { pageWindow, calls } = runNetworkScript();
     await pageWindow.fetch("https://api.example.com/v1?q=a b", {
       headers: { authorization: "Bearer page-secret" },
       credentials: "include",
@@ -124,15 +151,61 @@ describe("a running design's page with its Canvas's network on", () => {
       signal: undefined,
     });
 
-    await expect(
-      pageWindow.fetch("https://api.example.com/", { method: "POST", body: "x" }),
-    ).rejects.toThrow(/GET requests only/);
-    expect(calls).toHaveLength(1);
+    // The page's own proxy path is left as asked, not asked for through itself.
+    await pageWindow.fetch(`${base}fetch?url=https%3A%2F%2Fapi.example.com%2F`);
+    expect(calls[1]?.[0]).toBe(`${base}fetch?url=https%3A%2F%2Fapi.example.com%2F`);
+  });
 
-    // An address on the host itself is left as asked; the page's policy
-    // admits only the proxy path there.
-    await pageWindow.fetch("/api/canvas/get");
-    expect(calls[1]?.[0]).toBe("/api/canvas/get");
+  it("sends a POST's JSON string as JSON and drops every header the page chose", async () => {
+    const { pageWindow, calls } = runNetworkScript();
+    await pageWindow.fetch("https://api.example.com/rpc", {
+      method: "post",
+      headers: { authorization: "Bearer page-secret", "content-type": "text/plain", cookie: "a=1" },
+      credentials: "include",
+      body: '{"ask":1}',
+    });
+    expect(calls[0]?.[0]).toBe(
+      `${base}fetch?url=${encodeURIComponent("https://api.example.com/rpc")}`,
+    );
+    expect(calls[0]?.[1]).toEqual({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"ask":1}',
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: undefined,
+    });
+  });
+
+  it("offers no method but GET and POST, and no body but a JSON string", async () => {
+    const { pageWindow, calls } = runNetworkScript();
+    for (const method of ["PUT", "DELETE", "PATCH", "HEAD"]) {
+      await expect(
+        pageWindow.fetch("https://api.example.com/", { method, body: "{}" }),
+      ).rejects.toThrow(/GET, and POST with a JSON body/);
+    }
+    await expect(
+      pageWindow.fetch("https://api.example.com/", { method: "POST", body: new Uint8Array(2) }),
+    ).rejects.toThrow(/JSON string/);
+    await expect(pageWindow.fetch("https://api.example.com/", { method: "POST" })).rejects.toThrow(
+      /JSON string/,
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("points an image at another address to the page's image path, and leaves its own alone", () => {
+    const images = [
+      { src: "https://cdn.example.com/logo.png?v=1" },
+      { src: "data:image/png;base64,iVBORw0KGgo=" },
+      { src: `${base}image?url=https%3A%2F%2Fcdn.example.com%2Fa.png` },
+    ];
+    runNetworkScript(images);
+    expect(images.map((image) => image.src)).toEqual([
+      `${base}image?url=${encodeURIComponent("https://cdn.example.com/logo.png?v=1")}`,
+      "data:image/png;base64,iVBORw0KGgo=",
+      `${base}image?url=https%3A%2F%2Fcdn.example.com%2Fa.png`,
+    ]);
   });
 
   it("is never the policy an exported file carries", () => {

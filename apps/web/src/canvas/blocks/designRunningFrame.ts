@@ -73,6 +73,14 @@ export interface DesignRunRuntime {
    * says so in its own chrome while it is true.
    */
   readonly networkOn?: boolean;
+  /**
+   * Asks the host to keep the network token of the page at `url` alive for
+   * another hour, and answers whether it still is. The token lives an hour
+   * unrenewed, so the surface that holds a running page calls this while the
+   * page is open, and a closed page's token ages out. Absent when the Canvas's
+   * network is off or the host does not offer it.
+   */
+  readonly keepNetwork?: (url: string) => Promise<boolean>;
 }
 
 export type DesignDrawnIn = "desktop-surface" | "frame";
@@ -94,7 +102,7 @@ export function designDrawnInHere(): DesignDrawnIn {
  * desktop's surface, never in a frame.
  */
 export function designRunRuntimeFor(
-  client: Pick<CanvasClient, "runDesign"> | undefined,
+  client: Pick<CanvasClient, "runDesign" | "renewNetworkPage"> | undefined,
   input: {
     readonly canvasId: CanvasId;
     readonly versionId: string;
@@ -118,6 +126,22 @@ export function designRunRuntimeFor(
     drawnIn,
     runsOnOpen: input.runsOnOpen,
     ...(input.networkOn === true ? { networkOn: true } : {}),
+    ...(input.networkOn === true && client.renewNetworkPage !== undefined
+      ? {
+          keepNetwork: async (url) => {
+            // The page is named by the ticket this window ran it with; the
+            // token is the page's own and never passes through here.
+            const ticket = new URL(url).searchParams.get("ticket");
+            if (ticket === null) return false;
+            const renewed = await client.renewNetworkPage?.({
+              schemaVersion: 1,
+              kind: "renew-canvas-network-page",
+              ticket,
+            });
+            return renewed?.kind === "canvas-network-page-renewed";
+          },
+        }
+      : {}),
   };
 }
 

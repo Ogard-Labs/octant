@@ -16,6 +16,8 @@ export type PublicFetchTransport = (
     readonly signal: AbortSignal;
     readonly headers: Readonly<Record<string, string>>;
     readonly redirect: "manual";
+    /** A body makes the request a `POST`; without one it is a `GET`. */
+    readonly body?: Uint8Array;
   },
 ) => Promise<Response>;
 
@@ -140,8 +142,12 @@ export function createPinnedFetch(
           host: url.hostname,
           port: url.port.length > 0 ? Number(url.port) : secure ? 443 : 80,
           path: `${url.pathname}${url.search}`,
-          method: "GET",
-          headers: { ...init.headers, host: url.host },
+          method: init.body === undefined ? "GET" : "POST",
+          headers: {
+            ...init.headers,
+            host: url.host,
+            ...(init.body === undefined ? {} : { "content-length": String(init.body.byteLength) }),
+          },
           signal: init.signal,
           lookup: lookup as never,
           ...(secure ? { servername: url.hostname } : {}),
@@ -161,7 +167,7 @@ export function createPinnedFetch(
         },
       );
       request.on("error", reject);
-      request.end();
+      request.end(init.body);
     });
 }
 

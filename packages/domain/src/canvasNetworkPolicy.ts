@@ -19,6 +19,12 @@ import { parseNetworkAddress } from "./safeNetworkPolicy";
  * MiB a design's declared images are held to.
  */
 export const CANVAS_NETWORK_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+/**
+ * The most a page's `POST` may carry. A JSON question to an API is small; a
+ * larger body is refused whole, so the host is never the way a page uploads
+ * in bulk.
+ */
+export const CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES = 256 * 1024;
 /** One request, every redirect included, from the page's ask to the last byte. */
 export const CANVAS_NETWORK_TOTAL_TIME_MS = 30_000;
 /**
@@ -129,4 +135,37 @@ export function canvasNetworkAddressRefusal(
     );
   };
   return reserved.addresses.some(same) ? "octant-address" : undefined;
+}
+
+/**
+ * What a page asks the proxy for. `fetch` is a script's request, whose answer
+ * the script reads; `image` and `font` are what the page's policy lets an
+ * element or a stylesheet load, each from a path of its own.
+ */
+export type CanvasNetworkResource = "fetch" | "image" | "font";
+
+/** Font types servers still declare from before `font/*` was registered. */
+const LEGACY_FONT_TYPES: ReadonlySet<string> = new Set([
+  "application/font-woff",
+  "application/font-woff2",
+  "application/font-sfnt",
+  "application/x-font-ttf",
+  "application/x-font-opentype",
+  "application/vnd.ms-fontobject",
+]);
+
+/**
+ * Whether the host passes a fetched response on for what the page asked. A
+ * script reads any type. The image and font paths answer only a response that
+ * declares such a type, so neither is a second way to read a document or an
+ * API, and what the host's own origin serves there is never markup.
+ */
+export function canvasNetworkResponseTypeAllowed(
+  resource: CanvasNetworkResource,
+  contentType: string | undefined,
+): boolean {
+  if (resource === "fetch") return true;
+  const type = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  if (resource === "image") return /^image\/[a-z0-9.+-]+$/.test(type);
+  return /^font\/[a-z0-9.+-]+$/.test(type) || LEGACY_FONT_TYPES.has(type);
 }

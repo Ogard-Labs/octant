@@ -629,6 +629,7 @@ describe("a prototype whose Canvas has the network on", () => {
       kind: "relay",
       surfaceId: id,
       requestId,
+      resource: "fetch",
       target: "https://api.example.com/data",
     }) as const;
   const answers = (host: ReturnType<typeof fakeHost>) =>
@@ -713,6 +714,41 @@ describe("a prototype whose Canvas has the network on", () => {
     expect(answered.answer.contentType).toBe("application/json");
     expect(new TextDecoder().decode(answered.answer.body)).toBe('{"ok":true}');
     expect(Object.keys(answered.answer).sort()).toEqual(["body", "contentType", "status"]);
+  });
+
+  it("sends a page's JSON body to the proxy path as JSON, with no other header", async () => {
+    const fetchPage = networkHost();
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    await made.open(owner().port, request());
+    host.emit({ ...question(3), body: new TextEncoder().encode('{"ask":1}') });
+    await settle();
+    const [address, init] = fetchPage.mock.calls[1] ?? [];
+    expect(String(address)).toBe(proxied);
+    expect(init).toMatchObject({ method: "POST", redirect: "error" });
+    expect(init?.headers).toEqual({ "content-type": "application/json" });
+    expect(new TextDecoder().decode(init?.body as Uint8Array)).toBe('{"ask":1}');
+    expect(answers(host)).toHaveLength(1);
+  });
+
+  it("asks the image and font paths for an image and a font, never with a body", async () => {
+    const fetchPage = networkHost();
+    const { surface: made, host } = await readySurface({ fetch: fetchPage, brokerHeaders });
+    await made.open(owner().port, request());
+    host.emit({ ...question(1), resource: "image" });
+    host.emit({ ...question(2), resource: "font" });
+    await settle();
+    expect(
+      fetchPage.mock.calls.slice(1).map(([address, init]) => [String(address), init?.method]),
+    ).toEqual([
+      [proxied.replace("/fetch?", "/image?"), "GET"],
+      [proxied.replace("/fetch?", "/font?"), "GET"],
+    ]);
+    host.emit({ ...question(3), resource: "image", body: new Uint8Array(2) });
+    host.emit({ ...question(4), resource: "media" } as never);
+    host.emit({ ...question(5), body: new Uint8Array(256 * 1024 + 1) });
+    host.emit({ ...question(6), body: "{}" } as never);
+    await settle();
+    expect(fetchPage).toHaveBeenCalledTimes(3);
   });
 
   it("asks nothing for a surface it opened no networked page on, or a question that is not one", async () => {

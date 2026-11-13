@@ -45,13 +45,18 @@ export const CANVAS_DESIGN_PAGE_POLICY =
 
 /**
  * The policy of a page whose Canvas has **Allow network** on: the same policy
- * with one directive changed. `connect-src` names the page's own proxy path,
- * through its token and the trailing slash, so a script's request can go
- * there and to no other path on this host or anywhere else. Images, fonts,
- * media, frames, forms, and the sandbox stay as they are.
+ * with three directives changed, each naming a path under the page's own
+ * token. `connect-src` names the proxy path through the token and the
+ * trailing slash, so a script's request can go there and to no other path on
+ * this host or anywhere else; `img-src` and `font-src` each gain the one path
+ * the host answers with an image or a font. Media, frames, forms, and the
+ * sandbox stay as they are, so the page still opens no WebSocket to anywhere
+ * else, plays nothing from the network, and navigates nowhere.
  */
 export function canvasDesignPageNetworkPolicy(networkBase: string): string {
-  return CANVAS_DESIGN_PAGE_POLICY.replace("connect-src 'none'", `connect-src ${networkBase}`);
+  return CANVAS_DESIGN_PAGE_POLICY.replace("connect-src 'none'", `connect-src ${networkBase}`)
+    .replace("img-src data: blob:", `img-src data: blob: ${networkBase}image`)
+    .replace("font-src data:", `font-src data: ${networkBase}font`);
 }
 
 /**
@@ -245,36 +250,108 @@ const BRIDGE_SCRIPT = `(function () {
 
 /**
  * Written after the bridge for a page whose Canvas has **Allow network** on.
- * The page's policy admits one path on this host, so a `fetch` of an address
- * elsewhere would be refused by the browser; this sends it to that path, and
- * the host fetches it under the destination rule. It is a convenience, not a
- * boundary: a page that replaces `fetch` again, or calls the path itself,
- * reaches the same proxy and nothing more. Only `GET` is offered, and none of
- * the page's own headers are passed on.
+ * The page's policy admits three paths on this host, so a request of an
+ * address elsewhere would be refused by the browser; this sends each to its
+ * path, and the host fetches it under the destination rule. A design's own
+ * markup and style sheets name no remote address (the design policy refuses
+ * one), so everything here is what the page's script does: a `fetch`, an
+ * `img` element it gives a `src`, a `FontFace` it constructs, and a `url()`
+ * in a `style` element it adds (a font in `@font-face`, an image anywhere
+ * else). It is a convenience, not a boundary: a page that replaces `fetch`
+ * again, or calls a path itself, reaches the same proxy and nothing more. A
+ * `fetch` may be a `GET`, or a `POST` whose body is a JSON string; none of
+ * the page's own headers are passed on, and the host declares the body as
+ * JSON whatever the page said.
  */
 function networkScript(networkBase: string): string {
   return `(function () {
   "use strict";
-  var proxy = ${JSON.stringify(`${networkBase}fetch?url=`)};
+  var base = ${JSON.stringify(networkBase)};
   var direct = window.fetch.bind(window);
-  window.fetch = function (input, init) {
+  var each = function (list, visit) { Array.prototype.forEach.call(list, visit); };
+  var elsewhere = function (value) {
     var address;
-    try {
-      address = new URL(typeof input === "string" ? input : input && input.url ? input.url : String(input), document.baseURI);
-    } catch (_) { return direct(input, init); }
-    if ((address.protocol !== "http:" && address.protocol !== "https:") || address.origin === location.origin) {
-      return direct(input, init);
-    }
+    try { address = new URL(value, document.baseURI); } catch (_) { return null; }
+    if ((address.protocol !== "http:" && address.protocol !== "https:") || address.origin === location.origin) return null;
+    return address.href.indexOf(base) === 0 ? null : address;
+  };
+  var through = function (resource, address) {
+    return base + resource + "?url=" + encodeURIComponent(address.href);
+  };
+  window.fetch = function (input, init) {
+    var address = elsewhere(typeof input === "string" ? input : input && input.url ? input.url : String(input));
+    if (address === null) return direct(input, init);
     var method = String((init && init.method) || (input && input.method) || "GET").toUpperCase();
-    if (method !== "GET") return Promise.reject(new TypeError("Allow network offers GET requests only."));
-    return direct(proxy + encodeURIComponent(address.href), {
+    var request = {
       method: "GET",
       credentials: "omit",
       cache: "no-store",
       referrerPolicy: "no-referrer",
       signal: init && init.signal ? init.signal : undefined
+    };
+    if (method === "POST") {
+      if (!init || typeof init.body !== "string") {
+        return Promise.reject(new TypeError("Allow network sends a POST body only as a JSON string."));
+      }
+      request.method = "POST";
+      request.headers = { "content-type": "application/json" };
+      request.body = init.body;
+    } else if (method !== "GET") {
+      return Promise.reject(new TypeError("Allow network offers GET, and POST with a JSON body."));
+    }
+    return direct(through("fetch", address), request);
+  };
+  var loads = function (css, resource) {
+    return css.replace(/url\\(\\s*(["']?)(https?:[^"')]+)\\1\\s*\\)/gi, function (whole, quote, target) {
+      var address = elsewhere(target);
+      return address === null ? whole : 'url("' + through(resource, address) + '")';
     });
   };
+  var image = function (element) {
+    var address = elsewhere(element.getAttribute("src") || "data:,");
+    if (address !== null) element.setAttribute("src", through("image", address));
+  };
+  var rules = function (list) {
+    each(list, function (rule) {
+      if (rule.cssRules) rules(rule.cssRules);
+      var style = rule.style;
+      if (!style) return;
+      var font = typeof CSSFontFaceRule === "function" && rule instanceof CSSFontFaceRule;
+      (font ? ["src"] : Array.prototype.slice.call(style)).forEach(function (name) {
+        var value = style.getPropertyValue(name);
+        var next = loads(value, font ? "font" : "image");
+        if (next !== value) style.setProperty(name, next, style.getPropertyPriority(name));
+      });
+    });
+  };
+  var sheet = function (element) {
+    try { if (element.sheet) rules(element.sheet.cssRules); } catch (_) {}
+  };
+  var added = function (root) {
+    if (root.tagName === "IMG") image(root);
+    else if (root.tagName === "STYLE") sheet(root);
+    else if (root.querySelectorAll) {
+      each(root.querySelectorAll("img[src]"), image);
+      each(root.querySelectorAll("style"), sheet);
+    }
+  };
+  if (typeof MutationObserver === "function") {
+    new MutationObserver(function (changes) {
+      changes.forEach(function (change) {
+        if (change.type === "attributes") { added(change.target); return; }
+        if (change.target.tagName === "STYLE") sheet(change.target);
+        each(change.addedNodes, added);
+      });
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] });
+  }
+  if (typeof FontFace === "function") {
+    var Face = FontFace;
+    window.FontFace = function (family, source, descriptors) {
+      return new Face(family, typeof source === "string" ? loads(source, "font") : source, descriptors);
+    };
+    window.FontFace.prototype = Face.prototype;
+  }
+  document.addEventListener("DOMContentLoaded", function () { added(document); });
 })();`;
 }
 

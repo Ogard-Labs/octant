@@ -6,9 +6,11 @@ import {
   CANVAS_NETWORK_MAX_RESPONSE_BYTES,
   CANVAS_NETWORK_TOTAL_TIME_MS,
   canvasNetworkAddressRefusal,
+  canvasNetworkResponseTypeAllowed,
   canvasNetworkUrlRefusal,
   type CanvasNetworkRefusalReason,
   type CanvasNetworkReserved,
+  type CanvasNetworkResource,
 } from "@octant/domain/canvas-network-policy";
 import { createPinnedFetch, defaultResolveAll } from "../harness/nativeHarnessWebFetch";
 
@@ -21,7 +23,8 @@ import { createPinnedFetch, defaultResolveAll } from "../harness/nativeHarnessWe
  * go (the domain's destination rule), resolves a name once and connects only
  * to the addresses it judged, reads every redirect itself and judges it as a
  * new request, sends nothing that identifies the person or Octant, and bounds
- * what one Canvas can ask for.
+ * what one Canvas can ask for. A page may hand it a JSON body to `POST`; the
+ * headers of the outgoing request are the host's own either way.
  */
 
 /** One connection to addresses the proxy already judged; it follows no redirect. */
@@ -31,9 +34,19 @@ export type CanvasNetworkConnect = (
     /** The only addresses the connection may be made to. */
     readonly addresses: ReadonlyArray<string>;
     readonly headers: Readonly<Record<string, string>>;
+    readonly method: "GET" | "POST";
+    /** The page's JSON, sent with a `POST` and never with a `GET`. */
+    readonly body?: Uint8Array;
     readonly signal: AbortSignal;
   },
 ) => Promise<Response>;
+
+/** What a page asked for besides the address. */
+export interface CanvasNetworkProxyRequest {
+  readonly resource: CanvasNetworkResource;
+  /** A JSON body the route already bounded and read as JSON; it makes the request a `POST`. */
+  readonly body?: Uint8Array;
+}
 
 export type CanvasNetworkProxyRefusalReason =
   | CanvasNetworkRefusalReason
@@ -42,6 +55,7 @@ export type CanvasNetworkProxyRefusalReason =
   | "redirect-without-location"
   | "too-many-redirects"
   | "response-too-large"
+  | "response-type-not-allowed"
   | "timed-out"
   | "too-many-at-once"
   | "too-many-requests";
@@ -67,9 +81,14 @@ export interface CanvasNetworkProxyOptions {
 /**
  * The whole of what the host sends for a page. No cookie, credential, Octant
  * header, referrer, or header of the page's own goes with it; the transport
- * adds `Host`.
+ * adds `Host`, and a body's length. A body is always declared as JSON, which
+ * is the one kind the route admits.
  */
 const OUTGOING_HEADERS: Readonly<Record<string, string>> = { accept: "*/*" };
+const OUTGOING_BODY_HEADERS: Readonly<Record<string, string>> = {
+  ...OUTGOING_HEADERS,
+  "content-type": "application/json",
+};
 const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 const MINUTE_MS = 60_000;
 
@@ -87,7 +106,12 @@ export function pinnedCanvasNetworkConnect(
     createPinnedFetch({
       resolveAll: async () => connection.addresses,
       isPrivate: (address) => refusal(address) !== undefined,
-    })(url, { signal: connection.signal, headers: connection.headers, redirect: "manual" });
+    })(url, {
+      signal: connection.signal,
+      headers: connection.headers,
+      redirect: "manual",
+      ...(connection.method === "POST" ? { body: connection.body ?? new Uint8Array() } : {}),
+    });
 }
 
 const refused = (reason: CanvasNetworkProxyRefusalReason): CanvasNetworkProxyOutcome => ({
@@ -117,7 +141,11 @@ export class CanvasNetworkProxy {
   }
 
   /** Fetch one address for one Canvas's page, or say why not. It never throws. */
-  async fetch(canvasId: CanvasId, address: string): Promise<CanvasNetworkProxyOutcome> {
+  async fetch(
+    canvasId: CanvasId,
+    address: string,
+    request: CanvasNetworkProxyRequest = { resource: "fetch" },
+  ): Promise<CanvasNetworkProxyOutcome> {
     const key = String(canvasId);
     const now = this.#now();
     const use = this.#use.get(key) ?? { inFlight: 0, started: [] };
@@ -137,7 +165,7 @@ export class CanvasNetworkProxy {
       controller.abort();
     }, this.#totalTimeMs);
     try {
-      return await this.#follow(address, controller.signal);
+      return await this.#follow(address, request, controller.signal);
     } catch {
       return refused(timedOut ? "timed-out" : "unreachable");
     } finally {
@@ -147,8 +175,13 @@ export class CanvasNetworkProxy {
     }
   }
 
-  async #follow(address: string, signal: AbortSignal): Promise<CanvasNetworkProxyOutcome> {
+  async #follow(
+    address: string,
+    request: CanvasNetworkProxyRequest,
+    signal: AbortSignal,
+  ): Promise<CanvasNetworkProxyOutcome> {
     let current = address;
+    let body = request.body;
     for (let hop = 0; hop <= CANVAS_NETWORK_MAX_REDIRECTS; hop += 1) {
       const reserved = this.#reserved();
       const destination = canvasNetworkUrlRefusal(current, reserved);
@@ -166,9 +199,18 @@ export class CanvasNetworkProxy {
         if (reason !== undefined) return refused(reason);
       }
       const url = new URL(destination.url);
-      const response = await this.#connect(url, { addresses, headers: OUTGOING_HEADERS, signal });
+      const response = await this.#connect(
+        url,
+        body === undefined
+          ? { addresses, headers: OUTGOING_HEADERS, method: "GET", signal }
+          : { addresses, headers: OUTGOING_BODY_HEADERS, method: "POST", body, signal },
+      );
       if (REDIRECT_STATUSES.has(response.status)) {
         await response.body?.cancel();
+        // As a browser does: 307 and 308 repeat the request, body included,
+        // at a destination judged afresh above; any other redirect is
+        // followed with a GET and the body goes no further.
+        if (response.status !== 307 && response.status !== 308) body = undefined;
         const location = response.headers.get("location");
         if (location === null) return refused("redirect-without-location");
         try {
@@ -183,14 +225,14 @@ export class CanvasNetworkProxy {
         await response.body?.cancel();
         return refused("response-too-large");
       }
-      const body = await readWithin(response, CANVAS_NETWORK_MAX_RESPONSE_BYTES);
-      if (body === undefined) return refused("response-too-large");
-      return {
-        status: "fetched",
-        httpStatus: response.status,
-        contentType: response.headers.get("content-type") ?? undefined,
-        body,
-      };
+      const contentType = response.headers.get("content-type") ?? undefined;
+      if (!canvasNetworkResponseTypeAllowed(request.resource, contentType)) {
+        await response.body?.cancel();
+        return refused("response-type-not-allowed");
+      }
+      const fetched = await readWithin(response, CANVAS_NETWORK_MAX_RESPONSE_BYTES);
+      if (fetched === undefined) return refused("response-too-large");
+      return { status: "fetched", httpStatus: response.status, contentType, body: fetched };
     }
     return refused("too-many-redirects");
   }
@@ -220,13 +262,13 @@ function beforeAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-/** The whole body, or `undefined` once it passes the bound. */
-async function readWithin(
-  response: Response,
+/** The whole body of a response or a request, or `undefined` once it passes the bound. */
+export async function readWithin(
+  message: Pick<Response, "body">,
   maxBytes: number,
 ): Promise<Uint8Array<ArrayBuffer> | undefined> {
-  if (response.body === null) return new Uint8Array();
-  const reader = response.body.getReader();
+  if (message.body === null) return new Uint8Array();
+  const reader = message.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
@@ -270,6 +312,8 @@ export type CanvasNetworkRouteRefusalReason =
   | "token-not-live"
   | "not-a-script-request"
   | "method-not-allowed"
+  | "request-type-not-allowed"
+  | "request-too-large"
   | "invalid-request";
 
 /** The HTTP status a refusal is answered with; the body names the reason. */
@@ -281,6 +325,10 @@ function refusalStatus(
       return 400;
     case "method-not-allowed":
       return 405;
+    case "request-too-large":
+      return 413;
+    case "request-type-not-allowed":
+      return 415;
     case "too-many-at-once":
     case "too-many-requests":
       return 429;
@@ -291,6 +339,7 @@ function refusalStatus(
     case "redirect-without-location":
     case "too-many-redirects":
     case "response-too-large":
+    case "response-type-not-allowed":
       return 502;
     default:
       return 403;
@@ -317,6 +366,23 @@ export function canvasNetworkProxyResponse(
     headers: {
       ...ANSWER_HEADERS,
       "content-type": outcome.contentType ?? "application/octet-stream",
+    },
+  });
+}
+
+/**
+ * The answer to a browser's preflight for a page's JSON `POST`. It admits the
+ * two methods the route answers and the one header a JSON body needs, and it
+ * never admits credentials, so a cookie is not sent however a page asks.
+ */
+export function canvasNetworkPreflightResponse(): Response {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...ANSWER_HEADERS,
+      "access-control-allow-methods": "GET, POST",
+      "access-control-allow-headers": "content-type",
+      "access-control-max-age": "600",
     },
   });
 }

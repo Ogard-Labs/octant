@@ -15,12 +15,62 @@ const target = "https://api.example.com/data?page=2&sort=asc#top";
 const asked = `${relay}?url=${encodeURIComponent(target)}`;
 const networked = (id: string) => id === surfaceId;
 
-const decide = (url: string, method = "GET") =>
-  canvasPrototypeRelayRequest({ url, method }, networked);
+const decide = (url: string, method = "GET", contentType: string | null = null) =>
+  canvasPrototypeRelayRequest({ url, method, contentType }, networked);
 
 describe("what a prototype page may ask the desktop to fetch", () => {
   it("relays a GET of its own surface's relay address, with the address it asked for", () => {
-    expect(decide(asked)).toEqual({ status: "relay", surfaceId, target });
+    expect(decide(asked)).toEqual({
+      status: "relay",
+      surfaceId,
+      resource: "fetch",
+      method: "GET",
+      target,
+    });
+  });
+
+  it("relays a POST of that address only when it declares a JSON body", () => {
+    for (const type of ["application/json", "Application/JSON; charset=utf-8"]) {
+      expect(decide(asked, "POST", type)).toEqual({
+        status: "relay",
+        surfaceId,
+        resource: "fetch",
+        method: "POST",
+        target,
+      });
+    }
+    for (const type of [null, "", "text/plain", "application/x-www-form-urlencoded", "x/json"]) {
+      expect(decide(asked, "POST", type)).toEqual({
+        status: "refused",
+        reason: "request-type-not-allowed",
+      });
+    }
+  });
+
+  it("relays a GET of its surface's image and font addresses, and nothing else of them", () => {
+    for (const resource of ["image", "font"] as const) {
+      const address = `${CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX}${surfaceId}/${resource}?url=${encodeURIComponent(target)}`;
+      expect(decide(address)).toEqual({
+        status: "relay",
+        surfaceId,
+        resource,
+        method: "GET",
+        target,
+      });
+      for (const method of ["POST", "OPTIONS", "PUT"]) {
+        expect(decide(address, method, "application/json")).toEqual({
+          status: "refused",
+          reason: "method-not-allowed",
+        });
+      }
+    }
+  });
+
+  it("answers the browser's question before a JSON POST, for a surface with a network only", () => {
+    expect(decide(asked, "OPTIONS")).toEqual({ status: "preflight" });
+    expect(
+      decide(`${CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX}${other}/fetch?url=a`, "OPTIONS"),
+    ).toEqual({ status: "refused", reason: "no-network" });
   });
 
   it("is the address the host writes into the page, under the prototype host's scheme", () => {
@@ -91,8 +141,8 @@ describe("what a prototype page may ask the desktop to fetch", () => {
     });
   });
 
-  it("refuses every method but GET", () => {
-    for (const method of ["POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "get", ""]) {
+  it("refuses every method but GET and POST", () => {
+    for (const method of ["PUT", "DELETE", "PATCH", "HEAD", "CONNECT", "get", "post", ""]) {
       expect(decide(asked, method)).toEqual({ status: "refused", reason: "method-not-allowed" });
     }
   });
@@ -114,7 +164,13 @@ describe("what a prototype page may ask the desktop to fetch", () => {
 
   it("does not judge the address asked for: loopback goes to the host, whose rule refuses it", () => {
     expect(decide(`${relay}?url=${encodeURIComponent("http://127.0.0.1:3773/api/shell")}`)).toEqual(
-      { status: "relay", surfaceId, target: "http://127.0.0.1:3773/api/shell" },
+      {
+        status: "relay",
+        surfaceId,
+        resource: "fetch",
+        method: "GET",
+        target: "http://127.0.0.1:3773/api/shell",
+      },
     );
   });
 });
@@ -124,6 +180,13 @@ describe("where the desktop sends a page's request", () => {
     expect(canvasNetworkRelayAddress(server, token, target)).toBe(
       `${server}${CANVAS_NETWORK_PROXY_PATH_PREFIX}${token}/fetch?url=${encodeURIComponent(target)}`,
     );
+    for (const resource of ["image", "font"] as const) {
+      expect(canvasNetworkRelayAddress(server, token, target, resource)).toBe(
+        `${server}${CANVAS_NETWORK_PROXY_PATH_PREFIX}${token}/${resource}?url=${encodeURIComponent(target)}`,
+      );
+    }
+    // A path the host does not name is asked of nobody.
+    expect(canvasNetworkRelayAddress(server, token, target, "../shell" as never)).toBeUndefined();
   });
 
   it("cannot be moved off that path or that host by the address a page chose", () => {

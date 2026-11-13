@@ -27,6 +27,7 @@ import {
   type CanvasDesignDeviceSize,
   type CanvasDesignSize,
 } from "@octant/contracts/canvas";
+import { CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS } from "@octant/contracts/canvas-network";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
@@ -804,6 +805,27 @@ function RunningDesignBlock({
   const reportError = useCallback((message: string) => {
     setErrors((current) => [...current, message].slice(-RUNNING_DESIGN_MAX_ERRORS));
   }, []);
+
+  // A page's network token lives an hour unless this surface, which holds the
+  // page open, keeps it alive; once the page is stopped or gone nothing asks
+  // again and the token ages out. A page that has no live token (the switch
+  // went on after it was run, or the machine slept past the hour) is not
+  // asked about again until it is run again.
+  const runningUrl = state.kind === "running" ? state.url : undefined;
+  const keepNetwork = runtime?.keepNetwork;
+  useEffect(() => {
+    if (runningUrl === undefined || keepNetwork === undefined) return undefined;
+    const timer = window.setInterval(() => {
+      void keepNetwork(runningUrl).then(
+        (alive) => {
+          if (!alive) window.clearInterval(timer);
+        },
+        // The host could not be reached this time; the next turn asks again.
+        () => undefined,
+      );
+    }, CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [runningUrl, keepNetwork]);
 
   // The desktop's reserved shortcut is read before anything reaches the page,
   // and hands the keyboard to Stop.

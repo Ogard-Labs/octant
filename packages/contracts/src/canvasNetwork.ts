@@ -12,18 +12,19 @@ export const CANVAS_NETWORK_ACCESS_SCHEMA_VERSION = 1 as const;
 
 /**
  * Where a running page asks the host to fetch for it:
- * `/api/canvas/network/<token>/fetch?url=`. The page's policy names the path
- * through the token and its trailing slash, so no other path on the host is
- * within the page's reach.
+ * `/api/canvas/network/<token>/fetch?url=` for a script's request, and
+ * `/image?url=` and `/font?url=` beside it for what an element or a
+ * stylesheet loads. The page's policy names the paths under the token, so no
+ * other path on the host is within the page's reach.
  */
 export const CANVAS_NETWORK_PROXY_PATH_PREFIX = "/api/canvas/network/";
 
 /**
  * Where a page drawn by the desktop app's prototype host asks instead:
- * `octant-prototype://network/<surface id>/fetch?url=`. It is an address of
- * the prototype host's private scheme, which no network serves; the desktop
- * relays what arrives there to the proxy path above under a token the page
- * never holds.
+ * `octant-prototype://network/<surface id>/` and then `fetch?url=`,
+ * `image?url=`, or `font?url=`. It is an address of the prototype host's
+ * private scheme, which no network serves; the desktop relays what arrives
+ * there to the proxy path above under a token the page never holds.
  */
 export const CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX = "octant-prototype://network/";
 
@@ -75,6 +76,37 @@ export const CanvasNetworkAccessResult = Schema.Union(
 );
 export type CanvasNetworkAccessResult = typeof CanvasNetworkAccessResult.Type;
 
+/**
+ * How often the window that holds an open page whose Canvas has the network
+ * on asks the host to keep that page's token alive. The token lives one hour
+ * unrenewed, so one missed renewal (a window asleep, a host restarting) costs
+ * the page nothing.
+ */
+export const CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS = 20 * 60 * 1_000;
+
+/**
+ * A window keeps one page it ran alive. The page is named by the single-use
+ * ticket the window ran it with; the token is the page's, and is never an
+ * argument of anything a window sends.
+ */
+export const CanvasNetworkPageRenewalCommand = Schema.Struct({
+  schemaVersion: Schema.Literal(CANVAS_NETWORK_ACCESS_SCHEMA_VERSION),
+  kind: Schema.Literal("renew-canvas-network-page"),
+  ticket: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/)),
+}).annotations(strict);
+export type CanvasNetworkPageRenewalCommand = typeof CanvasNetworkPageRenewalCommand.Type;
+
+export const CanvasNetworkPageRenewalResult = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("canvas-network-page-renewed") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("canvas-network-page-renewal-refused"),
+    // `not-live`: no page run with that ticket holds a token now (it aged
+    // out, the switch went off, or the page never had one).
+    reason: Schema.Literal("malformed", "local-window-required", "not-live"),
+  }).annotations(strict),
+);
+export type CanvasNetworkPageRenewalResult = typeof CanvasNetworkPageRenewalResult.Type;
+
 export const CANVAS_NETWORK_ACCESS_AGGREGATE_TYPE = "canvas-network-access";
 export const CANVAS_NETWORK_ACCESS_CHANGED = "canvas.network-access-changed@1";
 
@@ -92,4 +124,10 @@ export const decodeCanvasNetworkAccessView = Schema.decodeUnknownSync(CanvasNetw
 export const decodeCanvasNetworkAccessResult = Schema.decodeUnknownSync(CanvasNetworkAccessResult);
 export const decodeCanvasNetworkAccessChanged = Schema.decodeUnknownSync(
   CanvasNetworkAccessChanged,
+);
+export const decodeCanvasNetworkPageRenewalCommand = Schema.decodeUnknownSync(
+  CanvasNetworkPageRenewalCommand,
+);
+export const decodeCanvasNetworkPageRenewalResult = Schema.decodeUnknownSync(
+  CanvasNetworkPageRenewalResult,
 );

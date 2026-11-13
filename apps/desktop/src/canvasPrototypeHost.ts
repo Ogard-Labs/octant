@@ -12,6 +12,10 @@ import type {
   WebContents,
 } from "electron";
 import { CANVAS_PROTOTYPE_NETWORK_RELAY_PREFIX } from "@octant/contracts/canvas-network";
+import {
+  CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES,
+  type CanvasNetworkResource,
+} from "@octant/domain/canvas-network-policy";
 import { canvasPrototypeRelayRequest } from "./canvasPrototypeNetwork";
 import { CANVAS_PROTOTYPE_PRELOAD_FILENAME } from "./runtimePaths";
 
@@ -222,7 +226,11 @@ export type CanvasPrototypeHostEvent =
       readonly kind: "relay";
       readonly surfaceId: string;
       readonly requestId: number;
+      /** Whether a script, an image element, or a font face is asking. */
+      readonly resource: CanvasNetworkResource;
       readonly target: string;
+      /** A script's JSON body, already held to the host's bound; it makes the question a `POST`. */
+      readonly body?: Uint8Array;
     }
   | { readonly kind: "gone"; readonly surfaceId: string };
 
@@ -440,9 +448,43 @@ function relayRefusal(status: number, reason: string): Response {
 const RELAY_REFUSAL_STATUS = {
   "not-the-relay": 404,
   "method-not-allowed": 405,
+  "request-type-not-allowed": 415,
   "invalid-request": 400,
   "no-network": 403,
 } as const;
+
+/**
+ * A page's JSON body, or `undefined` once it passes the host's bound. Read
+ * here so a body the host would refuse is never carried across two processes.
+ */
+async function relayBody(request: Request): Promise<Uint8Array | undefined> {
+  if (
+    Number(request.headers.get("content-length") ?? "0") > CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES
+  ) {
+    return undefined;
+  }
+  if (request.body === null) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
 
 /** The app's answer as the page's response; one a response cannot carry is the far side's fault. */
 function relayedResponse(answer: CanvasPrototypeRelayAnswer): Response {
@@ -481,34 +523,62 @@ export function createCanvasPrototypeHost(options: CanvasPrototypeHostOptions) {
   let lastRelay = 0;
 
   /**
-   * A page's question. Only the one request shape is handed to the app, and
-   * only its surface and the address it asked for: the app decides where that
-   * goes, and the host decides whether it is fetched.
+   * A page's question. Only the admitted request shapes are handed to the
+   * app, and only the surface, which of the three paths, the address asked
+   * for, and a script's JSON body: no header of the page's goes with it. The
+   * app decides where that goes, and the host decides whether it is fetched.
    */
-  const answerRelay = (request: Request): Promise<Response> => {
+  const answerRelay = async (request: Request): Promise<Response> => {
     const decision = canvasPrototypeRelayRequest(
-      { url: request.url, method: request.method },
+      {
+        url: request.url,
+        method: request.method,
+        contentType: request.headers.get("content-type"),
+      },
       (surfaceId) => networked.has(surfaceId),
     );
     if (decision.status === "refused") {
-      return Promise.resolve(relayRefusal(RELAY_REFUSAL_STATUS[decision.reason], decision.reason));
+      return relayRefusal(RELAY_REFUSAL_STATUS[decision.reason], decision.reason);
+    }
+    if (decision.status === "preflight") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          ...RELAY_ANSWER_HEADERS,
+          "access-control-allow-methods": "GET, POST",
+          "access-control-allow-headers": "content-type",
+        },
+      });
     }
     let waiting = 0;
     for (const relay of relays.values()) if (relay.surfaceId === decision.surfaceId) waiting += 1;
-    if (waiting >= MAX_RELAYS_PER_PAGE) {
-      return Promise.resolve(relayRefusal(429, "too-many-requests"));
-    }
+    if (waiting >= MAX_RELAYS_PER_PAGE) return relayRefusal(429, "too-many-requests");
     lastRelay += 1;
     const requestId = lastRelay;
-    return new Promise((settle) => {
+    // The place is taken before the body is read, so a page cannot open more
+    // questions than its bound by sending slow bodies.
+    const answered = new Promise<Response>((settle) => {
       relays.set(requestId, { surfaceId: decision.surfaceId, settle });
-      options.send({
-        kind: "relay",
-        surfaceId: decision.surfaceId,
-        requestId,
-        target: decision.target,
-      });
     });
+    let body: Uint8Array | undefined;
+    if (decision.method === "POST") {
+      body = await relayBody(request).catch(() => undefined);
+      if (body === undefined) {
+        relays.delete(requestId);
+        return relayRefusal(413, "request-too-large");
+      }
+      // The page closed while its body arrived: it was already answered.
+      if (!relays.has(requestId)) return answered;
+    }
+    options.send({
+      kind: "relay",
+      surfaceId: decision.surfaceId,
+      requestId,
+      resource: decision.resource,
+      target: decision.target,
+      ...(body === undefined ? {} : { body }),
+    });
+    return answered;
   };
 
   const answer = (request: Request): Promise<Response> =>

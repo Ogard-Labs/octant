@@ -346,6 +346,7 @@ describe("a page whose Canvas has the network on", () => {
       kind: "relay",
       surfaceId,
       requestId: expect.any(Number),
+      resource: "fetch",
       target: "https://api.example.com/data",
     });
     if (question?.kind !== "relay") throw new Error("The app was not asked.");
@@ -373,6 +374,67 @@ describe("a page whose Canvas has the network on", () => {
     });
   });
 
+  it("hands the app a page's JSON body with its question, and nothing else of the request", async () => {
+    const { sent, answer } = await started(true);
+    void answer(
+      new Request(asked, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer page-secret",
+          cookie: "a=1",
+        },
+        body: '{"ask":1}',
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const [question] = relays(sent);
+    if (question?.kind !== "relay") throw new Error("The app was not asked.");
+    expect(Object.keys(question).sort()).toEqual([
+      "body",
+      "kind",
+      "requestId",
+      "resource",
+      "surfaceId",
+      "target",
+    ]);
+    expect(question.resource).toBe("fetch");
+    expect(new TextDecoder().decode(question.body)).toBe('{"ask":1}');
+  });
+
+  it("refuses a body that is not declared JSON or is past the bound, and hands the app nothing", async () => {
+    const { sent, answer } = await started(true);
+    const post = (body: string, type: string) =>
+      answer(new Request(asked, { method: "POST", headers: { "content-type": type }, body }));
+    expect((await post("a=1", "text/plain"))?.status).toBe(415);
+    expect((await post("a=1", "application/x-www-form-urlencoded"))?.status).toBe(415);
+    const large = await post(JSON.stringify("x".repeat(256 * 1024)), "application/json");
+    expect(large?.status).toBe(413);
+    expect(await large?.json()).toEqual({ refused: "request-too-large" });
+    expect(relays(sent)).toEqual([]);
+  });
+
+  it("hands the app an image's and a font's address as that kind, and answers a preflight itself", async () => {
+    const { sent, answer } = await started(true);
+    for (const resource of ["image", "font"] as const) {
+      void answer(
+        new Request(
+          `${CANVAS_PROTOTYPE_SCHEME}://network/${surfaceId}/${resource}?url=${encodeURIComponent("https://cdn.example.com/a")}`,
+        ),
+      );
+    }
+    expect(relays(sent).map((event) => event.kind === "relay" && event.resource)).toEqual([
+      "image",
+      "font",
+    ]);
+    const preflight = await answer(new Request(asked, { method: "OPTIONS" }));
+    expect(preflight?.status).toBe(204);
+    expect(preflight?.headers.get("access-control-allow-methods")).toBe("GET, POST");
+    expect(preflight?.headers.get("access-control-allow-headers")).toBe("content-type");
+    expect(preflight?.headers.get("access-control-allow-origin")).toBe("*");
+    expect(relays(sent)).toHaveLength(2);
+  });
+
   it("still serves the page once and nothing else under the page's own address", async () => {
     const { answer } = await started(true);
     expect((await answer(new Request(address)))?.status).toBe(200);
@@ -386,7 +448,8 @@ describe("a page whose Canvas has the network on", () => {
 
     const { sent, answer } = await started(true);
     for (const [request, status] of [
-      [new Request(asked, { method: "POST", body: "x" }), 405],
+      [new Request(asked, { method: "PUT", body: "x" }), 405],
+      [new Request(asked, { method: "POST", body: "x" }), 415],
       [new Request(relay), 400],
       [new Request(`${relay}?url=a&url=b`), 400],
       [new Request(`${CANVAS_PROTOTYPE_SCHEME}://network/${surfaceId}/other?url=a`), 404],

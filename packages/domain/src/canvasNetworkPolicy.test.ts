@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canvasNetworkAddressRefusal,
+  canvasNetworkResponseTypeAllowed,
   canvasNetworkUrlRefusal,
   type CanvasNetworkReserved,
 } from "./canvasNetworkPolicy";
@@ -162,6 +163,38 @@ describe("Canvas network destination rule", () => {
       kind: "refused",
       reason: "octant-address",
     });
+  });
+});
+
+describe("what a Canvas page may load as an image or a font", () => {
+  it("passes a script's fetch whatever type the response declares", () => {
+    for (const type of ["application/json", "text/html", undefined]) {
+      expect(canvasNetworkResponseTypeAllowed("fetch", type)).toBe(true);
+    }
+  });
+
+  it("passes an image only a response that declares an image type", () => {
+    for (const type of ["image/png", "IMAGE/JPEG", "image/svg+xml; charset=utf-8", "image/webp"]) {
+      expect([type, canvasNetworkResponseTypeAllowed("image", type)]).toEqual([type, true]);
+    }
+    for (const type of [
+      "text/html",
+      "application/octet-stream",
+      "font/woff2",
+      "image/",
+      undefined,
+    ]) {
+      expect([type, canvasNetworkResponseTypeAllowed("image", type)]).toEqual([type, false]);
+    }
+  });
+
+  it("passes a font only a response that declares a font type", () => {
+    for (const type of ["font/woff2", "font/ttf", "application/font-woff", "Font/OTF"]) {
+      expect([type, canvasNetworkResponseTypeAllowed("font", type)]).toEqual([type, true]);
+    }
+    for (const type of ["text/css", "application/octet-stream", "image/png", undefined]) {
+      expect([type, canvasNetworkResponseTypeAllowed("font", type)]).toEqual([type, false]);
+    }
   });
 });
 

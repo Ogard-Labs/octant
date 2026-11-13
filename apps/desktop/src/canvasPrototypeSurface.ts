@@ -5,6 +5,7 @@ import {
   CANVAS_NETWORK_TOKEN_HEADER,
   CANVAS_PROTOTYPE_SURFACE_HEADER,
 } from "@octant/contracts/canvas-network";
+import { CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES } from "@octant/domain/canvas-network-policy";
 import { canvasNetworkRelayAddress } from "./canvasPrototypeNetwork";
 import type {
   CanvasPrototypeEditCommand,
@@ -43,8 +44,9 @@ import type {
  *   "Allow network" switch is on, and this process proved itself with the
  *   desktop bridge secret), the token stays here. The prototype host is told
  *   only that the page has a network; each address its page asks for is
- *   fetched here from the host's proxy path under that token, and from
- *   nowhere else.
+ *   fetched here from one of the host's proxy paths under that token, and
+ *   from nowhere else. A script's JSON body goes with it as JSON; no header
+ *   of the page's does.
  */
 
 export type CanvasPrototypeSurfacePreparation =
@@ -368,27 +370,37 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
   };
 
   /**
-   * One address a page asked for. This asks the host's proxy path under the
-   * token of the prototype that asked, and nothing else: no header, cookie, or
-   * body of its own, and no redirect followed. Whether the address is fetched
-   * is the host's decision there, under the destination rule, the bounds, and
-   * the switch. A question for a prototype with no token is answered here.
+   * One address a page asked for. This asks the host's proxy path for that
+   * kind of load under the token of the prototype that asked, and nothing
+   * else: no cookie and no header of its own or the page's, but the JSON type
+   * of a body the page's script sent, and no redirect followed. Whether the
+   * address is fetched is the host's decision there, under the destination
+   * rule, the bounds, and the switch. A question for a prototype with no
+   * token is answered here.
    */
   const relay = async (
     connection: CanvasPrototypeHostConnection,
     event: Extract<CanvasPrototypeHostEvent, { kind: "relay" }>,
   ): Promise<void> => {
-    const { surfaceId, requestId, target } = event;
+    const { surfaceId, requestId, target, resource, body } = event;
     // The prototype host draws agent-written pages; what it says is checked.
     if (typeof surfaceId !== "string" || !Number.isSafeInteger(requestId)) return;
     if (typeof target !== "string" || target.length > MAX_RELAY_TARGET_LENGTH) return;
+    if (
+      body !== undefined &&
+      (resource !== "fetch" ||
+        !(body instanceof Uint8Array) ||
+        body.byteLength > CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES)
+    ) {
+      return;
+    }
     const answer = (relayed: CanvasPrototypeRelayAnswer) =>
       connection.send({ kind: "relayed", surfaceId, requestId, answer: relayed });
     const token = networkTokens.get(surfaceId);
     const address =
       token === undefined
         ? undefined
-        : canvasNetworkRelayAddress(options.serverUrl(), token, target);
+        : canvasNetworkRelayAddress(options.serverUrl(), token, target, resource);
     if (address === undefined) {
       answer(RELAY_NOT_ALLOWED);
       return;
@@ -398,17 +410,20 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
     relaying.set(surfaceId, inFlight.add(request));
     try {
       const response = await options.fetch(address, {
-        method: "GET",
+        method: body === undefined ? "GET" : "POST",
         redirect: "error",
         signal: request.signal,
+        ...(body === undefined
+          ? {}
+          : { headers: { "content-type": "application/json" }, body: body.slice() }),
       });
-      const body = new Uint8Array(await response.arrayBuffer());
+      const answered = new Uint8Array(await response.arrayBuffer());
       // The prototype closed while the host answered: its page hears nothing.
       if (request.signal.aborted) return;
       answer({
         status: response.status,
         contentType: response.headers.get("content-type") ?? "application/octet-stream",
-        body,
+        body: answered,
       });
     } catch {
       if (!request.signal.aborted) answer(RELAY_UNREACHABLE);

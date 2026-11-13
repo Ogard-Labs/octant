@@ -34,7 +34,10 @@
 //    for. Its questions are relayed to the host's proxy route, which here runs
 //    the real destination rule over a stand-in for the far side. Nothing may
 //    arrive at any listener but that route, the rule must refuse loopback and
-//    the host, and only the public address may be fetched.
+//    the host, and only public addresses may be fetched: by a script's GET, a
+//    script's POST of JSON (which must go out with the host's headers alone),
+//    an image, and a font. A body that is not JSON, another method, and
+//    markup asked for as an image must be refused.
 // 5. `network on, page policy removed`: the same with the page's own content
 //    policy stripped, so only the prototype host stands between the page and
 //    everything but the relay.
@@ -59,7 +62,7 @@ import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { createSocket } from "node:dgram";
 import { createServer, type Socket } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -86,6 +89,17 @@ import {
 } from "../apps/server/src/canvas/canvasNetworkProxy";
 
 const root = resolve(import.meta.dir, "..");
+// A real image and a real font for the far side to answer with, so the page
+// can say whether what the relay brought back was drawn.
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+const FONT = await readFile(
+  createRequire(join(root, "apps/server/package.json")).resolve(
+    "katex/dist/fonts/KaTeX_Size2-Regular.woff2",
+  ),
+);
 
 function inScript(value: string): string {
   return JSON.stringify(value).replace(
@@ -115,8 +129,24 @@ ask("public", () => fetch("https://public.example.test/data"));
 ask("loopback", () => fetch(${inScript(`${beacon}/through-relay`)}));
 ask("host-api", () => fetch(${inScript(`${host}/api/host-secret`)}));
 ask("metadata", () => fetch("http://169.254.169.254/latest/meta-data/"));
+ask("post-json", () => fetch("https://public.example.test/rpc", { method: "POST", headers: { authorization: "Bearer page-secret", "x-api-key": "page-key" }, credentials: "include", body: JSON.stringify({ ask: 1 }) }));
 ask("post", () => fetch("https://public.example.test/post", { method: "POST", body: "x" }));
+ask("put", () => fetch("https://public.example.test/put", { method: "PUT", body: "{}" }));
 ask("raw-post", () => fetch(mine + wanted("https://public.example.test/raw-post"), { method: "POST", body: "x" }));
+ask("raw-image-post", () => fetch(mine + "image?url=" + encodeURIComponent("https://public.example.test/logo.png"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }));
+const draw = (label, address) => {
+  const image = document.createElement("img");
+  image.onload = () => say(label, "loaded:" + image.naturalWidth);
+  // The address as written is refused first; only the proxied one counts.
+  image.onerror = () => { if ((image.getAttribute("src") || "").indexOf("image?url=") !== -1) say(label, "failed"); };
+  image.setAttribute("src", address);
+  document.body.appendChild(image);
+};
+draw("image", "https://public.example.test/logo.png");
+draw("image-of-markup", "https://public.example.test/page.html");
+const face = new FontFace("Probe", 'url("https://public.example.test/face.woff2") format("woff2")');
+document.fonts.add(face);
+face.load().then(() => say("font", "1:" + document.fonts.check('16px "Probe"')), () => say("font", "failed"));
 ask("raw-other-path", () => fetch(mine + "other?url=x"));
 ask("raw-two-addresses", () => fetch(mine + wanted("https://public.example.test/a") + "&url=x"));
 ask("other-surface", () => fetch("octant-prototype://network/22222222-2222-4222-8222-222222222222/" + wanted("https://public.example.test/other-surface")));
@@ -205,8 +235,16 @@ interface Hits {
   readonly host: Array<string>;
   /** The addresses the proxy route was asked to fetch, and those the rule let through. */
   readonly asked: Array<string>;
-  readonly fetched: Array<{ readonly url: string; readonly headers: ReadonlyArray<string> }>;
-  /** Requests the proxy route got that were not a bare GET: a header the desktop added, or a method. */
+  readonly fetched: Array<{
+    readonly url: string;
+    readonly method: string;
+    readonly headers: ReadonlyArray<string>;
+    readonly body?: string;
+  }>;
+  /**
+   * Requests the proxy route got that were neither a bare GET nor a POST of
+   * JSON to the fetch path: a header the desktop added, or another method.
+   */
   readonly dressed: Array<string>;
 }
 
@@ -268,9 +306,25 @@ async function startListeners(): Promise<Listeners> {
     resolveAll: async (hostname) =>
       hostname === "public.example.test" ? ["93.184.216.34"] : [hostname],
     connect: async (url, connection) => {
-      hits.fetched.push({ url: url.toString(), headers: Object.keys(connection.headers).sort() });
+      hits.fetched.push({
+        url: url.toString(),
+        method: connection.method,
+        headers: Object.keys(connection.headers).sort(),
+        ...(connection.body === undefined
+          ? {}
+          : { body: new TextDecoder().decode(connection.body) }),
+      });
+      if (url.pathname.endsWith(".png")) {
+        return new Response(PNG, { headers: { "content-type": "image/png" } });
+      }
+      if (url.pathname.endsWith(".woff2")) {
+        return new Response(FONT, { headers: { "content-type": "font/woff2" } });
+      }
       return new Response(`proxied ${url.pathname}`, {
-        headers: { "content-type": "text/plain", "set-cookie": "far=1" },
+        headers: {
+          "content-type": url.pathname.endsWith(".html") ? "text/html" : "text/plain",
+          "set-cookie": "far=1",
+        },
       });
     },
   });
@@ -280,24 +334,54 @@ async function startListeners(): Promise<Listeners> {
     async fetch(request) {
       const url = new URL(request.url);
       // The proxy route, for the token minted in this run and no other.
-      if (
-        network.token !== undefined &&
-        url.pathname === `${CANVAS_NETWORK_PROXY_PATH_PREFIX}${network.token}/fetch`
-      ) {
+      const resource =
+        network.token === undefined
+          ? undefined
+          : (["fetch", "image", "font"] as const).find(
+              (name) =>
+                url.pathname ===
+                `${CANVAS_NETWORK_PROXY_PATH_PREFIX}${network.token ?? ""}/${name}`,
+            );
+      if (resource !== undefined) {
         const extra = [...request.headers.keys()].filter(
           (name) =>
-            !["accept", "accept-encoding", "accept-language", "connection", "host"].includes(
-              name,
-            ) &&
+            ![
+              "accept",
+              "accept-encoding",
+              "accept-language",
+              "connection",
+              "content-length",
+              "host",
+            ].includes(name) &&
             !name.startsWith("sec-fetch-") &&
             name !== "user-agent",
         );
-        if (request.method !== "GET" || extra.length > 0 || url.searchParams.size !== 1) {
-          hits.dressed.push(`${request.method} ${extra.join(",")} ${url.search}`);
+        // A script's JSON is the one body, and its type the one header, the
+        // desktop may send; an image or a font is asked for bare.
+        const posts =
+          resource === "fetch" &&
+          request.method === "POST" &&
+          extra.length === 1 &&
+          request.headers.get("content-type") === "application/json";
+        if (
+          url.searchParams.size !== 1 ||
+          !(posts || (request.method === "GET" && extra.length === 0))
+        ) {
+          hits.dressed.push(`${request.method} ${resource} ${extra.join(",")} ${url.search}`);
         }
         const target = url.searchParams.get("url") ?? "";
         hits.asked.push(target);
-        return canvasNetworkProxyResponse(await proxy.fetch(canvasId, target));
+        if (!posts) {
+          return canvasNetworkProxyResponse(await proxy.fetch(canvasId, target, { resource }));
+        }
+        // As the host's route does: only what reads as JSON goes further.
+        const body = new Uint8Array(await request.arrayBuffer());
+        try {
+          JSON.parse(new TextDecoder().decode(body));
+        } catch {
+          return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+        }
+        return canvasNetworkProxyResponse(await proxy.fetch(canvasId, target, { resource, body }));
       }
       hits.host.push(`${request.method} ${url.pathname}`);
       if (url.pathname === "/issue") {
@@ -511,10 +595,7 @@ interface Row {
   readonly http: ReadonlyArray<string>;
   readonly hostRequests: ReadonlyArray<string>;
   readonly asked: ReadonlyArray<string>;
-  readonly fetched: ReadonlyArray<{
-    readonly url: string;
-    readonly headers: ReadonlyArray<string>;
-  }>;
+  readonly fetched: ReadonlyArray<Hits["fetched"][number]>;
   readonly dressed: ReadonlyArray<string>;
   readonly minted: boolean;
   readonly tokenInPage: boolean;
@@ -617,25 +698,57 @@ for (const row of [networked, networkedStripped]) {
   if (said("public") !== "200:proxied /data") {
     failures.push(`${row.run}: a public address was not fetched: ${String(said("public"))}`);
   }
-  const fetched = [...new Set(row.fetched.map((entry) => entry.url))].sort();
-  // With or without its policy, only its own surface's question for a public
-  // address gets as far as the far side.
-  if (JSON.stringify(fetched) !== JSON.stringify(["https://public.example.test/data"])) {
+  const fetched = [...new Set(row.fetched.map((entry) => `${entry.method} ${entry.url}`))].sort();
+  // With or without its policy, only its own surface's questions for public
+  // addresses get as far as the far side: a fetch, a JSON POST, an image, a
+  // font, and the markup it asked for as an image, which is not passed on.
+  const expected = [
+    "GET https://public.example.test/data",
+    "GET https://public.example.test/face.woff2",
+    "GET https://public.example.test/logo.png",
+    "GET https://public.example.test/page.html",
+    "POST https://public.example.test/rpc",
+  ];
+  if (JSON.stringify(fetched) !== JSON.stringify(expected)) {
     failures.push(`${row.run}: the far side was asked for ${fetched.join(", ") || "nothing"}`);
   }
   for (const entry of row.fetched) {
-    if (entry.headers.some((name) => name !== "accept" && name !== "host")) {
+    // The page asked with an Authorization header, an API key, and
+    // credentials; a POST carries the JSON type and nothing else of it.
+    const allowed = entry.method === "POST" ? ["accept", "content-type"] : ["accept"];
+    if (entry.headers.some((name) => !allowed.includes(name))) {
       failures.push(`${row.run}: the far side was sent ${entry.headers.join(", ")}`);
     }
+    if (entry.method === "POST" && entry.body !== '{"ask":1}') {
+      failures.push(`${row.run}: the far side was sent the body ${String(entry.body)}`);
+    }
+  }
+  if (said("post-json") !== "200:proxied /rpc") {
+    failures.push(`${row.run}: a JSON POST was not sent: ${String(said("post-json"))}`);
+  }
+  if (said("image") !== "loaded:1") {
+    failures.push(`${row.run}: an image was not drawn: ${String(said("image"))}`);
+  }
+  if (said("image-of-markup") !== "failed") {
+    failures.push(
+      `${row.run}: markup was passed on as an image: ${String(said("image-of-markup"))}`,
+    );
+  }
+  if (said("font") !== "1:true") {
+    failures.push(`${row.run}: a font was not loaded: ${String(said("font"))}`);
   }
   for (const label of ["loopback", "host-api", "metadata"]) {
     if (said(label)?.startsWith("403:") !== true) {
       failures.push(`${row.run}: ${label} was not refused by the rule: ${String(said(label))}`);
     }
   }
-  if (said("post") !== "failed") failures.push(`${row.run}: a POST was offered: ${said("post")}`);
+  if (said("put") !== "failed") failures.push(`${row.run}: a PUT was offered: ${said("put")}`);
   for (const [label, status] of [
-    ["raw-post", "405"],
+    // A body that is not JSON is refused by the host's route, and one not
+    // declared as JSON by the scheme handler before it leaves the process.
+    ["post", "400"],
+    ["raw-post", "415"],
+    ["raw-image-post", "405"],
     ["raw-other-path", "404"],
     ["raw-two-addresses", "400"],
   ] as const) {

@@ -24,11 +24,12 @@ import type { Journal } from "../persistence/journal";
  */
 
 /**
- * How long a page's token lives. A prototype left open overnight asks again
- * with a fresh page (Run again); nothing a person does in one sitting meets
- * it.
+ * How long a page's token lives without being renewed (maintainer decision,
+ * 2026-11-13). The window that holds an open page renews it well inside the
+ * hour, so a page a person is looking at keeps its network, and a closed
+ * page's token is gone within the hour whatever became of it.
  */
-export const CANVAS_NETWORK_TOKEN_TTL_MS = 12 * 60 * 60 * 1_000;
+export const CANVAS_NETWORK_TOKEN_TTL_MS = 60 * 60 * 1_000;
 /**
  * Live tokens one Canvas may hold: one per running page, and a Canvas is
  * rarely open in more than a few windows. The oldest is forgotten first, so
@@ -58,7 +59,15 @@ export class CanvasNetworkAccessService {
   /** Each Canvas's switch as the journal holds it, read the first time it is asked for. */
   readonly #switches = new Map<string, { allowed: boolean; version: number }>();
   /** Insertion order is age: the first token of a Canvas is its oldest. */
-  readonly #tokens = new Map<string, { readonly canvasId: CanvasId; readonly expiresAt: number }>();
+  readonly #tokens = new Map<
+    string,
+    {
+      readonly canvasId: CanvasId;
+      /** The single-use ticket the token's page was served for: what a renewal names. */
+      readonly page: string | undefined;
+      expiresAt: number;
+    }
+  >();
 
   constructor(dependencies: CanvasNetworkAccessServiceDependencies) {
     this.#dependencies = dependencies;
@@ -101,8 +110,12 @@ export class CanvasNetworkAccessService {
     current.allowed = allowed;
   }
 
-  /** A token for one running page of a Canvas, or nothing while its switch is off. */
-  issueToken(canvasId: CanvasId): string | undefined {
+  /**
+   * A token for one running page of a Canvas, or nothing while its switch is
+   * off. `page` is the ticket the page was served for; a token minted without
+   * one cannot be renewed.
+   */
+  issueToken(canvasId: CanvasId, page?: string): string | undefined {
     if (!this.isAllowed(canvasId)) return undefined;
     const now = this.#now();
     const own: string[] = [];
@@ -114,8 +127,42 @@ export class CanvasNetworkAccessService {
     const surplus = Math.max(0, own.length - CANVAS_NETWORK_MAX_TOKENS_PER_CANVAS + 1);
     for (const oldest of own.slice(0, surplus)) this.#tokens.delete(oldest);
     const token = randomBytes(32).toString("base64url");
-    this.#tokens.set(token, { canvasId, expiresAt: now + CANVAS_NETWORK_TOKEN_TTL_MS });
+    this.#tokens.set(token, { canvasId, page, expiresAt: now + CANVAS_NETWORK_TOKEN_TTL_MS });
     return token;
+  }
+
+  /**
+   * The Canvas of the live token minted for a page, without renewing it, so a
+   * caller can decide whether the asker may renew before anything changes.
+   */
+  canvasForPage(page: string): CanvasId | undefined {
+    return this.#liveForPage(page)?.canvasId;
+  }
+
+  /**
+   * Give an open page's token another hour, and answer its Canvas. The page
+   * is named by its ticket, which the window that ran it holds, and never by
+   * the token: a token that leaked renews nothing, and neither does using
+   * one. A token that aged out or was revoked is not brought back.
+   */
+  renewPage(page: string): CanvasId | undefined {
+    const entry = this.#liveForPage(page);
+    if (entry === undefined) return undefined;
+    entry.expiresAt = this.#now() + CANVAS_NETWORK_TOKEN_TTL_MS;
+    return entry.canvasId;
+  }
+
+  #liveForPage(page: string) {
+    const now = this.#now();
+    for (const [token, entry] of this.#tokens) {
+      if (entry.page !== page) continue;
+      if (now >= entry.expiresAt || !this.isAllowed(entry.canvasId)) {
+        this.#tokens.delete(token);
+        return undefined;
+      }
+      return entry;
+    }
+    return undefined;
   }
 
   /**

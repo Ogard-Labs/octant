@@ -495,6 +495,10 @@ describe("authenticated product route dispatch", () => {
       ["/api/canvas/network-access", "POST"],
       ["/api/canvas/network-access?canvasId=11111111-1111-4111-8111-111111111111", "GET"],
       [`/api/canvas/network/${"a".repeat(43)}/fetch?url=https%3A%2F%2Fexample.com%2F`, "GET"],
+      ["/api/canvas/network-access/renew", "POST"],
+      [`/api/canvas/network/${"a".repeat(43)}/fetch?url=https%3A%2F%2Fexample.com%2F`, "POST"],
+      [`/api/canvas/network/${"a".repeat(43)}/image?url=https%3A%2F%2Fexample.com%2Fa.png`, "GET"],
+      [`/api/canvas/network/${"a".repeat(43)}/font?url=https%3A%2F%2Fexample.com%2Fa.woff2`, "GET"],
     ] as const) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method })),

@@ -3,6 +3,8 @@ import {
   decodeCanvasNetworkAccessChanged,
   decodeCanvasNetworkAccessCommand,
   decodeCanvasNetworkAccessResult,
+  decodeCanvasNetworkPageRenewalCommand,
+  decodeCanvasNetworkPageRenewalResult,
 } from "./canvasNetwork";
 
 const canvasId = "11111111-1111-4111-8111-111111111111";
@@ -50,6 +52,31 @@ describe("canvas network contracts", () => {
     });
     expect(() =>
       decodeCanvasNetworkAccessChanged({ canvasId, allowed: true, token: "x" }),
+    ).toThrow();
+  });
+
+  it("renews a page by the ticket it was run with, and never by a token or a Canvas", () => {
+    const command = {
+      schemaVersion: 1,
+      kind: "renew-canvas-network-page",
+      ticket: "A".repeat(43),
+    };
+    expect(decodeCanvasNetworkPageRenewalCommand(command)).toEqual(command);
+    for (const extra of [{ token: "B".repeat(43) }, { canvasId }, { ttlMs: 1 }]) {
+      expect(() => decodeCanvasNetworkPageRenewalCommand({ ...command, ...extra })).toThrow();
+    }
+    expect(() => decodeCanvasNetworkPageRenewalCommand({ ...command, ticket: "short" })).toThrow();
+    expect(decodeCanvasNetworkPageRenewalResult({ kind: "canvas-network-page-renewed" })).toEqual({
+      kind: "canvas-network-page-renewed",
+    });
+    expect(
+      decodeCanvasNetworkPageRenewalResult({
+        kind: "canvas-network-page-renewal-refused",
+        reason: "not-live",
+      }),
+    ).toMatchObject({ reason: "not-live" });
+    expect(() =>
+      decodeCanvasNetworkPageRenewalResult({ kind: "canvas-network-page-renewed", token: "x" }),
     ).toThrow();
   });
 });

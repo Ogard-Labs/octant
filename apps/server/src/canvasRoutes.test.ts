@@ -131,7 +131,11 @@ function createRevisionRoute(
       readonly connections: ReadonlyArray<{
         readonly url: string;
         readonly headers: Readonly<Record<string, string>>;
+        readonly method?: "POST";
+        readonly body?: string;
       }>;
+      /** Moves the clock the network tokens age by. */
+      readonly advance: (ms: number) => void;
     }) => void;
   } = {},
 ) {
@@ -295,15 +299,24 @@ function createRevisionRoute(
   const networkConnections: Array<{
     readonly url: string;
     readonly headers: Readonly<Record<string, string>>;
+    readonly method?: "POST";
+    readonly body?: string;
   }> = [];
+  let networkTime = 1;
   const canvasNetworkAccess = new CanvasNetworkAccessService({
     journal,
     uuid: () => `acacacac-acac-4cac-8cac-${(counter += 1).toString(16).padStart(12, "0")}`,
     actor,
     clock: () => later as never,
-    now: () => 1,
+    now: () => networkTime,
   });
-  options.network?.({ access: canvasNetworkAccess, connections: networkConnections });
+  options.network?.({
+    access: canvasNetworkAccess,
+    connections: networkConnections,
+    advance: (ms) => {
+      networkTime += ms;
+    },
+  });
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability: windowCapability, now: 0 });
   const route = createCanvasRouteHandler({
@@ -319,9 +332,26 @@ function createRevisionRoute(
         reserved: () => ({ addresses: [], hosts: [] }),
         resolveAll: async () => ["93.184.216.34"],
         connect: async (url, connection) => {
-          networkConnections.push({ url: url.toString(), headers: connection.headers });
+          networkConnections.push({
+            url: url.toString(),
+            headers: connection.headers,
+            ...(connection.method === "POST"
+              ? { method: "POST" as const, body: new TextDecoder().decode(connection.body) }
+              : {}),
+          });
+          const far = /\.(png|woff2|html)$/.exec(url.pathname)?.[1];
           return new Response("fetched for the page", {
-            headers: { "content-type": "text/plain", "set-cookie": "session=far" },
+            headers: {
+              "content-type":
+                far === "png"
+                  ? "image/png"
+                  : far === "woff2"
+                    ? "font/woff2"
+                    : far === "html"
+                      ? "text/html"
+                      : "text/plain",
+              "set-cookie": "session=far",
+            },
           });
         },
       }),
@@ -2803,7 +2833,10 @@ describe("canvas network routes", () => {
     let connections: ReadonlyArray<{
       readonly url: string;
       readonly headers: Readonly<Record<string, string>>;
+      readonly method?: "POST";
+      readonly body?: string;
     }> = [];
+    let advance: (ms: number) => void = () => undefined;
     let journal: Journal | undefined;
     const projection = new CanvasProjection();
     const route = createRevisionRoute(projection, {
@@ -2814,11 +2847,12 @@ describe("canvas network routes", () => {
       network: (parts) => {
         access = parts.access;
         connections = parts.connections;
+        advance = parts.advance;
       },
       ...options,
     });
     if (access === undefined || journal === undefined) throw new Error("expected the switch");
-    return { route, access, journal, projection, connections: () => connections };
+    return { route, access, journal, projection, connections: () => connections, advance };
   }
 
   async function answer(route: ReturnType<typeof createRevisionRoute>, request: Request) {
@@ -2880,8 +2914,28 @@ describe("canvas network routes", () => {
       /connect-src http:\/\/127\.0\.0\.1\/api\/canvas\/network\/([A-Za-z0-9_-]{43})\/;/.exec(
         policy,
       )?.[1];
-    return { policy, html, token };
+    const ticket = new URL(ready.page as string, "http://127.0.0.1").searchParams.get("ticket");
+    return { policy, html, token, ticket: ticket ?? "" };
   }
+
+  const networkPolicy = (base: string) =>
+    BASE_POLICY.replace("connect-src 'none'", `connect-src ${base}`)
+      .replace("img-src data: blob:", `img-src data: blob: ${base}image`)
+      .replace("font-src data:", `font-src data: ${base}font`);
+
+  const renew = (
+    route: ReturnType<typeof createRevisionRoute>,
+    ticket: unknown,
+    headers: Record<string, string> = windowHeaders,
+  ) =>
+    answer(
+      route,
+      new Request("http://127.0.0.1/api/canvas/network-access/renew", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ schemaVersion: 1, kind: "renew-canvas-network-page", ticket }),
+      }),
+    );
 
   const viaProxy = (
     route: ReturnType<typeof createRevisionRoute>,
@@ -2890,17 +2944,20 @@ describe("canvas network routes", () => {
       readonly method?: string;
       readonly headers?: Record<string, string>;
       readonly query?: string;
+      readonly resource?: string;
+      readonly body?: string;
     } = {},
   ) =>
     answer(
       route,
       new Request(
-        `http://127.0.0.1/api/canvas/network/${token}/fetch?${
+        `http://127.0.0.1/api/canvas/network/${token}/${init.resource ?? "fetch"}?${
           init.query ?? `url=${encodeURIComponent("https://api.example.com/data")}`
         }`,
         {
           method: init.method ?? "GET",
           headers: { origin: "null", "sec-fetch-dest": "empty", ...init.headers },
+          ...(init.body === undefined ? {} : { body: init.body }),
         },
       ),
     );
@@ -2942,14 +2999,14 @@ describe("canvas network routes", () => {
     expect(page.html).not.toContain("/api/canvas/network/");
   });
 
-  it("names one proxy path in the page's policy while the switch is on, and changes nothing else", async () => {
+  it("names the page's own proxy paths in its policy while the switch is on, and changes nothing else", async () => {
     const { route } = networkRoute();
     await setSwitch(route, true);
     const page = await runPage(route);
     expect(page.token).toBeDefined();
     const base = `http://127.0.0.1/api/canvas/network/${page.token ?? ""}/`;
-    expect(page.policy).toBe(BASE_POLICY.replace("connect-src 'none'", `connect-src ${base}`));
-    expect(page.html).toContain(JSON.stringify(`${base}fetch?url=`));
+    expect(page.policy).toBe(networkPolicy(base));
+    expect(page.html).toContain(JSON.stringify(base));
     // The bridge still comes first, and the author's script after the host's.
     expect(page.html.indexOf("octant-design-frame@1")).toBeLessThan(page.html.indexOf(base));
     expect(page.html.indexOf(base)).toBeLessThan(page.html.indexOf("function load()"));
@@ -3042,22 +3099,265 @@ describe("canvas network routes", () => {
     expect(connections()).toHaveLength(1);
   });
 
-  it("answers only a script's GET, never a document, another method, or another query", async () => {
+  it("answers only a script's request, never a document, another method, or another query", async () => {
     const { route, connections } = networkRoute();
     await setSwitch(route, true);
     const { token } = await runPage(route);
-    for (const destination of ["document", "iframe", "image", "script"]) {
+    for (const destination of ["document", "iframe", "image", "font", "script", "websocket"]) {
       const response = await viaProxy(route, token ?? "", {
         headers: { "sec-fetch-dest": destination },
       });
       expect([destination, response.status]).toEqual([destination, 403]);
     }
-    expect((await viaProxy(route, token ?? "", { method: "POST" })).status).toBe(405);
+    for (const method of ["PUT", "DELETE", "PATCH", "HEAD"]) {
+      const response = await viaProxy(route, token ?? "", { method });
+      expect([method, response.status]).toEqual([method, 405]);
+    }
     expect((await viaProxy(route, token ?? "", { query: "" })).status).toBe(400);
     expect(
       (await viaProxy(route, token ?? "", { query: "url=https%3A%2F%2Fa.example%2F&x=1" })).status,
     ).toBe(400);
+    // No path under the token but the three the host names.
+    expect((await viaProxy(route, token ?? "", { resource: "media" })).status).toBe(400);
+    expect((await viaProxy(route, token ?? "", { resource: "socket" })).status).toBe(400);
     expect(connections()).toEqual([]);
+  });
+
+  it("sends a page's JSON POST as JSON and forwards no header or credential the page set", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const response = await viaProxy(route, token ?? "", {
+      method: "POST",
+      body: '{"ask":1}',
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        cookie: "octant-session=secret",
+        authorization: "Bearer secret",
+        "x-api-key": "page-chosen",
+        "x-octant-window-capability": windowCapability,
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(connections()).toEqual([
+      {
+        url: "https://api.example.com/data",
+        headers: { accept: "*/*", "content-type": "application/json" },
+        method: "POST",
+        body: '{"ask":1}',
+      },
+    ]);
+  });
+
+  it("refuses a POST that is not JSON, is too large, or names a private address", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const json = { "content-type": "application/json" };
+    const post = (init: Parameters<typeof viaProxy>[2]) =>
+      viaProxy(route, token ?? "", { method: "POST", ...init });
+
+    for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"]) {
+      const response = await post({ body: "a=1", headers: { "content-type": type } });
+      expect([type, response.status, await response.json()]).toEqual([
+        type,
+        415,
+        { refused: "request-type-not-allowed" },
+      ]);
+    }
+    expect((await post({ body: "{}", headers: { "content-type": "" } })).status).toBe(415);
+    const notJson = await post({ body: "{not json", headers: json });
+    expect([notJson.status, await notJson.json()]).toEqual([400, { refused: "invalid-request" }]);
+    const large = await post({ body: JSON.stringify("x".repeat(256 * 1024)), headers: json });
+    expect([large.status, await large.json()]).toEqual([413, { refused: "request-too-large" }]);
+    const declared = await post({
+      body: "{}",
+      headers: { ...json, "content-length": String(256 * 1024 + 1) },
+    });
+    expect(declared.status).toBe(413);
+    for (const target of [
+      "http://127.0.0.1/api/canvas/get",
+      "http://169.254.169.254/",
+      "http://10.0.0.1/",
+    ]) {
+      const response = await post({
+        body: "{}",
+        headers: json,
+        query: `url=${encodeURIComponent(target)}`,
+      });
+      expect([target, response.status]).toEqual([target, 403]);
+    }
+    // An image or a font is never asked for with a body.
+    expect((await post({ body: "{}", headers: json, resource: "image" })).status).toBe(405);
+    expect((await post({ body: "{}", headers: json, resource: "font" })).status).toBe(405);
+    expect(connections()).toEqual([]);
+  });
+
+  it("answers a browser's preflight for a JSON POST of a live token, and offers nothing wider", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const preflight = await viaProxy(route, token ?? "", {
+      method: "OPTIONS",
+      headers: {
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type",
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
+    expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, POST");
+    expect(preflight.headers.get("access-control-allow-headers")).toBe("content-type");
+    expect(preflight.headers.get("access-control-allow-credentials")).toBeNull();
+    expect((await viaProxy(route, "A".repeat(43), { method: "OPTIONS" })).status).toBe(403);
+    expect(
+      (await viaProxy(route, token ?? "", { method: "OPTIONS", resource: "image" })).status,
+    ).toBe(405);
+    expect(connections()).toEqual([]);
+  });
+
+  it("serves an image and a font from their own paths, only to that kind of load and only as that type", async () => {
+    const { route, connections } = networkRoute();
+    await setSwitch(route, true);
+    const { token } = await runPage(route);
+    const load = (resource: string, target: string, destination: string | undefined) =>
+      viaProxy(route, token ?? "", {
+        resource,
+        query: `url=${encodeURIComponent(target)}`,
+        headers:
+          destination === undefined
+            ? { "sec-fetch-dest": "", cookie: "octant-session=secret" }
+            : { "sec-fetch-dest": destination, cookie: "octant-session=secret" },
+      });
+
+    const image = await load("image", "https://cdn.example.com/logo.png", "image");
+    expect([image.status, image.headers.get("content-type")]).toEqual([200, "image/png"]);
+    expect(image.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(image.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    const font = await load("font", "https://cdn.example.com/face.woff2", "font");
+    expect([font.status, font.headers.get("content-type")]).toEqual([200, "font/woff2"]);
+    expect(connections()).toEqual([
+      { url: "https://cdn.example.com/logo.png", headers: { accept: "*/*" } },
+      { url: "https://cdn.example.com/face.woff2", headers: { accept: "*/*" } },
+    ]);
+
+    // Markup, or the other kind, is not passed on from either path.
+    for (const [resource, target, destination] of [
+      ["image", "https://cdn.example.com/page.html", "image"],
+      ["image", "https://cdn.example.com/face.woff2", "image"],
+      ["font", "https://cdn.example.com/page.html", "font"],
+      ["font", "https://cdn.example.com/logo.png", "font"],
+    ] as const) {
+      const response = await load(resource, target, destination);
+      expect([resource, target, response.status, await response.json()]).toEqual([
+        resource,
+        target,
+        502,
+        { refused: "response-type-not-allowed" },
+      ]);
+    }
+    const before = connections().length;
+    // Neither path is a document's, a frame's, or the other kind's.
+    for (const [resource, destination] of [
+      ["image", "document"],
+      ["image", "iframe"],
+      ["image", "font"],
+      ["font", "image"],
+      ["font", "document"],
+      ["image", "video"],
+    ] as const) {
+      const response = await load(resource, "https://cdn.example.com/logo.png", destination);
+      expect([resource, destination, response.status]).toEqual([resource, destination, 403]);
+    }
+    // The destination rule holds on both.
+    for (const resource of ["image", "font"]) {
+      for (const target of ["http://127.0.0.1/logo.png", "http://192.168.1.1/face.woff2"]) {
+        const response = await load(resource, target, resource);
+        expect([resource, target, response.status]).toEqual([resource, target, 403]);
+      }
+    }
+    expect(connections()).toHaveLength(before);
+  });
+
+  it("lets a page's token age out in an hour unless the window that ran it keeps it alive", async () => {
+    const { route, advance, connections } = networkRoute();
+    await setSwitch(route, true);
+    const kept = await runPage(route);
+    const closed = await runPage(route);
+    const fiftyMinutes = 50 * 60 * 1_000;
+
+    advance(fiftyMinutes);
+    const renewed = await renew(route, kept.ticket);
+    expect(JSON.parse(await renewed.text())).toEqual({ kind: "canvas-network-page-renewed" });
+    advance(fiftyMinutes);
+    // The page nobody renewed is past its hour; the one kept open is not.
+    expect((await viaProxy(route, closed.token ?? "")).status).toBe(403);
+    expect((await viaProxy(route, kept.token ?? "")).status).toBe(200);
+    // Using the token did not renew it.
+    advance(fiftyMinutes);
+    expect((await viaProxy(route, kept.token ?? "")).status).toBe(403);
+    expect(JSON.parse(await (await renew(route, kept.ticket)).text())).toEqual({
+      kind: "canvas-network-page-renewal-refused",
+      reason: "not-live",
+    });
+    expect(connections()).toHaveLength(1);
+  });
+
+  it("renews a page only for the window that ran it: not for its token, a page, or a paired device", async () => {
+    const { route, advance } = networkRoute();
+    await setSwitch(route, true);
+    const page = await runPage(route);
+    const refusal = async (response: Response) => JSON.parse(await response.text());
+
+    // A leaked token names no page, with or without a window's credential.
+    expect(await refusal(await renew(route, page.token))).toEqual({
+      kind: "canvas-network-page-renewal-refused",
+      reason: "not-live",
+    });
+    // What the page itself could send: its ticket, an opaque origin, no credential.
+    const fromPage = await renew(route, page.ticket, {
+      "content-type": "application/json",
+      origin: "null",
+    });
+    expect(fromPage.status).toBeGreaterThanOrEqual(400);
+    expect(await refusal(await renew(route, "short"))).toMatchObject({ reason: "malformed" });
+
+    const paired = new Request("http://127.0.0.1/api/canvas/network-access/renew", {
+      method: "POST",
+      headers: windowHeaders,
+      body: JSON.stringify({
+        schemaVersion: 1,
+        kind: "renew-canvas-network-page",
+        ticket: page.ticket,
+      }),
+    });
+    bindPrincipalRouteContext(paired, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "17171717-1717-4171-8171-171717171717" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    expect(await refusal(await answer(route, paired))).toEqual({
+      kind: "canvas-network-page-renewal-refused",
+      reason: "local-window-required",
+    });
+
+    // None of that kept it alive.
+    advance(60 * 60 * 1_000);
+    expect((await viaProxy(route, page.token ?? "")).status).toBe(403);
+
+    // Turning the switch off ends renewal with the token.
+    const next = await runPage(route);
+    await setSwitch(route, false);
+    await setSwitch(route, true);
+    expect(await refusal(await renew(route, next.ticket))).toMatchObject({ reason: "not-live" });
   });
 
   it("refuses the switch to a paired device and gives its page no proxy", async () => {
@@ -3245,10 +3545,8 @@ describe("canvas network routes", () => {
       const page = await desktopPage(route, proof);
       expect(page.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
       // The page is told the prototype host's own address, never the host's or the token.
-      expect(page.policy).toBe(
-        BASE_POLICY.replace("connect-src 'none'", `connect-src ${relayBase}`),
-      );
-      expect(page.html).toContain(`${relayBase}fetch?url=`);
+      expect(page.policy).toBe(networkPolicy(relayBase));
+      expect(page.html).toContain(JSON.stringify(relayBase));
       expect(page.html).not.toContain(page.token ?? "missing");
       expect(page.html).not.toContain("/api/canvas/network/");
       expect(page.policy).not.toContain("127.0.0.1");

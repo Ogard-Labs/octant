@@ -20,10 +20,15 @@ const otherCanvasId = decodeCanvasId("22222222-2222-4222-8222-222222222222");
 const nothingReserved: CanvasNetworkReserved = { addresses: [], hosts: [] };
 const PUBLIC = "93.184.216.34";
 
+const text = (body: Uint8Array) => new TextDecoder().decode(body);
+const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+
 interface Connection {
   readonly url: string;
   readonly addresses: ReadonlyArray<string>;
   readonly headers: Readonly<Record<string, string>>;
+  readonly method: string;
+  readonly body?: string;
 }
 
 /** A proxy over a scripted resolver and a transport that records what it was handed. */
@@ -41,6 +46,8 @@ function proxyOver(input: {
       url: url.toString(),
       addresses: connection.addresses,
       headers: connection.headers,
+      method: connection.method,
+      ...(connection.body === undefined ? {} : { body: text(connection.body) }),
     });
     return (
       (await input.respond?.(url, connection.signal)) ??
@@ -60,8 +67,6 @@ function proxyOver(input: {
   return { proxy, connections, resolved };
 }
 
-const text = (body: Uint8Array) => new TextDecoder().decode(body);
-
 describe("Canvas network proxy", () => {
   it("fetches a public address and hands back its status, type, and body", async () => {
     const { proxy, connections, resolved } = proxyOver({});
@@ -74,7 +79,12 @@ describe("Canvas network proxy", () => {
     expect(outcome.status === "fetched" && text(outcome.body)).toBe("hello");
     expect(resolved).toEqual(["api.example.com"]);
     expect(connections).toEqual([
-      { url: "https://api.example.com/data?x=1", addresses: [PUBLIC], headers: { accept: "*/*" } },
+      {
+        url: "https://api.example.com/data?x=1",
+        addresses: [PUBLIC],
+        headers: { accept: "*/*" },
+        method: "GET",
+      },
     ]);
   });
 
@@ -189,10 +199,110 @@ describe("Canvas network proxy", () => {
           : new Response(null, { status: 302, headers: { location: "/final" } }),
     });
     await proxy.fetch(canvasId, "https://public.example.com/start");
-    expect(connections.map((connection) => connection.headers)).toEqual([
-      { accept: "*/*" },
-      { accept: "*/*" },
+    expect(connections.map((connection) => [connection.method, connection.headers])).toEqual([
+      ["GET", { accept: "*/*" }],
+      ["GET", { accept: "*/*" }],
     ]);
+  });
+
+  it("sends a page's JSON body as JSON, with no header the page chose", async () => {
+    const { proxy, connections } = proxyOver({});
+    const outcome = await proxy.fetch(canvasId, "https://public.example.com/rpc", {
+      resource: "fetch",
+      body: json({ ask: 1 }),
+    });
+    expect(outcome.status).toBe("fetched");
+    expect(connections).toEqual([
+      {
+        url: "https://public.example.com/rpc",
+        addresses: [PUBLIC],
+        headers: { accept: "*/*", "content-type": "application/json" },
+        method: "POST",
+        body: '{"ask":1}',
+      },
+    ]);
+  });
+
+  it("sends the body again only where a redirect keeps the method, and judges every hop", async () => {
+    const kept = proxyOver({
+      respond: (url) =>
+        url.pathname === "/final"
+          ? new Response("ok")
+          : new Response(null, { status: 307, headers: { location: "/final" } }),
+    });
+    await kept.proxy.fetch(canvasId, "https://public.example.com/start", {
+      resource: "fetch",
+      body: json({ ask: 1 }),
+    });
+    expect(kept.connections.map((connection) => [connection.method, connection.body])).toEqual([
+      ["POST", '{"ask":1}'],
+      ["POST", '{"ask":1}'],
+    ]);
+
+    const dropped = proxyOver({
+      respond: (url) =>
+        url.pathname === "/final"
+          ? new Response("ok")
+          : new Response(null, { status: 303, headers: { location: "/final" } }),
+    });
+    await dropped.proxy.fetch(canvasId, "https://public.example.com/start", {
+      resource: "fetch",
+      body: json({ ask: 1 }),
+    });
+    expect(dropped.connections.map((connection) => [connection.method, connection.body])).toEqual([
+      ["POST", '{"ask":1}'],
+      ["GET", undefined],
+    ]);
+    expect(dropped.connections[1]?.headers).toEqual({ accept: "*/*" });
+
+    // A body is never carried to a private address a redirect names.
+    const inward = proxyOver({
+      resolve: (hostname) => (hostname === "inside.example.com" ? ["10.0.0.5"] : [PUBLIC]),
+      respond: () =>
+        new Response(null, { status: 308, headers: { location: "https://inside.example.com/" } }),
+    });
+    await expect(
+      inward.proxy.fetch(canvasId, "https://public.example.com/", {
+        resource: "fetch",
+        body: json({ secret: true }),
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "private-address" });
+    expect(inward.connections).toHaveLength(1);
+  });
+
+  it("passes an image or a font only a response of that type, under the same rule and bounds", async () => {
+    const typed = (type: string) =>
+      proxyOver({ respond: () => new Response("bytes", { headers: { "content-type": type } }) });
+    const image = await typed("image/png").proxy.fetch(canvasId, "https://public.example.com/a", {
+      resource: "image",
+    });
+    expect(image.status === "fetched" && image.contentType).toBe("image/png");
+    const font = await typed("font/woff2").proxy.fetch(canvasId, "https://public.example.com/f", {
+      resource: "font",
+    });
+    expect(font.status).toBe("fetched");
+    for (const resource of ["image", "font"] as const) {
+      await expect(
+        typed("text/html").proxy.fetch(canvasId, "https://public.example.com/", { resource }),
+      ).resolves.toEqual({ status: "refused", reason: "response-type-not-allowed" });
+      const inside = proxyOver({ resolve: () => ["192.168.1.10"] });
+      await expect(
+        inside.proxy.fetch(canvasId, "https://printer.example.com/logo.png", { resource }),
+      ).resolves.toEqual({ status: "refused", reason: "private-address" });
+      expect(inside.connections).toEqual([]);
+      const large = proxyOver({
+        respond: () =>
+          new Response("x", {
+            headers: {
+              "content-type": resource === "image" ? "image/png" : "font/woff2",
+              "content-length": String(CANVAS_NETWORK_MAX_RESPONSE_BYTES + 1),
+            },
+          }),
+      });
+      await expect(
+        large.proxy.fetch(canvasId, "https://public.example.com/", { resource }),
+      ).resolves.toEqual({ status: "refused", reason: "response-too-large" });
+    }
   });
 
   it("refuses a response larger than the bound instead of cutting it short", async () => {
@@ -368,17 +478,28 @@ describe("the proxy's own transport", () => {
   async function listen(): Promise<{
     readonly port: number;
     readonly seen: IncomingHttpHeaders[];
+    readonly bodies: string[];
   }> {
     const seen: IncomingHttpHeaders[] = [];
+    const bodies: string[] = [];
     const server = createServer((request, response) => {
       seen.push(request.headers);
-      response.writeHead(200, { "content-type": "text/plain" });
-      response.end("reached");
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        bodies.push(`${request.method ?? ""} ${Buffer.concat(chunks).toString()}`);
+        response.writeHead(200, { "content-type": "text/plain" });
+        response.end("reached");
+      });
     });
     servers.push(server);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
     const address = server.address();
-    return { port: typeof address === "object" && address !== null ? address.port : 0, seen };
+    return {
+      port: typeof address === "object" && address !== null ? address.port : 0,
+      seen,
+      bodies,
+    };
   }
 
   it("connects to the address it was handed, never resolving the name, and sends no credential", async () => {
@@ -388,6 +509,7 @@ describe("the proxy's own transport", () => {
     const response = await connect(new URL(`http://no-such-name.invalid:${target.port}/x`), {
       addresses: ["127.0.0.1"],
       headers: { accept: "*/*" },
+      method: "GET",
       signal: new AbortController().signal,
     });
     await expect(response.text()).resolves.toBe("reached");
@@ -395,6 +517,27 @@ describe("the proxy's own transport", () => {
     const names = Object.keys(target.seen[0] ?? {}).sort();
     expect(names.filter((name) => name !== "connection")).toEqual(["accept", "host"]);
     expect(target.seen[0]?.host).toBe(`no-such-name.invalid:${target.port}`);
+  });
+
+  it("sends a JSON body with its length and nothing else the page could choose", async () => {
+    const target = await listen();
+    const connect = pinnedCanvasNetworkConnect(() => undefined);
+    const response = await connect(new URL(`http://no-such-name.invalid:${target.port}/rpc`), {
+      addresses: ["127.0.0.1"],
+      headers: { accept: "*/*", "content-type": "application/json" },
+      method: "POST",
+      body: json({ ask: 1 }),
+      signal: new AbortController().signal,
+    });
+    await expect(response.text()).resolves.toBe("reached");
+    expect(target.bodies).toEqual(['POST {"ask":1}']);
+    const names = Object.keys(target.seen[0] ?? {}).sort();
+    expect(names.filter((name) => name !== "connection")).toEqual([
+      "accept",
+      "content-length",
+      "content-type",
+      "host",
+    ]);
   });
 
   it("judges the handed address again where the socket opens", async () => {
@@ -406,6 +549,7 @@ describe("the proxy's own transport", () => {
       connect(new URL(`http://no-such-name.invalid:${target.port}/x`), {
         addresses: ["127.0.0.1"],
         headers: { accept: "*/*" },
+        method: "GET",
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow();

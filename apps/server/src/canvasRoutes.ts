@@ -100,7 +100,16 @@ import {
   type CanvasDesignRunTickets,
 } from "./canvas/canvasDesignPage";
 import type { CanvasNetworkAccessService } from "./canvas/canvasNetworkAccessService";
-import { canvasNetworkProxyResponse, type CanvasNetworkProxy } from "./canvas/canvasNetworkProxy";
+import {
+  canvasNetworkPreflightResponse,
+  canvasNetworkProxyResponse,
+  readWithin,
+  type CanvasNetworkProxy,
+} from "./canvas/canvasNetworkProxy";
+import {
+  CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES,
+  type CanvasNetworkResource,
+} from "@octant/domain/canvas-network-policy";
 import {
   CANVAS_NETWORK_PROXY_PATH_PREFIX,
   CANVAS_NETWORK_TOKEN_HEADER,
@@ -109,7 +118,10 @@ import {
   decodeCanvasNetworkAccessCommand,
   decodeCanvasNetworkAccessResult,
   decodeCanvasNetworkAccessView,
+  decodeCanvasNetworkPageRenewalCommand,
+  decodeCanvasNetworkPageRenewalResult,
   type CanvasNetworkAccessRefusalReason,
+  type CanvasNetworkPageRenewalResult,
 } from "@octant/contracts/canvas-network";
 import { admitDesktopBroker } from "./desktopBrokerAdmission";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
@@ -311,6 +323,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "public-link-settings" &&
       route !== "thread-reference-cards" &&
       route !== "network-access" &&
+      route !== "network-access/renew" &&
       !route.startsWith(NETWORK_PROXY_ROUTE_PREFIX)
     ) {
       return undefined;
@@ -1753,6 +1766,43 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         );
       }
 
+      if (route === "network-access/renew" && request.method === "POST") {
+        const answerRenewal = (result: CanvasNetworkPageRenewalResult) =>
+          jsonResponse(decodeCanvasNetworkPageRenewalResult(result), 200, origin);
+        const refusedRenewal = (
+          reason: Extract<
+            CanvasNetworkPageRenewalResult,
+            { kind: "canvas-network-page-renewal-refused" }
+          >["reason"],
+        ) => answerRenewal({ kind: "canvas-network-page-renewal-refused", reason });
+        // A page's token is kept alive only by the window that ran the page,
+        // which proves itself as a window and names the page by the ticket it
+        // ran it with. Neither a paired device (whose pages hold no token)
+        // nor the token itself renews anything, so a token that leaked from a
+        // page dies with that page.
+        if (principal.kind !== "local-window") return refusedRenewal("local-window-required");
+        const body = await readJson(request);
+        let command;
+        try {
+          command = decodeCanvasNetworkPageRenewalCommand(body.kind === "ok" ? body.value : null);
+        } catch {
+          return refusedRenewal("malformed");
+        }
+        const access = dependencies.canvasNetwork?.access;
+        const pageCanvasId = access?.canvasForPage(command.ticket);
+        if (
+          access === undefined ||
+          pageCanvasId === undefined ||
+          dependencies.canvasProjection.getById(pageCanvasId) === undefined ||
+          (await resolveAuthorizedContext(dependencies, authenticatedWindowId, pageCanvasId))
+            .kind !== "ok" ||
+          access.renewPage(command.ticket) === undefined
+        ) {
+          return refusedRenewal("not-live");
+        }
+        return answerRenewal({ kind: "canvas-network-page-renewed" });
+      }
+
       if (route === "export-folder" && (request.method === "GET" || request.method === "POST")) {
         const folders = dependencies.canvasExportFolderService;
         // Reading where a Canvas exports to and choosing it are the same
@@ -2582,7 +2632,9 @@ async function serveDesignPage(
     grant.network === true &&
     grant.canvasId !== undefined &&
     (destination === "iframe" || desktopSurface !== undefined)
-      ? dependencies.canvasNetwork?.access.issueToken(grant.canvasId)
+      ? // The ticket names the page from here on: the window that ran it
+        // renews the token by it.
+        dependencies.canvasNetwork?.access.issueToken(grant.canvasId, ticket)
       : undefined;
   // A browser's page is told the proxy path under its token. A desktop page
   // is told an address of the prototype host's own scheme, and the token goes
@@ -2638,14 +2690,20 @@ function desktopPrototypeSurface(
 }
 
 const NETWORK_PROXY_ROUTE_PREFIX = CANVAS_NETWORK_PROXY_PATH_PREFIX.slice("/api/canvas/".length);
-const NETWORK_PROXY_ROUTE = /^network\/([A-Za-z0-9_-]{43})\/fetch$/;
+const NETWORK_PROXY_ROUTE = /^network\/([A-Za-z0-9_-]{43})\/(fetch|image|font)$/;
+/** What a browser says it is loading from each path; any other load is not answered. */
+const NETWORK_FETCH_DESTINATION: Readonly<Record<CanvasNetworkResource, string>> = {
+  fetch: "empty",
+  image: "image",
+  font: "font",
+};
 
 /**
  * One fetch on behalf of a running page. The token names the Canvas and is
  * live only while that Canvas's switch is on. The request's cookies, origin,
- * and headers are not read and nothing of them is passed on; the address to
- * fetch is the one thing the page chooses, and the proxy holds it to the
- * destination rule.
+ * and headers are not read and nothing of them is passed on; the page chooses
+ * the address, which the proxy holds to the destination rule, and for a
+ * `POST` a JSON body, which is bounded and read as JSON here.
  */
 async function serveNetworkRequest(
   dependencies: CanvasRouteDependencies,
@@ -2655,7 +2713,8 @@ async function serveNetworkRequest(
 ): Promise<Response> {
   const match = NETWORK_PROXY_ROUTE.exec(route);
   const token = match?.[1];
-  if (token === undefined) {
+  const resource = match?.[2] as CanvasNetworkResource | undefined;
+  if (token === undefined || resource === undefined) {
     return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
   }
   const network = dependencies.canvasNetwork;
@@ -2675,20 +2734,57 @@ async function serveNetworkRequest(
   ) {
     return canvasNetworkProxyResponse({ status: "refused", reason: "token-not-live" });
   }
-  if (request.method !== "GET") {
+  // An image or a font is only ever loaded; a script may also send JSON.
+  const posts = resource === "fetch" && request.method === "POST";
+  const preflight = resource === "fetch" && request.method === "OPTIONS";
+  if (request.method !== "GET" && !posts && !preflight) {
     return canvasNetworkProxyResponse({ status: "refused", reason: "method-not-allowed" });
   }
-  // A browser names what it is loading. A script's request is the only kind
-  // answered, so a fetched page is never drawn as a document on this origin.
+  // A browser names what it is loading. Each path answers the one kind of
+  // load it is for, so a fetched page is never drawn as a document or a
+  // frame on this origin.
   const destination = request.headers.get("sec-fetch-dest");
-  if (destination !== null && destination !== "empty") {
+  if (destination !== null && destination !== NETWORK_FETCH_DESTINATION[resource]) {
     return canvasNetworkProxyResponse({ status: "refused", reason: "not-a-script-request" });
   }
+  // A browser asks before a page's JSON `POST` from another origin. The
+  // answer admits that one request shape and no credential.
+  if (preflight) return canvasNetworkPreflightResponse();
   const target = url.searchParams.get("url");
   if (url.searchParams.size !== 1 || target === null) {
     return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
   }
-  return canvasNetworkProxyResponse(await network.proxy.fetch(canvasId, target));
+  if (!posts) {
+    return canvasNetworkProxyResponse(await network.proxy.fetch(canvasId, target, { resource }));
+  }
+  const declaredType = (request.headers.get("content-type") ?? "").split(";")[0] ?? "";
+  if (declaredType.trim().toLowerCase() !== "application/json") {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "request-type-not-allowed" });
+  }
+  if (
+    Number(request.headers.get("content-length") ?? "0") > CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES
+  ) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "request-too-large" });
+  }
+  let body: Uint8Array | undefined;
+  try {
+    body = await readWithin(request, CANVAS_NETWORK_MAX_REQUEST_BODY_BYTES);
+  } catch {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+  }
+  if (body === undefined) {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "request-too-large" });
+  }
+  // The host declares the body as JSON to the far side, so it sends only
+  // what reads as JSON.
+  try {
+    JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+  } catch {
+    return canvasNetworkProxyResponse({ status: "refused", reason: "invalid-request" });
+  }
+  return canvasNetworkProxyResponse(
+    await network.proxy.fetch(canvasId, target, { resource, body }),
+  );
 }
 
 function toInventoryEntry(

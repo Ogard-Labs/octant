@@ -143,7 +143,8 @@ describe("Canvas network access", () => {
     open.close();
   });
 
-  it("forgets a token after twelve hours and keeps at most eight for a Canvas", () => {
+  it("forgets a token after one hour and keeps at most eight for a Canvas", () => {
+    expect(CANVAS_NETWORK_TOKEN_TTL_MS).toBe(60 * 60 * 1_000);
     const open = connection();
     let time = 0;
     const { service } = serviceOver(open, () => time);
@@ -161,6 +162,45 @@ describe("Canvas network access", () => {
     );
     expect(service.canvasForToken(first)).toBeUndefined();
     expect(rest.map((token) => service.canvasForToken(token))).toEqual(rest.map(() => canvasId));
+    open.close();
+  });
+
+  it("keeps an open page's token alive only when its own page is named, never by the token", () => {
+    const open = connection();
+    let time = 0;
+    const { service } = serviceOver(open, () => time);
+    service.set(canvasId, true);
+    const token = service.issueToken(canvasId, "page-one") ?? "";
+    const unnamed = service.issueToken(canvasId) ?? "";
+
+    time = CANVAS_NETWORK_TOKEN_TTL_MS - 1;
+    // Using a token does not renew it, and the token is not a page's name.
+    expect(service.canvasForToken(token)).toBe(canvasId);
+    expect(service.renewPage(token)).toBeUndefined();
+    expect(service.renewPage("another-page")).toBeUndefined();
+    expect(service.renewPage("page-one")).toBe(canvasId);
+
+    time = CANVAS_NETWORK_TOKEN_TTL_MS;
+    expect(service.canvasForToken(unnamed)).toBeUndefined();
+    expect(service.canvasForToken(token)).toBe(canvasId);
+    time = 2 * CANVAS_NETWORK_TOKEN_TTL_MS - 2;
+    expect(service.canvasForToken(token)).toBe(canvasId);
+    // A page nobody kept open ages out an hour after its last renewal, and
+    // cannot be brought back.
+    time = 2 * CANVAS_NETWORK_TOKEN_TTL_MS - 1;
+    expect(service.canvasForToken(token)).toBeUndefined();
+    expect(service.renewPage("page-one")).toBeUndefined();
+    open.close();
+  });
+
+  it("renews nothing once the switch is off", () => {
+    const open = connection();
+    const { service } = serviceOver(open);
+    service.set(canvasId, true);
+    service.issueToken(canvasId, "page-one");
+    service.set(canvasId, false);
+    service.set(canvasId, true);
+    expect(service.renewPage("page-one")).toBeUndefined();
     open.close();
   });
 });
