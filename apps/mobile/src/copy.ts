@@ -190,7 +190,7 @@ export const MOBILE_COPY = {
   toolApprovalAllowServerOnThread: "Allow this server in this thread",
   toolApprovalAllowToolOnly: "Allow only this tool",
   toolApprovalServerDetail:
-    "Octant asks about a server once: allowing lets every tool of this server run without asking, until its plugin is updated.",
+    "Octant asks about a server once: allowing lets every tool of this server run without asking, until an update comes from a different publisher or source, asks for more, or is rolled back.",
   toolApprovalServerOnThreadDetail:
     "This thread has read outside content, and this server can send what the thread has read over the network. Allowing lets its tools run for the rest of this thread without asking.",
   approvalDeny: "Deny",

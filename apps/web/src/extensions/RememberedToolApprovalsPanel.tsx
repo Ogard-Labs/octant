@@ -174,7 +174,7 @@ export function RememberedToolApprovalsPanel(props: {
                 <SettingsCompactRow
                   detail={
                     grant.mcpToolName === undefined
-                      ? `Octant runs every tool of this server ${place} without asking, until its plugin is updated.`
+                      ? `Octant runs every tool of this server ${place} without asking, until an update comes from a different publisher or source, asks for more, or is rolled back.`
                       : `Octant runs it ${place} without asking.`
                   }
                   focused={
