@@ -575,6 +575,8 @@ const timer = setInterval(() => {
             8000,
           );
           await writeFile(join(artifacts, `${stage}.json`), raw);
+          if (stage.startsWith("fixture") || stage.startsWith("back-to-app"))
+            console.log(`DIAG ${stage} ${Date.now()} ${raw.slice(0, 3000)}`);
           const snapshot = decodeSnapshot(JSON.parse(raw));
           if (snapshot.pid !== ownPid) throw Error("The observation belongs to another process.");
           lastNativeError = "";
