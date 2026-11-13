@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
+import { decodeHostAnswer } from "./hostAnswer";
 import {
   DecisionReviewRecorded,
   decodePendingRequest,
   decodePendingRequestList,
   MAX_PENDING_REQUESTS,
+  PendingRequestList,
 } from "./pendingRequests";
 
 const ids = {
@@ -24,6 +26,75 @@ const ids = {
   childRun: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
 } as const;
 const requestedAt = "2026-10-06T08:00:00.000Z";
+
+const toolAsk = {
+  kind: "tool-approval",
+  askId: ids.approval,
+  mode: "work",
+  projectId: ids.project,
+  threadId: ids.workThread,
+  threadTitle: "Quarterly report",
+  requestedAt,
+  text: "Run search_issues from the Linear server?",
+  detail: '{"query":"renewals"}',
+  inPlace: true,
+} as const;
+
+describe("waiting asks", () => {
+  it("lists a waiting ask beside the requests, with what a row shows and how to answer it", () => {
+    const list = decodePendingRequestList({ requests: [], truncated: false, asks: [toolAsk] });
+    expect(list.asks).toEqual([toolAsk]);
+    // A thread filed under no Project, and an ask only its own card can answer.
+    expect(
+      decodePendingRequestList({
+        requests: [],
+        truncated: false,
+        asks: [
+          {
+            kind: "browser-sign-in",
+            askId: ids.approval,
+            mode: "chat",
+            threadId: ids.chatThread,
+            threadTitle: "Trip",
+            requestedAt,
+            text: "Sign in at https://example.com",
+          },
+        ],
+      }).asks?.[0]?.inPlace,
+    ).toBeUndefined();
+  });
+
+  it("still decodes a list from a host that lists no asks", () => {
+    expect(decodePendingRequestList({ requests: [], truncated: false }).asks).toBeUndefined();
+  });
+
+  it("refuses an ask with a field this build cannot show, inside a lenient host answer", () => {
+    const lenient = decodeHostAnswer(PendingRequestList);
+    expect(
+      lenient({ requests: [], truncated: false, later: 1, asks: [toolAsk] }).asks,
+    ).toHaveLength(1);
+    expect(() =>
+      lenient({ requests: [], truncated: false, asks: [{ ...toolAsk, alsoGrants: "everything" }] }),
+    ).toThrow();
+  });
+
+  it("refuses an ask of an unknown kind or with text past the row's bound", () => {
+    expect(() =>
+      decodePendingRequestList({
+        requests: [],
+        truncated: false,
+        asks: [{ ...toolAsk, kind: "payment" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequestList({
+        requests: [],
+        truncated: false,
+        asks: [{ ...toolAsk, text: "x".repeat(301) }],
+      }),
+    ).toThrow();
+  });
+});
 
 const workApproval = {
   mode: "work",

@@ -1741,8 +1741,12 @@ authoritative.
   edit. The proposal carries the memory version the agent saw, so a change
   made against memory that moved while the card waited is not applied.
   Declined and cancelled proposals change nothing
-  and tell the agent so; an unanswered proposal waits in Needs you (not built
-  yet: today it expires after ten minutes). Plan mode refuses every write before asking; a turn
+  and tell the agent so; an unanswered proposal waits, with no expiry, as its
+  card in the thread until the person answers it, the turn stops, the thread
+  is archived, or the raising window goes away (built). The
+  pending-requests read (Needs you) lists it to that window as a waiting ask,
+  answerable from the list when the row holds the whole change (maintainer
+  decision, 2026-11-13). Plan mode refuses every write before asking; a turn
   the host starts with no person behind it (a routine's run, a resumed turn) is
   refused a write that needs a card, because no card can reach the person. A
   paired device's turn is offered the card on that device, as a window's turn is
@@ -3859,11 +3863,13 @@ the thread it came from.
   local window does (maintainer decision, 2026-11-12; not built yet: today it
   may not, so a paused routine says to resume it at a window on this
   computer).
-  The host holds it for ten minutes as a suggestion chip at the foot of the
+  The host holds it, with no expiry, as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with
-  no such window open, or once it goes away, the proposal is withdrawn
-  unanswered. The chip's one click confirms and dismissing it declines.
+  no such window open, or once it goes away, the turn stops, or the thread is
+  archived, the proposal is withdrawn unanswered. The pending-requests read
+  (Needs you) lists it to that window as a waiting ask whose row opens the
+  thread (maintainer decision, 2026-11-13). The chip's one click confirms and dismissing it declines.
   Confirm is the `POST /api/automations/proposals/decide` route, under the same transport
   principal and Project check as `commands`. On confirm the host builds the
   definition from the thread's live facts (Project version and binding, the
@@ -3894,8 +3900,8 @@ the thread it came from.
   run this turn belongs to. They answer at any posture, Plan included, and in
   a routine's own turn. `pause` and `archive` only ask: the request waits as a
   card in the thread under the proposal rules above (the raising window or
-  paired device only, ten minutes, the shared cap of 32, withdrawn with the
-  turn), and the person's confirmation is their own pause or archive through
+  paired device only, no expiry, the shared cap of 32, withdrawn with the
+  turn or the thread's archive), and the person's confirmation is their own pause or archive through
   the `proposals/decide` route and the ordinary command, under the same
   Project check, at the routine version the agent saw, so a routine changed
   since is refused rather than changed. An agent may ask only about a routine
@@ -5990,21 +5996,42 @@ ls-remote` against the thread's remote and the GitHub reads they already
   hold it with a visible reason. After an ordinary provider failure or a
   clean restart the queue continues by itself once, with no review of the
   queued messages first; a second failure in a row holds it (maintainer
-  request, 2026-11-12). Not built yet: today any cancellation or failure
-  holds it, and restart recovery holds pending work until an authenticated
-  user resumes it. Recovery never restores a temporary grant or guesses that an ambiguous
-  send failed. The one exception built today is a Chat, Work or Code thread the host
-  continues after the restart cut its turn off: the host lifts that queue's restart hold under its
+  request, 2026-11-12). Built: an ordinary failure is a turn its mode itself
+  recorded as failed: a Chat attempt whose outcome is `failed`, a Work turn
+  whose status is `failed` without the `interrupted` category, or Code
+  runtime work whose state is `failed`. A turn that was interrupted, stopped,
+  cancelled or cut off by a restart, one whose end is unconfirmed, and a
+  message whose delivery is unknown are not ordinary failures and hold the
+  queue. A clean restart is one that cut nothing of the queue: every message
+  was still queued, none dispatching or accepted, and the queue was not
+  paused, held, or already past its one continuation. Its hold stays visible
+  and lifts by itself once the window or paired device each message waits
+  under is live again and every message passes the checks an explicit resume
+  runs; a changed binding or lost authority holds it for a person instead.
+  The queue records the failure or restart it continued past, so a second
+  one in a row holds; a completed turn or a person's resume restores the one
+  continuation. Recovery never restores a temporary grant or guesses that an ambiguous
+  send failed. A Chat, Work or Code thread the host
+  continues after the restart cut its turn off is released sooner: the host lifts that queue's restart hold under its
   own scope, so its messages follow the continuation through the same
-  dispatch checks (see Code restart recovery under Persistence). Closing a composer cannot delete an accepted queued attachment.
+  dispatch checks. That release is no review: it records the restart as
+  continued past, so a failed continuation or another restart before a turn
+  completes holds the queue (see Code restart recovery under Persistence). Closing a composer cannot delete an accepted queued attachment.
   Thread purge removes queued private content and retained attachments.
   A queued message remains bound to the provider, model and authority settings
   present at enqueue. After changing those settings, restore them before
   resuming, or remove and resubmit the message with the new settings. Local
   authenticated windows share the queue, and a paired device may queue
-  (maintainer request, 2026-11-12; not built yet: today paired remote queue
-  commands remain unavailable until dispatch can revalidate the originating
-  device's grants).
+  (maintainer request, 2026-11-12). Built: a paired device reads a thread's
+  queue, queues a message, and edits or removes a message it queued; pause,
+  resume, reorder and another's message stay with a local window. The message
+  waits under the device's own scope, so its turn keeps every limit a turn
+  the device sends directly has. Each command and each dispatch asks again
+  that the device is still paired, is allowed the mode's send action, and
+  that the thread's Project is one the mode serves (for Code, an active one).
+  A Code dispatch has no request to be admitted by, so it is admitted as that
+  device for the dispatch alone and holds nothing afterwards. The paired
+  clients do not yet offer the queue in their composer.
   A committed queue change or terminal turn event wakes only its thread's
   dispatcher. Response text and unrelated journal writes do not scan other
   queues. A recovery pass runs once per second to catch runtime state that
@@ -6539,8 +6566,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   agent's own model suggestion is not a person's choice
   (`imageGenerationWithoutAsking` in `@octant/domain`). A kept choice the
   host can no longer run is dropped and asked again rather than swapped, at
-  Full access too; in a turn nobody attends the call then starts nothing. An offer lives at most ten minutes and is given
-  up when its turn stops or its window goes away; Plan refuses the call,
+  Full access too; in a turn nobody attends the call then starts nothing. An
+  offer waits with no expiry and is given up when its turn stops, its thread
+  is archived, or its window goes away; the pending-requests read (Needs
+  you) lists it to that window as a waiting ask whose row opens the thread,
+  where the person picks the model (maintainer decision, 2026-11-13). Plan
+  refuses the call,
   because a generation calls a paid provider and stores the result.
   After Generate the call waits up to two minutes for the job. A finished job
   answers with each image's attachment id, and the images themselves through
@@ -7373,7 +7404,11 @@ policy, which the host can only narrow.
 _Approvals._ A Code turn parked on an approval or a question is read with the
 same signal the sibling-threads read uses (`turnAwaitsPerson` or a harness
 approval). After 10 minutes parked, the runner interrupts the turn
-(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. A turn that
+(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. This
+park is the one ask that keeps a time limit without guarding a secret: a
+cell measures unattended work, holds a managed worktree and a place in its
+run until it settles, and reports the block as its result (maintainer
+decision, 2026-11-13). A turn that
 ends first while an approval waits (a provider-inactivity timeout, an interrupt)
 settles the same way, with the summary of what was asked, because the runner
 remembers what the turn was last seen waiting on; a turn that ends with no
@@ -8051,21 +8086,21 @@ watched has ended.
 
 _Failures._
 
-| What happens                                                                                                       | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A turn is running, or another compaction is                                                                        | Refused before anything is journaled; the same `compactionId` returns the compaction already under way.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| The runtime reports failure (Pi with no `result`, Claude `failed`)                                                 | `failed` (`runtime-failed`), carrying the adapter's `sessionMayHaveChanged`. Unchanged (Pi) reads as nothing changed and the person can retry; may-have-changed (Claude today) says so, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| The host summary request fails                                                                                     | `failed` (`summary-failed`); nothing changes, and the person can retry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| The host summary is not smaller than what it replaces                                                              | `failed` (`summary-not-smaller`); nothing changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| A pin, an exclusion, or the thread's provider or model changes while the host summary is being written             | `failed` (`context-changed`); nothing is committed, and the person can compact again. A provider or model change is journaled on the thread, so the context ledger's version is not the only guard.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| The request times out                                                                                              | `failed` (`timed-out`). A host summary call is cancelled on the existing maintenance timeout (30 seconds) and nothing changes. A runtime compaction gets the inactivity bound a Code turn has (the stalled-turn setting, 30 minutes by default; five minutes today), because it is a model call over the whole session that streams nothing until it ends. It is then interrupted and the session stopped: Codex runs the compaction as a turn of its own in an app-server other sessions share and keeps running it after a stop, so only its `interrupt` ends it before a later turn would queue behind it; Claude and Octant Harness refuse an interrupt with no turn in flight, and the stop ends theirs. It is recorded as one that may have changed the session. |
-| The runtime refuses after the request was journaled (its install changed, Octant Harness finds nothing to compact) | `failed` (`runtime-failed`); the adapter decided before asking, so nothing changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| The session cannot be opened (the checkout or folder is gone, the window lost access to it, the resume fails)      | `failed` (`subject-unavailable`); the runtime was never asked, so nothing changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| The runtime lacks the request (older Codex, OpenCode, Pi, Claude)                                                  | Refused `runtime-version-unsupported`, and the capability reports `unavailable` for that install.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| The provider is disabled, signed out or over a spend ceiling                                                       | Refused `provider-unavailable` or `spend-ceiling-reached`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| The thread's mode is disabled while compacting                                                                     | A runtime that reports success has changed its session, so the compaction is journaled `completed` and the thread stays unusable until the mode returns. Only an interrupted or unknown outcome is `failed` (`subject-unavailable`), marked as one that may have changed the session. A host summary that has not been committed is dropped and recorded `failed`.                                                                                                                                                                                                                                                                                                                                                                                                     |
-| The thread is deleted while compacting                                                                             | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| The host restarts mid-compaction                                                                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| What happens                                                                                                       | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A turn is running, or another compaction is                                                                        | Refused before anything is journaled; the same `compactionId` returns the compaction already under way.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| The runtime reports failure (Pi with no `result`, Claude `failed`)                                                 | `failed` (`runtime-failed`), carrying the adapter's `sessionMayHaveChanged`. Unchanged (Pi) reads as nothing changed and the person can retry; may-have-changed (Claude today) says so, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| The host summary request fails                                                                                     | `failed` (`summary-failed`); nothing changes, and the person can retry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| The host summary is not smaller than what it replaces                                                              | `failed` (`summary-not-smaller`); nothing changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| A pin, an exclusion, or the thread's provider or model changes while the host summary is being written             | `failed` (`context-changed`); nothing is committed, and the person can compact again. A provider or model change is journaled on the thread, so the context ledger's version is not the only guard.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| The request times out                                                                                              | `failed` (`timed-out`). A host summary call is cancelled on the existing maintenance timeout (30 seconds) and nothing changes. A runtime compaction gets the inactivity bound a Code turn has (the stalled-turn setting, 30 minutes by default; not built yet for compaction, which is still bounded at a fixed five minutes whatever the setting says), because it is a model call over the whole session that streams nothing until it ends. It is then interrupted and the session stopped: Codex runs the compaction as a turn of its own in an app-server other sessions share and keeps running it after a stop, so only its `interrupt` ends it before a later turn would queue behind it; Claude and Octant Harness refuse an interrupt with no turn in flight, and the stop ends theirs. It is recorded as one that may have changed the session. |
+| The runtime refuses after the request was journaled (its install changed, Octant Harness finds nothing to compact) | `failed` (`runtime-failed`); the adapter decided before asking, so nothing changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| The session cannot be opened (the checkout or folder is gone, the window lost access to it, the resume fails)      | `failed` (`subject-unavailable`); the runtime was never asked, so nothing changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| The runtime lacks the request (older Codex, OpenCode, Pi, Claude)                                                  | Refused `runtime-version-unsupported`, and the capability reports `unavailable` for that install.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| The provider is disabled, signed out or over a spend ceiling                                                       | Refused `provider-unavailable` or `spend-ceiling-reached`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| The thread's mode is disabled while compacting                                                                     | A runtime that reports success has changed its session, so the compaction is journaled `completed` and the thread stays unusable until the mode returns. Only an interrupted or unknown outcome is `failed` (`subject-unavailable`), marked as one that may have changed the session. A host summary that has not been committed is dropped and recorded `failed`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| The thread is deleted while compacting                                                                             | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| The host restarts mid-compaction                                                                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **Compacting a session by a rule.** A person can also have Octant compact a
 thread without asking each time, by a rule set in Settings (General →
@@ -9435,14 +9470,11 @@ the model at another size.
   blocks a tool call that needs a person until a decision arrives
   (`POST /api/native-harness/sessions/:thread/approvals`) or the turn is
   interrupted. Neither expires: both wait until answered (maintainer request,
-  2026-11-12). Not built yet: today both also end after ten minutes; that
-  expiry ends the call (as
-  `question-expired`, or as a denied call) and is journaled as `expired`, the
-  same way whether the timer or the clock caught it: the host checks the
-  clock whenever a question or approval is asked, answered, or listed
-  (including a read of the session view), so one whose timer fired late (a
-  busy host, a machine that slept) is never still shown as pending,
-  answerable, or holding a slot. A Code thread's inline copy of a question is
+  2026-11-12; built). A wait holds no timer; it ends with an answer, with its
+  turn (settled `cancelled`), or with its thread's archive or deletion, which
+  the host hears from the journal and settles `cancelled` too, because a
+  thread may be archived while its turn is still parked on the wait. The
+  journaled `expired` status remains only for what a restart cut off. A Code thread's inline copy of a question is
   withdrawn whenever the question settles, however it settled. The lead's own
   approval is the same wait a question is: while a turn is blocked on it, the
   thread reads as parked on the person, not running, in every mode. Work's and
@@ -11078,9 +11110,18 @@ that is not yet effective for the thread is refused and never reaches the model.
   slot. An unanswered approval does not expire: it waits in Needs you until a
   person answers it, and a host-run turn with no window (a routine, a goal
   loop) waits there too instead of being refused (maintainer request,
-  2026-11-12). Not built yet: today an unanswered approval expires after five
-  minutes and the call is denied, checked against the clock whenever approvals
-  are listed, answered, or requested.
+  2026-11-12). Built: an approval has no expiry and holds no timer; it is
+  denied only by an answer, its turn stopping, its thread's archive or
+  deletion, or its window's authority being revoked, so a prompt whose device
+  is no longer paired waits until one of those. It waits as the prompt in
+  its thread (`/api/extensions/tool-approvals`), and the pending-requests
+  read (Needs you) lists it to everyone this paragraph lets answer it: the
+  raising window or device, and, for a prompt a turn raised under the host's
+  own scope (a routine's run, a usage-limit resume) or a paired device's
+  turn, every local window that may drive the thread (maintainer decision,
+  2026-11-13). Each new prompt is also told to the paired phones as an
+  approval-needed notification. Not built yet: a call whose turn carries no
+  scope at all is still refused.
   An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
@@ -12831,11 +12872,38 @@ mechanisms are:
     question waits in Needs you until a person answers it. A time, count, or
     size limit is a default the person can change in Settings unless it
     protects a hard line or the integrity of stored data; a fixed constant
-    needs its reason stated beside it (maintainer request, 2026-11-12). Not
-    built yet: the limits the owning sections name are still constants, and
-    the asks that still expire after ten minutes (a routine proposal, a
-    routine's pause or archive ask, an image offer, a credential request)
-    have not been changed to wait.
+    needs its reason stated beside it (maintainer request, 2026-11-12).
+    Built: Octant Harness approvals and questions, MCP tool approvals,
+    Project memory proposals, routine proposals, a routine's pause or archive
+    ask, the image generation offer, and the Browser sign-in card have no
+    expiry. Each ends with the person's answer, its turn stopping, its
+    thread's archive or deletion (heard from the journal, since a thread may
+    be archived while its turn is parked on the ask), its window's authority
+    being revoked where a window owns it, or the host stopping; the caps on
+    how many may wait (32 each) are unchanged and are the only bound on what
+    is held. A Browser site, upload, download and script approval, and a Code
+    thread's own tool asks (a Browser session, a device effect, a terminal
+    command, a pull-request change or watch), wait the same way (maintainer
+    decision, 2026-11-13): none holds a timer, and each ends with an answer,
+    its call or turn stopping, its thread's archive, its window's revocation
+    where a window owns it, or the host stopping. What an ask holds is
+    released by every one of those ends: an upload's staged copies and a
+    download's held file are deleted on any outcome but approval. An ask
+    about an open page (its site approval, a script, a sign-in, an upload or
+    a download) also ends when that page closes or is stopped, and the page
+    lives, without an idle deadline, for as long as the ask waits; the first
+    navigate's site approval has no page yet and ends only with its call. The pending-requests read (Needs you) lists every one of these
+    asks, and each new one is told to the paired phones
+    ([Pending requests across modes](#security-and-authority)). Expiry stays
+    where a live secret or the host's own authority is at stake, each stated
+    by its owner: a pairing ticket, a sign-in or device-code flow, a one-use
+    credential request (ten minutes), and the desktop authority confirmation.
+    A benchmark cell's ten-minute park also stays: the cell is a measurement
+    of unattended work that holds a managed worktree and a place in its run,
+    and `blocked-on-approval` is its result, not a refusal given to the
+    agent in the person's name
+    ([Context and usage accounting](#context-and-usage-accounting), _Approvals_). Not built yet: the limits the owning
+    sections name are still constants.
   - **Opt-in sandbox at Full access.** A Code or Work thread may set
     `fullAccessSandbox`. Prompts stay off exactly as at Full access, and the
     thread keeps the confinement the guarded levels have:
@@ -13300,10 +13368,51 @@ approval-gated` command that undoes it. The terminal shows no one-time
   handle its mode's existing answer command takes; there is no new answer route.
   Only requests a live turn in this host can deliver are listed: a Code or Chat
   request journaled by a turn that died with the process is left out, because
-  answering it settles the turn interrupted. Excluded: Chat approvals (Chat
-  declines every provider approval), hidden Side Chats, Work browser tool approvals
-  (`/api/browser/approvals`), Computer Use approvals, and extension tool
-  approvals. A native-harness question raised on a Code turn is a Code question
+  answering it settles the turn interrupted. Excluded from `requests`: Chat
+  approvals (Chat declines every provider approval), hidden Side Chats, and
+  Computer Use approvals.
+  **Waiting asks.** The same answer carries `asks`: every other ask a host
+  service holds for the person, oldest first (maintainer decision,
+  2026-11-13). These are MCP and connector tool approvals, Project memory
+  proposals, routine proposals and change requests, image generation and
+  save offers, Browser site, upload, download and script approvals
+  (`/api/browser/approvals`), and the Browser sign-in card. Each list is the
+  holding service's own list for the reader, so the rule on who may answer
+  is the one that service already applies and listing adds none: the window
+  or device whose turn raised it, and, for an MCP or Browser ask a turn
+  raised under the host's own scope (a routine's run, a background resume),
+  every local window that may drive the thread. An ask whose thread is not
+  active, or whose mode is off, is left out. An entry names its kind, its
+  id (the one its own decide route takes), mode, Project, thread and title,
+  when it was asked, one line of text, and, when it fits, the detail its
+  card shows (a tool's input, the words a memory entry would hold, an
+  upload's files). An entry may be answered from the list (`inPlace`) only
+  when its line and detail are everything the ask's card shows; no kind
+  meets that today, so the host sets `inPlace` on none and every row opens
+  its thread, whose card decides it. An MCP tool card names the installed
+  plugin that owns the tool, which only the client's package list resolves,
+  and two plugins may expose the same server and tool names while running
+  different code; a memory card names the kind of entry and that every
+  later thread in the Project starts with it; a Browser card words what the
+  answer authorizes (the account a profile page acts as, that uploaded
+  files leave the computer, what a script may reach); a routine proposal,
+  an image offer and the sign-in card take a choice or an action a row does
+  not offer. A list that is given an `inPlace` entry offers its two plain
+  answers through the ask's own route, once and never remembered. A Browser
+  row names the site, the profile when the page
+  is in one (Personal, Project, or an account profile's own name) with the
+  words "signed in as you", and the asker: a site ask held for a Code
+  thread came from a program in one of its terminals, not from the thread's
+  agent, and the row says so. Words
+  are never cut to fit an answer: a row either holds the whole ask or sends
+  the person to the card. `asks` is its own optional field rather than more
+  members of `requests`, so a client built before it still decodes the list
+  and shows no such rows; it is absent when nothing waits. A memory or
+  routine proposal and an image offer are still not raised by a turn the
+  host runs with no person behind it (their owning sections refuse them
+  before asking), so none waits here for such a turn. The desktop menu
+  bar's fleet read lists `requests` only.
+  A native-harness question raised on a Code turn is a Code question
   and is listed. The lead's own native-harness session approval (a request with
   no `source`) is listed as a `lead-approval` row in any mode: the thread, its
   title, Project, the approval's summary (cut and redacted like a child's request
@@ -13345,7 +13454,17 @@ approval-gated` command that undoes it. The terminal shows no one-time
   never offers a remembered grant. A Code turn's Browser site ask
   is a Code approval and is listed with `browserOrigin`, the site it waits to
   open, which a provider's own approval never carries. Text keeps
-  each mode's own bounds and sanitization. A device the host's own person paired reads it as a local window does (maintainer decision, 2026-11-12); the remote action classifier names no action for it, so the route refuses every other device session. Freshness rides the Machine change feed: any harness question,
+  each mode's own bounds and sanitization. A device the host's own person paired reads it as a local window does (maintainer decision, 2026-11-12); the remote action classifier names no action for it, so the route refuses every other device session. The route lists under the device's own scope, so every source answers what that
+  device's own answer commands and ask routes would admit (an MCP prompt its
+  own turn raised, never a local window's or the host's). A waiting
+  subagent's row is listed to a device only when the harness session route
+  would let that device answer it (the run its own turn started, under a
+  parent it still owns), never by a window's Project binding, which a device
+  scope does not have. Each new waiting ask is told to the paired phones through the
+  existing sealed push path, as an approval-needed notification naming the
+  thread under that phone's settings and nothing of the ask; the phone app
+  itself shows the MCP prompt on its thread and has no list of the other
+  asks yet. Freshness rides the Machine change feed: a waiting ask starting or ending publishes `tool-approvals`, any harness question,
   the lead's own or a child's, asked or settled publishes `work-navigation` and
   `code-navigation` (a Chat lead's question is journaled on the attempt), and
   any harness approval, the
@@ -13353,8 +13472,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `work-navigation`, and `code-navigation`,
   a Work request's
   transitions and a Chat attempt's question are journaled, a Code request's ask,
-  answer, and turn end are journaled stream events, and a Code browser-origin
-  approval that expires or is abandoned — which journals nothing — publishes
+  answer, and turn end are journaled stream events, and a Code tool ask that
+  is withdrawn or abandoned — which journals nothing — publishes
   `code-navigation` itself.
 - **Fleet activity.** `GET /api/fleet-activity` returns the threads that need
   the calling window's person and the threads that are running, needs you
@@ -13457,13 +13576,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   extend one, and a sleep counts against it. A restart drops every such grant
   and starts a fresh epoch, so no stored clock value can block startup. On it
   today: Code operation approvals, window and launch sessions, managed-root
-  grants, simulator input grants, extension tool approvals, routine proposals
-  and image generation offers (their stated request time), computer-use
-  approval offers (an app grant itself has no clock and lasts the thread),
-  Claude's pre-tool grants, credential command
+  grants, simulator input grants, computer-use approval offers (an app grant
+  itself has no clock and lasts the thread), Claude's pre-tool grants,
+  credential command
   requests, Browser upload and download permissions (which are not restored
-  after a restart), Browser tool approvals, Browser session grants and
-  Browser credential use, and server preview tunnels. A deadline that
+  after a restart), Browser session grants and Browser credential use, and
+  server preview tunnels. A deadline that
   crosses to the desktop app crosses as time remaining, restated in the
   desktop's wall time, and the desktop's own wall deadline stays its local
   check; the server never compares one clock's deadline with the other's. A grant that is stored and
@@ -13471,9 +13589,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   stated in UTC: a paired device's registration expiry, and any stored
   `expiresAt` a later process reads back. Such a grant stays revocable by the
   person at any time, which is what bounds it when the clock is wrong.
-  Routine proposals and image
-  generation offers end on a timer alone; a timer is Node's monotonic clock,
-  which on Linux does not count a suspend.
+  Browser tool approvals (a site, an upload, a download, a script, a sign-in
+  request), extension tool approvals, routine proposals and image generation
+  offers wait until they are answered or withdrawn and expire on no clock;
+  only the request time they state is read from the authority clock.
   _Why elapsed time is trusted._ On Linux `os.uptime()` reads `/proc/uptime`
   (`CLOCK_BOOTTIME`): it counts suspend and ignores clock changes. On macOS
   both libuv (`uv_uptime` in `src/unix/darwin.c`, used by Electron's Node)

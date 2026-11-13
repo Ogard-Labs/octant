@@ -4,6 +4,8 @@ import {
   type ThreadMessageQueueCommand,
   type ThreadMessageQueueResult,
 } from "@octant/contracts";
+import { classifyProductAction } from "../authenticatedProductRoutes";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createThreadMessageQueueRouteHandler } from "./threadMessageQueueRoutes";
 
@@ -71,6 +73,55 @@ describe("message queue routes", () => {
     expect((await handle(post({ ...enqueue, windowId })))?.status).toBe(400);
     expect((await handle(post(enqueue, "https://untrusted.example")))?.status).toBe(400);
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("runs a paired device's read and command under the device's own scope", async () => {
+    const { handle, read, execute } = setup();
+    const deviceId = "92000000-0000-4000-8000-0000000000d1";
+    const paired = (request: Request) => {
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          hostId: "11111111-1111-4111-8111-111111111111",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "55000000-0000-4000-8000-0000000000aa",
+        } as never,
+        scopeId: decodeWindowId(deviceId),
+      });
+      return request;
+    };
+    await handle(
+      paired(
+        new Request(`http://127.0.0.1/api/thread-message-queue?mode=chat&threadId=${threadId}`),
+      ),
+    );
+    expect(read).toHaveBeenCalledWith(deviceId, { mode: "chat", threadId });
+    await handle(
+      paired(
+        new Request("http://127.0.0.1/api/thread-message-queue/commands", {
+          method: "POST",
+          headers: { origin: "http://127.0.0.1" },
+          body: JSON.stringify(enqueue),
+        }),
+      ),
+    );
+    expect(execute).toHaveBeenCalledWith(deviceId, expect.objectContaining({ kind: "enqueue" }));
+  });
+
+  it("admits a paired device to the queue's read and its commands, and to nothing else there", () => {
+    const action = (path: string, method: string) =>
+      classifyProductAction(new Request(`https://octant.example${path}`, { method }));
+    expect(action(`/api/thread-message-queue?mode=chat&threadId=${threadId}`, "GET")).toBe(
+      "project.overview.read",
+    );
+    expect(action("/api/thread-message-queue/commands", "POST")).toBe("chat.send-turn");
+    expect(action("/api/thread-message-queue", "POST")).toBeUndefined();
+    expect(action("/api/thread-message-queue/commands", "GET")).toBeUndefined();
+    expect(action("/api/thread-message-queue/other", "POST")).toBeUndefined();
   });
 
   it("bounds received bytes even when content length understates the request", async () => {

@@ -1,12 +1,14 @@
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
-import type { PendingRequest } from "@octant/contracts/pending-requests";
+import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
 import { CircleDot, Folder, GitPullRequest, ListTodo, RefreshCw } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
+import { WaitingAskRow } from "../pendingRequests/WaitingAskRow";
 import {
+  canAnswerWaitingAsk,
   isFindOnlyPendingRequest,
   isLeadApprovalPendingRequest,
   isLeadQuestionPendingRequest,
@@ -55,6 +57,8 @@ export interface InboxDecisionSource extends PendingRequestRowsSource {
    * waiting subagent, opens the thread's Agents tool on that subagent.
    */
   readonly onOpenThread: (request: PendingRequest) => void;
+  /** Opens the thread of an ask a host service holds, where its own card answers it. */
+  readonly onOpenAsk?: ((ask: WaitingAsk) => void) | undefined;
 }
 
 export interface InboxViewProps {
@@ -173,7 +177,7 @@ export function InboxView(props: InboxViewProps) {
 
   const externalSectionsPresent = loadGithub !== undefined || loadLinear !== undefined;
   const decisions = props.decisions;
-  const { rows: requestRows, answer, defer } = usePendingRequestRows(decisions);
+  const { rows: requestRows, answer, defer, asks, answerAsk } = usePendingRequestRows(decisions);
   // Questions use their exact pending request so attention deferral does not
   // hide an execution approval or create a duplicate thread attention row.
   const decisionRows = (requestRows ?? []).filter(
@@ -203,6 +207,7 @@ export function InboxView(props: InboxViewProps) {
     decisions === undefined ? [] : decisionRows,
     attentionItems,
     decisions?.now ?? 0,
+    decisions === undefined ? [] : asks,
   );
   const counts = inboxFilterCounts(waiting);
   const projectNames = new Map([
@@ -321,6 +326,24 @@ export function InboxView(props: InboxViewProps) {
                           )}
                           request={item.entry.request}
                           settled={item.entry.unlisted}
+                        />
+                      </li>
+                    ) : item.kind === "ask" ? (
+                      <li className="surface-row inbox-row" key={item.key}>
+                        <WaitingAskRow
+                          ask={item.ask}
+                          now={decisions?.now ?? 0}
+                          onAnswer={
+                            canAnswerWaitingAsk(decisions?.askClients, item.ask)
+                              ? answerAsk
+                              : undefined
+                          }
+                          onOpenThread={(ask) => decisions?.onOpenAsk?.(ask)}
+                          projectName={
+                            item.ask.projectId === undefined
+                              ? undefined
+                              : decisions?.projectNames.get(String(item.ask.projectId))
+                          }
                         />
                       </li>
                     ) : (

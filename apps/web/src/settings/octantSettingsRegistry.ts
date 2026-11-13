@@ -760,6 +760,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "automatic model calls second opinion decisions review independent model account api key provider off needs you card disagree",
         },
         {
+          id: settingId("stalled-turn-limit"),
+          label: "Stalled-turn limit",
+          scope: "host",
+          keywords:
+            "stalled turn limit silent silence no provider event inactivity idle timeout timed out cut off stop minutes hours off never long tool call",
+        },
+        {
+          id: settingId("provider-tool-call-pause-limit"),
+          label: "Tool-call pause limit",
+          scope: "host",
+          keywords:
+            "longest tool call pause stalled turn limit provider tool started never finished running hung stuck build test cap bound two hours off",
+        },
+        {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
           scope: "host",

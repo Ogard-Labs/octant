@@ -1,16 +1,20 @@
 import { decodeUtcTimestamp } from "@octant/contracts";
 import type { PendingRequestClient } from "@octant/client-runtime/pending-request-client";
 import type { OctantMode } from "@octant/contracts";
-import type { PendingRequest } from "@octant/contracts/pending-requests";
+import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   answerPendingRequest,
+  answerWaitingAsk,
   NOT_DELIVERED,
   pendingRequestKey,
   pendingRequestsForModes,
+  waitingAsksForModes,
   type PendingRequestAnswerClients,
   type PendingRequestAnswerResult,
   type PendingRequestResponse,
+  type WaitingAskAnswer,
+  type WaitingAskAnswerClients,
 } from "./pendingRequests";
 import { usePendingRequests, type PendingRequestFreshness } from "./usePendingRequests";
 
@@ -20,6 +24,8 @@ export interface PendingRequestRowsSource extends PendingRequestFreshness {
   readonly pendingRequestClient: PendingRequestClient | undefined;
   /** The clients each thread view already answers through; a surface adds no route. */
   readonly answerClients: PendingRequestAnswerClients;
+  /** The clients the asks' own cards answer through; see {@link WaitingAskAnswerClients}. */
+  readonly askClients?: WaitingAskAnswerClients | undefined;
   readonly modes: ReadonlyArray<OctantMode>;
   /** The clock the waits read, advanced once a minute by the shell. */
   readonly now: number;
@@ -51,6 +57,12 @@ const NO_FRESHNESS: PendingRequestFreshness = {
 export function usePendingRequestRows(source: PendingRequestRowsSource | undefined): {
   readonly defer: (request: PendingRequest, until: string | null) => Promise<boolean>;
   readonly rows: ReadonlyArray<PendingRequestRowEntry> | undefined;
+  /** Every other waiting ask of the surface's modes, oldest first. */
+  readonly asks: ReadonlyArray<WaitingAsk>;
+  readonly answerAsk: (
+    ask: WaitingAsk,
+    answer: WaitingAskAnswer,
+  ) => Promise<PendingRequestAnswerResult>;
   readonly answer: (
     request: PendingRequest,
     response: PendingRequestResponse,
@@ -151,5 +163,20 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
     },
     [source?.pendingRequestClient, refresh],
   );
-  return { rows, answer, defer };
+  const asks = useMemo(
+    () =>
+      read.status === "ready" && modes !== undefined ? waitingAsksForModes(read.asks, modes) : [],
+    [modes, read],
+  );
+  const askClients = source?.askClients;
+  const answerAsk = useCallback(
+    async (ask: WaitingAsk, choice: WaitingAskAnswer): Promise<PendingRequestAnswerResult> => {
+      if (askClients === undefined) return NOT_DELIVERED;
+      const result = await answerWaitingAsk(askClients, ask, choice);
+      refresh();
+      return result;
+    },
+    [askClients, refresh],
+  );
+  return { rows, answer, defer, asks, answerAsk };
 }

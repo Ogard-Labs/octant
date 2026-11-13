@@ -80,6 +80,7 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
+import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -394,6 +395,12 @@ export function wireChat(deps: ChatDependencies) {
       return hidden;
     };
     const chatService = new ChatService({
+      stalledTurnLimitMs: () =>
+        stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+      providerToolCallPauseLimitMs: () =>
+        providerToolCallPauseLimitMs(
+          persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+        ),
       verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
       conversationInputTransfer,
       liveTurns,

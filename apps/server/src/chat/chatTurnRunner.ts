@@ -70,6 +70,8 @@ import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
+  DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
+  DEFAULT_STALLED_TURN_LIMIT_MS,
   makeEventLoopShare,
   makeIdleTimeout,
   makeStreamedOutputBudget,
@@ -84,12 +86,10 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
 const DEFAULT_MAX_EVENTS = 4_096;
-// Inactivity window: a turn is cut off after this long without any provider
-// event, not after this much total wall time. A provider can stay silent while
-// the model writes one long tool call: Codex sent nothing for over two minutes
-// while a model wrote a three-screen Canvas design, so Chat waits as long as
-// Code does.
-const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
+// How long one app-managed tool call may run before the turn fails. It is the
+// call's own deadline, apart from the stalled-turn limit, which is paused
+// while the call runs and may be turned off.
+const APP_MANAGED_TOOL_DEADLINE_MS = 5 * 60_000;
 // A question record holds at most this many options, matching the attempt
 // contract; longer option lists are cut, not refused.
 const MAX_ATTEMPT_QUESTION_OPTIONS = 8;
@@ -213,6 +213,22 @@ export interface ChatTurnRunnerOptions {
   readonly researchRouter: ResearchRouter;
   readonly maxEvents?: number;
   readonly maxStreamedOutputBytes?: number;
+  /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off.
+   * Read as each turn starts, so a changed setting applies to the next turn
+   * and a running turn keeps the limit it started with.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off. Read as each turn starts,
+   * like the limit. Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
+  /**
+   * A fixed stalled-turn limit and app-managed tool deadline, for a caller
+   * with no host setting to read.
+   */
   readonly timeoutMs?: number;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
@@ -321,8 +337,10 @@ export class ChatTurnRunner {
   readonly #capacityScheduler: ProviderCapacityScheduler;
   readonly #contextHarness: ContextHarnessService;
   readonly #maxEvents: number;
+  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #providerToolCallPauseLimitMs: () => number | null;
+  readonly #appManagedToolDeadlineMs: number;
   readonly #maxStreamedOutputBytes: number;
-  readonly #timeoutMs: number;
   readonly #spendCeiling: ChatTurnRunnerOptions["spendCeiling"];
   readonly #openQuestions = new Map<string, OpenChatQuestion>();
   /** Kills one live attempt's own runtime process; present only for a connection that offers it. */
@@ -333,8 +351,12 @@ export class ChatTurnRunner {
     this.#spendCeiling = options.spendCeiling;
     this.#contextHarness = options.contextHarness;
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+    const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
+    this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
+    this.#providerToolCallPauseLimitMs =
+      options.providerToolCallPauseLimitMs ?? (() => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS);
+    this.#appManagedToolDeadlineMs = options.timeoutMs ?? APP_MANAGED_TOOL_DEADLINE_MS;
     this.#maxStreamedOutputBytes = options.maxStreamedOutputBytes ?? MAX_TURN_STREAMED_OUTPUT_BYTES;
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
 
   /**
@@ -381,8 +403,10 @@ export class ChatTurnRunner {
     const capacityScheduler = this.#capacityScheduler;
     const contextHarness = this.#contextHarness;
     const maxEvents = this.#maxEvents;
+    const stalledTurnLimitMs = this.#stalledTurnLimitMs;
+    const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
+    const appManagedToolDeadlineMs = this.#appManagedToolDeadlineMs;
     const streamedOutput = makeStreamedOutputBudget(this.#maxStreamedOutputBytes);
-    const timeoutMs = this.#timeoutMs;
     const spendCeiling = this.#spendCeiling;
     const openQuestions = this.#openQuestions;
     const forceStops = this.#forceStops;
@@ -968,7 +992,7 @@ export class ChatTurnRunner {
               }),
             );
 
-      const idle = yield* makeIdleTimeout(timeoutMs);
+      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
       const shareEventLoop = makeEventLoopShare();
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(
@@ -1011,7 +1035,7 @@ export class ChatTurnRunner {
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 yield* shareEventLoop;
-                yield* idle.touch;
+                yield* idle.observe(event);
                 // Liveness only restarts the idle clock; nothing else sees it.
                 if (event.kind === "liveness") return;
                 input.toolEffects?.observe(event, input.appManagedTools);
@@ -1340,10 +1364,10 @@ export class ChatTurnRunner {
                     executionSignal === undefined
                       ? toolAbort.signal
                       : AbortSignal.any([executionSignal, toolAbort.signal]);
-                  // App-owned work suspends the idle timeout, so the call gets
-                  // the same window as its own deadline: a tool that never
-                  // returns ends the turn with a named cause instead of
-                  // hanging it past the point the provider went silent.
+                  // App-owned work suspends the stalled-turn limit, so the call
+                  // gets a deadline of its own: a tool that never returns ends
+                  // the turn with a named cause instead of hanging it, whatever
+                  // the limit is set to and when it is Off.
                   const execution = yield* idle.during(
                     Effect.raceFirst(
                       Effect.tryPromise({
@@ -1381,7 +1405,7 @@ export class ChatTurnRunner {
                         ),
                       ),
                       Effect.andThen(
-                        Effect.sleep(timeoutMs),
+                        Effect.sleep(appManagedToolDeadlineMs),
                         Effect.gen(function* () {
                           toolAbort.abort();
                           return yield* failTurn(

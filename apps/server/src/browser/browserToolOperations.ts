@@ -1341,3 +1341,33 @@ export function browserPageScriptToolResult(receipt: BrowserPageScriptReceipt): 
     return { result: { script: { status: "truncated", effect: receipt.effect } }, isError: false };
   return { result, isError: receipt.status !== "completed" && receipt.status !== "truncated" };
 }
+
+/**
+ * Asks a question about the thread's open page for as long as that page
+ * lives. Browser questions have no expiry, so a page that closes or reaches
+ * its idle deadline must withdraw its question; otherwise the question stays
+ * listed and a later Approve meets only a stale page. The hold also keeps the
+ * page while the question waits. With no open page, the question is tied to
+ * the call's signal alone.
+ */
+export async function askWhilePageLives<T>(
+  hold:
+    | (() => { readonly release: () => void; readonly signal?: AbortSignal } | undefined)
+    | undefined,
+  signal: AbortSignal | undefined,
+  ask: (signal: AbortSignal | undefined) => Promise<T>,
+): Promise<T> {
+  const held = hold?.();
+  const pageSignal = held?.signal;
+  try {
+    return await ask(
+      pageSignal === undefined
+        ? signal
+        : signal === undefined
+          ? pageSignal
+          : AbortSignal.any([signal, pageSignal]),
+    );
+  } finally {
+    held?.release();
+  }
+}

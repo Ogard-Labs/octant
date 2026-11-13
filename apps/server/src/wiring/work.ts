@@ -39,12 +39,14 @@ import {
 } from "../serverProjects/serverWorkThreads";
 import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
+import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
 import { startEventLoopLagDetector } from "../eventLoopLag";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkThreadService } from "../work/workThreadService";
+import { WorkTurnRuntime } from "../work/workTurnRuntime";
 import { WorkTurnService } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "../work/workflowEventStore";
@@ -106,6 +108,7 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -134,6 +137,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "browserModelBindings"
     | "codeSessionAuthority"
     | "imageGenerationOffers"
+    | "isPairedDeviceScope"
     | "liveTurns"
     | "onWindowRevoked"
     | "routineProposalService"
@@ -184,6 +188,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     CodeWiring,
     | "canAccessCodeProject"
     | "codeAttachments"
+    | "codeProjectAccess"
     | "codeWorkingDirectoryProbePath"
     | "roots"
     | "workAttachments"
@@ -254,6 +259,8 @@ export function wireWork(deps: WorkDependencies) {
     productFeedbackService,
     resolveFeedbackThread,
     canAccessCodeProject,
+    codeProjectAccess,
+    isPairedDeviceScope,
     canvasAgentToolPort,
     canvasService,
     chatAttachmentStore,
@@ -425,6 +432,14 @@ export function wireWork(deps: WorkDependencies) {
 
     const feedbackTurns = createProductFeedbackTurnPort({ service: productFeedbackService });
     const workTurnService = new WorkTurnService({
+      turnRuntime: new WorkTurnRuntime({
+        stalledTurnLimitMs: () =>
+          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        providerToolCallPauseLimitMs: () =>
+          providerToolCallPauseLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ),
+      }),
       prepareProductFeedbackForTurn: (input) => {
         const scope = resolveFeedbackThread(input.windowId, input.threadId);
         if (scope?.mode !== "work") return undefined;
@@ -536,6 +551,8 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.releaseThread(ownerWindowId, threadId),
                 holdForPerson: (ownerWindowId, threadId) =>
                   browserAutomationService.holdForPerson(ownerWindowId, threadId),
+                holdForAsk: (ownerWindowId, threadId) =>
+                  browserAutomationService.holdForAsk(ownerWindowId, threadId),
                 snapshotRefs: (ownerWindowId, threadId) =>
                   browserAutomationService.snapshotRefs(ownerWindowId, threadId),
               },
@@ -1427,40 +1444,37 @@ export function wireWork(deps: WorkDependencies) {
         );
       },
     });
-    const threadMessageQueue = new ThreadMessageQueueService({
-      connection: persistence.connection,
+    const threadMessageQueuePort = createThreadMessageQueuePort({
+      persistence,
       journal: persistence.journal,
-      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-      clock: () => new Date().toISOString(),
-      port: createThreadMessageQueuePort({
-        persistence,
-        journal: persistence.journal,
-        chat: chatService,
-        work: {
-          readThread: (id) => workThreadProjection.read(id),
-          listTurns: (id) => workTurnProjection.listForThread(id),
-          startFirstTurn: (windowId, command, admissionOptions) =>
-            workTurnService.startFirstTurn(windowId, command, admissionOptions),
-        },
-        code: routeCodeService,
-        compacting: (scope) =>
-          contextHarness.compactionRunning(
-            decodeContextSubjectRef({
-              aggregateType: `${scope.mode}-thread`,
-              aggregateId: scope.threadId,
-            }),
-          ),
-        isModeEnabled: (mode) =>
-          enabledModes(
-            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-          ).includes(mode),
+      chat: chatService,
+      work: {
+        readThread: (id) => workThreadProjection.read(id),
+        listTurns: (id) => workTurnProjection.listForThread(id),
+        startFirstTurn: (windowId, command, admissionOptions) =>
+          workTurnService.startFirstTurn(windowId, command, admissionOptions),
+      },
+      code: routeCodeService,
+      compacting: (scope) =>
+        contextHarness.compactionRunning(
+          decodeContextSubjectRef({
+            aggregateType: `${scope.mode}-thread`,
+            aggregateId: scope.threadId,
+          }),
+        ),
+      isModeEnabled: (mode) =>
+        enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+          mode,
+        ),
+      ...createThreadMessageQueueAuthority({
         // The host's own scope is never a window. It reaches a queue only to
         // let a thread's queued messages follow the continuation it started
         // after a restart, in a Project of the thread's own mode.
-        isWindowLive: (windowId) =>
+        isLocalWindowLive: (windowId) =>
           isRoutineHostScope(windowId) ||
           windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
-        canAccess: (windowId, mode, projectId) => {
+        isPairedDevice: isPairedDeviceScope,
+        localWindowCanAccess: (windowId, mode, projectId) => {
           if (isRoutineHostScope(windowId) && mode === "work")
             return projectId !== undefined && persistence.readProject(projectId)?.type === "work";
           if (mode === "chat")
@@ -1470,12 +1484,33 @@ export function wireWork(deps: WorkDependencies) {
             ? canAccessCodeProject(windowId, projectId)
             : windowHoldsProject(windowId, projectId, mode);
         },
-        effectiveCodeThread: (windowId, thread) =>
-          codeSessionAuthority.effectiveThread(windowId, thread),
-        recoveryRequired: (threadId) =>
-          nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
-        attachments: queueAttachments,
+        projectType: (projectId) => persistence.readProject(projectId)?.type,
+        hasActiveCodeProject: (projectId) => codeProjectAccess.hasActiveCodeProject(projectId),
       }),
+      effectiveCodeThread: (windowId, thread) =>
+        codeSessionAuthority.effectiveThread(windowId, thread),
+      recoveryRequired: (threadId) =>
+        nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
+      attachments: queueAttachments,
+    });
+    const threadMessageQueue = new ThreadMessageQueueService({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+      isPairedDevice: isPairedDeviceScope,
+      port: {
+        ...threadMessageQueuePort,
+        // A Code turn checks the Project against the request that sent it. A
+        // message a paired device queued is dispatched with no request, so
+        // its admission runs as that device's, judged on its pairing now.
+        admit: (input) =>
+          isPairedDeviceScope(input.windowId)
+            ? codeProjectAccess.runQueuedDeviceDispatch(input.windowId, () =>
+                threadMessageQueuePort.admit(input),
+              )
+            : threadMessageQueuePort.admit(input),
+      },
     });
     yield* Effect.promise(() => threadMessageQueue.recover());
     const sideTaskForkPorts = {

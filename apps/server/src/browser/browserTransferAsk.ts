@@ -4,13 +4,16 @@ import type {
   ToolActionAuthority,
   WindowId,
 } from "@octant/contracts";
-import type { BrowserToolApprovalService } from "./browserToolApprovalService";
+import type {
+  BrowserToolApprovalOutcome,
+  BrowserToolApprovalService,
+} from "./browserToolApprovalService";
 
 /** The part of the Browser approval service an upload or a download save asks through. */
 export type BrowserTransferApprovals = Pick<BrowserToolApprovalService, "request"> &
   Partial<Pick<BrowserToolApprovalService, "isTransferRemembered">>;
 
-type BrowserTransferAnswer = "approved" | "denied" | "cancelled" | "expired";
+type BrowserTransferAnswer = BrowserToolApprovalOutcome;
 
 /**
  * Puts an ordinary upload or download save to the person, below Full access,

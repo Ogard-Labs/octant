@@ -697,6 +697,17 @@ export interface ChatServiceOptions {
   readonly threadWork: ThreadWorkService;
   readonly turnTimeoutMs?: number;
   /**
+   * The host's stalled-turn limit in milliseconds, `null` when it is Off,
+   * read as each turn starts. Absent uses the default limit.
+   */
+  readonly stalledTurnLimitMs?: () => number | null;
+  /**
+   * The longest one provider tool call pauses the stalled-turn clock, in
+   * milliseconds, `null` when that bound is Off, read as each turn starts.
+   * Absent uses the default bound.
+   */
+  readonly providerToolCallPauseLimitMs?: () => number | null;
+  /**
    * Deadline for the maintenance request that compacts a turn's dropped
    * conversation. The turn awaits it before dispatching the user's own
    * message, so it is bounded separately from the turn itself.
@@ -1241,6 +1252,12 @@ export class ChatService {
       contextHarness: options.contextHarness,
       researchRouter: options.researchRouter,
       ...(options.turnTimeoutMs === undefined ? {} : { timeoutMs: options.turnTimeoutMs }),
+      ...(options.stalledTurnLimitMs === undefined
+        ? {}
+        : { stalledTurnLimitMs: options.stalledTurnLimitMs }),
+      ...(options.providerToolCallPauseLimitMs === undefined
+        ? {}
+        : { providerToolCallPauseLimitMs: options.providerToolCallPauseLimitMs }),
       ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     });
   }

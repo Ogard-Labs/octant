@@ -1060,6 +1060,43 @@ describe("remote route policy", () => {
     expect(status(inspect("/api/reply-detail/extra", "GET"))).toBe(404);
   });
 
+  it("admits a paired device's message queue and Needs you reads and the queue's commands on their exact paths", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    const status = (decision: ReturnType<typeof inspect>) =>
+      decision.kind === "reject" ? decision.response.status : decision.kind;
+    const allowed = { kind: "allow", surface: "authenticated-product" };
+
+    expect(
+      inspect(
+        "/api/thread-message-queue?mode=chat&threadId=92000000-0000-4000-8000-000000000001",
+        "GET",
+      ),
+    ).toMatchObject(allowed);
+    expect(inspect("/api/thread-message-queue/commands", "POST")).toMatchObject(allowed);
+    expect(status(inspect("/api/thread-message-queue", "POST"))).toBe(405);
+    expect(status(inspect("/api/thread-message-queue/commands", "GET"))).toBe(405);
+    expect(status(inspect("/api/thread-message-queue/commands?x=1", "POST"))).not.toBe("allow");
+    expect(status(inspect("/api/thread-message-queue/other", "POST"))).toBe(404);
+
+    // Needs you: a paired device reads what waits on the person, as a read
+    // with no parameters. Answers go through each ask's own forwarded route.
+    expect(inspect("/api/pending-requests", "GET")).toMatchObject(allowed);
+    expect(status(inspect("/api/pending-requests", "POST"))).toBe(405);
+    expect(status(inspect("/api/pending-requests?windowId=1", "GET"))).not.toBe("allow");
+  });
+
   it("admits a paired device's dictation and voice status, and keeps read-aloud off the listener", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (

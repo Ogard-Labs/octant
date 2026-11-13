@@ -1232,6 +1232,40 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           </div>
+          <div hidden={harnessEndpointOpen} id="settings-stalled-turns">
+            <SettingsSection title="Stalled turns">
+              <div className="setgroup">
+                <SettingRow
+                  description="Cuts a turn off when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
+                  focused={focusedSetting === settingId("stalled-turn-limit")}
+                  label="Stalled-turn limit"
+                  scope="host"
+                  settingId="stalled-turn-limit"
+                >
+                  <StalledTurnLimitSelect
+                    minutes={props.settings.stalledTurnLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ stalledTurnLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  description="Pauses the stalled-turn limit for at most this long while one tool call the provider reports as running has not finished, from the next turn."
+                  focused={focusedSetting === settingId("provider-tool-call-pause-limit")}
+                  label="Tool-call pause limit"
+                  scope="host"
+                  settingId="provider-tool-call-pause-limit"
+                >
+                  <ProviderToolCallPauseLimitSelect
+                    minutes={props.settings.providerToolCallPauseLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ providerToolCallPauseLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          </div>
           <ProviderCatalogSection
             discoveryController={props.discoveryController}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -2184,6 +2218,31 @@ function AutoCompactIdleSelect(props: {
   );
 }
 
+const STALLED_TURN_LIMIT_CHOICES: ReadonlyArray<number> = [5, 15, 30, 60, 120, 240, 480];
+
+/** How long a turn may go without a provider event before it is cut off, plus Off. */
+function StalledTurnLimitSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || STALLED_TURN_LIMIT_CHOICES.includes(props.minutes)
+      ? STALLED_TURN_LIMIT_CHOICES
+      : [...STALLED_TURN_LIMIT_CHOICES, props.minutes].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Stalled-turn limit"
+      id="stalled-turn-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
+        { id: "off", label: "Off" },
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
 const BROWSER_TRANSFER_FILE_LIMIT_CHOICES: ReadonlyArray<number> = [
   10, 25, 50, 100, 250, 500, 1024,
 ];
@@ -2223,6 +2282,42 @@ function BrowserTransferLimitSelect(props: {
       value={String(props.value)}
     />
   );
+}
+
+const PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES: ReadonlyArray<number> = [30, 60, 120, 240, 480, 1440];
+
+/** How long one provider tool call may pause the stalled-turn limit, plus Off. */
+function ProviderToolCallPauseLimitSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES.includes(props.minutes)
+      ? PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES
+      : [...PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES, props.minutes].sort(
+          (left, right) => left - right,
+        );
+  return (
+    <OctantSelectField
+      aria-label="Tool-call pause limit"
+      id="provider-tool-call-pause-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
+        { id: "off", label: "Off" },
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
+/** A turn limit's choice, read as the length it allows; both turn limits share it. */
+function durationChoiceLabel(minutes: number): string {
+  return minutes < 60
+    ? `${String(minutes)} minutes`
+    : minutes === 60
+      ? "1 hour"
+      : `${String(minutes / 60)} hours`;
 }
 
 const AUTO_COMPACT_LIMIT_CHOICES: ReadonlyArray<number> = [75, 80, 85, 90, 95];

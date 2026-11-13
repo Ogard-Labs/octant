@@ -1038,6 +1038,7 @@ describe("octant_browser profile argument", () => {
       readonly fullAccess?: boolean;
       readonly plan?: boolean;
       readonly uploadRoot?: string;
+      readonly page?: AbortSignal;
       readonly rememberedTransfers?: ReadonlyArray<{
         readonly direction: string;
         readonly origin: string;
@@ -1053,6 +1054,7 @@ describe("octant_browser profile argument", () => {
         fullAccessAgent?: true;
       }) => activeContext(input.policy.profile),
     );
+    const page = options.page;
     const releaseThread = vi.fn(async () => snapshot());
     const act = vi.fn(
       async (_input: { readonly holdDownloads?: boolean; readonly fullAccess?: true }) =>
@@ -1098,6 +1100,9 @@ describe("octant_browser profile argument", () => {
         act: act as never,
         releaseThread,
         saveDownload: saveDownload as never,
+        ...(page === undefined
+          ? {}
+          : { holdForAsk: () => ({ release: () => undefined, signal: page }) }),
       },
       approvals: {
         request,
@@ -1200,6 +1205,70 @@ describe("octant_browser profile argument", () => {
           upload: [expect.objectContaining({ name: "report.txt", sizeBytes: 6 })],
         }),
       );
+      expect(act).not.toHaveBeenCalled();
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  // Browser questions have no expiry, so the page's own end must withdraw one;
+  // otherwise it stays listed and a late Approve only meets a stale page.
+  const closesWhileAsked = (page: AbortController) => async (input: unknown) => {
+    page.abort();
+    const signal = (input as { readonly signal?: AbortSignal }).signal;
+    return (signal?.aborted === true ? "cancelled" : "approved") as never;
+  };
+
+  it("withdraws a site approval for the open page when the page closes", async () => {
+    const page = new AbortController();
+    const { run, act, request } = fixture({ inspect: openPage(), page: page.signal });
+    request.mockImplementationOnce(closesWhileAsked(page));
+
+    expect(await run({ operation: "snapshot" })).toEqual({
+      result: { error: "browser-approval-cancelled" },
+      isError: true,
+    });
+    expect(act).not.toHaveBeenCalled();
+  });
+
+  it("withdraws a sign-in hand-off when its page closes", async () => {
+    const page = new AbortController();
+    const open = openPage();
+    const { run, request } = fixture({
+      inspect: {
+        ...open,
+        context: { ...open.context, presentation: "native-live" },
+      } as never as BrowserAutomationSnapshot,
+      modelBindings: boundPage(),
+      page: page.signal,
+    });
+    request.mockImplementationOnce(closesWhileAsked(page));
+
+    expect(await run({ operation: "sign-in" })).toEqual({
+      result: { error: "browser-sign-in-cancelled" },
+      isError: true,
+    });
+  });
+
+  it("withdraws an upload question when its page closes, and sends nothing", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const page = new AbortController();
+      const { run, act, request } = fixture({
+        uploadRoot: workspace,
+        inspect: openPage(),
+        modelBindings: boundPage(),
+        page: page.signal,
+      });
+      request.mockImplementationOnce(async (input: unknown) => {
+        page.abort();
+        const signal = (input as { readonly signal?: AbortSignal }).signal;
+        return (signal?.aborted === true ? "cancelled" : "approved") as never;
+      });
+
+      expect(await run({ operation: "upload", ref: "e1", files: ["report.txt"] })).toMatchObject({
+        isError: true,
+      });
       expect(act).not.toHaveBeenCalled();
     } finally {
       await rm(folder, { recursive: true, force: true });

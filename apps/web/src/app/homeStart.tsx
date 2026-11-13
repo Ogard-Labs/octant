@@ -19,7 +19,10 @@ import { currentCodeProjectBranches } from "../home/ciFailures";
 import { createComputersCard } from "../home/ComputersCard";
 import { computerConnection, sameHostOrigin } from "../home/computers";
 import { createNeedsYouCard } from "../home/NeedsYouCard";
-import { isChildPendingRequest } from "../pendingRequests/pendingRequests";
+import {
+  isChildPendingRequest,
+  type WaitingAskAnswerClients,
+} from "../pendingRequests/pendingRequests";
 import {
   pullRequestCardAvailable,
   sharePullRequestRead,
@@ -98,6 +101,8 @@ export interface HomeStartInput {
   readonly loadHomePullRequests: ReturnType<typeof sharePullRequestRead>;
   readonly needsYouCoordinatorTitles: ReadonlyMap<string, string>;
   readonly needsYouThreadProviders: ReadonlyMap<string, ThreadProviderIdentity>;
+  /** The clients the Needs you card answers a host-held ask through, kept by identity. */
+  readonly needsYouAskClients: WaitingAskAnswerClients;
   readonly now: number;
   readonly openRunningServiceLive:
     | ((service: RunningService, mode: RemoteOpenMode) => Promise<RemoteOpenOutcome>)
@@ -161,6 +166,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     loadHomePullRequests,
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
+    needsYouAskClients,
     now,
     openRunningServiceLive,
     pendingRequestClient,
@@ -260,6 +266,13 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
   const homeCards = [
     createNeedsYouCard({
       answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
+      askClients: needsYouAskClients,
+      onOpenAsk: (ask) => {
+        actions.closeWorkspaceReaders();
+        if (ask.mode === "chat") actions.selectChatThread(ask.threadId);
+        else if (ask.mode === "work") actions.selectWorkThread(ask.threadId);
+        else actions.selectCodeThread(ask.threadId);
+      },
       coordinatorTitles: needsYouCoordinatorTitles,
       feedRevision,
       modes: workingNowModes,

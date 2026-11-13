@@ -1480,7 +1480,7 @@ describe("WorkTurnRuntime", () => {
     });
   });
 
-  it("still times out when the provider stays silent", async () => {
+  it("still times out when the provider stays silent past the host's stalled-turn limit", async () => {
     const driver: ProviderDriver = {
       kind: "openai-compatible",
       probe: () => Effect.die("unused"),
@@ -1497,7 +1497,7 @@ describe("WorkTurnRuntime", () => {
           answerTool: () => Effect.void,
         } as never),
     };
-    const outcome = await new WorkTurnRuntime({ timeoutMs: 10 }).run({
+    const outcome = await new WorkTurnRuntime({ stalledTurnLimitMs: () => 10 }).run({
       command: decodeStartWorkThreadTurnCommand({
         kind: "start-work-thread-turn",
         requestId: ids.request,

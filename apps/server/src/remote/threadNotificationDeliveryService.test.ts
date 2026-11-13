@@ -407,6 +407,23 @@ describe("ordinary-thread notifications", () => {
     expect(transport?.sent).toHaveLength(4);
   });
 
+  it("notifies a paired phone once of an ask a host service holds outside the journal", async () => {
+    const { register, service, transport, receipts } = host();
+    register(phone);
+    const ask = { threadId: workThread, askId: "f1000000-0000-4000-8000-000000000001" };
+    service.notifyWaitingAsk(ask);
+    service.notifyWaitingAsk({ ...ask, askId: "f1000000-0000-4000-8000-000000000002" });
+    // The same ask announced again stays silent.
+    service.notifyWaitingAsk(ask);
+    await vi.waitFor(() => expect(receipts()).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(receipts().map((receipt) => [receipt.kind, receipt.threadId])).toEqual([
+      ["approval-needed", workThread],
+      ["approval-needed", workThread],
+    ]);
+    expect(transport?.sent).toHaveLength(2);
+  });
+
   it("holds back a device's notifications past the rate limit and journals each one it held", async () => {
     const { register, service, transport, receipts } = host();
     register(phone);

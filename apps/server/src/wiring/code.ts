@@ -594,6 +594,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     AuthorityWiring,
     | "bindingReceiptStore"
     | "codeSessionAuthority"
+    | "isPairedDeviceScope"
     | "liveTurns"
     | "machineChangeFeed"
     | "onWindowRevoked"
@@ -662,6 +663,7 @@ export function wireCode(deps: CodeDependencies) {
     managedWorktreeService,
     managedWorktreeSourcePreview,
     onGithubPullRequestsUnreadable,
+    isPairedDeviceScope,
     onWindowRevoked,
     options,
     persistence,
@@ -881,6 +883,7 @@ export function wireCode(deps: CodeDependencies) {
       // window that reopens registers the same window id again.
       isWindowLive: (scopeId) =>
         windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)),
+      isPairedDevice: isPairedDeviceScope,
     });
     const canAccessCodeProject = (scopeId: WindowId, projectId: ProjectId) =>
       codeProjectAccess.canAccessProject(scopeId, projectId);
