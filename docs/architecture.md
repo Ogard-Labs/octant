@@ -5844,6 +5844,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   through a windowed read and load earlier pages on request; each page is one
   contiguous run of whole turns, bounded by count and by text, and the
   journal and projection stay complete ([thread windows](design/host-reads-and-commands.md#thread-windows)).
+  Chat folds live reply deltas into its current view immediately but publishes
+  them to React and its read cursor on a 50 ms beat. Stream completion flushes
+  pending text; switching threads, replacing the authoritative view, or closing
+  the controller cancels the old beat. An old stream's teardown cannot cancel
+  a new thread's pending update.
   Chat pages over the active conversation only and counts the turns edits
   superseded or rewinds removed, so nothing derived from the whole thread goes partial; the
   Markdown copy and the thread's totals read the whole thread first. A Code
