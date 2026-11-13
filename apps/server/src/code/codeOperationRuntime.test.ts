@@ -101,6 +101,7 @@ import {
   readCodeRuntimeWorks,
   readCodeRuntimeWorkAggregateVersion,
   readCodeThreadActivity,
+  readCodeThreadsWithUnconfirmedRemoteSteps,
   readCodeReviewFinding,
   readCodeReviewFindings,
   reconcileCodeRestart,
@@ -153,6 +154,7 @@ import {
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "./codeOperationEventStore";
 import {
+  beginUnconfirmedStepSettlement,
   type CodeActiveTurns,
   createCodeOperationRuntime,
   threadWithActiveTurnPosture,
@@ -778,6 +780,204 @@ describe("CodeOperationRuntime", () => {
       }
     },
   );
+
+  describe("settling unconfirmed steps when the host starts", () => {
+    const hostScope = "90000000-0000-4000-8000-0000000000f0" as WindowId;
+    const lostPush = {
+      id: "90000000-0000-4000-8000-0000000000f1",
+      kind: "git",
+      state: "ambiguous",
+      remoteStep: {
+        kind: "push",
+        remote: "origin",
+        remoteRef: "refs/heads/feature",
+        commitOid: "a".repeat(40),
+      },
+    } as const;
+    // A restart leaves every checkout waiting until a window looks at it again.
+    const waitingCheckout = () =>
+      decodeCodeCheckoutIdentity({
+        id: checkoutId,
+        repositoryId: thread().repositoryId,
+        kind: "existing-worktree",
+        availability: "waiting",
+        head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
+        observedAt: now,
+      });
+    const latest = (fixture: ReturnType<typeof runtimeFixture>, id: string) =>
+      fixture
+        .runtimeWorks()
+        .filter((work) => work.id === id)
+        .at(-1)?.state;
+
+    it.each([
+      ["points at the pushed commit", { status: "found", oid: "a".repeat(40) }, "completed"],
+      ["points elsewhere", { status: "found", oid: "c".repeat(40) }, "failed"],
+      ["cannot be reached", { status: "unavailable" }, "ambiguous"],
+    ] as const)(
+      "settles a push lost in a restart when the remote branch %s, before anyone opens the thread",
+      async (_case, remote, settled) => {
+        const remoteHead = vi.fn(async () => remote);
+        const fixture = runtimeFixture({ remoteHead, checkoutIdentity: waitingCheckout() });
+        try {
+          fixture.appendRuntimeWork(lostPush);
+          await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+            signal: new AbortController().signal,
+          });
+          expect(remoteHead).toHaveBeenCalledWith(
+            expect.objectContaining({ remote: "origin", remoteRef: "refs/heads/feature" }),
+            expect.any(AbortSignal),
+          );
+          expect(fixture.access).toHaveBeenCalledWith(hostScope, thread().projectId);
+          expect(latest(fixture, lostPush.id)).toBe(settled);
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
+    it("leaves a lost push unconfirmed on a thread that is no longer active", async () => {
+      const remoteHead = vi.fn(async () => ({ status: "found" as const, oid: "a".repeat(40) }));
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        fixture.setThread(decodeCodeThread({ ...thread(), lifecycle: "archived" }));
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+        });
+        expect(remoteHead).not.toHaveBeenCalled();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("leaves a lost push unconfirmed when its remote does not answer in time", async () => {
+      const remoteHead = vi.fn(
+        (_input: unknown, signal?: AbortSignal) =>
+          new Promise<{ readonly status: "found"; readonly oid: string }>((resolve) => {
+            // Answers only once the step's time is up, as a hung remote that
+            // finally replies would.
+            signal?.addEventListener("abort", () =>
+              resolve({ status: "found", oid: "a".repeat(40) }),
+            );
+          }),
+      );
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+          stepTimeoutMs: 20,
+        });
+        expect(remoteHead).toHaveBeenCalledOnce();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("leaves a lost push unconfirmed when its checkout cannot be resolved in time", async () => {
+      const remoteHead = vi.fn(async () => ({ status: "found" as const, oid: "a".repeat(40) }));
+      // A probe of a stalled mount that never answers and ignores every signal.
+      const fixture = runtimeFixture({
+        remoteHead,
+        resolveCheckoutRoot: () => new Promise(() => {}),
+      });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+          stepTimeoutMs: 20,
+        });
+        expect(remoteHead).not.toHaveBeenCalled();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("stops the checkout probe it abandons when the step's time is up", async () => {
+      let probeSignal: AbortSignal | undefined;
+      const fixture = runtimeFixture({
+        resolveCheckoutRoot: (_windowId, _thread, _checkout, signal) => {
+          probeSignal = signal;
+          return new Promise(() => {});
+        },
+      });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        await fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+          stepTimeoutMs: 20,
+        });
+        expect(probeSignal?.aborted).toBe(true);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("returns at once while a remote is still being asked, and lets go when stopped", async () => {
+      let asked = false;
+      const remoteHead = vi.fn(
+        (_input: unknown, signal?: AbortSignal) =>
+          new Promise<{ readonly status: "unavailable" }>((resolve) => {
+            asked = true;
+            signal?.addEventListener("abort", () => resolve({ status: "unavailable" }));
+          }),
+      );
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        const look = beginUnconfirmedStepSettlement(fixture.runtime, hostScope);
+        await vi.waitFor(() => expect(asked).toBe(true));
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+        await look.stop();
+        expect(latest(fixture, lostPush.id)).toBe("ambiguous");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("makes a person's look at the checkout wait for the host's, so the remote is read once", async () => {
+      let answer: (() => void) | undefined;
+      const remoteHead = vi.fn(
+        () =>
+          new Promise<{ readonly status: "found"; readonly oid: string }>((resolve) => {
+            answer = () => resolve({ status: "found", oid: "a".repeat(40) });
+          }),
+      );
+      const fixture = runtimeFixture({ remoteHead });
+      try {
+        fixture.appendRuntimeWork(lostPush);
+        const look = fixture.runtime.settleUnconfirmedSteps?.(hostScope, {
+          signal: new AbortController().signal,
+        });
+        await vi.waitFor(() => expect(remoteHead).toHaveBeenCalledOnce());
+        const observed = fixture.runtime.execute(windowId, {
+          kind: "observe-git",
+          operationId: operationId(44),
+          threadId,
+          checkoutId,
+          gitOperationId: operationId(45),
+          maxDiffBytes: 1_024,
+        });
+        answer?.();
+        await Promise.all([look, observed]);
+        expect(remoteHead).toHaveBeenCalledOnce();
+        expect(latest(fixture, lostPush.id)).toBe("completed");
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+  });
 
   it("settles a Stop promptly while the provider floods the turn with deltas", async () => {
     const runs = 10;
@@ -7353,6 +7553,48 @@ describe("CodeOperationRuntime", () => {
       }
     });
 
+    it("settles a comment lost in a restart against its own pull request when the host starts", async () => {
+      // The branch now carries pull request 7; the comment went to 5 and landed.
+      const { fixture, actions, locate } = actionFixture({
+        ownComments: async (input) => ({
+          status: "read" as const,
+          bodies: input.number === 5 ? ["Looks right."] : [],
+        }),
+      });
+      try {
+        const lost = "90000000-0000-4000-8000-0000000000e6";
+        fixture.appendRuntimeWork({
+          id: lost,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: {
+            kind: "pull-request",
+            action: "comment",
+            commentDigest: pullRequestCommentDigest("Looks right."),
+            pullRequest: { owner: "octant", name: "octant", number: 5 },
+            priorMatches: 0,
+          },
+        });
+        await fixture.runtime.settleUnconfirmedSteps?.(
+          "90000000-0000-4000-8000-0000000000f0" as WindowId,
+          { signal: new AbortController().signal },
+        );
+        expect(actions.ownComments).toHaveBeenCalledWith(
+          { owner: "octant", name: "octant", number: 5 },
+          expect.any(AbortSignal),
+        );
+        expect(locate).not.toHaveBeenCalled();
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === lost)
+            .at(-1)?.state,
+        ).toBe("completed");
+      } finally {
+        fixture.close();
+      }
+    });
+
     it("merges on the person's approval only when the head and required checks match", async () => {
       const refusedFixture = actionFixture({});
       const base = {
@@ -10436,6 +10678,8 @@ function runtimeFixture(options: {
       readCodeRuntimeWorkAggregateVersion: (id) =>
         readCodeRuntimeWorkAggregateVersion(connection, id),
       readCodeRuntimeWorks: (id) => readCodeRuntimeWorks(connection, id),
+      readCodeThreadsWithUnconfirmedRemoteSteps: () =>
+        readCodeThreadsWithUnconfirmedRemoteSteps(connection),
       readCodeThread: readThread,
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
       readReviewFinding: (id) => readCodeReviewFinding(connection, id),
@@ -15625,6 +15869,7 @@ describe("continuing a Code turn a restart cut off", () => {
     const releaseQueue = vi.fn(async (_threadId: CodeThreadId) => {});
     const ports: CodeRestartContinuationPorts = {
       cutOff,
+      quitByPerson: false,
       readThread: (id) => (String(id) === String(threadId) ? thread() : undefined),
       runtimeWorks: (id) => readCodeRuntimeWorks(host.connection, id),
       enabled: () => true,
@@ -15758,6 +16003,39 @@ describe("continuing a Code turn a restart cut off", () => {
       ).resolves.toMatchObject({ continued: [{ threadId: String(threadId) }], held: [] });
       await vi.waitFor(() => expect(next.connection.send).toHaveBeenCalledOnce());
       expect(next.connection.resume).toHaveBeenCalledOnce();
+    } finally {
+      for (const host of hosts) host.close();
+    }
+  });
+
+  it("holds a thread a person's quit cut off, with the quit as its reason, and starts nothing", async () => {
+    const first = await hostRunningTurn();
+    const hosts: Host[] = [first.host];
+    try {
+      await first.host.runtime.close();
+      const next = restartAfter(first.host);
+      hosts.push(next.host);
+      const recovery = recoveryOn(next.host, next.cutOff, { quitByPerson: true });
+      await expect(continueCodeTurnsCutOffByRestart(recovery.ports)).resolves.toEqual({
+        at: now,
+        continued: [],
+        held: [
+          {
+            mode: "code",
+            threadId: String(threadId),
+            reason: "quit",
+            detail: "Octant was quit while this thread was working, so it waits for you.",
+          },
+        ],
+      });
+      expect(next.connection.resume).not.toHaveBeenCalled();
+      expect(next.connection.send).not.toHaveBeenCalled();
+      expect(recovery.releaseQueue).not.toHaveBeenCalled();
+      // The hold is not a continuation, so the crash-loop count stays untouched.
+      expect(
+        createCodeRestartContinuationAttempts(next.host.connection).read(String(threadId)),
+      ).toBeUndefined();
+      expect(statuses(next.host)).toEqual([[String(operationId(61)), "interrupted"]]);
     } finally {
       for (const host of hosts) host.close();
     }

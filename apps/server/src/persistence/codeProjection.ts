@@ -852,6 +852,27 @@ export function readCodeRuntimeWorks(
   }));
 }
 
+/**
+ * The threads holding a push or pull request step whose outcome the host
+ * never learned: `ambiguous` work that recorded the remote step it was taking.
+ */
+export function readCodeThreadsWithUnconfirmedRemoteSteps(
+  connection: SqliteConnection,
+): ReadonlyArray<CodeThreadId> {
+  const rows = connection
+    .prepare(
+      `SELECT * FROM code_runtime_projection WHERE state = 'ambiguous'
+       ORDER BY COALESCE(first_sequence, last_sequence) ASC, runtime_work_id ASC`,
+    )
+    .all() as ReadonlyArray<CodeRuntimeProjectionRow>;
+  const threads = new Map<string, CodeThreadId>();
+  for (const row of rows) {
+    const work = decodeRuntimeRow(row);
+    if (work.remoteStep !== undefined) threads.set(String(work.threadId), work.threadId);
+  }
+  return [...threads.values()];
+}
+
 export function readCodeReviewFinding(
   connection: SqliteConnection,
   findingId: CodeReviewFindingId,

@@ -277,6 +277,7 @@ import {
   type HostAdmission,
   type LocalHostDescriptor,
 } from "./hostLifecycle";
+import { reportPersonQuit, watchSystemShutdown } from "./personQuitReport";
 import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
 import {
   buildMenuBarItems,
@@ -1448,6 +1449,9 @@ let quitCanPrompt = false;
 // Set once a start-up has failed: a signal quit then ends the app instead of
 // being swallowed while the failure is released and shown.
 let quitAfterFailedStartup: (() => void) | undefined;
+// Whether the system announced a restart, shutdown or session end. Until the
+// app is ready nothing is watching, and nothing has announced one.
+let systemShuttingDown: () => boolean = () => false;
 let handlersInstalled = false;
 let projectRootPicker: ReturnType<typeof createProjectRootPicker> | undefined;
 const projectWindowLifecycle = createProjectWindowAuthorityLifecycle();
@@ -4807,6 +4811,17 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
   desktopBackendSupervisor.release();
   // Closing admission here fences a client arriving during the later flush.
   quitAccepted = true;
+  // A person's quit asks the host to hold, not continue, the turns it cuts
+  // off; a quit the system asked for continues them at the next start. Sent
+  // before the host stops, while it still answers, and bounded so it never
+  // holds the quit.
+  await reportPersonQuit({
+    interactive,
+    systemShuttingDown: systemShuttingDown(),
+    host: hostLifecycle.snapshot(),
+    brokerHeaders: desktopBrokerHeaders(),
+    fetch: globalThis.fetch,
+  });
   // Armed only once the quit is accepted, so the time a person spends on the
   // confirmation does not count against it.
   armQuitDeadline({
@@ -5084,6 +5099,14 @@ function startDesktopInstance(): void {
   void app
     .whenReady()
     .then(async () => {
+      systemShuttingDown = watchSystemShutdown({
+        powerMonitor,
+        onSessionEnd: (listener) =>
+          app.on("browser-window-created", (_event, window) => {
+            window.on("query-session-end", listener);
+            window.on("session-end", listener);
+          }),
+      });
       const withoutWindow = hostOnly(process.argv.slice(1));
       if (withoutWindow) {
         // The background service's host has no Nightly client to wait for: it
