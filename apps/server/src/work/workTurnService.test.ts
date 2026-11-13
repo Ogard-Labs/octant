@@ -6221,6 +6221,7 @@ describe("continuing a Work turn a restart cut off", () => {
 
   const noGoalLoops = {
     runningLoopThreads: () => [],
+    openRoundThreads: () => [],
     settleAfterRestart: async () => ({ roundsCutOffInARow: 0 }),
     crashLooping: () => false,
     continueAfterRestart: () => false,
@@ -6232,6 +6233,7 @@ describe("continuing a Work turn a restart cut off", () => {
     let running = true;
     const goalLoops = {
       runningLoopThreads: vi.fn(() => (running ? [String(ids.thread)] : [])),
+      openRoundThreads: () => [],
       settleAfterRestart: vi.fn(async (_threadId: string) => ({ roundsCutOffInARow })),
       crashLooping: (count: number) => count >= 3,
       continueAfterRestart: vi.fn((_threadId: string) => running),

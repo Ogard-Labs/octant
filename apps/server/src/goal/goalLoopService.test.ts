@@ -10,6 +10,9 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { GoalLoopEventStore } from "./goalLoopEventStore";
+import { chargeGoalForRound } from "./goalLoopCharge";
+import { GoalService } from "./goalService";
+import { JournalGoalStore } from "./journalGoalStore";
 import { GoalLoopService, type GoalLoopDependencies } from "./goalLoopService";
 
 const threadId = "22222222-0000-4000-8000-000000000001";
@@ -587,6 +590,7 @@ describe("a goal loop across a restart", () => {
     path: string,
     scheduleFirstRound = vi.fn(),
     runRound?: GoalLoopDependencies["runRound"],
+    options: { readonly stopBeforeRoundRecord?: boolean } = {},
   ) {
     const connection = openSqlite(path);
     opened.push(connection);
@@ -606,33 +610,126 @@ describe("a goal loop across a restart", () => {
       actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000001" },
     });
     const h = harness({ scheduleFirstRound });
-    const recordUsage = vi.fn(
-      async (_input: Parameters<GoalLoopDependencies["recordUsage"]>[0]) => {},
-    );
     // Ten seconds a reading, so a running round's spend is journaled.
     let tick = 0;
     const clock = () => new Date(Date.parse(at) + (tick += 10_000)).toISOString() as never;
+    // The real goal, journaled beside the loop, so a charge survives the restart.
+    const goals = new GoalService({ store: new JournalGoalStore({ journal }), clock });
+    const recordUsage = vi.fn((input: Parameters<GoalLoopDependencies["recordUsage"]>[0]) =>
+      chargeGoalForRound(goals, input),
+    );
+    // A host that stops after the charge commits and before the round's record.
+    const frames = options.stopBeforeRoundRecord
+      ? {
+          append: (input: Parameters<GoalLoopEventStore["append"]>[0]) => {
+            if (input.eventName === "goal-loop-round-recorded@1") throw new Error("host stopped");
+            events.append(input);
+          },
+        }
+      : events;
     const service = new GoalLoopService({
-      readGoal: () => goal(),
+      readGoal: (id) => goals.read(id).goal,
       recordUsage,
       threadAuthority: () => ceiling,
       modePosture: () => undefined,
       pendingApproval: () => undefined,
       markCheckpoint: async () => "checkpoint-1",
       runRound: runRound ?? h.runRound,
-      journal: events,
+      journal: frames,
       scheduleFirstRound,
       uuid: randomUUID,
       clock,
     });
     service.replay(events.replay());
-    return { service, scheduleFirstRound, recordUsage };
+    return { service, scheduleFirstRound, recordUsage, goals };
   }
 
-  it("comes back running with its rounds and narrowed ceiling, and a held loop stays paused on the next start", async () => {
+  async function storeWithGoal(): Promise<string> {
     const directory = mkdtempSync(join(tmpdir(), "octant-goal-loop-"));
     directories.push(directory);
     const path = join(directory, "octant.sqlite3");
+    await hostStart(path).goals.execute({
+      kind: "create-thread-goal",
+      threadId,
+      expectedVersion: 0,
+      goalId,
+      revisionId: "44444444-0000-4000-8000-000000000001",
+      objective: "Get the migration passing",
+      budget: { turnBudget: 10 },
+    });
+    return path;
+  }
+
+  const cutOffRound: GoalLoopDependencies["runRound"] = (input) => {
+    input.onSpend?.(700);
+    return new Promise(() => {});
+  };
+
+  async function loopCutOffMidRound(path: string) {
+    const before = hostStart(path, vi.fn(), cutOffRound);
+    await before.service.execute({
+      kind: "start-goal-loop",
+      threadId,
+      expectedVersion: 0,
+      loopId,
+      goalId,
+      ceiling,
+      trigger: { kind: "continuous" },
+    });
+    void before.service.advance(threadId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return before;
+  }
+
+  it("charges a cut-off round once when the host stops between the charge and the round's record, across two restarts", async () => {
+    const path = await storeWithGoal();
+    await loopCutOffMidRound(path);
+
+    const stopped = hostStart(path, vi.fn(), undefined, { stopBeforeRoundRecord: true });
+    await expect(stopped.service.settleAfterRestart(threadId)).rejects.toThrow("host stopped");
+    expect(stopped.goals.read(threadId).goal?.usage).toMatchObject({
+      tokensUsed: 700,
+      turnsUsed: 1,
+    });
+
+    const first = hostStart(path);
+    await first.service.settleAfterRestart(threadId);
+    const second = hostStart(path);
+    await second.service.settleAfterRestart(threadId);
+    expect(second.goals.read(threadId).goal?.usage).toMatchObject({
+      tokensUsed: 700,
+      turnsUsed: 1,
+    });
+    expect(second.service.read(threadId).rounds).toMatchObject([
+      { outcome: "interrupted", tokensSpent: 700 },
+    ]);
+  });
+
+  it("settles a round cut off on a loop a person paused mid-round, and does not continue the loop", async () => {
+    const path = await storeWithGoal();
+    const before = await loopCutOffMidRound(path);
+    const loop = before.service.read(threadId).loop;
+    await before.service.execute({
+      kind: "pause-goal-loop",
+      threadId,
+      expectedVersion: loop?.version ?? 0,
+    });
+
+    const after = hostStart(path);
+    expect(after.service.runningLoopThreads()).toEqual([]);
+    expect(after.service.openRoundThreads()).toEqual([threadId]);
+    await after.service.settleAfterRestart(threadId);
+    expect(after.service.read(threadId)).toMatchObject({
+      loop: { status: "paused", pauseReason: "paused-by-user" },
+      rounds: [{ outcome: "interrupted", tokensSpent: 700 }],
+    });
+    expect(after.goals.read(threadId).goal?.usage.tokensUsed).toBe(700);
+    expect(after.service.continueAfterRestart(threadId)).toBe(false);
+    expect(after.scheduleFirstRound).not.toHaveBeenCalled();
+  });
+
+  it("comes back running with its rounds and narrowed ceiling, and a held loop stays paused on the next start", async () => {
+    const path = await storeWithGoal();
 
     const before = hostStart(path);
     await before.service.execute({
@@ -678,14 +775,7 @@ describe("a goal loop across a restart", () => {
   });
 
   it("charges a round a restart cut off at its journaled spend, and counts rounds cut off in a row", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "octant-goal-loop-"));
-    directories.push(directory);
-    const path = join(directory, "octant.sqlite3");
-    // A round that reports spend and never ends: the host stops under it.
-    const cutOffRound: GoalLoopDependencies["runRound"] = (input) => {
-      input.onSpend?.(700);
-      return new Promise(() => {});
-    };
+    const path = await storeWithGoal();
 
     const before = hostStart(path, vi.fn(), cutOffRound);
     await before.service.execute({

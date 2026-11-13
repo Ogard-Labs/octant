@@ -5227,7 +5227,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   never recorded is the one the restart cut off: the start records it as
   `interrupted` and charges the goal the spend it last journaled (the last few
   seconds may be missing; a round that journaled none reads as unreported
-  spend, so a token budget is not trusted on it). A loop the start finds
+  spend, so a token budget is not trusted on it). This settles every open
+  round, a paused or stopped loop's too. The goal keeps the newest round ids
+  it was charged for (`recentChargeIds`) and refuses a charge id it holds, so a
+  host that stops between charging a round and recording it charges that
+  round once however often it restarts. A loop the start finds
   running then follows its thread's decision. When the restart cut off the
   loop's round turn, the loop's next round is that thread's continuation,
   behind the same holds and harness lift as a cut-off turn and in place of a

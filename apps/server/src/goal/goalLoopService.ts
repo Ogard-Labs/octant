@@ -54,8 +54,14 @@ export interface GoalLoopRoundOutcome {
 export interface GoalLoopDependencies {
   /** The goal this loop works on, and the command path that changes it. */
   readonly readGoal: (threadId: string) => ThreadGoal | null;
+  /**
+   * Charge one round to the goal. It must charge a round id at most once:
+   * a host that stops after the charge and before the round's record settles
+   * the same round again on its next start (goalLoopCharge.ts).
+   */
   readonly recordUsage: (input: {
     readonly threadId: string;
+    readonly roundId: string;
     readonly goal: ThreadGoal;
     readonly tokensSpent: number;
     readonly elapsedMs: number;
@@ -358,6 +364,7 @@ export class GoalLoopService {
       try {
         await this.#dependencies.recordUsage({
           threadId,
+          roundId,
           goal,
           tokensSpent: outcome.tokensSpent,
           elapsedMs: outcome.elapsedMs,
@@ -516,6 +523,7 @@ export class GoalLoopService {
       try {
         await this.#dependencies.recordUsage({
           threadId,
+          roundId: open.roundId,
           goal,
           tokensSpent,
           elapsedMs,
@@ -567,6 +575,17 @@ export class GoalLoopService {
   /** Whether restarts have cut off so many of this loop's rounds in a row that it should wait. */
   crashLooping(roundsCutOffInARow: number): boolean {
     return roundsCutOffInARow >= MAX_ROUNDS_CUT_OFF_IN_A_ROW;
+  }
+
+  /**
+   * The threads whose loop has a round the restart cut off, whatever the
+   * loop's status: a person may pause a loop while its round runs, and that
+   * round still spent and must still be recorded before a Resume.
+   */
+  openRoundThreads(): ReadonlyArray<string> {
+    return [...this.#byThread.values()]
+      .filter((record) => record.openRound !== undefined)
+      .map((record) => String(record.loop.threadId));
   }
 
   /** The threads whose loop was running when the previous host stopped. */

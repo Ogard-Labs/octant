@@ -436,6 +436,7 @@ export interface WorkRestartContinuationDependencies {
   readonly goalLoops: Pick<
     GoalLoopService,
     | "runningLoopThreads"
+    | "openRoundThreads"
     | "settleAfterRestart"
     | "crashLooping"
     | "continueAfterRestart"
@@ -468,6 +469,11 @@ export async function continueWorkTurns(deps: WorkRestartContinuationDependencie
   const { goalLoops } = deps;
   // The round a restart cut off is charged and recorded first, so the
   // crash-loop count below reads it.
+  // Every open round is settled, a paused or stopped loop's too; only a
+  // running loop is then continued or held.
+  for (const threadId of goalLoops.openRoundThreads()) {
+    await goalLoops.settleAfterRestart(threadId).catch(() => undefined);
+  }
   const crashLooping = new Set<string>();
   for (const threadId of goalLoops.runningLoopThreads()) {
     const settled = await goalLoops
