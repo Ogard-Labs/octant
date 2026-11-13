@@ -12636,6 +12636,11 @@ describe("continuing a Chat answer a restart cut off", () => {
       releaseQueue,
       ...overrides,
     });
+    // Recovery admits a background turn; let it release its files before
+    // afterEach removes the fixture, including tests that only assert admission.
+    for (const continued of recovery.continued) {
+      await until(() => !fixture.service.isTurnActive(decodeChatThreadId(continued.threadId)));
+    }
     return { cutOff, recovery, releaseQueue };
   }
 
