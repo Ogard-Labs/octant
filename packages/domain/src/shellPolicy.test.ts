@@ -288,10 +288,22 @@ describe("shell settings policy", () => {
 
     expect(browserTransferRemembered(inPersonal, { ...transfer, profile: personal })).toBe(true);
     expect(browserTransferRemembered(inPersonal, { ...transfer, profile: project })).toBe(false);
-    // A Private page carries no profile, and an answer given there stays there.
-    expect(browserTransferRemembered(inPersonal, transfer)).toBe(false);
-    expect(browserTransferRemembered([transfer], { ...transfer, profile: personal })).toBe(false);
-    expect(browserTransferRemembered([transfer], transfer)).toBe(true);
+    // An answer given on a Private page says so, and stays there.
+    const onPrivate = { ...transfer, privatePage: true } as const;
+    expect(browserTransferRemembered(inPersonal, onPrivate)).toBe(false);
+    expect(browserTransferRemembered([onPrivate], { ...transfer, profile: personal })).toBe(
+      false,
+    );
+    expect(browserTransferRemembered([onPrivate], onPrivate)).toBe(true);
+    // An answer remembered before the page was recorded names neither. It
+    // was given for the site and the folder on any page, and still covers
+    // that: the same site and folder, in any profile and on a Private page.
+    expect(browserTransferRemembered([transfer], { ...transfer, profile: personal })).toBe(true);
+    expect(browserTransferRemembered([transfer], { ...transfer, profile: project })).toBe(true);
+    expect(browserTransferRemembered([transfer], onPrivate)).toBe(true);
+    expect(
+      browserTransferRemembered([transfer], { ...onPrivate, origin: "https://other.example" }),
+    ).toBe(false);
     expect(
       browserTransferRemembered(inPersonal, {
         ...transfer,
@@ -299,6 +311,26 @@ describe("shell settings policy", () => {
         workspaceRoot: "/projects/other",
       }),
     ).toBe(false);
+  });
+
+  it("lets Settings forget a remembered transfer and never widen one to every page", () => {
+    const settings = defaultShellSettings();
+    const entry = {
+      direction: "upload",
+      origin: "https://example.com",
+      workspaceRoot: "/projects/brief",
+      profile: { kind: "personal" },
+    } as const;
+    const current: ShellSettings = { ...settings, rememberedBrowserTransfers: [entry] };
+
+    expect(
+      replaceShellSettings(current, { ...current, rememberedBrowserTransfers: [] })
+        .rememberedBrowserTransfers,
+    ).toEqual([]);
+    const { profile: _profile, ...anyPage } = entry;
+    expect(() =>
+      replaceShellSettings(current, { ...current, rememberedBrowserTransfers: [anyPage] }),
+    ).toThrow();
   });
 
   it("resolves first-run onboarding once and never reopens it", () => {

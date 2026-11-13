@@ -712,7 +712,13 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
       expect(approvals.decide(windowId, decision)).toBe(true);
       await expect(always).resolves.toBe("approved");
       expect(rememberTransfer).toHaveBeenCalledExactlyOnceWith(
-        { direction, origin: "https://example.com", workspaceRoot: "/projects/brief" },
+        {
+          direction,
+          origin: "https://example.com",
+          workspaceRoot: "/projects/brief",
+          // No profile was named, so the page is a Private one, and the answer says so.
+          privatePage: true,
+        },
         windowId,
       );
       // The answer is about files, never a grant to open the site.

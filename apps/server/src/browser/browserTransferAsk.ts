@@ -56,7 +56,11 @@ export function askBrowserTransfer(
       direction: input.direction,
       origin: input.origin,
       workspaceRoot: input.workspaceRoot,
-      ...(input.profile === undefined ? {} : { profile: input.profile }),
+      // A page with no stored profile is a Private one, and the question
+      // says so: an entry naming neither is an older answer for any page.
+      ...(input.profile === undefined
+        ? { privatePage: true as const }
+        : { profile: input.profile }),
     }) === true
   ) {
     return Promise.resolve("approved");

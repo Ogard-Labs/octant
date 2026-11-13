@@ -338,8 +338,8 @@ of waiting.
   size check, and is listed, with its profile, with a Forget control in
   Settings › Permissions › Browser uploads and downloads. Not built yet: it
   grows only through the approval answer of a window
-  of this computer (a paired device's answer covers one upload), and
-  an answer remembered before the profile was recorded carries none and covers Private pages alone, so a profile page asks once more. An unanswered ask waits in Needs
+  of this computer (a paired device's answer covers one upload).
+  An answer given on a Private page is stored as one and covers Private pages alone. An answer remembered before the page was recorded names neither a profile nor a Private page: it was given for the site and the folder on any page, so it keeps covering every profile and Private pages, shown as "on any page" in Settings, until the person forgets it (maintainer decision, 2026-11-13). It was not narrowed because that would ask again for what the person already answered, and it cannot be confused with a newer answer, which always names its page. An unanswered ask waits in Needs
   you. At Full access nothing is asked. Work and Code both ask in the
   thread's Browser approval card ("Upload once", "Always allow" or "Deny"),
   through one host function that reads the remembered answer and raises the

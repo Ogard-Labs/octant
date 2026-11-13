@@ -1966,8 +1966,14 @@ describe("SettingsView", () => {
       direction: "upload" as const,
       origin: "https://example.com",
       workspaceRoot: "/projects/brief",
+      privatePage: true as const,
     };
-    const download = { ...upload, direction: "download" as const };
+    // Remembered before the page was recorded, so it names none and covers any.
+    const download = {
+      direction: "download" as const,
+      origin: upload.origin,
+      workspaceRoot: upload.workspaceRoot,
+    };
     renderSettings({
       onSettingsChange,
       settings: { ...defaultShellSettings(), rememberedBrowserTransfers: [upload, download] },
@@ -1980,7 +1986,7 @@ describe("SettingsView", () => {
     ).toBeVisible();
     expect(
       screen.getByText(
-        "Agents save downloads from this site on Private pages into /projects/brief without asking.",
+        "Agents save downloads from this site on any page into /projects/brief without asking.",
       ),
     ).toBeVisible();
     // The rows are listed in the order remembered: the upload, then the download.

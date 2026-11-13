@@ -1043,6 +1043,7 @@ describe("octant_browser profile argument", () => {
         readonly origin: string;
         readonly workspaceRoot: string;
         readonly profile?: unknown;
+        readonly privatePage?: true;
       }>;
     } = {},
   ) {
@@ -1383,11 +1384,20 @@ describe("octant_browser profile argument", () => {
       expect(remembered.request).not.toHaveBeenCalled();
 
       // The same site and folder, answered on a Private page.
-      const asked = fixture({ ...page, rememberedTransfers: [answer] });
+      const asked = fixture({
+        ...page,
+        rememberedTransfers: [{ ...answer, privatePage: true as const }],
+      });
       await asked.run(upload);
       expect(asked.request).toHaveBeenCalledWith(
         expect.objectContaining({ upload: expect.anything(), profile: personal }),
       );
+
+      // An answer remembered before the page was recorded was given for the
+      // site and folder on any page, and still covers this one.
+      const older = fixture({ ...page, rememberedTransfers: [answer] });
+      expect((await older.run(upload)).isError).toBe(false);
+      expect(older.request).not.toHaveBeenCalled();
     } finally {
       await rm(folder, { recursive: true, force: true });
     }

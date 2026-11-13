@@ -267,7 +267,9 @@ export class BrowserToolApprovalService {
           direction,
           origin: pending.view.origin,
           workspaceRoot: pending.workspaceRoot,
-          ...(pending.view.profile === undefined ? {} : { profile: pending.view.profile }),
+          ...(pending.view.profile === undefined
+            ? { privatePage: true as const }
+            : { profile: pending.view.profile }),
         },
         windowId,
       );

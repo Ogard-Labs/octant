@@ -741,10 +741,30 @@ export function replaceShellSettings(
 }
 
 /**
+ * The page a remembered transfer answer is for: one stored profile, Private
+ * pages, or `any` for an answer remembered before the page was recorded.
+ */
+function rememberedTransferPage(transfer: RememberedBrowserTransfer): string {
+  if (transfer.profile !== undefined) return browserProfileKey(transfer.profile);
+  return transfer.privatePage === true ? "private" : "any";
+}
+
+function sameTransferRoute(a: RememberedBrowserTransfer, b: RememberedBrowserTransfer): boolean {
+  return (
+    a.direction === b.direction && a.origin === b.origin && a.workspaceRoot === b.workspaceRoot
+  );
+}
+
+/**
  * Whether an "Always allow" answer covers this direction, site, workspace
- * and Browser profile. The profile is part of it because a site's signed-in
- * session differs by profile: an answer about files sent from a Private page
- * says nothing about the same site signed in as the person.
+ * and page. The page is part of it because a site's signed-in session
+ * differs by profile: an answer about files sent from a Private page says
+ * nothing about the same site signed in as the person. `transfer` names the
+ * page the transfer happens on: its profile, or `privatePage`.
+ *
+ * An answer remembered before the page was recorded covered the site and the
+ * folder on every page, and keeps covering that (maintainer decision,
+ * 2026-11-13): it grants nothing the person had not already been given.
  */
 export function browserTransferRemembered(
   remembered: ReadonlyArray<RememberedBrowserTransfer>,
@@ -752,10 +772,9 @@ export function browserTransferRemembered(
 ): boolean {
   return remembered.some(
     (entry) =>
-      entry.direction === transfer.direction &&
-      entry.origin === transfer.origin &&
-      entry.workspaceRoot === transfer.workspaceRoot &&
-      browserProfileKey(entry.profile) === browserProfileKey(transfer.profile),
+      sameTransferRoute(entry, transfer) &&
+      (rememberedTransferPage(entry) === "any" ||
+        rememberedTransferPage(entry) === rememberedTransferPage(transfer)),
   );
 }
 
@@ -764,7 +783,19 @@ function resolveRememberedBrowserTransfers(
   replacement: ReadonlyArray<RememberedBrowserTransfer> | undefined,
 ): ReadonlyArray<RememberedBrowserTransfer> {
   if (replacement === undefined) return current;
-  if (replacement.some((entry) => !browserTransferRemembered(current, entry))) {
+  // Exactly an entry that is stored, never one a stored entry merely
+  // covers: a replacement could otherwise swap an answer for one profile
+  // for an answer for every page.
+  if (
+    replacement.some(
+      (entry) =>
+        !current.some(
+          (stored) =>
+            sameTransferRoute(stored, entry) &&
+            rememberedTransferPage(stored) === rememberedTransferPage(entry),
+        ),
+    )
+  ) {
     reject(
       "invalid-settings",
       "Remembered Browser uploads and downloads can only be added by the approval decision.",

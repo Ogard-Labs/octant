@@ -593,13 +593,21 @@ export const RememberedBrowserTransfer = Schema.Struct({
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
   /** The thread workspace on this host: a Work Project folder or a Code checkout. */
   workspaceRoot: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
-  /**
-   * The stored profile the page was in. Absent for a Private page, and on an
-   * answer remembered before the profile was recorded, which therefore
-   * covers Private pages alone.
-   */
+  /** The stored profile the page was in. Absent for a Private page. */
   profile: Schema.optional(StoredBrowserProfile),
-}).annotations(strict);
+  /**
+   * Set on an answer given on a Private page, which covers Private pages
+   * alone. An entry with neither this nor `profile` was remembered before
+   * the page was recorded: it was given for the site and the folder on any
+   * page, which is what it covered then, so it still covers every profile
+   * and Private pages until the person forgets it. Narrowing it would ask
+   * again for what they already answered, and no entry written since can be
+   * mistaken for one.
+   */
+  privatePage: Schema.optional(Schema.Literal(true)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((entry) => entry.profile === undefined || entry.privatePage !== true));
 export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
 
 export const ShellSettings = Schema.Struct({

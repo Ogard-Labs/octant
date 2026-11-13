@@ -878,7 +878,10 @@ save. The size and held-file caps are
 Settings defaults, not constants (maintainer request, 2026-11-12), and so is
 the count of files one upload may send, five by default. Work and Code ask on
 the same Browser approval card and read the remembered answer through one
-function, so "Always allow" exists in both. At Full access a download is not
+function, so "Always allow" exists in both. An answer given on a Private page
+covers Private pages alone; an answer remembered before the page was recorded
+was given for the site and folder on any page and keeps covering that until
+the person forgets it (maintainer decision, 2026-11-13). At Full access a download is not
 held for a second call: it is saved into `downloads/` as the action that
 started it answers, with the size cap, the link checks and the journal record
 unchanged (maintainer decision, 2026-11-13). Not built yet: an unanswered ask

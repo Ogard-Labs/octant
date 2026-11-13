@@ -1618,7 +1618,7 @@ function ActiveSectionContent({
                       ? `Agents upload files from ${transfer.workspaceRoot} to this site ${rememberedTransferProfile(transfer)} without asking.`
                       : `Agents save downloads from this site ${rememberedTransferProfile(transfer)} into ${transfer.workspaceRoot} without asking.`
                   }
-                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}\0${browserProfileKey(transfer.profile)}`}
+                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}\0${transfer.profile === undefined && transfer.privatePage !== true ? "any" : browserProfileKey(transfer.profile)}`}
                   label={`${transfer.direction === "upload" ? "Uploads to" : "Downloads from"} ${transfer.origin}`}
                   scope="host"
                   settingId="browser-agent-downloads"
@@ -2274,6 +2274,8 @@ function rememberedTransferProfile(
   transfer: SettingsViewProps["settings"]["rememberedBrowserTransfers"][number],
 ): string {
   const profile = transfer.profile;
+  // Remembered before the page was recorded: it covered every page then and still does.
+  if (profile === undefined && transfer.privatePage !== true) return "on any page";
   if (profile === undefined) return "on Private pages";
   if (profile.kind === "personal") return "in the Personal profile";
   return profile.kind === "project" ? "in a Project profile" : "in an added account profile";
