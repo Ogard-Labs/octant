@@ -674,6 +674,17 @@ const timer = setInterval(() => {
       process.env,
       8000,
     );
+    // The click leaves the pointer on the sidebar row, whose hover card opens
+    // over the start of the transcript. In the hosted runner's window that card
+    // was observed covering the start of the Canvas sentence this stage reads
+    // ("...week running."), so the pointer is moved onto the Canvas first.
+    await observeUntil("fixture-canvas-drawn", (snapshot) => hasText(snapshot, "Worth watching"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["hover", String(ownPid), join(artifacts, "fixture-canvas-hover.png"), "Worth watching"],
+      process.env,
+      8000,
+    );
     await observeUntil(
       "fixture-canvas",
       (snapshot) =>
