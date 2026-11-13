@@ -934,6 +934,63 @@ describe("CodeTerminalPane", () => {
     );
   });
 
+  it("offers a shell a host restart ended back in one click as a fresh start the host may refuse", async () => {
+    const client = codeClient();
+    vi.mocked(client.executeOperation).mockResolvedValueOnce({
+      kind: "operation-failed",
+      operationId: "70000000-0000-4000-8000-000000000004",
+      failure: { category: "unauthorized", message: "This thread cannot start a terminal now." },
+    } as never);
+    const restart = {
+      columns: 100,
+      createTerminalId: () => "80000000-0000-4000-8000-000000000004" as never,
+      credentialRefs: [],
+      rows: 30,
+    };
+    const interrupted = {
+      ...terminalResult,
+      state: "interrupted",
+      browserGrant: { status: "granted" },
+    } as never;
+    const { rerender } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => "70000000-0000-4000-8000-000000000004" as never}
+        executionPolicy="approval-gated"
+        restart={restart}
+        result={interrupted}
+        scope={scope}
+      />,
+    );
+
+    expect(screen.getByText("Interrupted · explicit restart required")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Restart terminal" }));
+    await waitFor(() =>
+      expect(client.executeOperation).toHaveBeenCalledWith({
+        kind: "start-terminal",
+        operationId: "70000000-0000-4000-8000-000000000004",
+        terminalId: "80000000-0000-4000-8000-000000000004",
+        columns: 100,
+        rows: 30,
+        credentialRefs: [],
+        ...scope,
+      }),
+    );
+    expect(await screen.findByText("This thread cannot start a terminal now.")).toBeVisible();
+
+    rerender(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => "70000000-0000-4000-8000-000000000005" as never}
+        executionPolicy="plan"
+        restart={restart}
+        result={interrupted}
+        scope={scope}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Restart terminal" })).not.toBeInTheDocument();
+  });
+
   it("restarts the terminal in one of the Project's extra folders the person picks", async () => {
     const client = codeClient({ evidence: "ready" });
     const operationIds = [

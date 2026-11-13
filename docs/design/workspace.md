@@ -1151,7 +1151,12 @@ explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
 tool does not stop its server-owned lifecycle. Restoring a Terminal tab may
 reattach to an existing process, but a saved layout is not permission to start
-a new shell. When no process remains, the tab offers **Start terminal**.
+a new shell. When no process remains, the tab offers **Start terminal**. A
+shell a host restart ended reads Interrupted with a **Restart terminal** button
+beside it: one click starts a new shell through the ordinary start, checked
+against the thread's posture and authority at that moment, with a fresh
+terminal and no Browser grant or other permission the ended shell held. Plan
+shows no button.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.
