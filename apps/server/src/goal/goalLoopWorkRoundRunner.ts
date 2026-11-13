@@ -36,6 +36,8 @@ export interface GoalLoopWorkRoundInput {
   readonly objective: string;
   /** The round's effective authority: the loop's ceiling met with the thread's own. */
   readonly authority?: { readonly executionPolicy: string };
+  /** Told what the turn has charged so far whenever the figure grows. */
+  readonly onSpend?: (tokensSpent: number) => void;
 }
 
 export interface CreateGoalLoopWorkRoundRunnerOptions {
@@ -127,7 +129,14 @@ export function createGoalLoopWorkRoundRunner(
         charged = takeUsage(requestId, options.usage);
         settled = accepted;
       } else {
+        let reported = 0;
         for await (const frame of frames) {
+          const sofar = options.usage.peek(requestId);
+          const tokens = sofar === undefined ? 0 : sofar.inputTokens + sofar.outputTokens;
+          if (tokens > reported) {
+            reported = tokens;
+            input.onSpend?.(tokens);
+          }
           if (frame.kind !== "turn-settled") continue;
           if (String(frame.turn.requestId) !== String(requestId)) continue;
           charged = takeUsage(requestId, options.usage);

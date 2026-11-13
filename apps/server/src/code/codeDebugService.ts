@@ -343,6 +343,28 @@ export class CodeDebugService {
     return new Map(this.#sessions.get(String(sessionId))?.refusedRequests ?? []);
   }
 
+  /**
+   * Sessions the last run of this host left open and the restart ended, so a
+   * panel still following one reads why it ended instead of "no session".
+   * Only the ending is kept; starting again is the ordinary start, which
+   * checks the configuration's confirmation as it stands then.
+   */
+  rememberEndedByRestart(
+    ended: ReadonlyArray<{
+      readonly sessionId: CodeDebugSessionId;
+      readonly threadId: CodeDebugSessionCall["threadId"];
+    }>,
+  ): void {
+    for (const session of ended.slice(-MAX_REMEMBERED_ENDINGS)) {
+      if (this.#endings.has(String(session.threadId))) continue;
+      this.#endings.set(String(session.threadId), {
+        sessionId: session.sessionId,
+        endReason: "host-restarted",
+        exitCode: undefined,
+      });
+    }
+  }
+
   startSweeping(intervalMs = SWEEP_INTERVAL_MS): void {
     if (this.#sweepTimer !== undefined) return;
     this.#sweepTimer = setInterval(() => void this.sweep().catch(() => undefined), intervalMs);

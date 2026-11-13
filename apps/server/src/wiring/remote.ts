@@ -196,6 +196,7 @@ import {
   createReleaseFeedVerifier,
   decodeKeychainServiceFamily,
   KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
+  readHostCrashRecords,
   type HostRuntimeDiagnostics,
 } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -2396,6 +2397,7 @@ export function wireRemote(deps: RemoteDependencies) {
       ...(options.hostControl?.readServiceLog === undefined
         ? {}
         : { readHostLog: options.hostControl.readServiceLog }),
+      readCrashRecords: () => readHostCrashRecords(persistence.dataDirectory),
       codeSettings: () => persistence.readCodeSettings()?.settings,
       codeThreadPolicies: () =>
         persistence.readCodeThreads().map((thread) => thread.executionPolicy),

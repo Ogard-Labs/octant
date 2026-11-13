@@ -1,7 +1,14 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import {
+  readHostInteractionMark,
+  type HostInteractionMark,
+} from "../apps/desktop/src/interactionTrace";
+import { decodeHostInfoReceipt } from "../packages/host-runtime/src/hostInfo";
+import { BoundedHostLogStore } from "../packages/host-runtime/src/logs";
 
 export interface SmokeChildProcess {
   readonly exitCode: number | null;
@@ -78,6 +85,107 @@ export function spawnPackagedApplication(input: {
   child.stdout?.on("data", (chunk: Buffer) => output.append(chunk));
   child.stderr?.on("data", (chunk: Buffer) => output.append(chunk));
   return { child, outputTail: output.text };
+}
+
+/**
+ * The desktop's local launch marks (`OCTANT_PERF_TRACE=1`), read line by line
+ * as they arrive. The bounded output tail keeps only the last few kilobytes, so
+ * the early launch marks would be gone by the time a slow stage gave up.
+ */
+export function collectHostInteractionMarks(
+  stream: NodeJS.ReadableStream | null | undefined,
+): () => ReadonlyArray<HostInteractionMark> {
+  const marks: HostInteractionMark[] = [];
+  let partial = "";
+  stream?.on("data", (chunk: Buffer | string) => {
+    const lines = (partial + chunk.toString()).split("\n");
+    partial = lines.pop() ?? "";
+    for (const line of lines) {
+      const mark = readHostInteractionMark(line);
+      if (mark !== undefined) marks.push(mark);
+    }
+  });
+  return () => [...marks];
+}
+
+export interface ColdLaunchPhase {
+  readonly phase: string;
+  /** Undefined when the phase was never observed. */
+  readonly sinceLaunchMs: number | undefined;
+}
+
+/**
+ * Where a cold launch spent its time, from the moment the smoke started the
+ * app. Each phase is its first occurrence: a later Chat refresh sends the same
+ * request again and says nothing about launch.
+ */
+export function coldLaunchPhases(input: {
+  readonly launchedAt: number;
+  readonly marks: ReadonlyArray<HostInteractionMark>;
+  readonly hostListeningAt: number | undefined;
+  readonly serverReadyAt: number | undefined;
+}): ReadonlyArray<ColdLaunchPhase> {
+  const first = (layer: HostInteractionMark["layer"], name: string) =>
+    input.marks.find((mark) => mark.layer === layer && mark.name === name)?.at;
+  const since = (at: number | undefined) => (at === undefined ? undefined : at - input.launchedAt);
+  const failedAt = first("renderer", "chat-bootstrap-failed");
+  return [
+    { phase: "desktop starts the host", sinceLaunchMs: since(first("server", "host-start")) },
+    { phase: "host listening", sinceLaunchMs: since(input.hostListeningAt) },
+    { phase: "server.ready", sinceLaunchMs: since(input.serverReadyAt) },
+    { phase: "window opened", sinceLaunchMs: since(first("native-window", "ready-to-show")) },
+    {
+      phase: "Chat bootstrap request sent",
+      sinceLaunchMs: since(first("renderer", "chat-bootstrap-sent")),
+    },
+    {
+      phase: "Chat bootstrap answered",
+      sinceLaunchMs: since(first("renderer", "chat-bootstrap-answered")),
+    },
+    ...(failedAt === undefined
+      ? []
+      : [{ phase: "Chat bootstrap failed", sinceLaunchMs: since(failedAt) }]),
+  ];
+}
+
+export function formatColdLaunchPhases(phases: ReadonlyArray<ColdLaunchPhase>): string {
+  return [
+    "Cold launch phases (ms since the smoke started the app):",
+    ...phases.map(({ phase, sinceLaunchMs }) =>
+      sinceLaunchMs === undefined ? `  ${phase}: not observed` : `  ${phase}: ${sinceLaunchMs}`,
+    ),
+  ].join("\n");
+}
+
+/**
+ * When the host was listening and when it reported ready, read from the files
+ * the host already writes: its host-info receipt (written once it listens) and
+ * the `server.ready` line of its service log. A file that is missing or
+ * unreadable reads as not observed; a timing report never fails a smoke.
+ */
+export async function readHostStartupTimes(input: {
+  readonly dataDirectory: string;
+  readonly logsDirectory: string;
+}): Promise<{
+  readonly hostListeningAt: number | undefined;
+  readonly serverReadyAt: number | undefined;
+}> {
+  const hostListeningAt = await readFile(join(input.dataDirectory, "octant-host.json"), "utf8")
+    .then((text) => Date.parse(decodeHostInfoReceipt(text).updatedAt))
+    .catch(() => undefined);
+  const serverReadyAt = await new BoundedHostLogStore({
+    path: join(input.logsDirectory, "service.log"),
+  })
+    .read({ limit: 2_000 })
+    .then(({ entries }) => {
+      const ready = entries.find((entry) => entry.event === "server.ready");
+      return ready === undefined ? undefined : Date.parse(ready.timestamp);
+    })
+    .catch(() => undefined);
+  return {
+    hostListeningAt: Number.isNaN(hostListeningAt) ? undefined : hostListeningAt,
+    serverReadyAt: Number.isNaN(serverReadyAt) ? undefined : serverReadyAt,
+  };
 }
 
 /**

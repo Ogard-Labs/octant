@@ -279,6 +279,42 @@ describe("useZenController", () => {
     expect(pinned).toBe(false);
   });
 
+  it("removes an ended terminal's card against the version its replacement's pin left, from the same render", async () => {
+    let pinnedAt = 0;
+    const pinnedClient = createClient({
+      pinProjectTerminal: async (request) => {
+        pinnedAt = request.expectedVersion;
+        return {
+          result: "terminal-pinned",
+          elementId: "00000000-0000-4000-8000-000000000935" as ZenElementId,
+          space: makeSpace({
+            version: (request.expectedVersion + 1) as AggregateVersion,
+            active: true,
+          }),
+        };
+      },
+    });
+    const { result } = renderHook(() =>
+      useZenController({ client: pinnedClient, windowId, storage: window.sessionStorage }),
+    );
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    // Both calls come from one render's callbacks, as a card's Restart does.
+    const { pinProjectTerminal, removeElement } = result.current;
+    await act(async () => {
+      await pinProjectTerminal({
+        projectId: "00000000-0000-4000-8000-000000000931" as never,
+        terminalId: "00000000-0000-4000-8000-000000000933" as never,
+      });
+      await removeElement("00000000-0000-4000-8000-000000000934" as ZenElementId);
+    });
+
+    expect(pinnedClient.command).toHaveBeenLastCalledWith(
+      expect.objectContaining({ command: "remove-element", expectedVersion: pinnedAt + 1 }),
+    );
+  });
+
   it("treats a pin whose reply was lost as pinned when the space holds the card", async () => {
     let written: ZenSpace | null = null;
     const lost = createClient({

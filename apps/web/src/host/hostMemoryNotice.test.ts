@@ -87,6 +87,21 @@ describe("hostMemoryNotices", () => {
     expect(notice?.detail).toContain("cause is not known");
   });
 
+  it("names the crash record kept for an unclean stop and that nothing was sent", () => {
+    const [notice] = hostMemoryNotices({
+      pressure: "normal",
+      processMegabytes: 400,
+      previousStop: {
+        lastSeenAt: "2026-10-31T09:00:00.000Z",
+        pressure: "normal",
+        processMegabytes: 300,
+        crashRecord: { recordedAt: "2026-10-31T09:01:00.000Z", exitReason: "signal SIGKILL" },
+      },
+    });
+    expect(notice?.detail).toContain("Octant kept a crash record on this device (signal SIGKILL");
+    expect(notice?.detail).toContain("nothing was sent");
+  });
+
   it("lists the unexpected stop before the relief", () => {
     const ids = hostMemoryNotices({
       pressure: "elevated",

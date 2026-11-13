@@ -11,6 +11,8 @@ import {
   type Ref,
 } from "react";
 import { signalNativeSurfaceLayoutChange } from "../browser/useNativeBrowserSurface";
+import { DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
+import { DockBarContext, useDockBarSlot } from "./dockBarControls";
 import { IconButton } from "./IconButton";
 import {
   OctantMenuItem,
@@ -434,6 +436,17 @@ function Tile(props: {
       node.removeEventListener("focusin", focus, true);
     };
   }, []);
+  const { host: barHost, items: barItems } = useDockBarSlot(props.single ? "alone" : "tiled");
+  const bar = useRef<HTMLDivElement>(null);
+  const row = useRef<HTMLDivElement>(null);
+  // A tool alone has no tile bar: the title band already names it. Its
+  // controls, if it has any, stand in one slim row of the same height, insets
+  // and hairline, holding only them.
+  const folded = useFoldedControls(
+    props.single ? row : bar,
+    barItems ?? [],
+    props.single ? 0 : TILE_CONTROLS,
+  );
   const { content, box } = props;
   const across = along(box.left, box.width);
   const down = along(box.top, box.height);
@@ -460,75 +473,90 @@ function Tile(props: {
     >
       {props.single ? null : (
         // One bar per tile, the tool's own header: its name (or the Browser's
-        // pages) leads, the tile's controls trail, and every bar is one height
-        // so neighbouring tiles line up.
-        <div className="dock-tile__bar">
+        // pages) leads, the tool's own controls follow, the tile's controls
+        // trail, and every bar is one height so neighbouring tiles line up.
+        <div
+          className="dock-tile__bar"
+          data-fold={folded}
+          data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
+          ref={bar}
+        >
           <div className="dock-tile__lead">{content.barLeading}</div>
-          <OctantMenuRoot>
-            <OctantMenuTrigger
-              aria-label={`Arrange ${content.label}`}
-              className="shell-icon-button dock-tile__control window-no-drag"
-              title={`Arrange ${content.label}`}
-            >
-              <LayoutPanelLeft aria-hidden="true" size={14} />
-            </OctantMenuTrigger>
-            <OctantMenuPortal>
-              <OctantMenuPositioner>
-                <OctantMenuPopup aria-label={`Arrange ${content.label}`}>
-                  {(
-                    [
-                      ["left", "Move left"],
-                      ["right", "Move right"],
-                      ["up", "Move up"],
-                      ["down", "Move down"],
-                    ] as const
-                  ).map(([direction, label]) =>
-                    content.moves[direction] ? (
-                      <OctantMenuItem
-                        className="workspace-disclosure__action window-no-drag"
-                        key={direction}
-                        onClick={() => props.onMove(direction)}
-                      >
-                        <span>{label}</span>
-                      </OctantMenuItem>
-                    ) : null,
-                  )}
-                  <OctantMenuSeparator />
-                  <OctantMenuItem
-                    className="workspace-disclosure__action window-no-drag"
-                    onClick={props.onShowAlone}
-                  >
-                    <span>Show alone</span>
-                  </OctantMenuItem>
-                  <OctantMenuItem
-                    className="workspace-disclosure__action window-no-drag"
-                    onClick={props.onHide}
-                  >
-                    <span>Hide from view</span>
-                  </OctantMenuItem>
-                  {props.onMinimise === undefined ? null : (
+          <DockBarRow fold={folded} items={barItems ?? []} toolLabel={content.label} />
+          <>
+            <OctantMenuRoot>
+              <OctantMenuTrigger
+                aria-label={`Arrange ${content.label}`}
+                className="shell-icon-button dock-tile__control window-no-drag"
+                title={`Arrange ${content.label}`}
+              >
+                <LayoutPanelLeft aria-hidden="true" size={14} />
+              </OctantMenuTrigger>
+              <OctantMenuPortal>
+                <OctantMenuPositioner>
+                  <OctantMenuPopup aria-label={`Arrange ${content.label}`}>
+                    {(
+                      [
+                        ["left", "Move left"],
+                        ["right", "Move right"],
+                        ["up", "Move up"],
+                        ["down", "Move down"],
+                      ] as const
+                    ).map(([direction, label]) =>
+                      content.moves[direction] ? (
+                        <OctantMenuItem
+                          className="workspace-disclosure__action window-no-drag"
+                          key={direction}
+                          onClick={() => props.onMove(direction)}
+                        >
+                          <span>{label}</span>
+                        </OctantMenuItem>
+                      ) : null,
+                    )}
+                    <OctantMenuSeparator />
                     <OctantMenuItem
                       className="workspace-disclosure__action window-no-drag"
-                      onClick={props.onMinimise}
+                      onClick={props.onShowAlone}
                     >
-                      <span>Minimise to card</span>
+                      <span>Show alone</span>
                     </OctantMenuItem>
-                  )}
-                </OctantMenuPopup>
-              </OctantMenuPositioner>
-            </OctantMenuPortal>
-          </OctantMenuRoot>
-          <IconButton
-            className="dock-tile__control text-muted-foreground"
-            icon={X}
-            label={`Close ${content.label}`}
-            onClick={props.onClose}
-          />
+                    <OctantMenuItem
+                      className="workspace-disclosure__action window-no-drag"
+                      onClick={props.onHide}
+                    >
+                      <span>Hide from view</span>
+                    </OctantMenuItem>
+                    {props.onMinimise === undefined ? null : (
+                      <OctantMenuItem
+                        className="workspace-disclosure__action window-no-drag"
+                        onClick={props.onMinimise}
+                      >
+                        <span>Minimise to card</span>
+                      </OctantMenuItem>
+                    )}
+                  </OctantMenuPopup>
+                </OctantMenuPositioner>
+              </OctantMenuPortal>
+            </OctantMenuRoot>
+            <IconButton
+              className="dock-tile__control text-muted-foreground"
+              icon={X}
+              label={`Close ${content.label}`}
+              onClick={props.onClose}
+            />
+          </>
         </div>
       )}
-      <div className={content.bodyClassName} data-dock-inset={content.inset ? "true" : undefined}>
-        {content.children}
-      </div>
+      {props.single && barItems !== undefined && barItems.length > 0 ? (
+        <div className="dock-tile__row" data-fold={folded} ref={row}>
+          <DockBarRow fold={folded} items={barItems} toolLabel={content.label} />
+        </div>
+      ) : null}
+      <DockBarContext.Provider value={barHost}>
+        <div className={content.bodyClassName} data-dock-inset={content.inset ? "true" : undefined}>
+          {content.children}
+        </div>
+      </DockBarContext.Provider>
     </section>
   );
 }

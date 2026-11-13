@@ -80,6 +80,7 @@ import {
   codeSiblingThreadState,
 } from "../siblingThreads/codeSiblingThreadSource";
 import { CoordinatorService } from "../coordinator/coordinatorService";
+import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
@@ -1678,6 +1679,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     // a worker is created through the ordinary Code command path and started,
     // like a wake turn, as an agent-initiated host turn under the routine host
     // scope, so every approval it raises waits for a person.
+    const coordinatorWakes = createCoordinatorWakeJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      clock: () => new Date().toISOString(),
+    });
     const coordinatorService = new CoordinatorService({
       readThread: (threadId) => persistence.readCodeThread(decodeCodeThreadId(threadId)),
       readThreads: () => persistence.readCodeThreads(),
@@ -1760,6 +1766,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           : outcome;
       },
       counts: createCoordinatorCountStore(persistence.connection),
+      wakes: coordinatorWakes,
       uuid: randomUUID,
       now: () => Date.now(),
       onError: (message, error) => console.error(`[coordinators] ${message}`, error),
@@ -2048,6 +2055,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeService,
       codeTurnDecisions,
       contributeCodeTools,
+      coordinatorService,
+      coordinatorWakes,
       routeCodeService,
       terminalProcessPort,
     };

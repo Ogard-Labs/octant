@@ -133,4 +133,32 @@ describe("a saved action beside its task", () => {
     expect(screen.getByText("failed fixture")).toBeVisible();
     expect(execute.mock.calls.every((args) => args[0]?.kind !== "start-action")).toBe(true);
   });
+  it("offers a run a host restart ended back through a fresh review, never a start on its own", async () => {
+    sessionStorage.setItem("action-fixture", "90000000-0000-4000-8000-000000000009");
+    const execute = vi.fn(async (command: { kind: string }) =>
+      command.kind === "preview-action"
+        ? preview
+        : decodeProjectTerminalResult({
+            kind: "project-terminal-refused",
+            reason: "host-restarted",
+            message: "This terminal ended when Octant restarted.",
+          }),
+    );
+    const user = userEvent.setup();
+    render(
+      <ProjectActionRunDialog
+        client={{ execute } as never}
+        target={target}
+        storageKey="action-fixture"
+        open
+        onClose={() => {}}
+      />,
+    );
+    expect(await screen.findByText("This terminal ended when Octant restarted.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Review and run again" }));
+    expect(await screen.findByText("/worktrees/child")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Run action" })).toBeEnabled();
+    expect(execute.mock.calls.filter(([c]) => c.kind === "preview-action")).toHaveLength(1);
+    expect(execute.mock.calls.every(([c]) => c.kind !== "start-action")).toBe(true);
+  });
 });

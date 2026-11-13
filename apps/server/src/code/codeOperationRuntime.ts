@@ -1317,20 +1317,23 @@ export function createCodeOperationRuntime(
               readRuntimeWorks(threadId)
                 .map((entry) => entry.work)
                 .filter((work) => work.state === "ambiguous"),
-            settle: (work: CodeRuntimeWork, state: "completed" | "failed") =>
-              observeRuntimeWorkOutcome(
-                runtimeWork.settleOrphaned({
-                  // A push is recorded under its Git operation, a pull request
-                  // step under its own operation.
-                  id:
-                    work.kind === "git"
-                      ? decodeCodeGitOperationId(String(work.id))
-                      : decodeCodeOperationId(String(work.id)),
-                  threadId: work.threadId,
-                  kind: work.kind,
-                  state,
-                }),
-              ),
+            settle: (work: CodeRuntimeWork, state: "completed" | "failed" | "interrupted") => {
+              const outcome = runtimeWork.settleOrphaned({
+                // A push is recorded under its Git operation, a pull request
+                // step under its own operation.
+                id:
+                  work.kind === "git"
+                    ? decodeCodeGitOperationId(String(work.id))
+                    : decodeCodeOperationId(String(work.id)),
+                threadId: work.threadId,
+                kind: work.kind,
+                state,
+              });
+              observeRuntimeWorkOutcome(outcome);
+              return outcome.status === "recorded" || outcome.status === "unchanged"
+                ? "settled"
+                : "not-recorded";
+            },
             describe: (threadId, operationId, remoteStep) =>
               observeRuntimeWorkOutcome(
                 runtimeWork.describeRemoteStep({

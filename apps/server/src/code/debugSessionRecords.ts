@@ -109,9 +109,10 @@ export class DebugSessionRecords {
 
   /**
    * Ends every session a previous run of this host started and never ended,
-   * as `host-restarted`. Run at startup, before any session starts.
+   * as `host-restarted`, and returns the sessions it ended. Run at startup,
+   * before any session starts.
    */
-  endLeftOpen(): number {
+  endLeftOpen(): ReadonlyArray<CodeDebugSessionStarted> {
     const open = new Map<string, CodeDebugSessionStarted>();
     let afterSequence = 0;
     for (;;) {
@@ -135,7 +136,7 @@ export class DebugSessionRecords {
       }
       if (batch.length < REPLAY_BATCH) break;
     }
-    let ended = 0;
+    const ended: CodeDebugSessionStarted[] = [];
     for (const started of open.values()) {
       const recorded = this.ended({
         sessionId: started.sessionId,
@@ -144,7 +145,7 @@ export class DebugSessionRecords {
         configurationDigest: started.configurationDigest,
         endReason: "host-restarted",
       });
-      if (recorded === "recorded") ended += 1;
+      if (recorded === "recorded") ended.push(started);
     }
     return ended;
   }
