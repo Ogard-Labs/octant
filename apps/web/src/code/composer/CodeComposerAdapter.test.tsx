@@ -360,6 +360,7 @@ describe("CodeComposerAdapter", () => {
       },
     });
     expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).not.toBe("development");
+    expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("baseBranchAssumed");
   });
 
   it("starts the thread in Auto where the provider has a reviewer, and shows Auto disabled with the reason where it has none", async () => {
@@ -933,6 +934,17 @@ describe("CodeComposerAdapter interactions", () => {
     expect(trigger?.textContent).not.toContain("development");
     root.unmount();
     container.remove();
+  });
+
+  it("says the base branch is assumed when a thread is sent before the host has named one", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const { baseBranch: _seeded, ...unseeded } = defaultProps;
+    render(<CodeComposerAdapter {...unseeded} onCreateThread={onCreateThread} />);
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({ baseBranchAssumed: true });
   });
 
   it("starts a draft opened for a failing branch from that branch even when the checkout is on another", async () => {
