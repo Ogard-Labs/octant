@@ -298,6 +298,8 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    /** Who asked, as the route resolved them; the sign-out record is journaled as theirs. */
+    actor?: EventActor,
   ): Promise<McpServerSignInView> {
     return this.#forServer(extensionId, componentId, async () => {
       if (principalKind === "local-window" && this.#removals.has(extensionId)) {
@@ -307,7 +309,7 @@ export class McpServerSignIn {
           ? recordView(record)
           : refused("unavailable", "Finish removing this server before changing its sign-in.");
       }
-      return this.#signOut(extensionId, componentId, principalKind);
+      return this.#signOut(extensionId, componentId, principalKind, actor);
     });
   }
   async preparePackageRemoval(extensionId: string): Promise<() => void> {
@@ -931,7 +933,7 @@ export class McpServerSignIn {
     if (previous !== undefined) {
       if (previous.signOutPending || previous.signInAgain === undefined)
         return recordView(previous);
-      const cleaned = await this.#signOut(extensionId, componentId, principalKind);
+      const cleaned = await this.#signOut(extensionId, componentId, principalKind, actor);
       if (cleaned.kind !== "signed-out") return cleaned;
     }
     const existing = this.#attempts.get(key);
@@ -1283,6 +1285,7 @@ export class McpServerSignIn {
     extensionId: string,
     componentId: string,
     principalKind: PrincipalKind,
+    actor?: EventActor,
   ): Promise<McpServerSignInView> {
     await this.#load();
     if (principalKind !== "local-window") {
@@ -1327,6 +1330,7 @@ export class McpServerSignIn {
         result = await Promise.race([
           this.#options.oauth.signOut({
             principalKind,
+            actor,
             descriptor: owner.descriptor,
             credentialRef: owner.credentialRef,
             forgetWhenNotRevoked: true,

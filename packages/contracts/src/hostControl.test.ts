@@ -274,8 +274,9 @@ describe("HostMemoryLimits", () => {
       changedAt: "2026-10-31T12:00:00.000Z",
     };
     expect(decodeHostMemoryLimitsChanged(change)).toEqual(change);
-    expect(() =>
-      decodeHostMemoryLimitsChanged({ ...change, changedBy: "remote-device" }),
-    ).toThrow();
+    // A paired device's change says so; the journal actor names which device.
+    const byDevice = { ...change, changedBy: "remote-device" };
+    expect(decodeHostMemoryLimitsChanged(byDevice)).toEqual(byDevice);
+    expect(() => decodeHostMemoryLimitsChanged({ ...change, changedBy: "agent" })).toThrow();
   });
 });

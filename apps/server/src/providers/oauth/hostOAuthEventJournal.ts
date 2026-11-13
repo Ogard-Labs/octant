@@ -3,6 +3,7 @@ import {
   ActorId,
   AggregateId,
   CorrelationId,
+  decodeEventActor,
   EventId,
   LOCAL_HOST_ID,
   type EventActor,
@@ -37,6 +38,8 @@ export function hostOAuthEventJournal(options: {
 }): {
   /** `actor` is who the record is journaled as; absent means the person at this host. */
   readonly append: (record: HostOAuthJournalRecord, actor?: EventActor) => void;
+  /** Who began an attempt, read from its start record; undefined when none is journaled. */
+  readonly startedBy: (attemptId: string) => EventActor | undefined;
   readonly acknowledgments: () => readonly HostOAuthTermsAcknowledgment[];
 } {
   return {
@@ -67,8 +70,43 @@ export function hostOAuthEventJournal(options: {
         ],
       });
     },
+    startedBy: (attemptId) => readStarter(options.connection, attemptId),
     acknowledgments: () => readAcknowledgments(options.connection),
   };
+}
+
+/**
+ * The actor of the newest start record for an attempt. A row that does not
+ * read as a start by a known actor answers undefined, so the caller falls
+ * back to naming whoever asked.
+ */
+function readStarter(connection: SqliteConnection, attemptId: string): EventActor | undefined {
+  const rows = connection
+    .prepare(
+      `SELECT actor_kind, actor_id, actor_json, payload_json FROM event_journal
+       WHERE event_name = ? AND instr(payload_json, ?) > 0
+       ORDER BY global_sequence DESC`,
+    )
+    .all(EVENT_NAME, JSON.stringify(attemptId)) as readonly {
+    readonly actor_kind: string;
+    readonly actor_id: string;
+    readonly actor_json: string | null;
+    readonly payload_json: string;
+  }[];
+  for (const row of rows) {
+    try {
+      const record = decodeHostOAuthJournalRecord(JSON.parse(row.payload_json));
+      if (record.name !== "host-oauth.sign-in-started" || record.attemptId !== attemptId) continue;
+      return decodeEventActor(
+        row.actor_json === null
+          ? { kind: row.actor_kind, actorId: row.actor_id }
+          : JSON.parse(row.actor_json),
+      );
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
 function readAcknowledgments(

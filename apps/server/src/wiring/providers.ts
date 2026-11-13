@@ -1274,9 +1274,9 @@ export function wireProviders(deps: ProvidersDependencies) {
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.poll(extensionId, componentId, attemptId, principalKind),
           ),
-        signOut: (extensionId, componentId, principalKind) =>
+        signOut: (extensionId, componentId, principalKind, actor) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.signOut(extensionId, componentId, principalKind),
+            signIn.signOut(extensionId, componentId, principalKind, actor),
           ),
       },
       mcpServerConnections: {

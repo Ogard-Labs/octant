@@ -104,7 +104,7 @@ export class HostMemoryLimitsService {
             kind: "memory-limits-changed",
             previous,
             next: decision.limits,
-            changedBy: "local-window",
+            changedBy: actor?.kind === "remote-device" ? "remote-device" : "local-window",
             changedAt,
           },
         },

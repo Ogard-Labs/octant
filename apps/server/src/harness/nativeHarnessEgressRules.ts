@@ -1217,16 +1217,14 @@ export class ToolEgressRules {
       case "local-window":
         return this.#personActor;
       case "person-paired-device":
-        // The actor every other change this device makes is journaled with.
+      case "remote-device":
+        // The actor every other change a device makes is journaled with: its
+        // own id, whoever admitted it. A restricted device was once recorded
+        // under the local person's actor id, which made one device read as
+        // two actors across records.
         return decodeActor({
           kind: "remote-device",
           actorId: principal.deviceId,
-          deviceId: principal.deviceId,
-        });
-      case "remote-device":
-        return decodeActor({
-          kind: "remote-device",
-          actorId: this.#personActor.actorId,
           deviceId: principal.deviceId,
         });
       case "reviewer":

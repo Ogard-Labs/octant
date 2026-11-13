@@ -178,6 +178,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
             instanceId: command.instanceId,
             kind: command.kind,
             principal,
+            actor,
           }),
           200,
           origin,
@@ -303,7 +304,7 @@ async function dispatch(input: {
       descriptor,
       ...(credentialRef === undefined ? {} : { credentialRef }),
     });
-    return finish(dependencies, command, offer, started, actorId, principal);
+    return finish(dependencies, command, offer, started, actorId, principal, actor);
   }
   if (command.kind === "poll") {
     const state = await dependencies.service.status({
@@ -312,7 +313,7 @@ async function dispatch(input: {
       attemptId: command.attemptId,
       descriptor,
     });
-    return finish(dependencies, command, offer, state, actorId, principal);
+    return finish(dependencies, command, offer, state, actorId, principal, actor);
   }
   const pointer = await readPointer(dependencies, command.instanceId);
   if (pointer === undefined || pointer.descriptorId !== offer.descriptor.descriptorId) {
@@ -325,6 +326,7 @@ async function dispatch(input: {
   }
   const signedOut = await dependencies.service.signOut({
     principalKind: principal,
+    actor,
     descriptor,
     credentialRef: pointer.credentialRef,
     forgetWhenNotRevoked: command.kind === "sign-out-locally",
@@ -350,6 +352,7 @@ async function finish(
   state: HostOAuthSignInState,
   windowId: string,
   principal: PrincipalKind,
+  actor: EventActor,
 ): Promise<ProviderOAuthView> {
   if (state.kind === "signed-in") {
     if (state.descriptorId !== offer.descriptor.descriptorId) {
@@ -357,7 +360,14 @@ async function finish(
     }
     const unmatched = unmatchedInstance(dependencies, command.instanceId, offer);
     if (unmatched !== undefined) return unmatched;
-    await revokeReplacedPointer(dependencies, command, offer, state.credentialRef, principal);
+    await revokeReplacedPointer(
+      dependencies,
+      command,
+      offer,
+      state.credentialRef,
+      principal,
+      actor,
+    );
     await storePointer(dependencies, command.instanceId, offer, state.credentialRef, windowId);
     return { kind: "signed-in", accountLabel: offer.accountLabel };
   }
@@ -475,6 +485,7 @@ async function revokeReplacedPointer(
   offer: SubscriptionOAuthOffer,
   nextCredentialRef: string,
   principal: PrincipalKind,
+  actor: EventActor,
 ): Promise<void> {
   const pointer = await readPointer(dependencies, command.instanceId);
   if (pointer === undefined || pointer.credentialRef === nextCredentialRef) return;
@@ -485,6 +496,7 @@ async function revokeReplacedPointer(
     // store with no pointer and no way to sign it out.
     const signedOut = await dependencies.service.signOut({
       principalKind: principal,
+      actor,
       descriptor: offer.descriptor,
       credentialRef: pointer.credentialRef,
       forgetWhenNotRevoked: true,

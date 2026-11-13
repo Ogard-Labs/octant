@@ -962,7 +962,12 @@ describe("browser automation routes", () => {
       expect(response?.status).toBe(200);
       expect(await response?.json()).toEqual(snapshot);
       expect(service.act).toHaveBeenLastCalledWith(
-        expect.objectContaining({ windowId, capturedBy: "person" }),
+        expect.objectContaining({
+          windowId,
+          capturedBy: "person",
+          // The capture is journaled as whoever took it.
+          capturedByActor: expect.objectContaining({ kind: "local-user" }),
+        }),
       );
     });
 
@@ -1152,10 +1157,20 @@ describe("browser automation routes", () => {
         scope: "all",
       };
 
+      // The route names who asked, so the service journals a change as theirs.
+      const pairedDeviceId = "90000000-0000-4000-8000-000000000001";
       expect((await withProfiles(post("profiles", clear)))?.status).toBe(200);
-      expect(profiles.execute).toHaveBeenLastCalledWith("local-window", clear);
+      expect(profiles.execute).toHaveBeenLastCalledWith(
+        "local-window",
+        clear,
+        expect.objectContaining({ kind: "local-user" }),
+      );
       await withProfiles(post("profiles", clear, true));
-      expect(profiles.execute).toHaveBeenLastCalledWith("remote-device", clear);
+      expect(profiles.execute).toHaveBeenLastCalledWith("remote-device", clear, {
+        kind: "remote-device",
+        actorId: pairedDeviceId,
+        deviceId: pairedDeviceId,
+      });
       // A profile cannot be named by a caller that decides its own scope or store path.
       expect(
         (await withProfiles(post("profiles", { ...clear, partition: "persist:other" })))?.status,
@@ -1348,6 +1363,11 @@ describe("browser automation routes", () => {
       expect(await body(await withFlows(post("flows", remove)))).toMatchObject({
         kind: "browser-flow-deleted",
       });
+      expect(flows.delete).toHaveBeenLastCalledWith(
+        flowProject,
+        "Order check",
+        expect.objectContaining({ kind: "local-user" }),
+      );
       expect(await body(await withFlows(post("flows", { ...remove, name: "Gone" })))).toMatchObject(
         { kind: "browser-flows-refused", reason: "not-found" },
       );
@@ -1462,10 +1482,20 @@ describe("browser automation routes", () => {
       });
       const list = { kind: "list" };
 
+      const pairedDeviceId = "90000000-0000-4000-8000-000000000001";
       expect((await withExtensions(post("extensions", list)))?.status).toBe(200);
-      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "local-window", list);
+      expect(extensions.execute).toHaveBeenLastCalledWith(
+        windowId,
+        "local-window",
+        list,
+        expect.objectContaining({ kind: "local-user" }),
+      );
       await withExtensions(post("extensions", list, true));
-      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "remote-device", list);
+      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "remote-device", list, {
+        kind: "remote-device",
+        actorId: pairedDeviceId,
+        deviceId: pairedDeviceId,
+      });
       // A folder path is never accepted from the caller; only a picker receipt is.
       expect(
         (await withExtensions(post("extensions", { kind: "install", path: "/Users/x/ext" })))

@@ -362,6 +362,89 @@ describe("one harness session on every surface", () => {
     ]);
   });
 
+  it("journals a pause, a resume and the steering notes a paired device sends with the device as actor, and a local window's as the local person", async () => {
+    const deviceId = "55000000-0000-4000-8000-0000000000d2";
+    const controlledBy = async (principal: unknown) => {
+      const { store, journal } = journaledSession();
+      store.ensure({
+        threadId,
+        mode: "work",
+        leadSlotId: decodeNativeHarnessSlotId("default"),
+        lead: decodeNativeHarnessSlotCandidate({
+          hostId: "00000000-0000-4000-8000-0000000000aa",
+          providerInstanceId: "00000000-0000-4000-8000-000000000001",
+          modelId: "frontier-large",
+        }),
+      });
+      store.markRunning(threadId);
+      const handler = createNativeHarnessSessionRouteHandler({
+        windowAuthorityStore: new WindowAuthorityStore(),
+        store,
+        followUps: {} as never,
+        authorizeThread: () => true,
+        steer: ({ threadId, command, actor }) => {
+          if (command.kind === "clear") {
+            store.clearSteering(threadId, "all", actor);
+            return "cleared";
+          }
+          if (command.kind === "take") return { taken: store.takeSteering(threadId, actor) };
+          return store.queueSteering(
+            threadId,
+            {
+              id: command.noteId ?? "55000000-0000-4000-8000-0000000000e0",
+              text: command.text,
+              status: "queued",
+              at: "2026-10-06T12:00:00.000Z" as never,
+            },
+            actor,
+          );
+        },
+      });
+      const send = async (action: string, body: unknown) => {
+        const request = new Request(
+          `http://127.0.0.1/api/native-harness/sessions/${threadId}/${action}`,
+          { method: "POST", body: JSON.stringify(body) },
+        );
+        bindPrincipalRouteContext(request, { principal: principal as never, scopeId: windowId });
+        expect((await handler(request))?.status).toBe(200);
+      };
+      const command = (kind: string) => {
+        const session = store.read(threadId)?.session;
+        return send("commands", {
+          kind,
+          sessionId: session?.id,
+          expectedVersion: session?.version,
+        });
+      };
+      await command("pause-native-harness-session");
+      await command("resume-native-harness-session");
+      await send("steering", {
+        kind: "queue",
+        text: "Use the smaller fixture.",
+        noteId: "55000000-0000-4000-8000-0000000000e1",
+      });
+      await send("steering", { kind: "take" });
+      await send("steering", {
+        kind: "queue",
+        text: "Skip the migration.",
+        noteId: "55000000-0000-4000-8000-0000000000e2",
+      });
+      await send("steering", { kind: "clear" });
+      return journal
+        .replay({ afterSequence: 0 as never, limit: 100 } as never)
+        .filter((event) => /paused|resumed|steering/.test(event.eventName))
+        .map((event) => event.actor);
+    };
+
+    const device = { kind: "remote-device", actorId: deviceId, deviceId };
+    expect(
+      await controlledBy({ kind: "remote-device", deviceId, admittedBy: "host-person" }),
+    ).toEqual([device, device, device, device, device, device]);
+    const local = await controlledBy({ kind: "local-window" });
+    expect(local).toHaveLength(6);
+    expect(new Set(local.map((actor) => actor.kind))).toEqual(new Set(["local-user"]));
+  });
+
   it("shares the local session between windows without exposing its prompts or controls to a phone", async () => {
     const store = journaledStore();
     store.ensure({

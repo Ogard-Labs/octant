@@ -104,6 +104,9 @@ describe("HostMemoryLimitsService", () => {
       limit: 10,
     });
     expect(event?.actor).toMatchObject({ kind: "remote-device", deviceId });
+    // The payload agrees with the actor: it once said a local window made
+    // every change, a device's included.
+    expect(event?.payload).toMatchObject({ changedBy: "remote-device" });
   });
 
   it("replays to the same limits when the projection is rebuilt from the journal", () => {

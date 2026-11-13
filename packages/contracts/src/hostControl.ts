@@ -186,12 +186,16 @@ export type SetHostMemoryLimitsOutcome = typeof SetHostMemoryLimitsOutcome.Type;
 export const HOST_MEMORY_LIMITS_AGGREGATE_TYPE = "host-memory-limits";
 export const HOST_MEMORY_LIMITS_EVENT_NAME = "host-memory-limits.changed@1";
 
-/** One journaled change: who made it, when, and the values before and after. */
+/**
+ * One journaled change: who made it, when, and the values before and after.
+ * `changedBy` says whether a window of the host or a paired device made it;
+ * the event's actor names the device.
+ */
 export const HostMemoryLimitsChanged = Schema.Struct({
   kind: Schema.Literal("memory-limits-changed"),
   previous: HostMemoryLimits,
   next: HostMemoryLimits,
-  changedBy: Schema.Literal("local-window"),
+  changedBy: Schema.Literal("local-window", "remote-device"),
   changedAt: UtcTimestamp,
 }).annotations(strict);
 export type HostMemoryLimitsChanged = typeof HostMemoryLimitsChanged.Type;

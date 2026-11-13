@@ -92,6 +92,8 @@ export interface NativeHarnessSessionRouteDependencies {
   readonly steer?: (input: {
     readonly threadId: string;
     readonly command: SteerNativeHarnessSession;
+    /** Who sent, took or cleared the note, as the route resolved it. */
+    readonly actor: EventActor;
   }) =>
     | "queued"
     | "cleared"
@@ -262,6 +264,7 @@ export function createNativeHarnessSessionRouteHandler(
             dependencies.store.turnInFlight(threadId)
               ? "Paused by the user. The current turn will finish; nothing new starts."
               : "Paused by the user.",
+            actor,
           );
           dependencies.onPaused?.({ threadId });
         } else if (command.kind === "resume-native-harness-session") {
@@ -300,7 +303,7 @@ export function createNativeHarnessSessionRouteHandler(
               );
             }
           }
-          if (!dependencies.store.resume(threadId)) {
+          if (!dependencies.store.resume(threadId, actor)) {
             return json(refusedCommand("not-paused"), 409, origin);
           }
           if (liftsRecovery && command.continueInterrupted !== true) {
@@ -390,7 +393,7 @@ export function createNativeHarnessSessionRouteHandler(
       } catch {
         return failure("Native harness steering note is invalid.", 400, origin);
       }
-      const outcome = dependencies.steer?.({ threadId, command }) ?? "no-session";
+      const outcome = dependencies.steer?.({ threadId, command, actor }) ?? "no-session";
       if (typeof outcome === "object") {
         return json(
           { view: dependencies.store.read(threadId) ?? null, taken: outcome.taken },

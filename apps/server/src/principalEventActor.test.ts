@@ -32,10 +32,21 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
 };
 
 /**
- * Modules whose changes still name their services' fixed actor for a device.
- * The list only shrinks: threading the actor through one removes it here.
+ * A device's actor written out by hand, with what it gives as the actor id
+ * and as the device id.
  */
-const STILL_NAMES_A_FIXED_ACTOR: ReadonlyArray<string> = ["browserAutomationRoutes.ts"];
+const HAND_BUILT_DEVICE_ACTOR =
+  /kind:\s*"remote-device",\s*actorId:\s*([^\n]+?),\s*deviceId:\s*([^\n]+?),?\s*\}/g;
+
+/** The value inside the decoders and `String` a module wraps an id in. */
+function unwrapped(expression: string): string {
+  let value = expression.trim();
+  for (;;) {
+    const inner = /^(?:String|decode\w+)\((.*)\)$/s.exec(value)?.[1];
+    if (inner === undefined) return value;
+    value = inner.trim();
+  }
+}
 
 function sourceModules(directory: string): ReadonlyArray<string> {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -66,10 +77,7 @@ describe("the actor a request's change is journaled with", () => {
         module: relative(SOURCE_ROOT, path).replaceAll("\\", "/"),
         resolvesActor: readFileSync(path, "utf8").includes("eventActorForPrincipal"),
       }));
-    const accounted = new Set([
-      ...Object.keys(NAMES_THE_ACTOR_ELSEWHERE),
-      ...STILL_NAMES_A_FIXED_ACTOR,
-    ]);
+    const accounted = new Set(Object.keys(NAMES_THE_ACTOR_ELSEWHERE));
 
     // A route that lets a paired device act as the person and forgets who
     // acted journals the local person for the device's change.
@@ -81,5 +89,25 @@ describe("the actor a request's change is journaled with", () => {
     // An entry that no longer applies is removed, so the lists stay true.
     const stillJudging = new Map(judging.map((entry) => [entry.module, entry.resolvesActor]));
     expect([...accounted].filter((module) => stillJudging.get(module) !== false)).toEqual([]);
+  });
+
+  it("names a device by its own id wherever a module writes a device's actor out by hand", () => {
+    // One device must read as one actor across every record. A restricted
+    // device's egress answers were once journaled under the local person's
+    // actor id while the same device's other records used its own.
+    const mismatched = sourceModules(SOURCE_ROOT).flatMap((path) =>
+      [...readFileSync(path, "utf8").matchAll(HAND_BUILT_DEVICE_ACTOR)]
+        .filter((match) => {
+          const actorId = unwrapped(match[1] ?? "");
+          const deviceId = unwrapped(match[2] ?? "");
+          // Copying an actor a caller already resolved keeps its scheme.
+          const copied =
+            actorId.endsWith(".actorId") &&
+            deviceId === `${actorId.slice(0, -".actorId".length)}.deviceId`;
+          return actorId !== deviceId && !copied;
+        })
+        .map(() => relative(SOURCE_ROOT, path).replaceAll("\\", "/")),
+    );
+    expect(mismatched).toEqual([]);
   });
 });

@@ -130,6 +130,7 @@ export async function dispatchDirectorySignIn(input: {
   if (pointer === undefined) return signedOut();
   const forgotten = await dependencies.service.signOut({
     principalKind: principal,
+    actor,
     descriptor,
     credentialRef: pointer.credentialRef,
     forgetWhenNotRevoked: true,
@@ -240,6 +241,7 @@ async function finish(
     readonly dependencies: ProviderOAuthRouteDependencies;
     readonly command: ProviderOAuthCommand;
     readonly principal: PrincipalKind;
+    readonly actor?: EventActor | undefined;
   },
   target: Extract<SignInTarget, { readonly kind: "target" }>,
   state: HostOAuthSignInState,
@@ -305,6 +307,7 @@ async function forgetReplacedGrant(
     readonly dependencies: ProviderOAuthRouteDependencies;
     readonly command: ProviderOAuthCommand;
     readonly principal: PrincipalKind;
+    readonly actor?: EventActor | undefined;
   },
   descriptor: HostOAuthDescriptor,
   nextCredentialRef: string,
@@ -314,6 +317,7 @@ async function forgetReplacedGrant(
   await input.dependencies.service
     .signOut({
       principalKind: input.principal,
+      actor: input.actor,
       descriptor,
       credentialRef: prior.credentialRef,
       forgetWhenNotRevoked: true,

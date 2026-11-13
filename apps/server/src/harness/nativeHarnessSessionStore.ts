@@ -444,6 +444,8 @@ export class NativeHarnessSessionStore {
   queueSteering(
     threadId: string,
     note: NativeHarnessSteeringNote,
+    /** Who asked, when a person did; absent, the host's own record. */
+    actor?: typeof EventActor.Type,
   ): "queued" | "full" | "no-session" {
     const record = this.#records.get(threadId);
     if (record === undefined) return "no-session";
@@ -452,10 +454,13 @@ export class NativeHarnessSessionStore {
       (entry) => entry.status === "queued",
     );
     if (queued.length >= MAX_NATIVE_HARNESS_STEERING_NOTES) return "full";
-    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringQueued, {
-      sessionId: record.session.id,
-      note,
-    });
+    this.#append(
+      record,
+      threadId,
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringQueued,
+      { sessionId: record.session.id, note },
+      actor,
+    );
     this.#applySteeringQueued(threadId, note);
     return "queued";
   }
@@ -481,23 +486,34 @@ export class NativeHarnessSessionStore {
    * next prompt. The queue is emptied in the same step, so a second client
    * taking at the same turn end gets nothing rather than a duplicate prompt.
    */
-  takeSteering(threadId: string): ReadonlyArray<NativeHarnessSteeringNote> {
+  takeSteering(
+    threadId: string,
+    /** Who asked, when a person did; absent, the host's own record. */
+    actor?: typeof EventActor.Type,
+  ): ReadonlyArray<NativeHarnessSteeringNote> {
     const record = this.#records.get(threadId);
     const queued = (this.#steering.get(threadId) ?? []).filter(
       (entry) => entry.status === "queued",
     );
     if (record === undefined || queued.length === 0) return [];
     const noteIds = queued.map((entry) => entry.id);
-    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringCleared, {
-      sessionId: record.session.id,
-      which: "taken",
-      noteIds,
-    });
+    this.#append(
+      record,
+      threadId,
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringCleared,
+      { sessionId: record.session.id, which: "taken", noteIds },
+      actor,
+    );
     this.#applySteeringCleared(threadId, { which: "taken", noteIds });
     return queued;
   }
 
-  clearSteering(threadId: string, which: "delivered" | "all"): void {
+  clearSteering(
+    threadId: string,
+    which: "delivered" | "all",
+    /** Who asked, when a person did; absent, the host's own record. */
+    actor?: typeof EventActor.Type,
+  ): void {
     const record = this.#records.get(threadId);
     const notes = this.#steering.get(threadId) ?? [];
     const dropping =
@@ -505,10 +521,13 @@ export class NativeHarnessSessionStore {
     // A turn ends with nothing delivered far more often than not; only a
     // change worth replaying is journaled.
     if (record === undefined || dropping === 0) return;
-    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringCleared, {
-      sessionId: record.session.id,
-      which,
-    });
+    this.#append(
+      record,
+      threadId,
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.steeringCleared,
+      { sessionId: record.session.id, which },
+      actor,
+    );
     this.#applySteeringCleared(threadId, { which });
   }
 
@@ -610,16 +629,20 @@ export class NativeHarnessSessionStore {
     threadId: string,
     status: "paused-by-advisor" | "paused-by-user" | "budget-limited" | "failed",
     detail: string,
+    /** Who asked, when a person did; absent, the host's own record. */
+    actor?: typeof EventActor.Type,
   ): boolean {
     const record = this.#records.get(threadId);
     if (record === undefined) return false;
     const trimmed = detail.trim().slice(0, 512).trim();
     const bounded = trimmed.length === 0 ? "Paused." : trimmed;
-    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.paused, {
-      sessionId: record.session.id,
-      status,
-      detail: bounded,
-    });
+    this.#append(
+      record,
+      threadId,
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.paused,
+      { sessionId: record.session.id, status, detail: bounded },
+      actor,
+    );
     this.#setSession(record, {
       ...record.session,
       status,
@@ -634,9 +657,11 @@ export class NativeHarnessSessionStore {
    * journal, everything the restart left open — the turn it cut off and any
    * approval or question nobody can answer now — so the next restart does not
    * raise the same recovery again. A plain pause settles nothing: an approval
-   * the finishing turn is waiting on is still live.
+   * the finishing turn is waiting on is still live. `actor` is who lifted it,
+   * and names the resume alone: what the restart left open is settled as the
+   * host's own record.
    */
-  resume(threadId: string): boolean {
+  resume(threadId: string, actor?: typeof EventActor.Type): boolean {
     const record = this.#records.get(threadId);
     if (record === undefined) return false;
     if (record.session.status === "running" || record.session.status === "idle") return false;
@@ -657,9 +682,13 @@ export class NativeHarnessSessionStore {
         this.settleQuestion(threadId, question.id, { status: "expired" });
       }
     }
-    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, {
-      sessionId: record.session.id,
-    });
+    this.#append(
+      record,
+      threadId,
+      NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed,
+      { sessionId: record.session.id },
+      actor,
+    );
     const { detail: _detail, ...rest } = record.session;
     this.#setSession(record, {
       ...rest,

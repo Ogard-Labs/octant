@@ -1,3 +1,5 @@
+import type { EventActor } from "@octant/contracts";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
   decodeBrowserDownloadPermissionsCommand,
@@ -239,6 +241,9 @@ export function createBrowserAutomationRouteHandler(
 
     let windowId;
     let callerKind: "local-window" | "remote-device";
+    // Who the journal names for what this request changes: the device, when a
+    // device asked.
+    let actor: EventActor;
     try {
       const principal = authenticateRoutePrincipal({
         request,
@@ -247,6 +252,7 @@ export function createBrowserAutomationRouteHandler(
       });
       windowId = principal.scopeId;
       callerKind = principal.principal.kind;
+      actor = eventActorForPrincipal(principal.principal);
     } catch {
       return failure(
         { category: "unauthorized", message: "Window authority is invalid." },
@@ -461,6 +467,7 @@ export function createBrowserAutomationRouteHandler(
               windowId,
               callerKind === "local-window" ? "local-window" : "remote-device",
               command,
+              actor,
             ),
           ),
           origin,
@@ -480,6 +487,7 @@ export function createBrowserAutomationRouteHandler(
             await dependencies.profiles.execute(
               callerKind === "local-window" ? "local-window" : "remote-device",
               command,
+              actor,
             ),
           ),
           origin,
@@ -542,7 +550,7 @@ export function createBrowserAutomationRouteHandler(
         }
         return success(
           decodeBrowserFlowsResult(
-            dependencies.flows.delete(command.projectId, command.name)
+            dependencies.flows.delete(command.projectId, command.name, actor)
               ? { kind: "browser-flow-deleted", projectId: command.projectId, name: command.name }
               : {
                   kind: "browser-flows-refused",
@@ -812,6 +820,7 @@ export function createBrowserAutomationRouteHandler(
               windowId,
               request: input.request,
               capturedBy: "person",
+              capturedByActor: actor,
             }),
           ),
           origin,

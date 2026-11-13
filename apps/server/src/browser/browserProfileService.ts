@@ -105,6 +105,8 @@ export class BrowserProfileService {
   async execute(
     caller: BrowserProfilesCaller,
     command: BrowserProfilesCommand,
+    /** Who asked, as the route resolved them; absent, the host's own person. */
+    actor?: EventActorValue,
   ): Promise<BrowserProfilesResult> {
     if (caller !== "local-window") {
       return refused("profile-not-local", "Browser profiles are managed only on this Mac.");
@@ -146,9 +148,10 @@ export class BrowserProfileService {
         command.browser,
         command.sourceProfile,
         command.site,
+        actor,
       );
     }
-    return this.#clear(store, command.profile, command.scope);
+    return this.#clear(store, command.profile, command.scope, actor);
   }
 
   /**
@@ -164,6 +167,7 @@ export class BrowserProfileService {
     browser: CookieImportBrowserId,
     sourceProfile: string,
     siteInput: string | undefined,
+    actor: EventActorValue | undefined,
   ): Promise<BrowserProfilesResult> {
     const site = siteInput === undefined ? undefined : normalizeImportSite(siteInput);
     if (siteInput !== undefined && site === undefined) {
@@ -190,10 +194,10 @@ export class BrowserProfileService {
     } catch {
       // Whatever arrived before the failure is in the profile and is recorded.
       if (imported > 0)
-        this.#journalImported(profile, browser, sourceProfile, imported, skipped, siteOnly);
+        this.#journalImported(profile, browser, sourceProfile, imported, skipped, siteOnly, actor);
       return refused("profile-unavailable", "The cookies could not be added to this profile.");
     }
-    this.#journalImported(profile, browser, sourceProfile, imported, skipped, siteOnly);
+    this.#journalImported(profile, browser, sourceProfile, imported, skipped, siteOnly, actor);
     return decodeBrowserProfilesResult({
       kind: "browser-cookies-imported",
       profile,
@@ -212,6 +216,7 @@ export class BrowserProfileService {
     imported: number,
     skipped: number,
     siteOnly: boolean,
+    actor: EventActorValue | undefined,
   ): void {
     this.#append(
       BROWSER_PROFILE_EVENT_NAMES.cookiesImported,
@@ -224,6 +229,7 @@ export class BrowserProfileService {
         skipped,
         ...(siteOnly ? { siteOnly } : {}),
       }),
+      actor,
     );
   }
 
@@ -276,6 +282,7 @@ export class BrowserProfileService {
     store: NonNullable<BrowserRuntimePort["profiles"]>,
     profile: StoredBrowserProfile,
     scope: BrowserProfileClearScope,
+    actor: EventActorValue | undefined,
   ): Promise<BrowserProfilesResult> {
     try {
       await this.#options.closePages(profile);
@@ -283,7 +290,7 @@ export class BrowserProfileService {
     } catch {
       return refused("profile-unavailable", "The profile could not be cleared.");
     }
-    this.#journalCleared(profile, scope);
+    this.#journalCleared(profile, scope, actor);
     return decodeBrowserProfilesResult({ kind: "browser-profile-cleared", profile, scope });
   }
 
@@ -313,14 +320,21 @@ export class BrowserProfileService {
     return project === undefined ? "A Project that no longer exists" : project.name;
   }
 
-  #journalCleared(profile: StoredBrowserProfile, scope: BrowserProfileClearScope): void {
+  #journalCleared(
+    profile: StoredBrowserProfile,
+    scope: BrowserProfileClearScope,
+    actor?: EventActorValue,
+  ): void {
     this.#append(
       BROWSER_PROFILE_EVENT_NAMES.cleared,
       decodeBrowserProfileCleared({ kind: "browser-profile-cleared", profile, scope }),
+      actor,
     );
   }
 
-  #append(eventName: string, payload: unknown): void {
+  // A purge's erase names the service's own actor; a person's change names
+  // who asked.
+  #append(eventName: string, payload: unknown, actor: EventActorValue = this.#options.actor): void {
     this.#options.journal.append({
       aggregate: {
         aggregateType: BROWSER_PROFILE_AGGREGATE,
@@ -333,7 +347,7 @@ export class BrowserProfileService {
           eventName: decodeEventName(eventName),
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#options.uuid()),
-          actor: decodeEventActor(this.#options.actor),
+          actor: decodeEventActor(actor),
           occurredAt: decodeTimestamp(this.#options.clock()),
           payload,
         },

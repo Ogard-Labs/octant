@@ -4818,6 +4818,18 @@ describe("native harness tool egress grants and learn mode", () => {
           principal: { kind: "remote-device", deviceId: device.deviceId },
         }),
       ]);
+      // A restricted device is journaled under the same actor id as a device
+      // the person paired: its own.
+      expect(
+        host
+          .events(TOOL_EGRESS_THREAD_AGGREGATE)
+          .filter(
+            (event) =>
+              event.eventName === TOOL_EGRESS_EVENT_NAMES.threadRuleGranted &&
+              (event.payload as { scope: { kind: string } }).scope.kind === "call",
+          )
+          .map((event) => event.actor),
+      ).toEqual([{ kind: "remote-device", actorId: device.deviceId, deviceId: device.deviceId }]);
     });
 
     it("offers no proposal on a thread whose revocations cannot be read, as nothing can be granted there", async () => {

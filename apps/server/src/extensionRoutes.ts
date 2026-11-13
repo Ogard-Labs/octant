@@ -117,6 +117,7 @@ export function createExtensionRouteHandler(options: {
       extensionId: string,
       componentId: string,
       principalKind: "local-window" | "remote-device",
+      actor?: EventActor,
     ): Promise<McpServerSignInView>;
   };
   /**
@@ -630,7 +631,7 @@ export function createExtensionRouteHandler(options: {
           );
         }
         return response(
-          await options.mcpServerSignIn.signOut(extensionId, componentId, principalKind),
+          await options.mcpServerSignIn.signOut(extensionId, componentId, principalKind, actor),
           200,
           origin,
         );
