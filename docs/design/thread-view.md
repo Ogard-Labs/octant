@@ -26,7 +26,8 @@ the fade also dims the scrollbar thumb at the two extremes, which is accepted. A
 `bubble`: control fill, hairline, `--oct-radius-md`, no shadow) with its time beneath
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
-transcript size with 1.5 leading, with no card of its own: only the work a turn
+transcript size with 1.5 leading, its paragraphs, list items and table cells at
+the 1.6 reading leading ([DESIGN.md: Scale](../../DESIGN.md#scale)), with no card of its own: only the work a turn
 produced is boxed. Over the application ground, the conversation supplies one quiet,
 continuous reading veil below the title band: the sheet colour at 80%, so the
 ground stays faintly visible behind the transcript. Replies remain bare prose, including on translucent

@@ -105,8 +105,8 @@ row is not.
 Settings is a grouped form page. The shared resizable navigation rail
 stays fixed while one centred, bounded 920px reading column scrolls. A 32–64px
 workspace gutter protects the content at narrower widths. The page title,
-section labels, and row labels have distinct roles; sections follow a
-consistent 28px rhythm. Navigation groups use quiet sentence-case labels
+section labels, and row labels have distinct roles; sections stand 24px
+apart ([DESIGN.md: Alignment](../../DESIGN.md#alignment)). Navigation groups use quiet sentence-case labels
 without hairlines between groups. A section is a label and its one-line
 description over one grouped card of hairline-divided rows (see "Page shell"
 for the kit). Discrete editors and install reviews keep their own boundaries
