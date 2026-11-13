@@ -70,7 +70,7 @@ export function MessageBubble(props: MessageBubbleProps) {
           paddingVertical: 10,
         },
         // A person's message: the control fill and a hairline, no accent
-        // (DESIGN.md › Transcript); the reply beside it is bare prose.
+        // (docs/design/thread-view.md › Transcript); the reply beside it is bare prose.
         bubbleUser: {
           backgroundColor: colors.userBubble,
           borderWidth: StyleSheet.hairlineWidth,
