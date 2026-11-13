@@ -107,6 +107,8 @@ export class ExtensionToolApprovalService {
      * anyway is refused.
      */
     readonly remember?: (scope: "tool" | "server") => boolean;
+    /** What an approval lets run afterwards, which the prompt states. */
+    readonly answerCovers?: "call" | "server" | "server-on-thread";
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
@@ -127,6 +129,7 @@ export class ExtensionToolApprovalService {
       inputJson: input.inputJson,
       requestedAt: new Date(requestedAt).toISOString(),
       rememberable: input.remember !== undefined,
+      ...(input.answerCovers === undefined ? {} : { answerCovers: input.answerCovers }),
       ...(input.outsideContent === undefined ? {} : { outsideContent: input.outsideContent }),
     });
     return new Promise<boolean>((resolve) => {

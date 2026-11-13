@@ -210,6 +210,7 @@ import type {
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "../extensions/extensionToolGrantStore";
+import { readUpdateLine, readVerifiedPublisherKey } from "../persistence/extensionProjection";
 import {
   readApprovalOutsideContent,
   readThreadExternalContentTaint,
@@ -1040,6 +1041,9 @@ export function wireProviders(deps: ProvidersDependencies) {
               .externalContentIngested,
           outsideContent: (threadId) =>
             readApprovalOutsideContent(persistence.connection, threadId),
+          verifiedPublisherKey: (version) =>
+            readVerifiedPublisherKey(persistence.connection, version),
+          updateLine: (version) => readUpdateLine(persistence.connection, version),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),

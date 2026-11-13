@@ -1615,10 +1615,10 @@ function ActiveSectionContent({
                 <SettingRow
                   description={
                     transfer.direction === "upload"
-                      ? `Agents upload files from ${transfer.workspaceRoot} to this site without asking.`
-                      : `Agents save downloads from this site into ${transfer.workspaceRoot} without asking.`
+                      ? `Agents upload files from ${transfer.workspaceRoot} to this site ${rememberedTransferProfile(transfer)} without asking.`
+                      : `Agents save downloads from this site ${rememberedTransferProfile(transfer)} into ${transfer.workspaceRoot} without asking.`
                   }
-                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}`}
+                  key={`${transfer.direction}\0${transfer.origin}\0${transfer.workspaceRoot}\0${transfer.profile === undefined && transfer.privatePage !== true ? "any" : browserProfileKey(transfer.profile)}`}
                   label={`${transfer.direction === "upload" ? "Uploads to" : "Downloads from"} ${transfer.origin}`}
                   scope="host"
                   settingId="browser-agent-downloads"
@@ -2269,6 +2269,18 @@ const BROWSER_HELD_DOWNLOAD_LIMIT_CHOICES: ReadonlyArray<number> = [5, 10, 20, 5
 const BROWSER_UPLOAD_FILE_COUNT_LIMIT_CHOICES: ReadonlyArray<number> = [1, 5, 10, 20, 50];
 
 /** One of the Browser transfer limits; a stored value outside the choices stays selectable. */
+/** Where a remembered upload or download answer applies: the profile the page was in. */
+function rememberedTransferProfile(
+  transfer: SettingsViewProps["settings"]["rememberedBrowserTransfers"][number],
+): string {
+  const profile = transfer.profile;
+  // Remembered before the page was recorded: it covered every page then and still does.
+  if (profile === undefined && transfer.privatePage !== true) return "on any page";
+  if (profile === undefined) return "on Private pages";
+  if (profile.kind === "personal") return "in the Personal profile";
+  return profile.kind === "project" ? "in a Project profile" : "in an added account profile";
+}
+
 function BrowserTransferLimitSelect(props: {
   readonly id: string;
   readonly label: string;

@@ -1465,7 +1465,10 @@ prefilled, for what to check. A pending follow-up reads "Follows up tomorrow
 at 9:00".
 
 An agent's proposal, a routine or a follow-up, waits as a suggestion chip at
-the foot of the thread, in the same card as the reply's suggested tasks. It is
+the foot of the thread, in the same card as the reply's suggested tasks (a
+routine the agent suggests in a turn running at Full access is not a chip: it
+is created paused and shown as the **Created automation** card,
+[Architecture: modes](../architecture.md#modes-chat-work-and-code)). It is
 labelled "Routine · suggested" or "Follow-up here · suggested" and states the
 name, the schedule and its time zone, the first run, the missed-run policy,
 what each run does, and the exact prompt. Its one action, **Create routine**

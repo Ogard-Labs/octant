@@ -117,8 +117,11 @@ export interface LibraryViewProps {
   /** Reads what a Marketplace item holds; installing waits for it. */
   readonly onInspect?: (item: LibraryItem) => void;
   readonly inspection?: LibraryInspection | undefined;
-  /** Installs a reviewed Marketplace item. Installing never trusts or turns it on. */
-  readonly onInstall?: (item: LibraryItem) => void;
+  /**
+   * Installs a reviewed Marketplace item: `turn-on` also trusts it and turns
+   * it on under the same confirmation, `install` adds it and nothing more.
+   */
+  readonly onInstall?: (item: LibraryItem, steps: "install" | "turn-on") => void;
   readonly installing?: boolean;
 }
 
@@ -476,7 +479,7 @@ export function LibraryView(props: LibraryViewProps) {
             }}
             onConnect={(secret) => connect(open, secret)}
             onInspect={() => props.onInspect?.(open)}
-            onInstall={() => props.onInstall?.(open)}
+            onInstall={(steps) => props.onInstall?.(open, steps)}
             onOpen={(target) => {
               setOpenId(undefined);
               props.onOpen(target, open);
@@ -745,7 +748,7 @@ interface LibraryDetailProps {
   readonly onClose: () => void;
   readonly onConnect: (secret?: string) => Promise<boolean>;
   readonly onInspect: () => void;
-  readonly onInstall: () => void;
+  readonly onInstall: (steps: "install" | "turn-on") => void;
   readonly onOpen: (target: LibraryHandoff) => void;
   readonly onTrust: (trusted: boolean) => void;
   readonly onPluginDesired: (desired: boolean) => void;
@@ -1032,13 +1035,23 @@ function LibraryDetail(props: LibraryDetailProps) {
           </OctantButton>
         ) : null}
         {reviewable && preview !== undefined ? (
-          <OctantButton
-            disabled={props.installing || props.disabled}
-            onClick={props.onInstall}
-            type="button"
-          >
-            {props.installing ? "Installing…" : "Install"}
-          </OctantButton>
+          <>
+            <OctantButton
+              disabled={props.installing || props.disabled}
+              onClick={() => props.onInstall("turn-on")}
+              type="button"
+            >
+              {props.installing ? "Installing…" : "Install, trust and turn on"}
+            </OctantButton>
+            <OctantButton
+              disabled={props.installing || props.disabled}
+              onClick={() => props.onInstall("install")}
+              type="button"
+              variant="outline"
+            >
+              Install only
+            </OctantButton>
+          </>
         ) : null}
         {ref !== undefined && next === "trust" ? (
           <OctantButton disabled={locked} onClick={() => props.onTrust(true)} type="button">
@@ -1085,7 +1098,7 @@ function LibraryDetail(props: LibraryDetailProps) {
               ? "Connect adds this server to this host, trusts it and turns it on after this confirmation. Tool calls still follow the thread's approval policy."
               : "Connect from the Octant window on this host; a browser-hosted Settings cannot keep a key or run a sign-in."
             : reviewable
-              ? "Install only adds it. You trust it and turn it on as separate steps afterwards."
+              ? "Install, trust and turn on does all three after this one confirmation. Install only adds it, and you trust it and turn it on as separate steps afterwards."
               : ref === undefined
                 ? "Installing never trusts or turns anything on by itself. You confirm each step, except a server you add directly, whose confirmation covers those steps."
                 : "Tool calls follow the thread's approval policy, including approvals you chose to remember."}

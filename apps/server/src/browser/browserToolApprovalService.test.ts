@@ -747,11 +747,40 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
       expect(approvals.decide(windowId, decision)).toBe(true);
       await expect(always).resolves.toBe("approved");
       expect(rememberTransfer).toHaveBeenCalledExactlyOnceWith(
-        { direction, origin: "https://example.com", workspaceRoot: "/projects/brief" },
+        {
+          direction,
+          origin: "https://example.com",
+          workspaceRoot: "/projects/brief",
+          // No profile was named, so the page is a Private one, and the answer says so.
+          privatePage: true,
+        },
         windowId,
       );
       // The answer is about files, never a grant to open the site.
       expect(rememberOrigin).not.toHaveBeenCalled();
+
+      // On a page in a profile the answer is kept for that profile.
+      const inProfile = approvals.request({
+        windowId,
+        threadId,
+        authority,
+        origin: "https://example.com",
+        workspaceRoot: "/projects/brief",
+        profile: personal,
+        ...ask,
+      });
+      await vi.waitFor(() => expect(approvals.list(windowId)).toHaveLength(1));
+      expect(approvals.decide(windowId, decision)).toBe(true);
+      await expect(inProfile).resolves.toBe("approved");
+      expect(rememberTransfer).toHaveBeenLastCalledWith(
+        {
+          direction,
+          origin: "https://example.com",
+          workspaceRoot: "/projects/brief",
+          profile: personal,
+        },
+        windowId,
+      );
     },
   );
 

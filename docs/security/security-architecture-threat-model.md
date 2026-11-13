@@ -259,6 +259,31 @@ the home folder and its keychains, another program, and the host's environment f
 process; they run on macOS only, in the `macos-15` CI job, and passed there on 2026-10-27
 ([job](https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053)).
 
+### AC7 — Trusted plugin source publishing a hostile update
+
+The source a person trusted an unsigned plugin at (a folder, a catalog entry, an npm registry
+package) is compromised, or the path to it is, and publishes a new version. Since 2026-11-13 an
+unsigned update from that same source keeps the package's trust and the approvals its tools were
+given, so the new code runs MCP tools without a new prompt. This is an accepted residual risk: the
+maintainer chose it over asking on every update of a plugin whose author does not sign, which
+trained people to approve without reading. The rule lives in
+[Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
+
+| Layer                | Control                                                                                                                                                                                                                                                                                             | Module                                                                                                        | State        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------ |
+| Source binding       | Approvals carry over only inside one journaled run of updates from the recorded source of a trusted package; a different source is a different package and a new install                                                                                                                            | `packages/domain/src/outsideDriverPublisherPolicy.ts` (`unsignedUpdateKeepsApprovals`, `sameExtensionSource`) | Exists today |
+| Key rule first       | Wherever a publisher key exists or existed, the key decides: a version the pinned key did not sign is held and loses trust, an unsigned update of a signed package never rides the source rule, and the first signed update of an unsigned package stops for the person's trust, which pins its key | `apps/server/src/persistence/extensionProjection.ts` (`withPublisherStanding`, `readVerifiedPublisherKey`)    | Exists today |
+| Capability check     | An update that declares more than the reviewed version is held for review and loses trust, so a hostile update cannot add the shell or the network silently                                                                                                                                         | `extensionProjection.ts` (`hasCapabilityExpansion`)                                                           | Exists today |
+| Notice               | The installed card says the plugin was updated, from and to which version and digest, and when; nothing is hidden behind a fold                                                                                                                                                                     | `apps/web/src/extensions/ExtensionsSettingsView.tsx` (`UpdatedNotice`)                                        | Exists today |
+| Roll back            | One press returns to the previous version from the retained, integrity-checked copy and ends every remembered approval of the package                                                                                                                                                               | `apps/server/src/extensions/extensionLifecycleService.ts` (`rollback`)                                        | Exists today |
+| Asks no grant spares | A Plan turn asks for every call, a tool the catalog marks ask-every-call asks every time, and a network server asks once per thread after the thread has read outside content                                                                                                                       | `packages/domain/src/extensionToolGrantPolicy.ts` (`decideExtensionToolGrant`)                                | Exists today |
+| Confinement          | A stdio server still launches with no network and writes limited to its plugin data; what the update can reach is what the reviewed version could                                                                                                                                                   | `apps/server/src/extensions/nodeExtensionProcessPort.ts`                                                      | Exists today |
+
+Residual: between the update and the person reading the notice, the new version can use the
+approved tools with the arguments the model gives it, and a network server can send those
+arguments out. A publisher who signs removes this case: a signed package's update is accepted only
+under the pinned key.
+
 ## Server-Side Tool-Call Policy Engine
 
 ### What exists today

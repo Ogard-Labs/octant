@@ -1745,6 +1745,7 @@ describe("Code app-managed tools", () => {
         direction: "download",
         origin: "https://example.com",
         workspaceRoot: "/checkout",
+        privatePage: true,
       });
       expect(request).not.toHaveBeenCalled();
     });
@@ -1907,6 +1908,7 @@ describe("Code app-managed tools", () => {
           direction: "upload",
           origin: "https://example.com",
           workspaceRoot: workspace,
+          privatePage: true,
         });
         expect(request).not.toHaveBeenCalled();
         expect(act.mock.calls[0]?.[0].uploadFiles).toHaveLength(1);

@@ -17,7 +17,8 @@ export type CanvasExportPackageRefusalReason =
   | "declares-capabilities"
   | "entry-point-invalid"
   | "source-unsupported"
-  | "ships-executable";
+  | "ships-executable"
+  | "signature-invalid";
 
 /** One bundled JavaScript module; installation runs no package scripts or dependency resolution. */
 export function readCanvasExportPackageDocument(

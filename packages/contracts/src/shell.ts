@@ -596,15 +596,30 @@ export type RememberedBrowserProfileSite = typeof RememberedBrowserProfileSite.T
 /**
  * One "Always allow" answer to an agent's upload or download-save below Full
  * access: later transfers in that direction between that site and that
- * thread workspace do not ask. It never covers the other direction, another
- * site, or another workspace, and it lifts no path, size or type check.
+ * thread workspace, on a page in that Browser profile, do not ask. It never
+ * covers the other direction, another site, another workspace, or another
+ * profile, and it lifts no path, size or type check.
  */
 export const RememberedBrowserTransfer = Schema.Struct({
   direction: Schema.Literal("upload", "download"),
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
   /** The thread workspace on this host: a Work Project folder or a Code checkout. */
   workspaceRoot: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
-}).annotations(strict);
+  /** The stored profile the page was in. Absent for a Private page. */
+  profile: Schema.optional(StoredBrowserProfile),
+  /**
+   * Set on an answer given on a Private page, which covers Private pages
+   * alone. An entry with neither this nor `profile` was remembered before
+   * the page was recorded: it was given for the site and the folder on any
+   * page, which is what it covered then, so it still covers every profile
+   * and Private pages until the person forgets it. Narrowing it would ask
+   * again for what they already answered, and no entry written since can be
+   * mistaken for one.
+   */
+  privatePage: Schema.optional(Schema.Literal(true)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((entry) => entry.profile === undefined || entry.privatePage !== true));
 export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
 
 export const ShellSettings = Schema.Struct({

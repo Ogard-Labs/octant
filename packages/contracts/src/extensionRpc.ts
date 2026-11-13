@@ -78,13 +78,20 @@ export const ExtensionToolApproval = Schema.Struct({
   inputJson: Schema.String.pipe(Schema.maxLength(64 * 1024)),
   requestedAt: UtcTimestamp,
   /**
-   * Whether this prompt may be answered with `remember`, for the tool or for
-   * its whole server. False on a Plan turn, on a turn the host started as
-   * itself or a paired device sent, and for a network tool on a thread that
-   * took in outside content: those are approved one call at a time. A thread
-   * with no `projectId` remembers for the account.
+   * Whether an approval is kept for the Project, or for the account on a
+   * thread with no `projectId`, so `remember` may also narrow it to this tool.
+   * False on a Plan turn, on a turn the host started as itself or a paired
+   * device sent, and for a network tool on a thread that took in outside
+   * content.
    */
   rememberable: Schema.Boolean,
+  /**
+   * What approving lets run afterwards: every tool of the tool's server
+   * (`server`, the same as `rememberable`), every tool of that server for the
+   * rest of this thread (`server-on-thread`), or this call alone (`call`).
+   * Absent from a host that predates it, where an approval covers this call.
+   */
+  answerCovers: Schema.optional(Schema.Literal("call", "server", "server-on-thread")),
   /** Present when the thread has taken in outside content; see `ApprovalOutsideContent`. */
   outsideContent: Schema.optional(ApprovalOutsideContent),
 }).annotations({ ...strict, ...personDecides });
@@ -96,11 +103,15 @@ export type ExtensionToolApprovalList = typeof ExtensionToolApprovalList.Type;
 export const ExtensionToolApprovalDecision = Schema.Struct({
   approvalId: Schema.UUID,
   decision: Schema.Literal("approved", "denied"),
-  /** Always allow, where the thread remembers. Only an approval can be remembered. */
+  /**
+   * Names what the approval is kept for, where the prompt is `rememberable`.
+   * Left out, an approval there is kept for every tool of the server. Only
+   * an approval can be remembered.
+   */
   remember: Schema.optional(Schema.Boolean),
   /**
-   * What `remember` covers: this tool, or every tool of its server. Absent
-   * means this tool, which is all an older client can ask for.
+   * What `remember` covers: this tool alone, or every tool of its server.
+   * Absent means this tool, which is all an older client can ask for.
    */
   rememberScope: Schema.optional(Schema.Literal("tool", "server")),
 })
@@ -161,6 +172,12 @@ const userAddedSecretValue = Schema.Struct({
 }).annotations(strict);
 export const UserAddedMcpServerRequest = Schema.Struct({
   name: boundedText(64),
+  /**
+   * Adds the server without trusting it or turning it on, leaving both as
+   * the person's own steps. Left out, the one confirmation of adding it
+   * installs, trusts and turns it on.
+   */
+  installOnly: Schema.optional(Schema.Boolean),
   /**
    * The catalog connector this server is, when it was added from Connectors.
    * The host checks it against the bundled catalog and names the package after
@@ -559,30 +576,47 @@ export const ExtensionCommand = Schema.Union(
     expectedDigest: Schema.optional(ExtensionContentDigest),
   }).annotations(strict),
   /**
-   * `trust` installs and trusts in one confirmed step, journaled as both.
-   * Enabling stays its own switch. Left out, the package installs untrusted.
-   * `enable`, with `trust`, is the one flow that admits an outside provider
-   * driver: it also switches on the plugin and its driver component, each
-   * journaled as its own step. The host refuses it for any other package.
+   * `trust` installs and trusts in one confirmed step, and `enable` with it
+   * also turns the package and its components on; each step is journaled as
+   * its own event. For a package that holds a provider driver this is the one
+   * flow that admits an outside driver: it switches on the plugin and its
+   * driver component. Left out, the package installs untrusted and switched
+   * off, and trusting and turning on stay separate commands. Nothing is
+   * turned on without trust, so `enable` alone is refused.
    */
   Schema.Struct({
     kind: Schema.Literal("install-package"),
     ...versionedTarget,
     trust: Schema.optional(Schema.Boolean),
     enable: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((install) => install.enable !== true || install.trust === true)),
   Schema.Struct({ kind: Schema.Literal("update-package"), ...versionedTarget }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("rollback-package"), ...versionedTarget }).annotations(
-    strict,
-  ),
+  /**
+   * `restoreTrust` is the one step behind an Updated notice: rolling back to
+   * the version that notice names also trusts it and turns it on as it was,
+   * journaled as separate events. Anywhere else it changes nothing, and a
+   * roll back leaves the package untrusted and off. Every roll back ends the
+   * package's remembered approvals.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("rollback-package"),
+    ...versionedTarget,
+    restoreTrust: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("uninstall-package"), ...packageTarget }).annotations(
     strict,
   ),
+  /** `trust` and `enable` compose the same steps as `install-package`, under one confirmation. */
   Schema.Struct({
     kind: Schema.Literal("install-skill"),
     ...versionedTarget,
     trust: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
+    enable: Schema.optional(Schema.Boolean),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((install) => install.enable !== true || install.trust === true)),
   Schema.Struct({ kind: Schema.Literal("update-skill"), ...versionedTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("remove-skill"), ...packageTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("reconcile-skills") }).annotations(strict),

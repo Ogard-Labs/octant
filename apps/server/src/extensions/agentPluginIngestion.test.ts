@@ -9,6 +9,7 @@ import {
 import { normalizeAgentPluginPackage, type AgentPluginPackageInput } from "./agentPluginIngestion";
 import { prepareAgentPluginMcpRuntime } from "./agentPluginMcpRuntime";
 import { inspectExtensionPackage } from "./packageInspector";
+import { signPackageEntries } from "./packageSignatureTestFixtures";
 
 const source = {
   kind: "local-folder",
@@ -362,6 +363,53 @@ description: A plain skill used for version defaults.
       expect.objectContaining({ path: "bin/server", executable: true }),
     );
     expect(inspected.contentReferences).toEqual({ "skill-review": "skills/review/SKILL.md" });
+  });
+});
+
+describe("Agent Plugins publisher signatures", () => {
+  it("records the key that signed a plugin, and none for an unsigned one", () => {
+    const unsigned = fixture();
+    const signature = signPackageEntries(unsigned.entries, {
+      name: "review-tools",
+      version: "1.2.3",
+    });
+
+    const signed = normalizeAgentPluginPackage(
+      fixture({ entries: [...unsigned.entries, signature.entry] }),
+    );
+
+    expect(signed.manifest).toMatchObject({
+      provenance: { publisherKey: signature.fingerprint },
+    });
+    expect(inspectExtensionPackage(signed).manifest.provenance.publisherKey).toBe(
+      signature.fingerprint,
+    );
+    expect(
+      inspectExtensionPackage(normalizeAgentPluginPackage(unsigned)).manifest.provenance
+        .publisherKey,
+    ).toBeUndefined();
+  });
+
+  it("refuses a signed plugin whose files changed after signing, or that is signed under another name", () => {
+    const unsigned = fixture();
+    const signature = signPackageEntries(unsigned.entries, {
+      name: "review-tools",
+      version: "1.2.3",
+    });
+    const changed = unsigned.entries.map((entry) =>
+      entry.path === "bin/server" ? { ...entry, content: encoder.encode("changed") } : entry,
+    );
+    expect(() =>
+      normalizeAgentPluginPackage(fixture({ entries: [...changed, signature.entry] })),
+    ).toThrow(expect.objectContaining({ code: "signature-invalid" }));
+
+    const otherName = signPackageEntries(unsigned.entries, {
+      name: "other-tools",
+      version: "1.2.3",
+    });
+    expect(() =>
+      normalizeAgentPluginPackage(fixture({ entries: [...unsigned.entries, otherName.entry] })),
+    ).toThrow(expect.objectContaining({ code: "signature-invalid" }));
   });
 });
 

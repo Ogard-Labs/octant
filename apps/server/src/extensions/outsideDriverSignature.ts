@@ -99,6 +99,21 @@ export function readOutsideDriverSignature(
   };
 }
 
+/**
+ * Checks the same signature file on a package of any other kind: an Agent
+ * Plugin, a Codex plugin, a language server, a debug adapter, or a Canvas
+ * export target. Such a package speaks no driver protocol, so its signed
+ * message carries no protocol line. An unsigned package stays allowed; a
+ * signature that does not verify refuses the package, because a publisher
+ * who signs is saying an altered copy is not theirs.
+ */
+export function readPackagePublisherSignature(
+  entries: ReadonlyArray<ExtensionArchiveEntry>,
+  facts: { readonly name: string; readonly version: string },
+): OutsideDriverSignatureReading {
+  return readOutsideDriverSignature(entries, { ...facts, protocolVersions: [] });
+}
+
 function sameFiles(
   computed: ReadonlyArray<{ readonly path: string; readonly sha256: string }>,
   listed: ReadonlyArray<{ readonly path: string; readonly sha256: string }>,

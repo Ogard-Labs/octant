@@ -328,14 +328,24 @@ export class ExtensionApiService {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
           if (command.enable === true) {
-            // Switching on at install is the outside-driver flow, which
-            // always trusts first; without trust there is nothing to enable.
+            // Switching on at install always trusts first; without trust there
+            // is nothing to enable.
             if (command.trust !== true) return failure("invalid", lifecycleMessage("invalid"));
+          }
+          if (
+            command.enable === true &&
+            inspection.manifest.components.some((component) => component.kind === "provider-driver")
+          ) {
+            // A provider driver is admitted by its own flow, which names the
+            // step that stopped it.
             const admitted = await this.#lifecycle.admitOutsideDriver(inspection);
             return await this.#stateUpdated(admitted.snapshot, command, admitted.stoppedAt);
           }
           return await this.#stateUpdated(
-            await this.#lifecycle.install(inspection, { trust: command.trust === true }),
+            await this.#lifecycle.install(inspection, {
+              trust: command.trust === true,
+              enable: command.enable === true,
+            }),
             command,
           );
         }

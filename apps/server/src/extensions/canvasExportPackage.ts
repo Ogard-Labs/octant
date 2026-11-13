@@ -10,6 +10,7 @@ import {
   type ExtensionArchiveEntry,
   type ResolvedExtensionPackage,
 } from "./packageInspector";
+import { readPackagePublisherSignature } from "./outsideDriverSignature";
 
 export interface CanvasExportPackageInput {
   readonly layout: "canvas-export-package";
@@ -39,11 +40,17 @@ export function readCanvasExportPackage(
     return { status: "refused", reason: "entry-point-invalid" };
   if (input.entries.some((entry) => entry.executable === true))
     return { status: "refused", reason: "ships-executable" };
+  const signature = readPackagePublisherSignature(input.entries, {
+    name: reading.document.manifest.slug,
+    version: reading.document.manifest.version,
+  });
+  if (signature.status === "invalid") return { status: "refused", reason: "signature-invalid" };
   const manifest = hostStatedManifest(
     "octant.canvas-export-package",
     input.source,
     document.manifest,
     reading.document.manifest.slug,
+    signature.status === "signed" ? signature.publisherKey : undefined,
   );
   const digest = calculateExtensionPackageDigest(manifest, input.entries);
   return {
