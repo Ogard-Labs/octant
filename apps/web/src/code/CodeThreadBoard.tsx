@@ -4,9 +4,10 @@ import type {
   CodeBoardStatus,
   CodeBoardView,
   CodeThreadMetadataRecoveryReason,
+  CodeUnconfirmedStepOutcome,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
-import type { CodeThreadId } from "@octant/contracts/code";
+import type { CodeRuntimeWorkId, CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
 import {
@@ -49,6 +50,7 @@ import {
 } from "../threadBoard/threadBoardState";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -104,7 +106,20 @@ export interface CodeThreadBoardProps {
    * offers the Coordinator filter. Absent leaves every card as the host sent it.
    */
   readonly coordinators?: CodeBoardCoordinators;
+  /**
+   * Records the person's word on a pull request update or merge a restart
+   * left unconfirmed. Absent: the card names the step but offers no action.
+   */
+  readonly resolveUnconfirmedStep?: (
+    card: CodeBoardCard,
+    workId: CodeRuntimeWorkId,
+    outcome: CodeUnconfirmedStepOutcome,
+  ) => Promise<UnconfirmedStepResolution>;
 }
+
+export type UnconfirmedStepResolution =
+  | { readonly status: "resolved" }
+  | { readonly status: "refused"; readonly message: string };
 
 interface FilterState {
   readonly text: string;
@@ -129,6 +144,7 @@ const DEFAULT_FILTERS: FilterState = {
 
 export function CodeThreadBoard(props: CodeThreadBoardProps) {
   const storage: BoardStorage | undefined = props.storage ?? defaultBoardStorage();
+  const resolveUnconfirmedStep = props.resolveUnconfirmedStep;
   const [grouping, setGrouping] = useState<CodeBoardGrouping>(
     () =>
       props.initialGrouping ??
@@ -524,6 +540,20 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             statusPresentation={presentation.statusPresentation}
             unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
             request={pending.forCard(card)}
+            {...(resolveUnconfirmedStep === undefined
+              ? {}
+              : {
+                  onResolveStep: async (
+                    workId: CodeRuntimeWorkId,
+                    outcome: CodeUnconfirmedStepOutcome,
+                  ) => {
+                    const resolution = await resolveUnconfirmedStep(card, workId, outcome);
+                    // The board re-reads the host: the card leaves Waiting only
+                    // once the host's own record says the step is settled.
+                    if (resolution.status === "resolved") setRefreshNonce((nonce) => nonce + 1);
+                    return resolution;
+                  },
+                })}
             {...coordinatorOfCard(coordinatorTitles, card)}
             {...cardViewExtras(card, {
               projectNames,
@@ -569,6 +599,72 @@ function OutsideContentCardMark(props: { readonly found: boolean }) {
 
 const EMPTY_COORDINATOR_TITLES: ReadonlyMap<string, string> = new Map();
 
+/**
+ * Mark resolved, for a pull request update or merge a restart left
+ * unconfirmed. Octant cannot check these on GitHub, so the person checks and
+ * says what happened, or clears the wait without saying.
+ */
+function UnconfirmedStepResolve(props: {
+  readonly action: "update" | "merge";
+  readonly onResolve: (outcome: CodeUnconfirmedStepOutcome) => Promise<UnconfirmedStepResolution>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [refusal, setRefusal] = useState<string | undefined>(undefined);
+  const step = props.action === "merge" ? "merge" : "pull request update";
+  const choose = (outcome: CodeUnconfirmedStepOutcome) => {
+    setSending(true);
+    setRefusal(undefined);
+    props.onResolve(outcome).then(
+      (resolution) => {
+        setSending(false);
+        if (resolution.status === "refused") setRefusal(resolution.message);
+        else setOpen(false);
+      },
+      () => {
+        setSending(false);
+        setRefusal("Octant could not record this. Try again.");
+      },
+    );
+  };
+  return (
+    <div className="board-card-resolve">
+      <OctantPopover
+        onOpenChange={setOpen}
+        open={open}
+        title={`Did the ${step} go through?`}
+        trigger={<span>Mark resolved</span>}
+        triggerLabel={`Mark the unconfirmed ${step} resolved`}
+        triggerVariant="ghost"
+      >
+        <p>Check the pull request on GitHub, then say what you found.</p>
+        <OctantButton disabled={sending} onClick={() => choose("happened")} size="sm" type="button">
+          It went through
+        </OctantButton>
+        <OctantButton
+          disabled={sending}
+          onClick={() => choose("did-not-happen")}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          It did not go through
+        </OctantButton>
+        <OctantButton
+          disabled={sending}
+          onClick={() => choose("unknown")}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Just stop waiting
+        </OctantButton>
+        {refusal === undefined ? null : <OctantAlert tone="warning">{refusal}</OctantAlert>}
+      </OctantPopover>
+    </div>
+  );
+}
+
 function coordinatorOfCard(
   titles: ReadonlyMap<string, string>,
   card: CodeBoardCard,
@@ -594,8 +690,13 @@ function CodeBoardCardView(props: {
   readonly providerKind?: string;
   readonly onOpen?: (target: CodeThreadOpenTarget) => void;
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
+  readonly onResolveStep?: (
+    workId: CodeRuntimeWorkId,
+    outcome: CodeUnconfirmedStepOutcome,
+  ) => Promise<UnconfirmedStepResolution>;
 }) {
   const { card } = props;
+  const resolveStep = props.onResolveStep;
   const statusLabel = codeBoardStatusLabel(card.status);
   const waitingReason = waitingReasonText(card);
   const className = props.layout === "list" ? "issuerow" : "board-card";
@@ -683,6 +784,15 @@ function CodeBoardCardView(props: {
       {props.request === undefined ? null : (
         <ThreadBoardCardRequest onOpenThread={onOpenThread} request={props.request} />
       )}
+      {resolveStep === undefined
+        ? null
+        : (card.unconfirmedPullRequestSteps ?? []).map((step) => (
+            <UnconfirmedStepResolve
+              action={step.action}
+              key={String(step.workId)}
+              onResolve={(outcome) => resolveStep(step.workId, outcome)}
+            />
+          ))}
       <ThreadBoardPullRequestSummaries
         {...(props.onSelectPullRequest === undefined
           ? {}
