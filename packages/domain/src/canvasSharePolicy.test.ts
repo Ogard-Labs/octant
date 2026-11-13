@@ -1,6 +1,7 @@
 import {
   CANVAS_MAX_TEXT_LENGTH,
   CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
   decodeCanvasVersion,
 } from "@octant/contracts/canvas";
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
@@ -444,6 +445,41 @@ describe("Canvas share policy", () => {
     expect(receipt.document.blocks).toEqual(blocks);
   });
 
+  it("shares a decision form's questions and sections at share version 17, never an answer", () => {
+    const form = decodeCanvasBlock({
+      blockId: "decisions",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "choice",
+      prompt: "Decisions",
+      questions: [
+        {
+          id: "who",
+          prompt: "Who?",
+          selection: "single",
+          options: [{ id: "any", label: "Anyone" }],
+        },
+      ],
+      sections: [{ id: "access", title: "Access", intro: "Who may set it", questionIds: ["who"] }],
+    });
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: decodeCanvasVersion({
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          blocks: [form],
+        },
+      }),
+      context,
+    });
+    expect(receipt.document.schemaVersion).toBe(17);
+    expect(decodeCanvasStaticExportDocument(receipt.document).blocks).toEqual([
+      { ...form, schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION },
+    ]);
+  });
+
   it("shares every block an agent is shown as an example, and a design only once its markup is acknowledged", () => {
     const atCurrentVersion = (blocks: ReadonlyArray<unknown>) => ({
       ...current,
@@ -573,8 +609,8 @@ describe("Canvas share policy", () => {
       });
     const receipt = share([design, diagram]);
     expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
-    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(16);
-    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(27);
+    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(17);
+    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(29);
     const { assets: _assets, ...withoutAssets } = design;
     expect(receipt.document.blocks).toEqual([
       {

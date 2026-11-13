@@ -290,6 +290,7 @@ import {
   type RecordExternalContentIngestion,
 } from "../context/inheritedExternalContentMark";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
+import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
 
 const RESEARCH_TOOL_NAME = WEB_SEARCH_TOOL_DEFINITION.name;
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
@@ -1088,13 +1089,6 @@ export interface ChatSubscribeOptions {
    */
   readonly appended?: boolean;
 }
-
-/**
- * How long a Stop on a shared-process provider (Codex, OpenCode) waits for the
- * runtime to confirm the turn ended: the same grace a provider that owns its
- * process gives before Force stop is offered.
- */
-const STOP_CONFIRMATION_MS = 10_000;
 
 export class ChatService {
   readonly #persistence: PersistenceService;

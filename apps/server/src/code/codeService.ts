@@ -603,6 +603,8 @@ export interface CodeFileRootAuthorityPort {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     relativePath: CodeRelativePath,
+    /** Stops the probe: its Git is killed and it resolves nothing once aborted. */
+    signal?: AbortSignal,
   ) => CodeFileRootResolution | undefined | Promise<CodeFileRootResolution | undefined>;
 }
 

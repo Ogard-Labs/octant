@@ -1,4 +1,5 @@
 import { decodeCanvasBlock, type CanvasChoiceBlock } from "@octant/contracts/canvas";
+import type { QuestionnaireResponse } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -24,6 +25,32 @@ const choice = decodeCanvasBlock({
 }) as CanvasChoiceBlock;
 
 describe("ChoiceBlock", () => {
+  it("sends the answers to a long decision list whole, past the inline questionnaire's four", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async (_block: CanvasChoiceBlock, _response: QuestionnaireResponse) => ({
+      status: "sent" as const,
+    }));
+    const [first] = choice.questions;
+    const long = decodeCanvasBlock({
+      ...choice,
+      questions: Array.from({ length: 24 }, (_, n) => ({
+        ...first,
+        id: `q${String(n)}`,
+        prompt: `Decision ${String(n + 1)}`,
+      })),
+    }) as CanvasChoiceBlock;
+    render(
+      <ChoiceBlock
+        block={long}
+        runtime={{ kind: "can-send", threadLabel: "the Work thread", onSend }}
+      />,
+    );
+    for (const radio of screen.getAllByRole("radio", { name: /Staged/ })) await user.click(radio);
+    await user.click(screen.getByRole("button", { name: "Send to the Work thread" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]?.[1].answers).toHaveLength(24);
+  });
+
   it("keeps a choice as a draft until the person sends it, then sends it once", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => ({ status: "sent" as const }));
