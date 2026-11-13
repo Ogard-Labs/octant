@@ -755,6 +755,64 @@ reads the route only while the card is on screen and the window is visible,
 about every ten seconds, at most one read per host at a time and each abandoned
 after five seconds, and does not poll in the background.
 
+### Local work resource limits
+
+Settings > General > Computer resources controls admission of new local work
+on this host. It is separate from the host-process Memory limits relief setting.
+Automatic is the default; Manual uses the person's ceilings without load-based
+adjustment; Pause holds new managed commands and helper agents. Running processes
+are not suspended or killed. Existing per-operation Stop controls remain available.
+
+The host journals the policy with its managed-agent settings aggregate and checks
+its version on writes. Only an authenticated local window can change it or read
+`/api/agent-run-settings/resources`. Old journals without a policy use Automatic.
+The panel shows hardware, last sampled load, effective ceilings and waiting/running
+command counts, with an explicit Refresh; it does not poll while closed.
+
+Automatic uses available CPU cores, system-wide CPU time deltas, one-minute load
+and system memory capacity. Linux uses `MemAvailable` (including reclaimable cache);
+macOS uses kernel memory pressure, never free-page counts. The initial ceilings are four command groups, four total
+worker slots and four managed helper agents, with a 60% CPU admission target and
+20% RAM reserve (at least 1 GiB). The person may choose 1–16 for each ceiling,
+20–90% for CPU and 10–50% for RAM. Each estimated unit needs a core and 1 GiB
+above the memory reserve where available bytes are measured. On macOS, normal
+pressure permits the hardware estimate (total RAM minus reserve); warning or critical
+pressure holds new work. The smallest of CPU headroom, runnable-load headroom,
+and memory headroom reduces the ceilings. Fewer than one memory unit, CPU at or
+above its target, or runnable load at or above the target core count holds new
+work. Missing readings admit only one command/worker/helper, except that known pressure
+stays held until valid healthy readings return. A recovered host
+must remain healthy for five seconds before admission resumes. Readings are
+cached for two seconds. Memory reuses the existing host memory guard sample
+(5–15 seconds, stale after 30 seconds), including its bounded macOS sysctl;
+the resource budget launches no additional monitoring subprocesses;
+queue retries run only while work waits. These are conservative heuristics, not
+hard CPU/memory quotas, thermal measurements or predictions of a tool's peak RAM.
+
+Repository tests, local worktree preparation, scaffolds and the Octant Harness's
+shell ports share one host budget. They reserve worker slots atomically before
+launch, bound each wait by the operation deadline and at most 30 minutes, retain
+cancellation, and recheck ordinary authority after waiting. The queue has at most
+128 entries. Worker slots are divided across the allowed command concurrency,
+so separate Projects do not each get a full worker pool. A confirmed exit releases
+the reservation; uncertain cleanup retains it until host restart/reconciliation.
+Queue expiry or saturation reports an unavailable launch, never successful work.
+Managed helpers also obey the adaptive host ceiling in addition to their existing
+per-thread/host limits; a resource waiter is retried without requiring another
+helper to finish. Settings changes affect subsequent admission, not already
+reserved work. Closing the host cancels pending resource waits and timers.
+
+Managed commands receive `VITEST_MAX_WORKERS`, the older thread-pool maximum/minimum
+variables, and `CMAKE_BUILD_PARALLEL_LEVEL`. Claude and Codex runtime launches
+receive conservative worker defaults divided across the configured helper ceiling.
+These are cooperative settings: supported Vitest versions honor them; other
+runners, shell scripts overriding their environment, native CLI delegation,
+terminal sessions, arbitrary grandchildren and externally launched processes are
+not hard-limited. Native runtime/session admission and OS-enforced descendant
+quotas are not built. The panel states this boundary rather than claiming control
+of all Node processes. Existing host memory relief still stops idle reusable
+provider runtimes and trims caches under pressure.
+
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
 `@octant/client-runtime` and never holds authority of its own. In development
@@ -2857,7 +2915,8 @@ existing runs can be named, a cycle cannot be expressed.
 
 How many children run at once is the person's setting
 (`AgentRunPolicySettings.concurrency`: per thread and on the host, defaults 4
-and 8, each at most `MAX_AGENT_RUN_CONCURRENCY` = 16). Run slots enforce it at
+and 8, each at most `MAX_AGENT_RUN_CONCURRENCY` = 16), further bounded by
+[local work resource limits](#local-work-resource-limits). Run slots enforce it at
 start: `createInMemoryCapacityPort` counts reservations per thread and per
 host, reads the limits on every reservation, and reports which limit is full;
 the capacity queue skips a waiter whose own thread is full so another thread's

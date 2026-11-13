@@ -1,3 +1,4 @@
+import { DEFAULT_HOST_RESOURCE_POLICY } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   AgentRunSettingsClientFailure,
@@ -5,6 +6,33 @@ import {
 } from "./agentRunSettingsClient";
 
 describe("agentRunSettingsClient", () => {
+  it("reads effective host capacity through the authenticated settings route", async () => {
+    const snapshot = {
+      policy: DEFAULT_HOST_RESOURCE_POLICY,
+      cores: 8,
+      totalMemoryBytes: 16 * 2 ** 30,
+      availableMemoryBytes: 8 * 2 ** 30,
+      cpuPercent: 80,
+      commands: 0,
+      workers: 1,
+      agents: 0,
+      activeCommands: 1,
+      queuedCommands: 2,
+      reason: "cpu-pressure",
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(url)).toBe("http://127.0.0.1:8787/api/agent-run-settings/resources");
+      expect(init?.headers).toEqual({ "x-octant-window-capability": "cap" });
+      return Response.json(snapshot);
+    });
+    const client = createAgentRunSettingsClient({
+      baseUrl: "http://127.0.0.1:8787",
+      windowCapability: "cap",
+      fetch: fetchImpl as typeof fetch,
+    });
+    expect(await client.resources?.()).toEqual(snapshot);
+  });
+
   it("reads the current posture", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toContain("/api/agent-run-settings");

@@ -148,6 +148,10 @@ const PROBE_OUTPUT_BYTES = 4_096;
 // grants far more than model access, and everything on the list is readable by
 // the model. A model provider's own credential is on it.
 const SAFE_ENVIRONMENT = new Set([
+  "VITEST_MAX_WORKERS",
+  "VITEST_MAX_THREADS",
+  "VITEST_MIN_THREADS",
+  "CMAKE_BUILD_PARALLEL_LEVEL",
   "COLORTERM",
   "HOME",
   "LANG",

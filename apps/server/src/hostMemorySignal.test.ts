@@ -61,7 +61,7 @@ describe("readSystemMemory", () => {
         totalBytes: () => 0,
         readFile: async () => "MemTotal: 1000 kB\nMemAvailable: 40 kB\n",
       }),
-    ).resolves.toEqual({ signal: "critical", totalBytes: 1000 * 1024 });
+    ).resolves.toEqual({ signal: "critical", totalBytes: 1000 * 1024, availableBytes: 40 * 1024 });
   });
 
   it("falls back to unknown when the reading fails", async () => {

@@ -240,6 +240,7 @@ export function startOctantServer(
       codeSessionConversation,
       codeEvidence,
       hostMemoryGuard,
+      readResourceMemory,
       isProjectPolicyTargetAllowed,
       providerRuntimeRegistry,
       selectCodeConversation,
@@ -320,6 +321,7 @@ export function startOctantServer(
       agentRunRouteDependencies,
       agentRunSessionStore,
       agentRunSettingsRoutes,
+      hostResourceBudget,
       agentsManagedToolsFor,
       capacityScheduler,
       contributeChildTools,
@@ -338,6 +340,7 @@ export function startOctantServer(
       threadFollowUpSuggestions,
       turnMetrics,
     } = wireAgentRuns({
+      readResourceMemory,
       agentRunParentAuthority,
       agentRunPersistence,
       toolEffectLedger,
@@ -360,6 +363,7 @@ export function startOctantServer(
       workThreadProjection,
       workTurnProjection,
     });
+    yield* Effect.addFinalizer(() => Effect.sync(() => hostResourceBudget.dispose()));
     const {
       agentMessageProjection,
       agentMessageService,
@@ -563,6 +567,7 @@ export function startOctantServer(
       managedWorktreeService,
       skillDiscoveryService,
     } = yield* wireProviders({
+      hostResourceBudget,
       serverRegistry,
       providerRuntimeNetwork,
       providerRuntimeRegistry,
@@ -620,6 +625,7 @@ export function startOctantServer(
       threadWork,
     } = wireHarness({
       toolEffectLedger,
+      hostResourceBudget,
       serverConnection,
       personMemory,
       safeNetworkStore,
@@ -854,6 +860,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      hostResourceBudget,
       threadMoveHolds,
       onThreadArchived,
       codeSessionConversation,
@@ -2151,6 +2158,7 @@ export function startOctantServer(
       }).pipe(Effect.onError(() => Effect.promise(() => cloudSessions.service.close()))),
       (server) =>
         Effect.promise(async () => {
+          hostResourceBudget.dispose();
           let shutdownFailure: unknown;
           try {
             windowAuthorityStore.revokeNativeLeases();

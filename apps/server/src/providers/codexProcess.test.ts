@@ -158,6 +158,10 @@ describe("sanitizeCodexEnvironment", () => {
     expect(
       sanitizeCodexEnvironment({
         PATH: "/usr/bin",
+        VITEST_MAX_WORKERS: "2",
+        VITEST_MAX_THREADS: "2",
+        VITEST_MIN_THREADS: "1",
+        CMAKE_BUILD_PARALLEL_LEVEL: "2",
         HOME: "/Users/test",
         TMPDIR: "/var/folders/tmp",
         TERM: "xterm-256color",
@@ -180,6 +184,10 @@ describe("sanitizeCodexEnvironment", () => {
       }),
     ).toEqual({
       PATH: "/usr/bin",
+      VITEST_MAX_WORKERS: "2",
+      VITEST_MAX_THREADS: "2",
+      VITEST_MIN_THREADS: "1",
+      CMAKE_BUILD_PARALLEL_LEVEL: "2",
       HOME: "/Users/test",
       TMPDIR: "/var/folders/tmp",
       TERM: "xterm-256color",

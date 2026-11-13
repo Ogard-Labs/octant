@@ -25,6 +25,61 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "general enabled modes startup default chat work updates version release threads completed put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
         {
+          id: settingId("resource-limits"),
+          label: "Computer resources",
+          scope: "host",
+          keywords:
+            "cpu ram memory load hardware automatic resource limits throttle vitest testing workers processes helpers pause concurrency",
+        },
+        {
+          id: settingId("resource-maxCommands"),
+          label: "Concurrent commands",
+          scope: "host",
+          keywords: "commands process concurrent limit",
+        },
+        {
+          id: settingId("resource-maxWorkers"),
+          label: "Total test workers",
+          scope: "host",
+          keywords: "vitest test workers processes parallel",
+        },
+        {
+          id: settingId("resource-maxAgents"),
+          label: "Helper agent limit",
+          scope: "host",
+          keywords: "subagent helper concurrency",
+        },
+        {
+          id: settingId("resource-cpuTargetPercent"),
+          label: "CPU target",
+          scope: "host",
+          keywords: "cpu utilization load headroom target",
+        },
+        {
+          id: settingId("resource-memoryReservePercent"),
+          label: "Memory reserve",
+          scope: "host",
+          keywords: "ram memory available reserve pressure",
+        },
+        {
+          id: settingId("resource-save"),
+          label: "Save resource limits",
+          scope: "host",
+          keywords: "save resource limits apply",
+        },
+        {
+          id: settingId("resource-pause"),
+          label: "Pause new work",
+          scope: "host",
+          keywords: "pause throttle testing helper agents commands",
+        },
+        {
+          id: settingId("resource-refresh"),
+          label: "Refresh host load",
+          scope: "host",
+          keywords: "refresh resources hardware cpu memory load",
+        },
+        {
           id: settingId("enable-chat"),
           label: "Enable Chat",
           scope: "app",

@@ -1,3 +1,4 @@
+import type { HostResourceBudget } from "../process/hostResourceBudget";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { constants } from "node:fs";
 import { access, lstat, open, realpath, stat } from "node:fs/promises";
@@ -65,6 +66,7 @@ export function defaultTemporaryDirectory(
 }
 
 interface RepositoryTestProcessPortOptions {
+  readonly resourceBudget?: HostResourceBudget;
   readonly platform?: NodeJS.Platform;
   readonly spawn?: (
     executable: string,
@@ -294,6 +296,7 @@ const HARNESS_SHELL = "/bin/sh";
 const SSH_ACCOUNT_LOOKUP = "com.apple.system.opendirectoryd.libinfo";
 
 export class RepositoryTestProcessPort {
+  readonly #resourceBudget: HostResourceBudget | undefined;
   readonly #platform: NodeJS.Platform;
   readonly #spawn: NonNullable<RepositoryTestProcessPortOptions["spawn"]>;
   readonly #killProcessGroup: NonNullable<RepositoryTestProcessPortOptions["killProcessGroup"]>;
@@ -313,6 +316,7 @@ export class RepositoryTestProcessPort {
   readonly #refuseNewSession: boolean;
 
   constructor(options: RepositoryTestProcessPortOptions = {}) {
+    this.#resourceBudget = options.resourceBudget;
     this.#platform = options.platform ?? process.platform;
     this.#spawn =
       options.spawn ??
@@ -572,6 +576,56 @@ export class RepositoryTestProcessPort {
   }
 
   async #launch(
+    input: RepositoryTestProcessInput,
+    validated: { readonly executable: string; readonly args: readonly string[] },
+    signal: AbortSignal | undefined,
+    proxied?: {
+      readonly networkEgress: OsNetworkEgress;
+      readonly environment: Readonly<Record<string, string>>;
+      /** Seatbelt rules a harness command's server access adds. */
+      readonly extraRules?: ReadonlyArray<string>;
+      /** The Linux forwarder's relays to a harness command's registered servers. */
+      readonly serverRelays?: ReadonlyArray<{ readonly port: number; readonly socketPath: string }>;
+    },
+    cloudCli?: {
+      readonly root: string;
+      readonly owned?: { readonly resource: string; readonly configuration: string };
+    },
+  ): Promise<RepositoryTestProcessResult> {
+    if (this.#resourceBudget === undefined)
+      return this.#launchAdmitted(input, validated, signal, proxied, cloudCli);
+    const started = Date.now();
+    const lease = await this.#resourceBudget.acquire(signal, input.timeoutMs);
+    if (lease === undefined) return signal?.aborted ? cancelledBeforeSpawn() : unavailable(false);
+    let released = false;
+    try {
+      const result = await this.#launchAdmitted(
+        {
+          ...input,
+          timeoutMs: Math.max(1, input.timeoutMs - (Date.now() - started)),
+          environment: {
+            ...input.environment,
+            VITEST_MAX_WORKERS: String(lease.workers),
+            VITEST_MAX_THREADS: String(lease.workers),
+            VITEST_MIN_THREADS: "1",
+            CMAKE_BUILD_PARALLEL_LEVEL: String(lease.workers),
+          },
+        },
+        validated,
+        signal,
+        proxied,
+        cloudCli,
+      );
+      // An unconfirmed descendant still consumes host capacity. Its durable receipt
+      // is reconciled at restart; do not admit replacement work on a guessed exit.
+      released = !result.cleanupUncertain;
+      return result;
+    } finally {
+      if (released) lease.release();
+    }
+  }
+
+  async #launchAdmitted(
     input: RepositoryTestProcessInput,
     validated: { readonly executable: string; readonly args: readonly string[] },
     signal: AbortSignal | undefined,

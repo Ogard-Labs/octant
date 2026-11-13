@@ -124,6 +124,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<
     AgentRunsWiring,
+    | "hostResourceBudget"
     | "nativeHarnessRouter"
     | "nativeHarnessRoutingStore"
     | "contributeChildTools"
@@ -361,6 +362,7 @@ export function wireHarness(deps: HarnessDependencies) {
     configurationRoot: join(providerDataDirectory, "harness", "cloud-cli"),
   });
   const harnessProcessPort = new RepositoryTestProcessPort({
+    resourceBudget: deps.hostResourceBudget,
     receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
     temporaryDirectory: harnessWorkDirectory,
     harnessShellScriptDirectory: harnessScriptDirectory,
@@ -372,6 +374,7 @@ export function wireHarness(deps: HarnessDependencies) {
   const harnessOfflineWorkDirectory = join(providerDataDirectory, "harness", "work-offline");
   mkdirSync(harnessOfflineWorkDirectory, { recursive: true, mode: 0o700 });
   const harnessOfflineProcessPort = new RepositoryTestProcessPort({
+    resourceBudget: deps.hostResourceBudget,
     receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
     temporaryDirectory: harnessOfflineWorkDirectory,
     networkEgress: "none",
@@ -381,6 +384,7 @@ export function wireHarness(deps: HarnessDependencies) {
   // Octant's OS sandbox, network open. The owned process group, receipts and
   // output capture stay, so the command is still journaled and stoppable.
   const harnessFullAccessProcessPort = new RepositoryTestProcessPort({
+    resourceBudget: deps.hostResourceBudget,
     receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
     temporaryDirectory: harnessWorkDirectory,
     harnessShellScriptDirectory: harnessScriptDirectory,

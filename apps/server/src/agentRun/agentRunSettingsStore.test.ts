@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
   AgentRunPolicySettings,
+  DEFAULT_HOST_RESOURCE_POLICY,
   CorrelationId,
   EventId,
   effectiveAgentRunConcurrency,
@@ -67,6 +68,31 @@ function createStore(journal = createJournal()): AgentRunSettingsStore {
 }
 
 describe("AgentRunSettingsStore", () => {
+  it("replays host resource limits and preserves them when helper settings change", () => {
+    const journal = createJournal();
+    const store = createStore(journal);
+    const resourcePolicy = {
+      ...DEFAULT_HOST_RESOURCE_POLICY,
+      mode: "paused" as const,
+      maxWorkers: 2,
+    };
+    store.update({ creationPosture: "off", expectedVersion: 0, resourcePolicy });
+    store.update({ creationPosture: "automatic", expectedVersion: 1 });
+    expect(createStore(journal).current()).toMatchObject({
+      resourcePolicy,
+      creationPosture: "automatic",
+      version: 2,
+    });
+    expect(() =>
+      store.update({
+        creationPosture: "off",
+        expectedVersion: 2,
+        resourcePolicy: { ...resourcePolicy, maxWorkers: 0 },
+      }),
+    ).toThrow(AgentRunSettingsStoreError);
+    expect(store.current().version).toBe(2);
+  });
+
   it("lets the agent start subagents on a host that never chose a posture", () => {
     const store = createStore();
     expect(store.current()).toEqual({ creationPosture: "automatic", version: 0, updatedAt: now });
