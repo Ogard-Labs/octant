@@ -61,6 +61,7 @@ export function createExtensionToolCallAuthorizer(options: {
         planTurn: call.thread.planTurn === true,
         threadTainted: options.threadTainted(call.thread.id),
         reach: call.reach,
+        ...(call.askEveryCall === true ? { askEveryCall: true } : {}),
         offered: offeredBinding(call),
         grant:
           stored === undefined

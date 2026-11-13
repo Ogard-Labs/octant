@@ -421,6 +421,7 @@ import {
 } from "../canvas/canvasEventStore";
 import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore";
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
+import { registerCoordinatorWakeEvents } from "../coordinator/coordinatorWakeJournal";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
 import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
 import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
@@ -430,6 +431,7 @@ import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerToolEffectEvents } from "../toolEffects/toolEffectLedger";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
 import { registerShipEvents } from "../ship/shipEventStore";
+import { registerCanvasChoiceAnswerEvents } from "../canvas/canvasChoiceAnswerService";
 import { registerCanvasCommentEvents } from "../canvas/canvasCommentService";
 import { registerCanvasTagEvents } from "../canvas/canvasTagService";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
@@ -818,9 +820,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasExportFolderEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);
+  registerCanvasChoiceAnswerEvents(events);
   registerCanvasTagEvents(events);
   registerArtifactMirrorEvents(events);
   registerGoalLoopEvents(events);
+  registerCoordinatorWakeEvents(events);
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
   registerToolEffectEvents(events);

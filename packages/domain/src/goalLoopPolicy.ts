@@ -259,6 +259,8 @@ export function goalLoopPauseText(reason: GoalLoopPauseReason): string {
       return "Paused.";
     case "stopped-by-user":
       return "Stopped.";
+    case "held-after-restart":
+      return "Octant restarted while this loop ran and did not continue it by itself. Resume it to keep going.";
   }
 }
 

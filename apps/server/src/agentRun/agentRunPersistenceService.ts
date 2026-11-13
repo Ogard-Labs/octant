@@ -85,6 +85,9 @@ export interface RequestAgentRunInput {
   readonly confirmed: boolean;
 }
 
+/** The reason a run the previous host was running reads after restart reconciliation. */
+export const AGENT_RUN_RESTART_INTERRUPTED_REASON = "restart-without-resumable-execution";
+
 /**
  * Server-owned AgentRun persistence seam: request-id idempotent command
  * application, journal append before effect, rebuildable projection, parent
@@ -639,6 +642,33 @@ export class AgentRunPersistenceService {
   }
 
   /**
+   * The version the run's latest start or resume moved it to, read from its
+   * journaled status changes; undefined when the journal cannot say. Restart
+   * continuation compares it with the resume the host itself made, so a
+   * person's later start breaks the host's crash-loop chain.
+   */
+  latestStartVersion(runId: AgentRunId): number | undefined {
+    let afterVersion = 0;
+    let latest: number | undefined;
+    for (;;) {
+      const replay = this.#store.replayRun({
+        runId,
+        afterVersion,
+        limit: MAX_AGENT_RUN_REPLAY_LIMIT,
+      });
+      if (replay.status !== "ok") return undefined;
+      for (const envelope of replay.events) {
+        if (envelope.eventName !== AGENT_RUN_STATUS_CHANGED || envelope.eventVersion !== 1)
+          continue;
+        const payload = decodeAgentRunStatusChanged(envelope.payload);
+        if (payload.toStatus === "starting") latest = payload.version;
+      }
+      if (replay.events.length < MAX_AGENT_RUN_REPLAY_LIMIT) return latest;
+      afterVersion = replay.nextCursor;
+    }
+  }
+
+  /**
    * After restart, non-terminal runs without independent resume evidence become
    * Interrupted with a restart recovery reason. Never Completes without a
    * recorded child result.
@@ -671,7 +701,7 @@ export class AgentRunPersistenceService {
         kind: "interrupt-agent-run",
         runId: run.id,
         expectedVersion: run.version,
-        recoveryReason: "restart-without-resumable-execution",
+        recoveryReason: AGENT_RUN_RESTART_INTERRUPTED_REASON,
       });
       if (result.kind === "run-updated") {
         interrupted.push(result.run);

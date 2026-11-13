@@ -40,6 +40,7 @@ import { CanvasEventStore } from "../canvas/canvasEventStore";
 import { markCanvasReader } from "../canvas/canvasOutsideContentMark";
 import type { CanvasProjectionEntry } from "../canvas/canvasProjection";
 import { CanvasService, type CanvasServiceDependencies } from "../canvas/canvasService";
+import { CanvasChoiceAnswerService } from "../canvas/canvasChoiceAnswerService";
 import { CanvasCommentService } from "../canvas/canvasCommentService";
 import { CanvasTagService } from "../canvas/canvasTagService";
 import { CanvasShareEventStore } from "../canvas/canvasShareEventStore";
@@ -910,6 +911,18 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     { authorize: authorizeCanvas },
   );
+  // A person's answers to a decision form are journaled facts of the Canvas,
+  // authored as the local user. No agent operation reaches this service.
+  const canvasChoiceAnswerService = new CanvasChoiceAnswerService(
+    {
+      journal: persistence.journal,
+      projection: persistence.canvasProjection,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      now: () => new Date().toISOString() as UtcTimestamp,
+    },
+    { authorize: authorizeCanvas },
+  );
   // What a Chat thread's agent may do with a Canvas: write blocks into one,
   // through the same service and the same Project the person clicking New
   // Canvas reaches. The Project and workspace are resolved from the window
@@ -937,6 +950,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     canvas: canvasService,
     commentRequests: (canvasId) => canvasCommentService.agentRequests(canvasId),
+    choiceAnswers: (canvasId) => canvasChoiceAnswerService.answersForAgent(canvasId),
     markReader: ({ readerId, canvasId }) => {
       const entry = persistence.canvasProjection.getById(canvasId);
       if (entry === undefined) return { status: "refused" };
@@ -1159,6 +1173,9 @@ export function wireCanvas(deps: CanvasDependencies) {
     // switches and interception, that the agent's preview uses.
     renderer: canvasPreviewRenderer,
   });
+  // Settle exports a previous run cut off mid-delivery before any new one is
+  // decided: recorded as unconfirmed for the person, never sent again.
+  canvasExportService.settleUnconfirmed({ kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID });
   // The library is a host-wide read of the same journal-derived projection
   // the per-Project inventory reads. It is deliberately wider than a window's
   // Project scope; the service, not the route, decides what a given
@@ -1292,6 +1309,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     resolveFolderCandidate: (windowId, input) =>
       folderBrowseService.resolveCandidate(windowId, input),
     canvasCommentService,
+    canvasChoiceAnswerService,
     windowAuthorityStore,
     projects: projectService,
     activeContextResolver: (windowId) =>

@@ -27,7 +27,11 @@ import {
   type ShellBootstrap,
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
-import { defaultShellSettings, defaultWindowWorkspace } from "@octant/domain";
+import {
+  canvasChoiceQuestionFingerprint,
+  defaultShellSettings,
+  defaultWindowWorkspace,
+} from "@octant/domain";
 import { AggregateHeadsProjection } from "./persistence/aggregateHeadsProjection";
 import { EventRegistry } from "./persistence/eventRegistry";
 import { Journal } from "./persistence/journal";
@@ -43,6 +47,10 @@ import { CanvasProjection } from "./canvas/canvasProjection";
 import { CanvasService } from "./canvas/canvasService";
 import { CanvasDesignRunTickets } from "./canvas/canvasDesignPage";
 import { CanvasShareEventStore, registerCanvasShareEvents } from "./canvas/canvasShareEventStore";
+import {
+  CanvasChoiceAnswerService,
+  registerCanvasChoiceAnswerEvents,
+} from "./canvas/canvasChoiceAnswerService";
 import { CanvasCommentService, registerCanvasCommentEvents } from "./canvas/canvasCommentService";
 import { CanvasShareService } from "./canvas/canvasShareService";
 import { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
@@ -110,6 +118,7 @@ function createRevisionRoute(
     readonly activeContextResolver?: CanvasRouteDependencies["activeContextResolver"];
     readonly threadReadAuthority?: ThreadReadAuthority;
     readonly resolveDesignSystem?: CanvasRouteDependencies["resolveDesignSystem"];
+    readonly canvasExportService?: CanvasRouteDependencies["canvasExportService"];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -169,13 +178,15 @@ function createRevisionRoute(
   applyMigrations(connection, MIGRATIONS, () => now);
   const registry = registerCanvasOutsideContentEvents(
     registerCanvasExportFolderEvents(
-      registerCanvasCommentEvents(
-        registerCanvasShareEvents(
-          registerCanvasPublicShareEvents(new EventRegistry())
-            .register(CANVAS_CREATED, 1, CanvasCreated)
-            .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
-            .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
-            .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+      registerCanvasChoiceAnswerEvents(
+        registerCanvasCommentEvents(
+          registerCanvasShareEvents(
+            registerCanvasPublicShareEvents(new EventRegistry())
+              .register(CANVAS_CREATED, 1, CanvasCreated)
+              .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
+              .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
+              .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+          ),
         ),
       ),
     ),
@@ -244,6 +255,16 @@ function createRevisionRoute(
     },
     { authorize: () => true },
   );
+  const canvasChoiceAnswerService = new CanvasChoiceAnswerService(
+    {
+      journal,
+      projection,
+      uuid: () => `acacacac-acac-4cac-8cac-${(counter += 1).toString(16).padStart(12, "0")}`,
+      actor,
+      now: () => later as never,
+    },
+    { authorize: () => true },
+  );
   const exportFolderDirectory = mkdtempSync(join(tmpdir(), "octant-export-route-"));
   directories.push(exportFolderDirectory);
   const canvasExportFolderService = new CanvasExportFolderService({
@@ -267,6 +288,9 @@ function createRevisionRoute(
     ...(options.resolveDesignSystem === undefined
       ? {}
       : { resolveDesignSystem: options.resolveDesignSystem }),
+    ...(options.canvasExportService === undefined
+      ? {}
+      : { canvasExportService: options.canvasExportService }),
     canvasShareService,
     canvasPublicShareService: new CanvasPublicShareService({
       journal,
@@ -289,6 +313,7 @@ function createRevisionRoute(
       return exportFolderDirectory;
     },
     canvasCommentService,
+    canvasChoiceAnswerService,
     windowAuthorityStore: store,
     projects: {
       bootstrap: async () => ({
@@ -2270,6 +2295,45 @@ describe("paired device Canvas reads", () => {
     expect((await readable(paired(`public-shares?canvasId=${missing}`)))?.status).toBe(403);
   });
 
+  it("journals a dismissed export notice as the local window, and refuses the same dismissal from a paired device", async () => {
+    const actors: string[] = [];
+    const exportService = {
+      dismissUnconfirmed: (input: { readonly actor: { readonly kind: string } }) => {
+        actors.push(input.actor.kind);
+        return input.actor.kind === "local-user"
+          ? { kind: "dismissed", exportId: "33333333-3333-4333-8333-333333333333" }
+          : { kind: "refused", code: "unauthorized", message: "Local window only." };
+      },
+    };
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(),
+      canvasExportService: exportService as never,
+    });
+    const body = {
+      schemaVersion: 1,
+      kind: "canvas-export-notice-dismiss",
+      canvasId: String(canvasId),
+      exportId: "33333333-3333-4333-8333-333333333333",
+    };
+
+    const local = await route(
+      new Request("http://127.0.0.1/api/canvas/export-notice-dismiss", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": windowCapability,
+        },
+        body: JSON.stringify(body),
+      }),
+    );
+    const remote = await route(paired("export-notice-dismiss", { method: "POST", body }));
+
+    expect(JSON.parse(await local!.text())).toMatchObject({ kind: "dismissed" });
+    expect(JSON.parse(await remote!.text())).toMatchObject({ kind: "refused" });
+    expect(actors).toEqual(["local-user", "remote-device"]);
+  });
+
   it("refuses a paired device cards asked under another Project or mode, and a Canvas its thread has left", async () => {
     const route = createRevisionRoute(undefined, {
       activeContextResolver: pairedReaderContexts,
@@ -2479,6 +2543,109 @@ describe("canvas comment routes", () => {
     expect(outcome.threads[0].comment.author).toEqual({
       kind: "local-user",
       actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+  });
+});
+
+describe("canvas decision form answer routes", () => {
+  const question = {
+    id: "who",
+    prompt: "Who may set it?",
+    selection: "single",
+    options: [
+      { id: "any", label: "Any device", recommended: true },
+      { id: "owner", label: "Owner devices" },
+    ],
+  } as const;
+  const form = {
+    blockId: "decisions",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "choice",
+    prompt: "Decisions",
+    questions: [question],
+  };
+  const change = {
+    kind: "set",
+    blockId: "decisions",
+    questionId: "who",
+    questionFingerprint: canvasChoiceQuestionFingerprint(question),
+    selectedOptionIds: ["any"],
+  };
+  const body = (expectedSequence: number) =>
+    JSON.stringify({
+      kind: "canvas-choice-answers-revise",
+      canvasId: String(canvasId),
+      expectedSequence,
+      changes: [change],
+    });
+  const post = (payload: string) =>
+    new Request("http://127.0.0.1/api/canvas/choice-answers-revise", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": windowCapability,
+      },
+      body: payload,
+    });
+  const read = () =>
+    new Request(`http://127.0.0.1/api/canvas/choice-answers?canvasId=${String(canvasId)}`, {
+      method: "GET",
+      headers: { "x-octant-window-capability": windowCapability },
+    });
+
+  it("saves a window's answer, reads it back, and refuses a stale write", async () => {
+    const route = createRevisionRoute(new CanvasProjection(), { extraBlocks: [form] });
+    const unauthenticated = await route(
+      new Request("http://127.0.0.1/api/canvas/choice-answers-revise", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: body(0),
+      }),
+    );
+    expect(unauthenticated?.status).toBe(401);
+    expect(JSON.parse(await (await route(post(body(0))))!.text())).toMatchObject({
+      kind: "accepted",
+      sequence: 1,
+    });
+    const outcome = JSON.parse(await (await route(read()))!.text());
+    expect(outcome).toMatchObject({ kind: "ready", sequence: 1 });
+    expect(outcome.answers[0]).toMatchObject({
+      questionId: "who",
+      selectedOptionIds: ["any"],
+      author: { kind: "local-user" },
+    });
+    expect(JSON.parse(await (await route(post(body(0))))!.text())).toMatchObject({
+      kind: "denied",
+      denialCode: "stale-version",
+    });
+  });
+
+  it("lets a paired device read saved answers but never save one", async () => {
+    const route = createRevisionRoute(new CanvasProjection(), { extraBlocks: [form] });
+    const principal = {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "17171717-1717-4171-8171-171717171717" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    };
+    const write = post(body(0));
+    bindPrincipalRouteContext(write, principal);
+    expect(JSON.parse(await (await route(write))!.text())).toMatchObject({
+      kind: "denied",
+      denialCode: "unauthorized",
+    });
+    const reading = read();
+    bindPrincipalRouteContext(reading, principal);
+    expect(JSON.parse(await (await route(reading))!.text())).toMatchObject({
+      kind: "ready",
+      sequence: 0,
+      answers: [],
     });
   });
 });

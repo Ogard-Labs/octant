@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "../code/XtermTerminalAdapter";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ZenProjectTerminalCardProps {
   readonly client: ProjectTerminalClient;
@@ -24,6 +25,12 @@ export interface ZenProjectTerminalCardProps {
   readonly loadRuntime?: () => Promise<XtermAdapterRuntime>;
   /** This person's shell is an SSH session; stopping it cannot prove remote processes ended. */
   readonly serverConnection?: boolean;
+  /**
+   * Opens a new shell for the Project in this card's place, through the
+   * ordinary start. Offered only for a shell a host restart ended. Resolves
+   * true once a new shell started, after which the card offers no second one.
+   */
+  readonly onRestart?: () => Promise<boolean>;
 }
 
 /**
@@ -40,6 +47,11 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
   const [terminal, setTerminal] = useState<ProjectTerminalView>();
   const [output, setOutput] = useState("");
   const [failure, setFailure] = useState<string>();
+  const [endedByRestart, setEndedByRestart] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  // Once a replacement started, the button stays spent even if this card
+  // lingers, so a second click cannot open a second shell.
+  const [replaced, setReplaced] = useState(false);
   // The shell's own exit code after a stop is the signal it was sent, not
   // something it chose; the person pressed Stop, so the card says so.
   const [stopped, setStopped] = useState(false);
@@ -81,6 +93,9 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
         }
         if (controller.signal.aborted) return;
         if (result.kind !== "project-terminal") {
+          setEndedByRestart(
+            result.kind === "project-terminal-refused" && result.reason === "host-restarted",
+          );
           setFailure(
             result.kind === "project-terminal-refused"
               ? result.message
@@ -163,6 +178,36 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
     }
   };
 
+  const { onRestart } = props;
+  // A shell a host restart ended is offered back in one click: an ordinary
+  // start at the Project's root, which the host checks as it would any
+  // start. Nothing the ended shell held is replayed into the new one. This
+  // holds whether the card had never shown the shell or was following it.
+  if (endedByRestart && failure !== undefined && onRestart !== undefined) {
+    return (
+      <div className="zen-terminal-card__notice zen-terminal-card__ended">
+        <p role="status">{failure}</p>
+        <OctantButton
+          disabled={restarting || replaced}
+          onClick={() => {
+            if (restarting || replaced) return;
+            setRestarting(true);
+            void onRestart()
+              .then((started) => {
+                if (started) setReplaced(true);
+              })
+              .catch(() => undefined)
+              .finally(() => setRestarting(false));
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {restarting ? "Restarting…" : "Restart terminal"}
+        </OctantButton>
+      </div>
+    );
+  }
   if (failure !== undefined && terminal === undefined) {
     return (
       <p className="zen-terminal-card__notice" role="status">

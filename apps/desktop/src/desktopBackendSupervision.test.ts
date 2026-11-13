@@ -77,14 +77,16 @@ describe("classifyDesktopBackendFailure", () => {
 });
 
 describe("createDesktopBackendSupervisor", () => {
-  it("restarts the backend after an unexpected exit and backoff", async () => {
+  it("records a crash and restarts the backend after an unexpected exit and backoff", async () => {
     const schedule = createSchedule();
     const first = createChild();
     const second = createChild();
     const restart = vi.fn(async () => second);
+    const recordCrash = vi.fn();
     const supervisor = createDesktopBackendSupervisor({
       restart,
       reportFatal: vi.fn(),
+      recordCrash,
       schedule: schedule.schedule,
       now: () => 1_000,
     });
@@ -92,6 +94,7 @@ describe("createDesktopBackendSupervisor", () => {
     supervisor.observe(first);
     expect(first.once).toHaveBeenCalledOnce();
     first.exit();
+    expect(recordCrash).toHaveBeenCalledExactlyOnceWith(first);
     expect(supervisor.snapshot()).toMatchObject({
       failures: 1,
       status: "waiting-to-restart",
@@ -104,12 +107,14 @@ describe("createDesktopBackendSupervisor", () => {
     expect(supervisor.snapshot().status).toBe("supervising");
   });
 
-  it("does not restart a backend exit released for shutdown", () => {
+  it("neither restarts nor records a crash for a backend exit released for shutdown", () => {
     const child = createChild();
     const restart = vi.fn(async () => child);
+    const recordCrash = vi.fn();
     const supervisor = createDesktopBackendSupervisor({
       restart,
       reportFatal: vi.fn(),
+      recordCrash,
     });
 
     supervisor.observe(child);
@@ -117,6 +122,7 @@ describe("createDesktopBackendSupervisor", () => {
     child.exit();
 
     expect(restart).not.toHaveBeenCalled();
+    expect(recordCrash).not.toHaveBeenCalled();
     expect(supervisor.snapshot().status).toBe("idle");
   });
 

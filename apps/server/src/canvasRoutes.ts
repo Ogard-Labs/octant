@@ -25,10 +25,14 @@ import {
   CANVAS_HTML_IMPORT_MAX_BYTES,
   decodeCanvasCommentCommandResult,
   decodeCanvasCommentsOutcome,
+  decodeCanvasChoiceAnswersOutcome,
+  decodeCanvasChoiceAnswersReviseResult,
   decodeCanvasDiagramLayoutReviseResult,
   decodeCanvasReviseResult,
   decodeCanvasRefreshResult,
   decodeCanvasExportDecideRequest,
+  decodeCanvasExportNoticeDismissRequest,
+  decodeCanvasExportNoticeDismissResult,
   decodeCanvasExportDecideResult,
   decodeCanvasExportOfferList,
   decodeCanvasExportPrepareRequest,
@@ -75,6 +79,7 @@ import {
 } from "@octant/domain";
 import { readableMockup, renderCanvasHtmlFile } from "./canvas/artifactDocumentRender";
 import type { CanvasService } from "./canvas/canvasService";
+import type { CanvasChoiceAnswerService } from "./canvas/canvasChoiceAnswerService";
 import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
 import type { CanvasExportService } from "./canvas/canvasExportService";
@@ -157,6 +162,8 @@ export interface CanvasRouteDependencies {
   readonly listDesignSystems?: (projectId: string) => Promise<DesignSystemList | undefined>;
   /** Comment journal; a host without it serves boards without a conversation. */
   readonly canvasCommentService?: CanvasCommentService;
+  /** A person's saved answers to decision forms; a host without it serves forms unanswerable. */
+  readonly canvasChoiceAnswerService?: CanvasChoiceAnswerService;
   /**
    * Resolves a design's declared images under the authority of the Canvas
    * version holding it. Absent on a host that cannot, and every design is then
@@ -256,6 +263,8 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "design-systems" &&
       route !== "comments" &&
       route !== "comment" &&
+      route !== "choice-answers" &&
+      route !== "choice-answers-revise" &&
       route !== "refresh" &&
       route !== "refresh-cancel" &&
       route !== "action" &&
@@ -269,6 +278,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "export-targets" &&
       route !== "export-prepare" &&
       route !== "export-decide" &&
+      route !== "export-notice-dismiss" &&
       route !== "export-folder" &&
       route !== "html-file" &&
       route !== "public-shares" &&
@@ -750,6 +760,106 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
                   : String(context.activeContext.projectId),
             },
             context.project,
+          ),
+          200,
+          origin,
+        );
+      }
+
+      if (route === "choice-answers" && request.method === "GET") {
+        if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+          return failureResponse("Canvas answers request is invalid.", 400, origin);
+        }
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+        } catch {
+          return failureResponse("Canvas ID is invalid.", 400, origin);
+        }
+        const answers = dependencies.canvasChoiceAnswerService;
+        const outcome = (value: unknown) =>
+          jsonResponse(decodeCanvasChoiceAnswersOutcome(value), 200, origin);
+        if (answers === undefined) {
+          return outcome({
+            kind: "unavailable",
+            canvasId,
+            reason: "Canvas answers are unavailable on this host.",
+          });
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          canvasId,
+        );
+        if (context.kind === "unauthorized") return outcome({ kind: "unauthorized", canvasId });
+        if (context.kind === "unavailable") {
+          return outcome({ kind: "unavailable", canvasId, reason: context.reason });
+        }
+        return jsonResponse(
+          answers.answers(
+            canvasId,
+            {
+              mode: context.activeContext.mode,
+              projectId:
+                context.activeContext.projectId === null
+                  ? null
+                  : String(context.activeContext.projectId),
+            },
+            context.project,
+          ),
+          200,
+          origin,
+        );
+      }
+
+      // A person's answers are the host window's own act: the remote classifier
+      // names no write for a paired device, and this refuses one too.
+      if (route === "choice-answers-revise" && request.method === "POST") {
+        const denied = (denialCode: string, message: string) =>
+          jsonResponse(
+            decodeCanvasChoiceAnswersReviseResult({ kind: "denied", denialCode, message }),
+            200,
+            origin,
+          );
+        const body = await readJson(request);
+        if (body.kind === "too-large" || body.kind === "invalid") {
+          return denied("malformed-request", "Canvas answers change is malformed.");
+        }
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId((body.value as { canvasId?: unknown }).canvasId ?? "");
+        } catch {
+          return denied("malformed-request", "Canvas answers change is malformed.");
+        }
+        const answers = dependencies.canvasChoiceAnswerService;
+        if (answers === undefined) {
+          return denied("unavailable", "Canvas answers are unavailable on this host.");
+        }
+        if (principal.kind === "remote-device") {
+          return denied("unauthorized", "Answers are saved from a window on the host.");
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          canvasId,
+        );
+        if (context.kind === "unauthorized") {
+          return denied("unauthorized", "Canvas answers are not authorized in this workspace.");
+        }
+        if (context.kind === "unavailable") return denied("unavailable", context.reason);
+        return jsonResponse(
+          decodeCanvasChoiceAnswersReviseResult(
+            answers.revise(
+              body.value,
+              {
+                mode: context.activeContext.mode,
+                projectId:
+                  context.activeContext.projectId === null
+                    ? null
+                    : String(context.activeContext.projectId),
+              },
+              context.project,
+            ),
           ),
           200,
           origin,
@@ -1399,6 +1509,55 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               ...(requestBody.link === undefined ? {} : { link: requestBody.link }),
               // The envelope names the transport principal this host
               // authenticated for the approval, never a fixed local user.
+              actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
+            }),
+          ),
+          200,
+          origin,
+        );
+      }
+
+      if (route === "export-notice-dismiss" && request.method === "POST") {
+        const exportService = dependencies.canvasExportService;
+        if (exportService === undefined) {
+          return jsonResponse(
+            decodeCanvasExportNoticeDismissResult({
+              kind: "refused",
+              code: "unavailable",
+              message: "Canvas export is unavailable on this host.",
+            }),
+            200,
+            origin,
+          );
+        }
+        const malformed = decodeCanvasExportNoticeDismissResult({
+          kind: "refused",
+          code: "malformed",
+          message: "Canvas export request is malformed.",
+        });
+        const body = await readJson(request);
+        if (body.kind === "too-large" || body.kind === "invalid") {
+          return jsonResponse(malformed, 200, origin);
+        }
+        let requestBody;
+        try {
+          requestBody = decodeCanvasExportNoticeDismissRequest(body.value);
+        } catch {
+          return jsonResponse(malformed, 200, origin);
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          requestBody.canvasId,
+        );
+        return jsonResponse(
+          decodeCanvasExportNoticeDismissResult(
+            exportService.dismissUnconfirmed({
+              canvasId: requestBody.canvasId,
+              exportId: requestBody.exportId,
+              permitted: context.kind === "ok",
+              // A paired device's request is journaled as that device, which
+              // the service refuses: only a local window may dismiss.
               actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
             }),
           ),

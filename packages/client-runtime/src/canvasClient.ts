@@ -12,11 +12,16 @@ import {
   CanvasHtmlImportResult,
   type CanvasExportDecideRequest,
   CanvasExportDecideResult,
+  CanvasExportNoticeDismissResult,
+  type CanvasExportNoticeDismissRequest,
   CanvasExportOfferList,
   type CanvasExportPrepareRequest,
   CanvasExportPrepareResult,
   type CanvasHtmlFileRequest,
   CanvasHtmlFileResult,
+  CanvasChoiceAnswersOutcome,
+  CanvasChoiceAnswersReviseResult,
+  type CanvasChoiceAnswersReviseCommand,
   type CanvasCommentCommand,
   CanvasCommentCommandResult,
   CanvasCommentsOutcome,
@@ -121,6 +126,14 @@ export interface CanvasClient {
   /** Comments on a Canvas and the commands that change them; host-journaled. */
   comments?(canvasId: CanvasId): Promise<CanvasCommentsOutcome>;
   comment?(command: CanvasCommentCommand): Promise<CanvasCommentCommandResult>;
+  /**
+   * A person's saved answers to a Canvas decision form, and the write that
+   * changes them. Optional: a host without the routes leaves forms unanswerable.
+   */
+  choiceAnswers?(canvasId: CanvasId): Promise<CanvasChoiceAnswersOutcome>;
+  reviseChoiceAnswers?(
+    command: CanvasChoiceAnswersReviseCommand,
+  ): Promise<CanvasChoiceAnswersReviseResult>;
   refresh?(request: CanvasRefreshRequest, signal?: AbortSignal): Promise<CanvasRefreshResult>;
   cancelRefresh?(request: CanvasRefreshCancelRequest): Promise<CanvasRefreshResult>;
   executeAction?(request: CanvasActionRequest, signal?: AbortSignal): Promise<CanvasActionResult>;
@@ -148,6 +161,9 @@ export interface CanvasClient {
   exportOffers?(canvasId: CanvasId): Promise<CanvasExportOfferList>;
   prepareExport?(request: CanvasExportPrepareRequest): Promise<CanvasExportPrepareResult>;
   decideExport?(request: CanvasExportDecideRequest): Promise<CanvasExportDecideResult>;
+  dismissExportNotice?(
+    request: CanvasExportNoticeDismissRequest,
+  ): Promise<CanvasExportNoticeDismissResult>;
   /**
    * The Canvas as one self-contained HTML file for this window to save or
    * copy. The host renders it under the read check; it goes to no
@@ -340,6 +356,28 @@ export function createCanvasClient(
         decodeHostAnswer(CanvasCommentCommandResult),
       );
     },
+    choiceAnswers(canvasId) {
+      const url = new URL("/api/canvas/choice-answers", options.baseUrl);
+      url.searchParams.set("canvasId", String(canvasId));
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(CanvasChoiceAnswersOutcome),
+      );
+    },
+    reviseChoiceAnswers(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/choice-answers-revise", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasChoiceAnswersReviseResult),
+      );
+    },
     reviseDiagramLayout(body) {
       return request(
         options.fetch,
@@ -529,6 +567,18 @@ export function createCanvasClient(
           body: JSON.stringify(body),
         },
         decodeHostAnswer(CanvasExportDecideResult),
+      );
+    },
+    dismissExportNotice(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/export-notice-dismiss", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasExportNoticeDismissResult),
       );
     },
     htmlFile(body) {

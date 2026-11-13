@@ -507,6 +507,17 @@
   color: var(--oct-muted);
 }
 
+.zen-terminal-card__ended {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.zen-terminal-card__ended > p {
+  margin: 0;
+}
+
 .zen-el-body .code-terminal-pane {
   height: 100%;
   min-height: 0;

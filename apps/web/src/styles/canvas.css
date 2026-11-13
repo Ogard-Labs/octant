@@ -3154,6 +3154,12 @@
   border-bottom: 1px solid var(--oct-border);
 }
 
+.canvas-workspace-tab__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
 .canvas-workspace-tab__spacer {
   flex: 1;
 }
@@ -5755,4 +5761,89 @@
   margin: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* A choice block drawn as a decision form: a sticky header with the progress
+   and its actions, then sections of questions whose answers save as made. */
+.decision-form {
+  display: grid;
+  gap: var(--oct-space-4);
+  min-width: 0;
+}
+
+.decision-form__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  gap: var(--oct-space-2);
+  padding-block: var(--oct-space-2);
+  background: var(--oct-bg);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.decision-form__progress {
+  margin: 0;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.decision-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.decision-form__section {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.decision-form__section-title {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+}
+
+.decision-form__section-intro {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.decision-form__question {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.decision-form__optional,
+.decision-form__status {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: normal;
+}
+
+.decision-form__status {
+  min-height: 1lh;
+  margin: 0;
+}
+
+/* Forced colours drop the tint that shows an option is chosen, so the choice
+   is drawn as a thick system-colour border and the header keeps its edge. */
+@media (forced-colors: active) {
+  .decision-form .provider-question-card__choice[data-checked] {
+    border: 3px solid Highlight;
+  }
+
+  .decision-form__header {
+    background: Canvas;
+    border-bottom-color: CanvasText;
+  }
 }

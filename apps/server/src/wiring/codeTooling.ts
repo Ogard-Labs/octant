@@ -738,7 +738,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     yield* Effect.promise(() =>
       rm(debugStateRoot, { recursive: true, force: true }).catch(() => undefined),
     );
-    debugSessionRecords.endLeftOpen();
+    debugService.rememberEndedByRestart(debugSessionRecords.endLeftOpen());
     debugService.startSweeping();
     // A thread archived, completed, or moved to Plan or across Full access, a
     // checkout gone, an adapter's package changed, or a confirmation the

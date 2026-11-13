@@ -1,3 +1,4 @@
+import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControls";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CanvasDesignSystemPanel } from "./CanvasDesignSystemPanel";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -84,7 +85,7 @@ import { copyCanvasHtml, saveCanvasHtmlFile } from "./canvasHtmlFile";
 import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
-import { canvasChoiceMessage } from "./canvasChoiceMessage";
+import { canvasChoiceMessage, canvasDecisionFormMessage } from "./canvasChoiceMessage";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
@@ -119,7 +120,14 @@ export interface CanvasWorkspaceTabProps {
   }) => void;
 }
 
+/** Hands the tool's own toolbar up to the bar that hosts it; it never folds. */
+function CanvasBarControls(props: { readonly children: ReactNode }) {
+  useDockBarControls([{ kind: "node", id: "toolbar", width: 232, node: props.children }]);
+  return null;
+}
+
 export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
+  const hosted = useDockBarPlacement() !== undefined;
   const [definition, setDefinition] = useState<CanvasDefinition | undefined>(undefined);
   const [message, setMessage] = useState("Loading canvas…");
   const [history, setHistory] = useState<ReadonlyArray<CanvasVersionHistoryEntry>>([]);
@@ -497,6 +505,19 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     tipVersionId,
   ]);
 
+  // A decision form's saved answers, when the host serves them; bound once so
+  // the form's loading effect does not re-run on every render.
+  const choiceAnswers = useMemo(() => {
+    const load = props.client?.choiceAnswers;
+    if (load === undefined) return undefined;
+    const revise = props.client?.reviseChoiceAnswers;
+    return {
+      canvasId: props.tab.canvasId,
+      load: () => load(props.tab.canvasId),
+      ...(revise === undefined ? {} : { revise }),
+    };
+  }, [props.client, props.tab.canvasId]);
+
   // Comments are offered only when the host journals them; the transport's
   // methods are bound once so the panel's effects do not re-run per render.
   const commentsClient = useMemo(() => {
@@ -822,19 +843,59 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // own authority. Where the window holds no queue or the host gave no scope
   // for the Canvas, its thread cannot be reached from here, and the choice
   // says so instead of offering a send the host would refuse.
+  const answersField = choiceAnswers === undefined ? {} : { answers: choiceAnswers };
   const choiceRuntime: CanvasChoiceRuntime =
     queueClient === undefined
-      ? { kind: "read-only", reason: "This window cannot send to this Canvas's thread." }
+      ? {
+          kind: "read-only",
+          reason: "This window cannot send to this Canvas's thread.",
+          ...answersField,
+        }
       : reviseBase === null || selectedVersionId === undefined
-        ? { kind: "read-only", reason: "This Canvas's thread cannot be reached from here." }
+        ? {
+            kind: "read-only",
+            reason: "This Canvas's thread cannot be reached from here.",
+            ...answersField,
+          }
         : String(selectedVersionId) !== tipVersionId || expectedSequence < headSequence
           ? {
               kind: "read-only",
               reason: "An older version is on screen; answer on the current one.",
+              ...answersField,
             }
           : {
               kind: "can-send",
               threadLabel: `the ${CHOICE_MODE_NAMES[reviseBase.mode]} thread`,
+              ...answersField,
+              onSendForm: async (block, answers) => {
+                const answer = [
+                  String(props.tab.canvasId),
+                  String(block.blockId),
+                  JSON.stringify(answers),
+                ].join(":");
+                const id = unconfirmedChoiceSends.current.get(answer) ?? crypto.randomUUID();
+                unconfirmedChoiceSends.current.set(answer, id);
+                const sent = await enqueueCanvasCommentTurn(queueClient, {
+                  mode: reviseBase.mode,
+                  threadId: String(reviseBase.originThreadId),
+                  prompt: canvasDecisionFormMessage({
+                    canvasTitle: definition.title,
+                    canvasId: String(props.tab.canvasId),
+                    block,
+                    answers,
+                  }),
+                  attemptKey: `${answer}:${id}`,
+                  canvasSelection: {
+                    canvasId: props.tab.canvasId,
+                    versionId: selectedVersionId,
+                    sequence: expectedSequence,
+                    displayName: definition.title,
+                    scope: "whole-canvas",
+                  },
+                });
+                if (sent.status === "sent") unconfirmedChoiceSends.current.delete(answer);
+                return sent;
+              },
               onSend: async (block, response) => {
                 const answer = [
                   String(props.tab.canvasId),
@@ -1079,119 +1140,143 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     );
   };
 
-  return (
-    <div className="canvas-workspace-tab">
-      <header className="canvas-workspace-tab__toolbar">
-        <OctantPopover
-          align="start"
-          className="canvas-workspace-tab__versions"
-          onOpenChange={setVersionsOpen}
-          open={versionsOpen}
-          title="Version history"
-          trigger={
-            <>
-              <span>v{expectedSequence}</span>
-              {String(selectedVersionId) === tipVersionId ? null : (
-                <span className="canvas-workspace-tab__older">older</span>
-              )}
-              <ChevronDown aria-hidden="true" size={12} />
-            </>
-          }
-          triggerLabel={`Version history, v${String(expectedSequence)}`}
-          triggerVariant="ghost"
-        >
-          <CanvasVersionHistoryPanel
-            entries={history}
-            selectedVersionId={selectedVersionId === undefined ? "" : String(selectedVersionId)}
-            currentVersionId={tipVersionId}
-            onSelect={(versionId) => {
-              setVersionsOpen(false);
-              handleSelectVersion(versionId);
-            }}
-          />
-          {previousEntry === undefined ? null : (
-            <OctantButton
-              disabled={loading}
-              onClick={() => void openCompare()}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Compare with v{previousEntry.sequence}
-            </OctantButton>
-          )}
-        </OctantPopover>
-        <span className="canvas-workspace-tab__spacer" />
-        {props.onAttachContext !== undefined && selectedVersionId !== undefined ? (
-          <CanvasWorkspaceTabActions
-            currentSequence={expectedSequence}
-            currentVersionId={selectedVersionId}
-            displayName={definition.title}
-            onAttachContext={props.onAttachContext}
-            {...(props.onPinCanvasInFocusZone === undefined
-              ? {}
-              : {
-                  onPinInFocusZone: () =>
-                    props.onPinCanvasInFocusZone?.({
-                      canvasId: props.tab.canvasId,
-                      title: definition.title,
-                    }),
-                })}
-            tab={props.tab}
-          />
-        ) : null}
-        {commentsAvailable ? (
+  // The toolbar's controls are the tool's own, so a tile's bar, the single row
+  // or the bottom panel's bar hosts them when there is one. The tool draws them
+  // itself (a version popover, a menu), so they go up as one control that never
+  // folds. A note about a file just taken stays in the tool, under them.
+  const toolbarControls = (
+    <>
+      <OctantPopover
+        align="start"
+        className="canvas-workspace-tab__versions"
+        onOpenChange={setVersionsOpen}
+        open={versionsOpen}
+        title="Version history"
+        trigger={
+          <>
+            <span>v{expectedSequence}</span>
+            {String(selectedVersionId) === tipVersionId ? null : (
+              <span className="canvas-workspace-tab__older">older</span>
+            )}
+            <ChevronDown aria-hidden="true" size={12} />
+          </>
+        }
+        triggerLabel={`Version history, v${String(expectedSequence)}`}
+        triggerVariant="ghost"
+      >
+        <CanvasVersionHistoryPanel
+          entries={history}
+          selectedVersionId={selectedVersionId === undefined ? "" : String(selectedVersionId)}
+          currentVersionId={tipVersionId}
+          onSelect={(versionId) => {
+            setVersionsOpen(false);
+            handleSelectVersion(versionId);
+          }}
+        />
+        {previousEntry === undefined ? null : (
           <OctantButton
-            aria-expanded={commentsOpen}
-            aria-label={
-              openThreads.length === 0 ? "Comments" : `Comments, ${String(openThreads.length)} open`
-            }
-            onClick={() => (commentsOpen ? closeComments() : openCommentsOn(undefined))}
+            disabled={loading}
+            onClick={() => void openCompare()}
             size="sm"
             type="button"
-            variant={commentsOpen ? "secondary" : "ghost"}
+            variant="secondary"
           >
-            <MessageSquare aria-hidden="true" size={14} />
-            Comments
-            {openThreads.length === 0 ? null : (
-              <span className="canvas-workspace-tab__count">{openThreads.length}</span>
-            )}
+            Compare with v{previousEntry.sequence}
           </OctantButton>
-        ) : null}
-        {overflowItems.length === 0 ? null : (
-          <OctantMenu
-            items={overflowItems}
-            onValueChange={(value) => {
-              if (value === "save-html" || value === "copy-html" || value === "save-tsx") {
-                void takeHtmlFile(value);
-                return;
-              }
-              if (value === "propose-deck") {
-                void proposeDeck();
-                return;
-              }
-              const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
-              if (chosen === undefined) return;
-              setExportTargetId(undefined);
-              setDialog(chosen);
-            }}
-            selectionMode="action"
-            trigger={<MoreHorizontal aria-hidden="true" size={16} />}
-            triggerClassName="canvas-workspace-tab__overflow"
-            triggerLabel="More Canvas actions"
-            value=""
-          />
         )}
-        {htmlFileMessage === undefined ? null : (
-          <p
-            className="canvas-workspace-tab__notice"
-            data-testid="canvas-html-file-status"
-            role="status"
-          >
-            {htmlFileMessage}
-          </p>
-        )}
-      </header>
+      </OctantPopover>
+      <span className="canvas-workspace-tab__spacer" />
+      {props.onAttachContext !== undefined && selectedVersionId !== undefined ? (
+        <CanvasWorkspaceTabActions
+          currentSequence={expectedSequence}
+          currentVersionId={selectedVersionId}
+          displayName={definition.title}
+          onAttachContext={props.onAttachContext}
+          {...(props.onPinCanvasInFocusZone === undefined
+            ? {}
+            : {
+                onPinInFocusZone: () =>
+                  props.onPinCanvasInFocusZone?.({
+                    canvasId: props.tab.canvasId,
+                    title: definition.title,
+                  }),
+              })}
+          tab={props.tab}
+        />
+      ) : null}
+      {commentsAvailable ? (
+        <OctantButton
+          aria-expanded={commentsOpen}
+          aria-label={
+            openThreads.length === 0 ? "Comments" : `Comments, ${String(openThreads.length)} open`
+          }
+          onClick={() => (commentsOpen ? closeComments() : openCommentsOn(undefined))}
+          size="sm"
+          type="button"
+          variant={commentsOpen ? "secondary" : "ghost"}
+        >
+          <MessageSquare aria-hidden="true" size={14} />
+          Comments
+          {openThreads.length === 0 ? null : (
+            <span className="canvas-workspace-tab__count">{openThreads.length}</span>
+          )}
+        </OctantButton>
+      ) : null}
+      {overflowItems.length === 0 ? null : (
+        <OctantMenu
+          items={overflowItems}
+          onValueChange={(value) => {
+            if (value === "save-html" || value === "copy-html" || value === "save-tsx") {
+              void takeHtmlFile(value);
+              return;
+            }
+            if (value === "propose-deck") {
+              void proposeDeck();
+              return;
+            }
+            const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
+            if (chosen === undefined) return;
+            setExportTargetId(undefined);
+            setDialog(chosen);
+          }}
+          selectionMode="action"
+          trigger={<MoreHorizontal aria-hidden="true" size={16} />}
+          triggerClassName="canvas-workspace-tab__overflow"
+          triggerLabel="More Canvas actions"
+          value=""
+        />
+      )}
+    </>
+  );
+  const htmlFileNotice = (
+    <>
+      {htmlFileMessage === undefined ? null : (
+        <p
+          className="canvas-workspace-tab__notice"
+          data-testid="canvas-html-file-status"
+          role="status"
+        >
+          {htmlFileMessage}
+        </p>
+      )}
+    </>
+  );
+
+  return (
+    <div className="canvas-workspace-tab">
+      {hosted ? (
+        <CanvasBarControls>
+          <span className="canvas-workspace-tab__controls">{toolbarControls}</span>
+        </CanvasBarControls>
+      ) : null}
+      {hosted ? (
+        htmlFileNotice
+      ) : (
+        <header className="canvas-workspace-tab__toolbar">
+          {toolbarControls}
+          {htmlFileNotice}
+        </header>
+      )}
       <div
         className="canvas-workspace-tab__body"
         data-tools={commentsAvailable ? "true" : "false"}
@@ -1383,6 +1468,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             {...(exportTargetId === undefined ? {} : { initialTargetId: exportTargetId })}
             offers={exportOffers}
             onDecide={props.client.decideExport}
+            {...(props.client.dismissExportNotice === undefined
+              ? {}
+              : { onDismissNotice: props.client.dismissExportNotice })}
             onExportFolderChosen={() => void loadExportOffers()}
             onPrepare={prepareExportInTheme}
           />

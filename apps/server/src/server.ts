@@ -821,6 +821,8 @@ export function startOctantServer(
       codeService,
       codeTurnDecisions,
       contributeCodeTools,
+      coordinatorService,
+      coordinatorWakes,
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
@@ -1051,6 +1053,7 @@ export function startOctantServer(
       fileMentionRoutes,
       fileMentionService,
       goalLoopRoutes,
+      goalLoopService,
       threadExportRoutes,
       threadExportService,
       threadHandOffProvider,
@@ -1151,6 +1154,8 @@ export function startOctantServer(
       shieldServerStore,
     });
     const { restartRecovery } = yield* wireContinuation({
+      coordinatorService,
+      coordinatorWakes,
       agentRunOrchestration,
       agentRunParentAuthority,
       agentRunPersistence,
@@ -1162,6 +1167,7 @@ export function startOctantServer(
       codeOperationRuntime,
       contextHarness,
       externalContentIngestionStore,
+      goalLoopService,
       liftRestartRecovery,
       toolEffectLedger,
       persistence,

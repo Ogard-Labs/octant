@@ -36,6 +36,13 @@ export class WorkTurnUsageStore {
     this.#byRequest.set(String(requestId), usage);
   }
 
+  /** The figures last reported for a request, left in place for the reader that takes them. */
+  peek(
+    requestId: WorkTurnRequestId,
+  ): { readonly inputTokens: number; readonly outputTokens: number } | undefined {
+    return this.#byRequest.get(String(requestId));
+  }
+
   take(
     requestId: WorkTurnRequestId,
   ): { readonly inputTokens: number; readonly outputTokens: number } | undefined {

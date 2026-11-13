@@ -104,6 +104,10 @@ export const HostPreviousStop = Schema.Struct({
   lastSeenAt: BoundedText,
   pressure: HostMemoryPressureLevel,
   processMegabytes: BoundedMegabytes,
+  /** The local crash record kept for that exit, when one could be kept. */
+  crashRecord: Schema.optional(
+    Schema.Struct({ recordedAt: BoundedText, exitReason: BoundedText }).annotations(strict),
+  ),
 }).annotations(strict);
 export type HostPreviousStop = typeof HostPreviousStop.Type;
 

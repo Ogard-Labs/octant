@@ -273,12 +273,13 @@ export function listThreadFileAnchors(
 
 /**
  * Aggregate types that belong to a Canvas and nothing else: the Canvas, its
- * comments, share and access history, refresh and action receipts,
+ * comments, saved decision-form answers, share and access history, refresh and action receipts,
  * artifact-mirror receipts, and its record of outside content.
  */
 const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
   "canvas",
   "canvas-comments",
+  "canvas-choice-answers",
   "canvas-share",
   "canvas-share-access",
   "canvas-refresh",
@@ -309,6 +310,7 @@ export function collectCanvasFamilyAggregates(
   add("canvas", canvasId);
   followLinkedAggregates(connection, keys, add, "canvas", CANVAS_LINK_PATHS);
   add("canvas-comments", canvasId);
+  add("canvas-choice-answers", canvasId);
   add("artifact-mirror", canvasId);
   add("canvas-outside-content", canvasId);
   return [...keys.values()];
@@ -445,12 +447,15 @@ function collectOwnedAggregates(
   // aggregate is taken by its id rather than by a payload path.
   add(TOOL_EGRESS_THREAD_AGGREGATE, threadId);
   add(TURN_METRICS_AGGREGATE_TYPE, threadId);
+  // Coordinator wakes are journaled on the woken thread's id (coordinatorWakeJournal.ts).
+  add("coordinator-wake", threadId);
   for (const match of aggregatesMatching(connection, THREAD_OWNERSHIP_PATHS, threadId)) {
     add(match.aggregateType, match.aggregateId);
   }
   followLinkedAggregates(connection, keys, add, "canvas", CANVAS_LINK_PATHS);
   for (const canvasId of idsOf(keys, "canvas")) {
     add("canvas-comments", canvasId);
+    add("canvas-choice-answers", canvasId);
     add("artifact-mirror", canvasId);
     add("canvas-outside-content", canvasId);
   }

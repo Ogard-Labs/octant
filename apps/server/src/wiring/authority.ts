@@ -317,8 +317,8 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => new Date().toISOString(),
     connection: persistence.connection,
   });
-  // The child runs this start found without a live execution. Restart
-  // recovery reads each one's record of tool calls beside its parent's turn.
+  // Restart continuation decides, once the rest of the host is wired, which
+  // of these the host resumes by itself (wiring/continuation.ts).
   const agentRunsCutOffByRestart = agentRunPersistence.reconcileAfterRestart();
   // Every tool call about to take effect, on every provider, so a restart
   // can tell a turn it cut off between calls from one it cut off inside one.

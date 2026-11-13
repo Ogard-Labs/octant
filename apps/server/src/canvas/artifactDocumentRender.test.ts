@@ -94,6 +94,29 @@ describe("rendering a canvas as a document", () => {
     expect(style).not.toMatch(/[<>]|url\(|@import/);
   });
 
+  it("exports a decision form's questions under their sections, with no answers", () => {
+    const form = decodeCanvasBlock({
+      blockId: "decisions",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "choice",
+      prompt: "Two decisions",
+      questions: [
+        { id: "a", prompt: "Who?", selection: "single", options: [{ id: "x", label: "Anyone" }] },
+        { id: "b", prompt: "How far?", selection: "single", options: [{ id: "y", label: "All" }] },
+      ],
+      sections: [
+        { id: "s1", title: "Access", intro: "Who and how far", questionIds: ["a"] },
+        { id: "s2", title: "Reach", questionIds: ["b"] },
+      ],
+    });
+    const rendered = renderArtifactMarkdown(definition([form]));
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toBe(
+      "# Launch plan\n\nTwo decisions\n\n## Access\n\nWho and how far\n\n### Who?\n\n- Anyone\n\n## Reach\n\n### How far?\n\n- All\n",
+    );
+  });
+
   it("keeps a table cell that ends in a backslash from splitting the row", () => {
     const table = {
       blockId: "table-1",

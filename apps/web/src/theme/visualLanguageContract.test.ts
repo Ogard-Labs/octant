@@ -893,7 +893,8 @@ describe("the public-block visual language", () => {
     expect(tabs).toContain("data-active:bg-muted");
     expect(tabs).not.toContain("data-selected");
     expect(tabs).not.toContain("data-active:shadow-sm");
-    expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
+    // Two pixels of padding around a 24px segment make the tray 28px tall.
+    expect(toggles).toContain("rounded-lg bg-muted p-[2px]");
     // An item inside the padded track takes the control corner less the
     // padding, never below 2px.
     expect(toggles).toContain("gap-1 rounded-sm border");

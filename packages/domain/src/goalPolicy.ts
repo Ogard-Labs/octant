@@ -38,6 +38,7 @@ export type GoalPolicyRejectionCode =
   | "goal-already-complete"
   | "invalid-budget"
   | "criterion-not-found"
+  | "usage-already-recorded"
   | "version-conflict";
 
 export class GoalPolicyRejection extends Error {
@@ -316,6 +317,9 @@ export function applyThreadGoalCommand(
       if (current.status === "paused") {
         reject("goal-not-active", "Paused Goals do not accumulate usage.");
       }
+      if (command.chargeId !== undefined && current.recentChargeIds?.includes(command.chargeId)) {
+        reject("usage-already-recorded", "That usage is already charged to the Goal.");
+      }
       const usage: ThreadGoalUsage = {
         tokensUsed: current.usage.tokensUsed + command.deltaTokens,
         elapsedMs: current.usage.elapsedMs + command.deltaElapsedMs,
@@ -325,6 +329,9 @@ export function applyThreadGoalCommand(
       const goal: ThreadGoal = {
         ...current,
         usage,
+        ...(command.chargeId === undefined
+          ? {}
+          : { recentChargeIds: [...(current.recentChargeIds ?? []), command.chargeId].slice(-32) }),
         // Budget exhaustion becomes budget-limited, never inferred complete.
         status: exhausted
           ? "budget-limited"
