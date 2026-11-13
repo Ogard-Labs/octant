@@ -385,18 +385,19 @@ describe("importing the other Mermaid diagram kinds", () => {
     expect((block.notes ?? []).map((note) => [note.afterMessageId, note.text])).toEqual([
       ["m2", "loop: Every minute"],
       ["m3", "alt: is ready"],
-      ["m4", "else: still running"],
-      ["m4", "backs off"],
-      ["m4", "end alt; end loop"],
+      ["m4", "else: still running; backs off; end alt; end loop"],
       ["m5", "opt; end opt"],
       ["m6", "par: To the log"],
       ["m7", "and: To the bus; end par"],
     ]);
-    expect(
-      (block.notes ?? []).every(
-        (note) => note.participantId === undefined || note.text === "backs off",
-      ),
-    ).toBe(true);
+    expect((block.notes ?? []).map((note) => note.participantId)).toEqual([
+      undefined,
+      undefined,
+      "API",
+      undefined,
+      undefined,
+      undefined,
+    ]);
     expect(() => admitted(block)).not.toThrow();
   });
 
@@ -448,6 +449,53 @@ describe("importing the other Mermaid diagram kinds", () => {
     ]);
     expect(refusal("sequenceDiagram\n  box Back end\n  A->>B: hi\n  end").line).toBe(3);
     expect(refusal("sequenceDiagram\n  loop x\n  box Back end\n  end\n  end").line).toBe(3);
+  });
+
+  it("puts a fragment's markers and the note it holds on one message into one note", () => {
+    const block = imported(
+      [
+        "sequenceDiagram",
+        "  loop Poll",
+        "  A->>B: request",
+        "  Note right of B: retry",
+        "  end",
+      ].join("\n"),
+    );
+    if (block.kind !== "sequence") throw new Error("not a sequence");
+    expect(block.notes).toEqual([
+      {
+        noteId: "n1",
+        text: "loop: Poll; retry; end loop",
+        participantId: "B",
+        afterMessageId: "m1",
+      },
+    ]);
+  });
+
+  it("joins two notes after the same message into one, and names a participant only when they agree", () => {
+    const block = imported(
+      [
+        "sequenceDiagram",
+        "  Note over A: before anything",
+        "  Note over B: also before",
+        "  A->>B: hi",
+        "  Note right of B: first",
+        "  Note left of B: second",
+        "  B->>A: bye",
+        "  Note left of A: mine",
+        "  Note over A,B: ours",
+        "  Note right of B: theirs",
+      ].join("\n"),
+    );
+    if (block.kind !== "sequence") throw new Error("not a sequence");
+    expect(block.notes).toEqual([
+      { noteId: "n1", text: "before anything", participantId: "A" },
+      { noteId: "n2", text: "also before", participantId: "B" },
+      { noteId: "n3", text: "first; second", participantId: "B", afterMessageId: "m1" },
+      { noteId: "n4", text: "mine; ours; theirs", afterMessageId: "m2" },
+    ]);
+    const anchors = (block.notes ?? []).flatMap((note) => note.afterMessageId ?? []);
+    expect(new Set(anchors).size).toBe(anchors.length);
   });
 
   it("keeps nested activations as separate spans on the one lifeline", () => {
@@ -596,15 +644,10 @@ describe("importing the other Mermaid diagram kinds", () => {
   });
 
   it("keeps a note over two participants as a note beside no single one", () => {
-    const block = imported(
-      "sequenceDiagram\n  A->>B: hi\n  Note over A, C: shared\n  Note left of B: own",
-    );
+    const block = imported("sequenceDiagram\n  A->>B: hi\n  Note over A, C: shared");
     if (block.kind !== "sequence") throw new Error("not a sequence");
     expect(block.participants.map((entry) => entry.participantId)).toEqual(["A", "B", "C"]);
-    expect(block.notes).toEqual([
-      { noteId: "n1", text: "shared", afterMessageId: "m1" },
-      { noteId: "n2", text: "own", participantId: "B", afterMessageId: "m1" },
-    ]);
+    expect(block.notes).toEqual([{ noteId: "n1", text: "shared", afterMessageId: "m1" }]);
     expect(refusal("sequenceDiagram\n  A->>B: hi\n  Note over A,B,C: three").line).toBe(3);
   });
 

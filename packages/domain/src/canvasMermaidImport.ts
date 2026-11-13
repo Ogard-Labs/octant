@@ -608,7 +608,11 @@ function isSequenceFragmentKind(word: string | undefined): word is SequenceFragm
 
 interface SequenceNote {
   text: string;
-  readonly participantId?: string;
+  /**
+   * Whom each note the author wrote here sits beside, `undefined` for a note
+   * over two participants. A fragment marker adds none.
+   */
+  readonly beside: Array<string | undefined>;
   readonly afterMessageId?: unknown;
 }
 
@@ -627,7 +631,6 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
   // Fragment openings wait for the first message they hold, so the note sits
   // on that message's row rather than beside the message before the fragment.
   let opening: string[] = [];
-  let lastMarker: SequenceNote | undefined;
   const participant = (mermaidId: string, statement: Statement, label?: string): string => {
     const id = ids.canvas(mermaidId, statement.line);
     if (!participants.has(id) || label !== undefined) participants.set(id, label ?? mermaidId);
@@ -650,19 +653,25 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
       endMessageId: endMessage["messageId"],
     });
   };
-  /** A fragment boundary, as a note on the last message; boundaries that meet there share it. */
-  const mark = (text: string): void => {
+  /**
+   * A note on the last message: one the author wrote, or a fragment boundary.
+   * The layout draws every note of a message on that message's row, so a
+   * second note there would cover the first (a closing `end loop` hid the
+   * note the loop held). Everything said on one message is therefore one
+   * note, in source order, joined by `; `, which no statement can contain
+   * because a semicolon ends one. Notes before the first message have no row
+   * to share and stay apart.
+   */
+  const annotate = (text: string, beside?: { readonly participantId?: string }): void => {
     const afterMessageId = messages.at(-1)?.["messageId"];
-    if (
-      lastMarker !== undefined &&
-      lastMarker === notes.at(-1) &&
-      lastMarker.afterMessageId === afterMessageId
-    ) {
-      lastMarker.text = `${lastMarker.text}; ${text}`;
-      return;
-    }
-    lastMarker = { text, afterMessageId };
-    notes.push(lastMarker);
+    const onRow = afterMessageId === undefined ? undefined : notes.at(-1);
+    const note =
+      onRow !== undefined && onRow.afterMessageId === afterMessageId
+        ? onRow
+        : { text: "", beside: [], ...(afterMessageId === undefined ? {} : { afterMessageId }) };
+    if (note !== onRow) notes.push(note);
+    note.text = note.text.length === 0 ? text : `${note.text}; ${text}`;
+    if (beside !== undefined) note.beside.push(beside.participantId);
   };
   /** A part of a fragment that holds no message has no row to be marked on. */
   const closePart = (fragment: SequenceFragment, statement: Statement): void => {
@@ -698,7 +707,7 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
       const messageId = `m${String(messages.length + 1)}`;
       messages.push({ messageId, from, to, label: unquote(message[4] ?? "") });
       if (opening.length > 0) {
-        mark(opening.join("; "));
+        annotate(opening.join("; "));
         opening = [];
       }
       if (message[2] === "+") activate(to, messages.length - 1);
@@ -708,16 +717,14 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
     const spanning = SPANNING_NOTE.exec(text);
     const note = spanning === null ? NOTE.exec(text) : null;
     if (spanning !== null || note !== null) {
-      const last = messages.at(-1);
       if (spanning !== null) {
         participant(spanning[1] ?? "", statement);
         participant(spanning[2] ?? "", statement);
       }
-      notes.push({
-        text: unquote(spanning?.[3] ?? note?.[3] ?? ""),
-        ...(note === null ? {} : { participantId: participant(note[2] ?? "", statement) }),
-        ...(last === undefined ? {} : { afterMessageId: last["messageId"] }),
-      });
+      annotate(
+        unquote(spanning?.[3] ?? note?.[3] ?? ""),
+        note === null ? {} : { participantId: participant(note[2] ?? "", statement) },
+      );
       continue;
     }
     const toggle = /^(activate|deactivate)\s+(\w+)$/.exec(text);
@@ -753,7 +760,7 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
       const closed = fragments.pop();
       if (closed === undefined) throw unsupported(statement, "An end without a block");
       closePart(closed, statement);
-      if (closed.kind !== "rect") mark(`end ${closed.kind}`);
+      if (closed.kind !== "rect") annotate(`end ${closed.kind}`);
       continue;
     }
     const box = BOX.exec(text);
@@ -781,11 +788,20 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
     .filter((box) => box.participantIds.length > 0)
     .map((box) => ({
       text: `${box.title}: ${box.participantIds.map((id) => participants.get(id) ?? id).join(", ")}`,
+      beside: [],
     }));
-  const allNotes = [...boxNotes, ...notes].map((note, index) => ({
-    noteId: `n${String(index + 1)}`,
-    ...note,
-  }));
+  const allNotes = [...boxNotes, ...notes].map((note, index) => {
+    // A joined note sits beside a participant only when every note the author
+    // wrote there names that one; otherwise it would claim a note it is not for.
+    const [participantId, ...others] = note.beside;
+    const agreed = others.every((other) => other === participantId);
+    return {
+      noteId: `n${String(index + 1)}`,
+      text: note.text,
+      ...(participantId === undefined || !agreed ? {} : { participantId }),
+      ...(note.afterMessageId === undefined ? {} : { afterMessageId: note.afterMessageId }),
+    };
+  });
   return {
     blockId,
     schemaVersion: CANVAS_SCHEMA_VERSION,

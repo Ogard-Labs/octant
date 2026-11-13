@@ -1274,7 +1274,14 @@ opens and runs nothing. In a sequence, a `loop`, `alt` with `else`, `opt`, or
 first message of each part reads `loop: <label>` (or `alt:`, `else:`, `opt:`,
 `par:`, `and:`; the bare keyword when there is no label), and a note on the
 fragment's last message reads `end loop` (or `end alt`, `end opt`, `end par`).
-Markers that land on the same message share one note, joined by `; `. A part
+The layout draws a note on its message's row, so the import never puts two
+notes on one message: markers and the author's own notes that land on the
+same message become one note, their texts verbatim and in source order,
+joined by `; ` (a separator no Mermaid statement can contain, since a
+semicolon ends one). That note names a participant only when every author
+note joined into it names the same one. Two `Note` lines after one message
+join the same way, fragment or not; notes before the first message stay
+separate. A part
 that holds no message has no row to be marked on and is refused. A
 `Note over A,B` keeps its text and its place in the order as a note that names
 no participant, which is how every renderer already draws a note. A `rect` is
