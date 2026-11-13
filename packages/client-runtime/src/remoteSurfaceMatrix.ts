@@ -50,6 +50,7 @@ export type RemoteShellSurfaceKind =
   | "shell-settings"
   | "design-systems"
   | "usage-ledger"
+  | "file-event-routines"
   | "approvals"
   | "extension-install"
   | "provider-setup"
@@ -142,6 +143,15 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     availability: "local-host-only",
     // No catalogued action, as for shell settings above.
     catalogAction: "usage.ledger.purge",
+  },
+  {
+    id: "file-event-routines",
+    label: "File and event routines",
+    description:
+      "Set up a routine that starts when a file arrives or a connected source reports an event.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "automation.source.configure",
   },
   {
     id: "approvals",

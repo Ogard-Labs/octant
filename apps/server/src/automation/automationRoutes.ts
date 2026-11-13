@@ -30,6 +30,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import type { WindowId } from "@octant/contracts";
 import type { AutomationEventSourcePreparation } from "./automationEventSources";
 import { resolveNextAutomationOccurrence } from "@octant/domain";
 import { ClientPrincipalError, WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
@@ -88,6 +89,13 @@ export interface AutomationRouteDependencies {
   };
   readonly now?: () => number;
   readonly uuid?: () => string;
+  /**
+   * Whether the device behind a scope is, at this moment, an active device the
+   * host's own person paired. File and event setup re-check their caller while
+   * preparation awaits; a window is re-checked by its capability, and a device,
+   * which holds none, by its pairing on the host.
+   */
+  readonly personPairedDeviceCurrent?: (scopeId: WindowId) => boolean;
   readonly prepareFileRearm?: (input: {
     readonly command: Extract<AutomationCommand, { readonly kind: "rearm-file-automation" }>;
     readonly current: () => boolean;
@@ -177,9 +185,9 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
         return await handleList(dependencies, context, url, origin);
       }
       if (route === "event-sources" && request.method === "GET") {
-        if (context.principal.kind !== "local-window")
+        if (!principalActsAsHostPerson(context.principal))
           return failureResponse(
-            "Configure event sources from a window on this host.",
+            "Configure event sources from a window on this host or a device you paired there.",
             403,
             origin,
           );
@@ -409,11 +417,19 @@ async function handleCommand(
   request: Request,
 ): Promise<Response> {
   const signal = request.signal;
-  // File setup/review is local HTTP only. Retain the original capability, not merely
-  // a window id that could be revoked and registered again while preparation awaits.
+  // File and event setup and review belong to the host's own person. For a
+  // window, retain the original capability, not merely a window id that could
+  // be revoked and registered again while preparation awaits. A device the
+  // person paired holds no capability: its pairing is read again on the host
+  // at the same points (maintainer decision, 2026-11-13).
   const capability = request.headers.get(WINDOW_CAPABILITY_HEADER);
   const localAuthorityCurrent = () => {
-    if (context.principal.kind !== "local-window" || capability === null) return false;
+    if (context.principal.kind === "remote-device")
+      return (
+        principalActsAsHostPerson(context.principal) &&
+        dependencies.personPairedDeviceCurrent?.(context.scopeId) === true
+      );
+    if (capability === null) return false;
     try {
       return (
         dependencies.windowAuthorityStore.authenticate(
@@ -505,9 +521,12 @@ async function handleCommand(
     isRecord(body.definition.trigger) &&
     body.definition.trigger.kind === "integration-event"
   ) {
-    if (context.principal.kind !== "local-window")
+    if (!principalActsAsHostPerson(context.principal))
       return jsonResponse(
-        commandFailure("unauthorized", "Configure an event routine from a window on this host."),
+        commandFailure(
+          "unauthorized",
+          "Configure an event routine from a window on this host or a device you paired there.",
+        ),
         200,
         origin,
       );
@@ -548,6 +567,9 @@ async function handleCommand(
     command = { ...checked, definition: eventPreparation.definition };
   }
   if (command.kind === "rearm-file-automation") {
+    // The journaled review record names the window that reviewed the held
+    // input (its id and capability generation), and recovery rebuilds the
+    // routine's author from it; it has no form for a device yet.
     if (context.principal.kind !== "local-window")
       return jsonResponse(
         commandFailure(
@@ -615,11 +637,11 @@ async function handleCommand(
     isRecord(body.definition.trigger) &&
     body.definition.trigger.kind === "file-arrival"
   ) {
-    if (context.principal.kind !== "local-window")
+    if (!principalActsAsHostPerson(context.principal))
       return jsonResponse(
         commandFailure(
           "unauthorized",
-          "Configure a file routine from an Octant window on this host.",
+          "Configure a file routine from an Octant window on this host or a device you paired there.",
         ),
         200,
         origin,

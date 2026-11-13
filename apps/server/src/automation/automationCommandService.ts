@@ -115,7 +115,7 @@ export class AutomationCommandService {
     if (
       (command.kind === "create-automation" || command.kind === "update-automation") &&
       command.definition.trigger.kind === "integration-event" &&
-      (command.principal.kind !== "local-window" ||
+      (!actsAsHostPerson(command.principal) ||
         provenance !== undefined ||
         eventSource === undefined ||
         !eventSource.current() ||
@@ -123,7 +123,7 @@ export class AutomationCommandService {
     )
       return failure(
         "blocked",
-        "Choose and verify a connected event source from a window on this host.",
+        "Choose and verify a connected event source from a window on this host or a device you paired there.",
       );
 
     try {
@@ -640,7 +640,7 @@ export class AutomationCommandService {
     source: AutomationFileSourcePreparation | undefined,
   ): boolean {
     return (
-      command.principal.kind === "local-window" &&
+      actsAsHostPerson(command.principal) &&
       source !== undefined &&
       source.automationId === command.automationId &&
       source.expectedVersion === command.expectedVersion &&
@@ -722,6 +722,15 @@ function isSchemaParseError(error: unknown): boolean {
     "name" in error &&
     (error as { readonly name?: unknown }).name === "ParseError"
   );
+}
+
+/**
+ * Whether a command comes from the host's own person: a window, or a device
+ * that person paired. File and event setup is theirs alone (maintainer
+ * decision, 2026-11-13).
+ */
+function actsAsHostPerson(principal: AutomationClientPrincipal): boolean {
+  return principal.kind === "local-window" || principal.admittedBy === "host-person";
 }
 
 /**

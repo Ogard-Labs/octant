@@ -3437,8 +3437,12 @@ the thread it came from.
   a relative existing input directory, included suffixes, excluded directories,
   a settling interval of 2–60 seconds and at most 1–32 automatic starts per
   explicit arm (default 8). Configuration and reviewed re-arm are the person's
-  actions, at a local window or a paired device (maintainer decision,
-  2026-11-12; not built yet: today local-window only); ordinary pause, archive
+  actions, at a local window or a device the host's own person paired
+  (maintainer decision, 2026-11-12). Built: configuration, from such a device
+  (maintainer decision, 2026-11-13); where a window's capability is read again
+  while the folder is prepared, the device's pairing is read again on the host.
+  Not built yet: a reviewed re-arm is local-window only, because its journaled
+  review record names the reviewing window. Ordinary pause, archive
   and thread cancellation keep their existing
   authority. No thread agent proposes a file routine. The existing host scheduler
   owns observation and dispatch; there is no second runner or hosted watcher.
@@ -3556,7 +3560,7 @@ the thread it came from.
   exact recorded operation, session, prompt, checkout and provider, never from
   the thread's latest unrelated turn. Pause, restart, quiet time and ordinary Save reset no budget.
   Explicit Review/Re-arm requires current source and Project authority from a
-  local window or, not built yet, a paired device,
+  local window (not built yet for a file routine: a device the host's own person paired; such a device re-arms an event routine),
   no active run, and the displayed definition version. It skips held events,
   restores the allowance and establishes a fresh quiet baseline. A lost response
   remains unconfirmed and is never automatically resent.
@@ -14300,7 +14304,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Developer tools, desktop recipe, provider trust, "Agents may merge",
     coordinator and wake switches, and Shield model; remembers a tool approval
     and reads and revokes remembered ones; installs, updates, trusts, enables,
-    and removes a package, adds a server, pins a plugin, and signs in to or reconnects a server; reads the local provider usage history and resets or trims the host's usage ledger, whose audit row names the device (`/api/usage/local-history`, `reset`, `retain`; maintainer decision, 2026-11-13); lists, reads, creates, and saves a Project's design systems (`/api/design-systems`; maintainer decision, 2026-11-13); searches, previews, installs, updates, and removes skills and reconciles the skill folders (`/api/extensions/skills`; maintainer decision, 2026-11-13); adds, changes, and removes a provider, starts a
+    and removes a package, adds a server, pins a plugin, and signs in to or reconnects a server; sets up a file-arrival or event routine and lists the event sources, journaled as the device (`/api/automations`; maintainer decision, 2026-11-13); reads the local provider usage history and resets or trims the host's usage ledger, whose audit row names the device (`/api/usage/local-history`, `reset`, `retain`; maintainer decision, 2026-11-13); lists, reads, creates, and saves a Project's design systems (`/api/design-systems`; maintainer decision, 2026-11-13); searches, previews, installs, updates, and removes skills and reconciles the skill folders (`/api/extensions/skills`; maintainer decision, 2026-11-13); adds, changes, and removes a provider, starts a
     provider sign-in, and stores, replaces, or removes a provider key
     ([Provider credentials](#security-and-authority)); navigates and types in the host's agent Browser and reviews its session, upload, and download permissions, for every active Work or Code Project, since no workspace on the host is bound for a device; writes to a thread terminal and lists, reads, and starts a
     thread from a terminal session; merges a pull request or a stack, acts on
@@ -14330,7 +14334,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; provider cloud
     sessions; scanning the host for installed provider commands; choosing a new skill folder or a local plugin folder, which goes through the host's native folder picker; the replica store and its membership; and the whole host's
-    export, bulk data with no bound for a remote caller. Not built yet: server Projects, disk cleanup, switching a Canvas to another design system, file-arrival and event routines, and diagnostics are not forwarded either, and creating or
+    export, bulk data with no bound for a remote caller. Not built yet: server Projects, disk cleanup, switching a Canvas to another design system, the reviewed re-arm of a file routine, and diagnostics are not open to a person-paired device either, and creating or
     widening an agent grant stays on the loopback administration channel. In
     the Browser no device takes the page over from the agent or hands it
     back, reads a signed-in profile's page or a capture, grants login
