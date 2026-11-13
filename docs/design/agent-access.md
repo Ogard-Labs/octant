@@ -248,7 +248,10 @@ reach, whether the agent started it or the person did in a granted Project, is
 in scope only while its mode and Project are in the grant. The agent may start
 a turn or send an answer only on a thread whose current access is within the
 grant's highest level (Full access, and its sandbox choice, only when the
-grant names it) and whose current model
+grant names it; `start_work` then accepts an explicit `full-access`, kept on
+the new thread alone because a grant cannot remember a level on a Project, and
+refuses it for every other grant; maintainer decision, 2026-11-13) and whose
+current model
 is one the grant includes; otherwise the turn is refused, and the person can
 change the thread. Every prompt and answer an agent sends marks its thread as
 outside content before it is sent, and nothing is sent when the mark cannot be

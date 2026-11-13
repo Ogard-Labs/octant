@@ -9148,7 +9148,10 @@ the model at another size.
   approval or any other request listed for the person (only a harness
   question or a Chat turn's question, through the routes line mode uses);
   it refuses `full-access`, which would save Full access on the Project, so
-  a thread starts at Full access only where the person already set it; and
+  a thread starts at Full access only where the person already set it (the
+  same tools served to an agent grant accept it when the person chose Full
+  access for that grant, and give it to the thread alone, never the Project;
+  maintainer decision, 2026-11-13); and
   it adds a folder as a Project only when the call says the person asked to
   work there (`addProject`). A folder must be an absolute path, and a Work or
   Code thread needs a folder or Project named: the server's own working
@@ -14223,13 +14226,23 @@ approval-gated` command that undoes it. The terminal shows no one-time
     once from the authenticated principal and never from the request; a local
     window's change stays the local person's, and what the host does on its
     own keeps the host's actor. A server test refuses a module that judges a
-    device as the person without resolving that actor. Not built yet: a Code
-    operation's own events are journaled as the system (the records it writes
-    for the person name the device); the Browser automation routes' changes
-    still name a fixed actor (session and transfer permissions name the
-    device); a provider sign-in the host completes after a restart loses the
-    device that began it; and a device-code or cloud sign-in is not
-    attributed to a device.
+    device as the person without resolving that actor, with no module still
+    exempt as an open gap. The same holds for the rest of what a device does
+    (maintainer decision, 2026-11-13): pausing, resuming and steering a
+    harness run; signing out of a provider, a connector or a cloud sign-in; a
+    memory-limits change, whose payload says a device made it; and a sign-in
+    the host completes after a restart, attributed to the device that began it
+    from the journal's own start record. The Browser routes hand the same
+    actor to the profile, extension, flow and capture services, so each would
+    journal a device's change as the device's; a device reaches none of those
+    changes today, as the list above says. A device-code or cloud sign-in
+    begins only at the host's terminal, so it is the local person's. A device
+    is named by its own id in every record, a restricted device's included;
+    a second test refuses a module that writes a device's actor under any
+    other id. Not built yet: a Code operation's own events are journaled as
+    the system, for a local window as for a device (the records it writes for
+    the person name the device); cancelling a connector sign-in that is still
+    waiting names no device.
 
   A hub acting on its spoke, or a spoke
   delegating to another spoke, is such a remote principal on the receiving
@@ -14242,6 +14255,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   modes, a highest level (Full access included when the person chooses it for
   the grant; maintainer decision, 2026-11-12; the grant's guard holds the agent
   to that level and to its closed list), tools, models, limits, and expiry.
+  Picking Full access for a grant shows the one-time Full access warning
+  first, and `start_work` then accepts an explicit Full access for that grant
+  alone (maintainer decision, 2026-11-13).
   It reaches only `POST /api/agent-access/claim` and `POST
 /api/agent-access/mcp` on the listener's pre-auth surface, LAN-private and
   Tailscale sources only, authenticated by a signed bridge proof or a bearer

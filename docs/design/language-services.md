@@ -956,8 +956,8 @@ accepted above (slices 5 and 6) or in the architecture.
 
 ### Debugger outcome
 
-A person working in a Code thread at a local window picks a debug
-configuration, presses Start, and the program stops at their breakpoints in
+A person working in a Code thread at a local window, or on a device they
+paired, picks a debug configuration, presses Start, and the program stops at their breakpoints in
 the Monaco editor. They see the call stack and variables, step, continue,
 evaluate an expression they type, and stop. The adapter and the program run in
 one confined process tree that writes only the checkout and its own state,
@@ -1096,8 +1096,9 @@ format nobody has).
   and one adapter package state (extension, component, package digest,
   lifecycle version), as slice 6's approval does. One that cannot be appended
   is not in force.
-- **Starting.** A person starts a session at a local window, and an agent may
-  start one under [Debugger authority](#debugger-authority). Below Full
+- **Starting.** A person starts a session at a local window or on a device
+  they paired, and an agent may start one under
+  [Debugger authority](#debugger-authority). Below Full
   access a start succeeds only while an approval covers the configuration's
   current digest and the adapter's current package state. Any edit of the
   configuration, or any change to the package (update, switch, trust,
@@ -1268,6 +1269,8 @@ frame ends the session. Each request has a 10-second deadline and reports
   stepping, `evaluate`), and stops a session from a local window whose
   Project binding holds the thread, checked on every request as a terminal's
   input is. Another local window holding the thread may control the session.
+  A device the host's own person paired is that person here too
+  (decision DB7 below).
 - **Agents.** An agent in the thread may start, control, and read that
   thread's session: unasked at Full access, approval-gated per configuration
   below it, and refused in Plan
@@ -1277,15 +1280,20 @@ frame ends the session. Each request has a 10-second deadline and reports
   nothing a session shows enters a prompt.
 - **Code only, macOS and Linux.** As the companion.
 
-**Decision DB7: paired devices neither
-start, control, nor observe.** The debug routes have no remote action, so the
-remote gate denies them and the routes answer 403 to a device that reached them
-anyway. Recommended because stepping and `evaluate` run the program on the
-host, which D4 keeps with the person at the machine, and a stopped program's
-variables often hold secrets, which a paired device should not read through a
-new surface in the first slices. Rejected: remote observe now (a later,
-remote-approvable `code.debug.observe` read of the stopped state, without
-`evaluate`, can be proposed once the local panel ships); remote control.
+**Decision DB7: a device the host's own person paired debugs as a local
+window does; no other device session starts, controls, or observes.** A
+person-paired device is the person (maintainer decision, 2026-11-12), so the
+start policy, the four debug routes and the service judge it as a local
+window, and what it confirms is journaled as the device's (maintainer
+decision, 2026-11-13; built on the server). For every other device session
+the debug routes have no remote action, so the remote gate denies them and
+the routes answer 403 to one that reached them anyway: stepping and
+`evaluate` run the program on the host, and a stopped program's variables
+often hold secrets. Rejected: holding a person-paired device to the
+restricted rule, which stops nobody but the person; remote observe for a
+restricted device (a `code.debug.observe` read of the stopped state without
+`evaluate` can still be proposed). Not built yet: the Run and debug panel is
+not checked on a paired browser.
 
 **Decision DB8: agent debug tools follow the thread's level.** An agent may
 start, control, and read a debug session: unasked at Full access,
@@ -1523,8 +1531,8 @@ the addendum left a choice open.
   thread and checkout the dock follows and calls the four local-window
   routes through `@octant/client-runtime/code-debug-client`; it decides no
   refusal itself. An answer of `403`, which the remote gate and the routes
-  give a paired device, shows that debugging stays on this computer and
-  offers nothing to start or confirm.
+  give a device session the host's own person did not pair, shows that
+  debugging stays on this computer and offers nothing to start or confirm.
 - **Breakpoints.** A line breakpoint is set from the editor's glyph gutter
   or with F9 on the cursor's line, so the pointer is never the only way.
   They are shared by the editor and panel and saved as configuration only.
