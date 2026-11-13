@@ -3560,7 +3560,7 @@ restricts that globally or per Project), messages them, receives their state,
 and brings their requests to the person. Its wake, round and start bounds
 are per-coordinator settings with defaults of 30 wakes an hour, 10 rounds and
 60 starts an hour, and the person may fix the workers' level when creating the
-coordinator at a local window or a paired device, Full access included; a mark on the coordinator
+coordinator at a local window or a device the host's own person paired (built for that device; maintainer decision, 2026-11-13), Full access included; a mark on the coordinator
 does not lower a fixed level, and the coordinator itself stays read-only
 (maintainer request, 2026-11-12). The planner below is now a
 coordinator whose starts always need approval: the designated planner's turns
@@ -6255,8 +6255,11 @@ ls-remote` against the thread's remote and the GitHub reads they already
   resuming, or remove and resubmit the message with the new settings. Local
   authenticated windows share the queue, and a paired device may queue
   (maintainer request, 2026-11-12). Built: a paired device reads a thread's
-  queue, queues a message, and edits or removes a message it queued; pause,
-  resume, reorder and another's message stay with a local window. The message
+  queue, queues a message, and edits or removes a message it queued. A device
+  the host's own person paired also pauses, resumes and reorders the queue and
+  edits or removes another's message, as a local window does (maintainer
+  decision, 2026-11-13); a hub-introduced or restricted device is refused
+  those. A device's queue change is journaled with the device as its actor. The message
   waits under the device's own scope, so its turn keeps every limit a turn
   the device sends directly has. Each command and each dispatch asks again
   that the device is still paired, is allowed the mode's send action, and

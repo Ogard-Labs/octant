@@ -344,6 +344,8 @@ export class ThreadMessageQueuePersistence {
       readonly command?: ThreadMessageQueueCommand;
       readonly settled?: QueueSettlement;
       readonly content?: QueueContent;
+      /** Who made the change, when not the actor this store was opened with. */
+      readonly actor?: EventActor;
     } = {},
   ): "applied" | "conflict" | "unavailable" {
     const contentJson = input.content === undefined ? undefined : JSON.stringify(input.content);
@@ -358,7 +360,7 @@ export class ThreadMessageQueuePersistence {
               eventName: THREAD_MESSAGE_QUEUE_CHANGED,
               eventVersion: 1,
               correlationId: input.command?.requestId ?? randomUUID(),
-              actor: this.#actor,
+              actor: input.actor ?? this.#actor,
               occurredAt: this.#clock(),
               payload: {
                 threadId: state.scope.threadId,

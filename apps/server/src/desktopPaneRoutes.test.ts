@@ -27,18 +27,28 @@ const remotePrincipal = createRemoteDevicePrincipal({
   capabilityDigest: "b".repeat(64),
   sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
 });
+const personPairedPrincipal = createRemoteDevicePrincipal({
+  hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+  deviceId: deviceId as DeviceId,
+  credentialGeneration: 1,
+  origin: "https://octant.example",
+  protocolVersion: 1,
+  capabilityDigest: "b".repeat(64),
+  sessionId: "33333333-3333-4333-8333-333333333334" as RemoteSessionId,
+  admittedBy: "host-person",
+});
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 
 function post(
   path: string,
   payload: unknown,
-  options: { remote?: boolean; capability?: string } = {},
+  options: { remote?: boolean; personPaired?: boolean; capability?: string } = {},
 ) {
   const request = new Request(`http://127.0.0.1:13773${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      ...(options.remote === true
+      ...(options.remote === true || options.personPaired === true
         ? {}
         : { "x-octant-window-capability": options.capability ?? capability }),
       origin: "http://127.0.0.1:5173",
@@ -49,6 +59,12 @@ function post(
     bindPrincipalRouteContext(request, {
       principal: remotePrincipal,
       scopeId: remotePrincipal.deviceId as never,
+    });
+  }
+  if (options.personPaired === true) {
+    bindPrincipalRouteContext(request, {
+      principal: personPairedPrincipal,
+      scopeId: personPairedPrincipal.deviceId as never,
     });
   }
   return request;
@@ -132,15 +148,16 @@ function routes(
           }
         : { status: "refused", reason: "spend-cap-local-only" },
     ),
-    leaseSettings: vi.fn<DesktopLeaseService["leaseSettings"]>(({ actor }) =>
-      actor.kind === "local-user"
+    leaseSettings: vi.fn<DesktopLeaseService["leaseSettings"]>(({ actor, personPairedDevice }) =>
+      actor.kind === "local-user" || personPairedDevice === true
         ? { status: "lease-settings", settings: leaseSettingsOf({}) }
         : { status: "refused", reason: "not-permitted" },
     ),
-    setLeaseSettings: vi.fn<DesktopLeaseService["setLeaseSettings"]>(({ actor, change }) =>
-      actor.kind === "local-user"
-        ? { status: "lease-settings", settings: leaseSettingsOf(change) }
-        : { status: "refused", reason: "not-permitted" },
+    setLeaseSettings: vi.fn<DesktopLeaseService["setLeaseSettings"]>(
+      ({ actor, change, personPairedDevice }) =>
+        actor.kind === "local-user" || personPairedDevice === true
+          ? { status: "lease-settings", settings: leaseSettingsOf(change) }
+          : { status: "refused", reason: "not-permitted" },
     ),
     destination: vi.fn<DesktopLeaseService["destination"]>(() => ({
       status: "leasable",
@@ -334,7 +351,7 @@ describe("Desktop pane routes", () => {
     expect(service.setSpendCap).toHaveBeenCalledTimes(2);
   });
 
-  it("changes the lease settings only for a person at a local window, never for a paired device", async () => {
+  it("changes the lease settings for a person at a local window or on a device they paired, as that device, never for a hub-introduced device", async () => {
     const { handler, service } = routes();
     const set = { kind: "set-lease-settings", confirmBilledDesktops: false, leasesPerThread: 4 };
     const local = await handler(post("/api/code/desktops", set));
@@ -344,14 +361,26 @@ describe("Desktop pane routes", () => {
     });
     const remote = await handler(post("/api/code/desktops", set, { remote: true }));
     await expect(remote?.json()).resolves.toEqual({ status: "refused", reason: "not-permitted" });
-    expect(service.setLeaseSettings.mock.calls.map(([input]) => input.actor.kind)).toEqual([
-      "local-user",
-      "remote-device",
+    const paired = await handler(post("/api/code/desktops", set, { personPaired: true }));
+    await expect(paired?.json()).resolves.toMatchObject({ status: "lease-settings" });
+    expect(
+      service.setLeaseSettings.mock.calls.map(([input]) => [
+        input.actor,
+        input.personPairedDevice === true,
+      ]),
+    ).toEqual([
+      [{ kind: "local-user", actorId: localActorId }, false],
+      [{ kind: "remote-device", actorId: deviceId, deviceId }, false],
+      [{ kind: "remote-device", actorId: deviceId, deviceId }, true],
     ]);
     const read = await handler(
       post("/api/code/desktops", { kind: "lease-settings" }, { remote: true }),
     );
     await expect(read?.json()).resolves.toEqual({ status: "refused", reason: "not-permitted" });
+    const pairedRead = await handler(
+      post("/api/code/desktops", { kind: "lease-settings" }, { personPaired: true }),
+    );
+    await expect(pairedRead?.json()).resolves.toMatchObject({ status: "lease-settings" });
     // A count outside what a person may set, or a body naming its own actor,
     // is refused before the service hears it.
     for (const body of [
@@ -361,7 +390,7 @@ describe("Desktop pane routes", () => {
     ]) {
       expect((await handler(post("/api/code/desktops", body)))?.status).toBe(400);
     }
-    expect(service.setLeaseSettings).toHaveBeenCalledTimes(2);
+    expect(service.setLeaseSettings).toHaveBeenCalledTimes(3);
   });
 
   it("says whether a Project's recipe has its key, never the key, to a window or a paired device", async () => {

@@ -15,6 +15,7 @@ import {
   desktopLeaseSpendEstimate,
   desktopLeaseSpent,
   desktopMonthSpent,
+  desktopLeaseSettingsChangeAllowed,
   desktopSpendCapChangeAllowed,
   desktopSpendMonth,
 } from "./desktopLeasePolicy";
@@ -533,6 +534,14 @@ describe("desktop lease policy", () => {
         answeredForThread: false,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
+  });
+
+  it("lets a person at a local window or on a device they paired change the lease settings, never an agent or another device", () => {
+    expect(desktopLeaseSettingsChangeAllowed("local-user", false)).toBe(true);
+    expect(desktopLeaseSettingsChangeAllowed("remote-device", true)).toBe(true);
+    expect(desktopLeaseSettingsChangeAllowed("remote-device", false)).toBe(false);
+    expect(desktopLeaseSettingsChangeAllowed("agent", true)).toBe(false);
+    expect(desktopLeaseSettingsChangeAllowed("system", true)).toBe(false);
   });
 
   it("lets only a person at a local window change the cap, never an agent or a paired device", () => {

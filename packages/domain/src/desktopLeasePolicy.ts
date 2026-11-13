@@ -44,12 +44,17 @@ export const DESKTOP_LEASE_SETTINGS_DEFAULTS: DesktopLeaseSettings = {
 };
 
 /**
- * Only a person at a local window changes the lease settings. An agent never
- * does, in any posture, so no turn can stop its own billed desktops asking or
- * raise how many it holds; a paired device does not either, as with the cap.
+ * Only the host's own person changes the lease settings: at a local window,
+ * or on a device that person paired (maintainer decision, 2026-11-13). An
+ * agent never does, in any posture, so no turn can stop its own billed
+ * desktops asking or raise how many it holds; a device the hub introduced
+ * does not either. The monthly cap stays with a local window.
  */
-export function desktopLeaseSettingsChangeAllowed(actor: EventActor["kind"]): boolean {
-  return actor === "local-user";
+export function desktopLeaseSettingsChangeAllowed(
+  actor: EventActor["kind"],
+  personPairedDevice: boolean,
+): boolean {
+  return actor === "local-user" || (actor === "remote-device" && personPairedDevice);
 }
 
 const TRANSITIONS: Readonly<Record<DesktopLeaseState, ReadonlySet<DesktopLeaseState>>> = {

@@ -1110,6 +1110,7 @@ export function startOctantServer(
     } = yield* wireWork({
       codeProjectAccess,
       isPairedDeviceScope,
+      isRestrictedDeviceScope,
       threadMoveHolds,
       conversationInputTransfer,
       codeBoardEventStore,

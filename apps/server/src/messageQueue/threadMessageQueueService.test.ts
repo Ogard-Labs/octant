@@ -1,3 +1,4 @@
+import { eventActorForPrincipal } from "../principalEventActor";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1518,6 +1519,7 @@ describe("queue after a failure or a restart", () => {
 
 describe("a paired device at the queue", () => {
   const deviceId = Schema.decodeUnknownSync(WindowId)(randomUUID());
+  const personDeviceId = Schema.decodeUnknownSync(WindowId)(randomUUID());
   function deviceFixture() {
     const p = port();
     const directory = mkdtempSync(join(tmpdir(), "octant-thread-queue-"));
@@ -1538,9 +1540,13 @@ describe("a paired device at the queue", () => {
       port: p,
       actor,
       clock: () => now,
-      isPairedDevice: (scopeId) => String(scopeId) === String(deviceId),
+      isRestrictedDevice: (scopeId) => String(scopeId) === String(deviceId),
+      deviceActor: (scopeId) =>
+        String(scopeId) === String(deviceId) || String(scopeId) === String(personDeviceId)
+          ? eventActorForPrincipal({ kind: "remote-device", deviceId: String(scopeId) })
+          : undefined,
     });
-    return { service, p };
+    return { service, p, connection };
   }
 
   it("queues a message, edits and removes its own, and dispatches under the device's own scope", async () => {
@@ -1594,5 +1600,39 @@ describe("a paired device at the queue", () => {
       expect(await f.service.execute(deviceId, attempt)).toMatchObject(refused);
     expect(await snapshot(f.service)).toMatchObject({ version, paused: false });
     expect((await snapshot(f.service)).items[0]?.payload?.prompt).toBe("private prompt");
+  });
+
+  it("lets a device the host's own person paired pause, resume and reorder the queue and edit or remove another's message, journaled as the device", async () => {
+    const f = deviceFixture();
+    f.p.setInspection({ status: "busy", binding: "authorized-target" });
+    const first = enqueue();
+    await f.service.execute(windowId, first);
+    const second = enqueue((await snapshot(f.service)).version);
+    await f.service.execute(windowId, second);
+    const at = async () => (await snapshot(f.service)).version;
+    for (const attempt of [
+      async () => command("pause", await at()),
+      async () =>
+        command("reorder", await at(), { messageIds: [second.messageId, first.messageId] }),
+      async () =>
+        command("edit", await at(), { messageId: first.messageId, prompt: "from my phone" }),
+      async () => command("remove", await at(), { messageId: second.messageId }),
+      async () => command("resume", await at()),
+    ])
+      expect((await f.service.execute(personDeviceId, await attempt())).status).toBe("applied");
+    const after = await snapshot(f.service);
+    expect(after.paused).toBe(false);
+    expect(after.items.map((item) => item.payload?.prompt)).toEqual(["from my phone"]);
+    const actors = f.connection
+      .prepare(
+        "SELECT actor_kind, actor_id FROM event_journal WHERE aggregate_type = 'thread-message-queue' ORDER BY global_sequence",
+      )
+      .all() as Array<{ actor_kind: string; actor_id: string }>;
+    expect(actors.slice(-5)).toEqual(
+      Array.from({ length: 5 }, () => ({
+        actor_kind: "remote-device",
+        actor_id: String(personDeviceId),
+      })),
+    );
   });
 });

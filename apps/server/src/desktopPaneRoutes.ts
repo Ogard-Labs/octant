@@ -12,10 +12,11 @@ import {
   type ProjectId,
 } from "@octant/contracts";
 import type { DesktopRecipeKeyView } from "./computerUse/desktopRecipeKeys";
-import type { ClientPrincipal } from "./clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "./clientPrincipal";
 import { leasableProvidersOf } from "./computerUse/computerUseDestination";
 import type { DesktopLeaseCaller, DesktopLeaseService } from "./computerUse/desktopLeaseService";
 import type { DesktopPreviewRequest, DesktopPreviewAnswer } from "@octant/contracts";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -164,7 +165,16 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
             origin,
           );
         default:
-          return encoded(await answer(dependencies.service, paneRequest, actor, scopeId), origin);
+          return encoded(
+            await answer(
+              dependencies.service,
+              paneRequest,
+              actor,
+              scopeId,
+              principal.kind === "remote-device" && principalActsAsHostPerson(principal),
+            ),
+            origin,
+          );
       }
     } catch {
       return failure("Desktop request is invalid.", 400, origin);
@@ -177,6 +187,7 @@ async function answer(
   request: Exclude<DesktopPaneRequest, { readonly kind: "recipe-key" } | DesktopPreviewRequest>,
   actor: EventActor,
   scopeId: string,
+  personPairedDevice: boolean,
 ): Promise<DesktopPaneAnswer> {
   // The recipe editor asks which providers a recipe may name: the ones this
   // host offers for leasing now, the same list destination reporting uses.
@@ -201,11 +212,15 @@ async function answer(
     return service.setSpendCap({ actor, monthlyCapUsdCents: request.monthlyCapUsdCents });
   }
   // The lease settings are host-wide too, and one of them decides whether a
-  // billed desktop asks, so they are answered and changed the same way.
-  if (request.kind === "lease-settings") return service.leaseSettings({ actor });
+  // billed desktop asks. The host's own person answers and changes them, at a
+  // local window or on a device they paired (maintainer decision,
+  // 2026-11-13); a device the hub introduced is refused by the service.
+  if (request.kind === "lease-settings")
+    return service.leaseSettings({ actor, personPairedDevice });
   if (request.kind === "set-lease-settings") {
     return service.setLeaseSettings({
       actor,
+      personPairedDevice,
       change: {
         confirmBilledDesktops: request.confirmBilledDesktops,
         leasesPerThread: request.leasesPerThread,
@@ -265,11 +280,7 @@ function callerFor(threadId: string, actor: EventActor, scopeId: string): Deskto
  */
 function personOf(principal: ClientPrincipal, localActorId: string): EventActor {
   return principal.kind === "remote-device"
-    ? decodeEventActor({
-        kind: "remote-device",
-        actorId: String(principal.deviceId),
-        deviceId: String(principal.deviceId),
-      })
+    ? eventActorForPrincipal(principal)
     : decodeEventActor({ kind: "local-user", actorId: localActorId });
 }
 

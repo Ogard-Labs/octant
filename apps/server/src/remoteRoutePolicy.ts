@@ -847,7 +847,9 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
   // The message queue: a paired device reads a thread's queue and queues a
   // message on a thread it may already send to. The service rechecks the
   // device's pairing, the thread and the mode on every command and again at
-  // dispatch, and keeps pause, resume and reorder with a window on the host.
+  // dispatch. Pause, resume, reorder and another's message are the host's own
+  // person's, at a window on the host or on a device they paired; the service
+  // refuses them to any other device.
   {
     id: "thread-message-queue",
     match: { kind: "exact", path: "/api/thread-message-queue" },

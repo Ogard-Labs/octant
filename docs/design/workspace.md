@@ -65,7 +65,9 @@ it. A paired device may queue (maintainer request, 2026-11-12;
 [Architecture: persistence](../architecture.md#persistence) owns the queue).
 Built: the queue passes one turn its mode recorded as failed and lifts the hold
 of one restart that cut nothing of it, and a paired device queues on a thread
-it may already send to; Resume queues the continuation ahead of the messages
+it may already send to; a device the host's own person paired also pauses,
+resumes and reorders the queue and edits or removes any queued message, as a
+local window does (maintainer decision, 2026-11-13); Resume queues the continuation ahead of the messages
 already waiting, with no review of them. A queue the person paused stays
 paused, with the continuation waiting first. A refused recovery leaves the notice
 and an actionable reason. A continuation already queued is visible in the

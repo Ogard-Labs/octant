@@ -131,7 +131,9 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   is refused by the ordinary creation command, and nothing falls back to
   another model.
 - **Authority.** The person may fix the workers' level when creating the
-  coordinator at a local window or a paired device, Full access included; every
+  coordinator at a local window or a device the host's own person paired
+  (built for that device, journaled as it; maintainer decision, 2026-11-13),
+  Full access included; every
   worker then
   starts at that level, and a mark on the coordinator does not lower it
   ([the Full access rule](../architecture.md#security-and-authority);
