@@ -565,6 +565,7 @@ const timer = setInterval(() => {
       accept: (snapshot: typeof Snapshot.Type) => boolean,
     ) => {
       let lastNativeError = "";
+      let lastRows: ReadonlyArray<string> | undefined;
       // A cold macOS runner can still show "Connecting to Chat..." well past 20s
       // (the primary-window stage includes app start), so a stage that is merely
       // slow must not read as a failed one. Each observation keeps its own 8s bound.
@@ -588,6 +589,7 @@ const timer = setInterval(() => {
           const snapshot = decodeSnapshot(JSON.parse(raw));
           if (snapshot.pid !== ownPid) throw Error("The observation belongs to another process.");
           lastNativeError = "";
+          lastRows = snapshot.texts.map((row) => row.text);
           if (accept(snapshot)) {
             console.log(`Observed native stage: ${stage}`);
             return snapshot;
@@ -601,6 +603,24 @@ const timer = setInterval(() => {
       await writeFile(
         join(artifacts, "native-controller-diagnostic.txt"),
         lastNativeError || `The latest owned image did not contain the expected ${stage} state.`,
+      );
+      // The last observation otherwise exists only in the uploaded artifact,
+      // and two runs that gave up at update-owned-card could not be read from
+      // their job logs. The rows are what the window showed, bounded; a long
+      // unbroken run of key-like characters is hidden in case a row came from
+      // a field that holds a key.
+      const bounded = (text: string) =>
+        text.slice(0, 200).replace(/[A-Za-z0-9_+/=-]{24,}/g, "[hidden]");
+      console.error(
+        JSON.stringify({
+          unobservedNativeStage: stage,
+          screenshot: join(artifacts, `${stage}.png`),
+          observedRows: lastRows?.length ?? null,
+          rows: lastRows?.slice(0, 120).map(bounded),
+          ...(lastNativeError === ""
+            ? {}
+            : { lastObservationError: bounded(lastNativeError.slice(-200)) }),
+        }),
       );
       throw Error(`The real packaged ${stage} state was not observed.`);
     };
