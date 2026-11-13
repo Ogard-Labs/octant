@@ -1173,9 +1173,8 @@ function mcpInputSchemaEvaluationIsUnsafe(schema: unknown): boolean {
   let remainingNodes = MAX_MCP_SCHEMA_EVALUATION_NODES;
   const active = new Set<unknown>();
   const visit = (candidate: unknown): boolean => {
-    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
-      return false;
-    }
+    if (Array.isArray(candidate)) return candidate.some(visit);
+    if (candidate === null || typeof candidate !== "object") return false;
     if (active.has(candidate) || --remainingNodes < 0) return true;
     active.add(candidate);
     try {
@@ -1248,10 +1247,59 @@ function localJsonPointerTarget(root: unknown, reference: string): unknown {
   return target;
 }
 
+type McpInputSchemaDialect = "draft-07" | "2019-09" | "2020-12";
+
+let ajvDraft7Module: Promise<typeof import("ajv")> | undefined;
+let ajv2019Module: Promise<typeof import("ajv/dist/2019.js")> | undefined;
 let ajv2020Module: Promise<typeof import("ajv/dist/2020.js")> | undefined;
+
+function loadAjvDraft7() {
+  return (ajvDraft7Module ??= import("ajv"));
+}
+
+function loadAjv2019() {
+  return (ajv2019Module ??= import("ajv/dist/2019.js"));
+}
 
 function loadAjv2020() {
   return (ajv2020Module ??= import("ajv/dist/2020.js"));
+}
+
+function mcpInputSchemaDialect(
+  schema: Readonly<Record<string, unknown>>,
+): McpInputSchemaDialect | undefined {
+  if (schema.$schema === undefined) return "2020-12";
+  if (typeof schema.$schema !== "string") return undefined;
+  const dialect = schema.$schema.endsWith("#") ? schema.$schema.slice(0, -1) : schema.$schema;
+  if (dialect === "http://json-schema.org/draft-07/schema") return "draft-07";
+  if (dialect === "https://json-schema.org/draft/2019-09/schema") return "2019-09";
+  if (dialect === "https://json-schema.org/draft/2020-12/schema") return "2020-12";
+  return undefined;
+}
+
+async function compileMcpInputSchema(
+  schema: Readonly<Record<string, unknown>>,
+): Promise<ValidateFunction<unknown> | undefined> {
+  const dialect = mcpInputSchemaDialect(schema);
+  if (dialect === undefined) return undefined;
+  const options = {
+    allErrors: false,
+    strict: false,
+    validateFormats: false,
+    validateSchema: true,
+  } as const;
+  let validateInput: ValidateFunction<unknown>;
+  if (dialect === "draft-07") {
+    const { default: AjvDraft7 } = await loadAjvDraft7();
+    validateInput = new AjvDraft7(options).compile<unknown>(schema as AnySchema);
+  } else if (dialect === "2019-09") {
+    const { default: Ajv2019 } = await loadAjv2019();
+    validateInput = new Ajv2019(options).compile<unknown>(schema as AnySchema);
+  } else {
+    const { default: Ajv2020 } = await loadAjv2020();
+    validateInput = new Ajv2020(options).compile<unknown>(schema as AnySchema);
+  }
+  return "$async" in validateInput ? undefined : validateInput;
 }
 
 async function prepareMcpTool(
@@ -1273,14 +1321,8 @@ async function prepareMcpTool(
       inputSchema: tool.inputSchema,
     });
     if (mcpInputSchemaIsUnsafeToValidate(providerDefinition.inputSchema)) return undefined;
-    const { default: Ajv2020 } = await loadAjv2020();
-    const validateInput = new Ajv2020({
-      allErrors: false,
-      strict: false,
-      validateFormats: false,
-      validateSchema: true,
-    }).compile<unknown>(providerDefinition.inputSchema as AnySchema);
-    if ("$async" in validateInput) return undefined;
+    const validateInput = await compileMcpInputSchema(providerDefinition.inputSchema);
+    if (validateInput === undefined) return undefined;
     return { listed: tool, providerDefinition, validateInput };
   } catch {
     return undefined;

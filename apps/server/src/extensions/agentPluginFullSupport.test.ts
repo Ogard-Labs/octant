@@ -907,6 +907,44 @@ describe("Agent Plugin MCP session manager", () => {
                                 $defs: { value: { type: "string" } },
                               },
                             },
+                            {
+                              name: "draft-seven",
+                              inputSchema: {
+                                $schema: "http://json-schema.org/draft-07/schema#",
+                                type: "object",
+                                properties: {
+                                  pair: {
+                                    type: "array",
+                                    items: [{ type: "string" }, { type: "number" }],
+                                    additionalItems: false,
+                                  },
+                                },
+                              },
+                            },
+                            {
+                              name: "draft-seven-recursive-tuple",
+                              inputSchema: {
+                                $schema: "http://json-schema.org/draft-07/schema#",
+                                type: "array",
+                                items: [{ anyOf: [{ $ref: "#" }, { $ref: "#" }] }],
+                              },
+                            },
+                            {
+                              name: "draft-2019",
+                              inputSchema: {
+                                $schema: "https://json-schema.org/draft/2019-09/schema",
+                                type: "object",
+                                properties: { value: { type: "string" } },
+                              },
+                            },
+                            {
+                              name: "draft-2020",
+                              inputSchema: {
+                                $schema: "https://json-schema.org/draft/2020-12/schema",
+                                type: "object",
+                                properties: { value: { type: "number" } },
+                              },
+                            },
                             { name: "duplicate", inputSchema: { type: "object" } },
                             {
                               name: "duplicate",
@@ -940,9 +978,11 @@ describe("Agent Plugin MCP session manager", () => {
       },
     });
 
-    await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
+    const effective = effectiveMcpSnapshot("mcp-local", "local");
+    await manager.reconcile(effective);
 
-    expect(manager.toolDefinitions().map((definition) => definition.inputSchema)).toEqual([
+    const definitions = manager.toolDefinitions();
+    expect(definitions.map((definition) => definition.inputSchema)).toEqual([
       {
         type: "object",
         properties: { pattern: { type: "string" } },
@@ -952,7 +992,52 @@ describe("Agent Plugin MCP session manager", () => {
         properties: { value: { $ref: "#/$defs/value" } },
         $defs: { value: { type: "string" } },
       },
+      {
+        $schema: "http://json-schema.org/draft-07/schema#",
+        type: "object",
+        properties: {
+          pair: {
+            type: "array",
+            items: [{ type: "string" }, { type: "number" }],
+            additionalItems: false,
+          },
+        },
+      },
+      {
+        $schema: "https://json-schema.org/draft/2019-09/schema",
+        type: "object",
+        properties: { value: { type: "string" } },
+      },
+      {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: { value: { type: "number" } },
+      },
     ]);
+    const draftSeven = definitions.find(
+      (definition) => definition.inputSchema.$schema === "http://json-schema.org/draft-07/schema#",
+    );
+    expect(draftSeven).toBeDefined();
+    await expect(
+      manager.createToolExecutionPort().execute({
+        thread: { id: effective.scope.threadId } as never,
+        name: draftSeven!.name,
+        inputJson: '{"pair":["one",2,true]}',
+      }),
+    ).resolves.toEqual({
+      result: { error: "extension-tool-input-invalid" },
+      isError: true,
+    });
+    await expect(
+      manager.createToolExecutionPort().execute({
+        thread: { id: effective.scope.threadId } as never,
+        name: draftSeven!.name,
+        inputJson: '{"pair":["one",2]}',
+      }),
+    ).resolves.toEqual({
+      result: { error: "extension-tool-approval-required" },
+      isError: true,
+    });
     await manager.drainAll();
   });
 

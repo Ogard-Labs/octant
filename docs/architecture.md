@@ -11465,7 +11465,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   tool name omits the affected tool. Each call's JSON must satisfy it before an
   approval is requested, a remembered grant is consulted, credentials are
   resolved, or the server receives the call. Validation never coerces or
-  rewrites arguments.
+  rewrites arguments. An advertised draft-07, 2019-09, or 2020-12 dialect
+  selects the matching validator; an absent dialect uses 2020-12, and any
+  unsupported dialect omits the tool.
   - A grant grows only through that answer from a person, at a local window or a device the host's own person paired (maintainer decision, 2026-11-12). No route, command,
     manifest field, structured reference, tool call, model output, or
     host-owned turn (a routine, a goal loop, a usage-limit resume, a child-run
