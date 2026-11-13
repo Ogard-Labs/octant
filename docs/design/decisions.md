@@ -1595,6 +1595,7 @@ Below Full access every MCP tool call waits for an approval in the turn's window
 - A package update signed by the same key keeps the package's trust and its remembered approvals, for a tool or a whole server; a new or missing signing key and an update that widens what the package may do ask again (maintainer decision, 2026-11-12). Built for every package kind that can carry a signature, MCP plugins included (maintainer decision, 2026-11-13).
 - An unsigned package's update from the source the person trusted keeps its remembered approvals, for a tool, a whole server, or a marked thread; any other unsigned update asks again (maintainer decision, 2026-11-13; built).
 - Below Full access, on a thread that has taken in outside content, a remembered grant holds for a local stdio server; a network server asks once per thread and server after the mark, then runs for the rest of that thread (maintainer decision, 2026-11-12). That answer covers no other thread, and uninstall, rollback or withdrawn trust end it. It is journaled, so a host restart does not ask that thread again, and Settings does not list it among remembered approvals (maintainer decision, 2026-11-13; built).
+- Streamable HTTP sends POST and session cleanup only to the configured address and follows no redirect.
 - Uninstall, withdrawn trust and rollback revoke grants, and installing again restores nothing.
 
 Status: Partly built. Since: —. Detail: [Architecture: Extensions and skills](../architecture.md#extensions-and-skills).
