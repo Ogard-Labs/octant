@@ -188,6 +188,15 @@ export {
   type HostLogReadOptions,
   type HostLogReadResult,
 } from "./logs";
+export {
+  HOST_CRASH_RECORD_LIMIT,
+  hostCrashRecordsDirectory,
+  keepUncleanStopCrashRecord,
+  readHostCrashRecords,
+  recordHostCrash,
+  type HostCrashRecord,
+  type HostCrashRecordOutcome,
+} from "./crashRecords";
 export { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "./diagnostics";
 export { acceptedReportedHostVersion, resolveReportedHostVersion } from "./reportedHostVersion";
 export { writeBridgeSecretProjection } from "./bridgeSecret";

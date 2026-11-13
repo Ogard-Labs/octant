@@ -33,7 +33,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 2       | 7            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 7         | 1       | 5            | 1                   |
-| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 4       | 3            | 0                   |
+| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 5       | 2            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 4       | 1            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 0       | 4            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **251**   | **131** | **115**      | **5**               |
+| **All areas**                                                                         | **251**   | **132** | **114**      | **5**               |
 
 ## Principles and hard lines
 
@@ -449,10 +449,9 @@ The desktop main process owns native windows, menus, the system keychain and all
 - The server listens on one canonical loopback endpoint, and every mutation goes through services that append to the journal.
 - A paired browser mounts the remote shell; the desktop's window-bound sidebar, dock and Settings are not served remotely.
 - Process-local approvals and grants expire on the process authority clock (wall time once at start, then suspend-aware elapsed time), so a wall clock set back cannot extend one, and a host restart discards them. A stored grant that must outlive a restart, such as a paired device's expiry, stays on wall time. No persisted local-authority epoch or wall-clock value may block local startup. Detail: [Security and authority, Which clock an expiry runs on](../architecture.md#security-and-authority).
-- Browser tool approvals, session grants and credential use are process-local but still read wall time (not built yet).
 - Shared product state is host-owned; window bounds, panes, focus, scroll and unsaved drafts stay client-context state. _Here only._
 
-Status: Partly built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
+Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 
 ### Local client context and loopback trust
 
@@ -1145,7 +1144,9 @@ After a crash or reboot the host repairs what it safely can and says what is wro
 - Settings offers "Keep Octant running in the background" (the per-user LaunchAgent or systemd unit `octant` manages, pointed at the app's own windowless host) and, on macOS, "Open Octant at login". Both are off by default, each shows what the operating system reports, and only Octant's own desktop windows can change them, never a paired device or a Nightly client. A real install and uninstall on a Mac is a maintainer check.
 - Built: a Code thread terminal a restart ended offers **Restart terminal** in one click, an ordinary start the host checks against the thread's posture and authority as they are then, with a fresh terminal and no grant the ended shell held ([Workspace](workspace.md)).
 - Built: a Project terminal card whose shell a restart ended offers **Restart terminal**, a new shell through the ordinary start; the host tells only a window that may still use the Project's terminals that a restart ended the shell ([Workspace](workspace.md)). A debug session a restart ended offers **Restart** for the confirmed configuration of the same name, an ordinary Start checked against that confirmation as it stands ([Language services](language-services.md)). A saved Project action's run a restart ended offers **Review and run again**: the action's preview is its review, so the run stays a separate press.
-- Not built yet: exporting a support bundle from the recovery screen; a local crash record (crash dumps kept on the device with upload off, in a support bundle only by choice, named in the next start's notice); one-click reopening of a Browser session a restart ended, which needs the host to record that a restart, not another loss of ownership, ended it. Extensions get no restart button: their components run under the effective activation the host works out when they are used, so no ended process waits for a person, and a button must never stand in for the separate install, trust and enable steps.
+- When the desktop-managed host exits unexpectedly, or exits before it is ready, the desktop keeps a local crash record in the host's data directory: the time, the process, how it ended, and its last few output lines, with secrets redacted and the home folder shown as `~`. Records stay on the device, the newest 20 are kept, and they leave it only in a support bundle the person saves. The support bundle lists them as a Crash records section; the recovery screen offers Save support bundle on every screen and writes crash records and the host log, redacted, to a file the person chooses, without a journal record because the host is not running. Native crash dumps are not collected: they hold process memory that cannot be redacted.
+- A host no desktop watched, a background-service host or the native Windows host, keeps its own crash record at its next start after an unclean exit, unless a watching desktop already kept one for that exit. The next start's "Octant stopped unexpectedly" notice names the record and says Save diagnostics includes it.
+- Not built yet: one-click reopening of a Browser session a restart ended, which needs the host to record that a restart, not another loss of ownership, ended it. Extensions get no restart button: their components run under the effective activation the host works out when they are used, so no ended process waits for a person, and a button must never stand in for the separate install, trust and enable steps.
 
 Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Process topology](../architecture.md#process-topology) and [Persistence](../architecture.md#persistence).
 

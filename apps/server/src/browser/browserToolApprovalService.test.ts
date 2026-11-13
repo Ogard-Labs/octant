@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { BrowserToolApprovalService } from "./browserToolApprovalService";
 
@@ -43,6 +44,40 @@ describe("BrowserToolApprovalService", () => {
     current = false;
     expect(await service.request(input)).toBe("denied");
     expect(service.list(windowId)).toEqual([]);
+    service.close();
+  });
+
+  it("ends a prompt when its elapsed time is up even though the wall clock was set back", async () => {
+    let wallClockMs = Date.parse("2026-09-09T10:00:00.000Z");
+    let elapsedMs = 1_000;
+    const clock = new ProcessAuthorityClock({
+      wallClock: () => wallClockMs,
+      suspendAwareElapsedSource: () => elapsedMs,
+    });
+    const service = new BrowserToolApprovalService({
+      uuid: () => "40000000-0000-4000-8000-0000000000b1",
+      now: clock.now(),
+      ttlMs: 60_000,
+      authorityIsCurrent: () => true,
+    });
+    const pending = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+    });
+    expect(service.list(windowId)).toHaveLength(1);
+    elapsedMs += 60_000;
+    wallClockMs -= 60 * 60_000;
+
+    expect(service.list(windowId)).toEqual([]);
+    expect(
+      service.decide(windowId, {
+        approvalId: "40000000-0000-4000-8000-0000000000b1" as never,
+        decision: "approved",
+      }),
+    ).toBe(false);
+    await expect(pending).resolves.toBe("expired");
     service.close();
   });
 

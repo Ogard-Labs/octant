@@ -8,6 +8,7 @@ import {
   decodeBrowserSessionGrantsCommand,
   type BrowserSessionTarget,
 } from "@octant/contracts/browser-session-grants";
+import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { BrowserSessionGrants, type CurrentBrowserSessionTarget } from "./browserSessionGrants";
 import { decodePersistentBrowserOwnerStatus } from "@octant/contracts/persistent-browser-owner";
 
@@ -215,6 +216,24 @@ describe("explicit Browser session permissions", () => {
     } finally {
       f.service.close();
       vi.useRealTimers();
+    }
+  });
+  it("ends a permission when its elapsed time is up even though the wall clock was set back", async () => {
+    let wallClockMs = Date.parse("2026-11-07T10:00:00Z");
+    let elapsedMs = 1_000;
+    const clock = new ProcessAuthorityClock({
+      wallClock: () => wallClockMs,
+      suspendAwareElapsedSource: () => elapsedMs,
+    });
+    const f = fixture(clock.now());
+    try {
+      const allowed = await grant(f);
+      elapsedMs += 15 * 60_000;
+      wallClockMs -= 60 * 60_000;
+      expect(f.service.find(command.grantee, command.profile, command.origins)).toBeUndefined();
+      expect(f.onRevoked).toHaveBeenCalledWith(allowed.grantId);
+    } finally {
+      f.service.close();
     }
   });
   it("grants only the reviewed caller, model, host, profile and HTTPS origins until expiry", async () => {

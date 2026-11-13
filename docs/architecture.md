@@ -581,7 +581,35 @@ starting again or quitting. Both repairs run the server's own offline store
 maintenance (`apps/server/dist/dbMaintenance.mjs` in the packaged app, the same
 code as the `db:*` scripts) under exclusive ownership, so the authority and
 integrity rules are the store's own. An unfinished local data removal offers
-neither repair. Starting again relaunches the app. See
+neither repair. Starting again relaunches the app. Every recovery screen also
+offers "Save support bundle…": the host's bundle route is unreachable while the
+host is down, so the desktop builds the same bundle layout itself from the two
+sources that live in files, the local crash records and the host's service log,
+marks every other section not available, and writes it owner-only to the place
+the person picks in the native save dialog. Nothing is journaled for that save,
+because the journal is what may have refused to open; nothing is sent.
+
+**Local crash records.** When the desktop-managed host exits without being
+asked to (the supervisor's unexpected exit, or an exit before it was ready),
+the desktop writes one owner-only JSON file to `crash-records/` in the host's
+data directory: the time, the process (`host`), how it ended (`exit code N`,
+`signal NAME`, or the host's refusal category), and its last output lines from
+the redacted stderr tail. Every string is redacted again on write and the home
+folder becomes `~`; the newest 20 records are kept. The desktop writes the
+record because a host that crashed cannot be trusted to. Records never leave
+the machine except inside a support bundle the person saves. Native crash dumps
+are not collected: they carry process memory no redaction can sweep. A host
+that no desktop watched (a background-service host, or the native Windows host,
+whose owned profile the desktop does not write into) keeps its own record at
+its next start: when `host-memory.json` shows the previous process ended
+without a clean stop and no record exists at or after that process's last
+reading, the host writes one with `stopped without a clean exit` and the last
+memory reading, through the same code on every platform. A record a watching
+desktop already wrote for that exit is reused, not doubled. The next start's
+"Octant stopped unexpectedly" notice names the record kept for that exit (how
+it ended and when) and says Save diagnostics includes it; host-control status
+carries it as `memory.previousStop.crashRecord`, with no path or output line.
+See
 [Persistence: startup repair](#persistence).
 
 **Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
@@ -5057,7 +5085,8 @@ or .zip>` write the same files, built by one host command
   process state, sign-in kind, detected version, and capability support, never
   its name, address, models, or message), host log (the newest 200 lines with
   time, level, event, and message cut to 240 characters, without details),
-  recent activity (the newest 200 journal event names, sequences, and times
+  crash records (the newest 20 [local crash records](#process-topology): time,
+  process, how it ended, and the last output lines), recent activity (the newest 200 journal event names, sequences, and times
   from the journal, with the payload column never selected), confinement and
   guardrails (the default guardrail level and remembered-permission setting,
   Code threads counted per execution policy, the sandbox tools the host
@@ -13029,13 +13058,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
   and image generation offers (their stated request time), computer-use owners
   and five-minute app grants, Claude's pre-tool grants, credential command
   requests, Browser upload and download permissions (which are not restored
-  after a restart), and server preview tunnels. A grant that is stored and
+  after a restart), Browser tool approvals, Browser session grants and
+  Browser credential use, and server preview tunnels. A deadline that
+  crosses to the desktop app crosses as time remaining, restated in the
+  desktop's wall time, and the desktop's own wall deadline stays its local
+  check; the server never compares one clock's deadline with the other's. A grant that is stored and
   must outlive a restart cannot use a process epoch and stays on wall time,
   stated in UTC: a paired device's registration expiry, and any stored
   `expiresAt` a later process reads back. Such a grant stays revocable by the
-  person at any time, which is what bounds it when the clock is wrong. Not
-  yet moved: Browser tool approvals, session grants and credential use read
-  wall time though they live in the process. Routine proposals and image
+  person at any time, which is what bounds it when the clock is wrong.
+  Routine proposals and image
   generation offers end on a timer alone; a timer is Node's monotonic clock,
   which on Linux does not count a suspend.
   _Why elapsed time is trusted._ On Linux `os.uptime()` reads `/proc/uptime`
@@ -16980,13 +17012,12 @@ documents its authority, privacy, and release boundaries):
   decision, 2026-11-12): projection-only damage rebuilds at startup, other
   refusals open the desktop recovery screen, and a default-off background host
   and open-at-login item keep the host available
-  ([process topology](#process-topology)). Not built yet: a local crash record
-  (Electron crash dumps kept on the device with upload off, added to a support
-  bundle only by choice, and named in the next start's notice), exporting a
-  support bundle from the recovery screen, and one-click reopening of a
-  Browser session a restart ended. Code thread and Project terminals, debug
-  sessions and saved Project action runs a restart ended are offered back
-  through their ordinary start
+  ([process topology](#process-topology)), the desktop keeps local crash
+  records (an unwatched host keeps its own at its next start), the next
+  start's notice names them, and the recovery screen saves a support bundle.
+  Not built yet: one-click reopening of a Browser session a restart ended.
+  Code thread and Project terminals, debug sessions and saved Project action
+  runs a restart ended are offered back through their ordinary start
   ([Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the

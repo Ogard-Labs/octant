@@ -1379,7 +1379,7 @@ html[data-octant-reduced-motion="true"] .thread-move-frozen__progress > span {
 .thread-move-tombstone__title {
   margin: 0;
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .thread-move-tombstone__meta {

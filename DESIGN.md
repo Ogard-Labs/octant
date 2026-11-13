@@ -157,8 +157,7 @@ nothing essential sits under 12px at the default. The roles live in
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text and every name in navigation (thread titles, sidebar and
-Settings rail rows, the account's name), 500 (`--oct-weight-medium`,
-`--oct-weight-display`) for labels, controls, a setting's row and a menu's
+Settings rail rows, the account's name), 500 (`--oct-weight-medium`) for labels, controls, a setting's row and a menu's
 options, 600 (`--oct-weight-strong`) for emphasis (section labels, card titles,
 `strong`, the app's name, a destination's page title), and 700
 (`--oct-weight-title`) only for the large title. A count beside a label is Meta
@@ -1996,9 +1995,8 @@ rule:
   the mode switch in the sidebar's header, the thread-list switch under it and
   the composer's Work and Code switch alike. A tray's inner corner stays the
   tray's corner less its padding, never under 2px. The icon rail's button takes
-  its face's 32px in the column (its transparent 1px border is given back with
-  a 1px margin: switching the border off is a repaint of the shared button that
-  the UI check refuses), and the account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
+  its face's 32px in the column (it is the button's `rail` variant, which draws
+  no border, so no negative margin gives one back), and the account row is 44px (`--oct-nav-head-h`), the row height a two-line row uses.
 - _The account row's avatar and the Projects toolbar's folder sit on the icon
   column._ The 20px avatar is centred on the centre line of the 16px navigation
   icons (the 12px inset plus half an icon), not left-aligned with them, and the
@@ -2016,15 +2014,16 @@ rule:
 - _One hairline._ A 1px dividing line or a quiet control outline on the title
   band, the thread's disclosures, the sidebar's tiles and the icon rail is
   `--oct-hairline` (10% ink): the environment mark's edge, the divider between
-  a thread's tool rows, the rail's count badge and divider, a count tile's edge,
-  and the rule beside a reasoning block, which is 1px, not a 2px bar. A
+  a thread's tool rows, the rail's count badge and divider, and a count tile's edge. A
   deliberately stronger edge stays: a field's border, a focus edge, a status
   tint, and a Project tile's initial (22%, 40% on hover), which is an
   identity mark rather than a divider.
-- _A slider's track is the stronger hairline_ (`--oct-hairline-strong`, 14% ink),
-  so it shows on a dark card; the control fill it used is the card's own colour
-  there. Measured against the card, the track is 1.5:1 in dark and 1.3:1 in
-  light, and the thumb carries the value.
+- _The rule beside reasoning_ is 1px, not a 2px bar, in `--octant-border-strong`:
+  the hairline measured about 1.2:1 and was too faint to find.
+- _A slider's track is the strong divider role_ (`--octant-divider-strong`), a
+  theme role held to 3:1 against the workspace, so the track is found on a card
+  in dark and in light. The hairline it used was 1.5:1 in dark and 1.3:1 in
+  light. The thumb still carries the value.
 
 **Icon rail foot.** The rail's destinations scroll, with the same short fade at
 their edges and no scrollbar, above a foot (usage, Settings) that stays on
@@ -2781,7 +2780,7 @@ leading, 8 trailing) with 4px between controls.
   name at the tile's width, each word switch first becomes one control showing
   the current view's name with a menu of the views, so the current place is
   always readable in words; then the actions fold into one **More <tool> actions**
-  menu; a control the tool draws itself (Canvas's version popover and menu) moves to the one secondary row under the bar when even the folded bar cannot hold it; the tool's name is cut last. Status text (a count, a device's state with its mark) never folds either, and its full text is its tooltip: the actions fold first. A cue a person must be able to read (View only, a billed Desktop's provider and place) is never cut to an ellipsis: when the bar cannot hold it beside the tool's name even with the actions folded, it moves, without being drawn again, to the one secondary row, which is inside the same toolbar and exists only while something has moved to it. The row wraps onto further 32px lines when its contents are wider than the bar and the bar reserves the height it has; a cue has no cap, no ellipsis and does not shrink. The bar measures a control the tool draws itself as it is drawn, not by a declared width, and reads its own insets. In the bottom panel, which has no second row, such a control, and a cue, scrolls within its own box, which takes focus so a keyboard can scroll it, with Hide beside it. Alt, Meta, Ctrl and Shift with an arrow key are left to the browser. A named control stops at 16em with an ellipsis and its full name as the tooltip. The controls stand in one labelled toolbar with arrow-key movement. A menu returns focus to its control after an
+  menu; a control the tool draws itself (Canvas's version popover and menu) moves to the one secondary row under the bar when even the folded bar cannot hold it; the tool's name is cut last. Status text (a count, a device's state with its mark) never folds either, and its full text is its tooltip: the actions fold first. A cue a person must be able to read (View only, a billed Desktop's provider and place) is never cut to an ellipsis: when the bar cannot hold it beside the tool's name even with the actions folded, it moves, without being drawn again, to the one secondary row, which is inside the same toolbar and exists only while something has moved to it. It follows the bar's actions in the page, so Tab, the arrow keys and the eye all meet the controls in the same order. The row wraps onto further 32px lines when its contents are wider than the bar and the bar reserves the height it has; a cue has no cap, no ellipsis and does not shrink. The bar measures a control the tool draws itself as it is drawn, not by a declared width, and reads its own insets. In the bottom panel, which has no second row, such a control, and a cue, scrolls within its own box, which takes focus so a keyboard can scroll it, with Hide beside it. Alt, Meta, Ctrl and Shift with an arrow key are left to the browser. A named control stops at 16em with an ellipsis and its full name as the tooltip. The controls stand in one labelled toolbar with arrow-key movement. A menu returns focus to its control after an
   action. The steps are decided from the bar's width, the name's natural width
   and the words' natural width, never from the folded controls, so the bar
   cannot flip between two states. At the 280px dock minimum Review's switch is
@@ -3526,8 +3525,8 @@ interfaces. Revealing them must not move the transcript.
 
 ## Motion and interaction
 
-Functional feedback uses 120–160ms transitions; the base system duration is
-200ms. Use standard easing and no decorative entrance animation. There is no
+Functional feedback uses 150ms (`--oct-motion-fast`) and geometry 200ms
+(`--oct-motion-base`); an overlay leaves in 100ms (`--oct-dur-fast`). One value with one meaning has one token: a duration, a weight or a space is never defined twice under two names. Use standard easing and no decorative entrance animation. There is no
 ambient motion behind the work by default; an animated built-in picture, the
 Pulsing characters, Dithered pixels, and Flowing grounds, and a printed picture
 set to Wave are the moving grounds a person may choose, and reduced motion holds
@@ -3540,7 +3539,7 @@ animations without removing state information.
 way, declared once (`components.css`, Overlay motion): a menu, a context
 menu, a select or combobox list, a popover, a tooltip, a hover card, a dialog,
 Settings' sheet, and the scrim under a dialog or a sheet. It fades in over
-150ms (`--oct-dur-base`, `--oct-ease-motion`) and out over 100ms
+150ms (`--oct-motion-fast`, `--oct-ease-motion`) and out over 100ms
 (`--oct-dur-fast`, `--oct-ease-color`): nobody waits for a thing to leave. A
 popup settles from 98% at the point it is anchored to and a dialog from 98%
 about its centre; the sheet rises 8px instead, since a surface that size reads

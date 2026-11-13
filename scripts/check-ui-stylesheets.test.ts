@@ -294,7 +294,7 @@ describe("UI stylesheet check", () => {
     expect(
       findStylesheetFindings({
         [CSS]: [
-          ".a { font-weight: var(--oct-weight-display); }",
+          ".a { font-weight: var(--oct-weight-medium); }",
           ".b { font-weight: 600; }",
           ".c { font-weight: var(--oct-weight-strong); }",
           ".d { font-weight: bold; }",

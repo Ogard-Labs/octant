@@ -103,7 +103,7 @@
 .automation-center__suggestion strong {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .automation-center__creation-path small,
@@ -200,7 +200,7 @@
   color: inherit;
   padding: 0;
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   cursor: default;
   text-align: start;
 }
@@ -323,7 +323,7 @@
   margin: 0;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .automation-detail__state {
@@ -376,7 +376,7 @@
   gap: 0.3rem;
   cursor: default;
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .automation-history {
@@ -435,7 +435,7 @@
   margin: 0;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .automation-editor__problems {
@@ -530,7 +530,7 @@
   margin: 0;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .routine-calendar__weekdays,
@@ -571,7 +571,7 @@
 
 .routine-calendar__day[data-today="true"] .routine-calendar__day-number {
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   text-decoration: underline;
 }
 
