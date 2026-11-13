@@ -5,6 +5,8 @@ import type {
   BrowserDownloadSaveDecision,
 } from "./browserDownloadSave";
 import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
+import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
+import type { BrowserPageScriptInput } from "./browserAutomationService";
 import type { BrowserUploadPermissions } from "./browserUploadPermissions";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
@@ -15,6 +17,7 @@ import { askBrowserTransfer } from "./browserTransferAsk";
 import {
   browserCallOrigin,
   browserDownloadSavedResult,
+  browserPageScriptToolResult,
   browserOperationRefusedInPlan,
   browserPageReach,
   browserToolAction,
@@ -182,6 +185,16 @@ export interface BrowserAppManagedToolsOptions {
       threadId: BrowserThreadId,
     ) => { readonly release: () => void; readonly signal?: AbortSignal };
   };
+  /**
+   * Lent only to a Work thread's own tool: the bounded script runner, and the
+   * level the thread holds now (undefined once it differs from the level this
+   * turn began with). Chat has no Full access, and terminal, routine and
+   * delegated-child tools are lent none, so `run-script` is refused there.
+   */
+  readonly pageScript?: {
+    readonly level: () => ProviderExecutionPolicy | undefined;
+    readonly run: (input: BrowserPageScriptInput) => Promise<BrowserPageScriptReceipt>;
+  };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
     Partial<
       Pick<
@@ -271,9 +284,49 @@ export function createBrowserAppManagedTools(
       return failure("browser-authority-stale");
     }
     if (input.operation === "run-script") {
-      // The Work/terminal adapter has no live Full-access script admission yet.
-      return failure(
-        options.executionPolicy === "plan" ? "plan-mode-read-only" : "script-unavailable",
+      if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+      const script = options.pageScript;
+      if (script === undefined || options.mode !== "work") return failure("script-unavailable");
+      if (signInRefusal(options) !== undefined) return failure("script-needs-a-local-person");
+      // Work has no one-use script permission: below Full access it is refused.
+      if (script.level() !== "full-access") return failure("script-needs-full-access");
+      if (!modelIsCurrent(options)) return failure("browser-model-stale");
+      const opened = options.browser.inspectThread(options.windowId, options.threadId);
+      if (opened.waitingForPerson !== undefined) {
+        return heldForPersonAnswer(opened.waitingForPerson);
+      }
+      const context = opened.context;
+      if (context?.state !== "active" || context.presentation !== "native-live")
+        return failure("script-needs-the-app-browser");
+      const profileKey = JSON.stringify(context.policy.profile ?? null);
+      const callerIsCurrent = () => {
+        const latest = options.browser.inspectThread(options.windowId, options.threadId);
+        const held = options.resolveAuthority(options.threadId, options.mode);
+        return (
+          held !== undefined &&
+          sameToolActionAuthority(authority, held) &&
+          modelIsCurrent(options) &&
+          script.level() === "full-access" &&
+          signInRefusal(options) === undefined &&
+          String(latest.context?.contextId) === String(context.contextId) &&
+          JSON.stringify(latest.context?.policy.profile ?? null) === profileKey &&
+          latest.waitingForPerson === undefined
+        );
+      };
+      const receipt = await script.run({
+        windowId: options.windowId,
+        threadId: options.threadId,
+        contextId: context.contextId,
+        source: input.source,
+        expectedObservationRevision: input.expectedObservationRevision,
+        turnExecutionPolicy: "full-access",
+        callerIsCurrent,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      return browserPageScriptToolResult(
+        callerIsCurrent() && !signal?.aborted
+          ? receipt
+          : { status: "refused", effect: receipt.effect, reason: "stale" },
       );
     }
     if (input.operation === "stop") {

@@ -1,5 +1,6 @@
 import { validateQuestionnaireAnswer } from "@octant/domain";
 import {
+  type EventActor,
   decodeNativeHarnessQuestion,
   decodeNativeHarnessQuestionId,
   decodeUtcTimestamp,
@@ -35,7 +36,7 @@ export type NativeHarnessQuestionOutcome = SettledQuestionOutcome | RefusedQuest
 interface Waiter {
   readonly threadId: string;
   readonly questionnaire?: Questionnaire;
-  readonly resolve: (outcome: SettledQuestionOutcome) => void;
+  readonly resolve: (outcome: SettledQuestionOutcome, actor?: EventActor) => void;
   readonly onAbort: () => void;
   readonly signal: AbortSignal | undefined;
 }
@@ -120,12 +121,12 @@ export class NativeHarnessQuestionStore {
       // A surface that cannot show the question does not stop it being asked.
     }
     return new Promise((resolve) => {
-      const settle = (outcome: SettledQuestionOutcome) => {
+      const settle = (outcome: SettledQuestionOutcome, actor?: EventActor) => {
         const waiter = this.#waiters.get(String(questionId));
         if (waiter === undefined) return;
         this.#waiters.delete(String(questionId));
         waiter.signal?.removeEventListener("abort", waiter.onAbort);
-        this.#options.sessions.settleQuestion(input.threadId, questionId, outcome);
+        this.#options.sessions.settleQuestion(input.threadId, questionId, outcome, actor);
         try {
           this.#options.onSettled?.({ threadId: input.threadId, questionId: String(questionId) });
         } catch {
@@ -169,6 +170,8 @@ export class NativeHarnessQuestionStore {
     threadId: string,
     questionId: string,
     answer: string,
+    /** Who answered, as the route resolved it; absent means the person at this host. */
+    actor?: EventActor,
   ): "answered" | "question-not-found" | "already-settled" | "invalid-answer" {
     const waiter = this.#waiters.get(questionId);
     if (waiter === undefined || waiter.threadId !== threadId) {
@@ -179,10 +182,12 @@ export class NativeHarnessQuestionStore {
         return "question-not-found";
       // No turn is waiting (a restart, say); the journaled question can still
       // take the answer, and that is an answer, not a refusal.
-      const settled = this.#options.sessions.settleQuestion(threadId, questionId as never, {
-        status: "answered",
-        answer,
-      });
+      const settled = this.#options.sessions.settleQuestion(
+        threadId,
+        questionId as never,
+        { status: "answered", answer },
+        actor,
+      );
       return typeof settled === "string" ? settled : "answered";
     }
     if (
@@ -190,7 +195,7 @@ export class NativeHarnessQuestionStore {
       validateQuestionnaireAnswer(waiter.questionnaire, answer).status === "invalid"
     )
       return "invalid-answer";
-    waiter.resolve({ status: "answered", answer });
+    waiter.resolve({ status: "answered", answer }, actor);
     return "answered";
   }
 

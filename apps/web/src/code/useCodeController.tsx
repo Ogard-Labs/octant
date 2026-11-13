@@ -118,6 +118,7 @@ import {
   findCodeThread,
   pinCodeThread,
   renameCodeThread,
+  markCodeThreadDone,
   reopenCodeThread,
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorWake,
@@ -192,6 +193,8 @@ export interface CodeThreadNavigationItem {
   readonly completedAt?: NonNullable<CodeThread["completedAt"]>;
   /** The host's record of the thread's snooze; absent while it is awake. */
   readonly snooze?: NonNullable<CodeThread["snooze"]>;
+  /** A person marked the thread Done as their own override. */
+  readonly markedDone?: true;
   /**
    * The visible thread this one was forked from. Absent when the thread
    * started on its own.
@@ -2079,6 +2082,7 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(thread.pinned === true ? { pinned: true } : {}),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+            ...(thread.markedDoneAt === undefined ? {} : { markedDone: true as const }),
             ...(thread.forkedFrom === undefined
               ? {}
               : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
@@ -2534,6 +2538,10 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, reopenCodeThread),
     [restCommand],
   );
+  const markThreadDone = useCallback(
+    (threadId: CodeThreadId) => restCommand(threadId, markCodeThreadDone),
+    [restCommand],
+  );
   const snoozeThread = useCallback(
     (threadId: CodeThreadId, until: string) =>
       restCommand(threadId, (thread) => snoozeCodeThread(thread, decodeUtcTimestamp(until))),
@@ -2677,6 +2685,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly requireGitRepository?: boolean;
       readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
       readonly bundledLanguageServer?: boolean;
+      readonly androidEmulatorSnapshotBoot?: boolean;
       readonly defaultAutoApprove?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly shieldModel?: ShieldModelChoice | null;
@@ -3264,6 +3273,7 @@ export function useCodeController(options: CodeControllerOptions) {
     archiveThread,
     completeThread,
     reopenThread,
+    markThreadDone,
     snoozeThread,
     wakeThread,
     moveThread,

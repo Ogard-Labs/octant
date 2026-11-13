@@ -47,25 +47,32 @@ describe("the server resources route", () => {
     expect(asked()).toBe(0);
   });
 
-  it("refuses a paired device, whose request would run a command under the person's SSH identity", async () => {
+  it("answers a device the host's own person paired and refuses a restricted device, whose request would run a command under the person's SSH identity", async () => {
     const { routes, asked } = setup({ status: "ready", snapshot });
-    const request = new Request(URL_PATH);
-    bindPrincipalRouteContext(request, {
-      principal: createRemoteDevicePrincipal({
-        hostId: decodeStableHostId("33333333-3333-4333-8333-333333333333"),
-        deviceId: Schema.decodeUnknownSync(DeviceId)("22222222-2222-4222-8222-222222222222"),
-        credentialGeneration: 1,
-        origin: "https://octant.example",
-        protocolVersion: 1,
-        capabilityDigest: "a".repeat(64),
-        sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
-          "55555555-5555-4555-8555-555555555555",
-        ),
-      }),
-      scopeId: decodeWindowId("22222222-2222-4222-8222-222222222222"),
-    });
-    expect((await routes(request))?.status).toBe(403);
+    const fromDevice = (admittedBy: "host-person" | "hub-roster") => {
+      const request = new Request(URL_PATH);
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          admittedBy,
+          hostId: decodeStableHostId("33333333-3333-4333-8333-333333333333"),
+          deviceId: Schema.decodeUnknownSync(DeviceId)("22222222-2222-4222-8222-222222222222"),
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+            "55555555-5555-4555-8555-555555555555",
+          ),
+        }),
+        scopeId: decodeWindowId("22222222-2222-4222-8222-222222222222"),
+      });
+      return routes(request);
+    };
+    expect((await fromDevice("hub-roster"))?.status).toBe(403);
     expect(asked()).toBe(0);
+    const response = await fromDevice("host-person");
+    expect(response?.status).toBe(200);
+    expect(decodeHostResourceSnapshot(await response?.json())).toEqual(snapshot);
   });
 
   it("answers the server's snapshot to a local window", async () => {

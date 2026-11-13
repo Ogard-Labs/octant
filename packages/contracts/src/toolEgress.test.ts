@@ -189,9 +189,19 @@ describe("Project egress rule grants", () => {
     expect(decodeProjectEgressRuleGrantedPayload(projectGrant)).toEqual(projectGrant);
   });
 
-  it("refuses a Project rule from a paired device, a reviewer, or a tainted thread", () => {
+  it("records a Project rule a device the host's own person paired granted, naming the device", () => {
+    const fromDevice = { ...projectGrant, principal: { kind: "remote-device", deviceId } };
+    expect(decodeProjectEgressRuleGrantedPayload(fromDevice)).toEqual(fromDevice);
+    expect(() =>
+      decodeProjectEgressRuleGrantedPayload({
+        ...projectGrant,
+        principal: { kind: "remote-device" },
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a Project rule from a reviewer or a tainted thread", () => {
     for (const grant of [
-      { ...projectGrant, principal: { kind: "remote-device", deviceId } },
       { ...projectGrant, principal: { kind: "reviewer" } },
       { ...projectGrant, threadTainted: true },
     ]) {

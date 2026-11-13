@@ -670,6 +670,12 @@ export interface CodeServiceExecutionContext {
    * command carries it, and a created thread's own record never may.
    */
   readonly coordinatorThreadId?: CodeThreadId;
+  /**
+   * Who asked, as the route resolved it from the authenticated principal: a
+   * paired device's change is journaled as that device. Absent means the
+   * person at this host.
+   */
+  readonly actor?: EventActor;
 }
 
 export interface CodeServiceOptions {
@@ -894,6 +900,14 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
 ): Omit<T, "completedAt" | "snooze"> {
   const { completedAt: _completedAt, snooze: _snooze, ...rest } = thread;
   return rest;
+}
+
+/** The thread without a person's Done mark, as if it had never been marked. */
+function withoutDoneMark<T extends Pick<CodeThread, "markedDoneAt">>(
+  thread: T,
+): Omit<T, "markedDoneAt"> {
+  const { markedDoneAt: _markedDoneAt, ...unmarked } = thread;
+  return unmarked;
 }
 
 const CODE_MOVE_REFUSALS = {
@@ -1478,6 +1492,7 @@ export class CodeService {
     signal?: AbortSignal,
     executionContext?: CodeServiceExecutionContext,
   ): Promise<CodeCommandResult> {
+    const actor = executionContext?.actor;
     try {
       if (process.platform === "win32")
         throw this.#failure("unavailable", "Code execution requires Windows host confinement.");
@@ -1777,10 +1792,10 @@ export class CodeService {
               0,
               "code.thread-created@1",
               { kind: "thread-created", thread },
-              isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+              isRoutineHostScope(authenticatedWindowId) ? "system" : actor,
             );
             if (terminalSession !== undefined) {
-              this.#terminalSessions?.journalImported(String(thread.id), terminalSession);
+              this.#terminalSessions?.journalImported(String(thread.id), terminalSession, actor);
             }
           });
         } catch (bindingError) {
@@ -1939,6 +1954,9 @@ export class CodeService {
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          ...((command.androidEmulatorSnapshotBoot ?? current.androidEmulatorSnapshotBoot) === true
+            ? { androidEmulatorSnapshotBoot: true }
+            : {}),
           ...((command.defaultAutoApprove ?? current.defaultAutoApprove) === true
             ? { defaultAutoApprove: true }
             : {}),
@@ -1982,18 +2000,22 @@ export class CodeService {
             command.expectedVersion,
             "code.settings-updated@1",
             { kind: "settings-updated", settings },
+            actor,
           );
-          this.#journalLowering({
-            scope: "global",
-            from: permissionModeOf({
-              executionPolicy: current.defaultExecutionPolicy,
-              autoApprove: current.defaultAutoApprove,
-            }),
-            to: permissionModeOf({
-              executionPolicy: settings.defaultExecutionPolicy,
-              autoApprove: settings.defaultAutoApprove,
-            }),
-          });
+          this.#journalLowering(
+            {
+              scope: "global",
+              from: permissionModeOf({
+                executionPolicy: current.defaultExecutionPolicy,
+                autoApprove: current.defaultAutoApprove,
+              }),
+              to: permissionModeOf({
+                executionPolicy: settings.defaultExecutionPolicy,
+                autoApprove: settings.defaultAutoApprove,
+              }),
+            },
+            actor,
+          );
         });
         return { kind: "settings-updated", settings };
       }
@@ -2113,26 +2135,54 @@ export class CodeService {
           throw this.#failure("invalid", "The selected working folder is unavailable.");
         executionContext?.onCreationBoundary?.();
         this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
-          this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
-            kind: "thread-created",
-            thread,
-          });
+          this.#append(
+            "code-thread",
+            thread.id,
+            0,
+            "code.thread-created@1",
+            {
+              kind: "thread-created",
+              thread,
+            },
+            actor,
+          );
           if (terminalSession !== undefined) {
-            this.#terminalSessions?.journalImported(String(thread.id), terminalSession);
+            this.#terminalSessions?.journalImported(String(thread.id), terminalSession, actor);
           }
         });
         this.#bindCreateIssueContexts(String(thread.id), preparedIssueContexts, command);
         return { kind: "thread-created", thread };
       }
 
+      // Done by hand is a person's override of the delivery target. A
+      // routine, a planner tool, or a child-run delivery acts as the host,
+      // never as the person.
+      if (command.kind === "mark-code-thread-done" && isRoutineHostScope(authenticatedWindowId)) {
+        throw this.#failure("unauthorized", "Only a person can mark a Code thread Done.");
+      }
       const current = this.#persistence.readCodeThread(command.threadId);
       if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
       await this.#authorizeThread(authenticatedWindowId, current);
       if (current.version !== command.expectedVersion) {
         throw this.#failure("stale", "Code state changed; reload and retry.");
       }
+      if (command.kind === "mark-code-thread-done") {
+        if (current.lifecycle === "archived") {
+          throw this.#failure("invalid", "An archived thread cannot be marked Done.");
+        }
+        if (current.markedDoneAt !== undefined) {
+          throw this.#failure("invalid", "This thread is already marked Done.");
+        }
+      }
+      if (
+        command.kind === "reopen-code-thread" &&
+        current.markedDoneAt !== undefined &&
+        isRoutineHostScope(authenticatedWindowId)
+      ) {
+        throw this.#failure("unauthorized", "Only a person can reopen a Code thread marked Done.");
+      }
       if (command.kind === "move-code-thread") {
-        return await this.#moveThread(authenticatedWindowId, current, command);
+        return await this.#moveThread(authenticatedWindowId, current, command, actor);
       }
       const updatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "set-code-thread-restart-continuation") {
@@ -2189,6 +2239,7 @@ export class CodeService {
               kind: "thread-updated",
               thread: next,
             },
+            actor,
           );
         });
         return {
@@ -2241,10 +2292,16 @@ export class CodeService {
           version: command.expectedVersion + 2,
           updatedAt,
         });
-        this.#appendBoth("code-thread", current.id, command.expectedVersion, [
-          [USAGE_RESUME_SCHEDULED, { resume: record }],
-          ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
-        ]);
+        this.#appendBoth(
+          "code-thread",
+          current.id,
+          command.expectedVersion,
+          [
+            [USAGE_RESUME_SCHEDULED, { resume: record }],
+            ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
+          ],
+          actor,
+        );
         return { kind: "thread-updated", thread: next };
       }
       if (command.kind === "cancel-code-usage-resume") {
@@ -2260,10 +2317,16 @@ export class CodeService {
           version: command.expectedVersion + 2,
           updatedAt,
         });
-        this.#appendBoth("code-thread", current.id, command.expectedVersion, [
-          [USAGE_RESUME_CANCELLED, { resume: scheduled.record }],
-          ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
-        ]);
+        this.#appendBoth(
+          "code-thread",
+          current.id,
+          command.expectedVersion,
+          [
+            [USAGE_RESUME_CANCELLED, { resume: scheduled.record }],
+            ["code.thread-updated@1", { kind: "thread-updated", thread: next }],
+          ],
+          actor,
+        );
         return { kind: "thread-updated", thread: next };
       }
       if (command.kind === "rebind-code-thread-checkout") {
@@ -2310,10 +2373,17 @@ export class CodeService {
           version: command.expectedVersion + 1,
           updatedAt,
         });
-        this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
-          kind: "thread-updated",
-          thread: rebound,
-        });
+        this.#append(
+          "code-thread",
+          current.id,
+          command.expectedVersion,
+          "code.thread-updated@1",
+          {
+            kind: "thread-updated",
+            thread: rebound,
+          },
+          actor,
+        );
         // Recovery discards, never revalidates. A session grant of Full
         // access was minted against the checkout the thread just left, so it
         // does not carry onto the new one; the thread returns to its persisted
@@ -2502,7 +2572,11 @@ export class CodeService {
                   }
                 : command.kind === "reopen-code-thread" || command.kind === "wake-code-thread"
                   ? {
-                      ...withoutRest(current),
+                      // Reopen undoes both ways a person closed the thread:
+                      // put away, and marked Done. A wake leaves the mark.
+                      ...withoutRest(
+                        command.kind === "reopen-code-thread" ? withoutDoneMark(current) : current,
+                      ),
                       version: command.expectedVersion + 1,
                       updatedAt,
                     }
@@ -2617,15 +2691,22 @@ export class CodeService {
                                     version: command.expectedVersion + 1,
                                     updatedAt,
                                   }
-                                : {
-                                    ...current,
-                                    ...(command.workingFolderId === undefined
-                                      ? {}
-                                      : { workingFolderId: command.workingFolderId }),
-                                    workingDirectory: command.workingDirectory,
-                                    version: command.expectedVersion + 1,
-                                    updatedAt,
-                                  },
+                                : command.kind === "mark-code-thread-done"
+                                  ? {
+                                      ...current,
+                                      markedDoneAt: updatedAt,
+                                      version: command.expectedVersion + 1,
+                                      updatedAt,
+                                    }
+                                  : {
+                                      ...current,
+                                      ...(command.workingFolderId === undefined
+                                        ? {}
+                                        : { workingFolderId: command.workingFolderId }),
+                                      workingDirectory: command.workingDirectory,
+                                      version: command.expectedVersion + 1,
+                                      updatedAt,
+                                    },
       );
       const next =
         command.kind === "change-code-thread-access"
@@ -2642,15 +2723,19 @@ export class CodeService {
               kind: "thread-updated",
               thread: next,
             },
+            actor,
           );
           if (command.kind === "change-code-thread-access") {
-            this.#journalLowering({
-              scope: "thread",
-              from: permissionModeOf(current),
-              to: permissionModeOf(next),
-              projectId: current.projectId,
-              threadId: String(current.id),
-            });
+            this.#journalLowering(
+              {
+                scope: "thread",
+                from: permissionModeOf(current),
+                to: permissionModeOf(next),
+                projectId: current.projectId,
+                threadId: String(current.id),
+              },
+              actor,
+            );
           }
         });
       if (
@@ -3578,6 +3663,8 @@ export class CodeService {
   async saveFile(
     authenticatedWindowId: WindowId,
     input: CodeSaveFileInput,
+    /** Who saved, as the route resolved them; absent means the person at this host. */
+    actor?: EventActor,
   ): Promise<CodeFileSaveResultEnvelope> {
     const thread = this.#persistence.readCodeThread(input.threadId);
     if (thread === undefined) throw this.#failure("invalid", "Code thread was not found.");
@@ -3654,10 +3741,14 @@ export class CodeService {
       updatedAt: decodeTimestamp(this.#clock()),
     });
     try {
-      this.#append("code-file", root.fileId, expectedFileVersion, "code.file-reference-updated@1", {
-        kind: "file-reference-updated",
-        file: saving,
-      });
+      this.#append(
+        "code-file",
+        root.fileId,
+        expectedFileVersion,
+        "code.file-reference-updated@1",
+        { kind: "file-reference-updated", file: saving },
+        actor,
+      );
     } catch (error) {
       throw this.#mapFailure(error);
     }
@@ -3712,10 +3803,14 @@ export class CodeService {
       updatedAt: decodeTimestamp(this.#clock()),
     });
     try {
-      this.#append("code-file", root.fileId, saving.version, "code.file-reference-updated@1", {
-        kind: "file-reference-updated",
-        file: terminal,
-      });
+      this.#append(
+        "code-file",
+        root.fileId,
+        saving.version,
+        "code.file-reference-updated@1",
+        { kind: "file-reference-updated", file: terminal },
+        actor,
+      );
     } catch {
       return decodeCodeFileSaveResultEnvelope({
         kind: "code-file-save-result",
@@ -3747,6 +3842,7 @@ export class CodeService {
     authenticatedWindowId: WindowId,
     current: CodeThread,
     command: Extract<CodeCommand, { readonly kind: "move-code-thread" }>,
+    actor: EventActor | undefined,
   ): Promise<CodeCommandResult> {
     // A routine acts as the host, never as the person; filing a thread is the person's call.
     if (isRoutineHostScope(authenticatedWindowId)) {
@@ -3844,10 +3940,17 @@ export class CodeService {
       version: command.expectedVersion + 1,
       updatedAt,
     });
-    this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
-      kind: "thread-updated",
-      thread: moved,
-    });
+    this.#append(
+      "code-thread",
+      current.id,
+      command.expectedVersion,
+      "code.thread-updated@1",
+      {
+        kind: "thread-updated",
+        thread: moved,
+      },
+      actor,
+    );
     // A session grant of Full access was minted under the Project the thread
     // just left; authority is discarded on a move, never carried over.
     this.#sessionAuthority.revokeThreadEverywhere(current.id);
@@ -4033,7 +4136,7 @@ export class CodeService {
     aggregateId: string,
     expectedVersion: number,
     events: ReadonlyArray<readonly [string, unknown]>,
-    actorKind: "local-user" | "system" = "local-user",
+    actorKind: "local-user" | "system" | EventActor = "local-user",
   ): void {
     this.#persistence.journal.append({
       aggregate: { aggregateType, aggregateId },
@@ -4043,7 +4146,10 @@ export class CodeService {
         eventName,
         eventVersion: 1,
         correlationId: decodeCorrelationId(this.#uuid()),
-        actor: { kind: actorKind, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+        actor:
+          typeof actorKind === "string"
+            ? { kind: actorKind, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) }
+            : actorKind,
         occurredAt: decodeTimestamp(this.#clock()),
         payload,
       })),

@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   createHash,
   randomBytes as defaultRandomBytes,
@@ -130,16 +131,20 @@ export interface PairingClaimResult {
 
 export interface ApprovePairingTicketInput {
   readonly ticketId: string;
+  /** The paired device that decided. Absent, the host's own record is written. */
+  readonly actor?: EventActor;
 }
 
 export interface DenyPairingTicketInput {
   readonly ticketId: string;
   readonly reasonCode: string;
+  readonly actor?: EventActor;
 }
 
 export interface RenameDeviceInput {
   readonly deviceId: string;
   readonly deviceLabel: string;
+  readonly actor?: EventActor;
 }
 
 export class PairingDeviceLifecycleService {
@@ -483,7 +488,7 @@ export class PairingDeviceLifecycleService {
           eventName: REMOTE_ACCESS_EVENT_NAMES.deviceRegistered,
           eventVersion: 1,
           correlationId,
-          actor: { kind: "system", actorId: this.#actorId() },
+          actor: input.actor ?? { kind: "system", actorId: this.#actorId() },
           occurredAt: new Date(now).toISOString(),
           payload: { device },
         },
@@ -492,7 +497,7 @@ export class PairingDeviceLifecycleService {
           eventName: REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded,
           eventVersion: 1,
           correlationId,
-          actor: { kind: "system", actorId: this.#actorId() },
+          actor: input.actor ?? { kind: "system", actorId: this.#actorId() },
           occurredAt: new Date(now).toISOString(),
           payload: {
             record: {
@@ -635,7 +640,7 @@ export class PairingDeviceLifecycleService {
           eventName: REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded,
           eventVersion: 1,
           correlationId,
-          actor: { kind: "system", actorId: this.#actorId() },
+          actor: input.actor ?? { kind: "system", actorId: this.#actorId() },
           occurredAt: new Date(now).toISOString(),
           payload: {
             record: {
@@ -698,7 +703,7 @@ export class PairingDeviceLifecycleService {
           eventName: REMOTE_ACCESS_EVENT_NAMES.deviceRegistered,
           eventVersion: 1,
           correlationId: this.#correlationId(),
-          actor: { kind: "system", actorId: this.#actorId() },
+          actor: input.actor ?? { kind: "system", actorId: this.#actorId() },
           occurredAt: new Date(now).toISOString(),
           payload: { device: renamed },
         },

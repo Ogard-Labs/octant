@@ -180,6 +180,30 @@ describe("explicit Project memory creation", () => {
     },
   );
 
+  it("names the paired device that wrote or transferred an entry as its author", () => {
+    const deviceId = "71000000-0000-4000-8000-0000000000dc";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const entry = createMemoryEntry({
+      id: ids.entry,
+      projectId: ids.sourceProject,
+      kind: "fact",
+      content: "Written from a phone.",
+      actor: device,
+      createdAt,
+      expectedVersion: version(0),
+    });
+    expect(entry.author).toEqual(device);
+    const moved = transferMemoryEntry(entry, {
+      destinationProjectId: ids.destinationProject,
+      destinationEntryId: ids.destination,
+      actor: device,
+      transferredAt: createdAt,
+      expectedVersion: version(0),
+    } as never);
+    expect(moved.author).toEqual(device);
+    expect(moved.provenance).toMatchObject({ transferredBy: device });
+  });
+
   it("rejects silent system creation and empty content", () => {
     expect(() =>
       createMemoryEntry({

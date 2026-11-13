@@ -22,6 +22,8 @@ import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { SettingRow } from "../../settings/primitives";
+import { getInjectedHostBridge } from "../../shell/hostBridge";
+import { DeviceCodeSignIn } from "../DeviceCodeSignIn";
 import {
   emptyTransientCredential,
   HttpCredentialFields,
@@ -833,26 +835,55 @@ export function DirectoryEndpointSignIn(props: {
   ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
   readonly onOpenExternalUrl?: (url: string) => void;
 }) {
+  const [signedOut, setSignedOut] = useState(false);
+  // A sign-in finished with a code is read by a fresh panel: the panel keeps
+  // its own state and learns of a sign-in only from the host's status.
+  const [codeSignIns, setCodeSignIns] = useState(0);
   if (props.instance.configuration.authentication !== "directory-oauth") return null;
   const signIn =
     props.instance.driverKind === "azure-foundry"
       ? AZURE_FOUNDRY_DIRECTORY_SIGN_IN
       : GATEWAY_DIRECTORY_SIGN_IN;
+  // Only an Azure AI Foundry endpoint the person opted in signs in with a
+  // code, and only a local desktop window holds the bridge that shows one.
+  const deviceSignIn =
+    props.instance.driverKind === "azure-foundry" &&
+    props.instance.configuration.deviceCodeSignIn === true
+      ? getInjectedHostBridge()?.providerDeviceSignIn
+      : undefined;
   return (
-    <ProviderOAuthSignInPanel
-      accountLabel={signIn.accountLabel}
-      descriptorId={signIn.descriptorId}
-      disabled={props.disabled}
-      instanceId={props.instance.id}
-      localSignOut
-      signInLabel="Sign in with your organization"
-      {...(props.startSignIn === true ? { startSignIn: true } : {})}
-      {...(props.consentShown === true ? { consentShown: true } : {})}
-      {...(props.onStateChange === undefined ? {} : { onStateChange: props.onStateChange })}
-      {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}
-      {...(props.onOpenExternalUrl === undefined ? {} : { openUrl: props.onOpenExternalUrl })}
-      termsSummary={signIn.termsSummary}
-    />
+    <>
+      <ProviderOAuthSignInPanel
+        accountLabel={signIn.accountLabel}
+        descriptorId={signIn.descriptorId}
+        disabled={props.disabled}
+        instanceId={props.instance.id}
+        key={codeSignIns}
+        localSignOut
+        signInLabel="Sign in with your organization"
+        {...(props.startSignIn === true ? { startSignIn: true } : {})}
+        {...(props.consentShown === true ? { consentShown: true } : {})}
+        onStateChange={(state) => {
+          setSignedOut(state.kind === "signed-out");
+          props.onStateChange?.(state);
+        }}
+        {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}
+        {...(props.onOpenExternalUrl === undefined ? {} : { openUrl: props.onOpenExternalUrl })}
+        termsSummary={signIn.termsSummary}
+      />
+      {deviceSignIn === undefined || !signedOut ? null : (
+        <DeviceCodeSignIn
+          disabled={props.disabled}
+          instanceId={String(props.instance.id)}
+          instanceName={props.instance.displayName}
+          onSignedIn={() => setCodeSignIns((count) => count + 1)}
+          request={deviceSignIn}
+          {...(props.onOpenExternalUrl === undefined
+            ? {}
+            : { onOpenExternalUrl: props.onOpenExternalUrl })}
+        />
+      )}
+    </>
   );
 }
 

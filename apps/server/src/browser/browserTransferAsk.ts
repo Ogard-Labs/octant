@@ -20,7 +20,8 @@ type BrowserTransferAnswer = BrowserToolApprovalOutcome;
  * unless they already answered "Always allow" for it.
  *
  * Work and Code both ask through here and nowhere else, so the remembered
- * answer is read with one key in both modes: a mode that asked on its own
+ * answer is read with one key in both modes (direction, site, workspace and
+ * Browser profile): a mode that asked on its own
  * would keep asking after the person said always, or read a narrower key
  * than the one their answer was stored under. The answer is stored by the
  * approval service when the person gives it.
@@ -58,6 +59,11 @@ export function askBrowserTransfer(
       direction: input.direction,
       origin: input.origin,
       workspaceRoot: input.workspaceRoot,
+      // A page with no stored profile is a Private one, and the question
+      // says so: an entry naming neither is an older answer for any page.
+      ...(input.profile === undefined
+        ? { privatePage: true as const }
+        : { profile: input.profile }),
     }) === true
   ) {
     return Promise.resolve("approved");

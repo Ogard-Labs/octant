@@ -12,7 +12,7 @@ import {
   type OwnerBrowserNativeCommand,
   type OwnerBrowserTarget,
 } from "@octant/contracts/owner-browser";
-import type { HubMemberId, UtcTimestamp } from "@octant/contracts";
+import type { EventActor, HubMemberId, UtcTimestamp } from "@octant/contracts";
 import type { PersistentBrowserLeaseBinding } from "@octant/contracts/persistent-browser-owner";
 import type { OwnerBrowserHost } from "./ownerBrowserControl";
 import type {
@@ -1165,6 +1165,8 @@ export class BrowserAutomationService {
      * names the agent tool or the person's pane; an unnamed caller keeps none.
      */
     readonly capturedBy?: BrowserCaptureTaker;
+    /** Who took a person's capture, as the route resolved them; the capture is journaled as theirs. */
+    readonly capturedByActor?: EventActor;
     /** Trusted caller attribution for admission/idle only; never keeps a capture. */
     readonly activityBy?: BrowserCaptureTaker;
     /**
@@ -1340,6 +1342,7 @@ export class BrowserAutomationService {
       readonly flowRun?: BrowserFlowCustody;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly capturedByActor?: EventActor;
       readonly activityBy?: BrowserCaptureTaker;
       readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
@@ -1969,6 +1972,7 @@ export class BrowserAutomationService {
     input: {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly capturedByActor?: EventActor;
       readonly discardRecording?: true;
     },
     observed: {
@@ -2009,6 +2013,7 @@ export class BrowserAutomationService {
         url: stopping ? recording?.url : observed.url,
         title: stopping ? recording?.title : observed.title,
         takenBy,
+        ...(input.capturedByActor === undefined ? {} : { takenByActor: input.capturedByActor }),
         ...(storedBrowserProfile(owned.record.policy.profile) === undefined
           ? {}
           : { profile: storedBrowserProfile(owned.record.policy.profile) }),

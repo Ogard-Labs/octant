@@ -150,10 +150,7 @@ existing folder, and refuses to replace a file that exists.
 ## Constraints
 
 - **A local window or a paired device.** `GET /api/design-systems`, `GET
-/api/design-systems/file`, and `POST /api/design-systems/file` answer a window
-  on this host or a paired device (maintainer decision, 2026-11-12). They read
-  and write the person's folder as their own editor would. Not built yet: today
-  they answer only a window on this host.
+/api/design-systems/file`, and `POST /api/design-systems/file` answer a window on this host or a device the host's own person paired (maintainer decision, 2026-11-12; built), and refuse every other device session. They read and write the person's folder as their own editor would; a save journals nothing.
   The Project must be one the window's bootstrap lists, and the folder one the
   Project lends.
 - **No link is followed.** The search does not descend into a linked

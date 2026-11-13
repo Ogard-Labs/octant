@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   decodeWorkRequestCommand,
   decodeWorkRequestCommandResult,
@@ -14,7 +15,8 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { eventActorForPrincipal } from "./principalEventActor";
+import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { WorkRequestApplicationService } from "./work/workRequestApplicationService";
 
@@ -31,6 +33,7 @@ export interface WorkRequestRouteService {
   readonly execute: (
     authenticatedWindowId: WindowId,
     command: WorkRequestCommand,
+    actor?: EventActor,
   ) => Promise<WorkRequestCommandResult> | WorkRequestCommandResult;
 }
 
@@ -131,7 +134,11 @@ export function createWorkRequestRouteHandler(dependencies: WorkRequestRouteDepe
       const command = decodeWorkRequestCommand(value);
       return jsonResponse(
         decodeWorkRequestCommandResult(
-          await dependencies.service.execute(authenticatedWindowId, command),
+          await dependencies.service.execute(
+            authenticatedWindowId,
+            command,
+            eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+          ),
         ),
         200,
         origin,

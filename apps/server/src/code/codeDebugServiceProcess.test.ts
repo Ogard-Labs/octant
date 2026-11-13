@@ -668,6 +668,32 @@ describe("starting a debug session", () => {
     expect(test.reloadedApprovals().approvals(test.thread().projectId)).toHaveLength(1);
   });
 
+  it("lets a device the host's own person paired list, confirm, start and read a session as a local window does", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const value = test.configuration();
+    const paired = "person-paired-device";
+
+    expect(await test.configurations(paired)).toMatchObject({ status: "listed", approved: [] });
+    expect(await test.start(value, paired)).toEqual({
+      status: "refused",
+      reason: "approval-required",
+    });
+    expect(await test.approve(value, "checkout", paired)).toMatchObject({ status: "approved" });
+    const started = await test.start(value, paired);
+    expect(started).toMatchObject({ status: "started" });
+    if (started.status !== "started") return;
+    expect((await test.ask(started.sessionId, { kind: "state" }, paired)).status).not.toBe(
+      "refused",
+    );
+    // Any other device session stays refused on the same running session.
+    expect(await test.ask(started.sessionId, { kind: "state" }, "remote-device")).toEqual({
+      status: "refused",
+      reason: "local-host-required",
+    });
+  });
+
   it("starts a program that lives in an extra folder, and refuses one in a folder beside it", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));
@@ -826,6 +852,37 @@ describe("a running debug session", () => {
         expect.objectContaining({ endReason: "approval-ended" }),
       ]),
     );
+  });
+
+  it("starts an unconfirmed configuration at Full access, keeps it running, and ends it when the thread leaves Full access", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const value = test.configuration();
+
+    test.threads[0] = { ...test.thread(), executionPolicy: "full-access" };
+    const started = await test.start(value);
+    if (started.status !== "started") throw new Error(`not started: ${JSON.stringify(started)}`);
+    expect(test.journal.approvals()).toHaveLength(0);
+    // Nothing confirmed the configuration, and at Full access nothing has to.
+    await test.service.sweep();
+    expect(test.service.running).toBe(1);
+    expect(await test.ask(started.sessionId, { kind: "state" })).not.toMatchObject({
+      state: { status: "ended" },
+    });
+    // A paired device still starts nothing, whatever the level.
+    expect(await test.start(value, "remote-device")).toEqual({
+      status: "refused",
+      reason: "local-host-required",
+    });
+
+    test.threads[0] = { ...test.thread(), executionPolicy: "approval-gated" };
+    await test.service.sweep();
+    expect(await test.ask(started.sessionId, { kind: "state" })).toMatchObject({
+      state: { status: "ended", endReason: "network-changed" },
+    });
+    // Below Full access the same configuration is a proposal again.
+    expect(await test.start(value)).toEqual({ status: "refused", reason: "approval-required" });
   });
 
   it("ends at once when the window whose own Full access it ran under moves the thread to Plan", async () => {

@@ -11,6 +11,7 @@ import {
   type ToolActionAuthority,
   type ToolHostId,
 } from "@octant/contracts";
+import type { AppToolThreadLevel } from "@octant/domain";
 import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
 import type { CurrentBrowserSessionTarget } from "./browserSessionGrants";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -101,6 +102,24 @@ export function withRoutineBrowserProfiles(input: {
     },
     BROWSER_TOOL_HELP,
   );
+}
+
+/**
+ * The level a routine's Browser target reads the tool gate at. Inside a turn
+ * it is the level that turn runs at. Between turns, while a person reviews
+ * what the routine may open, there is no turn: a routine opted into its
+ * Project's level may run at Full access, so its target is read there and
+ * stays reviewable on a runtime that carries Octant's tools only at Full
+ * access; every other routine runs below it, where the guarded capability
+ * alone answers. Reviewing offers no tool: each turn is still judged at its
+ * own level.
+ */
+export function routineBrowserToolLevel(
+  definition: Pick<AutomationDefinition, "projectLevel">,
+  turn: AppToolThreadLevel | undefined,
+): AppToolThreadLevel | undefined {
+  if (turn !== undefined) return turn;
+  return definition.projectLevel === "opted-in" ? { executionPolicy: "full-access" } : undefined;
 }
 
 /** The reviewed recipient is a definition, never whichever thread last ran it. */

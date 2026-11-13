@@ -1,4 +1,4 @@
-import type { ProviderInstance, ProviderInstanceId } from "@octant/contracts";
+import type { EventActor, ProviderInstance, ProviderInstanceId } from "@octant/contracts";
 import {
   decodeHostOAuthJournalRecord,
   type HostOAuthDescriptor,
@@ -33,7 +33,9 @@ import type { ProviderOAuthCommand, ProviderOAuthView } from "./providerOAuthRou
 export interface CloudIamSignInDependencies {
   readonly broker: CloudIamBrokerPort;
   readonly terms: Pick<HostOAuthService, "offer" | "acknowledgeTerms">;
-  readonly journal: { readonly append: (record: HostOAuthJournalRecord) => void };
+  readonly journal: {
+    readonly append: (record: HostOAuthJournalRecord, actor?: EventActor) => void;
+  };
   readonly credentials?: ProviderCredentialStore;
   readonly readInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined;
   /** Where a sign-in the server could not record is reported, without its data. */
@@ -236,6 +238,8 @@ export async function answerCloudIamSettingsCommand(input: {
   readonly instanceId: ProviderInstanceId;
   readonly kind: ProviderOAuthCommand["kind"];
   readonly principal: PrincipalKind;
+  /** Who asked, as the route resolved them; a Sign out is journaled as theirs. */
+  readonly actor?: EventActor | undefined;
 }): Promise<ProviderOAuthView> {
   const { dependencies } = input;
   if (input.kind !== "status" && input.kind !== "sign-out") {
@@ -279,11 +283,15 @@ export async function answerCloudIamSettingsCommand(input: {
   } catch {
     return { kind: "refused", reason: "unavailable" };
   }
-  append(dependencies, {
-    name: "host-oauth.signed-out",
-    descriptorId: target.descriptor.descriptorId,
-    credentialRef: pointer.credentialRef,
-  });
+  append(
+    dependencies,
+    {
+      name: "host-oauth.signed-out",
+      descriptorId: target.descriptor.descriptorId,
+      credentialRef: pointer.credentialRef,
+    },
+    input.actor,
+  );
   return signedOut(false);
 }
 
@@ -365,9 +373,11 @@ function refuse(
 function append(
   dependencies: CloudIamSignInDependencies,
   record: Readonly<Record<string, unknown>> & { readonly name: string },
+  // Absent for a sign-in begun and followed from the host's own terminal.
+  actor?: EventActor,
 ): void {
   try {
-    dependencies.journal.append(decodeHostOAuthJournalRecord(record));
+    dependencies.journal.append(decodeHostOAuthJournalRecord(record), actor);
   } catch {
     (dependencies.log ?? console.warn)(`[cloud-iam] could not journal ${record.name}.`);
   }

@@ -284,17 +284,14 @@ the page, the workspace, or the person is reached.
   front the agent can still list tabs and switch to another. On the headless
   Browser, a tab that followed a redirect off the allowed origins after its own
   action is sent to a blank page before it is listed.
-- A paired device does all of this as a local window does: hover, list tabs,
-  choose an option, drag, upload, save a download, open, switch, and close a
-  tab, navigate and type (maintainer decision, 2026-11-12). Not built yet: today
-  it may hover and list tabs only
+- A device the host's own person paired does all of this as a local window does: hover, list tabs, choose an option, drag, upload, save a download, open, switch, and close a tab, navigate and type (maintainer decision, 2026-11-12; built for every page action the route takes). A device the host knows only through the hub's roster may hover and list tabs only
   ([Architecture: remote access](../architecture.md#security-and-authority)).
 
 ### Upload
 
 Below Full access a file leaves this computer through a page only after a
 person approves its file authority. Ordinary uploads use the thread's workspace
-and an answer the person may remember for the site; a recurring routine may
+and an answer the person may remember for the site, folder and profile; a recurring routine may
 instead use the explicit manifest below. At Full access an upload does not ask
 and the path checks below still hold
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
@@ -330,12 +327,16 @@ of waiting.
   covers those files to that site once, or, with "Always allow", later uploads
   to that site from that folder in that profile: the remembered answer is
   keyed by site, folder and profile (maintainer decision, 2026-11-12). Built:
-  the remembered answer is one direction, one site and one workspace folder; it
+  the remembered answer is one direction, one site, one workspace folder and
+  one profile: the entry records the stored profile the page was in, and a
+  later transfer is covered only on a page in that same profile, because a
+  site's signed-in session differs by profile. It
   is journaled in the shell settings like a remembered site, lifts no path or
-  size check, and is listed with a Forget control in Settings › Permissions ›
-  Browser uploads and downloads. Not built yet: the remembered answer is not
-  keyed by profile, and it grows only through the approval answer of a window
-  of this computer (a paired device's answer covers one upload). An unanswered ask waits in Needs
+  size check, and is listed, with its profile, with a Forget control in
+  Settings › Permissions › Browser uploads and downloads. Not built yet: it
+  grows only through the approval answer of a window
+  of this computer (a paired device's answer covers one upload).
+  An answer given on a Private page is stored as one and covers Private pages alone. An answer remembered before the page was recorded names neither a profile nor a Private page: it was given for the site and the folder on any page, so it keeps covering every profile and Private pages, shown as "on any page" in Settings, until the person forgets it (maintainer decision, 2026-11-13). It was not narrowed because that would ask again for what the person already answered, and it cannot be confused with a newer answer, which always names its page. An unanswered ask waits in Needs
   you. At Full access nothing is asked. Work and Code both ask in the
   thread's Browser approval card ("Upload once", "Always allow" or "Deny"),
   through one host function that reads the remembered answer and raises the
@@ -410,7 +411,7 @@ not establish packaged or personal-account acceptance.
 A file comes from a page into a thread's workspace only while a switch is on.
 At Full access the switch is on by default and a save does not ask; below Full
 access the person turns it on and answers for the file, an answer they may
-remember for the site, or separately reviews the bounded routine download manifest below
+remember for the site, folder and profile, or separately reviews the bounded routine download manifest below
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
 request, 2026-11-12). At Full access a download is not kept waiting for a
 second call either: it is saved as the action that started it answers
@@ -421,8 +422,7 @@ desktop pane's download handler, has not been run in a packaged window.
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default below Full access and on by default for a thread at Full access.
   It is a host setting in the shell settings, which a window of this computer
-  or a paired device writes (maintainer decision, 2026-11-12; not built yet:
-  today the shell route is local-only and a paired device cannot); a
+  or a device the host's own person paired writes (maintainer decision, 2026-11-12; built on the shell settings route); a
   routine, a subagent, a plugin, a CLI in a thread terminal, and an agent have
   no way to set it, and a change is journaled like every shell setting. Off,
   every download on every page of a thread below Full access stays blocked, as
@@ -486,7 +486,7 @@ desktop pane's download handler, has not been run in a packaged window.
   in that profile: the remembered answer is keyed by site, folder and profile
   (maintainer decision, 2026-11-12). Built: "Always allow" covers later saves
   from that site into this thread's workspace, remembered and forgotten as an
-  upload's is. Not built yet: the remembered answer is not keyed by profile. At Full access the save is not asked and the checks, the
+  upload's is, keyed by profile as an upload's is. At Full access the save is not asked and the checks, the
   destination rules and the journal record still apply. Work and Code both ask in the thread's
   Browser approval card ("Save once", "Always allow" or "Deny"), through the same host
   function an upload asks through (maintainer decision, 2026-11-13).
@@ -751,13 +751,32 @@ runs, not when it was recorded.
   it, or give the text for a prompt (maintainer request, 2026-11-12). A dialog
   the agent does not answer is answered by one fixed rule: an alert and
   a leave-page question are accepted; a confirm and a prompt are dismissed, so
-  the page never gets an answer the agent did not give. Not built yet: today
-  the agent cannot answer and the fixed rule answers every dialog. Each dialog is
+  the page never gets an answer the agent did not give. Each dialog is
   reported in the next answer as `dialogs`, with its type, its message (at most
-  512 characters), and the answer. The headless Browser applies the rule to
-  every dialog; the desktop Browser applies it while an agent's action runs,
-  and a dialog that opens while the person drives stays theirs. The desktop
-  Browser leaves alone a page whose developer tools someone else attached.
+  512 characters), the answer, and `answeredBy` (`agent` or `rule`). The
+  headless Browser applies this to every dialog; the desktop Browser applies it
+  while an agent's action runs, and a dialog that opens while the person drives
+  stays theirs. The desktop Browser leaves alone a page whose developer tools
+  someone else attached.
+  - **How the agent answers.** A dialog blocks its page, so none ever waits for
+    a model turn: every dialog is answered the moment it opens. The agent
+    states its answer in advance, as `dialog` on the acting call that raises
+    the dialog: `{"action": "accept"}` or `{"action": "dismiss"}`, with `text`
+    (at most 1,024 characters) for a prompt. The agent learns a dialog exists
+    from the `dialogs` report of the call the rule answered, which changed
+    nothing on the page, and repeats that call with its answer. The answer goes
+    to the first dialog that one call raises; every later dialog, and every
+    dialog of a later call, takes the rule. A read, a tab operation, and `stop`
+    take no answer. The call's arguments and its `dialogs` report are the
+    record on the tool row. A dialog that was already open for the person when
+    an agent call starts still takes the rule.
+  - **Prompt text and credentials.** Text for a prompt whose message asks for
+    a credential (password, passcode, passphrase, one-time code, PIN, card,
+    SSN, secret, token, or API key, the words that mark a credential field) is
+    not typed: the rule dismisses the prompt and the report carries
+    `textWithheld: "credential-protected"`. Declining such a prompt is allowed.
+  - **Flows.** A saved flow keeps no dialog answer, so a replay's dialogs take
+    the rule and a flow never stores prompt text.
 - **Viewport and device.** `resize` makes the agent's page look like another
   device. Each field changes only what it names, and `resize` with none of them
   restores the page's own size, touch, and color scheme together.
@@ -1386,13 +1405,15 @@ Several threads of one Project may each drive their own page at the same time.
 
 `run-script` reaches the same owned native page as the fixed actions when a
 local Code or Work thread has Full access, or a local Code thread has a scoped
-script permission (Work at Full access: maintainer request, 2026-11-12; not
-built yet, today Work is refused). It takes `source` and the
+script permission (Work at Full access: maintainer request, 2026-11-12). It
+takes `source` and the
 `expectedObservationRevision` from a fresh page read. It opens no page or
 profile and takes no additional script approval at Full access. Existing site,
 profile, model, window, Project and thread authority still apply. Work below
 Full access, headless, paired, routine, managed-subagent and terminal-grant callers are
-currently refused. Scripts cannot enter `steps` or saved/replayed flows.
+currently refused. A Work turn runs a script only while the thread still holds
+the Full access its turn began with: a level changed mid-turn, either way,
+refuses the script and withholds a result already on its way. Scripts cannot enter `steps` or saved/replayed flows.
 
 Below Full access, a local Code task may request a separate one-use script
 permission. The prompt shows the exact source and HTTPS origin, names the task

@@ -3,6 +3,7 @@ import { CodeLanguageRefusalReason } from "@octant/contracts/code-language";
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import {
+  decideAgentReadThroughRepositoryTooling,
   decideLanguageServerLaunch,
   type LanguageServerHostPlatform,
   type LanguageServerLaunchDecision,
@@ -128,6 +129,37 @@ describe("language server launch policy", () => {
         shellCommandApproval: "absent",
       }),
     ).toEqual({ status: "refused", reason: "approval-required" });
+  });
+
+  it("lets an agent read through a repo-tooling server only while one runs under an approval, and never in Plan", () => {
+    const running = {
+      posture: "approval-gated",
+      platform: "linux",
+      server: "running",
+      shellCommandApproval: "granted",
+    } as const;
+    for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      expect(decideAgentReadThroughRepositoryTooling({ ...running, posture })).toEqual({
+        status: "read",
+      });
+    }
+    expect(decideAgentReadThroughRepositoryTooling({ ...running, posture: "plan" })).toEqual({
+      status: "refused",
+      reason: "plan-read-only",
+    });
+    // Starting one stays the person's act at the machine, at every level.
+    for (const posture of postures.filter((candidate) => candidate !== "plan")) {
+      expect(
+        decideAgentReadThroughRepositoryTooling({ ...running, posture, server: "not-running" }),
+      ).toEqual({ status: "refused", reason: "local-host-required" });
+    }
+    expect(
+      decideAgentReadThroughRepositoryTooling({ ...running, shellCommandApproval: "absent" }),
+    ).toEqual({ status: "refused", reason: "approval-required" });
+    expect(decideAgentReadThroughRepositoryTooling({ ...running, platform: "windows" })).toEqual({
+      status: "refused",
+      reason: "unsupported-platform",
+    });
   });
 
   it("refuses every class on a platform without a confinement backend", () => {

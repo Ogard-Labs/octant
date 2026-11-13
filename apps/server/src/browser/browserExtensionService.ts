@@ -157,6 +157,8 @@ export class BrowserExtensionService {
     windowId: WindowId,
     caller: BrowserExtensionsCaller,
     command: BrowserExtensionsCommand,
+    /** Who asked, as the route resolved them; absent, the host's own person. */
+    actor?: EventActorValue,
   ): Promise<BrowserExtensionsResult> {
     // A paired device may see what is installed and where it runs; changing any of
     // it is the person's, at a window of this computer.
@@ -171,7 +173,7 @@ export class BrowserExtensionService {
           extensions: this.list(),
         });
       case "install":
-        return this.#install(windowId, command.receiptId);
+        return this.#install(windowId, command.receiptId, actor);
       case "import-sources":
         return decodeBrowserExtensionsResult({
           kind: "browser-extension-import-sources",
@@ -181,17 +183,26 @@ export class BrowserExtensionService {
               : publicExtensionSources(listInstalledExtensionSources(this.#options.importHome)),
         });
       case "import":
-        return this.#import(command.browser, command.sourceProfile, command.sourceExtensionId);
+        return this.#import(
+          command.browser,
+          command.sourceProfile,
+          command.sourceExtensionId,
+          actor,
+        );
       case "enable":
-        return this.#enable(command.extensionId, command.profile, command.contentHash);
+        return this.#enable(command.extensionId, command.profile, command.contentHash, actor);
       case "disable":
-        return this.#disable(command.extensionId, command.profile);
+        return this.#disable(command.extensionId, command.profile, actor);
       case "remove":
-        return this.#remove(command.extensionId);
+        return this.#remove(command.extensionId, actor);
     }
   }
 
-  async #install(windowId: WindowId, receiptId: string): Promise<BrowserExtensionsResult> {
+  async #install(
+    windowId: WindowId,
+    receiptId: string,
+    actor: EventActorValue | undefined,
+  ): Promise<BrowserExtensionsResult> {
     if ((await this.#options.runtime.nativeAvailable?.()) !== true) {
       return refused("extension-unsupported", "Extensions need the Octant app on this Mac.");
     }
@@ -215,7 +226,7 @@ export class BrowserExtensionService {
     } catch {
       return refused("invalid", "The folder's manifest.json is not valid JSON.");
     }
-    return this.#installFolder(folder, manifest, undefined);
+    return this.#installFolder(folder, manifest, undefined, actor);
   }
 
   /**
@@ -228,6 +239,7 @@ export class BrowserExtensionService {
     browser: ExtensionImportBrowserId,
     sourceProfile: string,
     sourceExtensionId: string,
+    actor: EventActorValue | undefined,
   ): Promise<BrowserExtensionsResult> {
     if ((await this.#options.runtime.nativeAvailable?.()) !== true) {
       return refused("extension-unsupported", "Extensions need the Octant app on this Mac.");
@@ -245,13 +257,14 @@ export class BrowserExtensionService {
     if (candidate.unsupportedReason !== undefined) {
       return refused("extension-unsupported", candidate.unsupportedReason);
     }
-    return this.#installFolder(candidate.folder, candidate.manifest, browser);
+    return this.#installFolder(candidate.folder, candidate.manifest, browser, actor);
   }
 
   async #installFolder(
     folder: string,
     manifest: unknown,
     importedFrom: ExtensionImportBrowserId | undefined,
+    actor: EventActorValue | undefined,
   ): Promise<BrowserExtensionsResult> {
     const decision = readExtensionManifest(manifest);
     if (decision.kind === "refused") return refused(decision.reason, decision.message);
@@ -309,6 +322,7 @@ export class BrowserExtensionService {
       updated
         ? decodeBrowserExtensionUpdated({ kind: "browser-extension-updated", ...payload })
         : decodeBrowserExtensionInstalled({ kind: "browser-extension-installed", ...payload }),
+      actor,
     );
     const extension = this.#summary(extensionId);
     if (extension === undefined) return refused("invalid", "That folder could not be installed.");
@@ -329,6 +343,7 @@ export class BrowserExtensionService {
     extensionId: BrowserExtensionId,
     profile: StoredBrowserProfile,
     contentHash: string,
+    actor: EventActorValue | undefined,
   ): Promise<BrowserExtensionsResult> {
     const extension = this.#summary(extensionId);
     if (extension === undefined) return refused("not-found", "That extension is not installed.");
@@ -353,6 +368,7 @@ export class BrowserExtensionService {
         profile,
         contentHash,
       }),
+      actor,
     );
     await this.#syncProfiles([profile]);
     return this.#changed(extensionId);
@@ -361,6 +377,7 @@ export class BrowserExtensionService {
   async #disable(
     extensionId: BrowserExtensionId,
     profile: StoredBrowserProfile,
+    actor: EventActorValue | undefined,
   ): Promise<BrowserExtensionsResult> {
     if (this.#summary(extensionId) === undefined) {
       return refused("not-found", "That extension is not installed.");
@@ -369,18 +386,23 @@ export class BrowserExtensionService {
       extensionId,
       BROWSER_EXTENSION_EVENT_NAMES.disabled,
       decodeBrowserExtensionDisabled({ kind: "browser-extension-disabled", extensionId, profile }),
+      actor,
     );
     await this.#syncProfiles([profile]);
     return this.#changed(extensionId);
   }
 
-  async #remove(extensionId: BrowserExtensionId): Promise<BrowserExtensionsResult> {
+  async #remove(
+    extensionId: BrowserExtensionId,
+    actor: EventActorValue | undefined,
+  ): Promise<BrowserExtensionsResult> {
     const extension = this.#summary(extensionId);
     if (extension === undefined) return refused("not-found", "That extension is not installed.");
     this.#append(
       extensionId,
       BROWSER_EXTENSION_EVENT_NAMES.removed,
       decodeBrowserExtensionRemoved({ kind: "browser-extension-removed", extensionId }),
+      actor,
     );
     rmSync(this.#folderOf(extensionId), { recursive: true, force: true });
     await this.#syncProfiles([...extension.enabledIn, ...extension.needsConfirmation]);
@@ -444,7 +466,14 @@ export class BrowserExtensionService {
     }
   }
 
-  #append(extensionId: BrowserExtensionId, eventName: string, payload: unknown): void {
+  #append(
+    extensionId: BrowserExtensionId,
+    eventName: string,
+    payload: unknown,
+    // What the host does on its own (a Project's profile going away) names
+    // the service's actor; a person's change names who asked.
+    actor: EventActorValue = this.#options.actor,
+  ): void {
     const aggregateId = decodeAggregateId(aggregateUuid(extensionId));
     const current = this.#options.journal
       .aggregateVersions(BROWSER_EXTENSION_AGGREGATE)
@@ -458,7 +487,7 @@ export class BrowserExtensionService {
           eventName: decodeEventName(eventName),
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#options.uuid()),
-          actor: decodeEventActor(this.#options.actor),
+          actor: decodeEventActor(actor),
           occurredAt: decodeTimestamp(this.#options.clock()),
           payload,
         },

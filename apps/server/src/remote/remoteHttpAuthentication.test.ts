@@ -87,6 +87,13 @@ const signOutRoute: RemoteRouteDefinition = {
   methods: ["POST"],
   allowQuery: false,
 };
+const ownDeviceRoute: RemoteRouteDefinition = {
+  id: "remote-auth-device",
+  match: { kind: "exact", path: "/api/remote/auth/device" },
+  surface: "authenticated-product",
+  methods: ["GET"],
+  allowQuery: false,
+};
 const rotateKeyRoute: RemoteRouteDefinition = {
   id: "remote-auth-rotate-key",
   match: { kind: "exact", path: "/api/remote/auth/rotate-key" },
@@ -122,6 +129,7 @@ interface SetupOptions {
    * fail-closed behavior.
    */
   readonly skipRequiredSecureBundle?: boolean;
+  readonly deviceAdmittedBy?: (deviceId: string) => "host-person" | "hub-roster";
 }
 
 function setup(options: SetupOptions = {}) {
@@ -267,6 +275,9 @@ function setup(options: SetupOptions = {}) {
         }
       : {}),
     ...(options.productDispatch !== undefined ? { productDispatch: options.productDispatch } : {}),
+    ...(options.deviceAdmittedBy === undefined
+      ? {}
+      : { deviceAdmittedBy: options.deviceAdmittedBy }),
   });
   return {
     connection,
@@ -629,6 +640,60 @@ describe("remote HTTP authentication boundary", () => {
     }
     expect(dispatched[0]?.forwardedBody).toBeNull();
     connection.close();
+  });
+
+  it("hands dispatch who let the device on, read from the host's own record and never from the request", async () => {
+    for (const admittedBy of ["host-person", "hub-roster"] as const) {
+      const asked: string[] = [];
+      const { auth, privateKey, dispatched, connection } = setup({
+        withDispatch: true,
+        deviceAdmittedBy: (asking) => {
+          asked.push(asking);
+          return admittedBy;
+        },
+      });
+      const { session } = await issueSessionOverHttp(auth, privateKey);
+
+      const response = await auth.handleAuthenticated(
+        productRequest(session, privateKey, { method: "GET" }),
+        transport,
+      );
+
+      expect(response.status).toBe(200);
+      expect(asked).toEqual([deviceId]);
+      expect(dispatched[0]?.principal).toMatchObject({
+        kind: "remote-device",
+        deviceId,
+        admittedBy,
+      });
+      expect(Object.isFrozen(dispatched[0]?.principal)).toBe(true);
+      connection.close();
+    }
+  });
+
+  it("tells a device whether its session acts as the host's own person, from the host's record", async () => {
+    for (const [admittedBy, expected] of [
+      ["host-person", true],
+      ["hub-roster", false],
+      [undefined, false],
+    ] as const) {
+      const { auth, privateKey, connection } = setup({
+        withSelfService: true,
+        withDispatch: true,
+        ...(admittedBy === undefined ? {} : { deviceAdmittedBy: () => admittedBy }),
+      });
+      const { session } = await issueSessionOverHttp(auth, privateKey);
+
+      const response = await auth.handleAuthenticated(
+        productRequest(session, privateKey, { method: "GET", target: "/api/remote/auth/device" }),
+        transport,
+        ownDeviceRoute,
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ deviceId, actsAsHostPerson: expected });
+      connection.close();
+    }
   });
 
   it("requires exact CSRF and command metadata on mutations and forwards body bytes unchanged", async () => {

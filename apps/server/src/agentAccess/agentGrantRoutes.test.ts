@@ -111,7 +111,7 @@ describe("agent grant routes", () => {
     expect(executed).toEqual([
       {
         command: { kind: "revoke", grantId, stopRunningTurns: true },
-        actor: expect.objectContaining({ kind: "remote-device", deviceId }),
+        actor: { kind: "remote-device", actorId: deviceId, deviceId },
       },
     ]);
     expect(stopped).toEqual([grantId]);

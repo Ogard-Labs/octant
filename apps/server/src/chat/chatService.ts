@@ -108,6 +108,7 @@ import {
   type ProviderModelId,
   type ProviderObservedState,
   type ProviderProbeResult,
+  type EventActor,
   type MentionableThreadId,
   type PendingRequest,
   type ProviderServiceLimits,
@@ -618,6 +619,11 @@ export interface ChatServiceExecutionContext {
    * (usage-limit recovery) that have no window to attach.
    */
   readonly windowId?: WindowId;
+  /**
+   * Who a thread or settings change is journaled as: the paired device the
+   * route resolved it for. Absent, the change is the local person's.
+   */
+  readonly actor?: EventActor;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -1717,10 +1723,10 @@ export class ChatService {
         case "change-chat-instructions":
         case "set-chat-thread-restart-continuation":
           return await this.#withThreadAdmission(command.threadId, () =>
-            this.#updateThread(command),
+            this.#updateThread(command, executionContext?.actor),
           );
         case "update-chat-settings":
-          return await this.#updateThread(command);
+          return await this.#updateThread(command, executionContext?.actor);
         case "send-chat-turn":
           return await this.#sendTurn(command, executionContext);
         case "deliver-chat-agent-result":
@@ -2395,7 +2401,10 @@ export class ChatService {
     return { kind: "thread-created", thread };
   }
 
-  async #updateThread(command: ReturnType<typeof decodeChatCommand>): Promise<ChatCommandResult> {
+  async #updateThread(
+    command: ReturnType<typeof decodeChatCommand>,
+    actor?: EventActor,
+  ): Promise<ChatCommandResult> {
     this.#assertReady();
     const threadId = decodeChatThreadId(
       "threadId" in command ? command.threadId : CHAT_SETTINGS_AGGREGATE_ID,
@@ -2530,7 +2539,13 @@ export class ChatService {
       this.#persistence.journal.append({
         aggregate: { aggregateType: "chat-settings", aggregateId: CHAT_SETTINGS_AGGREGATE_ID },
         expectedVersion: command.expectedVersion,
-        events: [this.#pending("chat.settings-updated@1", { kind: "settings-updated", settings })],
+        events: [
+          this.#pending(
+            "chat.settings-updated@1",
+            { kind: "settings-updated", settings },
+            actor === undefined ? undefined : { actor },
+          ),
+        ],
       });
       return { kind: "settings-updated", settings };
     }
@@ -2757,7 +2772,13 @@ export class ChatService {
     this.#persistence.journal.append({
       aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
       expectedVersion: command.expectedVersion,
-      events: [this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: next })],
+      events: [
+        this.#pending(
+          "chat.thread-updated@1",
+          { kind: "thread-updated", thread: next },
+          actor === undefined ? undefined : { actor },
+        ),
+      ],
     });
     return { kind: "thread-updated", thread: next };
   }
@@ -7410,6 +7431,8 @@ export class ChatService {
       // Everything a person asks for is theirs; only the host's own timer
       // writes as the system, so a journal reader can tell the two apart.
       readonly actorKind?: "local-user" | "system";
+      /** The paired device a person's change came from, in place of the local person. */
+      readonly actor?: EventActor;
     },
   ) {
     return {
@@ -7418,7 +7441,7 @@ export class ChatService {
       eventVersion: 1,
       hostId: LOCAL_HOST_ID,
       correlationId: options?.correlationId ?? decodeCorrelationId(this.#uuid()),
-      actor: {
+      actor: options?.actor ?? {
         kind: options?.actorKind ?? ("local-user" as const),
         actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
       },

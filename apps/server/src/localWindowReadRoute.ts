@@ -1,4 +1,6 @@
 import type { WindowId } from "@octant/contracts";
+import type { PrincipalKind } from "@octant/domain/remote-access-policy";
+import { principalActsAsHostPerson, principalAuthorityKind } from "./clientPrincipal";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -17,25 +19,18 @@ export interface LocalWindowReadRouteOptions<T> {
   readonly noun: string;
   /** The plural that opens an unavailable sentence, such as "Pending requests". */
   readonly plural: string;
-  readonly read: (windowId: WindowId, reader: "local-window" | "remote-device") => Promise<T>;
-  /**
-   * Admits a paired device, which then reads under its own scope: the read
-   * must list only what that scope could itself open or answer. Absent, the
-   * read spans what the host's own windows reach and a device is refused.
-   */
-  readonly pairedDevices?: "admitted";
+  readonly read: (windowId: WindowId, reader: PrincipalKind) => Promise<T>;
   readonly decodeFailure: (failure: LocalWindowReadFailure) => unknown;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
 
 /**
- * A parameterless GET that only a local window may make, unless the read
- * admits paired devices. The path of a local-only read sits outside every
- * prefix the remote listener forwards, and a request that still arrives
- * carrying a paired device's principal is refused here, because these reads
- * span every Project the host's own windows can reach and a paired device's
- * reach is narrower.
+ * A parameterless GET that only the host's own person may make: at a local
+ * window, or on a device that person paired (maintainer decision,
+ * 2026-11-12). These reads span every Project the caller's own scope can
+ * reach, so a hub-introduced device or an agent grant, whose reach is
+ * narrower, is refused here even when its request arrives.
  */
 export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptions<T>) {
   const now = options.now ?? Date.now;
@@ -74,18 +69,15 @@ export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptio
     }
 
     let windowId: WindowId;
-    let reader: "local-window" | "remote-device";
+    let reader: PrincipalKind;
     try {
       const context = authenticateRoutePrincipal({
         request,
         store: options.windowAuthorityStore,
         now: now(),
       });
-      reader = context.principal.kind === "local-window" ? "local-window" : "remote-device";
-      if (
-        context.principal.kind !== "local-window" &&
-        !(options.pairedDevices === "admitted" && context.principal.kind === "remote-device")
-      ) {
+      reader = principalAuthorityKind(context.principal);
+      if (!principalActsAsHostPerson(context.principal)) {
         return fail(
           { code: "unauthorized", message: `${options.plural} are read at a local window.` },
           403,

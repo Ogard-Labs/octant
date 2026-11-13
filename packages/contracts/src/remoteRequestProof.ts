@@ -172,6 +172,15 @@ export const RemoteOwnDeviceMetadataV1 = Schema.Struct({
   state: Schema.Literal("active", "revoked", "expired"),
   sessionIdleExpiresAt: Schema.optional(UtcTimestamp),
   sessionAbsoluteExpiresAt: Schema.optional(UtcTimestamp),
+  /**
+   * Whether this session acts as the host's own person: true only for a device
+   * that person paired, which the host lets do what a local window does. A
+   * device the hub's roster introduced and an agent grant's session read
+   * false. Absent from a host built before it said so, which a client reads as
+   * false. It describes what the host will accept and grants nothing: the host
+   * decides each request from its own record.
+   */
+  actsAsHostPerson: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type RemoteOwnDeviceMetadataV1 = typeof RemoteOwnDeviceMetadataV1.Type;
 

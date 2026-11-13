@@ -21,6 +21,7 @@ import {
   BrowserActionKind,
   BrowserAuditKind,
   BrowserColorScheme,
+  BrowserDialogAnswer,
   BrowserObservationPart,
   decodeBrowserWaitFor,
   decodeImportedCookie,
@@ -679,6 +680,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "diagnosticsWarnings",
     "auditKind",
     "downloads",
+    "dialog",
     "downloadLimits",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
@@ -703,6 +705,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
           (file) => typeof file === "string" && file.length <= 4096 && file.startsWith("/"),
         ))) &&
     (value.downloads === undefined || value.downloads === "hold") &&
+    (value.dialog === undefined || Schema.is(BrowserDialogAnswer)(value.dialog)) &&
     (value.downloadLimits === undefined || isDownloadLimits(value.downloadLimits)) &&
     (value.waitFor === undefined || isWaitFor(value.waitFor)) &&
     (value.diagnosticsSince === undefined ||

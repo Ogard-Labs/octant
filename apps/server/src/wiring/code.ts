@@ -1163,10 +1163,11 @@ export function wireCode(deps: CodeDependencies) {
       merge: projectPullRequestPorts.merge,
       requiredChecks: (request, signal) =>
         projectPullRequestPorts.actions.requiredChecks(request, signal),
-      recordMerge: (record) =>
+      recordMerge: (record, actor) =>
         journalPullRequestMerge(persistence.journal, record, {
           uuid: randomUUID,
           clock: () => new Date().toISOString(),
+          ...(actor === undefined ? {} : { actor }),
         }),
       cacheStats,
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
@@ -1182,12 +1183,13 @@ export function wireCode(deps: CodeDependencies) {
     const projectPullRequestActionService = new CodeProjectPullRequestActionService({
       authority: projectPullRequestService,
       forge: projectPullRequestPorts.actions,
-      merge: (windowId, command, signal, caller) =>
-        projectPullRequestService.merge(windowId, command, signal, caller),
-      record: (record) =>
+      merge: (windowId, command, signal, caller, actor) =>
+        projectPullRequestService.merge(windowId, command, signal, caller, actor),
+      record: (record, actor) =>
         journalPullRequestAction(persistence.journal, record, {
           uuid: randomUUID,
           clock: () => new Date().toISOString(),
+          ...(actor === undefined ? {} : { actor }),
         }),
     });
     onGithubPullRequestsUnreadable(() => projectPullRequestService.revokeGithub());

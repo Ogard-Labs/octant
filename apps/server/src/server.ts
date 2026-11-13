@@ -113,6 +113,7 @@ import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
 import { createAgentGrantRouteSlot } from "./agentAccess/agentGrantRoutes";
+import { createPairedDeviceRouteSlot } from "./remote/pairedDeviceRouteSlot";
 import { createThreadMoveHolds } from "./hub/threadMoveHolds";
 import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
@@ -265,6 +266,7 @@ export function startOctantServer(
       codeSessionAuthority,
       extensionToolApprovalService,
       isPairedDeviceScope,
+      isRestrictedDeviceScope,
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
@@ -572,7 +574,7 @@ export function startOctantServer(
       extensionToolApprovalService,
       externalContentIngestionStore,
       githubExtensionSnapshot,
-      isPairedDeviceScope,
+      isRestrictedDeviceScope,
       latencyStats,
       managedWorktreeReceipts,
       nativeHarnessRouter,
@@ -999,6 +1001,7 @@ export function startOctantServer(
       extensionLifecycleService,
       extensionPackageStore,
       managedWorktreeReceipts,
+      externalContentIngestionStore,
       options,
       persistence,
       projectRootPort,
@@ -1740,8 +1743,10 @@ export function startOctantServer(
     });
     yield* Effect.addFinalizer(() => Effect.promise(() => cloudSessions.service.close()));
     const agentGrantRouteSlot = createAgentGrantRouteSlot();
+    const pairedDeviceRouteSlot = createPairedDeviceRouteSlot();
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
       agentGrantRoutes: agentGrantRouteSlot.routes,
+      pairedDeviceRoutes: pairedDeviceRouteSlot.routes,
       conversationInputRoutes,
       providerCloudSessionRoutes: cloudSessions.routes,
       credentialRequestRoutes,
@@ -1868,6 +1873,7 @@ export function startOctantServer(
     } = wireRemote({
       restartRecovery,
       agentGrantRouteSlot,
+      pairedDeviceRouteSlot,
       workRequestRuntime,
       workRequestService,
       chatService,

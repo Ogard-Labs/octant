@@ -14,6 +14,7 @@ import {
   type AgentGrantView,
 } from "@octant/contracts";
 import { useCallback, useId, useRef, useState } from "react";
+import { useFullAccessWarning } from "../code/FullAccessWarning";
 import { failureMessage } from "../lib/failureMessage";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
@@ -38,6 +39,7 @@ const LEVEL_LABELS: Readonly<Record<AgentGrantLevel, string>> = {
   "accept-edits": "Accept edits",
   auto: "Auto",
   plan: "Plan",
+  "full-access": "Full access",
 };
 const MODE_LABELS: Readonly<Record<AgentGrantMode, string>> = {
   chat: "Chat",
@@ -180,7 +182,7 @@ export function AgentAccessSettingsSection(props: {
           description={
             administration === undefined
               ? "Agents on other computers on your network that may start work here. You can revoke one from this device; make or change a grant on the computer running Octant."
-              : "Let an agent on another computer on your network, such as a bot or a coding tool, start and follow work here, within what you choose. Its approvals wait for you, and it never gets Full access."
+              : "Let an agent on another computer on your network, such as a bot or a coding tool, start and follow work here, within what you choose. Its approvals wait for you, and it gets Full access only when you choose it for the grant."
           }
           label="Agents on other computers"
           scope="app"
@@ -435,6 +437,9 @@ function GrantForm(props: {
     scope?.modes ?? ["code", "work"],
   );
   const [level, setLevel] = useState<AgentGrantLevel>(scope?.highestLevel ?? "ask-first");
+  // A grant reaches several Projects, so its Full access is this machine's
+  // choice: the warning is the one the machine's own default shows, once.
+  const fullAccessWarning = useFullAccessWarning("machine");
   const [threads, setThreads] = useState<"own" | "project">(scope?.threads ?? "own");
   const [answers, setAnswers] = useState(scope?.tools.includes("answer_question") ?? false);
   const [direct, setDirect] = useState(scope?.direct ?? false);
@@ -516,12 +521,13 @@ function GrantForm(props: {
           id={`${id}-level`}
           onValueChange={(value) => {
             const next = AGENT_GRANT_LEVELS.find((entry) => entry === value);
-            if (next !== undefined) setLevel(next);
+            if (next !== undefined) fullAccessWarning.guard(next, () => setLevel(next));
           }}
           options={AGENT_GRANT_LEVELS.map((entry) => ({ id: entry, label: LEVEL_LABELS[entry] }))}
           value={level}
         />
       </OctantField>
+      {fullAccessWarning.dialog}
       <OctantField>
         <OctantFieldLabel htmlFor={`${id}-threads`}>
           Threads it may read and continue

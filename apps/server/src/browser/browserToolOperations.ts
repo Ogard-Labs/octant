@@ -14,6 +14,7 @@ import {
   BROWSER_DEVICE_PRESETS,
   BROWSER_RESIZE_BOUNDS,
   BrowserColorScheme,
+  BrowserDialogAnswer,
   MAX_BROWSER_FLOW_NAME_LENGTH,
   type BrowserAuditKind,
   MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
@@ -188,6 +189,8 @@ export const MAX_BROWSER_TOOL_STEPS = 10;
 export type BrowserToolInput = {
   readonly expectedObservationRevision?: number;
   readonly include?: BrowserToolInclude;
+  /** The answer for the first dialog this action raises; see `BrowserDialogAnswer`. */
+  readonly dialog?: BrowserDialogAnswer;
 } & (
   | {
       readonly operation: "navigate";
@@ -348,9 +351,13 @@ function parseBrowserToolRecord(
   // that changes the page takes it.
   const acts = ACTING_OPERATIONS.has(String(operation));
   if (include !== undefined && !acts) return undefined;
+  // Only an action can raise a dialog of its own, so only one takes an answer.
+  if (record.dialog !== undefined && (!acts || !Schema.is(BrowserDialogAnswer)(record.dialog)))
+    return undefined;
   const common = {
     ...(revision === undefined ? {} : { expectedObservationRevision: revision }),
     ...(include === undefined ? {} : { include }),
+    ...(record.dialog === undefined ? {} : { dialog: record.dialog }),
   };
   const keys = Object.keys(record);
   const only = (...allowed: ReadonlyArray<string>) =>
@@ -358,7 +365,7 @@ function parseBrowserToolRecord(
       (key) =>
         key === "operation" ||
         key === "expectedObservationRevision" ||
-        (key === "include" && acts) ||
+        ((key === "include" || key === "dialog") && acts) ||
         allowed.includes(key),
     );
   const text = (key: string, max: number) =>
@@ -748,6 +755,7 @@ export function browserToolAction(
       ? {}
       : { expectedObservationRevision: input.expectedObservationRevision }),
     ...(input.include === undefined ? {} : { include: input.include }),
+    ...(input.dialog === undefined ? {} : { dialog: input.dialog }),
   } as const;
   const element = (named: Partial<BrowserToolTarget>) =>
     named.ref !== undefined

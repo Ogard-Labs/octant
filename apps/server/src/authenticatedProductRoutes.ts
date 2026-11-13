@@ -1,6 +1,10 @@
 import { authorizePrincipalAction } from "@octant/domain";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
-import type { ClientPrincipal } from "./clientPrincipal";
+import {
+  principalActsAsHostPerson,
+  principalAuthorityKind,
+  type ClientPrincipal,
+} from "./clientPrincipal";
 import {
   bindPrincipalRouteContext,
   resolvePrincipalRouteContext,
@@ -32,12 +36,18 @@ export function createAuthenticatedProductDispatch(
   options: AuthenticatedProductDispatchOptions,
 ): (handoff: AuthenticatedProductDispatchHandoff) => Promise<Response | undefined> {
   return async (handoff) => {
-    const action = classifyProductAction(handoff.request);
-    const decision = authorizePrincipalAction({
-      principalKind: handoff.principal.kind,
-      action: action ?? "",
-    });
-    if (decision.kind === "deny") return unauthorizedResponse();
+    // A device the host's own person paired is that person: every route the
+    // private listener forwards reaches its handler, as it does for a local
+    // window, and the handler's own authority checks decide. Any other device
+    // session is held to the catalogue, where an uncatalogued action fails closed.
+    if (!principalActsAsHostPerson(handoff.principal)) {
+      const action = classifyProductAction(handoff.request);
+      const decision = authorizePrincipalAction({
+        principalKind: principalAuthorityKind(handoff.principal),
+        action: action ?? "",
+      });
+      if (decision.kind === "deny") return unauthorizedResponse();
+    }
 
     const context = resolvePrincipalRouteContext({
       request: handoff.request,
@@ -88,8 +98,9 @@ export function classifyProductAction(request: Request): string | undefined {
   }
   if (path.startsWith("/api/code/")) {
     // Debugging runs the program on the host and shows what it holds, which
-    // stays with the person at the machine (decision DB7): no remote action
-    // starts, controls, or observes a session, whatever the method.
+    // stays with the host's own person. A device that person paired never
+    // reaches this catalogue; for every device session that does, no remote
+    // action starts, controls, or observes a session, whatever the method.
     if (path.startsWith("/api/code/debug/")) return undefined;
     if (method === "POST" && path === "/api/code/board") return "project.overview.read";
     if (method === "POST" && path === "/api/code/evidence/batch") {
@@ -234,11 +245,10 @@ export function classifyProductAction(request: Request): string | undefined {
     return undefined;
   }
   // The Reply detail default and the threads' own levels: a presentation read,
-  // never a write. Changing either is the shell route's, which a device never reaches.
+  // never a write. Changing either is a settings replacement: a window's on the
+  // shell route, a person-paired device's on the shell settings route, which
+  // has no catalogued action and so stays closed to every other device.
   if (path === "/api/conversation-inputs")
-    return method === "GET" ? "project.overview.read" : undefined;
-  // Needs you is a read of what waits; every answer is its own route's action.
-  if (path === "/api/pending-requests")
     return method === "GET" ? "project.overview.read" : undefined;
   // The queue serves all three modes from one path and names the mode in the
   // command, so admission is at the least of their send actions. The queue
@@ -306,7 +316,8 @@ export function classifyProductAction(request: Request): string | undefined {
     // Every Usage read is POST by construction — the routes answer 405 to any
     // other method — so admitting only GET/HEAD left the whole surface
     // unreadable from a paired browser. Reset and retain purge the host-wide
-    // ledger and stay denied for a remote device. Admission is still only
+    // ledger and the local history reads the home folder: none has an action
+    // here, so each stays denied for a device held to this catalogue. Admission is still only
     // forwarding: the route authenticates the window and scopes the read to
     // that window's Projects before answering.
     if (

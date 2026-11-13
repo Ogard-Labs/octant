@@ -20,6 +20,7 @@ import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import {
+  readDeviceApprovedByPerson,
   readDeviceRegistrations,
   RemoteAccessProjection,
 } from "../persistence/remoteAccessProjection";
@@ -267,6 +268,29 @@ describe("PairingDeviceLifecycleService", () => {
     void later;
   });
 
+  it("proves a device the person approved from its approval record, and never one the hub's roster introduced or one with no record", () => {
+    const { service, connection } = createService({
+      randomBytes: (size) => Uint8Array.from({ length: size }, (_, index) => index + 11),
+    });
+    const ticket = service.createTicket({ sourceClass: "lan-private" });
+    service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+    const approved = service.approveTicket({ ticketId: ticket.ticketId });
+    const introduced = service.admitIntroducedDevice({
+      devicePublicKey: generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+        .publicKey.export({ type: "spki", format: "pem" })
+        .toString(),
+      deviceLabel: "Guest phone",
+      origin: "https://mac.example.test",
+      sourceClass: "tailscale",
+    });
+
+    expect(readDeviceApprovedByPerson(connection, approved.device.deviceId)).toBe(true);
+    expect(readDeviceApprovedByPerson(connection, introduced.deviceId)).toBe(false);
+    expect(readDeviceApprovedByPerson(connection, "99999999-9999-4999-8999-999999999999")).toBe(
+      false,
+    );
+  });
+
   it("approves a claimed ticket into a durable device registration and denies duplicates", () => {
     const { service, connection, journal, projection } = createService({
       randomBytes: (size) => Uint8Array.from({ length: size }, (_, index) => index + 11),
@@ -315,6 +339,33 @@ describe("PairingDeviceLifecycleService", () => {
       clock: () => nowIso,
     });
     expect(readDeviceRegistrations(connection)).toHaveLength(1);
+  });
+
+  it("journals an approval, a denial and a rename made from a paired device as that device, and the device it approves is the person's", () => {
+    const { service, connection } = createService();
+    const approver = "71000000-0000-4000-8000-0000000000de";
+    const actor = { kind: "remote-device", actorId: approver, deviceId: approver } as never;
+    const ticket = service.createTicket({ sourceClass: "lan-private" });
+    service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+    const approved = service.approveTicket({ ticketId: ticket.ticketId, actor });
+    service.renameDevice({ deviceId: approved.device.deviceId, deviceLabel: "Phone", actor });
+    const denied = service.createTicket({ sourceClass: "lan-private" });
+    service.claimTicket(claimInput(denied.ticketId, denied.ticketProof));
+    service.denyTicket({ ticketId: denied.ticketId, reasonCode: "user-denied", actor });
+
+    const actors = (
+      connection
+        .prepare(
+          "SELECT actor_json FROM event_journal WHERE event_name LIKE 'remote.%' ORDER BY global_sequence DESC LIMIT 4",
+        )
+        .all() as ReadonlyArray<{ actor_json: string }>
+    ).map((row) => JSON.parse(row.actor_json) as { kind: string; deviceId?: string });
+    expect(actors).toHaveLength(4);
+    for (const recorded of actors) {
+      expect(recorded).toMatchObject({ kind: "remote-device", deviceId: approver });
+    }
+    expect(readDeviceApprovedByPerson(connection, approved.device.deviceId)).toBe(true);
+    connection.close();
   });
 
   it("denies a claimed ticket without creating a device and keeps denial idempotent", () => {

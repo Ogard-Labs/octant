@@ -12,6 +12,7 @@ import {
   type AutomationThreadId,
   type AutomationTrigger,
   type AutomationWeeklyResolution,
+  type EventActor,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { AutomationEventSourcePreparation } from "./automationEventSources";
@@ -24,6 +25,7 @@ import {
   resolveNextAutomationOccurrence,
   validateAutomationDefinition,
 } from "@octant/domain";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { AutomationEventStore, AutomationEventStoreError } from "./automationEventStore";
 import type {
   AutomationFileSourcePreparation,
@@ -113,7 +115,7 @@ export class AutomationCommandService {
     if (
       (command.kind === "create-automation" || command.kind === "update-automation") &&
       command.definition.trigger.kind === "integration-event" &&
-      (command.principal.kind !== "local-window" ||
+      (!actsAsHostPerson(command.principal) ||
         provenance !== undefined ||
         eventSource === undefined ||
         !eventSource.current() ||
@@ -121,7 +123,7 @@ export class AutomationCommandService {
     )
       return failure(
         "blocked",
-        "Choose and verify a connected event source from a window on this host.",
+        "Choose and verify a connected event source from a window on this host or a device you paired there.",
       );
 
     try {
@@ -297,6 +299,7 @@ export class AutomationCommandService {
       }),
     );
     this.#store.appendDefinitionCreated({
+      ...personActor(command.principal),
       automation: definition,
       ...(eventSource?.checkpoint === undefined ? {} : { eventSource: eventSource.checkpoint }),
       ...(command.definition.trigger.kind === "file-arrival" && source !== undefined
@@ -385,6 +388,7 @@ export class AutomationCommandService {
           };
     }
     this.#store.appendDefinitionUpdated({
+      ...personActor(command.principal),
       automation: updated,
       ...(eventSource?.checkpoint === undefined ? {} : { eventSource: eventSource.checkpoint }),
       ...(command.definition.trigger.kind === "file-arrival" && configuredSource !== undefined
@@ -437,6 +441,7 @@ export class AutomationCommandService {
       }),
     );
     this.#store.appendDefinitionLifecycleChanged({
+      ...personActor(command.principal),
       automation: changed,
       previousLifecycle: current.lifecycle,
       expectedVersion: current.version,
@@ -527,7 +532,7 @@ export class AutomationCommandService {
       now: this.#now(),
     });
     try {
-      this.#store.appendRunCreated({ run });
+      this.#store.appendRunCreated({ ...personActor(command.principal), run });
     } catch (error) {
       // A crash between append and reply can race the retry; the journal is
       // authoritative, so a conflict resolves to the committed receipt.
@@ -580,6 +585,7 @@ export class AutomationCommandService {
     }
     const now = this.#now();
     this.#store.appendRunCancellation({
+      ...personActor(command.principal),
       automationId: command.automationId,
       runId: run.id,
       previousLifecycle: run.lifecycle,
@@ -634,7 +640,7 @@ export class AutomationCommandService {
     source: AutomationFileSourcePreparation | undefined,
   ): boolean {
     return (
-      command.principal.kind === "local-window" &&
+      actsAsHostPerson(command.principal) &&
       source !== undefined &&
       source.automationId === command.automationId &&
       source.expectedVersion === command.expectedVersion &&
@@ -716,4 +722,22 @@ function isSchemaParseError(error: unknown): boolean {
     "name" in error &&
     (error as { readonly name?: unknown }).name === "ParseError"
   );
+}
+
+/**
+ * Whether a command comes from the host's own person: a window, or a device
+ * that person paired. File and event setup is theirs alone (maintainer
+ * decision, 2026-11-13).
+ */
+function actsAsHostPerson(principal: AutomationClientPrincipal): boolean {
+  return principal.kind === "local-window" || principal.admittedBy === "host-person";
+}
+
+/**
+ * Who a person's command is journaled as. A command carries the principal the
+ * route authenticated, never one the request supplied, so a paired device's
+ * routine names the device. A local window leaves the store's own actor.
+ */
+function personActor(principal: AutomationClientPrincipal): { readonly actor?: EventActor } {
+  return principal.kind === "remote-device" ? { actor: eventActorForPrincipal(principal) } : {};
 }

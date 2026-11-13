@@ -108,9 +108,9 @@ describe("Work file listing route", () => {
     expect(JSON.stringify(await response?.json())).not.toContain("summary.md");
   });
 
-  it("refuses a paired device before dispatching a server listing", async () => {
+  it("lists a server Work thread for a device the host's own person paired, and refuses a restricted device before dispatching", async () => {
     const store = new WindowAuthorityStore();
-    const serverList = vi.fn();
+    const serverList = vi.fn(async () => listedResult());
     const handler = createWorkFileListingRouteHandler({
       service: { list: vi.fn() } as never,
       persistence: { readProject: vi.fn() } as never,
@@ -119,24 +119,41 @@ describe("Work file listing route", () => {
       windowAuthorityStore: store,
       now: () => 0,
     });
-    const request = new Request(listingUrl);
-    bindPrincipalRouteContext(request, {
-      principal: {
-        kind: "remote-device",
-        deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
-        hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
-        credentialGeneration: 1,
-        origin: "https://octant.example",
-        protocolVersion: 1,
-        capabilityDigest: "b".repeat(64),
-        sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
-          "00000000-0000-4000-8000-00000000c003",
-        ),
-      },
-      scopeId: windowId,
-    });
-    expect((await handler(request))?.status).toBe(403);
+    const fromDevice = (admittedBy: "host-person" | "hub-roster", lifetime?: AbortSignal) => {
+      const request = new Request(listingUrl);
+      bindPrincipalRouteContext(request, {
+        principal: {
+          admittedBy,
+          kind: "remote-device",
+          deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
+          hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+            "00000000-0000-4000-8000-00000000c003",
+          ),
+        },
+        scopeId: windowId,
+        ...(lifetime === undefined ? {} : { abortSignal: lifetime }),
+      });
+      return handler(request);
+    };
+    expect((await fromDevice("hub-roster"))?.status).toBe(403);
     expect(serverList).not.toHaveBeenCalled();
+
+    const session = new AbortController();
+    const listed = await fromDevice("host-person", session.signal);
+    expect(listed?.status).toBe(200);
+    expect(serverList).toHaveBeenCalledWith(expect.objectContaining({ windowId, projectId }));
+
+    // A revoke ends the device session, which aborts its request lifetime.
+    serverList.mockImplementationOnce(async () => {
+      session.abort();
+      return listedResult();
+    });
+    expect((await fromDevice("host-person", session.signal))?.status).toBe(403);
   });
 
   it("lists the folder the window's Project is bound to", async () => {

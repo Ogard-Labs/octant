@@ -16,7 +16,7 @@ import {
   MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
 } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
-import { AggregateVersion } from "./events";
+import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
@@ -572,6 +572,18 @@ export const StandaloneSkillActivationState = Schema.Struct({
   reviewed: Schema.Boolean,
   trusted: Schema.Boolean,
   desiredEnabled: Schema.Boolean,
+  /**
+   * When a person last turned this skill on by hand. Absent for a skill that
+   * is on by default or by a file written before the field existed, so the
+   * host can tell a person's choice from a default when two same-named skills
+   * are both on.
+   */
+  chosenAt: Schema.optional(UtcTimestamp),
+  /**
+   * The Project's same-named skill the host turned this one off for. Kept
+   * until a person next switches either, so the notice survives a restart.
+   */
+  gaveWayTo: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
 }).annotations(strict);
 export type StandaloneSkillActivationState = typeof StandaloneSkillActivationState.Type;
 
@@ -614,15 +626,30 @@ export type RememberedBrowserProfileSite = typeof RememberedBrowserProfileSite.T
 /**
  * One "Always allow" answer to an agent's upload or download-save below Full
  * access: later transfers in that direction between that site and that
- * thread workspace do not ask. It never covers the other direction, another
- * site, or another workspace, and it lifts no path, size or type check.
+ * thread workspace, on a page in that Browser profile, do not ask. It never
+ * covers the other direction, another site, another workspace, or another
+ * profile, and it lifts no path, size or type check.
  */
 export const RememberedBrowserTransfer = Schema.Struct({
   direction: Schema.Literal("upload", "download"),
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
   /** The thread workspace on this host: a Work Project folder or a Code checkout. */
   workspaceRoot: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
-}).annotations(strict);
+  /** The stored profile the page was in. Absent for a Private page. */
+  profile: Schema.optional(StoredBrowserProfile),
+  /**
+   * Set on an answer given on a Private page, which covers Private pages
+   * alone. An entry with neither this nor `profile` was remembered before
+   * the page was recorded: it was given for the site and the folder on any
+   * page, which is what it covered then, so it still covers every profile
+   * and Private pages until the person forgets it. Narrowing it would ask
+   * again for what they already answered, and no entry written since can be
+   * mistaken for one.
+   */
+  privatePage: Schema.optional(Schema.Literal(true)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((entry) => entry.profile === undefined || entry.privatePage !== true));
 export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
 
 export const ShellSettings = Schema.Struct({
@@ -725,6 +752,12 @@ export const ShellSettings = Schema.Struct({
    * default). Turning the switch on records the choice explicitly.
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Whether the desktop app's quit keyboard shortcut needs a second press
+   * before it quits. On by default, including for a store from before the
+   * choice existed: the guard was always on then.
+   */
+  quitShortcutNeedsSecondPress: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   computerUse: Schema.optionalWith(ComputerUseSettings, {
     default: () => ({ enabled: true, automaticUpdates: false }),
   }),
@@ -1485,6 +1518,25 @@ export const decodeWorkspaceSurfaceDescriptor = Schema.decodeUnknownSync(
 );
 export const decodeWorkspaceSurfaceCatalog = Schema.decodeUnknownSync(WorkspaceSurfaceCatalog);
 export const decodeShellSettings = Schema.decodeUnknownSync(ShellSettings);
+
+/**
+ * The host's shell settings for a device the host's own person paired, which
+ * has no window on the host to bootstrap: the settings with the version a
+ * replacement must name, and the replacement itself.
+ */
+export const SHELL_SETTINGS_PATH = "/api/shell/settings";
+export const ShellSettingsReading = Schema.Struct({
+  settings: ShellSettings,
+  version: AggregateVersion,
+}).annotations(strict);
+export type ShellSettingsReading = typeof ShellSettingsReading.Type;
+export const decodeShellSettingsReading = Schema.decodeUnknownSync(ShellSettingsReading);
+export const ShellSettingsReplacement = Schema.Struct({
+  expectedVersion: AggregateVersion,
+  settings: ShellSettings,
+}).annotations(strict);
+export type ShellSettingsReplacement = typeof ShellSettingsReplacement.Type;
+export const decodeShellSettingsReplacement = Schema.decodeUnknownSync(ShellSettingsReplacement);
 export const decodeWorkspaceTab = Schema.decodeUnknownSync(WorkspaceTab);
 export const decodeWorkspaceLayoutNode = Schema.decodeUnknownSync(WorkspaceLayoutNode);
 export const decodeWindowWorkspace = Schema.decodeUnknownSync(WindowWorkspace);

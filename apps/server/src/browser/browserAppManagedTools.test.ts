@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
-import { browserAgentAvailability } from "@octant/domain";
+import { browserAgentAvailability, browserTransferRemembered } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,
@@ -1043,6 +1043,8 @@ describe("octant_browser profile argument", () => {
         readonly direction: string;
         readonly origin: string;
         readonly workspaceRoot: string;
+        readonly profile?: unknown;
+        readonly privatePage?: true;
       }>;
     } = {},
   ) {
@@ -1106,17 +1108,8 @@ describe("octant_browser profile argument", () => {
         request,
         isRemembered: (origin: string, profile: unknown) =>
           options.remembered?.(origin, profile) === true,
-        isTransferRemembered: (transfer: {
-          readonly direction: string;
-          readonly origin: string;
-          readonly workspaceRoot: string;
-        }) =>
-          (options.rememberedTransfers ?? []).some(
-            (entry) =>
-              entry.direction === transfer.direction &&
-              entry.origin === transfer.origin &&
-              entry.workspaceRoot === transfer.workspaceRoot,
-          ),
+        isTransferRemembered: (transfer: never) =>
+          browserTransferRemembered((options.rememberedTransfers ?? []) as never, transfer),
         isUnattendedScope: () => options.unattended === true,
         isPairedDevice: () => options.paired === true,
       } as never,
@@ -1430,6 +1423,50 @@ describe("octant_browser profile argument", () => {
           expect.objectContaining({ upload: expect.anything(), workspaceRoot: workspace }),
         );
       }
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("asks again for an upload on a page in another Browser profile than the one the person always allowed", async () => {
+    const { folder, workspace } = await projectFolder();
+    try {
+      const personal = { kind: "personal" };
+      const page = {
+        inspect: openPage(personal),
+        modelBindings: boundPage(),
+        uploadRoot: workspace,
+        defaultProfile: "personal" as const,
+      };
+      const upload = { operation: "upload", ref: "e1", files: ["report.txt"] };
+      const answer = {
+        direction: "upload",
+        origin: "https://example.com",
+        workspaceRoot: workspace,
+      };
+
+      const remembered = fixture({
+        ...page,
+        rememberedTransfers: [{ ...answer, profile: personal }],
+      });
+      expect((await remembered.run(upload)).isError).toBe(false);
+      expect(remembered.request).not.toHaveBeenCalled();
+
+      // The same site and folder, answered on a Private page.
+      const asked = fixture({
+        ...page,
+        rememberedTransfers: [{ ...answer, privatePage: true as const }],
+      });
+      await asked.run(upload);
+      expect(asked.request).toHaveBeenCalledWith(
+        expect.objectContaining({ upload: expect.anything(), profile: personal }),
+      );
+
+      // An answer remembered before the page was recorded was given for the
+      // site and folder on any page, and still covers this one.
+      const older = fixture({ ...page, rememberedTransfers: [answer] });
+      expect((await older.run(upload)).isError).toBe(false);
+      expect(older.request).not.toHaveBeenCalled();
     } finally {
       await rm(folder, { recursive: true, force: true });
     }
@@ -2231,6 +2268,153 @@ describe("bounded page script input", () => {
       },
     ])
       expect(parse(input)).toBeUndefined();
+  });
+});
+
+describe("a Work thread's bounded page script", () => {
+  const workAuthority = { ...authority, mode: "work" } as unknown as ToolActionAuthority;
+  const context = {
+    contextId: "50000000-0000-4000-8000-000000000001" as never,
+    threadId,
+    actionId: "60000000-0000-4000-8000-000000000001" as never,
+    correlationId: "70000000-0000-4000-8000-000000000001" as never,
+    authority: workAuthority,
+    policy: {
+      profileMode: "isolated" as const,
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true as const,
+      maxConcurrentTabs: 8,
+      sessionTimeoutMs: 600_000,
+    },
+    state: "active" as const,
+    presentation: "native-live" as const,
+    createdAt: "2026-09-09T10:00:00.000Z" as never,
+  };
+  const call = {
+    name: "octant_browser",
+    inputJson: JSON.stringify({
+      operation: "run-script",
+      source: "document.title",
+      expectedObservationRevision: 3,
+    }),
+  };
+  function scriptTools(
+    overrides: {
+      readonly level?: () => "full-access" | "approval-gated" | undefined;
+      readonly lent?: boolean;
+      readonly presentation?: "native-live" | "headless";
+      readonly approvals?: Record<string, unknown>;
+      readonly profileCaller?: "terminal-grant";
+      readonly mode?: "work" | "chat";
+    } = {},
+  ) {
+    const run = vi.fn(
+      async (
+        _input: import("./browserAutomationService").BrowserPageScriptInput,
+      ): Promise<import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt> => ({
+        status: "completed",
+        effect: "possible",
+        valueJson: '"Shop"',
+      }),
+    );
+    const request = vi.fn(async () => "approved" as const);
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: overrides.mode ?? "work",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => workAuthority,
+      browser: {
+        inspectThread: () =>
+          snapshot({
+            status: "running",
+            context: { ...context, presentation: overrides.presentation ?? "native-live" },
+            observation: { revision: 3, url: "https://example.com/" } as never,
+          }),
+        create: vi.fn(),
+        act: vi.fn(),
+        releaseThread: vi.fn(),
+      },
+      ...(overrides.lent === false
+        ? {}
+        : { pageScript: { level: overrides.level ?? (() => "full-access" as const), run } }),
+      approvals: { request, ...overrides.approvals } as never,
+      ...(overrides.profileCaller === undefined ? {} : { profileCaller: overrides.profileCaller }),
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    return { tools, run, request };
+  }
+
+  it("runs unasked on the thread's open app Browser page at Full access", async () => {
+    const { tools, run, request } = scriptTools();
+    expect(await tools.execute(call)).toMatchObject({
+      isError: false,
+      result: { script: { status: "completed", valueJson: '"Shop"' } },
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        windowId,
+        threadId,
+        contextId: context.contextId,
+        source: "document.title",
+        expectedObservationRevision: 3,
+        turnExecutionPolicy: "full-access",
+      }),
+    );
+    // No scoped permission exists for Work, so none is claimed.
+    expect(run.mock.calls[0]?.[0].scriptPermissionIsCurrent).toBeUndefined();
+  });
+
+  it.each([
+    ["below Full access", { level: () => "approval-gated" as const }, "script-needs-full-access"],
+    [
+      "when the level changed since the turn began",
+      { level: () => undefined },
+      "script-needs-full-access",
+    ],
+    [
+      "on a paired device",
+      { approvals: { isPairedDevice: () => true } },
+      "script-needs-a-local-person",
+    ],
+    [
+      "on an unattended turn",
+      { approvals: { isUnattendedScope: () => true } },
+      "script-needs-a-local-person",
+    ],
+    [
+      "from a terminal grant",
+      { profileCaller: "terminal-grant" as const },
+      "script-needs-a-local-person",
+    ],
+    ["on a headless page", { presentation: "headless" as const }, "script-needs-the-app-browser"],
+    ["where the host lends no script runner", { lent: false }, "script-unavailable"],
+    ["in Chat, which has no Full access", { mode: "chat" as const }, "script-unavailable"],
+  ])("refuses %s and runs nothing", async (_name, overrides, error) => {
+    const { tools, run, request } = scriptTools(overrides);
+    expect(await tools.execute(call)).toEqual({ isError: true, result: { error } });
+    expect(run).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("withholds a result that arrives after the thread left Full access", async () => {
+    let level: "full-access" | "approval-gated" = "full-access";
+    const { tools, run } = scriptTools({ level: () => level });
+    run.mockImplementation(async (input) => {
+      level = "approval-gated";
+      expect(input.callerIsCurrent()).toBe(false);
+      return { status: "completed", effect: "possible", valueJson: '"late-private-result"' };
+    });
+    const result = await tools.execute(call);
+    expect(result).toMatchObject({
+      isError: true,
+      result: { script: { status: "refused", effect: "possible", reason: "stale" } },
+    });
+    expect(JSON.stringify(result)).not.toContain("late-private-result");
   });
 });
 

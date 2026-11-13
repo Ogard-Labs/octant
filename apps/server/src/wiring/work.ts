@@ -1,7 +1,7 @@
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { decodeBrowserThreadId } from "@octant/contracts";
-import { browserToolTransport } from "@octant/domain";
+import { appToolThreadLevel, browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
@@ -500,13 +500,18 @@ export function wireWork(deps: WorkDependencies) {
       resolveAppManagedTools: (input) => {
         const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
         const browserSupported =
-          browserToolTransport(observed, String(input.thread.modelId)) === true;
+          browserToolTransport(
+            observed,
+            String(input.thread.modelId),
+            appToolThreadLevel(input.thread),
+          ) === true;
         const native = nativeHarnessComposition?.forWork(input);
         const routineBrowser =
           input.routineRun === undefined
             ? undefined
             : routineBrowserTools({
                 routineRun: input.routineRun,
+                turnLevel: appToolThreadLevel(input.thread),
                 threadId: decodeBrowserThreadId(String(input.thread.id)),
                 currentAuthority: () =>
                   browserAuthority.resolve(decodeBrowserThreadId(String(input.thread.id)), "work"),
@@ -552,6 +557,20 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.snapshotRefs(ownerWindowId, threadId),
               },
               flows: browserFlows,
+              // A routine's turn is unattended, and its tool is lent no script runner.
+              ...(input.routineRun !== undefined
+                ? {}
+                : {
+                    pageScript: {
+                      level: () => {
+                        const current = workThreadProjection.read(input.thread.id);
+                        return current === undefined || current.access !== input.thread.access
+                          ? undefined
+                          : workThreadAccessOf(current.access).executionPolicy;
+                      },
+                      run: (command) => browserAutomationService.runScript(command),
+                    },
+                  }),
               approvals: browserToolApprovalService,
               uploadRoot: () => input.projectRoot,
               uploadFileCountLimit: () =>
@@ -713,7 +732,11 @@ export function wireWork(deps: WorkDependencies) {
           modelId: input.thread.modelId,
           executionPolicy: "approval-gated",
         });
-        const computer = computerToolsFor(computerOwner);
+        const computer = computerToolsFor(
+          computerOwner,
+          undefined,
+          appToolThreadLevel(input.thread),
+        );
         const pastThreads = !browserSupported
           ? undefined
           : personMemoryAccess.toolsFor({

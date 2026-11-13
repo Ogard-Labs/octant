@@ -263,6 +263,26 @@ export function readDeviceRegistrations(
     .all() as ReadonlyArray<DeviceRegistrationProjectionRow>;
 }
 
+/**
+ * Whether the host's own person approved this device's pairing. The proof is
+ * the approval's audit record, written in the same journal append as the
+ * registration: a pairing the person approved records `user-approved`, and a
+ * device the hub's roster introduced records `hub-introduced`. A device with
+ * no approval record is not proved and reads as not approved by the person.
+ */
+export function readDeviceApprovedByPerson(
+  connection: SqliteConnection,
+  deviceId: string,
+): boolean {
+  const rows = connection
+    .prepare(
+      `SELECT reason_code AS reasonCode FROM remote_security_audit_projection
+       WHERE device_id = ? AND event_kind = 'device-approved'`,
+    )
+    .all(deviceId) as ReadonlyArray<{ readonly reasonCode: string }>;
+  return rows.length > 0 && rows.every((row) => row.reasonCode === "user-approved");
+}
+
 export function readRemoteSessionInvalidation(
   connection: SqliteConnection,
   sessionIdDigest: string,

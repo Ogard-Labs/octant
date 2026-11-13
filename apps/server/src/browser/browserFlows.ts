@@ -162,14 +162,17 @@ export class BrowserFlowService {
     this.#cache.delete(String(projectId));
   }
 
-  /** Delete a flow; false when the Project has none of that name. */
-  delete(projectId: ProjectId, name: string): boolean {
+  /**
+   * Delete a flow; false when the Project has none of that name. `actor` is
+   * who asked, as the route resolved them; absent, the host's own person.
+   */
+  delete(projectId: ProjectId, name: string, actor?: EventActor): boolean {
     if (!this.#flows(projectId).has(name)) return false;
     this.#append(
       projectId,
       BROWSER_FLOW_EVENT_NAMES.deleted,
       { kind: "browser-flow-deleted", projectId, name },
-      this.#personActor,
+      actor ?? this.#personActor,
     );
     return true;
   }
@@ -349,13 +352,20 @@ const UNSTORED_OPERATIONS: ReadonlySet<string> = new Set([
 
 /**
  * The operation as the tool takes it, without the call-level extras that mean
- * nothing on a later page: the observation revision it was chosen from and the
- * `include` it asked for.
+ * nothing on a later page: the observation revision it was chosen from, the
+ * `include` it asked for, and its dialog answer. A replay's dialogs take the
+ * fixed rule, so a saved flow never carries prompt text or an agreement nobody
+ * reviews at replay.
  */
 export function browserToolInputRecord(
   input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
 ): Record<string, unknown> {
-  const { expectedObservationRevision: _revision, include: _include, ...rest } = input;
+  const {
+    expectedObservationRevision: _revision,
+    include: _include,
+    dialog: _dialog,
+    ...rest
+  } = input;
   const record: Record<string, unknown> = { ...rest };
   if ("to" in rest) {
     delete record.to;

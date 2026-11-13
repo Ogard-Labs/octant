@@ -1,7 +1,7 @@
 import type { CodeLanguageRefusalReason } from "@octant/contracts/code-language";
 import type { ExtensionLanguageServerClass } from "@octant/contracts/extensions";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
-import type { PrincipalKind } from "./remoteAccessPolicy";
+import { actsAsHostPerson, type PrincipalKind } from "./remoteAccessPolicy";
 
 /**
  * Whether a language server may start for a Code checkout, and how it is
@@ -95,10 +95,10 @@ export function decideLanguageServerLaunch(
     };
   }
   if (request.posture === "plan") return { status: "refused", reason: "plan-read-only" };
-  // Running the repository's tooling on the host stays with the person at the
-  // machine, as terminal input does, so an approval on record does not let a
-  // paired device start one.
-  if (request.startedBy !== "local-window") {
+  // Running the repository's tooling on the host is the person's to start, at
+  // the machine or on a device they paired, as terminal input is. An approval
+  // on record does not let any other device session start one.
+  if (!actsAsHostPerson(request.startedBy)) {
     return { status: "refused", reason: "local-host-required" };
   }
   if (request.shellCommandApproval !== "granted") {
@@ -117,4 +117,43 @@ export function decideLanguageServerLaunch(
       network: "proxied-under-project-rules",
     },
   };
+}
+
+/** The facts of one agent read of a file a `repo-tooling` server covers. */
+export interface AgentRepositoryToolingReadRequest {
+  /** The posture the agent's turn runs at when the read is made. */
+  readonly posture: ProviderExecutionPolicy;
+  readonly platform: LanguageServerHostPlatform;
+  /** Whether the server for this checkout and component is up and answering now. */
+  readonly server: "running" | "not-running";
+  /** The shell-command approval for this checkout and the server's package state as it is now. */
+  readonly shellCommandApproval: "granted" | "absent";
+}
+
+export type AgentRepositoryToolingReadDecision =
+  | { readonly status: "read" }
+  | { readonly status: "refused"; readonly reason: LanguageServerLaunchRefusal };
+
+/**
+ * Whether an agent's code tool may read through a `repo-tooling` server.
+ * Canonical: docs/design/language-services.md § Agent read rules.
+ *
+ * It never decides a launch: an agent reads only through a server the person
+ * at the machine already started under an approval that still covers it, so a
+ * server that is not running is refused exactly as a start would be. Plan
+ * refuses, as it refuses every use of the class, because the file the read
+ * opens is one the server then runs the repository's tooling on.
+ */
+export function decideAgentReadThroughRepositoryTooling(
+  request: AgentRepositoryToolingReadRequest,
+): AgentRepositoryToolingReadDecision {
+  if (request.platform !== "macos" && request.platform !== "linux") {
+    return { status: "refused", reason: "unsupported-platform" };
+  }
+  if (request.posture === "plan") return { status: "refused", reason: "plan-read-only" };
+  if (request.shellCommandApproval !== "granted") {
+    return { status: "refused", reason: "approval-required" };
+  }
+  if (request.server !== "running") return { status: "refused", reason: "local-host-required" };
+  return { status: "read" };
 }

@@ -1451,9 +1451,9 @@ export function createCodeOperationRuntime(
       : { recordReviewContent: options.recordExternalContentIngestion }),
     reviewFindings: {
       list: (windowId, threadId) => reviewFindings.list(windowId, threadId),
-      create: (windowId, input, admissionCurrent) =>
-        reviewFindings.create(windowId, input, admissionCurrent),
-      changeState: (windowId, input, admissionCurrent) =>
+      create: (windowId, input, admissionCurrent, actor) =>
+        reviewFindings.create(windowId, input, admissionCurrent, actor),
+      changeState: (windowId, input, admissionCurrent, actor) =>
         reviewFindings.changeState(
           windowId,
           {
@@ -1461,6 +1461,7 @@ export function createCodeOperationRuntime(
             findingId: decodeCodeReviewFindingId(input.findingId),
           },
           admissionCurrent,
+          actor,
         ),
     },
     turns,

@@ -1057,7 +1057,9 @@ describe.skipIf(chrome === undefined)(
         const tick = await popup();
         expect(tick).toMatchObject({ kind: "dialog", dialog: "alert", message: "Tick" });
         const observed = await host.act(contextId, { kind: "snapshot" });
-        expect(observed.dialogs).toEqual([{ type: "alert", message: "Tick", answer: "accepted" }]);
+        expect(observed.dialogs).toEqual([
+          { type: "alert", message: "Tick", answer: "accepted", answeredBy: "rule" },
+        ]);
         const mark = entry(observed.snapshotRefs, "Mark");
         const clicked = await host.act(contextId, {
           kind: "click",
@@ -2182,8 +2184,8 @@ describe.skipIf(chrome === undefined)(
       });
       expect(asked.title).toBe("Kept");
       expect(asked.dialogs).toEqual([
-        { type: "confirm", message: "Delete everything?", answer: "dismissed" },
-        { type: "alert", message: "kept", answer: "accepted" },
+        { type: "confirm", message: "Delete everything?", answer: "dismissed", answeredBy: "rule" },
+        { type: "alert", message: "kept", answer: "accepted", answeredBy: "rule" },
       ]);
       const narrow = await host.act(contextId, {
         kind: "resize",
@@ -2201,13 +2203,17 @@ describe.skipIf(chrome === undefined)(
 
     it("answers a dialog the very first page raises as it loads, and one a new tab raises", async () => {
       const { host, contextId, page, opened } = await surface("/greets", 3);
-      expect(opened.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
+      expect(opened.dialogs).toEqual([
+        { type: "alert", message: "Welcome", answer: "accepted", answeredBy: "rule" },
+      ]);
       expect(opened.title).toBe("Greeted");
       const tabs = await host.act(contextId, {
         kind: "tab-open",
         target: `${origin}/greets`,
       });
-      expect(tabs.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
+      expect(tabs.dialogs).toEqual([
+        { type: "alert", message: "Welcome", answer: "accepted", answeredBy: "rule" },
+      ]);
       expect(tabs.tabs?.[1]).toMatchObject({ title: "Greeted", active: true });
       await page.close();
     });
@@ -2326,7 +2332,9 @@ describe.skipIf(chrome === undefined)(
         }),
       ).rejects.toThrow(/timed out/);
       const next = await host.act(contextId, { kind: "extract-text" });
-      expect(next.dialogs).toEqual([{ type: "alert", message: "late news", answer: "accepted" }]);
+      expect(next.dialogs).toEqual([
+        { type: "alert", message: "late news", answer: "accepted", answeredBy: "rule" },
+      ]);
       await page.close();
     });
 

@@ -1,3 +1,4 @@
+import type { EventActor } from "@octant/contracts";
 import {
   decodeMemoryEntryId,
   decodeProjectMemoryProposal,
@@ -40,6 +41,7 @@ export interface ProjectMemoryProposalServiceOptions {
   readonly apply: (
     command: AgentMemoryCommand,
     origin: AgentAuthoredMemoryProvenance,
+    actor?: EventActor,
   ) => Promise<MemoryCommandResult>;
   /** The waiting set changed. Wired at composition to the change feed. */
   readonly onChanged?: () => void;
@@ -124,6 +126,8 @@ export class ProjectMemoryProposalService {
   async decide(
     windowId: WindowId,
     decision: ProjectMemoryProposalDecision,
+    /** Who answered, as the route resolved them; absent means the person at this host. */
+    actor?: EventActor,
   ): Promise<ProjectMemoryProposalDecisionResult> {
     const key = String(decision.proposalId);
     const pending = this.#pending.get(key);
@@ -146,6 +150,7 @@ export class ProjectMemoryProposalService {
       const result = await this.#options.apply(
         agentMemoryCommandFor(proposal, () => decodeMemoryEntryId(this.#options.uuid())),
         origin,
+        actor,
       );
       pending.settle({ status: "confirmed", result });
       return { kind: "project-memory-proposal-confirmed", result };

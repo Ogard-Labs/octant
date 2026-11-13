@@ -40,4 +40,25 @@ describe("RemoteOwnDeviceMetadataV1", () => {
     });
     expect(receipt.result).toBe("applied");
   });
+
+  it("says whether the session acts as the host's own person, and decodes an older host's answer that does not say", () => {
+    const answer = {
+      deviceId: "22222222-2222-4222-8222-222222222222",
+      deviceLabel: "Ada's Safari",
+      origin: "https://mac.example.test",
+      credentialGeneration: 1,
+      createdAt: "2026-08-03T00:00:00.000Z",
+      expiresAt: "2026-09-03T00:00:00.000Z",
+      lastSeenAt: "2026-08-03T07:00:00.000Z",
+      state: "active",
+    };
+    expect(decodeRemoteOwnDeviceMetadataV1({ ...answer, actsAsHostPerson: true })).toMatchObject({
+      actsAsHostPerson: true,
+    });
+    expect(decodeRemoteOwnDeviceMetadataV1({ ...answer, actsAsHostPerson: false })).toMatchObject({
+      actsAsHostPerson: false,
+    });
+    expect(decodeRemoteOwnDeviceMetadataV1(answer).actsAsHostPerson).toBeUndefined();
+    expect(() => decodeRemoteOwnDeviceMetadataV1({ ...answer, actsAsHostPerson: "yes" })).toThrow();
+  });
 });

@@ -94,7 +94,14 @@ const postures: ReadonlyArray<ProviderExecutionPolicy> = [
   "auto-accept-edits",
   "full-access",
 ];
-const starters: ReadonlyArray<DebugSessionStarter> = ["local-window", "remote-device", "agent"];
+const starters: ReadonlyArray<DebugSessionStarter> = [
+  "local-window",
+  "person-paired-device",
+  "remote-device",
+  "agent",
+];
+/** The host's own person: at a window of the host, or on a device they paired. */
+const hostPerson: ReadonlyArray<DebugSessionStarter> = ["local-window", "person-paired-device"];
 const configurationStates = ["resolve", "unresolved"] as const;
 const debugPortCounts = [0, 1] as const;
 
@@ -142,9 +149,9 @@ describe("debug session start policy", () => {
                       ? "mode-prohibited"
                       : posture === "plan"
                         ? "plan-read-only"
-                        : startedBy !== "local-window"
+                        : startedBy !== "agent" && !hostPerson.includes(startedBy)
                           ? "local-host-required"
-                          : !approval.covers
+                          : posture !== "full-access" && !approval.covers
                             ? "approval-required"
                             : configurationPaths !== "resolve"
                               ? "configuration-invalid"
@@ -160,7 +167,40 @@ describe("debug session start policy", () => {
         }
       }
     }
-    expect(combinations).toBe(4 * 3 * 4 * 3 * approvalStates.length * 2);
+    expect(combinations).toBe(4 * 3 * 4 * starters.length * approvalStates.length * 2);
+  });
+
+  it("starts for an agent unasked at Full access, only for a confirmed configuration below it, and never in Plan", () => {
+    const agent = { startedBy: "agent" as const, approvals: [] };
+    expect(decideDebugSessionStart(request({ ...agent, posture: "full-access" })).status).toBe(
+      "launch",
+    );
+    for (const posture of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(decideDebugSessionStart(request({ ...agent, posture }))).toEqual({
+        status: "refused",
+        reason: "approval-required",
+      });
+      expect(
+        decideDebugSessionStart(request({ startedBy: "agent", posture, approvals: [covering] }))
+          .status,
+      ).toBe("launch");
+    }
+    expect(decideDebugSessionStart(request({ startedBy: "agent", posture: "plan" }))).toEqual({
+      status: "refused",
+      reason: "plan-read-only",
+    });
+  });
+
+  it("starts for a person at a local window unasked at Full access, and never for a paired device", () => {
+    expect(decideDebugSessionStart(request({ posture: "full-access", approvals: [] })).status).toBe(
+      "launch",
+    );
+    for (const posture of ["approval-gated", "full-access"] as const) {
+      expect(decideDebugSessionStart(request({ startedBy: "remote-device", posture }))).toEqual({
+        status: "refused",
+        reason: "local-host-required",
+      });
+    }
   });
 
   it("launches the adapter and program in one capsule that writes only the checkout and session state", () => {

@@ -610,7 +610,11 @@ the reason; the pick becomes the default for every new Work and Code thread
 until changed in Settings › Work or Settings › Code, or for one Project) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Setup also asks once whether
 Octant may check for updates, and does not ask again whatever the answer
-(maintainer request, 2026-11-12; not built yet: today first run does not ask). Every step is optional from
+(maintainer request, 2026-11-12). The question is an Updates card on the
+readiness view with one switch, Check for updates automatically, off until the
+person turns it on; it is shown only in the desktop app, which is the only
+window that updates anything, and the answer is the Automatic update checks
+setting. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
 step's controls. Skipping preserves settled answers, waits for pending writes,

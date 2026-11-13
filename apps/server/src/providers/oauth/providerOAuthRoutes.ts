@@ -1,3 +1,4 @@
+import { principalAuthorityKind } from "../../clientPrincipal";
 import {
   decodeProviderInstanceId,
   type ProviderInstance,
@@ -22,6 +23,8 @@ import type { PrincipalKind } from "@octant/domain/remote-access-policy";
 import { authenticateProjectRequest } from "../../projectBindingRoutes";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../../windowAuthorityStore";
+import type { EventActor } from "@octant/contracts";
+import { eventActorForPrincipal } from "../../principalEventActor";
 import { readPrincipalRouteContext } from "../../principalRouteContext";
 import type { ProviderCredentialStore } from "../credentialBrokerClient";
 import type { HostOAuthService } from "./hostOAuthService";
@@ -161,6 +164,8 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
       return json({ kind: "refused", reason: "unavailable" }, 503, origin);
     }
     const principal = principalKind(request);
+    // Who the journal names for this sign-in: the device, when a device asked.
+    const actor = eventActorForPrincipal(readPrincipalRouteContext(request)?.principal);
     const command = readCommand(body);
     if (command === undefined) return json({ kind: "refused", reason: "invalid" }, 400, origin);
     // A cloud sign-in begins only from the host's terminal; Settings reads
@@ -173,6 +178,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
             instanceId: command.instanceId,
             kind: command.kind,
             principal,
+            actor,
           }),
           200,
           origin,
@@ -215,6 +221,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
             command: resumed,
             principal,
             actorId: windowId,
+            actor,
           });
         }
         return dispatch({
@@ -224,6 +231,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
           offer,
           principal,
           actorId: windowId,
+          actor,
         });
       };
       const viewPromise = execute();
@@ -262,13 +270,15 @@ async function dispatch(input: {
   readonly offer: SubscriptionOAuthOffer;
   readonly principal: PrincipalKind;
   readonly actorId: string;
+  readonly actor: EventActor;
 }): Promise<ProviderOAuthView> {
-  const { dependencies, command, descriptor, offer, principal, actorId } = input;
+  const { dependencies, command, descriptor, offer, principal, actorId, actor } = input;
   if (command.kind === "status") return signedInOrOut(dependencies, command, offer, principal);
   if (command.kind === "acknowledge") {
     const recorded = dependencies.service.acknowledgeTerms({
       principalKind: principal,
       actorId,
+      actor,
       descriptor,
     });
     if (recorded.kind === "refused") return { kind: "refused", reason: recorded.reason };
@@ -290,18 +300,20 @@ async function dispatch(input: {
     const started = await dependencies.service.begin({
       principalKind: principal,
       actorId,
+      actor,
       descriptor,
       ...(credentialRef === undefined ? {} : { credentialRef }),
     });
-    return finish(dependencies, command, offer, started, actorId, principal);
+    return finish(dependencies, command, offer, started, actorId, principal, actor);
   }
   if (command.kind === "poll") {
     const state = await dependencies.service.status({
       principalKind: principal,
+      actor,
       attemptId: command.attemptId,
       descriptor,
     });
-    return finish(dependencies, command, offer, state, actorId, principal);
+    return finish(dependencies, command, offer, state, actorId, principal, actor);
   }
   const pointer = await readPointer(dependencies, command.instanceId);
   if (pointer === undefined || pointer.descriptorId !== offer.descriptor.descriptorId) {
@@ -314,6 +326,7 @@ async function dispatch(input: {
   }
   const signedOut = await dependencies.service.signOut({
     principalKind: principal,
+    actor,
     descriptor,
     credentialRef: pointer.credentialRef,
     forgetWhenNotRevoked: command.kind === "sign-out-locally",
@@ -339,6 +352,7 @@ async function finish(
   state: HostOAuthSignInState,
   windowId: string,
   principal: PrincipalKind,
+  actor: EventActor,
 ): Promise<ProviderOAuthView> {
   if (state.kind === "signed-in") {
     if (state.descriptorId !== offer.descriptor.descriptorId) {
@@ -346,7 +360,14 @@ async function finish(
     }
     const unmatched = unmatchedInstance(dependencies, command.instanceId, offer);
     if (unmatched !== undefined) return unmatched;
-    await revokeReplacedPointer(dependencies, command, offer, state.credentialRef, principal);
+    await revokeReplacedPointer(
+      dependencies,
+      command,
+      offer,
+      state.credentialRef,
+      principal,
+      actor,
+    );
     await storePointer(dependencies, command.instanceId, offer, state.credentialRef, windowId);
     return { kind: "signed-in", accountLabel: offer.accountLabel };
   }
@@ -464,6 +485,7 @@ async function revokeReplacedPointer(
   offer: SubscriptionOAuthOffer,
   nextCredentialRef: string,
   principal: PrincipalKind,
+  actor: EventActor,
 ): Promise<void> {
   const pointer = await readPointer(dependencies, command.instanceId);
   if (pointer === undefined || pointer.credentialRef === nextCredentialRef) return;
@@ -474,6 +496,7 @@ async function revokeReplacedPointer(
     // store with no pointer and no way to sign it out.
     const signedOut = await dependencies.service.signOut({
       principalKind: principal,
+      actor,
       descriptor: offer.descriptor,
       credentialRef: pointer.credentialRef,
       forgetWhenNotRevoked: true,
@@ -565,8 +588,8 @@ function readCommand(value: unknown): ProviderOAuthCommand | undefined {
 }
 
 function principalKind(request: Request): PrincipalKind {
-  const context = readPrincipalRouteContext(request);
-  return context?.principal.kind === "remote-device" ? "remote-device" : "local-window";
+  const principal = readPrincipalRouteContext(request)?.principal;
+  return principal === undefined ? "local-window" : principalAuthorityKind(principal);
 }
 
 function json(body: ProviderOAuthView, status: number, origin: string | null): Response {

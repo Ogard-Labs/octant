@@ -23,7 +23,11 @@ import {
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ExtensionToolGrantProjection } from "../persistence/extensionToolGrantProjection";
-import { catchUpProjection, rebuildProjection } from "../persistence/projection";
+import {
+  catchUpProjection,
+  ProjectionRegistry,
+  rebuildProjection,
+} from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -83,6 +87,10 @@ function openHost(
     readonly package?: { version: string; digest: string };
     /** `stdio` is a server Octant launches itself under its supervisor. */
     readonly transport?: "streamable-http" | "stdio";
+    /** The publisher key the host verified for each package version, by version. */
+    readonly signedBy?: Readonly<Record<string, string>>;
+    /** The run of same-source updates the host journaled for each unsigned version, by version. */
+    readonly updateLines?: Readonly<Record<string, string>>;
   } = {},
 ) {
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -200,6 +208,8 @@ function openHost(
       threadTainted: (threadId) =>
         readThreadExternalContentTaint(connection, threadId).externalContentIngested,
       outsideContent: (threadId) => readApprovalOutsideContent(connection, threadId),
+      verifiedPublisherKey: (version) => options.signedBy?.[version.version],
+      updateLine: (version) => options.updateLines?.[version.version],
     }),
     recordExternalContentIngestion: (input) => taint.record(input),
   });
@@ -253,7 +263,11 @@ function openHost(
     return pending;
   }
 
-  /** `"server"` remembers the answer for every tool of the tool's server. */
+  /**
+   * Approves. `false` is the plain approval, kept for every tool of the
+   * tool's server where the prompt keeps answers; `true` narrows it to this
+   * tool; `"server"` names the whole server as an older client does.
+   */
   async function answer(remember: boolean | "server") {
     const pending = await prompt();
     return approvals.decide(atWindow, {
@@ -262,6 +276,11 @@ function openHost(
       ...(remember === false ? {} : { remember: true }),
       ...(remember === "server" ? { rememberScope: "server" } : {}),
     });
+  }
+
+  async function deny() {
+    const pending = await prompt();
+    return approvals.decide(atWindow, { approvalId: pending.approvalId, decision: "denied" });
   }
 
   /** Runs a call that must not ask anyone, and reports what it returned. */
@@ -281,6 +300,7 @@ function openHost(
     call,
     prompt,
     answer,
+    deny,
     unprompted,
     close,
   };
@@ -401,7 +421,7 @@ function lifecycle(host: ReturnType<typeof openHost>) {
   };
 }
 
-/** Approves `search` in Project A from thread one and remembers the answer. */
+/** Approves `search` in Project A from thread one and keeps the answer for that tool alone. */
 async function rememberSearch(host: ReturnType<typeof openHost>) {
   const first = host.call({ threadId: threadOne, projectId: projectA });
   // A clean thread's prompt names no outside content.
@@ -421,6 +441,127 @@ async function rememberSearch(host: ReturnType<typeof openHost>) {
 
 const approvalRequired = { result: { error: "extension-tool-approval-required" }, isError: true };
 
+describe("an MCP server a person is asked about once", () => {
+  it("covers every tool of the server in that Project after the first approval, and still asks a Plan turn", async () => {
+    const host = openHost(temporaryDirectory());
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ mcpToolName: "search", answerCovers: "server" });
+    expect(await host.answer(false)).toBe(true);
+    await expect(first).resolves.not.toMatchObject({ isError: true });
+
+    await expect(
+      host.unprompted({ threadId: threadTwo, projectId: projectA, tool: "delete" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    const [grant] = host.grants.list();
+    expect(grant).toMatchObject({ projectId: projectA, componentId: "mcp-notes" });
+    expect(grant?.mcpToolName).toBeUndefined();
+
+    const planned = host.call({ threadId: threadThree, projectId: projectA, planTurn: true });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "call" });
+    expect(await host.answer(false)).toBe(true);
+    await planned;
+
+    const otherProject = host.call({ threadId: threadFour, projectId: projectB });
+    expect(await host.prompt()).toMatchObject({ projectId: projectB, answerCovers: "server" });
+    expect(await host.deny()).toBe(true);
+    await otherProject;
+    expect(host.grants.list()).toHaveLength(1);
+  });
+
+  it("asks once for a network server on a thread that read outside content, then runs there and asks on the next marked thread", async () => {
+    const host = openHost(temporaryDirectory());
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+
+    // The approved call's own result marked thread one.
+    const marked = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({
+      answerCovers: "server-on-thread",
+      rememberable: false,
+    });
+    expect(await host.answer(false)).toBe(true);
+    await expect(marked).resolves.not.toMatchObject({ isError: true });
+
+    await expect(
+      host.unprompted({ threadId: threadOne, projectId: projectA, tool: "delete" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    expect(host.server.calls).toEqual(["search", "search", "delete"]);
+    // The answer on the marked thread is not a grant for the Project.
+    expect(host.grants.list()).toHaveLength(1);
+
+    // An unmarked thread runs on the server's grant; its result marks it.
+    await host.unprompted({ threadId: threadTwo, projectId: projectA });
+    const otherMarked = host.call({ threadId: threadTwo, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await host.deny()).toBe(true);
+    await expect(otherMarked).resolves.toMatchObject({ isError: true });
+    const deniedAgain = host.call({ threadId: threadTwo, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await host.deny()).toBe(true);
+    await deniedAgain;
+  });
+  it("keeps a marked thread's answer across a host restart, for that thread alone", async () => {
+    const directory = temporaryDirectory();
+    const host = openHost(directory);
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+    const marked = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await host.answer(false)).toBe(true);
+    await marked;
+    await host.unprompted({ threadId: threadTwo, projectId: projectA });
+    await host.close();
+
+    const restarted = openHost(directory);
+    await expect(
+      restarted.unprompted({ threadId: threadOne, projectId: projectA, tool: "delete" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    // Settings lists what is kept for a Project or the account, not a thread's answer.
+    expect(restarted.grants.list()).toHaveLength(1);
+    const otherMarked = restarted.call({ threadId: threadTwo, projectId: projectA });
+    expect(await restarted.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await restarted.deny()).toBe(true);
+    await otherMarked;
+
+    // Withdrawn trust ends the thread's answer with the package's grants,
+    // and a restart cannot bring it back.
+    restarted.grants.revokeForLifecycleChange({
+      kind: "set-source-trust",
+      extensionId,
+      trusted: false,
+    });
+    await restarted.close();
+    const again = openHost(directory);
+    const asked = again.call({ threadId: threadOne, projectId: projectA });
+    expect(await again.prompt()).toMatchObject({ threadId: threadOne });
+    expect(await again.deny()).toBe(true);
+    await asked;
+  });
+
+  it("asks a marked thread again once the package was uninstalled, rolled back or lost its trust", async () => {
+    const host = openHost(temporaryDirectory());
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+    const marked = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await host.answer(false)).toBe(true);
+    await marked;
+
+    host.grants.revokeForLifecycleChange({
+      kind: "set-source-trust",
+      extensionId,
+      trusted: false,
+    });
+    const afterTrustReturned = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ threadId: threadOne });
+    expect(await host.deny()).toBe(true);
+    await afterTrustReturned;
+  });
+});
+
 describe("an MCP tool a person always allows in a Project", () => {
   it("runs unasked in another thread of that Project and nowhere else", async () => {
     const host = openHost(temporaryDirectory());
@@ -432,13 +573,14 @@ describe("an MCP tool a person always allows in a Project", () => {
 
     const otherProject = host.call({ threadId: threadThree, projectId: projectB });
     expect(await host.prompt()).toMatchObject({ projectId: projectB, mcpToolName: "search" });
-    expect(await host.answer(false)).toBe(true);
+    expect(await host.deny()).toBe(true);
     await otherProject;
 
     // A thread no tool result has reached yet: thread two's own result tainted it.
+    // The person narrowed their answer to `search`, so another tool still asks.
     const otherTool = host.call({ threadId: threadFour, projectId: projectA, tool: "delete" });
     expect(await host.prompt()).toMatchObject({ mcpToolName: "delete", rememberable: true });
-    expect(await host.answer(false)).toBe(true);
+    expect(await host.deny()).toBe(true);
     await otherTool;
     expect(host.grants.list()).toHaveLength(1);
   });
@@ -509,7 +651,7 @@ describe("an MCP tool a person always allows in a Project", () => {
     await call;
   });
 
-  it("asks for each call of a network tool once the thread has taken in outside content", async () => {
+  it("refuses to keep a network tool's answer for the Project once the thread has taken in outside content", async () => {
     const host = openHost(temporaryDirectory());
     await rememberSearch(host);
 
@@ -628,7 +770,7 @@ describe("an MCP tool a person always allows in a Project", () => {
     });
     const inProject = restarted.call({ threadId: threadThree, projectId: projectA });
     expect(await restarted.prompt()).toMatchObject({ projectId: projectA, rememberable: true });
-    expect(await restarted.answer(false)).toBe(true);
+    expect(await restarted.deny()).toBe(true);
     await inProject;
 
     if (grant === undefined) throw new Error("Expected a remembered approval.");
@@ -706,6 +848,70 @@ describe("an MCP tool a person always allows in a Project", () => {
       updated.grants.revokeForLifecycleChange({ kind: "uninstall-package", extensionId }),
     ).toBe(1);
     expect(updated.grants.list()).toEqual([]);
+  });
+
+  it("keeps a server's approval and a marked thread's answer across an unsigned update from the trusted source, and asks again outside that run", async () => {
+    const directory = temporaryDirectory();
+    const host = openHost(directory);
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+    const marked = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ answerCovers: "server-on-thread" });
+    expect(await host.answer(false)).toBe(true);
+    await marked;
+    await host.close();
+
+    const update = { version: "1.1.0", digest: `sha256:${"e".repeat(64)}` };
+    const sameSource = openHost(directory, {
+      package: update,
+      updateLines: { "1.0.0": "line", "1.1.0": "line" },
+    });
+    await expect(
+      sameSource.unprompted({ threadId: threadTwo, projectId: projectA, tool: "delete" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    await expect(
+      sameSource.unprompted({ threadId: threadOne, projectId: projectA }),
+    ).resolves.not.toMatchObject({ isError: true });
+    await sameSource.close();
+
+    const otherRun = openHost(directory, { package: update });
+    const call = otherRun.call({ threadId: threadThree, projectId: projectA, tool: "delete" });
+    expect(await otherRun.prompt()).toMatchObject({ mcpToolName: "delete" });
+    expect(await otherRun.deny()).toBe(true);
+    await call;
+  });
+
+  it("keeps a server's approval across an update the same publisher key signed, and asks again for a new or missing key", async () => {
+    const key = `ed25519:${"1".repeat(64)}`;
+    const directory = temporaryDirectory();
+    const host = openHost(directory, { signedBy: { "1.0.0": key } });
+    const first = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.answer(false)).toBe(true);
+    await first;
+    await host.close();
+
+    const update = { version: "1.1.0", digest: `sha256:${"e".repeat(64)}` };
+    const sameKey = openHost(directory, {
+      package: update,
+      signedBy: { "1.0.0": key, "1.1.0": key },
+    });
+    await expect(
+      sameKey.unprompted({ threadId: threadTwo, projectId: projectA, tool: "delete" }),
+    ).resolves.not.toMatchObject({ isError: true });
+    await sameKey.close();
+
+    for (const signedBy of [
+      { "1.0.0": key, "1.1.0": `ed25519:${"2".repeat(64)}` },
+      { "1.0.0": key },
+    ]) {
+      const changed = openHost(directory, { package: update, signedBy });
+      const call = changed.call({ threadId: threadThree, projectId: projectA, tool: "delete" });
+      expect(await changed.prompt()).toMatchObject({ mcpToolName: "delete" });
+      expect(await changed.deny()).toBe(true);
+      await call;
+      await changed.close();
+    }
   });
 
   it("refuses an answer for the whole server on a host-run turn and keeps the call waiting", async () => {
@@ -869,10 +1075,15 @@ describe("an MCP tool a person always allows in a Project", () => {
       () => now,
     );
     const runtime = createPhase1RuntimeRegistries();
+    // The table as it stood then cannot hold a row as it is written now, so
+    // the grant reaches the journal alone, as an upgraded host finds it.
     const journal = new Journal({
       connection,
       registry: runtime.events,
-      projections: runtime.projections,
+      projections: runtime.projections
+        .all()
+        .filter((projection) => !(projection instanceof ExtensionToolGrantProjection))
+        .reduce((registry, projection) => registry.register(projection), new ProjectionRegistry()),
       clock: () => now,
     });
     const grants = new ExtensionToolGrantStore({
@@ -897,8 +1108,6 @@ describe("an MCP tool a person always allows in a Project", () => {
         definitionDigest: `sha256:${"d".repeat(64)}`,
       }),
     ).toBe("recorded");
-    const before = grants.list();
-    expect(before).toHaveLength(1);
 
     applyMigrations(connection, MIGRATIONS, () => now);
     catchUpProjection({
@@ -907,7 +1116,7 @@ describe("an MCP tool a person always allows in a Project", () => {
       projection: new ExtensionToolGrantProjection(),
       clock: () => now,
     });
-    expect(grants.list()).toEqual(before);
+    expect(grants.list()).toMatchObject([{ ...subject, version: "1.0.0" }]);
   });
 
   it("leaves a newer answer standing when an older revocation is applied again", async () => {

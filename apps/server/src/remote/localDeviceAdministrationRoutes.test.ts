@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { decodeWindowId, type UtcTimestamp } from "@octant/contracts";
 import type { DeviceRegistrationV1, StableHostId } from "@octant/contracts/remote-access";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import {
   createLocalDeviceAdministrationRouteHandler,
   type LocalDeviceAdministrationPort,
@@ -217,5 +219,146 @@ describe("local device administration routes", () => {
         }),
       ),
     ).resolves.toMatchObject({ status: 401 });
+  });
+});
+
+describe("device administration from a paired device", () => {
+  const approver = "73000000-0000-4000-8000-000000000080";
+  const actor = { kind: "remote-device", actorId: approver, deviceId: approver };
+  const ticketId = "44444444-4444-4444-8444-444444444444";
+
+  /** The request as the product dispatch hands it on: loopback-shaped, with the device bound. */
+  function fromDevice(
+    path: string,
+    body?: unknown,
+    admittedBy?: "host-person" | "hub-roster",
+  ): Request {
+    const remote = new Request(`http://127.0.0.1${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        origin: "http://127.0.0.1",
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    bindPrincipalRouteContext(remote, {
+      principal: createRemoteDevicePrincipal({
+        hostId: hostId as never,
+        deviceId: approver as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "73000000-0000-4000-8000-000000000081" as never,
+        ...(admittedBy === undefined ? {} : { admittedBy }),
+      }),
+      scopeId: approver as never,
+    });
+    return remote;
+  }
+
+  function pending(deviceKeyFingerprint: string) {
+    return {
+      kind: "pending" as const,
+      ticketId: ticketId as never,
+      hostId,
+      deviceLabel: "New phone",
+      deviceKeyFingerprint,
+      origin: "https://mac.example.test",
+      sourceClass: "lan-private" as const,
+      comparisonCode: "123-456",
+      claimedAt: timestamp,
+      expiresAt: expiry,
+    };
+  }
+
+  it("lets a device the host's own person paired list, rename, revoke and approve, each as that device", async () => {
+    const { handle, control } = setup({
+      listPendingPairings: vi.fn(() => [pending("c".repeat(64))]),
+    });
+    const person = "host-person" as const;
+
+    const inventory = await handle(fromDevice("/api/remote/devices", undefined, person));
+    expect(inventory?.status).toBe(200);
+    expect(JSON.stringify(await inventory?.json())).not.toContain("BEGIN PUBLIC KEY");
+    expect(
+      (await handle(fromDevice("/api/remote/pairing-requests", undefined, person)))?.status,
+    ).toBe(200);
+
+    expect(
+      (await handle(fromDevice("/api/remote/pairing-requests/approve", { ticketId }, person)))
+        ?.status,
+    ).toBe(201);
+    expect(control.approvePairing).toHaveBeenCalledWith({ ticketId, actor });
+
+    expect(
+      (
+        await handle(
+          fromDevice(
+            "/api/remote/pairing-requests/deny",
+            { ticketId, reasonCode: "user-denied" },
+            person,
+          ),
+        )
+      )?.status,
+    ).toBe(201);
+    expect(control.denyPairing).toHaveBeenCalledWith({
+      ticketId,
+      reasonCode: "user-denied",
+      actor,
+    });
+
+    expect(
+      (
+        await handle(
+          fromDevice("/api/remote/devices/rename", { deviceId, deviceLabel: "Kitchen" }, person),
+        )
+      )?.status,
+    ).toBe(201);
+    expect(control.renameDevice).toHaveBeenCalledWith({ deviceId, deviceLabel: "Kitchen", actor });
+
+    expect(
+      (await handle(fromDevice("/api/remote/devices/revoke", { deviceId }, person)))?.status,
+    ).toBe(201);
+    expect(control.revokeDevice).toHaveBeenCalledWith({ deviceId, actor });
+
+    // Revoking every device takes the asking device with the rest, as it
+    // does when a window on the host asks.
+    expect((await handle(fromDevice("/api/remote/devices/revoke-all", {}, person)))?.status).toBe(
+      201,
+    );
+    expect(control.revokeAll).toHaveBeenCalledWith({ actor });
+  });
+
+  it("refuses a pairing request made with the asking device's own key", async () => {
+    const own = { ...device(), deviceId: approver as never, deviceKeyFingerprint: "d".repeat(64) };
+    const { handle, control } = setup({
+      listDevices: vi.fn(() => [device(), own]),
+      listPendingPairings: vi.fn(() => [pending("d".repeat(64))]),
+    });
+
+    const refused = await handle(
+      fromDevice("/api/remote/pairing-requests/approve", { ticketId }, "host-person"),
+    );
+    expect(refused?.status).toBe(401);
+    expect(control.approvePairing).not.toHaveBeenCalled();
+  });
+
+  it("refuses a hub-introduced device, an unproved pairing, and a caller with no paired device, and keeps the bridge's routes from every device", async () => {
+    const { handle, control } = setup();
+    for (const remote of [
+      fromDevice("/api/remote/devices", undefined, "hub-roster"),
+      fromDevice("/api/remote/devices"),
+      fromDevice("/api/remote/devices/revoke", { deviceId }, "hub-roster"),
+      fromDevice("/api/remote/pairing-requests/approve", { ticketId }),
+      // The bridge secret opens the bridge's own paths only.
+      request("/api/remote/devices"),
+      fromDevice("/api/desktop/remote/devices", undefined, "host-person"),
+    ]) {
+      expect((await handle(remote))?.status).toBe(401);
+    }
+    expect(control.listDevices).not.toHaveBeenCalled();
+    expect(control.revokeDevice).not.toHaveBeenCalled();
+    expect(control.approvePairing).not.toHaveBeenCalled();
   });
 });

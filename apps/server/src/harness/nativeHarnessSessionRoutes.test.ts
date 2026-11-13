@@ -22,6 +22,8 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
+import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
+import { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import { createNativeHarnessSessionRouteHandler } from "./nativeHarnessSessionRoutes";
 import { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
@@ -240,7 +242,12 @@ describe("native harness session routes", () => {
     expect(answerQuestion).not.toHaveBeenCalled();
     mayOpen = true;
     expect((await answer())?.status).toBe(200);
-    expect(answerQuestion).toHaveBeenCalledExactlyOnceWith({ threadId, questionId, answer: "Q3" });
+    expect(answerQuestion).toHaveBeenCalledExactlyOnceWith({
+      threadId,
+      questionId,
+      answer: "Q3",
+      actor: expect.objectContaining({ kind: "local-user" }),
+    });
   });
 });
 
@@ -253,19 +260,27 @@ describe("one harness session on every surface", () => {
   });
 
   function journaledStore(): NativeHarnessSessionStore {
+    return journaledSession().store;
+  }
+
+  function journaledSession(): {
+    readonly store: NativeHarnessSessionStore;
+    readonly journal: Journal;
+  } {
     const now = "2026-10-06T12:00:00.000Z";
     const directory = mkdtempSync(join(tmpdir(), "octant-harness-surfaces-"));
     directories.push(directory);
     const connection = openSqlite(join(directory, "events.sqlite3"));
     applyMigrations(connection, MIGRATIONS, () => now);
     let counter = 0;
-    return new NativeHarnessSessionStore({
-      journal: new Journal({
-        connection,
-        registry: registerNativeHarnessEvents(new EventRegistry()),
-        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
-        clock: () => now,
-      }),
+    const journal = new Journal({
+      connection,
+      registry: registerNativeHarnessEvents(new EventRegistry()),
+      projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+      clock: () => now,
+    });
+    const store = new NativeHarnessSessionStore({
+      journal,
       uuid: () => `cccccccc-cccc-4ccc-8ccc-${(++counter).toString(16).padStart(12, "0")}`,
       actor: Schema.decodeUnknownSync(EventActor)({
         kind: "local-user",
@@ -273,7 +288,162 @@ describe("one harness session on every surface", () => {
       }),
       clock: () => now,
     });
+    return { store, journal };
   }
+
+  it("journals an approval and a question a paired device settles with the device as actor, and a local window's as the local person", async () => {
+    const deviceId = "55000000-0000-4000-8000-0000000000d1";
+    const lead = decodeNativeHarnessSlotCandidate({
+      hostId: "00000000-0000-4000-8000-0000000000aa",
+      providerInstanceId: "00000000-0000-4000-8000-000000000001",
+      modelId: "frontier-large",
+    });
+    const settledBy = async (principal: unknown) => {
+      const { store, journal } = journaledSession();
+      let counter = 0;
+      const uuid = () => `dddddddd-dddd-4ddd-8ddd-${(++counter).toString(16).padStart(12, "0")}`;
+      const clock = () => "2026-10-06T12:00:00.000Z";
+      const approvals = new NativeHarnessApprovalStore({ sessions: store, uuid, clock });
+      const questions = new NativeHarnessQuestionStore({ sessions: store, uuid, clock });
+      const handler = createNativeHarnessSessionRouteHandler({
+        windowAuthorityStore: new WindowAuthorityStore(),
+        store,
+        followUps: {} as never,
+        authorizeThread: () => true,
+        decideApproval: ({ threadId, approvalId, decision, answer }) =>
+          approvals.decide(threadId, approvalId, decision, answer),
+        answerQuestion: ({ threadId, questionId, answer, actor }) =>
+          questions.answer(threadId, questionId, answer, actor),
+      });
+      const send = (action: string, body: unknown) => {
+        const request = new Request(
+          `http://127.0.0.1/api/native-harness/sessions/${threadId}/${action}`,
+          { method: "POST", body: JSON.stringify(body) },
+        );
+        bindPrincipalRouteContext(request, { principal: principal as never, scopeId: windowId });
+        return handler(request);
+      };
+      const approved = approvals.ask({
+        threadId,
+        mode: "work",
+        lead,
+        toolName: "write",
+        summary: "write: summary.md",
+        approvalClass: "file-writes",
+      });
+      const asked = questions.ask({ threadId, mode: "work", lead, prompt: "Which?", options: [] });
+      const view = store.read(threadId);
+      expect(
+        (await send("approvals", { approvalId: view?.approvals?.[0]?.id, decision: "approve" }))
+          ?.status,
+      ).toBe(200);
+      expect(
+        (await send("questions", { questionId: view?.questions[0]?.id, answer: "This one" }))
+          ?.status,
+      ).toBe(200);
+      expect(await approved).toBe("approved");
+      expect((await asked).status).toBe("answered");
+      return journal
+        .replay({ afterSequence: 0 as never, limit: 100 } as never)
+        .filter((event) => event.eventName.includes("-settled"))
+        .map((event) => [event.eventName.split(".").at(-1)?.split("@")[0], event.actor]);
+    };
+
+    const device = { kind: "remote-device", actorId: deviceId, deviceId };
+    expect(await settledBy({ kind: "remote-device", deviceId, admittedBy: "host-person" })).toEqual(
+      [
+        ["native-harness-approval-settled", device],
+        ["native-harness-question-settled", device],
+      ],
+    );
+    expect(await settledBy({ kind: "local-window" })).toEqual([
+      ["native-harness-approval-settled", expect.objectContaining({ kind: "local-user" })],
+      ["native-harness-question-settled", expect.objectContaining({ kind: "local-user" })],
+    ]);
+  });
+
+  it("journals a pause, a resume and the steering notes a paired device sends with the device as actor, and a local window's as the local person", async () => {
+    const deviceId = "55000000-0000-4000-8000-0000000000d2";
+    const controlledBy = async (principal: unknown) => {
+      const { store, journal } = journaledSession();
+      store.ensure({
+        threadId,
+        mode: "work",
+        leadSlotId: decodeNativeHarnessSlotId("default"),
+        lead: decodeNativeHarnessSlotCandidate({
+          hostId: "00000000-0000-4000-8000-0000000000aa",
+          providerInstanceId: "00000000-0000-4000-8000-000000000001",
+          modelId: "frontier-large",
+        }),
+      });
+      store.markRunning(threadId);
+      const handler = createNativeHarnessSessionRouteHandler({
+        windowAuthorityStore: new WindowAuthorityStore(),
+        store,
+        followUps: {} as never,
+        authorizeThread: () => true,
+        steer: ({ threadId, command, actor }) => {
+          if (command.kind === "clear") {
+            store.clearSteering(threadId, "all", actor);
+            return "cleared";
+          }
+          if (command.kind === "take") return { taken: store.takeSteering(threadId, actor) };
+          return store.queueSteering(
+            threadId,
+            {
+              id: command.noteId ?? "55000000-0000-4000-8000-0000000000e0",
+              text: command.text,
+              status: "queued",
+              at: "2026-10-06T12:00:00.000Z" as never,
+            },
+            actor,
+          );
+        },
+      });
+      const send = async (action: string, body: unknown) => {
+        const request = new Request(
+          `http://127.0.0.1/api/native-harness/sessions/${threadId}/${action}`,
+          { method: "POST", body: JSON.stringify(body) },
+        );
+        bindPrincipalRouteContext(request, { principal: principal as never, scopeId: windowId });
+        expect((await handler(request))?.status).toBe(200);
+      };
+      const command = (kind: string) => {
+        const session = store.read(threadId)?.session;
+        return send("commands", {
+          kind,
+          sessionId: session?.id,
+          expectedVersion: session?.version,
+        });
+      };
+      await command("pause-native-harness-session");
+      await command("resume-native-harness-session");
+      await send("steering", {
+        kind: "queue",
+        text: "Use the smaller fixture.",
+        noteId: "55000000-0000-4000-8000-0000000000e1",
+      });
+      await send("steering", { kind: "take" });
+      await send("steering", {
+        kind: "queue",
+        text: "Skip the migration.",
+        noteId: "55000000-0000-4000-8000-0000000000e2",
+      });
+      await send("steering", { kind: "clear" });
+      return journal
+        .replay({ afterSequence: 0 as never, limit: 100 } as never)
+        .filter((event) => /paused|resumed|steering/.test(event.eventName))
+        .map((event) => event.actor);
+    };
+
+    const device = { kind: "remote-device", actorId: deviceId, deviceId };
+    expect(
+      await controlledBy({ kind: "remote-device", deviceId, admittedBy: "host-person" }),
+    ).toEqual([device, device, device, device, device, device]);
+    const local = await controlledBy({ kind: "local-window" });
+    expect(local).toHaveLength(6);
+    expect(new Set(local.map((actor) => actor.kind))).toEqual(new Set(["local-user"]));
+  });
 
   it("shares the local session between windows without exposing its prompts or controls to a phone", async () => {
     const store = journaledStore();
@@ -468,7 +638,10 @@ describe("a paired device answering its own managed child's request", () => {
         threadId,
         approvalId,
         decision: "approve",
-        answer: { principal: { kind: "remote-device", deviceId } },
+        answer: {
+          principal: { kind: "remote-device", deviceId },
+          actor: { kind: "remote-device", actorId: deviceId, deviceId },
+        },
       }),
     );
     expect((await send("questions", { questionId, answer: "Strict" }))?.status).toBe(200);
@@ -476,6 +649,7 @@ describe("a paired device answering its own managed child's request", () => {
       threadId,
       questionId,
       answer: "Strict",
+      actor: { kind: "remote-device", actorId: deviceId, deviceId },
     });
   });
   it("refuses another device, remembered answers, revoked authority and session commands", async () => {

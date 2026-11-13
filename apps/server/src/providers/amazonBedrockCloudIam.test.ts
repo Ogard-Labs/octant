@@ -481,6 +481,28 @@ describe("Amazon Bedrock with cloud single sign-on, end to end", () => {
     }
   });
 
+  it("journals a cloud Sign out a paired device asked for as the device's", async () => {
+    const scene = await host();
+    expect(await signIn(scene)).toMatchObject({ outcome: "signed-in" });
+    const deviceId = "80000000-0000-4000-8000-000000000bd1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const journaled: Array<readonly [string, unknown]> = [];
+
+    const answered = await answerCloudIamSettingsCommand({
+      dependencies: {
+        ...scene.cloudIam,
+        journal: { append: (record, actor) => void journaled.push([record.name, actor]) },
+      },
+      instanceId,
+      kind: "sign-out",
+      principal: "person-paired-device",
+      actor: device,
+    });
+
+    expect(answered.kind).toBe("signed-out");
+    expect(journaled).toEqual([["host-oauth.signed-out", device]]);
+  });
+
   it("refuses a remote principal's Sign out, and every Settings command but status and Sign out, before any broker call", async () => {
     const scene = await host();
     expect(await signIn(scene)).toMatchObject({ outcome: "signed-in" });

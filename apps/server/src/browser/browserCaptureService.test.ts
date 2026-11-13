@@ -160,6 +160,20 @@ describe("BrowserCaptureService", () => {
     expect(journalRows(connection)[0]?.actor_kind).toBe("local-user");
   });
 
+  it("attributes a capture to the device the route named when a person took it there", async () => {
+    const { connection, service } = open();
+    const deviceId = "a0000000-0000-4000-8000-0000000000d4";
+    kept(
+      await service.keep(
+        request({
+          takenBy: "person",
+          takenByActor: { kind: "remote-device", actorId: deviceId, deviceId } as never,
+        }),
+      ),
+    );
+    expect(journalRows(connection)[0]?.actor_kind).toBe("remote-device");
+  });
+
   it("reads back the same bytes for the thread that owns the capture", async () => {
     const { service } = open();
     const captureId = kept(await service.keep(request()));

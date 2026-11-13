@@ -12,6 +12,7 @@ import {
   decodeCodeProjectAutoReviewerChanged,
   decodeCodeProjectAgentDefaultBranchPushChanged,
   decodeCodeProjectAgentMergeChanged,
+  decodeCodeProjectOwnToolchainChanged,
   decodeCodeProjectAgentPullRequestCommentsChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
@@ -193,6 +194,8 @@ const projectDecoders = {
     decodeCodeProjectPullRequestBackgroundRefreshChanged(payload).project,
   "project.code-agent-merge-changed@1": (payload: unknown) =>
     decodeCodeProjectAgentMergeChanged(payload).project,
+  "project.code-own-toolchain-changed@1": (payload: unknown) =>
+    decodeCodeProjectOwnToolchainChanged(payload).project,
   "project.code-agent-pull-request-comments-changed@1": (payload: unknown) =>
     decodeCodeProjectAgentPullRequestCommentsChanged(payload).project,
   "project.code-agent-default-branch-push-changed@1": (payload: unknown) =>

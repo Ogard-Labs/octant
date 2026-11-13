@@ -40,8 +40,6 @@ export type CodeProviderRequest =
       readonly kind: "approval";
       readonly approvalId: CodeApprovalId;
       readonly summary: string;
-      /** The host takes an answer only from a window on its own computer. */
-      readonly localPersonOnly?: true;
     }
   | {
       readonly kind: "input";
@@ -107,7 +105,6 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       kind: "approval",
       approvalId: event.approvalId,
       summary: event.summary,
-      ...(event.localPersonOnly === true ? { localPersonOnly: true } : {}),
     };
   }
   // App questionnaires follow the session read so answers from another window

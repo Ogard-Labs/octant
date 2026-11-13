@@ -13,8 +13,11 @@ import {
   type ExtensionPublisherKeyFingerprint,
 } from "@octant/contracts/extensions";
 import { decodeExtensionSnapshot, type ExtensionSnapshot } from "@octant/contracts/extension-rpc";
-import { AggregateVersion, type EventEnvelope } from "@octant/contracts/events";
-import { outsideDriverPublisherStanding } from "@octant/domain/outside-driver-publisher-policy";
+import { AggregateVersion, UtcTimestamp, type EventEnvelope } from "@octant/contracts/events";
+import {
+  outsideDriverPublisherStanding,
+  updateAwaitsPublisherTrust,
+} from "@octant/domain/outside-driver-publisher-policy";
 import { resolveExtensionActivation } from "@octant/plugin-host/activation";
 import type { Projection } from "./projection";
 import type { SqliteConnection } from "./sqlitePort";
@@ -27,6 +30,21 @@ export interface ProjectedExtensionVersion {
   readonly manifest: ExtensionPackageManifest;
   readonly verified: boolean;
   readonly quarantined: boolean;
+  /**
+   * The run of updates this unsigned version belongs to, each one taken from
+   * the source the person trusted: the version and digest the run began at.
+   * An approval given to any version of a run holds for the others.
+   */
+  readonly updateLine?: string;
+}
+
+/** The update an Updated notice reports: what was replaced, by what, and when. */
+export interface ProjectedExtensionSourceUpdate {
+  readonly previousVersion: string;
+  readonly previousDigest: string;
+  readonly version: string;
+  readonly digest: string;
+  readonly at: string;
 }
 
 export interface ProjectedExtensionPending {
@@ -83,6 +101,11 @@ export interface ProjectedExtensionRecord {
    * forgetting the pin does.
    */
   readonly publisherChanged?: boolean;
+  /**
+   * Set while the selected version is an unsigned update that kept the
+   * package's trust and approvals because it came from the same source.
+   */
+  readonly sourceUpdate?: ProjectedExtensionSourceUpdate;
   readonly draining: boolean;
   readonly broken: boolean;
   readonly unavailable: boolean;
@@ -134,6 +157,7 @@ export class ExtensionProjection implements Projection {
       event,
       envelope.aggregateVersion,
       envelope.globalSequence,
+      envelope.occurredAt,
     );
     upsertRecord(connection, next);
   }
@@ -200,6 +224,7 @@ function applyLifecycle(
   event: ExtensionLifecycleEvent,
   aggregateVersion: number,
   lastSequence: number,
+  occurredAt: string,
 ): ProjectedExtensionRecord {
   const payload = event.payload;
   const packageId = "packageId" in payload ? payload.packageId : existing?.packageId;
@@ -253,7 +278,17 @@ function applyLifecycle(
         next.current !== undefined &&
         hasCapabilityExpansion(next.current, payload.manifest);
       const outsideDriver = holdsProviderDriver(payload.manifest);
-      const held = expanded || outsideDriver;
+      // An update whose version the pinned publisher did not sign is held
+      // for that publisher below and loses its trust here, as a driver does.
+      // So does the first signed update of a package trusted unsigned: no
+      // key is pinned, so nothing holds it, and without this it would keep
+      // running with a key nobody accepted and none ever pinned. Trusting
+      // it again is the person's confirmation and pins the key.
+      const awaitsPublisherTrust =
+        payload.kind === "update-committed" &&
+        next.current !== undefined &&
+        updateAwaitsPublisherTrust(next.publisherPin, payload.manifest.provenance.publisherKey);
+      const held = expanded || outsideDriver || awaitsPublisherTrust;
       // An outside driver's review is trusting it, so a widened component is
       // held for that admission rather than for a review nothing else lifts.
       const reviewHeld = expanded && !outsideDriver;
@@ -269,8 +304,10 @@ function applyLifecycle(
           })
         : next.diagnostics;
       return withPublisherStanding({
-        ...withoutPending(next),
-        lifecycleState: held ? "quarantined" : "installed",
+        ...withoutSourceUpdate(withoutPending(next)),
+        // Lost trust is the whole hold for a publisher's key; the state
+        // says quarantined only where a review or an admission is owed.
+        lifecycleState: expanded || outsideDriver ? "quarantined" : "installed",
         current: payload.manifest,
         versions,
         trusted: held ? false : next.trusted,
@@ -289,13 +326,47 @@ function applyLifecycle(
           : diagnostics,
       });
     }
+    case "update-kept-from-source": {
+      const previous = next.versions.find(
+        (version) =>
+          version.manifest.version === payload.previousVersion &&
+          version.manifest.digest === payload.previousDigest,
+      );
+      if (
+        previous === undefined ||
+        next.current?.version !== payload.version ||
+        next.current.digest !== payload.digest
+      ) {
+        return next;
+      }
+      const updateLine =
+        previous.updateLine ?? `${payload.previousVersion}:${payload.previousDigest}`;
+      return {
+        ...next,
+        versions: next.versions.map((version) =>
+          version === previous ||
+          (version.manifest.version === payload.version &&
+            version.manifest.digest === payload.digest)
+            ? { ...version, updateLine }
+            : version,
+        ),
+        sourceUpdate: {
+          previousVersion: payload.previousVersion,
+          previousDigest: payload.previousDigest,
+          version: payload.version,
+          digest: payload.digest,
+          at: occurredAt,
+        },
+      };
+    }
     case "rollback-selected":
       return withPublisherStanding({
-        ...withoutPending(next),
+        ...withoutSourceUpdate(withoutPending(next)),
         grantsEnded: { sequence: lastSequence, reason: "rolled-back" },
         lifecycleState: holdsProviderDriver(payload.manifest) ? "quarantined" : "installed",
         current: payload.manifest,
-        versions: selectVersion(next.versions, payload.manifest),
+        // Every approval ends here, so no run of updates outlives it.
+        versions: selectVersion(next.versions.map(withoutUpdateLine), payload.manifest),
         trusted: false,
         pluginDesired: false,
         componentDesired: {},
@@ -380,7 +451,7 @@ function applyLifecycle(
       };
     case "package-uninstalled":
       return {
-        ...next,
+        ...withoutSourceUpdate(next),
         lifecycleState: "uninstalled",
         grantsEnded: { sequence: lastSequence, reason: "plugin-uninstalled" },
         trusted: false,
@@ -389,7 +460,10 @@ function applyLifecycle(
         draining: false,
         waiting: false,
         tombstoned: true,
-        versions: next.versions.map((version) => ({ ...version, verified: false })),
+        versions: next.versions.map((version) => ({
+          ...withoutUpdateLine(version),
+          verified: false,
+        })),
       };
     case "package-quarantined": {
       const selected =
@@ -494,9 +568,8 @@ function projectPackageState(record: ProjectedExtensionRecord): ExtensionPackage
     compatibility: manifest.compatibility,
     activation: packageActivation,
     ...(manifest.provenance.npm === undefined ? {} : { npm: manifest.provenance.npm }),
-    ...(holdsProviderDriver(manifest) && publisherState(record) !== undefined
-      ? { publisher: publisherState(record) }
-      : {}),
+    ...(publisherState(record) === undefined ? {} : { publisher: publisherState(record) }),
+    ...(updatedState(record) === undefined ? {} : { updated: updatedState(record) }),
     components: manifest.components.map((component) => {
       const desired = record.componentDesired[component.id] ?? false;
       const componentActivation = activation(record, installed, desired);
@@ -621,6 +694,103 @@ function holdsProviderDriver(manifest: ExtensionPackageManifest): boolean {
   return manifest.components.some((component) => component.kind === "provider-driver");
 }
 
+/**
+ * The publisher key whose signature of one retained version the host
+ * verified, when it is the key the person pinned for the package. Every
+ * package kind that can carry a signature file has it checked on the way in,
+ * and no author can state a key: a manifest the host builds takes it from
+ * the verified signature alone, and one an author writes is refused if it
+ * names one.
+ */
+export function readVerifiedPublisherKey(
+  connection: SqliteConnection,
+  target: {
+    readonly extensionId: string;
+    readonly version: string;
+    readonly digest: string;
+  },
+): ExtensionPublisherKeyFingerprint | undefined {
+  const record = readExtensionRecord(connection, target.extensionId);
+  if (record === undefined || record.tombstoned || record.publisherPin === undefined) {
+    return undefined;
+  }
+  const retained = record.versions.find(
+    (version) =>
+      version.verified &&
+      !version.quarantined &&
+      version.manifest.version === target.version &&
+      version.manifest.digest === target.digest,
+  );
+  const key = retained?.manifest.provenance.publisherKey;
+  return key === record.publisherPin ? key : undefined;
+}
+
+/**
+ * The run of same-source updates one retained, unsigned version belongs to,
+ * or `undefined` outside any. A package with a pinned key has none: there the
+ * key decides whether an approval holds.
+ */
+export function readUpdateLine(
+  connection: SqliteConnection,
+  target: {
+    readonly extensionId: string;
+    readonly version: string;
+    readonly digest: string;
+  },
+): string | undefined {
+  const record = readExtensionRecord(connection, target.extensionId);
+  if (record === undefined || record.tombstoned || record.publisherPin !== undefined) {
+    return undefined;
+  }
+  const retained = record.versions.find(
+    (version) =>
+      version.verified &&
+      !version.quarantined &&
+      version.manifest.version === target.version &&
+      version.manifest.digest === target.digest,
+  );
+  return retained?.manifest.provenance.publisherKey === undefined
+    ? retained?.updateLine
+    : undefined;
+}
+
+function withoutSourceUpdate(record: ProjectedExtensionRecord): ProjectedExtensionRecord {
+  const { sourceUpdate: _ended, ...rest } = record;
+  return rest;
+}
+
+function withoutUpdateLine(version: ProjectedExtensionVersion): ProjectedExtensionVersion {
+  const { updateLine: _ended, ...rest } = version;
+  return rest;
+}
+
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+
+/** The Updated notice of the selected version, when it is such an update. */
+function updatedState(record: ProjectedExtensionRecord): ExtensionPackageState["updated"] {
+  const update = record.sourceUpdate;
+  if (
+    update === undefined ||
+    record.tombstoned ||
+    record.current?.version !== update.version ||
+    record.current.digest !== update.digest
+  ) {
+    return undefined;
+  }
+  const previous = record.versions.find(
+    (version) =>
+      version.manifest.version === update.previousVersion &&
+      version.manifest.digest === update.previousDigest,
+  );
+  if (previous === undefined) return undefined;
+  return {
+    previousVersion: previous.manifest.version,
+    previousDigest: previous.manifest.digest,
+    at: decodeTimestamp(update.at),
+    rollbackAvailable: previous.verified && !previous.quarantined,
+  };
+}
+
 function isProviderDriverComponent(record: ProjectedExtensionRecord, componentId: string): boolean {
   return (
     record.current?.components.some(
@@ -637,14 +807,12 @@ function isQuarantined(record: ProjectedExtensionRecord): boolean {
 
 /**
  * Sets the publisher hold from the pin and the key that signed the selected
- * version, for an outside driver. A package that holds no driver has no
- * publisher standing.
+ * version. A package nobody pinned a key for has no publisher standing.
  */
 function withPublisherStanding(record: ProjectedExtensionRecord): ProjectedExtensionRecord {
   const { publisherChanged: _previous, ...rest } = record;
   const changed =
     record.current !== undefined &&
-    holdsProviderDriver(record.current) &&
     outsideDriverPublisherStanding(record.publisherPin, record.current.provenance.publisherKey)
       .kind === "publisher-changed";
   const diagnostics = changed
@@ -658,7 +826,7 @@ function withPublisherStanding(record: ProjectedExtensionRecord): ProjectedExten
 const OUTSIDE_DRIVER_PUBLISHER_CHANGED: ExtensionDiagnostic = {
   code: "outside-driver-publisher-changed",
   message:
-    "Another publisher signed this provider driver. It stays held until you trust the new publisher or forget the old one.",
+    "Another publisher signed this package, or nobody did. It stays held until you trust the new publisher or forget the old one.",
 };
 
 function publisherState(record: ProjectedExtensionRecord): ExtensionPackageState["publisher"] {
@@ -712,7 +880,7 @@ const OUTSIDE_DRIVER_QUARANTINE: ExtensionDiagnostic = {
   message: "An outside provider driver stays quarantined until you trust its source.",
 };
 
-function hasCapabilityExpansion(
+export function hasCapabilityExpansion(
   previous: ExtensionPackageManifest,
   next: ExtensionPackageManifest,
 ): boolean {

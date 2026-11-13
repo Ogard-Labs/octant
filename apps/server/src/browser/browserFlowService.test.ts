@@ -130,6 +130,25 @@ describe("a Project's saved Browser flows", () => {
     ]);
   });
 
+  it("journals a delete as whoever the route named", () => {
+    const { service, journal } = open();
+    const flows = service();
+    const deviceId = "a0000000-0000-4000-8000-0000000000d3";
+    const device = decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId });
+    flows.save({ projectId: projectA, name: "One", steps: openAndClick, actor: agent });
+    flows.delete(projectA, "One", device);
+    expect(
+      journal
+        .replayAggregate({
+          aggregateType: BROWSER_FLOW_AGGREGATE_TYPE,
+          aggregateId: String(projectA),
+          afterVersion: 0,
+          limit: 10,
+        })
+        .at(-1)?.actor,
+    ).toEqual(device);
+  });
+
   it("summarizes flows across Projects with their step count and first address", () => {
     const { service } = open();
     const flows = service();

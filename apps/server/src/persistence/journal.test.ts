@@ -182,6 +182,7 @@ describe("Journal", () => {
         contextSidebarWidth: 640,
         firstRunOnboarding: "pending",
         automaticUpdateChecks: true,
+        quitShortcutNeedsSecondPress: true,
         marketplaceFetchesEnabled: true,
         completedThreadArchiveAfterDays: 7,
         autoCompactOctantWindowPercent: 85,

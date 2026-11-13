@@ -202,6 +202,11 @@ function standaloneSkillSummarySourceLabel(skill: StandaloneSkillRecord): string
   return "Project skill";
 }
 
+/** A package that holds a provider driver is an outside driver, admitted by its own flow. */
+function holdsProviderDriver(preview: ExtensionPackagePreview): boolean {
+  return preview.review.components.some((component) => component.kind === "provider-driver");
+}
+
 function licenseLabel(license: ExtensionPackagePreview["review"]["license"]): string {
   switch (license.kind) {
     case "spdx":
@@ -424,6 +429,9 @@ const DEFAULT_EXTENSION_SETTINGS_SCOPE: ExtensionActivationScope = {
 const COMMAND_VERSION = 1 as never;
 const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 
+/** What one install confirmation covers; the host journals each step by itself. */
+type InstallSteps = "install" | "trust" | "turn-on";
+
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
   const marketplaceFetchesEnabled = props.marketplaceFetchesEnabled ?? true;
@@ -601,9 +609,22 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           message: "Standalone skill discovery could not be refreshed.",
         });
       }
-      const scoped = await props.client.effectiveState({ scope });
+      // The scope's effective state only tells Settings whether the catalog
+      // is offline; the snapshot above is what Settings lists. One package
+      // the scope query refused used to blank the whole view, so a failed
+      // query keeps the list and says so.
+      let scoped: ExtensionEffectiveSnapshot | undefined;
+      try {
+        scoped = await props.client.effectiveState({ scope });
+      } catch {
+        if (epoch !== reloadEpoch.current) return;
+        setFailure({
+          category: "unavailable",
+          message: "Effective state could not be read. Installed packages are still shown.",
+        });
+      }
       if (epoch !== reloadEpoch.current) return;
-      if (scoped.catalogStatus === "offline") {
+      if (scoped?.catalogStatus === "offline") {
         setMarketplaceEntries([]);
         setPreview(undefined);
         setLocalPreview(undefined);
@@ -816,14 +837,20 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   );
 
   /**
-   * Installs the inspected entry. `plainInstall` is the Library's: it never
-   * turns into an npm update that Marketplace left pending, and it leaves
-   * Marketplace's own review state alone. Returns the failure message, if any.
+   * Installs the inspected entry. `steps` is what the one confirmation
+   * covers: the install alone, the install and trust, or those and turning
+   * the plugin on; the host journals each step by itself. `plainInstall` is
+   * the Library's: it never turns into an npm update that Marketplace left
+   * pending, and it leaves Marketplace's own review state alone. Returns the
+   * failure message, if any.
+   * For an outside provider driver, Install and trust is the driver flow:
+   * the host also switches it on, and names the step it refused if it
+   * stopped early.
    */
   const confirmInstall = useCallback(
     async (
       entry: ExtensionCatalogEntry,
-      trust = false,
+      steps: InstallSteps = "install",
       plainInstall = false,
     ): Promise<string | undefined> => {
       if (installing) return "An install is already running.";
@@ -837,7 +864,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           packageId: entry.packageId,
           version: entry.version,
           digest: entry.digest,
-          ...(trust && !updating ? { trust: true } : {}),
+          ...(steps !== "install" && !updating ? { trust: true } : {}),
+          ...(steps === "turn-on" && !updating ? { enable: true } : {}),
         });
         if (installed.kind === "extension-command-failed") {
           setFailure({
@@ -852,7 +880,16 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           setNpmUpdateOf(undefined);
         }
         await reload();
-        return undefined;
+        // The steps before the refused one stand, so the package is listed
+        // under Installed; the banner says where the flow stopped.
+        const stopped =
+          installed.kind !== "extension-state-updated" || installed.stoppedAt === undefined
+            ? undefined
+            : installed.stoppedAt === "trust"
+              ? `${entry.displayName} is installed, but Octant refused to trust its source, so it stays untrusted and switched off. Review it under Installed.`
+              : `${entry.displayName} is installed and trusted, but could not be switched on. Switch it on under Installed.`;
+        if (stopped !== undefined) setFailure({ category: "blocked", message: stopped });
+        return stopped;
       } catch {
         setFailure({
           category: "unavailable" as never,
@@ -940,7 +977,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   );
 
   const confirmSkillInstall = useCallback(
-    async (preview: SkillPackagePreview, trust = false) => {
+    async (preview: SkillPackagePreview, steps: "install" | "trust" | "turn-on" = "install") => {
       if (installingSkill) return;
       const action = skillPackageAction(snapshot, preview);
       if (action === "current") return;
@@ -953,7 +990,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           packageId: preview.packageId,
           version: preview.entry.version,
           digest: preview.entry.skill.digest,
-          ...(trust && action === "install" ? { trust: true } : {}),
+          ...(steps !== "install" && action === "install" ? { trust: true } : {}),
+          ...(steps === "turn-on" && action === "install" ? { enable: true } : {}),
         });
         if (installed.kind === "extension-command-failed") {
           setFailure({
@@ -1054,11 +1092,12 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       });
     }
   };
-  // Install adds the package and nothing more: no trust, nothing turned on.
-  const installLibraryItem = async (item: LibraryItem) => {
+  // One confirmation installs, trusts and turns the plugin on; Install only
+  // adds the package and nothing more.
+  const installLibraryItem = async (item: LibraryItem, steps: "install" | "turn-on") => {
     const entry = libraryInspection?.preview?.entry ?? marketplaceEntryOf(item);
     if (entry === undefined) return;
-    const failed = await confirmInstall(entry, false, true);
+    const failed = await confirmInstall(entry, steps, true);
     setLibraryInspection(
       failed === undefined ? undefined : { itemId: item.id, status: "failed", message: failed },
     );
@@ -1159,7 +1198,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             void reload();
           }}
           onInspect={(item) => void inspectLibraryItem(item)}
-          onInstall={(item) => void installLibraryItem(item)}
+          onInstall={(item, steps) => void installLibraryItem(item, steps)}
           loading={status === "loading" && snapshot.packages.length === 0}
           marketplaceFetchesEnabled={marketplaceFetchesEnabled}
           onOpen={(target) => setView(target)}
@@ -1318,6 +1357,19 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                               extensionId: pkg.extensionId,
                               expectedStateVersion: pkg.stateVersion,
                               publisherKey,
+                            },
+                            `${pkg.extensionId}:${pkg.packageId}`,
+                          )
+                        }
+                        onRollBackUpdate={(previous) =>
+                          runLifecycle(
+                            {
+                              kind: "rollback-package",
+                              extensionId: pkg.extensionId,
+                              packageId: pkg.packageId,
+                              version: previous.previousVersion,
+                              digest: previous.previousDigest,
+                              restoreTrust: true,
                             },
                             `${pkg.extensionId}:${pkg.packageId}`,
                           )
@@ -1508,6 +1560,32 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               )}
             </div>
           </SettingsSection>
+
+          {(snapshot.projectSkillsInUse ?? []).length > 0 ? (
+            <ul
+              aria-label="Project skills in use"
+              className="extensions-settings__diagnostics settings-collection-scroll"
+              tabIndex={0}
+            >
+              {(snapshot.projectSkillsInUse ?? []).map((notice) => {
+                const named = (qualifiedId: string) =>
+                  snapshot.skills?.find(
+                    (skill) => String(skill.skill.qualifiedId) === String(qualifiedId),
+                  )?.displayName ?? notice.name;
+                return (
+                  <li
+                    aria-label={`Project skill in use: ${notice.name}`}
+                    key={`${String(notice.used)}:${String(notice.gaveWay)}`}
+                    role="status"
+                  >
+                    Two skills named <strong>{notice.name}</strong> were on. The Project's copy,{" "}
+                    {named(notice.used)}, is used, and {named(notice.gaveWay)} was turned off. Turn{" "}
+                    {named(notice.gaveWay)} on to use it instead.
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
 
           {snapshot.collisions.length > 0 ? (
             <SettingsDisclosure
@@ -1829,10 +1907,21 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                 variant="secondary"
                                 aria-label="Install and trust"
                                 disabled={installing}
-                                onClick={() => void confirmInstall(preview.entry, true)}
+                                onClick={() => void confirmInstall(preview.entry, "trust")}
                                 type="button"
                               >
                                 Install and trust
+                              </OctantButton>
+                            )}
+                            {npmUpdateOf === entry.extensionId ? null : (
+                              <OctantButton
+                                variant="secondary"
+                                aria-label="Install, trust and turn on"
+                                disabled={installing}
+                                onClick={() => void confirmInstall(preview.entry, "turn-on")}
+                                type="button"
+                              >
+                                Install, trust and turn on
                               </OctantButton>
                             )}
                           </div>
@@ -1956,16 +2045,41 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         variant="secondary"
                         aria-label="Install and trust"
                         disabled={installing}
-                        onClick={() => void confirmInstall(localPreview.entry, true)}
+                        onClick={() =>
+                          void confirmInstall(
+                            localPreview.entry,
+                            holdsProviderDriver(localPreview) ? "turn-on" : "trust",
+                          )
+                        }
                         type="button"
                       >
                         Install and trust
                       </OctantButton>
                     )}
-                    {npmUpdateOf !== undefined ? null : (
+                    {npmUpdateOf !== undefined || holdsProviderDriver(localPreview) ? null : (
+                      <OctantButton
+                        variant="secondary"
+                        aria-label="Install, trust and turn on"
+                        disabled={installing}
+                        onClick={() => void confirmInstall(localPreview.entry, "turn-on")}
+                        type="button"
+                      >
+                        Install, trust and turn on
+                      </OctantButton>
+                    )}
+                    {npmUpdateOf !== undefined ? null : holdsProviderDriver(localPreview) ? (
+                      <p className="extensions-settings__state">
+                        Install and trust installs this driver, trusts it at this digest and
+                        switches it on, in that order, stopping at the first step Octant refuses.
+                        Confirm install only adds it, untrusted and switched off. Adding a provider
+                        from it, the connection check and Verify tools stay separate steps. Octant
+                        ran nothing from the package.
+                      </p>
+                    ) : (
                       <p className="extensions-settings__state">
                         Confirm install adds it untrusted and switched off; Install and trust also
-                        trusts it, and it stays switched off. Octant ran nothing from the package.
+                        trusts it, and it stays switched off; Install, trust and turn on does all
+                        three. Octant ran nothing from the package.
                       </p>
                     )}
                   </div>
@@ -1977,8 +2091,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           <SettingsSection className="extensions-settings__section" title="Standalone skills">
             <div className="extensions-settings__body">
               <p className="extensions-settings__description">
-                Search skills.sh and npm packages that ship SKILL.md, preview, then install.
-                Installs start disabled — trust and enable them from Installed.
+                Search skills.sh and npm packages that ship SKILL.md, preview, then install. Choose
+                whether to trust and turn it on as you install it.
               </p>
               <div className="extensions-settings__search">
                 <OctantInput
@@ -2094,36 +2208,49 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                 <dd>{licenseLabel(skillPreview.license)}</dd>
                               </div>
                             </dl>
-                            <OctantButton
-                              variant="default"
-                              aria-label={
-                                skillPreviewAction === "current"
-                                  ? "Skill already installed"
-                                  : skillPreviewAction === "update"
-                                    ? "Confirm skill update"
-                                    : "Confirm skill install"
-                              }
-                              disabled={installingSkill || skillPreviewAction === "current"}
-                              onClick={() => void confirmSkillInstall(skillPreview)}
-                              type="button"
-                            >
-                              {skillPreviewAction === "current"
-                                ? "Already installed"
-                                : skillPreviewAction === "update"
-                                  ? "Confirm update"
-                                  : "Confirm install"}
-                            </OctantButton>
-                            {skillPreviewAction === "install" ? (
+                            <div className="extensions-settings__preview-actions">
                               <OctantButton
-                                variant="secondary"
-                                aria-label="Install and trust skill"
-                                disabled={installingSkill}
-                                onClick={() => void confirmSkillInstall(skillPreview, true)}
+                                variant="default"
+                                aria-label={
+                                  skillPreviewAction === "current"
+                                    ? "Skill already installed"
+                                    : skillPreviewAction === "update"
+                                      ? "Confirm skill update"
+                                      : "Confirm skill install"
+                                }
+                                disabled={installingSkill || skillPreviewAction === "current"}
+                                onClick={() => void confirmSkillInstall(skillPreview)}
                                 type="button"
                               >
-                                Install and trust
+                                {skillPreviewAction === "current"
+                                  ? "Already installed"
+                                  : skillPreviewAction === "update"
+                                    ? "Confirm update"
+                                    : "Confirm install"}
                               </OctantButton>
-                            ) : null}
+                              {skillPreviewAction === "install" ? (
+                                <OctantButton
+                                  variant="secondary"
+                                  aria-label="Install and trust skill"
+                                  disabled={installingSkill}
+                                  onClick={() => void confirmSkillInstall(skillPreview, "trust")}
+                                  type="button"
+                                >
+                                  Install and trust
+                                </OctantButton>
+                              ) : null}
+                              {skillPreviewAction === "install" ? (
+                                <OctantButton
+                                  variant="secondary"
+                                  aria-label="Install, trust and turn on skill"
+                                  disabled={installingSkill}
+                                  onClick={() => void confirmSkillInstall(skillPreview, "turn-on")}
+                                  type="button"
+                                >
+                                  Install, trust and turn on
+                                </OctantButton>
+                              ) : null}
+                            </div>
                           </div>
                         ) : null}
                       </li>
@@ -2339,7 +2466,11 @@ interface InstalledPackageCardProps {
     publisherKey: ExtensionPublisherKeyFingerprint,
   ) => Promise<boolean>;
   readonly onForgetPublisher: (publisherKey: ExtensionPublisherKeyFingerprint) => Promise<boolean>;
+  /** Returns to the version an Updated notice names, trusted and on as it was. */
+  readonly onRollBackUpdate: (previous: PackageUpdate) => Promise<boolean>;
 }
+
+type PackageUpdate = NonNullable<ExtensionSnapshot["packages"][number]["updated"]>;
 
 type NpmUpdateCheck =
   | { readonly status: "current" }
@@ -2408,7 +2539,52 @@ function NpmSourceDetails(props: {
 }
 
 /**
- * An outside provider driver's publisher keys. When another key signed the
+ * An unsigned plugin's update that kept its trust and approvals because it
+ * came from the source the person trusted. Nobody was asked, so the card
+ * says what changed and when, and one press returns to the version before.
+ */
+function UpdatedNotice(props: {
+  readonly version: string;
+  readonly digest: string;
+  readonly updated: PackageUpdate;
+  readonly busy: boolean;
+  readonly onRollBack: () => Promise<boolean>;
+}) {
+  const { updated } = props;
+  return (
+    <div className="extensions-settings__publisher">
+      <p aria-label="Updated" className="extensions-settings__effective" role="status">
+        Updated from v{updated.previousVersion} to v{props.version} on{" "}
+        <time dateTime={updated.at}>{updated.at.slice(0, 10)}</time>. It came from the source you
+        trusted, so its trust and approvals were kept.
+      </p>
+      <dl className="extensions-settings__compatibility" aria-label="Update digests">
+        <div>
+          <dt>Was</dt>
+          <dd className="oct-meta--mono">{updated.previousDigest}</dd>
+        </div>
+        <div>
+          <dt>Now</dt>
+          <dd className="oct-meta--mono">{props.digest}</dd>
+        </div>
+      </dl>
+      {updated.rollbackAvailable ? (
+        <OctantButton
+          size="sm"
+          variant="secondary"
+          disabled={props.busy}
+          onClick={() => void props.onRollBack()}
+          type="button"
+        >
+          Roll back to v{updated.previousVersion}
+        </OctantButton>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * A signed package's publisher keys. When another key signed the
  * selected version, both keys are shown together, and trusting the new
  * publisher is its own action: trusting the source does not take it.
  */
@@ -2431,6 +2607,12 @@ function PublisherKeys(props: {
           {selected === undefined
             ? "This version is unsigned. It stays held until you forget the pinned publisher."
             : "Another publisher signed this version. It stays held until you trust the new publisher or forget the old one."}
+        </p>
+      ) : null}
+      {pinned === undefined && selected !== undefined ? (
+        <p className="extensions-settings__effective" role="status">
+          No publisher key is pinned yet. Trusting this source pins the key below, and later updates
+          must be signed by it.
         </p>
       ) : null}
       <dl className="extensions-settings__compatibility" aria-label="Publisher keys">
@@ -2611,6 +2793,15 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
           npm={pkg.npm}
           onCheck={props.onCheckNpmUpdate}
           onReview={props.onReviewNpmUpdate}
+        />
+      )}
+      {pkg.updated === undefined ? null : (
+        <UpdatedNotice
+          busy={props.busy}
+          digest={pkg.digest}
+          onRollBack={() => props.onRollBackUpdate(pkg.updated as PackageUpdate)}
+          updated={pkg.updated}
+          version={pkg.version}
         />
       )}
       {pkg.publisher === undefined ? null : (

@@ -1,3 +1,5 @@
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import {
   decodePersonMemoryCommand,
   decodePersonMemoryResult,
@@ -67,7 +69,7 @@ export function createPersonMemoryRouteHandler(dependencies: PersonMemoryRouteDe
       }
       throw error;
     }
-    if (principal.kind !== "local-window") {
+    if (!principalActsAsHostPerson(principal)) {
       return json(
         decodePersonMemoryResult({
           kind: "person-memory-refused",
@@ -98,7 +100,7 @@ export function createPersonMemoryRouteHandler(dependencies: PersonMemoryRouteDe
           origin,
         );
       }
-      const result = dependencies.store.change(command);
+      const result = dependencies.store.change(command, eventActorForPrincipal(principal));
       return json(result, result.kind === "person-memory-refused" ? 409 : 200, origin);
     }
     return json({ error: "Memory route is not found." }, 404, origin);

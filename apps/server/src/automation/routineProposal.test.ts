@@ -359,6 +359,45 @@ describe("routine proposals from a thread", () => {
     });
   });
 
+  it("creates a paused routine with no card, and a receipt for the thread, when the agent suggests one at Full access", async () => {
+    const h = harness({ mode: "code" });
+    const outcome = await h
+      .tools(windowId, false, "full-access")
+      .execute({ name: "octant_propose_routine", inputJson: weeklyInput });
+    expect(outcome).toMatchObject({ result: { status: "created", paused: true } });
+    expect(outcome.routine).toMatchObject({ name: "Monday report", paused: true });
+    expect(await listed(h.handler)).toEqual([]);
+    const items = h.projection.listSummaries({
+      hostId: "local" as never,
+      mode: "all",
+      limit: 10,
+    }).items;
+    expect(items).toHaveLength(1);
+    const routine = h.projection.getDefinition(items[0]?.id as never);
+    expect(routine).toMatchObject({ lifecycle: "paused", originThreadId: THREAD });
+    // The thread's level reaches none of the routine: its runs still ask first.
+    expect(routine?.authorityProfile.effective).toMatchObject({
+      executionPolicy: "approval-gated",
+    });
+  });
+
+  it("still asks on a card for a follow-up the agent suggests at Full access", async () => {
+    const h = harness({ mode: "code" });
+    const followUp = h.tools(windowId, false, "full-access").execute({
+      name: "octant_propose_routine",
+      inputJson: JSON.stringify({
+        name: "Check back",
+        prompt: "Check whether the reply arrived.",
+        trigger: "follow-up",
+        at: "2026-11-01T09:00:00Z",
+      }),
+    });
+    const card = await cardAppears(h.handler);
+    expect(card).toHaveLength(1);
+    await decide(h.handler, String(card[0]?.proposalId), "decline");
+    expect(await followUp).toMatchObject({ result: { status: "declined" } });
+  });
+
   it("still asks on a card when the agent suggests the routine itself", async () => {
     const h = harness();
     const { call, proposal } = await propose(h);

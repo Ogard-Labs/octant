@@ -529,8 +529,8 @@ describe("browser automation routes", () => {
     expect(service.create).not.toHaveBeenCalled();
   });
 
-  it("lets a paired device act inside the page but never drive the host's browser", async () => {
-    function pairedRequest(kind: string): Request {
+  it("lets a hub-introduced device act inside the page but never drive the host's browser, and a device the host's own person paired navigate and type", async () => {
+    function pairedRequest(kind: string, admittedBy?: "host-person" | "hub-roster"): Request {
       const request = new Request("http://127.0.0.1/api/browser/actions", {
         method: "POST",
         headers: {
@@ -557,6 +557,7 @@ describe("browser automation routes", () => {
           protocolVersion: 1,
           capabilityDigest: "a".repeat(64),
           sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
         }),
         scopeId: windowId,
       });
@@ -567,10 +568,15 @@ describe("browser automation routes", () => {
     expect(service.act).toHaveBeenCalledOnce();
 
     for (const kind of ["navigate", "type", "close-tab"]) {
-      const response = await handler(pairedRequest(kind));
-      expect(response?.status).toBe(403);
+      expect((await handler(pairedRequest(kind)))?.status).toBe(403);
+      expect((await handler(pairedRequest(kind, "hub-roster")))?.status).toBe(403);
     }
     expect(service.act).toHaveBeenCalledOnce();
+
+    for (const kind of ["navigate", "type"]) {
+      expect((await handler(pairedRequest(kind, "host-person")))?.status).toBe(200);
+    }
+    expect(service.act).toHaveBeenCalledTimes(3);
   });
 
   it("refuses a paired device that asks to record the host's page", async () => {
@@ -956,7 +962,12 @@ describe("browser automation routes", () => {
       expect(response?.status).toBe(200);
       expect(await response?.json()).toEqual(snapshot);
       expect(service.act).toHaveBeenLastCalledWith(
-        expect.objectContaining({ windowId, capturedBy: "person" }),
+        expect.objectContaining({
+          windowId,
+          capturedBy: "person",
+          // The capture is journaled as whoever took it.
+          capturedByActor: expect.objectContaining({ kind: "local-user" }),
+        }),
       );
     });
 
@@ -1146,15 +1157,82 @@ describe("browser automation routes", () => {
         scope: "all",
       };
 
+      // The route names who asked, so the service journals a change as theirs.
+      const pairedDeviceId = "90000000-0000-4000-8000-000000000001";
       expect((await withProfiles(post("profiles", clear)))?.status).toBe(200);
-      expect(profiles.execute).toHaveBeenLastCalledWith("local-window", clear);
+      expect(profiles.execute).toHaveBeenLastCalledWith(
+        "local-window",
+        clear,
+        expect.objectContaining({ kind: "local-user" }),
+      );
       await withProfiles(post("profiles", clear, true));
-      expect(profiles.execute).toHaveBeenLastCalledWith("remote-device", clear);
+      expect(profiles.execute).toHaveBeenLastCalledWith("remote-device", clear, {
+        kind: "remote-device",
+        actorId: pairedDeviceId,
+        deviceId: pairedDeviceId,
+      });
       // A profile cannot be named by a caller that decides its own scope or store path.
       expect(
         (await withProfiles(post("profiles", { ...clear, partition: "persist:other" })))?.status,
       ).toBe(400);
       expect((await handler(post("profiles", clear)))?.status).toBe(503);
+    });
+
+    it("lets a device the host's own person paired review session, upload and download permissions under its own scope, and refuses a hub-introduced device", async () => {
+      const deviceId = "90000000-0000-4000-8000-000000000002";
+      const fromDevice = (path: string, admittedBy: "host-person" | "hub-roster") => {
+        const request = new Request(`http://127.0.0.1/api/browser/${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "list" }),
+        });
+        bindPrincipalRouteContext(request, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: deviceId as never,
+            credentialGeneration: 1,
+            origin: "https://octant.example",
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000002" as never,
+            admittedBy,
+          }),
+          scopeId: deviceId as never,
+        });
+        return request;
+      };
+      const sessionGrants = {
+        execute: vi.fn(async () => ({ kind: "browser-session-grants" as const, grants: [] })),
+      };
+      const uploadPermissions = {
+        execute: vi.fn(async () => ({ kind: "upload-permissions" as const, permissions: [] })),
+      };
+      const downloadPermissions = {
+        execute: vi.fn(async () => ({ kind: "download-permissions" as const, permissions: [] })),
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: service as never,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        sessionGrants,
+        uploadPermissions,
+        downloadPermissions,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      for (const [path, port] of [
+        ["session-grants", sessionGrants],
+        ["upload-permissions", uploadPermissions],
+        ["download-permissions", downloadPermissions],
+      ] as const) {
+        expect(await (await route(fromDevice(path, "hub-roster")))?.json()).toMatchObject({
+          reason: "not-local",
+        });
+        expect(port.execute).not.toHaveBeenCalled();
+        expect((await route(fromDevice(path, "host-person")))?.status).toBe(200);
+        // The device's own scope is what the permission's record names.
+        expect(port.execute).toHaveBeenCalledWith(deviceId, { kind: "list" });
+      }
     });
 
     it("admits only authenticated local session-permission commands and strictly decodes their scope", async () => {
@@ -1285,6 +1363,11 @@ describe("browser automation routes", () => {
       expect(await body(await withFlows(post("flows", remove)))).toMatchObject({
         kind: "browser-flow-deleted",
       });
+      expect(flows.delete).toHaveBeenLastCalledWith(
+        flowProject,
+        "Order check",
+        expect.objectContaining({ kind: "local-user" }),
+      );
       expect(await body(await withFlows(post("flows", { ...remove, name: "Gone" })))).toMatchObject(
         { kind: "browser-flows-refused", reason: "not-found" },
       );
@@ -1399,10 +1482,20 @@ describe("browser automation routes", () => {
       });
       const list = { kind: "list" };
 
+      const pairedDeviceId = "90000000-0000-4000-8000-000000000001";
       expect((await withExtensions(post("extensions", list)))?.status).toBe(200);
-      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "local-window", list);
+      expect(extensions.execute).toHaveBeenLastCalledWith(
+        windowId,
+        "local-window",
+        list,
+        expect.objectContaining({ kind: "local-user" }),
+      );
       await withExtensions(post("extensions", list, true));
-      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "remote-device", list);
+      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "remote-device", list, {
+        kind: "remote-device",
+        actorId: pairedDeviceId,
+        deviceId: pairedDeviceId,
+      });
       // A folder path is never accepted from the caller; only a picker receipt is.
       expect(
         (await withExtensions(post("extensions", { kind: "install", path: "/Users/x/ext" })))

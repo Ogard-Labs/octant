@@ -483,6 +483,53 @@ describe("WorkRequestService.resolve", () => {
     expect(occurredAt).toEqual([clockNow, clockLater, clockLater, clockLater]);
   });
 
+  it("journals a paired device's answer and cancellation with the device as their actor, and keeps the request's arrival the system's", async () => {
+    const deviceId = "00000000-0000-4000-8000-0000000000d1";
+    const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+    const journaledBy = async (act: "resolve" | "cancel") => {
+      const actors: Array<typeof EventActor.Type> = [];
+      const { service } = createService({
+        eventStore: {
+          append(input) {
+            actors.push(input.actor);
+            return input.frame;
+          },
+          replayAll: () => ({ status: "ok", frames: [] }),
+        },
+      });
+      const request = recordOne(service);
+      if (act === "resolve") {
+        await service.resolve(
+          {
+            kind: "resolve-work-request",
+            requestId: request.requestId,
+            expectedVersion: request.version,
+            resolution: { kind: "approval", approved: true },
+          },
+          undefined,
+          device,
+        );
+      } else {
+        await service.cancel(
+          {
+            kind: "cancel-work-request",
+            requestId: request.requestId,
+            expectedVersion: request.version,
+          },
+          device,
+        );
+      }
+      return actors;
+    };
+
+    for (const act of ["resolve", "cancel"] as const) {
+      const [arrival, ...answered] = await journaledBy(act);
+      expect(arrival?.kind).toBe("system");
+      expect(answered.length).toBeGreaterThan(0);
+      expect(answered).toEqual(answered.map(() => device));
+    }
+  });
+
   it("answers the originating approval session before journaling resolution", async () => {
     const calls: Array<string> = [];
     const { service } = createService({

@@ -68,6 +68,9 @@ import {
 import {
   decodeAppleSimulatorId,
   decodeAndroidEmulatorId,
+  isDeviceOpenUrl,
+  type DeviceOpenUrl,
+  type DeviceOrientation,
   type AppleActionRequest,
   type AppleBuildEvidence,
   type AppleDiscoveryRequest,
@@ -190,6 +193,10 @@ const appleDefinition = {
           "type-text",
           "key-press",
           "repair-input",
+          "open-url",
+          "rotate",
+          "start-recording",
+          "stop-recording",
           "help",
         ],
       },
@@ -206,6 +213,8 @@ const appleDefinition = {
       durationMs: { type: "number" },
       text: { type: "string" },
       key: { type: "string" },
+      url: { type: "string" },
+      orientation: { type: "string", enum: ["portrait", "landscape"] },
       sinceSeconds: { type: "number" },
       includeCrashes: { type: "boolean" },
     },
@@ -237,6 +246,10 @@ const androidDefinition = {
           "key-press",
           "install",
           "launch",
+          "open-url",
+          "rotate",
+          "start-recording",
+          "stop-recording",
           "help",
         ],
       },
@@ -251,6 +264,8 @@ const androidDefinition = {
       key: { type: "string" },
       apkPath: { type: "string" },
       packageName: { type: "string" },
+      url: { type: "string" },
+      orientation: { type: "string", enum: ["portrait", "landscape"] },
       sinceSeconds: { type: "number" },
       includeCrashes: { type: "boolean" },
     },
@@ -270,9 +285,9 @@ const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
-    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. discover, build, test, and run take projectPath: an .xcodeproj or .xcworkspace inside this thread's checkout, either relative to the checkout root (App/App.xcodeproj) or absolute under it; a path outside the checkout is refused. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Tapping an element by name (target) and describing the UI are Android-only for now: on a Simulator, read the screen from a screenshot and tap a point. repair-input takes simulatorId; use it only after an input fails with input-disconnected. It restarts the Simulator's home screen, which closes the running apps, so run the app again afterwards. It is input like a tap: a live Allow input grant covers it, and without one an approval-gated thread asks the person first. logs takes simulatorId and bundleIdentifier and returns the app's unified-log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600, rounded up to whole minutes) sets how far back, five minutes by default, and includeCrashes adds the start of the app's newest three crash reports. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. discover, build, test, and run take projectPath: an .xcodeproj or .xcworkspace inside this thread's checkout, either relative to the checkout root (App/App.xcodeproj) or absolute under it; a path outside the checkout is refused. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Tapping an element by name (target) and describing the UI are Android-only for now: on a Simulator, read the screen from a screenshot and tap a point. repair-input takes simulatorId; use it only after an input fails with input-disconnected. It restarts the Simulator's home screen, which closes the running apps, so run the app again afterwards. It is input like a tap: a live Allow input grant covers it, and without one an approval-gated thread asks the person first. logs takes simulatorId and bundleIdentifier and returns the app's unified-log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600, rounded up to whole minutes) sets how far back, five minutes by default, and includeCrashes adds the start of the app's newest three crash reports. open-url takes simulatorId and url, a credential-free http or https address, and opens it on the Simulator; an approval-gated thread shows the person the whole address. rotate takes simulatorId and turns the Simulator, to orientation (portrait or landscape) when given and the other way otherwise. start-recording starts a screen recording of at most 60 seconds and stop-recording ends it and keeps the video as a recording artifact; stopping never asks. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   [CODE_ANDROID_TOOL_NAME]:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. describe-ui lists the labelled elements on screen as text in the result, one line each with its class, text, desc (content-desc), id (resource-id), center, and bounds, in the pixels tap takes; at most 300 elements, with truncated set when cut. tap takes either a point (x, y) in the pixels of the live screen or a target: an element's resource-id, content-desc, or text, matched exactly in that order, and it taps that element's center; a target that no element or several elements carry is refused with the count. swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. logs takes packageName and returns that running app's log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600) sets how far back, and includeCrashes adds the device's crash buffer, which also answers for an app that is no longer running. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, describe-ui, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. describe-ui lists the labelled elements on screen as text in the result, one line each with its class, text, desc (content-desc), id (resource-id), center, and bounds, in the pixels tap takes; at most 300 elements, with truncated set when cut. tap takes either a point (x, y) in the pixels of the live screen or a target: an element's resource-id, content-desc, or text, matched exactly in that order, and it taps that element's center; a target that no element or several elements carry is refused with the count. swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. logs takes packageName and returns that running app's log lines as text in the result, the newest 500 lines or 32 KiB, with truncated set when cut; sinceSeconds (at most 600) sets how far back, and includeCrashes adds the device's crash buffer, which also answers for an app that is no longer running. open-url takes url, a credential-free http or https address, and opens it on the emulator; an approval-gated thread shows the person the whole address. rotate takes orientation (portrait or landscape). start-recording starts a screen recording of at most 60 seconds and stop-recording ends it and keeps the video as a recording artifact; stopping never asks. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, describe-ui, logs, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
 };
 
 /**
@@ -1987,7 +2002,7 @@ async function appleTool(
   const prepared = appleActionRequest(input, scope, options.uuid);
   if (prepared === undefined) return failure("invalid-apple-input");
   let request = prepared;
-  if (!isDeviceRead(input.operation)) {
+  if (!isDeviceRead(input.operation) && input.operation !== "stop-recording") {
     const decision = await deviceEffectApproval(
       options,
       { kind: "apple-action", request: prepared },
@@ -2149,7 +2164,7 @@ async function androidTool(
   const prepared = androidActionRequest(input, scope, options.uuid);
   if (prepared === undefined) return failure("invalid-android-input");
   let request = prepared;
-  if (!isDeviceRead(input.operation)) {
+  if (!isDeviceRead(input.operation) && input.operation !== "stop-recording") {
     const decision = await deviceEffectApproval(
       options,
       { kind: "android-action", request: prepared },
@@ -2287,6 +2302,34 @@ function androidActionRequest(
         ...base,
         kind: "launch",
         packageName: input.packageName as AndroidEmulatorRequest["packageName"],
+        timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+      };
+    case "open-url": {
+      const url = deviceOpenUrl(input.url);
+      if (url === undefined) return undefined;
+      return {
+        ...base,
+        kind: "open-url",
+        requestedBy: agentEventActor(scope.authority, scope.threadId, uuid),
+        url,
+        timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+      };
+    }
+    case "rotate":
+      if (input.orientation === undefined) return undefined;
+      return {
+        ...base,
+        kind: "rotate",
+        requestedBy: agentEventActor(scope.authority, scope.threadId, uuid),
+        orientation: input.orientation,
+        timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
+      };
+    case "start-recording":
+    case "stop-recording":
+      return {
+        ...base,
+        kind: input.operation,
+        requestedBy: agentEventActor(scope.authority, scope.threadId, uuid),
         timeoutMs: ANDROID_ACTION_TIMEOUT_MS,
       };
     case "tap":
@@ -2541,6 +2584,35 @@ function appleActionRequest(
         timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
       } as AppleActionRequest;
     }
+    case "open-url": {
+      const url = deviceOpenUrl(input.url);
+      if (input.simulatorId === undefined || url === undefined) return undefined;
+      return {
+        ...base,
+        kind: "open-url",
+        simulatorId: input.simulatorId as never,
+        requestedBy: agentEventActor(scope.authority, scope.threadId, uuid),
+        url,
+        timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
+      } as AppleActionRequest;
+    }
+    case "rotate":
+    case "start-recording":
+    case "stop-recording":
+    case "repair-input": {
+      if (input.simulatorId === undefined) return undefined;
+      return {
+        ...base,
+        kind: input.operation,
+        simulatorId: input.simulatorId as never,
+        requestedBy: agentEventActor(scope.authority, scope.threadId, uuid),
+        // Without an orientation the host turns the Simulator the other way.
+        ...(input.operation === "rotate" && input.orientation !== undefined
+          ? { orientation: input.orientation }
+          : {}),
+        timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
+      } as AppleActionRequest;
+    }
     default:
       return undefined;
   }
@@ -2688,7 +2760,11 @@ interface AppleToolInput {
     | "swipe"
     | "type-text"
     | "key-press"
-    | "repair-input";
+    | "repair-input"
+    | "open-url"
+    | "rotate"
+    | "start-recording"
+    | "stop-recording";
   readonly projectPath?: string;
   readonly scheme?: string;
   readonly platform?: string;
@@ -2702,6 +2778,8 @@ interface AppleToolInput {
   readonly durationMs?: number;
   readonly text?: string;
   readonly key?: string;
+  readonly url?: string;
+  readonly orientation?: DeviceOrientation;
   readonly sinceSeconds?: number;
   readonly includeCrashes?: boolean;
 }
@@ -2721,7 +2799,11 @@ interface AndroidToolInput {
     | "type-text"
     | "key-press"
     | "install"
-    | "launch";
+    | "launch"
+    | "open-url"
+    | "rotate"
+    | "start-recording"
+    | "stop-recording";
   readonly emulatorId?: string;
   readonly target?: string;
   readonly x?: number;
@@ -2733,6 +2815,8 @@ interface AndroidToolInput {
   readonly key?: string;
   readonly apkPath?: string;
   readonly packageName?: string;
+  readonly url?: string;
+  readonly orientation?: DeviceOrientation;
   readonly sinceSeconds?: number;
   readonly includeCrashes?: boolean;
 }
@@ -2895,6 +2979,8 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
       "durationMs",
       "text",
       "key",
+      "url",
+      "orientation",
       "sinceSeconds",
       "includeCrashes",
     ]),
@@ -2916,10 +3002,12 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     operation !== "swipe" &&
     operation !== "type-text" &&
     operation !== "key-press" &&
-    operation !== "repair-input"
+    operation !== "repair-input" &&
+    !isDeviceEffectOperation(operation)
   ) {
     return undefined;
   }
+  if (!validDeviceEffectFields(parsed)) return undefined;
   for (const field of [
     "projectPath",
     "scheme",
@@ -2969,6 +3057,8 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
       "key",
       "apkPath",
       "packageName",
+      "url",
+      "orientation",
       "sinceSeconds",
       "includeCrashes",
     ]),
@@ -2989,10 +3079,12 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
     operation !== "type-text" &&
     operation !== "key-press" &&
     operation !== "install" &&
-    operation !== "launch"
+    operation !== "launch" &&
+    !isDeviceEffectOperation(operation)
   ) {
     return undefined;
   }
+  if (!validDeviceEffectFields(parsed)) return undefined;
   for (const field of ["emulatorId", "target", "text", "key", "apkPath", "packageName"] as const) {
     if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
   }
@@ -3018,6 +3110,47 @@ function parseAndroidInput(value: string): AndroidToolInput | undefined {
   }
   if (!validLogWindow(parsed)) return undefined;
   return parsed as unknown as AndroidToolInput;
+}
+
+/** The effects beside input that both device tools offer: an address, a turn, a recording. */
+function isDeviceEffectOperation(
+  operation: unknown,
+): operation is "open-url" | "rotate" | "start-recording" | "stop-recording" {
+  return (
+    operation === "open-url" ||
+    operation === "rotate" ||
+    operation === "start-recording" ||
+    operation === "stop-recording"
+  );
+}
+
+/**
+ * An address and an orientation, checked here against the contract: left to
+ * the host's decoder, a wrong one came back as the host being unreachable.
+ */
+function validDeviceEffectFields(parsed: Readonly<Record<string, unknown>>): boolean {
+  if (parsed.url !== undefined && typeof parsed.url !== "string") return false;
+  return (
+    parsed.orientation === undefined ||
+    parsed.orientation === "portrait" ||
+    parsed.orientation === "landscape"
+  );
+}
+
+/**
+ * The address in the form the URL parser writes it back, which is the only
+ * form the host accepts: the confirmation then shows exactly what the device
+ * receives. Anything but a credential-free `http` or `https` address is none.
+ */
+function deviceOpenUrl(value: string | undefined): DeviceOpenUrl | undefined {
+  if (value === undefined) return undefined;
+  let href: string;
+  try {
+    href = new URL(value).href;
+  } catch {
+    return undefined;
+  }
+  return isDeviceOpenUrl(href) ? href : undefined;
 }
 
 /**
@@ -3152,7 +3285,12 @@ async function askPersonForDevice(
   return { kind: "allowed", approval: { kind: "approved", approvalId: outcome.approvalId } };
 }
 
-/** Whether an operation only reads the toolchain, the runtime, or a screen. */
+/**
+ * Whether an operation only reads the toolchain, the runtime, or a screen.
+ * `stop-recording` is no read, yet is not asked for either: it ends what an
+ * approved `start-recording` began, and the device policy lets it through
+ * under every posture for the same reason.
+ */
 function isDeviceRead(operation: string): boolean {
   return (
     operation === "status" ||

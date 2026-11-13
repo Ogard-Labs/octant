@@ -60,6 +60,7 @@ async function setup() {
     hub: host.hub,
     spoke: host.spoke,
     pairedMergeUnlock: host.pairedMergeUnlock,
+    ownerApprovalAnswerUnlock: host.ownerApprovalAnswerUnlock,
     failover: host.failover,
     wake: host.wake,
     spokeWake: host.spokeWake,

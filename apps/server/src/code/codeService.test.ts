@@ -38,6 +38,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { CodeContentStore, type CodeContentStoreOptions } from "./codeContentStore";
 import {
@@ -928,6 +929,49 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+
+    const untouched = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+    });
+    if (untouched.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(untouched.settings.androidEmulatorSnapshotBoot).toBeUndefined();
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: untouched.settings } as never);
+
+    const turnedOn = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 1,
+      androidEmulatorSnapshotBoot: true,
+    });
+    expect(turnedOn).toMatchObject({ settings: { androidEmulatorSnapshotBoot: true } });
+    if (turnedOn.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: turnedOn.settings } as never);
+
+    const kept = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      defaultExecutionPolicy: "plan",
+    });
+    expect(kept).toMatchObject({ settings: { androidEmulatorSnapshotBoot: true } });
+    if (kept.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: kept.settings } as never);
+
+    const turnedOff = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 3,
+      androidEmulatorSnapshotBoot: false,
+    });
+    if (turnedOff.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(turnedOff.settings.androidEmulatorSnapshotBoot).toBeUndefined();
+  });
+
   it("keeps the Auto reviewer and Shield model across later changes, and returns Shield to the thread's provider on null", async () => {
     const fixture = serviceFixture();
     const shieldModel = {
@@ -1469,7 +1513,15 @@ describe("CodeService commands", () => {
       terminalSessions,
     });
 
-    await expect(fixture.service.execute(ids.window, command)).resolves.toMatchObject({
+    // The person who brought the session in is who its import names.
+    const importer = {
+      kind: "remote-device",
+      actorId: "00000000-0000-4000-8000-0000000000d1",
+      deviceId: "00000000-0000-4000-8000-0000000000d1",
+    } as never;
+    await expect(
+      fixture.service.execute(ids.window, command, undefined, { actor: importer }),
+    ).resolves.toMatchObject({
       kind: "thread-created",
     });
     expect(record).toHaveBeenCalledWith(
@@ -1482,7 +1534,11 @@ describe("CodeService commands", () => {
     expect(record.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared);
+    expect(terminalSessions.journalImported).toHaveBeenCalledWith(
+      String(ids.thread),
+      prepared,
+      importer,
+    );
 
     const elsewhere = serviceFixture({
       recordExternalContentIngestion: record,
@@ -1935,6 +1991,44 @@ describe("CodeService commands", () => {
           ? (result.thread as { fullAccessSandbox?: boolean }).fullAccessSandbox
           : "missing",
       ).toBeUndefined();
+    });
+
+    it("journals a paired device's Full access changes with the device as their actor, and a local window's as the local user", async () => {
+      const deviceId = "00000000-0000-4000-8000-0000000000d1";
+      const device = { kind: "remote-device", actorId: deviceId, deviceId } as never;
+      const raiseDefault = {
+        kind: "update-code-settings",
+        expectedVersion: 0,
+        defaultExecutionPolicy: "full-access",
+        defaultPermissionPersistence: "current-session",
+      };
+      const changesBy = async (context?: { readonly actor: never }) => {
+        const fixture = serviceFixture({
+          threads: [thread({ executionPolicy: "approval-gated" })],
+          approve: false,
+        });
+        await fixture.service.execute(ids.window, raise("current-session"), undefined, context);
+        await fixture.service.execute(ids.window, raiseDefault, undefined, context);
+        return fixture.persistence.journal.append.mock.calls.flatMap(([request]) =>
+          request.events.map((event: { eventName: string; actor: unknown }) => [
+            event.eventName,
+            event.actor,
+          ]),
+        );
+      };
+
+      expect(await changesBy({ actor: device })).toEqual([
+        ["code.thread-updated@1", device],
+        ["guardrail.level-lowered@1", device],
+        ["code.settings-updated@1", device],
+        ["guardrail.level-lowered@1", device],
+      ]);
+      expect((await changesBy()).map(([, actor]) => actor)).toEqual(
+        Array.from({ length: 4 }, () => ({
+          kind: "local-user",
+          actorId: "00000000-0000-4000-8000-000000000002",
+        })),
+      );
     });
 
     it("journals a lowered default in Settings at the global scope", async () => {
@@ -5466,6 +5560,63 @@ describe("completing and snoozing a Code thread", () => {
     });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
     expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("lets a person mark a thread Done whatever its delivery target says, journals the mark as their override, and clears it on Reopen", async () => {
+    const fixture = serviceFixture();
+
+    const marked = await fixture.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(marked).toMatchObject({
+      kind: "thread-updated",
+      thread: { markedDoneAt: now, version: 2 },
+    });
+    const markAppend = fixture.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      events: Array<{ eventName: string; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(markAppend.events[0]?.eventName).toBe("code.thread-updated@1");
+    expect(markAppend.events[0]?.payload.thread.markedDoneAt).toBe(now);
+    // The delivery target is left exactly as the person confirmed it: the
+    // override never rewrites what the thread was asked to deliver.
+    expect(markAppend.events[0]?.payload.thread.deliveryTarget).toEqual(thread().deliveryTarget);
+
+    const alreadyMarked = serviceFixture({ threads: [thread({ markedDoneAt: nowAt })] });
+    await expect(
+      alreadyMarked.service.execute(ids.window, {
+        kind: "mark-code-thread-done",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: "This thread is already marked Done." },
+    });
+
+    const reopened = await alreadyMarked.service.execute(ids.window, {
+      kind: "reopen-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(reopened).toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    if (!("thread" in reopened)) throw new Error("expected the reopened thread");
+    expect(reopened.thread).not.toHaveProperty("markedDoneAt");
+  });
+
+  it("refuses a routine or anything else acting as the host when it tries to mark a Code thread Done", async () => {
+    const fixture = serviceFixture();
+
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "mark-code-thread-done",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: "Only a person can mark a Code thread Done." },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("reopens a completed thread and wakes a snoozed one back into play", async () => {

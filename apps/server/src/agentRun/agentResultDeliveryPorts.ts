@@ -81,7 +81,7 @@ export function createWorkAgentResultDeliveryPort(
       }
       // A parent a person marked Done takes no turn, but the result is still
       // owed: it waits, readable on the child's run, and lands as a turn once
-      // the thread is reactivated, whose commit wakes this delivery.
+      // the thread is reopened, whose commit wakes this delivery.
       if (thread.completionConfirmed === true) {
         return { kind: "deferred", detail: "The parent Work thread is marked Done." };
       }
@@ -117,7 +117,7 @@ export function createWorkAgentResultDeliveryPort(
           return { kind: "deferred", detail: "The parent Work thread is mid-turn." };
         }
         // Marked Done while the turn was prepared: a refusal here would settle
-        // the result as failed, and reactivation could no longer deliver it.
+        // the result as failed, and reopening could no longer deliver it.
         if (input.readThread(thread.id)?.completionConfirmed === true) {
           return { kind: "deferred", detail: "The parent Work thread is marked Done." };
         }

@@ -3,7 +3,7 @@ import { ApprovedWorkingFolders } from "./workingDirectory";
 import { CanvasDesignBrand } from "./canvasBrand";
 import { DesignSystemChoice } from "./designSystems";
 import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
-import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
+import { ActorId, AggregateVersion, EventActor, EventActorDeviceId, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { OctantMode } from "./modes";
@@ -97,9 +97,19 @@ export const DEFAULT_CODE_NEW_THREAD_WORKSPACE: CodeNewThreadWorkspace = "curren
 export const Phase3CodeAccessPersistence = Schema.Literal("current-session");
 export type Phase3CodeAccessPersistence = typeof Phase3CodeAccessPersistence.Type;
 
+/**
+ * Who a Project record says did something: the host itself, the person at
+ * this host, or a device that person paired, named by its id. A record
+ * written before a device could act names only the first two.
+ */
 export const ProjectActor = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("system"), actorId: ActorId }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("local-user"), actorId: ActorId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("remote-device"),
+    actorId: ActorId,
+    deviceId: EventActorDeviceId,
+  }).annotations(strict),
 );
 export type ProjectActor = typeof ProjectActor.Type;
 
@@ -333,6 +343,17 @@ export type CodeProjectAgentPullRequestComments = typeof CodeProjectAgentPullReq
 export const CodeProjectAgentDefaultBranchPush = Schema.Literal("enabled", "disabled");
 export type CodeProjectAgentDefaultBranchPush = typeof CodeProjectAgentDefaultBranchPush.Type;
 
+/**
+ * Whether this Project's language services run the Project's own copy of a
+ * language's toolchain (its pinned TypeScript, say) instead of the one Octant
+ * bundles. Absent means disabled. The Project's copy is a program the
+ * repository supplies, so a server run from it is `repo-tooling`: approved per
+ * checkout, refused in Plan, and started only by the person at the machine.
+ * Only a window on the host sets it.
+ */
+export const CodeProjectOwnToolchain = Schema.Literal("enabled", "disabled");
+export type CodeProjectOwnToolchain = typeof CodeProjectOwnToolchain.Type;
+
 export const ProjectActionId = brandedUuid("ProjectActionId");
 export type ProjectActionId = typeof ProjectActionId.Type;
 
@@ -448,6 +469,7 @@ export const CodeProject = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
+  ownToolchain: Schema.optional(CodeProjectOwnToolchain),
   agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
   agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
   /**
@@ -511,6 +533,7 @@ const CodeProjectSummary = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
+  ownToolchain: Schema.optional(CodeProjectOwnToolchain),
   agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
   agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
   defaultPermissionMode: Schema.optional(PermissionMode),
@@ -776,6 +799,11 @@ export const ProjectCommand = Schema.Union(
     agentMerge: CodeProjectAgentMerge,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-code-project-own-toolchain"),
+    ...ProjectCommandFields,
+    ownToolchain: CodeProjectOwnToolchain,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-code-project-agent-pull-request-comments"),
     ...ProjectCommandFields,
     agentPullRequestComments: CodeProjectAgentPullRequestComments,
@@ -915,6 +943,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-project-agent-merge-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-own-toolchain-changed"),
     project: CodeProject,
   }).annotations(strict),
   Schema.Struct({
@@ -1197,6 +1229,11 @@ export const CodeProjectAgentMergeChanged = Schema.Struct({ project: CodeProject
   strict,
 );
 export type CodeProjectAgentMergeChanged = typeof CodeProjectAgentMergeChanged.Type;
+/** Journaled once per change so the choice survives a restart and shows who made it. */
+export const CodeProjectOwnToolchainChanged = Schema.Struct({ project: CodeProject }).annotations(
+  strict,
+);
+export type CodeProjectOwnToolchainChanged = typeof CodeProjectOwnToolchainChanged.Type;
 /** Journaled once per change, as the merge permission is, so it survives a restart and shows who set it. */
 export const CodeProjectAgentPullRequestCommentsChanged = Schema.Struct({
   project: CodeProject,
@@ -1360,6 +1397,9 @@ export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decod
 );
 export const decodeCodeProjectAgentMergeChanged = Schema.decodeUnknownSync(
   CodeProjectAgentMergeChanged,
+);
+export const decodeCodeProjectOwnToolchainChanged = Schema.decodeUnknownSync(
+  CodeProjectOwnToolchainChanged,
 );
 export const decodeCodeProjectAgentPullRequestCommentsChanged = Schema.decodeUnknownSync(
   CodeProjectAgentPullRequestCommentsChanged,
