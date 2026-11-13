@@ -614,6 +614,20 @@ describe("UI stylesheet check", () => {
     expect(findings.map((finding) => finding.line)).toEqual([1, 2, 5, 6]);
   });
 
+  it("reads only the literals that can become a corner, not comparison operands", () => {
+    const findings = findComponentScaleFindings({
+      "apps/web/src/feature/Card.tsx": [
+        'const a = { borderRadius: kind === "pill" ? "50%" : 0 };',
+        'const b = { borderRadius: kind !== "8px" ? 0 : "var(--oct-radius-sm)" };',
+        'const c = { borderRadius: ["a", "b"].includes("8px") ? 0 : 0 };',
+        'const d = { borderRadius: "8px" === kind ? 0 : 0 };',
+        'const e = { borderRadius: kind === "pill" ? "8px" : 0 };',
+        'const f = { borderRadius: kind === "pill" || "9px" };',
+      ].join("\n"),
+    });
+    expect(findings.map((finding) => finding.line)).toEqual([5, 6]);
+  });
+
   it("reads recipes in subfolders of the shared recipe folders", () => {
     const findings = findComponentScaleFindings({
       "apps/web/src/ui/base/menu/OctantMenuItem.tsx": 'x = "h-[30px]";',
@@ -627,7 +641,7 @@ describe("UI stylesheet check", () => {
 
   it("flags a recipe height off the 20, 24, 28, 32 scale and only in the shared recipes", () => {
     const recipe = [
-      'const ok = "h-[round(2.154rem,2px)] size-[round(down,1.538rem,2px)] h-[28px] h-(--oct-space-5)";',
+      'const ok = "h-[round(2.154rem,2px)] size-[round(up,1.538rem,2px)] h-[28px] h-(--oct-space-5)";',
       'const off = "h-[round(1.25rem,2px)] size-[1.15rem] h-[30px] min-h-[4rem]";',
     ].join("\n");
     const findings = findComponentScaleFindings({
@@ -639,6 +653,17 @@ describe("UI stylesheet check", () => {
       ["control-height-scale", "apps/web/src/ui/base/OctantThing.tsx", 2],
       ["control-height-scale", "apps/web/src/ui/base/OctantThing.tsx", 2],
     ]);
+  });
+
+  it("judges a rounded recipe height by its rounded result at the 13px root", () => {
+    const findings = findComponentScaleFindings({
+      "apps/web/src/ui/base/OctantThing.tsx": [
+        'const ok = "h-[round(1.5rem,2px)] h-[round(nearest,1.85rem,4px)] h-[round(up,1.4rem,2px)] h-[round(to-zero,2.5rem,2px)]";',
+        'const off = "h-[round(down,1.538rem,2px)] h-[round(to-zero,1.538rem,2px)] h-[round(up,1.6rem,2px)]";',
+        'const open = "h-[round(var(--x),2px)] h-[round(1.5rem,var(--step))]";',
+      ].join("\n"),
+    });
+    expect(findings.map((finding) => finding.line)).toEqual([2, 2, 2]);
   });
 
   it("ratchets radius and control-height findings and records them in the baseline", () => {

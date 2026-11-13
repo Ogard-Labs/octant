@@ -173,6 +173,22 @@ const QUOTED_LITERAL = /(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
 // A number that is a result of the expression, not an operand of a comparison.
 const RESULT_NUMBER = /(?:^|[?:]|\?\?|\|\||&&)\s*(\d*\.?\d+)(?![\w.%])/g;
 
+const OPERATOR_BEFORE = /(?:[!=]==?\s*|(?<!=)[<>]=?\s*|\.\w+\(\s*)$/;
+const OPERATOR_AFTER = /^\s*(?:[!=]==?|(?<!=)[<>]=?|\.)/;
+
+/** A string that is only compared or searched for (`kind === "pill"`,
+ * `list.includes("x")`) is never the corner. A form this does not recognise is
+ * read as a result, so the check errs towards a finding. */
+function isComparisonOperand(expression: string, index: number, length: number): boolean {
+  const before = expression.slice(0, index);
+  const openBrackets = before.split("[").length - before.split("]").length;
+  return (
+    openBrackets > 0 ||
+    OPERATOR_BEFORE.test(before) ||
+    OPERATOR_AFTER.test(expression.slice(index + length))
+  );
+}
+
 /** Judge an inline corner expression. A plain literal is judged in full. A
  * conditional or a template can only be judged by the literals it spells out:
  * an off-scale px string or a numeric result. A value read from a variable
@@ -189,6 +205,7 @@ function inlineRadiusOffScale(expression: string): string | null {
     return radiusOnScale(text) ? null : text;
   }
   for (const literal of expression.matchAll(QUOTED_LITERAL)) {
+    if (isComparisonOperand(expression, literal.index, literal[0].length)) continue;
     const text = (literal[2] ?? "").replace(/\$\{[^}]*\}/g, "x");
     const hasPlaceholder = text !== (literal[2] ?? "");
     if (!hasPlaceholder) {
@@ -206,11 +223,48 @@ function inlineRadiusOffScale(expression: string): string | null {
   return null;
 }
 
+const MEASURE = /^(\d*\.?\d+)(rem|px)$/;
+
+function measurePx(text: string): number | null {
+  const measure = MEASURE.exec(text.trim());
+  if (measure === null) return null;
+  return Number(measure[1]) * (measure[2] === "rem" ? ROOT_PX : 1);
+}
+
+/** CSS `round(strategy?, value, interval)` at the 13px root. Null when the
+ * expression cannot be evaluated here (a `var()`, a `calc()`, no interval). */
+function roundedPx(expression: string): number | null {
+  const call = /^round\(([^()]*)\)$/.exec(expression);
+  if (call === null) return null;
+  const args = (call[1] ?? "").split(",");
+  const first = args[0]?.trim() ?? "";
+  const strategy = /^(?:up|down|nearest|to-zero)$/.test(first) ? first : "nearest";
+  const operands = strategy === first ? args.slice(1) : args;
+  if (operands.length !== 2) return null;
+  const value = measurePx(operands[0] ?? "");
+  const interval = measurePx(operands[1] ?? "");
+  if (value === null || interval === null || interval <= 0) return null;
+  const steps = value / interval;
+  const whole =
+    strategy === "up"
+      ? Math.ceil(steps)
+      : strategy === "down"
+        ? Math.floor(steps)
+        : strategy === "to-zero"
+          ? Math.trunc(steps)
+          : Math.round(steps);
+  return whole * interval;
+}
+
+/** A rounded height is judged by its rounded result. An expression this check
+ * cannot evaluate keeps the old reading: the first measure it spells out. */
 function controlHeightOnScale(value: string): boolean {
-  const inner = /^round\((?:(?:up|down|nearest|to-zero),)?([^,]+),[^)]*\)$/.exec(value);
-  const measure = /^(\d*\.?\d+)(rem|px)$/.exec(inner ? (inner[1] ?? "") : value);
-  if (measure === null) return true;
-  const px = Number(measure[1]) * (measure[2] === "rem" ? ROOT_PX : 1);
+  const px =
+    roundedPx(value) ??
+    measurePx(
+      /^round\((?:(?:up|down|nearest|to-zero),)?([^,]+),[^)]*\)$/.exec(value)?.[1] ?? value,
+    );
+  if (px === null) return true;
   return CONTROL_HEIGHT_PX.some((step) => Math.abs(px - step) < 0.2);
 }
 
