@@ -7,7 +7,7 @@ import { relative, resolve, sep } from "node:path";
  * component boundary check covers .tsx; this one covers every .css file the
  * renderer ships.
  *
- * Colour literals and undefined tokens fail closed. The six other rules ratchet against
+ * Colour literals and undefined tokens fail closed. The other rules ratchet against
  * `scripts/ui-stylesheet-baseline.json`: a file may not add a finding, and a
  * fix must lower the recorded count so the baseline never overstates.
  */
@@ -28,6 +28,8 @@ export type StylesheetRule =
   | "heavy-weight"
   | "control-repaint"
   | "spacing-scale"
+  | "radius-token"
+  | "control-height-scale"
   | "undefined-token";
 
 export interface StylesheetFinding {
@@ -66,6 +68,205 @@ const MOTION_TOKEN = /var\(--oct-motion-[a-z-]+\)/;
 const SPACING_PROPERTY =
   /^(?:gap|row-gap|column-gap|padding(?:-(?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))?|margin(?:-(?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))?)$/;
 const SPACING_LITERAL = /(?<![\w.-])(\d*\.?\d+)px\b/g;
+
+// A corner is a radius token, `0`, `50%`, or the 1-4px of a chart bar, mark or
+// status dot (DESIGN.md, "Radii"). Every component of the
+// value must be one of those on its own: a token with a fallback, a token next
+// to a literal, or a token plus a length is a literal corner in disguise. The
+// one derived form is a part inside a control, the control radius less the
+// padding between them, never below 2px: `calc(token - Npx)`, optionally
+// floored with `max(1-4px, …)`. Existing code spells it that way.
+const RADIUS_PROPERTY =
+  /^border(?:-(?:top|bottom)-(?:left|right)|-(?:start|end)-(?:start|end))?-radius$/;
+const RADIUS_TOKEN_VAR = String.raw`var\(\s*--(?:oct-)?radius(?:-[a-z0-9]+)*\s*\)`;
+const RADIUS_TOKEN = new RegExp(`^${RADIUS_TOKEN_VAR}$`);
+const RADIUS_INSET = new RegExp(String.raw`^calc\(\s*${RADIUS_TOKEN_VAR}\s+-\s+\d*\.?\d+px\s*\)$`);
+const RADIUS_FLOORED_INSET = new RegExp(String.raw`^max\(\s*[1-4]px\s*,\s*(calc\(.*\))\s*\)$`);
+const RADIUS_KEYWORD = /^(?:0|0px|50%|inherit|initial|unset|revert|revert-layer)$/;
+const RADIUS_MARK_PX = /^[1-4]px$/;
+
+/** Split on whitespace and `/` that sit outside any parentheses. */
+function topLevelParts(value: string): ReadonlyArray<string> {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of value) {
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+    if (depth === 0 && (char === "/" || /\s/.test(char))) {
+      if (current !== "") parts.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  if (current !== "") parts.push(current);
+  return parts;
+}
+
+function radiusPartOnScale(part: string): boolean {
+  if (RADIUS_KEYWORD.test(part) || RADIUS_MARK_PX.test(part) || RADIUS_TOKEN.test(part)) {
+    return true;
+  }
+  if (RADIUS_INSET.test(part)) return true;
+  const floored = RADIUS_FLOORED_INSET.exec(part);
+  return floored !== null && RADIUS_INSET.test(floored[1] ?? "");
+}
+
+function radiusOnScale(value: string): boolean {
+  const bare = value.replace(IMPORTANT_ANNOTATION, "").trim().toLowerCase();
+  const parts = topLevelParts(bare);
+  return parts.length > 0 && parts.every(radiusPartOnScale);
+}
+
+// Recipe controls take their height in rem so they grow with the interface
+// size, rounded to a whole 2px. At the 13px root DESIGN.md allows 20, 24, 28
+// and 32px; a recipe asking for another height is off the control scale.
+const CONTROL_HEIGHT_PX = [20, 24, 28, 32];
+const ROOT_PX = 13;
+const RECIPE_SOURCE = /(?:^|\/)ui\/(?:base|shadcn)\/(?:.+\/)?[^/]+\.tsx$/;
+const FIXED_SIZE_UTILITY = /(?<![\w-])(?:h|size)-\[([^\]\s]+)\]/g;
+// `rounded-[…]` and `rounded-(--token)`; Tailwind writes a space as `_`, and a
+// bare `--token` inside brackets is a variable read, so `rounded-[--oct-radius-sm]`
+// and `rounded-(--oct-radius-sm)` are the same corner.
+const ARBITRARY_RADIUS_UTILITY =
+  /(?<![\w-])rounded(?:-(?:[a-z]{1,2}))?-(?:\[([^\]\s]+)\]|\((--[^)\s]+)\))/g;
+// Every inline spelling of a corner: camelCase or quoted kebab keys, and an
+// `el.style.x =` or `style.setProperty("x", …)` assignment.
+const RADIUS_CAMEL = String.raw`border(?:(?:Top|Bottom)(?:Left|Right)|(?:Start|End)(?:Start|End))?Radius`;
+const RADIUS_KEBAB = String.raw`border(?:-(?:top|bottom)-(?:left|right)|-(?:start|end)-(?:start|end))?-radius`;
+const INLINE_RADIUS_SITE = new RegExp(
+  [
+    String.raw`(?<![\w$.])["']?${RADIUS_CAMEL}["']?\s*:`,
+    String.raw`(?<![\w$.])["']${RADIUS_KEBAB}["']\s*:`,
+    String.raw`\.style\s*(?:\.${RADIUS_CAMEL}|\[\s*["'](?:${RADIUS_CAMEL}|${RADIUS_KEBAB})["']\s*\])\s*=(?!=)`,
+    String.raw`\.setProperty\(\s*["']${RADIUS_KEBAB}["']\s*,`,
+  ].join("|"),
+  "g",
+);
+
+/** The source text of the expression that starts at `from`, up to the `,`, `;`,
+ * `}` or `)` that ends it at the same nesting level. */
+function expressionAt(source: string, from: number): string {
+  let depth = 0;
+  let quote = "";
+  for (let index = from; index < source.length; index += 1) {
+    const char = source.charAt(index);
+    if (quote !== "") {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") quote = char;
+    else if (char === "(" || char === "[" || char === "{") depth += 1;
+    else if (char === ")" || char === "]" || char === "}") {
+      if (depth === 0) return source.slice(from, index);
+      depth -= 1;
+    } else if (depth === 0 && (char === "," || char === ";")) return source.slice(from, index);
+  }
+  return source.slice(from);
+}
+
+const WHOLE_STRING = /^\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1\s*$/;
+const WHOLE_NUMBER = /^\s*(\d*\.?\d+)\s*$/;
+const QUOTED_LITERAL = /(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
+// A number that is a result of the expression, not an operand of a comparison.
+const RESULT_NUMBER = /(?:^|[?:]|\?\?|\|\||&&)\s*(\d*\.?\d+)(?![\w.%])/g;
+
+const OPERATOR_BEFORE = /(?:[!=]==?\s*|(?<!=)[<>]=?\s*|\.\w+\(\s*)$/;
+const OPERATOR_AFTER = /^\s*(?:[!=]==?|(?<!=)[<>]=?|\.)/;
+
+/** A string that is only compared or searched for (`kind === "pill"`,
+ * `list.includes("x")`) is never the corner. A form this does not recognise is
+ * read as a result, so the check errs towards a finding. */
+function isComparisonOperand(expression: string, index: number, length: number): boolean {
+  const before = expression.slice(0, index);
+  const openBrackets = before.split("[").length - before.split("]").length;
+  return (
+    openBrackets > 0 ||
+    OPERATOR_BEFORE.test(before) ||
+    OPERATOR_AFTER.test(expression.slice(index + length))
+  );
+}
+
+/** Judge an inline corner expression. A plain literal is judged in full. A
+ * conditional or a template can only be judged by the literals it spells out:
+ * an off-scale px string or a numeric result. A value read from a variable
+ * has no literal to judge and passes. */
+function inlineRadiusOffScale(expression: string): string | null {
+  const whole = WHOLE_STRING.exec(expression);
+  if (whole !== null && !(whole[1] === "`" && (whole[2] ?? "").includes("${"))) {
+    const text = whole[2] ?? "";
+    return radiusOnScale(text) ? null : text;
+  }
+  const bareNumber = WHOLE_NUMBER.exec(expression);
+  if (bareNumber !== null) {
+    const text = `${bareNumber[1]}px`;
+    return radiusOnScale(text) ? null : text;
+  }
+  for (const literal of expression.matchAll(QUOTED_LITERAL)) {
+    if (isComparisonOperand(expression, literal.index, literal[0].length)) continue;
+    const text = (literal[2] ?? "").replace(/\$\{[^}]*\}/g, "x");
+    const hasPlaceholder = text !== (literal[2] ?? "");
+    if (!hasPlaceholder) {
+      if (!radiusOnScale(text)) return text;
+      continue;
+    }
+    for (const length of text.matchAll(/(?<![\w.-])(\d*\.?\d+)px\b/g)) {
+      if (!radiusOnScale(length[0])) return length[0];
+    }
+  }
+  for (const result of expression.replace(QUOTED_LITERAL, '""').matchAll(RESULT_NUMBER)) {
+    const text = `${result[1]}px`;
+    if (!radiusOnScale(text)) return text;
+  }
+  return null;
+}
+
+const MEASURE = /^(\d*\.?\d+)(rem|px)$/;
+
+function measurePx(text: string): number | null {
+  const measure = MEASURE.exec(text.trim());
+  if (measure === null) return null;
+  return Number(measure[1]) * (measure[2] === "rem" ? ROOT_PX : 1);
+}
+
+/** CSS `round(strategy?, value, interval)` at the 13px root. Null when the
+ * expression cannot be evaluated here (a `var()`, a `calc()`, no interval). */
+function roundedPx(expression: string): number | null {
+  const call = /^round\(([^()]*)\)$/.exec(expression);
+  if (call === null) return null;
+  const args = (call[1] ?? "").split(",");
+  const first = args[0]?.trim() ?? "";
+  const strategy = /^(?:up|down|nearest|to-zero)$/.test(first) ? first : "nearest";
+  const operands = strategy === first ? args.slice(1) : args;
+  if (operands.length !== 2) return null;
+  const value = measurePx(operands[0] ?? "");
+  const interval = measurePx(operands[1] ?? "");
+  if (value === null || interval === null || interval <= 0) return null;
+  const steps = value / interval;
+  const whole =
+    strategy === "up"
+      ? Math.ceil(steps)
+      : strategy === "down"
+        ? Math.floor(steps)
+        : strategy === "to-zero"
+          ? Math.trunc(steps)
+          : Math.round(steps);
+  return whole * interval;
+}
+
+/** A rounded height is judged by its rounded result. An expression this check
+ * cannot evaluate keeps the old reading: the first measure it spells out. */
+function controlHeightOnScale(value: string): boolean {
+  const px =
+    roundedPx(value) ??
+    measurePx(
+      /^round\((?:(?:up|down|nearest|to-zero),)?([^,]+),[^)]*\)$/.exec(value)?.[1] ?? value,
+    );
+  if (px === null) return true;
+  return CONTROL_HEIGHT_PX.some((step) => Math.abs(px - step) < 0.2);
+}
 
 const ACCESSIBILITY_MEDIA =
   /prefers-reduced-motion|prefers-reduced-transparency|prefers-contrast|forced-colors/;
@@ -406,6 +607,9 @@ export function findStylesheetFindings(
       if (name === "font-size" && !fontSizeOnScale(value)) {
         push("font-size-scale", `font-size ${value} is not a type-scale token`);
       }
+      if (!isToken && RADIUS_PROPERTY.test(name) && !radiusOnScale(value)) {
+        push("radius-token", `${property} ${value} is not a radius token`);
+      }
       if (!isToken && !exempt && SPACING_PROPERTY.test(name) && !spacingOnScale(value)) {
         push("spacing-scale", `${property} ${value} is off the 4px spacing scale`);
       }
@@ -428,6 +632,50 @@ export function findStylesheetFindings(
             `${property} repaints ${repainted.primitive} through .${repainted.className}`,
           );
         }
+      }
+    }
+  }
+  return findings;
+}
+
+/**
+ * The shape rules that live in component source rather than a stylesheet: a
+ * recipe's fixed control height, and a corner written as a literal in a class
+ * or an inline style. Tailwind's named corners (`rounded-md`) resolve to the
+ * radius tokens in tailwind.css, so only an arbitrary value can go off them.
+ */
+export function findComponentScaleFindings(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<StylesheetFinding> {
+  const findings: StylesheetFinding[] = [];
+  for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    const normalized = file.split(sep).join("/");
+    const push = (rule: StylesheetRule, index: number, detail: string): void => {
+      findings.push({ rule, file: normalized, line: lineAt(source, index), detail });
+    };
+    if (RECIPE_SOURCE.test(normalized)) {
+      for (const match of source.matchAll(FIXED_SIZE_UTILITY)) {
+        const value = match[1] ?? "";
+        if (!controlHeightOnScale(value)) {
+          push("control-height-scale", match.index, `${match[0]} is off the 20/24/28/32 scale`);
+        }
+      }
+    }
+    for (const match of source.matchAll(ARBITRARY_RADIUS_UTILITY)) {
+      const value =
+        match[2] !== undefined
+          ? `var(${match[2]})`
+          : (match[1] ?? "").replace(/^(--[a-z0-9-]+)$/, "var($1)").replace(/_/g, " ");
+      if (!radiusOnScale(value)) {
+        push("radius-token", match.index, `${match[0]} is not a radius token`);
+      }
+    }
+    for (const match of source.matchAll(INLINE_RADIUS_SITE)) {
+      const offScale = inlineRadiusOffScale(expressionAt(source, match.index + match[0].length));
+      if (offScale !== null) {
+        push("radius-token", match.index, `corner ${offScale} is not a radius token`);
       }
     }
   }
@@ -488,6 +736,8 @@ export function countFindings(
     "heavy-weight": {},
     "control-repaint": {},
     "spacing-scale": {},
+    "radius-token": {},
+    "control-height-scale": {},
     "undefined-token": {},
   };
   for (const finding of findings) {
@@ -513,6 +763,8 @@ const RATCHETED_RULES: ReadonlyArray<StylesheetRule> = [
   "heavy-weight",
   "control-repaint",
   "spacing-scale",
+  "radius-token",
+  "control-height-scale",
 ];
 
 export function compareWithBaseline(
@@ -599,6 +851,7 @@ async function main(): Promise<void> {
   const { stylesheets, components } = await rendererFiles(root);
   const findings = [
     ...findStylesheetFindings(stylesheets, collectPrimitiveClasses(components)),
+    ...findComponentScaleFindings(components),
     ...findUndefinedTokenFindings(stylesheets, collectScriptedTokens(await scriptSources(root))),
   ];
   const baselineFile = resolve(root, BASELINE_PATH);
@@ -612,7 +865,9 @@ async function main(): Promise<void> {
   const baseline = JSON.parse(await readFile(baselineFile, "utf8")) as StylesheetBaseline;
   const problems = compareWithBaseline(findings, baseline);
   if (problems.length === 0) {
-    console.log("Stylesheets match the type, motion, spacing, and colour contract.");
+    console.log(
+      "Stylesheets match the type, motion, spacing, radius, control-height, and colour contract.",
+    );
     return;
   }
 

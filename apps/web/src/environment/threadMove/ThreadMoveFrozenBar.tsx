@@ -27,7 +27,7 @@ export function holdsThread(status: ThreadMoveThreadStatus | undefined): boolean
  * host already refuses every command on a held thread; the bar says what
  * holds it and offers the one action that releases it, instead of a composer
  * whose every send would be refused with the moving reason. Canonical:
- * DESIGN.md "While it moves".
+ * docs/design/hub-and-spokes.md "Moving a thread: screens", "While it moves".
  */
 export function ThreadMoveFrozenBar(props: {
   readonly client: ThreadMoveClient;
