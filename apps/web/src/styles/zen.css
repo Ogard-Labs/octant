@@ -379,7 +379,7 @@
    title in Settings and the loudest thing on a focus surface. */
 .zen-panel .card-head h2 {
   font-size: var(--oct-text-xl);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: var(--oct-tracking-tight);
   line-height: var(--oct-leading-heading);
 }
@@ -929,7 +929,7 @@ img.zen-appearance__thumb {
 .zen-research__title {
   flex: 1;
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   color: var(--oct-muted);
 }
 
@@ -961,7 +961,7 @@ img.zen-appearance__thumb {
 }
 
 .zen-research__tab button[aria-selected="true"] {
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   color: var(--oct-fg);
 }
 
@@ -1008,7 +1008,7 @@ img.zen-appearance__thumb {
 
 .project-agent-pages__page {
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .project-agent-pages__owner {
@@ -1039,7 +1039,7 @@ img.zen-appearance__thumb {
 .project-agent-page__owner {
   flex: 1;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .project-agent-page__picture {

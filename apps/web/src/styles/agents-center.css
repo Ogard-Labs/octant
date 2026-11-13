@@ -116,7 +116,7 @@
 }
 
 .agents-center-row__task {
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .agents-center-row__meta {
@@ -189,7 +189,7 @@
 }
 
 .agents-center-graph__title {
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .agents-center-graph__meta {

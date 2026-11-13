@@ -411,7 +411,7 @@
 
 .extensions-settings__compatibility dt {
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
   text-transform: none;
   color: var(--oct-fg);
