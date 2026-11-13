@@ -5,8 +5,9 @@
  * person's Resume sends, through the mode's ordinary turn admission, which
  * rechecks authority, posture and the spend ceiling as it admits it. A thread
  * is held for its person instead when the setting or the thread's own switch
- * is off, when its own continuations keep being cut off, or when its provider
- * cannot take up the session the cut-off turn ran in.
+ * is off, when a person quit Octant while it ran, when its own continuations
+ * keep being cut off, or when its provider cannot take up the session the
+ * cut-off turn ran in.
  *
  * Chat and Work keep no journaled push or pull request steps of their own,
  * so the Code hold for an uncertain external action has nothing to read here;
@@ -17,6 +18,7 @@ import {
   boundedRestartDetail,
   MAX_REPORTED_RESTART_THREADS,
   MAX_RESTART_CONTINUATIONS_CUT_OFF,
+  QUIT_HOLD_DETAIL,
   type CodeRestartContinuationAttempts,
 } from "../code/codeRestartContinuation";
 import { RESTART_CONTINUATION_PROMPT, restartContinuationId } from "./restartContinuation";
@@ -45,6 +47,11 @@ export type RestartContinuationReadiness =
 
 export interface ThreadRestartContinuationPorts {
   readonly mode: "chat" | "work";
+  /**
+   * The previous host stopped because a person quit it, not because it
+   * crashed or the system restarted (personQuit.ts).
+   */
+  readonly quitByPerson: boolean;
   readonly cutOff: ReadonlyArray<ThreadTurnCutOffByRestart>;
   readonly readiness: (turn: ThreadTurnCutOffByRestart) => RestartContinuationReadiness;
   /** The mode's Continue after restart setting. */
@@ -114,6 +121,10 @@ export async function continueThreadTurnsCutOffByRestart(
     }
     if (readiness.optedOut) {
       hold(turn.threadId, "opted-out", HOLD_DETAIL["opted-out"]);
+      continue;
+    }
+    if (ports.quitByPerson) {
+      hold(turn.threadId, "quit", QUIT_HOLD_DETAIL);
       continue;
     }
     // The chain goes on only while the cut-off turn is the continuation the

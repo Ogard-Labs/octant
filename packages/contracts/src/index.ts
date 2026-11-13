@@ -198,6 +198,7 @@ export * from "./codeProjectPullRequestSwitches";
 export * from "./canvasShareSnapshot";
 export * from "./canvasShareAccessLog";
 export * from "./canvasBoard";
+export * from "./canvasChoiceAnswer";
 export * from "./canvasTags";
 
 export * from "./computerUsePlugin";

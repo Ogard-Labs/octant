@@ -125,6 +125,7 @@ import {
   readCodeRuntimeWork,
   readCodeRuntimeWorkAggregateVersion,
   readCodeRuntimeWorks,
+  readCodeThreadsWithUnconfirmedRemoteSteps,
   readCodeReviewFinding,
   readCodeReviewFindings,
   readCodeSettings,
@@ -277,6 +278,7 @@ export interface PersistenceService {
   ) => ReadonlyArray<ProjectedCodeRuntimeWork>;
   /** The provider turns this start found the previous host still running. */
   readonly codeTurnsCutOffByRestart: ReadonlyArray<CodeTurnCutOffByRestart>;
+  readonly readCodeThreadsWithUnconfirmedRemoteSteps: () => ReadonlyArray<CodeThreadId>;
   readonly readCodeReviewFinding: (findingId: CodeReviewFindingId) => CodeReviewFinding | undefined;
   readonly readCodeReviewFindings: (threadId: CodeThreadId) => ReadonlyArray<CodeReviewFinding>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
@@ -665,6 +667,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readCodeRuntimeWork: (workId) => readCodeRuntimeWork(connection, workId),
       readCodeRuntimeWorks: (threadId) => readCodeRuntimeWorks(connection, threadId),
       codeTurnsCutOffByRestart,
+      readCodeThreadsWithUnconfirmedRemoteSteps: () =>
+        readCodeThreadsWithUnconfirmedRemoteSteps(connection),
       readCodeReviewFinding: (findingId) => readCodeReviewFinding(connection, findingId),
       readCodeReviewFindings: (threadId) => readCodeReviewFindings(connection, threadId),
       readCodeThreadView: (threadId) => readCodeThreadView(connection, threadId),

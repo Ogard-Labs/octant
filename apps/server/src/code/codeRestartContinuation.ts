@@ -9,8 +9,9 @@
  * taken effect, ask again for approvals. A thread is held for its person
  * instead when continuing it could repeat or hide something: a push or pull
  * request step whose outcome nobody learned, a person who turned the
- * continuation off, a thread whose own continuations keep being cut off, or a
- * provider that cannot resume the session.
+ * continuation off or quit Octant while the turn ran, a thread whose own
+ * continuations keep being cut off, or a provider that cannot resume the
+ * session.
  */
 import {
   decodeCodeOperationId,
@@ -34,6 +35,13 @@ import type { CodeOperationEventStore } from "./codeOperationEventStore";
  * times is held: the continuation itself may be what stops the host.
  */
 export const MAX_RESTART_CONTINUATIONS_CUT_OFF = 2;
+
+/**
+ * A person who quits while turns run chose to stop them; the next start
+ * leaves each such thread for them rather than starting it again unasked.
+ */
+export const QUIT_HOLD_DETAIL =
+  "Octant was quit while this thread was working, so it waits for you.";
 
 /** The report's bound on each list; the host control wire refuses a longer one. */
 export const MAX_REPORTED_RESTART_THREADS = 500;
@@ -132,6 +140,11 @@ export function codeRestartResumability(
 export interface CodeRestartContinuationPorts {
   /** The provider turns this start found the previous host still running. */
   readonly cutOff: ReadonlyArray<CodeTurnCutOffByRestart>;
+  /**
+   * The previous host stopped because a person quit it, not because it
+   * crashed or the system restarted (personQuit.ts).
+   */
+  readonly quitByPerson: boolean;
   readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly runtimeWorks: (threadId: CodeThreadId) => ReadonlyArray<ProjectedCodeRuntimeWork>;
   /** Settings › Code › Continue after restart. */
@@ -263,6 +276,7 @@ function guard(
       detail:
         "A push or pull request may have reached the remote before Octant stopped. Check it, then continue.",
     };
+  if (ports.quitByPerson) return { reason: "quit", detail: QUIT_HOLD_DETAIL };
   if (priorContinuationsCutOff(ports, thread.id, operationId) >= MAX_RESTART_CONTINUATIONS_CUT_OFF)
     return {
       reason: "crash-loop",

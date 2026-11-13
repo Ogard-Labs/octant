@@ -1157,6 +1157,10 @@ function seedCanvasFamily(harness: Harness, thread: SeededThread): void {
     canvasId,
     body: thread.marker,
   });
+  insertEvent(harness.connection, "canvas-choice-answers", canvasId, {
+    canvasId,
+    answer: { note: thread.marker },
+  });
   insertEvent(harness.connection, "canvas-outside-content", canvasId, {
     canvasId,
     versionId: uuidFor(thread.mode, "version"),

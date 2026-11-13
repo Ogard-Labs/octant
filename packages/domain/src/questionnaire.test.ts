@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateQuestionnaireAnswer } from "./questionnaire";
+import { validateCanvasChoiceAnswer, validateQuestionnaireAnswer } from "./questionnaire";
 
 const questionnaire = {
   questions: [
@@ -120,5 +120,41 @@ describe("questionnaire answers", () => {
   it("refuses malformed and oversized input", () => {
     expect(validateQuestionnaireAnswer(questionnaire, "not JSON").status).toBe("invalid");
     expect(validateQuestionnaireAnswer(questionnaire, " ".repeat(16_385)).status).toBe("invalid");
+  });
+});
+
+describe("Canvas choice answers", () => {
+  const many = {
+    allowComment: false,
+    questions: Array.from({ length: 24 }, (_, n) => ({
+      id: `q${String(n)}`,
+      prompt: `Decision ${String(n)}`,
+      selection: "single" as const,
+      options: [{ id: "a", label: "A" }],
+    })),
+  };
+  const answers = JSON.stringify({
+    version: 1,
+    answers: many.questions.map((question) => ({
+      questionId: question.id,
+      selectedOptionIds: ["a"],
+    })),
+  });
+
+  it("accepts an answer to every question of a long form that the inline rule refuses", () => {
+    expect(validateCanvasChoiceAnswer(many, answers).status).toBe("valid");
+    expect(validateQuestionnaireAnswer(many, answers).status).toBe("invalid");
+  });
+
+  it("still refuses a missing answer and an option the question never offered", () => {
+    const missing = JSON.stringify({ version: 1, answers: JSON.parse(answers).answers.slice(1) });
+    const unknown = JSON.stringify({
+      version: 1,
+      answers: JSON.parse(answers).answers.map((entry: object, index: number) =>
+        index === 0 ? { ...entry, selectedOptionIds: ["zz"] } : entry,
+      ),
+    });
+    expect(validateCanvasChoiceAnswer(many, missing).status).toBe("invalid");
+    expect(validateCanvasChoiceAnswer(many, unknown).status).toBe("invalid");
   });
 });
