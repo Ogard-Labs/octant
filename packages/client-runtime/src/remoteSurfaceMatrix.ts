@@ -52,6 +52,7 @@ export type RemoteShellSurfaceKind =
   | "usage-ledger"
   | "file-event-routines"
   | "provider-discovery"
+  | "server-projects"
   | "approvals"
   | "extension-install"
   | "provider-setup"
@@ -161,6 +162,15 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     availability: "local-host-only",
     // No catalogued action, as for shell settings above.
     catalogAction: "provider.discovery.scan",
+  },
+  {
+    id: "server-projects",
+    label: "Server Projects",
+    description:
+      "Read the Projects bound to a folder on a server, their files and the server's load.",
+    availability: "local-host-only",
+    // No catalogued action, as for shell settings above.
+    catalogAction: "server.project.read",
   },
   {
     id: "approvals",

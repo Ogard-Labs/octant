@@ -24,6 +24,9 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
   "harness/nativeHarnessEgressRoutes.ts": "hands the device to the rules store, which journals it",
   "localUsageHistoryRoutes.ts": "reads provider history; changes nothing",
   "localWindowReadRoute.ts": "a parameterless read; changes nothing",
+  "serverProjects/serverProjectRoutes.ts":
+    "a device only reads the catalog; its changes stay with a local window",
+  "serverProjects/serverResourceRoutes.ts": "reads a server's load; changes nothing",
   "workFileListingRoutes.ts": "lists a folder's entries; changes nothing",
   "providers/providerUsageLimitsRoutes.ts":
     "reads the limits and asks the providers again; journals nothing",

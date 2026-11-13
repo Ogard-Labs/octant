@@ -1115,6 +1115,16 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/usage/diagnostics",
     methods: ["POST"] as const,
   },
+  // The catalog of Projects bound to a folder on a server, and a server's
+  // load, read by a device the host's own person paired. Changing the catalog
+  // is not forwarded: its journaled records name only a local window.
+  ...["/api/server-projects", "/api/server-projects/resources"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    namesProjectInQuery: true as const,
+  })),
   // Scanning the host for installed provider commands and connecting what
   // the scan found, for a device the host's own person paired; the route
   // refuses every other.

@@ -1,4 +1,5 @@
 import type { HostResourceSnapshot } from "@octant/contracts";
+import { principalActsAsHostPerson } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -15,8 +16,10 @@ export interface ServerResourceRouteDependencies {
 
 /**
  * Load on the server a server Project is bound to, for the Vitals tool.
- * Only a person at a local window may ask: the read runs a command under the
- * person's own SSH identity, which a paired device does not hold. The body is
+ * Only the host's own person may ask, at a local window or on a device that
+ * person paired (maintainer decision, 2026-11-13): the read runs a command on
+ * the host under the person's own SSH identity, which no other device session
+ * may borrow. The body is
  * the same snapshot `/api/host/resources` answers.
  */
 export function createServerResourceRoutes(dependencies: ServerResourceRouteDependencies) {
@@ -42,7 +45,7 @@ export function createServerResourceRoutes(dependencies: ServerResourceRouteDepe
         store: dependencies.windows,
         now: (dependencies.now ?? Date.now)(),
       });
-      if (context.principal.kind !== "local-window") {
+      if (!principalActsAsHostPerson(context.principal)) {
         return json({ error: "Server resources are not available to this client." }, 403);
       }
     } catch {
