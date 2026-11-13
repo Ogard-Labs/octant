@@ -5162,8 +5162,9 @@ or .zip>` write the same files, built by one host command
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
   threads that window can open. Chat and Work turns are continued by the same
-  rule (Chat and Work restart recovery, below), and so are Work goal loops;
-  subagent runs and coordinator wakes are not continued yet.
+  rule (Chat and Work restart recovery, below), and so are Work goal loops
+  and subagent runs (subagent restart recovery, below); coordinator wakes are
+  not continued yet.
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5310,6 +5311,27 @@ ls-remote` against the thread's remote and the GitHub reads they already
   a person's Resume runs it again. A loop that continues starts its round
   through the ordinary round path, where the budget, ceiling and authority
   checks apply again.
+
+  Subagent restart recovery resumes the runs the start's reconciliation
+  interrupted (`restart-without-resumable-execution`: a run that was starting,
+  running or waiting on its provider; a run parked on its dependencies, a pool
+  decision or a usage limit keeps its wait). It runs after the three modes, so
+  a parent thread's own continuation is admitted first. Each run is resumed
+  once, as the host, through the ordinary run resume with the same message a
+  person's Resume sends; the resume reads the parent thread's live grant at
+  that moment and rechecks the saved conversation, the workspace, approvals
+  and capacity, and never starts a turn on the parent thread. A run is its own
+  provider session and the resume refuses a run that is no longer Interrupted,
+  so a run never has two executions at once. A run waits for its person
+  instead, still Interrupted and resumable only by a person's Resume, when its
+  parent mode's Continue after restart setting is off, its parent thread's own
+  switch is off, a person quit Octant while it ran, its own automatic
+  continuation was cut off by a restart twice, or the resume refuses it. The
+  crash-loop count shares the thread store under the run's own key and is
+  keyed by the version the host's resume moved the run to; the chain goes on
+  only while the run's latest journaled start is that resume, so a person's
+  later start begins a fresh count. The restart notice names each continued or
+  held run under its parent thread.
 
   A person who quits Octant while turns run chose to stop them, so the next
   start holds those threads instead of continuing them (maintainers decided on
