@@ -1,13 +1,18 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
+import { formatHostInteractionMark } from "../apps/desktop/src/interactionTrace";
 import {
   PACKAGED_SMOKE_PROCESS_PROBE_TIMEOUT_MS,
   PACKAGED_SMOKE_SERVER_PORT,
   packagedSmokeServerPort,
   PACKAGED_SMOKE_SERVER_URL,
   cleanupPackagedProcess,
+  coldLaunchPhases,
+  collectHostInteractionMarks,
+  formatColdLaunchPhases,
   packagedServerEnvironment,
   runBoundedCommand,
   sanitizedPackagedEnvironment,
@@ -70,6 +75,39 @@ describe("sanitizedPackagedEnvironment", () => {
       OCTANT_SERVER_PORT: String(PACKAGED_SMOKE_SERVER_PORT),
     });
     expect(PACKAGED_SMOKE_SERVER_URL).toBe(`http://127.0.0.1:${PACKAGED_SMOKE_SERVER_PORT}`);
+  });
+});
+
+describe("coldLaunchPhases", () => {
+  it("reports each cold launch phase from the app's start and names the ones that never happened", () => {
+    const stderr = new PassThrough();
+    const marks = collectHostInteractionMarks(stderr);
+    const line = (layer: "server" | "native-window" | "renderer", name: string, at: number) =>
+      `${formatHostInteractionMark({ layer, name, at })}\n`;
+    // A mark split across two chunks, and app output between marks, still read.
+    const startLine = line("server", "host-start", 1_200);
+    stderr.write(startLine.slice(0, 10));
+    stderr.write(`${startLine.slice(10)}[server] unrelated output\n`);
+    stderr.write(line("native-window", "ready-to-show", 9_000));
+    stderr.write(line("renderer", "chat-bootstrap-sent", 9_400));
+    stderr.write(line("renderer", "chat-bootstrap-sent", 40_000));
+
+    const phases = coldLaunchPhases({
+      launchedAt: 1_000,
+      marks: marks(),
+      hostListeningAt: 3_000,
+      serverReadyAt: 3_100,
+    });
+
+    expect(phases).toEqual([
+      { phase: "desktop starts the host", sinceLaunchMs: 200 },
+      { phase: "host listening", sinceLaunchMs: 2_000 },
+      { phase: "server.ready", sinceLaunchMs: 2_100 },
+      { phase: "window opened", sinceLaunchMs: 8_000 },
+      { phase: "Chat bootstrap request sent", sinceLaunchMs: 8_400 },
+      { phase: "Chat bootstrap answered", sinceLaunchMs: undefined },
+    ]);
+    expect(formatColdLaunchPhases(phases)).toContain("Chat bootstrap answered: not observed");
   });
 });
 

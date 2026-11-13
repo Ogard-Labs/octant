@@ -38,6 +38,7 @@ import {
   CodeRelativePath,
   CodeRepositoryId,
   CodeReviewFindingId,
+  CodeRuntimeWorkId,
   CodeTerminalId,
   CodeTestRunId,
   CodeThread,
@@ -465,6 +466,22 @@ const RevokeTerminalBrowserGrant = Schema.Struct({
   kind: Schema.Literal("revoke-terminal-browser-grant"),
   ...OperationScope,
   terminalId: CodeTerminalId,
+}).annotations(strict);
+/**
+ * The person's word on a pull request update or merge whose outcome a restart
+ * left unconfirmed. Octant cannot tell such a step from an earlier one by
+ * looking at GitHub, so only the person, having checked, can settle it:
+ * `happened`, `did-not-happen`, or `unknown` (stop waiting without saying).
+ * It changes nothing on GitHub, so it is never gated, but only the person at
+ * a local window may send it.
+ */
+export const CodeUnconfirmedStepOutcome = Schema.Literal("happened", "did-not-happen", "unknown");
+export type CodeUnconfirmedStepOutcome = typeof CodeUnconfirmedStepOutcome.Type;
+const ResolveUnconfirmedStep = Schema.Struct({
+  kind: Schema.Literal("resolve-unconfirmed-step"),
+  ...OperationScope,
+  workId: CodeRuntimeWorkId,
+  outcome: CodeUnconfirmedStepOutcome,
 }).annotations(strict);
 const RunRepositoryTest = Schema.Struct({
   kind: Schema.Literal("run-repository-test"),
@@ -1121,6 +1138,7 @@ export const CodeOperationCommand = Schema.Union(
   ResizeTerminal,
   StopTerminal,
   RevokeTerminalBrowserGrant,
+  ResolveUnconfirmedStep,
   RunRepositoryTest,
   CancelRepositoryTest,
   RunScaffold,
@@ -2904,6 +2922,19 @@ export const CodeBoardCard = Schema.Struct({
   recovery: CodeThreadMetadataRecovery,
   githubFreshness: CodeMetadataFreshness,
   blockingReason: Schema.optional(boundedNonEmptyText(MAX_CODE_BOARD_CARD_BLOCKING_REASON_BYTES)),
+  /**
+   * Pull request updates and merges whose outcome a restart left unconfirmed
+   * and that only the person can settle (`resolve-unconfirmed-step`). Absent
+   * when the thread has none.
+   */
+  unconfirmedPullRequestSteps: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        workId: CodeRuntimeWorkId,
+        action: Schema.Literal("update", "merge"),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(16)),
+  ),
   followUp: Schema.Boolean,
   lastMeaningfulActivityAt: Schema.NullOr(UtcTimestamp),
   /**

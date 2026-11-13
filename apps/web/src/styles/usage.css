@@ -537,10 +537,6 @@ p.provider-limits__warning {
   height: auto;
   min-height: 0;
   padding: 0;
-  /* The recipe's transparent 1px border made the button 34px around its 32px
-     face; the margin gives the border back, so the button takes its face's
-     32px in the column. */
-  margin: -1px;
 }
 
 .rail-usage__face {

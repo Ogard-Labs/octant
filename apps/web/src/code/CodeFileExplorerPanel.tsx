@@ -172,6 +172,7 @@ function ExtraFolderExplorer(
           onRefresh={() => void controller.refresh()}
           refreshing={controller.status === "loading"}
           truncated={controller.truncated}
+          barControls={false}
         />
       )}
     </section>

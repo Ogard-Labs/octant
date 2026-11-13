@@ -57,6 +57,7 @@ import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { createGoalLoopRouteHandler } from "../goal/goalLoopRoutes";
 import { GoalLoopEventStore } from "../goal/goalLoopEventStore";
 import { GoalLoopService } from "../goal/goalLoopService";
+import { chargeGoalForRound } from "../goal/goalLoopCharge";
 import { GoalLoopScheduler } from "../goal/goalLoopScheduler";
 import { createGoalLoopWorkRoundRunner } from "../goal/goalLoopWorkRoundRunner";
 import { WorkTurnUsageStore } from "../work/workTurnUsageStore";
@@ -1150,31 +1151,7 @@ export function wireWork(deps: WorkDependencies) {
     });
     const goalLoopService = new GoalLoopService({
       readGoal: (threadId) => goalService.read(threadId).goal,
-      recordUsage: async ({ threadId, goal, tokensSpent, elapsedMs, evidence, complete }) => {
-        // The round's own turn may have moved the goal — a harness lead runs
-        // goal checks, and the last passing one completes it. Charge the round
-        // against the goal as it is now; a goal its own checks completed is
-        // finished and takes no further spend.
-        const current = goalService.read(threadId).goal ?? goal;
-        if (current.status === "complete") return;
-        const recorded = await goalService.execute({
-          kind: "record-thread-goal-usage",
-          threadId,
-          expectedVersion: current.version,
-          goalId: goal.id,
-          deltaTokens: tokensSpent,
-          deltaElapsedMs: elapsedMs,
-          deltaTurns: 1,
-        });
-        if (!complete) return;
-        await goalService.execute({
-          kind: "complete-thread-goal",
-          threadId,
-          expectedVersion: recorded.goal.version,
-          goalId: goal.id,
-          evidence: evidence.slice(0, 16),
-        });
-      },
+      recordUsage: (input) => chargeGoalForRound(goalService, input),
       threadAuthority: (threadId) => {
         if (!goalLoopWorkEnabled()) return undefined;
         try {
@@ -1233,6 +1210,9 @@ export function wireWork(deps: WorkDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString() as never,
     });
+    // Loops come back as the previous host left them; restart continuation
+    // decides whether one it found running goes on (wiring/continuation.ts).
+    goalLoopService.replay(goalLoopEvents.replay());
     const goalLoopRoutes = createGoalLoopRouteHandler({
       service: goalLoopService,
       windowAuthorityStore,

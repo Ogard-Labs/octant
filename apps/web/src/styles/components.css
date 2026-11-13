@@ -1749,7 +1749,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 }
 
 .turn-activity__disclosure + .turn-activity__disclosure {
-  border-top: 1px solid var(--oct-border-soft);
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .turn-activity__disclosure > summary {
@@ -1804,7 +1804,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 }
 
 .turn-activity__toolchain > .turn-activity__disclosure:first-child {
-  border-top: 1px solid var(--oct-border-soft);
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .turn-activity__disclosure--thinking > summary .turn-activity__name {
@@ -1899,7 +1899,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 .turn-activity__thinking-body {
   margin: 0 0 8px 20px;
   padding: 0 0 0 var(--oct-space-4);
-  border-left: 2px solid var(--oct-border);
+  border-left: 1px solid var(--octant-border-strong);
   color: var(--oct-muted);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-sm);
@@ -1923,7 +1923,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 .turn-activity__disclosure + .turn-activity__review,
 .turn-activity__review + .turn-activity__disclosure,
 .turn-activity__review + .turn-activity__review {
-  border-top: 1px solid var(--oct-border-soft);
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .turn-activity__review-icon {

@@ -7388,6 +7388,113 @@ describe("CodeOperationRuntime", () => {
       }
     });
 
+    it("releases a thread from an unconfirmed merge only on the word of the person at a window", async () => {
+      const { fixture, locate } = actionFixture({});
+      try {
+        const lost = "90000000-0000-4000-8000-0000000000e7";
+        fixture.appendRuntimeWork({
+          id: lost,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: { kind: "pull-request", action: "merge" },
+        });
+        // Starting up never settles a merge: GitHub cannot tell it from an earlier one.
+        await fixture.runtime.settleUnconfirmedSteps?.(windowId, {
+          signal: new AbortController().signal,
+        });
+        expect(fixture.boardActivity()).toMatchObject({
+          awaitingInput: true,
+          unconfirmedPullRequestSteps: [{ workId: lost, action: "merge" }],
+        });
+        const resolve = {
+          kind: "resolve-unconfirmed-step" as const,
+          workId: lost,
+          outcome: "happened" as const,
+        };
+        expect(
+          await fixture.runtime.execute(windowId, { ...resolve, ...scope(170) }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+        expect(
+          await fixture.runtime.execute(
+            windowId,
+            { ...resolve, ...scope(171) },
+            { initiator: "user" },
+          ),
+        ).toMatchObject({ kind: "operation-accepted" });
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === lost)
+            .at(-1)?.state,
+        ).toBe("completed");
+        expect(fixture.boardActivity()).toMatchObject({ awaitingInput: false });
+        expect(fixture.boardActivity()).not.toHaveProperty("unconfirmedPullRequestSteps");
+        // A second word on a step already settled is refused, not recorded again.
+        expect(
+          await fixture.runtime.execute(
+            windowId,
+            { ...resolve, ...scope(172) },
+            { initiator: "user" },
+          ),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "stale" } });
+        expect(locate).not.toHaveBeenCalled();
+      } finally {
+        fixture.close();
+      }
+    });
+
+    it("answers that it could not record the person's word when the journal refuses it, and takes it on a retry", async () => {
+      const { fixture } = actionFixture({});
+      try {
+        const lost = "90000000-0000-4000-8000-0000000000e8";
+        fixture.appendRuntimeWork({
+          id: lost,
+          kind: "delivery",
+          state: "ambiguous",
+          remoteStep: { kind: "pull-request", action: "update" },
+        });
+        const append = fixture.journal.append.bind(fixture.journal);
+        const refusing = vi
+          .spyOn(fixture.journal, "append")
+          .mockImplementation((input: Parameters<Journal["append"]>[0]) => {
+            if (
+              typeof input === "object" &&
+              input !== null &&
+              "aggregate" in input &&
+              typeof input.aggregate === "object" &&
+              input.aggregate !== null &&
+              "aggregateType" in input.aggregate &&
+              input.aggregate.aggregateType === "code-runtime"
+            )
+              throw new Error("runtime work journal unavailable");
+            return append(input);
+          });
+        const command = {
+          kind: "resolve-unconfirmed-step" as const,
+          workId: lost,
+          outcome: "did-not-happen" as const,
+          ...scope(175),
+        };
+        expect(
+          await fixture.runtime.execute(windowId, command, { initiator: "user" }),
+        ).toMatchObject({ kind: "operation-failed", failure: { category: "unavailable" } });
+        expect(fixture.boardActivity()).toMatchObject({ awaitingInput: true });
+        refusing.mockRestore();
+        // The same operation id runs again rather than replaying a success.
+        expect(
+          await fixture.runtime.execute(windowId, command, { initiator: "user" }),
+        ).toMatchObject({ kind: "operation-accepted" });
+        expect(
+          fixture
+            .runtimeWorks()
+            .filter((work) => work.id === lost)
+            .at(-1)?.state,
+        ).toBe("failed");
+      } finally {
+        fixture.close();
+      }
+    });
+
     it("merges on the person's approval only when the head and required checks match", async () => {
       const refusedFixture = actionFixture({});
       const base = {
