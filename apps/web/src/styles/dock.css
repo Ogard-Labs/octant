@@ -1077,7 +1077,10 @@
 }
 
 /* Navigation keeps its words: a small tray of segments, the tray 28px and each
-   segment 24px, centred in the bar's 32px (2px above and below). */
+   segment 24px, centred in the bar's 32px (2px above and below). The shared
+   toggle group sets the same padding and segment height on the real switch;
+   they are repeated here because the unseen ruler that decides the fold is
+   plain spans with these classes, and must measure the same width. */
 .dock-bar-switch {
   display: inline-flex;
   height: 28px;
@@ -1672,7 +1675,7 @@ html[data-octant-increased-contrast="true"] .octant-dialog__popup {
 
 .navigator-panel__header h2 {
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .navigator-panel__header p {

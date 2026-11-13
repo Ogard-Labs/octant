@@ -1151,7 +1151,12 @@ explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
 tool does not stop its server-owned lifecycle. Restoring a Terminal tab may
 reattach to an existing process, but a saved layout is not permission to start
-a new shell. When no process remains, the tab offers **Start terminal**.
+a new shell. When no process remains, the tab offers **Start terminal**. A
+shell a host restart ended reads Interrupted with a **Restart terminal** button
+beside it: one click starts a new shell through the ordinary start, checked
+against the thread's posture and authority at that moment, with a fresh
+terminal and no Browser grant or other permission the ended shell held. Plan
+shows no button.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.
@@ -1831,7 +1836,11 @@ with them. Zen's Add terminal offers the window's Code Project as
 "This Project" ahead of the Code threads that can open one; choosing it starts
 a Project terminal and pins a card that names the Project and the terminal,
 never a thread. The card is a window onto the shell and grants nothing: a card
-naming a terminal this window does not own is refused. Authority, lifecycle,
+naming a terminal this window does not own is refused. A card whose shell a
+host restart ended says so, to a window that may still use the Project's
+terminals, with a **Restart terminal** button: one click starts a new shell at
+the Project's root through the ordinary start and pins it in the ended card's
+place; a refused start leaves the card as it was. Authority, lifecycle,
 and the journal record follow the
 [Project terminal rule](../architecture.md#security-and-authority). A Code
 Project's saved actions (Run, Test, Dev) are buttons in the window header, three
@@ -1844,7 +1853,9 @@ the person confirms. Choosing one previews its actual folder and branch,
 then starts a dedicated run beside the task. A Code thread defaults to its
 active checkout; the Project folder and approved extra folders remain explicit
 choices. Output, exit status and Stop stay in the action dialog; Open terminal
-explicitly opens Zen. A lost reply is never retried automatically (see
+explicitly opens Zen. A run a host restart ended offers **Review and run
+again**, which reads the action's preview afresh; Run action stays the
+person's to press. A lost reply is never retried automatically (see
 [Project actions](../architecture.md#security-and-authority)). Add browser
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the

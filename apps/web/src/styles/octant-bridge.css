@@ -73,9 +73,8 @@
   /* ─── motion ────────────────────────────────────────────────────────
      Colour settles faster than geometry, so hover feels immediate while
      a lift or a disclosure still reads as movement. */
+  /* An overlay leaves in 100ms, faster than `--oct-motion-fast`. */
   --oct-dur-fast: 0.1s;
-  --oct-dur-base: 0.15s;
-  --oct-dur-slow: 0.2s;
   --oct-ease-color: cubic-bezier(0.4, 0, 0.2, 1);
   --oct-ease-motion: cubic-bezier(0.22, 1, 0.36, 1);
 

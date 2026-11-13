@@ -447,6 +447,8 @@ function collectOwnedAggregates(
   // aggregate is taken by its id rather than by a payload path.
   add(TOOL_EGRESS_THREAD_AGGREGATE, threadId);
   add(TURN_METRICS_AGGREGATE_TYPE, threadId);
+  // Coordinator wakes are journaled on the woken thread's id (coordinatorWakeJournal.ts).
+  add("coordinator-wake", threadId);
   for (const match of aggregatesMatching(connection, THREAD_OWNERSHIP_PATHS, threadId)) {
     add(match.aggregateType, match.aggregateId);
   }

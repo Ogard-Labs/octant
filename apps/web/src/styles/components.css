@@ -349,9 +349,9 @@ html[data-octant-increased-contrast="true"]
   .octant-sheet__backdrop
 ) {
   transition:
-    opacity var(--oct-dur-base) var(--oct-ease-motion),
-    scale var(--oct-dur-base) var(--oct-ease-motion),
-    translate var(--oct-dur-base) var(--oct-ease-motion);
+    opacity var(--oct-motion-fast) var(--oct-ease-motion),
+    scale var(--oct-motion-fast) var(--oct-ease-motion),
+    translate var(--oct-motion-fast) var(--oct-ease-motion);
 }
 
 :is(
@@ -1517,7 +1517,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .goal-loop__title {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .goal-loop__note,
@@ -1584,7 +1584,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .ship-panel__title {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .ship-panel__note,
@@ -1899,7 +1899,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 .turn-activity__thinking-body {
   margin: 0 0 8px 20px;
   padding: 0 0 0 var(--oct-space-4);
-  border-left: 1px solid var(--oct-hairline);
+  border-left: 1px solid var(--octant-border-strong);
   color: var(--oct-muted);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-sm);

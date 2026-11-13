@@ -1468,6 +1468,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             {...(exportTargetId === undefined ? {} : { initialTargetId: exportTargetId })}
             offers={exportOffers}
             onDecide={props.client.decideExport}
+            {...(props.client.dismissExportNotice === undefined
+              ? {}
+              : { onDismissNotice: props.client.dismissExportNotice })}
             onExportFolderChosen={() => void loadExportOffers()}
             onPrepare={prepareExportInTheme}
           />

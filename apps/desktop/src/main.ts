@@ -110,6 +110,7 @@ import {
   makeLinkedSecretStores,
   prepareHostRuntimePaths,
   readHostInfoReceipt,
+  recordHostCrash,
   ServicePolicyStore,
   addApiKey,
   ApiKeyPoolError,
@@ -256,6 +257,7 @@ import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import { createRuntimeBinaryPicker } from "./runtimeBinaryPicker";
 import { createBrowserProofSaver } from "./browserProofSaver";
 import { createSupportBundleSaver } from "./supportBundleSaver";
+import { buildRecoverySupportBundle } from "./recoverySupportBundle";
 import {
   createSingleFlight,
   assertAutomaticHostStartupEnabled,
@@ -263,6 +265,8 @@ import {
   probeHostInfoReceipt,
   probeLocalHost,
   createStderrTail,
+  ServerExitedBeforeReady,
+  type StderrTail,
   reserveLoopbackPort,
   resolveManagedServerUrl,
   resolveStableHostAttachment,
@@ -365,7 +369,11 @@ import {
   type PageStoragePort,
   PairedComputerPins,
 } from "./pairedComputers";
-import { markHostInteraction } from "./interactionTrace";
+import {
+  hostInteractionTraceEnabled,
+  isChatBootstrapRequest,
+  markHostInteraction,
+} from "./interactionTrace";
 import {
   installCanvasFrameGuards,
   isolateEachCanvasFrameDocument,
@@ -1404,6 +1412,38 @@ app.setPath(
 );
 
 let server: ChildProcess | undefined;
+// The running managed server's stderr tail, read when it exits unexpectedly.
+let serverStderrTail: StderrTail | undefined;
+
+/**
+ * Keeps a local crash record for a managed host that ended unexpectedly. The
+ * native Windows host keeps its data in an owned profile the desktop does not
+ * write into; that host keeps its own record at its next start instead. A
+ * record that cannot be written is reported on stderr and never blocks
+ * recovery.
+ */
+async function keepHostCrashRecord(
+  exitReason: string,
+  lastLines: () => Promise<ReadonlyArray<string>>,
+): Promise<void> {
+  if (desktopWindowsHost !== undefined) return;
+  const outcome = await recordHostCrash(desktopDataDirectory, {
+    recordedAt: new Date().toISOString(),
+    process: "host",
+    exitReason,
+    lastLines: await lastLines().catch(() => []),
+    homeDirectory: homedir(),
+  });
+  if (outcome.status === "failed")
+    writeDiagnostic(`[octant] crash record not kept: ${outcome.reason}`);
+}
+
+function exitReasonOf(child: {
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+}): string {
+  return child.signalCode !== null ? `signal ${child.signalCode}` : `exit code ${child.exitCode}`;
+}
 let desktopHostLaunch: DesktopHostLaunch | undefined;
 let acceptedQuitLaunch: DesktopHostLaunch | undefined;
 let desktopQuitAccepted = false;
@@ -1614,6 +1654,13 @@ function installTrustedRendererRequestHeaders(): void {
           ? undefined
           : trustedRendererRequests.get(details.webContentsId);
       const frameUrl = details.frame?.url ?? details.webContents?.getURL();
+      if (
+        context !== undefined &&
+        hostInteractionTraceEnabled() &&
+        isChatBootstrapRequest(details.url, context.serverOrigin)
+      ) {
+        markHostInteraction("renderer", "chat-bootstrap-sent");
+      }
       callback({
         requestHeaders: decorateTrustedRendererHeaders({
           requestHeaders: details.requestHeaders,
@@ -1623,6 +1670,27 @@ function installTrustedRendererRequestHeaders(): void {
         }),
       });
     },
+  );
+  if (!hostInteractionTraceEnabled()) return;
+  const chatBootstrapSettled = (
+    details: { readonly url: string; readonly webContentsId?: number },
+    name: "chat-bootstrap-answered" | "chat-bootstrap-failed",
+  ) => {
+    const context =
+      details.webContentsId === undefined
+        ? undefined
+        : trustedRendererRequests.get(details.webContentsId);
+    if (context !== undefined && isChatBootstrapRequest(details.url, context.serverOrigin)) {
+      markHostInteraction("renderer", name);
+    }
+  };
+  session.defaultSession.webRequest.onCompleted(
+    { urls: ["http://*/*", "https://*/*"] },
+    (details) => chatBootstrapSettled(details, "chat-bootstrap-answered"),
+  );
+  session.defaultSession.webRequest.onErrorOccurred(
+    { urls: ["http://*/*", "https://*/*"] },
+    (details) => chatBootstrapSettled(details, "chat-bootstrap-failed"),
   );
 }
 
@@ -1891,6 +1959,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
   const serverStderr = createStderrTail();
+  serverStderrTail = serverStderr;
   const instanceId = randomUUID();
   const launch = createDesktopHostLaunch({
     shutdownServer:
@@ -2081,6 +2150,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
               : { [KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]: desktopKeychainServiceFamily }),
           },
         });
+        markHostInteraction("server", "host-start");
         return spawn(spec.command, spec.args, {
           env: spec.env,
           stdio: [...spec.stdio] as ["pipe", "inherit", "pipe"],
@@ -2292,6 +2362,14 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
       activityUnconfirmed: true,
     });
     updateHostTray();
+  },
+  recordCrash: (child) => {
+    const tail = serverStderrTail;
+    void keepHostCrashRecord(exitReasonOf(child), async () => {
+      if (tail === undefined) return [];
+      await tail.drained(STDERR_DRAIN_TIMEOUT_MS);
+      return tail.text().split("\n");
+    });
   },
 });
 
@@ -4873,6 +4951,12 @@ async function handleFatalStartup(error: unknown): Promise<void> {
   // offers the repairs that refusal allows; the Windows host keeps its store in
   // a native owned profile the offline maintenance command does not open.
   const refusal = desktopWindowsHost === undefined ? readHostStartupRefusal(error) : undefined;
+  if (error instanceof ServerExitedBeforeReady) {
+    // The error already carries the redacted stderr tail after its first line.
+    await keepHostCrashRecord(refusal?.category ?? exitReasonOf(error), async () =>
+      error.message.split("\n").slice(1),
+    );
+  }
   if (refusal !== undefined) {
     const choice = await showHostRecovery({
       refusal,
@@ -4893,6 +4977,19 @@ async function handleFatalStartup(error: unknown): Promise<void> {
         ...process.env,
         OCTANT_DATA_DIR: desktopDataDirectory,
         ...desktopHostStartup.hostEnvironment,
+      },
+      supportBundle: {
+        defaultDirectory: app.getPath("downloads"),
+        build: (now) =>
+          buildRecoverySupportBundle({
+            bundleId: randomUUID(),
+            now,
+            octantVersion: app.getVersion(),
+            runtime: `electron ${process.versions.electron}`,
+            dataDirectory: desktopDataDirectory,
+            serviceLogPath: desktopPosixHostPaths().serviceLogPath,
+            homeDirectory: homedir(),
+          }),
       },
     }).catch(() => "quit" as const);
     // Starting again is a fresh launch: the refused start already released

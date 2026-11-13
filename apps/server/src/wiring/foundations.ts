@@ -1,6 +1,8 @@
 import { createConversationInputTransfer } from "./conversationInputs";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { join } from "node:path";
+import { keepUncleanStopCrashRecord } from "@octant/host-runtime";
 import {
   type CodeThreadId,
   LOCAL_HOST_ID,
@@ -123,6 +125,21 @@ export function wireFoundations(deps: FoundationsDependencies) {
   // server's startup and shutdown, so a host that never binds writes nothing.
   const hostMemoryGuard = new HostMemoryGuard({
     stateFile: join(persistence.dataDirectory, "host-memory.json"),
+    // The host itself keeps the crash record no watching desktop could: a
+    // background-service host, or the native Windows host.
+    keepCrashRecord: async (stop) => {
+      const record = await keepUncleanStopCrashRecord(persistence.dataDirectory, {
+        lastSeenAt: stop.lastSeenAt,
+        recordedAt: new Date().toISOString(),
+        lastLines: [
+          `last reading ${stop.lastSeenAt}: ${stop.pressure} memory pressure, host using ${stop.processMegabytes} MB`,
+        ],
+        homeDirectory: homedir(),
+      });
+      return record === undefined
+        ? undefined
+        : { recordedAt: record.recordedAt, exitReason: record.exitReason };
+    },
     readSystem: () => readSystemMemory(),
     readProcessRssBytes: () => process.memoryUsage.rss(),
     readLimits: () => readHostMemoryLimits(persistence.connection),

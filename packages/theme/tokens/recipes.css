@@ -117,8 +117,8 @@
   cursor: default;
   box-shadow: var(--octant-shadow-control);
   transition:
-    background-color var(--oct-dur-base) var(--oct-ease-color),
-    box-shadow var(--oct-dur-base) var(--oct-ease-color);
+    background-color var(--oct-motion-fast) var(--oct-ease-color),
+    box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 .oct-button:hover {
   background: color-mix(in oklab, var(--octant-control), var(--octant-text-primary) 5%);
@@ -178,8 +178,8 @@
   color: var(--oct-muted);
   cursor: default;
   transition:
-    background-color var(--oct-dur-base) var(--oct-ease-color),
-    color var(--oct-dur-base) var(--oct-ease-color);
+    background-color var(--oct-motion-fast) var(--oct-ease-color),
+    color var(--oct-motion-fast) var(--oct-ease-color);
 }
 .oct-icon-button:hover {
   background: var(--octant-control);
@@ -214,8 +214,8 @@
   user-select: text;
   -webkit-user-select: text;
   transition:
-    border-color var(--oct-dur-base) var(--oct-ease-color),
-    background-color var(--oct-dur-base) var(--oct-ease-color);
+    border-color var(--oct-motion-fast) var(--oct-ease-color),
+    background-color var(--oct-motion-fast) var(--oct-ease-color);
 }
 .oct-field::placeholder {
   color: var(--oct-meta);

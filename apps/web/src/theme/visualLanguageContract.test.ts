@@ -1377,7 +1377,7 @@ describe("the public-block visual language", () => {
       // in one frame. In is the base duration, out the fast one.
       const rest = bodyOf(/^:is\([^)]*\)$/);
       for (const property of ["opacity", "scale", "translate"]) {
-        expect(rest?.body).toContain(`${property} var(--oct-dur-base) var(--oct-ease-motion)`);
+        expect(rest?.body).toContain(`${property} var(--oct-motion-fast) var(--oct-ease-motion)`);
       }
       const hidden = bodyOf(/\):is\(\[data-starting-style\], \[data-ending-style\]\)$/);
       expect(hidden?.body).toBe("opacity: 0;");

@@ -736,8 +736,8 @@
      second, solid outline a step brighter than the hairline, so the box read
      as two stacked borders. */
   transition:
-    background-color var(--oct-dur-base) var(--oct-ease-color),
-    box-shadow var(--oct-dur-base) var(--oct-ease-color);
+    background-color var(--oct-motion-fast) var(--oct-ease-color),
+    box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 
 .chat-composer__bar {

@@ -956,7 +956,7 @@ describe("a running debug session", () => {
     expect(test.launches()).toBe(5);
   });
 
-  it("is reaped, and its record closed, by a restarted host", async () => {
+  it("is reaped, its record closed, and its ending told to the panel, by a restarted host", async () => {
     const test = await host(passthrough);
     // A capsule a host left running when it stopped without ending it.
     const adapter = join(test.root, "lingering-adapter");
@@ -991,12 +991,21 @@ describe("a running debug session", () => {
     await test.processPort().reconcile();
     await launched.process.exited;
     expect(exited).toBe(true);
-    expect(test.records.endLeftOpen()).toBe(1);
+    const ended = test.records.endLeftOpen();
+    expect(ended).toHaveLength(1);
     expect(test.journal.sessions().at(-1)?.payload).toMatchObject({
       sessionId,
       endReason: "host-restarted",
     });
-    expect(test.records.endLeftOpen()).toBe(0);
+    expect(test.records.endLeftOpen()).toEqual([]);
+    // The panel still following the session reads that a restart ended it,
+    // and nothing of it runs on: starting again is a new start.
+    test.service.rememberEndedByRestart(ended);
+    expect(await test.ask(decodeCodeDebugSessionId(sessionId), { kind: "state" })).toMatchObject({
+      status: "state",
+      state: { status: "ended", endReason: "host-restarted" },
+    });
+    expect(test.service.running).toBe(0);
   });
 });
 

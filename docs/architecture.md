@@ -585,7 +585,35 @@ starting again or quitting. Both repairs run the server's own offline store
 maintenance (`apps/server/dist/dbMaintenance.mjs` in the packaged app, the same
 code as the `db:*` scripts) under exclusive ownership, so the authority and
 integrity rules are the store's own. An unfinished local data removal offers
-neither repair. Starting again relaunches the app. See
+neither repair. Starting again relaunches the app. Every recovery screen also
+offers "Save support bundle…": the host's bundle route is unreachable while the
+host is down, so the desktop builds the same bundle layout itself from the two
+sources that live in files, the local crash records and the host's service log,
+marks every other section not available, and writes it owner-only to the place
+the person picks in the native save dialog. Nothing is journaled for that save,
+because the journal is what may have refused to open; nothing is sent.
+
+**Local crash records.** When the desktop-managed host exits without being
+asked to (the supervisor's unexpected exit, or an exit before it was ready),
+the desktop writes one owner-only JSON file to `crash-records/` in the host's
+data directory: the time, the process (`host`), how it ended (`exit code N`,
+`signal NAME`, or the host's refusal category), and its last output lines from
+the redacted stderr tail. Every string is redacted again on write and the home
+folder becomes `~`; the newest 20 records are kept. The desktop writes the
+record because a host that crashed cannot be trusted to. Records never leave
+the machine except inside a support bundle the person saves. Native crash dumps
+are not collected: they carry process memory no redaction can sweep. A host
+that no desktop watched (a background-service host, or the native Windows host,
+whose owned profile the desktop does not write into) keeps its own record at
+its next start: when `host-memory.json` shows the previous process ended
+without a clean stop and no record exists at or after that process's last
+reading, the host writes one with `stopped without a clean exit` and the last
+memory reading, through the same code on every platform. A record a watching
+desktop already wrote for that exit is reused, not doubled. The next start's
+"Octant stopped unexpectedly" notice names the record kept for that exit (how
+it ended and when) and says Save diagnostics includes it; host-control status
+carries it as `memory.previousStop.crashRecord`, with no path or output line.
+See
 [Persistence: startup repair](#persistence).
 
 **Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
@@ -5068,7 +5096,8 @@ or .zip>` write the same files, built by one host command
   process state, sign-in kind, detected version, and capability support, never
   its name, address, models, or message), host log (the newest 200 lines with
   time, level, event, and message cut to 240 characters, without details),
-  recent activity (the newest 200 journal event names, sequences, and times
+  crash records (the newest 20 [local crash records](#process-topology): time,
+  process, how it ended, and the last output lines), recent activity (the newest 200 journal event names, sequences, and times
   from the journal, with the payload column never selected), confinement and
   guardrails (the default guardrail level and remembered-permission setting,
   Code threads counted per execution policy, the sandbox tools the host
@@ -5173,8 +5202,9 @@ or .zip>` write the same files, built by one host command
   threads continued and held, ids and reasons only), and a window shows it as
   "Octant restarted. Continued N threads; M need you", naming and linking only
   threads that window can open. Chat and Work turns are continued by the same
-  rule (Chat and Work restart recovery, below); subagent runs, coordinator
-  wakes and goal loops are not continued yet.
+  rule (Chat and Work restart recovery, below), and so are Work goal loops,
+  subagent runs (subagent restart recovery, below) and pending coordinator
+  wakes (coordinator wake restart recovery, below).
   Other running Code work has no process left after a restart. A push or pull
   request step may already have landed on the remote, so it becomes `ambiguous`
   and keeps the thread Waiting ("could not confirm how the last step ended")
@@ -5193,7 +5223,16 @@ or .zip>` write the same files, built by one host command
   ("Fixed.") never stands in for it. A comment record without that pull request
   or count, or one whose branch now carries a different pull request, is never
   judged against another pull request: it stays unconfirmed. An unconfirmed
-  update or merge stays unconfirmed.
+  update or merge cannot be told from an earlier one on GitHub, so the host
+  never settles it; the thread's board card offers Mark resolved instead. The
+  person checks GitHub and says it went through (`completed`), it did not
+  (`failed`), or just stops waiting (`interrupted`). That is the
+  `resolve-unconfirmed-step` operation: never gated, since it changes nothing
+  on GitHub, but accepted only from the person at a local window (an agent or
+  a paired device is refused), only for the thread's own still-unconfirmed
+  update or merge, after the same Project access check as any operation. The
+  runtime-work record and the operation result are journaled, and a repeat
+  on a step already settled is refused as stale.
   File, terminal, test, review, and local Git work, whose result is in the
   checkout, becomes `interrupted`.
 
@@ -5283,6 +5322,79 @@ ls-remote` against the thread's remote and the GitHub reads they already
   messages follow the continuation under the same release as Code. A Chat
   attempt already waiting on a question or approval at the restart is retained
   as before, and answering it still settles it interrupted.
+
+  A Work goal loop is journaled frame by frame (started, each round's start,
+  what a running round has charged at most every five seconds, each round with
+  whether its spend was seen, paused, resumed, stopped, and each narrowed
+  ceiling) and every start rebuilds loops from those frames, so a restart
+  never widens a loop's ceiling or forgets its rounds. A round started and
+  never recorded is the one the restart cut off: the start records it as
+  `interrupted` and charges the goal the spend it last journaled (the last few
+  seconds may be missing; a round that journaled none reads as unreported
+  spend, so a token budget is not trusted on it). This settles every open
+  round, a paused or stopped loop's too. The goal keeps the newest round ids
+  it was charged for (`recentChargeIds`) and refuses a charge id it holds, so a
+  host that stops between charging a round and recording it charges that
+  round once however often it restarts. A loop the start finds
+  running then follows its thread's decision. When the restart cut off the
+  loop's round turn, the loop's next round is that thread's continuation,
+  behind the same holds and harness lift as a cut-off turn and in place of a
+  separate continuation turn, so the thread never gets two turns at once. A
+  loop found running with no cut-off turn continues unless the Work setting,
+  the thread's switch, a person's quit or Work being off holds it, and the
+  restart notice lists it either way. A loop whose rounds restarts cut off
+  three times in a row (the restart's own round and two continuations, the
+  same allowance as a cut-off turn's) waits with the `crash-loop` reason; the
+  count is read from the journaled rounds, so it survives the restart it
+  counts. A held loop is paused with `held-after-restart` ("Octant restarted
+  while this loop ran and did not continue it by itself"), journaled, and only
+  a person's Resume runs it again. A loop that continues starts its round
+  through the ordinary round path, where the budget, ceiling and authority
+  checks apply again.
+
+  Subagent restart recovery resumes the runs the start's reconciliation
+  interrupted (`restart-without-resumable-execution`: a run that was starting,
+  running or waiting on its provider; a run parked on its dependencies, a pool
+  decision or a usage limit keeps its wait). It runs after the three modes, so
+  a parent thread's own continuation is admitted first. Each run is resumed
+  once, as the host, through the ordinary run resume with the same message a
+  person's Resume sends; the resume reads the parent thread's live grant at
+  that moment and rechecks the saved conversation, the workspace, approvals
+  and capacity, and never starts a turn on the parent thread. A run is its own
+  provider session and the resume refuses a run that is no longer Interrupted,
+  so a run never has two executions at once. A run waits for its person
+  instead, still Interrupted and resumable only by a person's Resume, when its
+  parent mode's Continue after restart setting is off, its parent thread's own
+  switch is off, a person quit Octant while it ran, the parent's mode is turned
+  off (the run resume does not read the mode switch, so it is checked here),
+  its own automatic continuation was cut off by a restart twice, or the resume
+  refuses it. The
+  crash-loop count shares the thread store under the run's own key and is
+  keyed by the version the host's resume moved the run to; the chain goes on
+  only while the run's latest journaled start is that resume, so a person's
+  later start begins a fresh count. The restart notice names each continued or
+  held run under its parent thread.
+
+  Coordinator wake restart recovery starts the wakes the previous host decided
+  but never started a turn for. Each wake is journaled on the woken thread's
+  `coordinator-wake` aggregate when it is decided (its id, cause, sender, hop,
+  and for a state notice only the worker change it was decided on) and again
+  when its turn starts or it is dropped or held, so a wake with no second frame
+  is open; purging the thread takes its wakes. The other pending notices stay
+  in memory, since the woken turn's roster reads every worker's state again.
+  It runs after Code restart recovery. Each thread's newest open wake is
+  started once, as the host, through the ordinary wake turn: the recipient's
+  switches and idleness are read as they are now, and the hourly bound charged
+  when the wake was decided is not charged again. A thread that is not idle
+  already has a turn (a person's or its own restart continuation), so its wake
+  is dropped rather than run beside it. A wake is held (journaled `held`, so no
+  later start runs it, and the thread's next turn is a person's) when Settings
+  › Code › Continue after restart or the thread's switch is off, a person quit
+  Octant, Code is turned off (wakes only start Code turns, and that path does
+  not read the mode switch), Code restart recovery held the same thread, or
+  its own start was cut
+  off by a restart twice (the crash-loop count sits in the thread store under
+  the wake's own key).
 
   A person who quits Octant while turns run chose to stop them, so the next
   start holds those threads instead of continuing them (maintainers decided on
@@ -10892,10 +11004,28 @@ thirty-second export deadline apply; termination and revocation stop the owned
 process and abort its requests. Failure after possible external effects requires
 checking the destination before retrying; the host never retries automatically.
 
-Each completed export is a `canvas.export@1` journal event and is rebuilt by
-replay. When the destination was called but the journal could not take the
-record, the answer is `unrecorded` and carries the destination's outcome; it is
-never reported as a failed export. A target that passed activation is still reported honestly as
+Each approved export journals its intent (`canvas.export-intent@1`) before the
+destination is called, and its outcome (`canvas.export@1`) after; both are
+rebuilt by replay. When the intent cannot be journaled, nothing is sent and the
+answer is an `unavailable` refusal. When the destination was called but the
+journal could not take the outcome, the answer is `unrecorded` and carries the
+destination's outcome; it is never reported as a failed export. At startup,
+before any export is decided, the host settles every intent with no outcome as
+`unconfirmed`: a restart cut it off mid-delivery, the host cannot read an
+arbitrary destination back to learn whether it published, so it records
+neither success nor failure and never delivers it again. The Canvas's export
+offers list those exports, newest first and at most eight, and the export panel
+says each was not confirmed and asks the person to check the destination before
+exporting again. A later recorded export to the same destination retires the
+notice, and so does the person's Dismiss (`POST
+/api/canvas/export-notice-dismiss`), journaled as
+`canvas.export-notice-dismissed@1` and accepted only from a local window; a
+paired device's dismissal is refused, so a remote client cannot quietly clear
+the host's record of an uncertain publish. Exports journaled before intents
+existed replay as they were. In-app Canvas sharing records no separate intent:
+creating a share is a single journal append with nothing sent off the host
+and is idempotent on its snapshot id, so there is no window in which it can be
+half done. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`. A local target may describe the exact
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
@@ -12902,13 +13032,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
   and image generation offers (their stated request time), computer-use owners
   and five-minute app grants, Claude's pre-tool grants, credential command
   requests, Browser upload and download permissions (which are not restored
-  after a restart), and server preview tunnels. A grant that is stored and
+  after a restart), Browser tool approvals, Browser session grants and
+  Browser credential use, and server preview tunnels. A deadline that
+  crosses to the desktop app crosses as time remaining, restated in the
+  desktop's wall time, and the desktop's own wall deadline stays its local
+  check; the server never compares one clock's deadline with the other's. A grant that is stored and
   must outlive a restart cannot use a process epoch and stays on wall time,
   stated in UTC: a paired device's registration expiry, and any stored
   `expiresAt` a later process reads back. Such a grant stays revocable by the
-  person at any time, which is what bounds it when the clock is wrong. Not
-  yet moved: Browser tool approvals, session grants and credential use read
-  wall time though they live in the process. Routine proposals and image
+  person at any time, which is what bounds it when the clock is wrong.
+  Routine proposals and image
   generation offers end on a timer alone; a timer is Node's monotonic clock,
   which on Linux does not count a suspend.
   _Why elapsed time is trusted._ On Linux `os.uptime()` reads `/proc/uptime`
@@ -16951,11 +17084,13 @@ documents its authority, privacy, and release boundaries):
   decision, 2026-11-12): projection-only damage rebuilds at startup, other
   refusals open the desktop recovery screen, and a default-off background host
   and open-at-login item keep the host available
-  ([process topology](#process-topology)). Not built yet: a local crash record
-  (Electron crash dumps kept on the device with upload off, added to a support
-  bundle only by choice, and named in the next start's notice), exporting a
-  support bundle from the recovery screen, and one-click restart of terminals,
-  dev servers and extensions a restart ended.
+  ([process topology](#process-topology)), the desktop keeps local crash
+  records (an unwatched host keeps its own at its next start), the next
+  start's notice names them, and the recovery screen saves a support bundle.
+  Not built yet: one-click reopening of a Browser session a restart ended.
+  Code thread and Project terminals, debug sessions and saved Project action
+  runs a restart ended are offered back through their ordinary start
+  ([Decisions and requirements](design/decisions.md#recovering-after-a-crash-without-the-terminal)).
 - Public Canvas links, under
   [Canvas public links](design/canvas-public-links.md), served by the
   self-hostable reference app at `apps/share` in this repository. Ogard Labs

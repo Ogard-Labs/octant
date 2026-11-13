@@ -325,10 +325,13 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => new Date().toISOString(),
     connection: persistence.connection,
   });
-  agentRunPersistence.reconcileAfterRestart();
+  // Restart continuation decides, once the rest of the host is wired, which
+  // of these the host resumes by itself (wiring/continuation.ts).
+  const agentRunsCutOffByRestart = agentRunPersistence.reconcileAfterRestart();
   return {
     agentRunParentAuthority,
     agentRunPersistence,
+    agentRunsCutOffByRestart,
     androidInputGrants,
     automationEventStore,
     bindingReceiptStore,

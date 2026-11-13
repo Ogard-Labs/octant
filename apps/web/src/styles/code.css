@@ -84,7 +84,7 @@
 
 .code-delivery-pane__toolbar h1 {
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .code-delivery-pane__toolbar p,
@@ -96,6 +96,18 @@
 .code-delivery-pane > [role="alert"],
 .code-delivery-pane > [role="status"] {
   padding: var(--oct-space-2) var(--oct-space-4);
+}
+
+.code-terminal-pane__ended {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+}
+
+.code-terminal-pane__ended > p {
+  margin: 0;
 }
 
 .code-delivery-pane__warning {
@@ -637,7 +649,7 @@ html:not([data-octant-reduced-transparency="true"])
   margin: 0;
   overflow: hidden;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -776,7 +788,7 @@ html:not([data-octant-reduced-transparency="true"])
   overflow: hidden;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -959,7 +971,7 @@ html:not([data-octant-reduced-transparency="true"])
   margin: 0;
   overflow: hidden;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1159,7 +1171,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .github-onboarding__heading {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .github-onboarding__facts {
@@ -1594,7 +1606,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-overview__target-details dt {
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -1606,7 +1618,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   margin: 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-xl);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: -0.03em;
 }
 
@@ -1702,7 +1714,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-width: 0;
   padding: 0;
   font-size: var(--oct-text-xl);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: -0.035em;
   line-height: 1.1;
 }
@@ -1737,7 +1749,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 .code-overview__context {
