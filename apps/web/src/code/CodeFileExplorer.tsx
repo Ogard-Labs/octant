@@ -120,6 +120,25 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
     });
     return indexes;
   }, [visible]);
+  const siblingPositions = useMemo(() => {
+    const groups = new Map<string, number[]>();
+    visible.forEach((entry, index) => {
+      const parent = pathParent(entry.path);
+      const bucket = groups.get(parent);
+      if (bucket === undefined) groups.set(parent, [index]);
+      else bucket.push(index);
+    });
+    const positions = Array.from<
+      { readonly posInSet: number; readonly setSize: number } | undefined
+    >({ length: visible.length });
+    for (const bucket of groups.values()) {
+      const setSize = bucket.length;
+      bucket.forEach((index, offset) => {
+        positions[index] = { posInSet: offset + 1, setSize };
+      });
+    }
+    return positions;
+  }, [visible]);
   /**
    * One tab stop for the whole tree, moved by the row that last held focus.
    * Every row otherwise stays reachable with Tab first and then the arrow
@@ -138,10 +157,11 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
   }, [focusedPath, visible]);
   const virtualized = visible.length > EXPLORER_VIRTUALIZATION_THRESHOLD;
   const pendingFocusPath = useRef<string | undefined>(undefined);
-  const virtualizer = useVirtualizer({
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>({
     count: virtualized ? visible.length : 0,
     getScrollElement: () => tree.current,
     estimateSize: () => EXPLORER_ROW_HEIGHT_PX,
+    measureElement: measureExplorerRowElement,
     overscan: EXPLORER_OVERSCAN,
     initialRect: { width: 320, height: 480 },
     getItemKey: (index) => {
@@ -299,10 +319,18 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
     const label = String(entry.path);
     const level = entryLevel(entry.path);
     const selected = props.selectedPath === entry.path;
+    const siblingPosition = siblingPositions[index];
     const rowProps = {
       "aria-level": level,
+      ...(siblingPosition === undefined
+        ? {}
+        : {
+            "aria-posinset": siblingPosition.posInSet,
+            "aria-setsize": siblingPosition.setSize,
+          }),
       "data-index": index,
       "data-path": label,
+      ref: virtualized ? virtualizer.measureElement : undefined,
       role: "treeitem" as const,
       style: virtualRowStyle(level - 1, virtualStart),
       tabIndex: label === tabbable ? 0 : -1,
@@ -456,21 +484,21 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
           ref={tree}
           role="tree"
         >
-          {virtualized ? (
-            <div
-              className="code-file-explorer__virtual"
-              style={{ height: virtualizer.getTotalSize() }}
-            >
-              {virtualItems.map((virtualItem) => {
-                const entry = visible[virtualItem.index];
-                return entry === undefined
-                  ? null
-                  : renderEntry(entry, virtualItem.index, virtualItem.start);
-              })}
-            </div>
-          ) : (
-            visible.map((entry, index) => renderEntry(entry, index))
-          )}
+          {/* Keep one wrapper across the virtualization threshold so expanding
+              a folder past EXPLORER_VIRTUALIZATION_THRESHOLD never drops focus. */}
+          <div
+            className="code-file-explorer__virtual"
+            style={virtualized ? { height: virtualizer.getTotalSize() } : undefined}
+          >
+            {virtualized
+              ? virtualItems.map((virtualItem) => {
+                  const entry = visible[virtualItem.index];
+                  return entry === undefined
+                    ? null
+                    : renderEntry(entry, virtualItem.index, virtualItem.start);
+                })
+              : visible.map((entry, index) => renderEntry(entry, index))}
+          </div>
         </div>
       )}
     </section>
@@ -479,6 +507,14 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
 
 function entryLevel(path: CodeRelativePath): number {
   return String(path).split("/").length;
+}
+
+function measureExplorerRowElement(element: Element): number {
+  if (element instanceof HTMLElement) {
+    const height = element.getBoundingClientRect().height;
+    if (height > 0) return height;
+  }
+  return EXPLORER_ROW_HEIGHT_PX;
 }
 
 function findFocusableIndex(

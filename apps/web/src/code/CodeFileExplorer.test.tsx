@@ -366,6 +366,94 @@ describe("CodeFileExplorer", () => {
     );
     expect(codeStylesheet).toMatch(/\.code-file-explorer__search input \{[^}]*height:\s*30px/);
   });
+
+  it("keeps focus on a folder when expanding or collapsing crosses the virtualization threshold", async () => {
+    const user = userEvent.setup();
+    const topFiles = Array.from({ length: 39 }, (_, index) =>
+      file(`file-${String(index).padStart(2, "0")}.ts`),
+    );
+    const expandedChildren = Array.from({ length: 5 }, (_, index) =>
+      file(`big/child-${String(index).padStart(2, "0")}.ts`),
+    );
+    await withTreeViewportHeight(280, async () => {
+      render(
+        <CodeFileExplorer
+          entries={[{ kind: "directory", path: "big" as never }, ...expandedChildren, ...topFiles]}
+          onOpenFile={vi.fn()}
+        />,
+      );
+
+      const folder = screen.getByRole("treeitem", { name: "big" });
+      folder.focus();
+      expect(folder).toHaveFocus();
+
+      await user.keyboard("{ArrowRight}");
+      expect(screen.getByRole("treeitem", { name: "big" })).toBe(folder);
+      expect(folder).toHaveAttribute("aria-expanded", "true");
+      expect(folder).toHaveFocus();
+
+      await user.keyboard("{ArrowLeft}");
+      expect(screen.getByRole("treeitem", { name: "big" })).toBe(folder);
+      expect(folder).toHaveAttribute("aria-expanded", "false");
+      expect(folder).toHaveFocus();
+    });
+  });
+
+  it("sets aria-posinset and aria-setsize within each sibling group", () => {
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: "src" as never },
+          file("src/a.ts"),
+          file("src/b.ts"),
+          file("README.md"),
+        ]}
+        onOpenFile={vi.fn()}
+        selectedPath={"src/a.ts" as never}
+      />,
+    );
+
+    const src = screen.getByRole("treeitem", { name: "src" });
+    expect(src).toHaveAttribute("aria-posinset", "1");
+    expect(src).toHaveAttribute("aria-setsize", "2");
+
+    const readme = screen.getByRole("treeitem", { name: "README.md" });
+    expect(readme).toHaveAttribute("aria-posinset", "2");
+    expect(readme).toHaveAttribute("aria-setsize", "2");
+
+    const childA = screen.getByRole("treeitem", { name: "src/a.ts" });
+    expect(childA).toHaveAttribute("aria-posinset", "1");
+    expect(childA).toHaveAttribute("aria-setsize", "2");
+
+    const childB = screen.getByRole("treeitem", { name: "src/b.ts" });
+    expect(childB).toHaveAttribute("aria-posinset", "2");
+    expect(childB).toHaveAttribute("aria-setsize", "2");
+  });
+
+  it("measures rows taller than the 28px minimum so adjacent rows do not overlap", async () => {
+    const getBoundingClientRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function mockRowRect() {
+      if (this instanceof HTMLElement && this.dataset.index === "0") {
+        return new DOMRect(0, 0, 300, 44);
+      }
+      if (this instanceof HTMLElement && this.getAttribute("role") === "treeitem") {
+        return new DOMRect(0, 0, 300, 28);
+      }
+      return getBoundingClientRect.call(this);
+    };
+    const many = Array.from({ length: 50 }, (_, index) =>
+      file(`src/row-${String(index).padStart(2, "0")}.ts`),
+    );
+    try {
+      await withTreeViewportHeight(280, async () => {
+        render(<CodeFileExplorer entries={many} onOpenFile={vi.fn()} />);
+        const secondRow = screen.getByRole("treeitem", { name: /row-01\.ts/ });
+        expect(secondRow).toHaveStyle({ transform: "translateY(44px)" });
+      });
+    } finally {
+      Element.prototype.getBoundingClientRect = getBoundingClientRect;
+    }
+  });
 });
 
 function entries(): ReadonlyArray<CodeFileExplorerEntry> {
