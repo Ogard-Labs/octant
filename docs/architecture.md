@@ -11574,6 +11574,10 @@ that is not yet effective for the thread is refused and never reaches the model.
     journal-order rule, so trusting or installing the same version again
     does not revive it. Settings does not list it among remembered
     approvals, because it spares no prompt anywhere else.
+    A server's JSON-RPC application error is a result for this boundary too: its
+    bounded message is marked, watched, and framed as outside content before the
+    provider reads it. Host validation, transport, authentication, cancellation,
+    and timeout errors remain host-authored and do not taint the thread.
   - Disabling the plugin or component, archiving the Project, or switching a
     mode off leaves grants stored and unused. Uninstall, withdrawn source
     trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so

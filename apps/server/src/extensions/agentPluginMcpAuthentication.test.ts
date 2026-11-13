@@ -7,6 +7,7 @@ import { decodeChatThread } from "@octant/contracts";
 import { ExtensionSelection } from "@octant/contracts/extensions";
 import { decodeHostOAuthDescriptor } from "@octant/contracts/host-oauth";
 import type { HostOAuthService } from "../providers/oauth/hostOAuthService";
+import type { ExternalContentIngestionResult } from "../context/externalContentIngestionStore";
 import { McpServerSignIn } from "./mcpServerSignIn";
 import {
   createExtensionChatResolver,
@@ -153,10 +154,17 @@ describe("MCP authentication retirement", () => {
     connect.mockResolvedValue(transport);
     const check = vi.fn(async () => "unchanged" as const);
     const rejected = vi.fn(async () => undefined);
+    const recordExternalContentIngestion = vi.fn(
+      (): ExternalContentIngestionResult => ({
+        kind: "recorded",
+        taint: { externalContentIngested: true, ingestedSources: ["mcp-tool"] },
+      }),
+    );
     let approved = false;
     const subject = manager(async () => approved, {
       isUserAddedSource: () => true,
       bindUserAddedAuthentication: async () => ({ check, rejected }),
+      recordExternalContentIngestion,
     });
     await subject.reconcile(effective());
     const execute = cachedExecution(subject);
@@ -168,9 +176,13 @@ describe("MCP authentication retirement", () => {
     expect(transport.callTool).not.toHaveBeenCalled();
     approved = true;
     vi.mocked(transport.callTool).mockRejectedValue(new Error("Synthetic application refusal"));
-    expect((await execute()).isError).toBe(true);
+    expect(await execute()).toEqual({
+      isError: true,
+      result: { error: "MCP tool call failed." },
+    });
     expect(check).toHaveBeenCalledOnce();
     expect(rejected).not.toHaveBeenCalled();
+    expect(recordExternalContentIngestion).not.toHaveBeenCalled();
     expect(subject.sessions().map((record) => record.session)).toEqual([transport]);
   });
 
