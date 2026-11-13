@@ -1809,6 +1809,60 @@ describe("WorkTurnRuntime", () => {
     if (outcome.kind === "waiting") expect(outcome.failure?.message).toMatch(/timed out/i);
   });
 
+  it("reports the prompt sent only once the provider accepts it, so carried messages survive a refused send", async () => {
+    async function promptSentAfter(sendRefused: boolean): Promise<number> {
+      let reported = 0;
+      const driver: ProviderDriver = {
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: () =>
+          Effect.succeed({
+            subscribe: Effect.succeed(Stream.never),
+            start: () => Effect.void,
+            send: () =>
+              sendRefused
+                ? Effect.fail({ category: "provider-failed", message: "Session is not active." })
+                : Effect.void,
+            resume: () => Effect.void,
+            interrupt: () => Effect.void,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          } as never),
+      };
+      await new WorkTurnRuntime({ timeoutMs: 10 }).run({
+        command: decodeStartWorkThreadTurnCommand({
+          kind: "start-work-thread-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          prompt: "Read the carried message",
+          authority: decodeWorkTurnAuthority({
+            hostId: "local",
+            projectId: ids.project,
+            bindingRevisionId: ids.binding,
+            workingDirectory: ".",
+            confinementPosture: "project-root-confined",
+            providerInstanceId: ids.provider,
+            modelId: "gpt-5",
+          }),
+        }),
+        providerSessionId: ids.session as never,
+        projectRoot: "/tmp/work-project",
+        driver,
+        signal: new AbortController().signal,
+        onPromptSent: () => {
+          reported += 1;
+        },
+      });
+      return reported;
+    }
+
+    expect(await promptSentAfter(true)).toBe(0);
+    expect(await promptSentAfter(false)).toBe(1);
+  });
+
   it("keeps a turn alive while the provider streams only liveness past the idle window", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const event = {

@@ -114,6 +114,9 @@ export interface BrowserCaptureServiceOptions {
  * smaller one, so a capture is listed only while the store still holds its
  * bytes: growing the number never brings back a capture that was dropped.
  */
+/** The most events `Journal.replayAggregate` hands back in one call. */
+const REPLAY_PAGE = 1_000;
+
 export class BrowserCaptureService {
   readonly #store: BrowserCaptureStore;
   readonly #journal: Pick<Journal, "append" | "replayAggregate">;
@@ -439,25 +442,32 @@ export class BrowserCaptureService {
     const kept = this.#capturesPerThread();
     const droppedVersion = browserCaptureRetention(headVersion, kept).firstRetainedVersion - 1;
     const keptBefore = this.#keptAtLastDrop.get(String(threadId)) ?? this.#keptAtStart;
-    this.#keptAtLastDrop.set(String(threadId), kept);
-    if (droppedVersion < 1) return;
-    // The window normally advances by one capture a keep. After the person
-    // lowers the number it jumps, and every version it passed over goes, or
-    // raising the number again would list captures that were dropped.
-    const firstDropped = kept < keptBefore ? 1 : droppedVersion;
-    const dropped = this.#journal.replayAggregate({
-      aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE,
-      aggregateId: String(threadId),
-      afterVersion: firstDropped - 1,
-      limit: droppedVersion - firstDropped + 1,
-    });
-    // A removal that fails here is not lost: the journal already no longer
-    // retains the capture, so the next recovery pass removes it.
-    for (const event of dropped) {
-      await this.#store
-        .remove(threadId, decodeBrowserCapture(event.payload).captureId)
-        .catch(() => undefined);
+    if (droppedVersion >= 1) {
+      // The window normally advances by one capture a keep. After the person
+      // lowers the number it jumps, and every version it passed over goes, or
+      // raising the number again would list captures that were dropped.
+      const firstDropped = kept < keptBefore ? 1 : droppedVersion;
+      // The journal replays at most a thousand events a call, and a lowered
+      // number on a long-lived thread passes over more than that.
+      for (let after = firstDropped - 1; after < droppedVersion; after += REPLAY_PAGE) {
+        const dropped = this.#journal.replayAggregate({
+          aggregateType: BROWSER_CAPTURE_AGGREGATE_TYPE,
+          aggregateId: String(threadId),
+          afterVersion: after,
+          limit: Math.min(REPLAY_PAGE, droppedVersion - after),
+        });
+        // A removal that fails here is not lost: the journal already no longer
+        // retains the capture, so the next recovery pass removes it.
+        for (const event of dropped) {
+          await this.#store
+            .remove(threadId, decodeBrowserCapture(event.payload).captureId)
+            .catch(() => undefined);
+        }
+      }
     }
+    // Recorded only after the sweep finished: a sweep that threw keeps the
+    // higher number here, so the next keep sweeps the passed-over versions again.
+    this.#keptAtLastDrop.set(String(threadId), kept);
   }
 
   /**

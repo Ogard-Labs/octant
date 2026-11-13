@@ -744,23 +744,28 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               : [{ kind: "user-message" as const, text: feedback.context }]),
           ];
           meter.sent();
-          input.onPromptSent?.();
-          return connection.send({
-            sessionId: input.providerSessionId,
-            prompt: input.command.prompt,
-            // Keep the existing standing-context hold. New note context remains
-            // a user-message block and is carried only by this admitted turn.
-            context:
-              input.driver.conversationOwnership === "provider"
-                ? heldTurnContext.forTurn({
-                    sessionId: input.providerSessionId,
-                    resumed: input.resumeCursor !== undefined,
-                    context,
-                  }).context
-                : context,
-            attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
-            tools: [...(input.appManagedTools?.definitions ?? [])],
-          });
+          // Report the prompt sent only once the provider accepted it: the
+          // service confirms carried messages delivered (deleting their
+          // bodies) on this signal, and a send refused before anything left,
+          // such as an inactive session, must leave them for the next turn.
+          return connection
+            .send({
+              sessionId: input.providerSessionId,
+              prompt: input.command.prompt,
+              // Keep the existing standing-context hold. New note context remains
+              // a user-message block and is carried only by this admitted turn.
+              context:
+                input.driver.conversationOwnership === "provider"
+                  ? heldTurnContext.forTurn({
+                      sessionId: input.providerSessionId,
+                      resumed: input.resumeCursor !== undefined,
+                      context,
+                    }).context
+                  : context,
+              attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
+              tools: [...(input.appManagedTools?.definitions ?? [])],
+            })
+            .pipe(Effect.tap(() => Effect.sync(() => input.onPromptSent?.())));
         }),
       });
       yield* Fiber.join(events);

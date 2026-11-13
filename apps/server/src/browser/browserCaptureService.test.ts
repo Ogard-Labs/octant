@@ -6,6 +6,7 @@ import {
   decodeBrowserCaptureId,
   decodeBrowserThreadId,
   MAX_BROWSER_CAPTURE_BYTES,
+  MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_BROWSER_RECORDING_BYTES,
   MAX_BROWSER_RECORDINGS_PER_THREAD,
   MAX_BROWSER_STEPS_PER_THREAD,
@@ -14,7 +15,7 @@ import {
   type CorrelationId,
   type ProviderInstanceId,
 } from "@octant/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -76,7 +77,7 @@ function open(dataDirectory?: string) {
     clock: () => new Date(Date.parse(now) + ++tick * 1_000).toISOString(),
     capturesPerThread: () => capturesPerThread,
   });
-  return { connection, directory: root, service };
+  return { connection, directory: root, journal, service };
 }
 
 function pngDataUrl(bytes: Uint8Array = PNG): string {
@@ -250,6 +251,44 @@ describe("BrowserCaptureService", () => {
     expect(service.list(threadA).map((capture) => capture.captureId)).toEqual(
       ids.slice(-3).reverse(),
     );
+  });
+
+  it("removes every passed-over capture of a thread with more than a thousand captures when the number is lowered", async () => {
+    const { directory, service } = open();
+    capturesPerThread = MAX_BROWSER_CAPTURES_PER_THREAD;
+    const ids: string[] = [];
+    for (let index = 0; index < 1_100; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    ids.push(kept(await service.keep(request({ title: "After lowering" }))));
+
+    const left = ids.filter((id) => existsSync(captureDirectory(directory, threadA, id)));
+    expect(left).toEqual(ids.slice(-3));
+  }, 60_000);
+
+  it("retries the sweep of a lowered number at the next keep when it failed", async () => {
+    const { directory, journal, service } = open();
+    const ids: string[] = [];
+    for (let index = 0; index < KEPT; index += 1) {
+      ids.push(kept(await service.keep(request({ title: `Page ${index}` }))));
+    }
+    capturesPerThread = 3;
+    const replay = journal.replayAggregate.bind(journal);
+    const sweepFails = vi
+      .spyOn(journal, "replayAggregate")
+      .mockImplementationOnce(() => {
+        throw new Error("journal unavailable");
+      })
+      .mockImplementation(replay);
+    // The first call of this keep is the sweep; it fails and leaves the bytes.
+    ids.push(kept(await service.keep(request({ title: "Sweep fails" }))));
+    expect(existsSync(captureDirectory(directory, threadA, String(ids[0])))).toBe(true);
+    sweepFails.mockRestore();
+
+    ids.push(kept(await service.keep(request({ title: "Sweep retried" }))));
+    const left = ids.filter((id) => existsSync(captureDirectory(directory, threadA, id)));
+    expect(left).toEqual(ids.slice(-3));
   });
 
   it("keeps the newest 200 captures when the person chose no number", async () => {
