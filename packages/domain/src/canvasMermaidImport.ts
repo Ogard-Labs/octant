@@ -15,17 +15,26 @@ import {
  * read here, statement by statement, into a `diagram`, `sequence`, `state`,
  * `er`, or `mindmap` block, which Octant's own layout then draws, comments
  * anchor to, and a share carries. The subset is closed: a construct this
- * reader does not know — click handlers, links, loops and alternatives,
- * notes it cannot place — refuses the whole import with the line that
- * stopped it, so the caller keeps the source as a code block rather than a
- * picture that silently lost part of what it said.
+ * reader does not know — another shape or link, a `critical` or `break`
+ * fragment, a fragment that holds no message — refuses the whole import with
+ * the line that stopped it, so the caller keeps the source as a code block
+ * rather than a picture that silently lost part of what it said.
+ *
+ * Where Mermaid says something the target block has no field for, the reader
+ * keeps it in a field the block does have rather than extend the block: a
+ * hexagon, subroutine, or parallelogram is a process whose detail names the
+ * shape, a bidirectional link is one arrow each way, and a sequence fragment
+ * (`loop`, `alt`, `opt`, `par`) is a note on its first message and another on
+ * its last.
  *
  * Layout hints are the exception, and are read past: a direction, a link's
  * length or weight, and `autonumber` say how Mermaid would draw the diagram,
  * not what it holds, and Octant lays the block out itself. Styling is the
  * other exception, and is dropped: a directive, a `classDef`, `class`,
- * `style`, or `linkStyle` statement, and a node's `:::class` suffix say what
- * colors Mermaid would use, and a Canvas block takes the Canvas theme.
+ * `style`, or `linkStyle` statement, a node's `:::class` suffix, and a
+ * sequence's `rect` highlight say what colors Mermaid would use, and a Canvas
+ * block takes the Canvas theme. A flowchart's `click` line is dropped with
+ * them: a Canvas node runs nothing and opens nothing.
  */
 
 export type CanvasMermaidRefusalReason =
@@ -188,6 +197,9 @@ function unsupported(statement: Statement, what = "This statement"): Refusal {
 const STYLING_STATEMENT =
   /^(?:(?:classDef|style|linkStyle)\s+\S.*|class\s+[A-Za-z0-9_-]+(?:\s*,\s*[A-Za-z0-9_-]+)*\s+[A-Za-z0-9_-]+)$/;
 
+/** A flowchart's `click` line binds a link or a script to a node, and is dropped. */
+const CLICK_STATEMENT = /^click\s+\S.*$/;
+
 /** The `:::class` suffix Mermaid allows after a node or a state, as regex source. */
 const CLASS_SUFFIX = ":::[A-Za-z0-9_][A-Za-z0-9_-]*";
 
@@ -248,10 +260,18 @@ export function importCanvasMermaid(source: string, blockId: CanvasBlockId): Can
 
 type FlowRole = "process" | "decision" | "terminator" | undefined;
 
+/**
+ * What a shape Canvas does not draw means in a flowchart. The node becomes a
+ * process and carries the meaning as its detail line, so the distinction the
+ * author drew is still on the picture.
+ */
+type FlowShapeDetail = "Preparation" | "Subroutine" | "Input or output" | undefined;
+
 interface FlowNode {
   readonly nodeId: string;
   label: string;
   role: FlowRole;
+  detail: FlowShapeDetail;
   /** A cylinder is a store: the plain box with the database glyph. */
   database: boolean;
 }
@@ -267,19 +287,21 @@ interface FlowGroup {
  * A node reference with an optional shape: `id`, `id[Label]` (process),
  * `id(Label)` (the plain box), `id([Label])` and `id((Label))` (terminator: a
  * circle starts or ends a flow, and the pill is the shape Canvas draws for
- * that), `id[(Label)]` (a database), `id{Label}` (decision). Every other
- * Mermaid shape is refused.
+ * that), `id[(Label)]` (a database), `id{Label}` (decision), and the three
+ * shapes read as a process with a detail: `id{{Label}}` (hexagon),
+ * `id[[Label]]` (subroutine), `id[/Label/]` and `id[\Label\]` (parallelogram).
+ * Every other Mermaid shape is refused.
  */
 const NODE_REF =
-  /^([A-Za-z0-9_][A-Za-z0-9_-]*)(?:\(\[(.+?)\]\)|\(\((?!\()(.+?)\)\)|\[\((.+?)\)\]|\[(?![[(/\\])(.+?)\]|\((?![([])(.+?)\)|\{(?!\{)(.+?)\})?$/;
+  /^([A-Za-z0-9_][A-Za-z0-9_-]*)(?:\(\[(.+?)\]\)|\(\((?!\()(.+?)\)\)|\[\((.+?)\)\]|\[(?![[(/\\])(.+?)\]|\((?![([])(.+?)\)|\{(?!\{)(.+?)\}|\{\{(.+?)\}\}|\[\[(.+?)\]\]|\[\/(.+?)\/\]|\[\\(.+?)\\\])?$/;
 
 /**
  * A link between two nodes, with an optional label written either way Mermaid
  * allows (`A -->|yes| B` or `A -- yes --> B`). A thick arrow is an arrow, and
- * extra dashes, dots, or equals signs only ask Mermaid for a longer link. The
- * bidirectional, circle, cross, and arrowless thick or dashed links are
- * matched only so they can be refused by name rather than read as part of a
- * node. Each form is listed on its own; the first that matches at a position
+ * extra dashes, dots, or equals signs only ask Mermaid for a longer link. A
+ * bidirectional link is an arrow each way. The reversed, circle, cross, and
+ * arrowless thick or dashed links are matched only so they can be refused by
+ * name rather than read as part of a node. Each form is listed on its own; the first that matches at a position
  * wins, so the labelled forms come before the bare arrows they contain.
  */
 const LINK_FORMS: ReadonlyArray<string> = [
@@ -291,7 +313,7 @@ const LINK_FORMS: ReadonlyArray<string> = [
   String.raw`={2,}>`, // thick arrow
   String.raw`-{3,}`, // line
   String.raw`={3,}`, // thick without an arrow, refused
-  String.raw`<-->`, // bidirectional, refused
+  String.raw`<-{2,}>`, // bidirectional
   String.raw`<--`, // reversed, refused
   String.raw`-\.-`, // dashed without an arrow, refused
   String.raw`--[ox](?=\s)`, // circle or cross end, refused
@@ -347,12 +369,31 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
     const match = NODE_REF.exec(text.trim().replace(new RegExp(`${CLASS_SUFFIX}$`), ""));
     if (match === null) throw unsupported(statement, `The node "${text.trim().slice(0, 40)}"`);
     const nodeId = ids.canvas(match[1] ?? "", statement.line);
-    const [terminator, circle, cylinder, process, plain, decision] = match.slice(2, 8);
-    const label = terminator ?? circle ?? cylinder ?? process ?? plain ?? decision;
+    const [terminator, circle, cylinder, process, plain, decision, hexagon, subroutine] =
+      match.slice(2, 10);
+    const parallelogram = match[10] ?? match[11];
+    const detail: FlowShapeDetail =
+      hexagon !== undefined
+        ? "Preparation"
+        : subroutine !== undefined
+          ? "Subroutine"
+          : parallelogram !== undefined
+            ? "Input or output"
+            : undefined;
+    const label =
+      terminator ??
+      circle ??
+      cylinder ??
+      process ??
+      plain ??
+      decision ??
+      hexagon ??
+      subroutine ??
+      parallelogram;
     const role: FlowRole =
       terminator !== undefined || circle !== undefined
         ? "terminator"
-        : process !== undefined
+        : process !== undefined || detail !== undefined
           ? "process"
           : decision !== undefined
             ? "decision"
@@ -363,11 +404,13 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
         nodeId,
         label: label === undefined ? (match[1] ?? nodeId) : unquote(label),
         role,
+        detail,
         database: cylinder !== undefined,
       });
     } else if (label !== undefined) {
       existing.label = unquote(label);
       existing.role = role;
+      existing.detail = detail;
       existing.database = cylinder !== undefined;
     }
     // A node sits in the innermost subgraph that names it. Mermaid lets an
@@ -390,6 +433,7 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
   for (const statement of body) {
     const text = statement.text;
     if (DIRECTION_HINT.test(text) || STYLING_STATEMENT.test(text)) continue;
+    if (CLICK_STATEMENT.test(text)) continue;
     if (REFUSED_KEYWORDS.test(text)) throw unsupported(statement);
     const subgraph = /^subgraph\s+(.+)$/.exec(text);
     if (subgraph !== null) {
@@ -429,7 +473,8 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
         // Refused before the pairs exist: two long `&` lists multiply, and a
         // source inside the size bound could otherwise build millions of
         // edges only for the block catalog to refuse them.
-        if (edges.length + from.length * to.length > CANVAS_MAX_DIAGRAM_EDGES)
+        const perPair = pending.bothWays ? 2 : 1;
+        if (edges.length + from.length * to.length * perPair > CANVAS_MAX_DIAGRAM_EDGES)
           throw unsupported(statement, "More links than a diagram holds");
         for (const source of from) {
           for (const target of to) {
@@ -440,6 +485,17 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
               style: pending.style,
               ...(pending.label === undefined ? {} : { label: pending.label }),
             });
+            // A Canvas edge has one arrowhead, so a link that points both ways
+            // is the pair of arrows it stands for. The label says what the
+            // link is once, on the arrow the author wrote first.
+            if (pending.bothWays) {
+              edges.push({
+                edgeId: `e${String(edges.length + 1)}`,
+                source: target,
+                target: source,
+                style: pending.style,
+              });
+            }
           }
         }
       }
@@ -471,6 +527,7 @@ function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: C
       nodeId: node.nodeId,
       label: node.label,
       ...(node.role === undefined ? {} : { role: node.role }),
+      ...(node.detail === undefined ? {} : { detail: node.detail }),
       ...(node.database ? { icon: "database" } : {}),
     })),
     edges,
@@ -482,13 +539,20 @@ function readLink(
   operator: string,
   piped: string | undefined,
   statement: Statement,
-): { readonly style: "line" | "arrow" | "dashed"; readonly label?: string } {
+): {
+  readonly style: "line" | "arrow" | "dashed";
+  readonly label?: string;
+  readonly bothWays: boolean;
+} {
+  const bothWays = /^<-{2,}>$/.test(operator);
   const named = /^(?:--\s+(.+?)\s+(?:-{2,}>|-{3,})|==\s+(.+?)\s+={2,}>)$/.exec(operator);
   const dotted = /^-\.\s+(.+?)\s+\.+->$/.exec(operator);
   const style =
     dotted !== null || /^-\.+->$/.test(operator)
       ? "dashed"
-      : (named !== null && operator.endsWith(">")) || /^(?:-{2,}|={2,})>$/.test(operator)
+      : (named !== null && operator.endsWith(">")) ||
+          bothWays ||
+          /^(?:-{2,}|={2,})>$/.test(operator)
         ? "arrow"
         : named !== null || /^-{3,}$/.test(operator)
           ? "line"
@@ -496,7 +560,11 @@ function readLink(
   if (style === undefined) throw unsupported(statement, `The link ${operator}`);
   const inline = named?.[1] ?? named?.[2] ?? dotted?.[1];
   const label = (piped === undefined ? inline : piped.slice(1, -1))?.trim();
-  return { style, ...(label === undefined || label.length === 0 ? {} : { label: unquote(label) }) };
+  return {
+    style,
+    bothWays,
+    ...(label === undefined || label.length === 0 ? {} : { label: unquote(label) }),
+  };
 }
 
 // ── sequenceDiagram ─────────────────────────────────────────────────────────
@@ -507,34 +575,74 @@ function readLink(
 // receiver's activation or closes the sender's.
 const MESSAGE = /^(\w+)\s*(?:-->>|->>|--x|-x|--\)|-\)|-->|->)\s*([+-]?)\s*(\w+)\s*:\s*(.+)$/;
 const NOTE = /^Note\s+(left of|right of|over)\s+(\w+)\s*:\s*(.+)$/i;
-// A Canvas note sits beside one participant; a note spanning two has no
-// faithful translation, so the source stays code rather than losing one side.
-const SPANNING_NOTE = /^Note\s+over\s+\w+\s*,/i;
+// A Canvas note sits beside one participant or beside none, and no renderer
+// draws it across lifelines. A note over two participants keeps its text and
+// its place in the order, and names neither as its own.
+const SPANNING_NOTE = /^Note\s+over\s+(\w+)\s*,\s*(\w+)\s*:\s*(.+)$/i;
+
+/** A fragment keyword and the label after it, and the keywords that divide one. */
+const FRAGMENT = /^(loop|alt|opt|par)(?:\s+(.+))?$/;
+const FRAGMENT_PART = /^(else|and)(?:\s+(.+))?$/;
+/** A `rect` is a background color behind some messages: styling, dropped. */
+const RECT = /^rect\s+\S.*$/;
+/**
+ * A `box` around participants, with the color Mermaid lets it lead with. Only
+ * a functional color or `transparent` is read as one: a named color cannot be
+ * told from the first word of a title without the CSS color list, and a color
+ * name left in a title loses nothing.
+ */
+const BOX = /^box(?:\s+(?:(?:rgba?|hsla?)\([^)]*\)|transparent(?=\s|$)))?(?:\s+(.+))?$/;
+
+type SequenceFragmentKind = "loop" | "alt" | "opt" | "par";
+
+interface SequenceFragment {
+  /** `rect` holds messages like a fragment, and says nothing about them. */
+  readonly kind: SequenceFragmentKind | "rect";
+  /** How many messages existed when the current part opened. */
+  partStart: number;
+}
+
+function isSequenceFragmentKind(word: string | undefined): word is SequenceFragmentKind {
+  return word === "loop" || word === "alt" || word === "opt" || word === "par";
+}
+
+interface SequenceNote {
+  text: string;
+  readonly participantId?: string;
+  readonly afterMessageId?: unknown;
+}
 
 function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasBlockId) {
   const ids = new Ids("Participant");
   const participants = new Map<string, string>();
   const messages: Array<Record<string, unknown>> = [];
-  const notes: Array<Record<string, unknown>> = [];
+  const notes: SequenceNote[] = [];
+  const boxes: Array<{ readonly title: string; readonly participantIds: string[] }> = [];
+  let openBox: (typeof boxes)[number] | undefined;
   const activations: Array<Record<string, unknown>> = [];
-  const opened = new Map<string, number>();
+  // A lifeline may be activated again while it is active; each `deactivate`
+  // closes the innermost, as Mermaid's stacked bars do.
+  const opened = new Map<string, number[]>();
+  const fragments: SequenceFragment[] = [];
+  // Fragment openings wait for the first message they hold, so the note sits
+  // on that message's row rather than beside the message before the fragment.
+  let opening: string[] = [];
+  let lastMarker: SequenceNote | undefined;
   const participant = (mermaidId: string, statement: Statement, label?: string): string => {
     const id = ids.canvas(mermaidId, statement.line);
     if (!participants.has(id) || label !== undefined) participants.set(id, label ?? mermaidId);
     return id;
   };
-  const activate = (id: string, startIndex: number, statement: Statement): void => {
-    if (opened.has(id)) throw unsupported(statement, "A nested activation");
-    opened.set(id, startIndex);
+  const activate = (id: string, startIndex: number): void => {
+    opened.set(id, [...(opened.get(id) ?? []), startIndex]);
   };
   const deactivate = (id: string, statement: Statement): void => {
-    const start = opened.get(id);
+    const start = opened.get(id)?.pop();
     const startMessage = start === undefined ? undefined : messages[start];
     const endMessage = messages.at(-1);
     if (startMessage === undefined || endMessage === undefined) {
       throw unsupported(statement, "An activation that spans no message");
     }
-    opened.delete(id);
     activations.push({
       activationId: `a${String(activations.length + 1)}`,
       participantId: id,
@@ -542,40 +650,72 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
       endMessageId: endMessage["messageId"],
     });
   };
+  /** A fragment boundary, as a note on the last message; boundaries that meet there share it. */
+  const mark = (text: string): void => {
+    const afterMessageId = messages.at(-1)?.["messageId"];
+    if (
+      lastMarker !== undefined &&
+      lastMarker === notes.at(-1) &&
+      lastMarker.afterMessageId === afterMessageId
+    ) {
+      lastMarker.text = `${lastMarker.text}; ${text}`;
+      return;
+    }
+    lastMarker = { text, afterMessageId };
+    notes.push(lastMarker);
+  };
+  /** A part of a fragment that holds no message has no row to be marked on. */
+  const closePart = (fragment: SequenceFragment, statement: Statement): void => {
+    if (fragment.kind !== "rect" && fragment.partStart === messages.length) {
+      throw unsupported(statement, `A part of ${fragment.kind} that holds no message`);
+    }
+    fragment.partStart = messages.length;
+  };
   for (const statement of body) {
     const text = statement.text;
     if (text === "autonumber") continue;
     const declared = /^(participant|actor)\s+(\w+)(?:\s+as\s+(.+))?$/.exec(text);
     if (declared !== null) {
-      participant(
+      const id = participant(
         declared[2] ?? "",
         statement,
         declared[3] === undefined ? undefined : unquote(declared[3]),
       );
+      if (openBox !== undefined && !openBox.participantIds.includes(id)) {
+        openBox.participantIds.push(id);
+      }
+      continue;
+    }
+    if (openBox !== undefined) {
+      if (text !== "end") throw unsupported(statement, "A box that holds more than participants");
+      openBox = undefined;
       continue;
     }
     const message = MESSAGE.exec(text);
     if (message !== null) {
       const from = participant(message[1] ?? "", statement);
       const to = participant(message[3] ?? "", statement);
-      messages.push({
-        messageId: `m${String(messages.length + 1)}`,
-        from,
-        to,
-        label: unquote(message[4] ?? ""),
-      });
-      if (message[2] === "+") activate(to, messages.length - 1, statement);
+      const messageId = `m${String(messages.length + 1)}`;
+      messages.push({ messageId, from, to, label: unquote(message[4] ?? "") });
+      if (opening.length > 0) {
+        mark(opening.join("; "));
+        opening = [];
+      }
+      if (message[2] === "+") activate(to, messages.length - 1);
       if (message[2] === "-") deactivate(from, statement);
       continue;
     }
-    if (SPANNING_NOTE.test(text)) throw unsupported(statement, "A note spanning two participants");
-    const note = NOTE.exec(text);
-    if (note !== null) {
+    const spanning = SPANNING_NOTE.exec(text);
+    const note = spanning === null ? NOTE.exec(text) : null;
+    if (spanning !== null || note !== null) {
       const last = messages.at(-1);
+      if (spanning !== null) {
+        participant(spanning[1] ?? "", statement);
+        participant(spanning[2] ?? "", statement);
+      }
       notes.push({
-        noteId: `n${String(notes.length + 1)}`,
-        text: unquote(note[3] ?? ""),
-        participantId: participant(note[2] ?? "", statement),
+        text: unquote(spanning?.[3] ?? note?.[3] ?? ""),
+        ...(note === null ? {} : { participantId: participant(note[2] ?? "", statement) }),
         ...(last === undefined ? {} : { afterMessageId: last["messageId"] }),
       });
       continue;
@@ -583,14 +723,69 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
     const toggle = /^(activate|deactivate)\s+(\w+)$/.exec(text);
     if (toggle !== null) {
       const id = participant(toggle[2] ?? "", statement);
-      if (toggle[1] === "activate") activate(id, messages.length, statement);
+      if (toggle[1] === "activate") activate(id, messages.length);
       else deactivate(id, statement);
+      continue;
+    }
+    const fragment = FRAGMENT.exec(text);
+    const kind = fragment?.[1];
+    if (fragment !== null && isSequenceFragmentKind(kind)) {
+      fragments.push({ kind, partStart: messages.length });
+      opening.push(fragment[2] === undefined ? kind : `${kind}: ${unquote(fragment[2])}`);
+      continue;
+    }
+    const part = FRAGMENT_PART.exec(text);
+    if (part !== null) {
+      const word = part[1] ?? "";
+      const within = fragments.at(-1);
+      if (within === undefined || within.kind !== (word === "else" ? "alt" : "par")) {
+        throw unsupported(statement, `An ${word} outside its block`);
+      }
+      closePart(within, statement);
+      opening.push(part[2] === undefined ? word : `${word}: ${unquote(part[2])}`);
+      continue;
+    }
+    if (RECT.test(text)) {
+      fragments.push({ kind: "rect", partStart: messages.length });
+      continue;
+    }
+    if (text === "end") {
+      const closed = fragments.pop();
+      if (closed === undefined) throw unsupported(statement, "An end without a block");
+      closePart(closed, statement);
+      if (closed.kind !== "rect") mark(`end ${closed.kind}`);
+      continue;
+    }
+    const box = BOX.exec(text);
+    if (box !== null) {
+      // A box groups lifelines, not messages: Mermaid has none inside a fragment.
+      if (fragments.length > 0) throw unsupported(statement, "A box inside another block");
+      openBox = { title: box[1] === undefined ? "Group" : unquote(box[1]), participantIds: [] };
+      boxes.push(openBox);
       continue;
     }
     throw unsupported(statement);
   }
-  if (opened.size > 0) throw new Refusal("unsupported-construct", "An activation is never closed.");
+  if ([...opened.values()].some((starts) => starts.length > 0)) {
+    throw new Refusal("unsupported-construct", "An activation is never closed.");
+  }
+  const unclosed = fragments.at(-1);
+  if (unclosed !== undefined || openBox !== undefined) {
+    throw new Refusal("unsupported-construct", `A ${unclosed?.kind ?? "box"} is never closed.`);
+  }
   if (participants.size === 0) throw new Refusal("empty", "The sequence names no participants.");
+  // A sequence block has no participant groups. A box becomes a note beside no
+  // message, which the layout stacks above the first: its title and the labels
+  // of the participants it held, read once every alias is known.
+  const boxNotes: ReadonlyArray<SequenceNote> = boxes
+    .filter((box) => box.participantIds.length > 0)
+    .map((box) => ({
+      text: `${box.title}: ${box.participantIds.map((id) => participants.get(id) ?? id).join(", ")}`,
+    }));
+  const allNotes = [...boxNotes, ...notes].map((note, index) => ({
+    noteId: `n${String(index + 1)}`,
+    ...note,
+  }));
   return {
     blockId,
     schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -598,7 +793,7 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
     participants: [...participants].map(([participantId, label]) => ({ participantId, label })),
     messages,
     ...(activations.length === 0 ? {} : { activations }),
-    ...(notes.length === 0 ? {} : { notes }),
+    ...(allNotes.length === 0 ? {} : { notes: allNotes }),
   };
 }
 

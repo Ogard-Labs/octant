@@ -1244,7 +1244,8 @@ BT and RL, which keep their links and are drawn down and right; a `direction`
 line is read past; `[ ]` process, `{ }` decision, `([ ])` and `(( ))`
 terminator, `( )` the plain box, `[( )]` the plain box with the database icon;
 `-->`, `---`, `-.->`, `==>` and their longer forms with a piped or inline
-label; `a & b --> c & d` as one link per pair, refused before the pairs are
+label; `<-->` as two arrow links, one each way, the label on the first, because
+a Canvas link has one arrowhead; `a & b --> c & d` as one link per pair, refused before the pairs are
 built when they would exceed the block's link limit; `subgraph` nested up to
 three levels, with a quoted title) into a `diagram`; a `sequenceDiagram`
 (participants and actors with aliases, `->>`, `-->>`, `->`, `-->`, `-x`,
@@ -1260,9 +1261,37 @@ the diagram still imports, because a Canvas block takes the Canvas theme: a
 `%%{init: …}%%` or other `%%{…}%%` directive in any diagram type, and, in a
 flowchart and a state diagram, `classDef`, `class <ids> <name>`, `style`, and
 `linkStyle` statements and the `:::class` suffix on a node or state, which
-keeps the node (maintainer decision, 2026-11-13). Anything else — another
-diagram type, a `classDiagram` among them, `click`, loops and alternatives, other shapes
-and links, a subgraph nested deeper than three levels, a note spanning two participants, an `FK` or
+keeps the node (maintainer decision, 2026-11-13). The subset is widened
+again without changing a block schema (maintainer decision, 2026-11-13); where
+the target block has no field for a construct, the translation keeps it in a
+field the block already has, as follows. In a flowchart, a hexagon `{{ }}`, a
+subroutine `[[ ]]`, and a parallelogram `[/ /]` or `[\ \]` become a process
+node whose detail line reads "Preparation", "Subroutine", or "Input or
+output", since the layout draws only the process, decision, and terminator
+shapes; and a `click` line is dropped like styling, because a Canvas node
+opens and runs nothing. In a sequence, a `loop`, `alt` with `else`, `opt`, or
+`par` with `and` is flattened: its messages stay in order, and a note on the
+first message of each part reads `loop: <label>` (or `alt:`, `else:`, `opt:`,
+`par:`, `and:`; the bare keyword when there is no label), and a note on the
+fragment's last message reads `end loop` (or `end alt`, `end opt`, `end par`).
+Markers that land on the same message share one note, joined by `; `. A part
+that holds no message has no row to be marked on and is refused. A
+`Note over A,B` keeps its text and its place in the order as a note that names
+no participant, which is how every renderer already draws a note. A `rect` is
+a background colour and is dropped like styling, keeping its messages. A `box`
+becomes a note placed before the first message that reads
+`<title>: <participant labels>` ("Group" when the box has no title); a leading
+`rgb()`, `rgba()`, `hsl()`, `hsla()`, or `transparent` is dropped as its
+colour, while a named colour cannot be told from a title's first word and
+stays in the title. A participant activated again while active keeps one
+activation per `activate`, the innermost closed first; the layout draws them
+as one bar over the outer span. Each note counts against the block's limit of
+64 notes, so a sequence with more markers than that is refused as
+`invalid-result`. Anything else — another
+diagram type, a `classDiagram` among them, `critical`, `break`, and `par_over`, a note over
+three or more participants, a box inside a fragment or one holding anything but participants,
+the trapezoid, flag, and other shapes, `<-.->`, `<==>`, and other
+links, a subgraph nested deeper than three levels, an `FK` or
 `UK` key, a non-identifying (`..`) relationship, two ids that would collide, a source over 32,768
 characters, or a translation the block catalog refuses — returns a typed
 refusal (`unsupported-diagram`, `unsupported-construct` with its line, `empty`,

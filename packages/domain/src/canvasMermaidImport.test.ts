@@ -17,6 +17,26 @@ function refusal(source: string): Extract<CanvasMermaidImport, { status: "refuse
   return result;
 }
 
+/** The domain policy's verdict on a document that holds only this block. */
+function admitted(block: ReturnType<typeof imported>) {
+  return validateCanvasDefinition({
+    schemaVersion: block.schemaVersion,
+    title: "Imported",
+    provenance: {
+      mode: "chat",
+      hostId: "local",
+      projectId: "22222222-2222-4222-8222-222222222222",
+      threadId: "33333333-3333-4333-8333-333333333333",
+      actor: { kind: "local-user", actorId: "55555555-5555-4555-8555-555555555555" },
+      providerInstanceId: "44444444-4444-4444-8444-444444444444",
+      modelId: "octant-test-model",
+      createdAt: "2026-08-01T21:00:00.000Z",
+    },
+    sourceManifest: [],
+    blocks: [block],
+  });
+}
+
 describe("importing a Mermaid flowchart", () => {
   const loop = [
     "flowchart TD",
@@ -57,25 +77,7 @@ describe("importing a Mermaid flowchart", () => {
   });
 
   it("is a block the Canvas policy admits in a current document", () => {
-    const block = imported(loop);
-    expect(() =>
-      validateCanvasDefinition({
-        schemaVersion: block.schemaVersion,
-        title: "Loop",
-        provenance: {
-          mode: "chat",
-          hostId: "local",
-          projectId: "22222222-2222-4222-8222-222222222222",
-          threadId: "33333333-3333-4333-8333-333333333333",
-          actor: { kind: "local-user", actorId: "55555555-5555-4555-8555-555555555555" },
-          providerInstanceId: "44444444-4444-4444-8444-444444444444",
-          modelId: "octant-test-model",
-          createdAt: "2026-08-01T21:00:00.000Z",
-        },
-        sourceManifest: [],
-        blocks: [block],
-      }),
-    ).not.toThrow();
+    expect(() => admitted(imported(loop))).not.toThrow();
   });
 
   it("reads graph LR, a plain line, a text label, and an underscored id", () => {
@@ -141,16 +143,69 @@ describe("importing a Mermaid flowchart", () => {
     ).toEqual(plain);
     expect(imported('%%{init: {"theme": "dark"}}%% flowchart TD\n  a --> b')).toEqual(plain);
     expect(imported("flowchart TD\n  %%{wrap}%%\n  a --> b")).toEqual(plain);
-    expect(refusal("%%{\n  init: {}\n}%%\nflowchart TD\n  a <--> b").line).toBe(5);
+    expect(refusal("%%{\n  init: {}\n}%%\nflowchart TD\n  a -.- b").line).toBe(5);
   });
 
-  it("refuses interaction, other shapes, and other links, naming the line", () => {
+  it("reads a hexagon, a subroutine, and a parallelogram as a process that names its shape", () => {
+    const block = imported(
+      [
+        "flowchart TD",
+        "  setup{{Warm the cache}} --> read[/Read the order/]",
+        "  read --> charge[[Charge the card]]",
+        "  charge --> out[\\Print the receipt\\]",
+        "  plain[Pack]",
+      ].join("\n"),
+    );
+    if (block.kind !== "diagram") throw new Error("not a diagram");
+    expect(block.nodes.map((node) => [node.nodeId, node.label, node.role, node.detail])).toEqual([
+      ["setup", "Warm the cache", "process", "Preparation"],
+      ["read", "Read the order", "process", "Input or output"],
+      ["charge", "Charge the card", "process", "Subroutine"],
+      ["out", "Print the receipt", "process", "Input or output"],
+      ["plain", "Pack", "process", undefined],
+    ]);
+    expect(() => admitted(block)).not.toThrow();
+  });
+
+  it("reads a bidirectional link as one arrow each way, its label on the first", () => {
+    const block = imported("flowchart LR\n  app <-->|sync| db\n  db <---> cache & queue");
+    if (block.kind !== "diagram") throw new Error("not a diagram");
+    expect(block.edges.map((edge) => [edge.source, edge.target, edge.style, edge.label])).toEqual([
+      ["app", "db", "arrow", "sync"],
+      ["db", "app", "arrow", undefined],
+      ["db", "cache", "arrow", undefined],
+      ["cache", "db", "arrow", undefined],
+      ["db", "queue", "arrow", undefined],
+      ["queue", "db", "arrow", undefined],
+    ]);
+    const many = Array.from({ length: 30 }, (_, index) => `n${String(index)}`).join(" & ");
+    const refused = refusal(`flowchart TD\n  ${many} <--> ${many.replace(/n/g, "m")}`);
+    expect(refused.reason).toBe("unsupported-construct");
+    expect(refused.line).toBe(2);
+  });
+
+  it("drops a click line and imports the nodes and links it was attached to", () => {
+    const plain = "flowchart TD\n  a[Open] --> b[Close]";
+    const clicked = [
+      "flowchart TD",
+      '  click a href "https://example.com" "Open the site" _blank',
+      "  a[Open] --> b[Close]",
+      "  click b call closeIt()",
+    ].join("\n");
+    expect(imported(clicked)).toEqual(imported(plain));
+    expect(refusal("flowchart TD\n  a --> b\n  click").line).toBe(3);
+    expect(refusal('sequenceDiagram\n  A->>B: hi\n  click A href "https://example.com"').line).toBe(
+      3,
+    );
+  });
+
+  it("refuses other shapes and other links, naming the line", () => {
     for (const [statement, line] of [
-      ['  click a href "https://example.com"', 2],
-      ["  a <--> b", 2],
       ["  a -.- b", 2],
-      ["  a{{Hexagon}} --> b", 2],
-      ["  a[[Subroutine]] --> b", 2],
+      ["  a <-.-> b", 2],
+      ["  a <==> b", 2],
+      ["  a <-- b", 2],
+      ["  a[/Trapezoid\\] --> b", 2],
       ["  a>Flag] --> b", 2],
     ] as const) {
       const result = refusal(`flowchart TD\n${statement}`);
@@ -291,9 +346,137 @@ describe("importing the other Mermaid diagram kinds", () => {
       activations: [{ participantId: "web", startMessageId: "m2", endMessageId: "m3" }],
       notes: [{ participantId: "web", text: "Cookie is HttpOnly", afterMessageId: "m3" }],
     });
-    expect(refusal("sequenceDiagram\n a->>b: hi\n loop Every minute\n b->>a: ok\n end").line).toBe(
-      3,
+  });
+
+  it("flattens loop, alt, opt, and par into notes on the first and last message of each part", () => {
+    const block = imported(
+      [
+        "sequenceDiagram",
+        "  Client->>API: start",
+        "  loop Every minute",
+        "    Client->>API: poll",
+        "    alt is ready",
+        "      API-->>Client: result",
+        "    else still running",
+        "      API-->>Client: wait",
+        "      Note right of API: backs off",
+        "    end",
+        "  end",
+        "  opt",
+        "    Client->>API: acknowledge",
+        "  end",
+        "  par To the log",
+        "    API->>Log: write",
+        "  and To the bus",
+        "    API->>Bus: publish",
+        "  end",
+      ].join("\n"),
     );
+    if (block.kind !== "sequence") throw new Error("not a sequence");
+    expect(block.messages.map((message) => message.label)).toEqual([
+      "start",
+      "poll",
+      "result",
+      "wait",
+      "acknowledge",
+      "write",
+      "publish",
+    ]);
+    expect((block.notes ?? []).map((note) => [note.afterMessageId, note.text])).toEqual([
+      ["m2", "loop: Every minute"],
+      ["m3", "alt: is ready"],
+      ["m4", "else: still running"],
+      ["m4", "backs off"],
+      ["m4", "end alt; end loop"],
+      ["m5", "opt; end opt"],
+      ["m6", "par: To the log"],
+      ["m7", "and: To the bus; end par"],
+    ]);
+    expect(
+      (block.notes ?? []).every(
+        (note) => note.participantId === undefined || note.text === "backs off",
+      ),
+    ).toBe(true);
+    expect(() => admitted(block)).not.toThrow();
+  });
+
+  it("refuses a fragment it cannot place, naming the line", () => {
+    for (const [body, line] of [
+      ["  A->>B: hi\n  loop Forever\n  end", 4],
+      ["  alt ok\n  A->>B: hi\n  else\n  end", 5],
+      ["  A->>B: hi\n  else no", 3],
+      ["  par one\n  A->>B: hi\n  else two\n  A->>B: ho\n  end", 4],
+      ["  A->>B: hi\n  end", 3],
+      ["  critical Connect\n  A->>B: hi\n  end", 2],
+      ["  break when down\n  A->>B: hi\n  end", 2],
+    ] as const) {
+      const refused = refusal(`sequenceDiagram\n${body}`);
+      expect(refused.reason).toBe("unsupported-construct");
+      expect(refused.line).toBe(line);
+    }
+    const unclosed = refusal("sequenceDiagram\n  loop Forever\n  A->>B: hi");
+    expect(unclosed.reason).toBe("unsupported-construct");
+    expect(unclosed.line).toBeUndefined();
+  });
+
+  it("drops a rect highlight and keeps a box as a note naming its participants", () => {
+    const block = imported(
+      [
+        "sequenceDiagram",
+        "  box rgb(33,66,99) Back end",
+        "    participant api as API",
+        "    participant db as Database",
+        "  end",
+        "  box",
+        "    actor person",
+        "  end",
+        "  rect rgba(0, 0, 255, .1)",
+        "    person->>api: ask",
+        "    rect rgb(200, 150, 255)",
+        "      api->>db: read",
+        "    end",
+        "  end",
+        "  participant db as Store",
+      ].join("\n"),
+    );
+    if (block.kind !== "sequence") throw new Error("not a sequence");
+    expect(block.participants.map((entry) => entry.participantId)).toEqual(["api", "db", "person"]);
+    expect(block.messages.map((message) => message.label)).toEqual(["ask", "read"]);
+    expect(block.notes).toEqual([
+      { noteId: "n1", text: "Back end: API, Store" },
+      { noteId: "n2", text: "Group: person" },
+    ]);
+    expect(refusal("sequenceDiagram\n  box Back end\n  A->>B: hi\n  end").line).toBe(3);
+    expect(refusal("sequenceDiagram\n  loop x\n  box Back end\n  end\n  end").line).toBe(3);
+  });
+
+  it("keeps nested activations as separate spans on the one lifeline", () => {
+    const block = imported(
+      [
+        "sequenceDiagram",
+        "  Client->>+API: outer",
+        "  Client->>+API: inner",
+        "  API-->>-Client: inner done",
+        "  activate API",
+        "  API->>API: think",
+        "  deactivate API",
+        "  API-->>-Client: outer done",
+      ].join("\n"),
+    );
+    if (block.kind !== "sequence") throw new Error("not a sequence");
+    expect(
+      (block.activations ?? []).map((entry) => [
+        entry.participantId,
+        entry.startMessageId,
+        entry.endMessageId,
+      ]),
+    ).toEqual([
+      ["API", "m2", "m3"],
+      ["API", "m4", "m4"],
+      ["API", "m1", "m5"],
+    ]);
+    expect(() => admitted(block)).not.toThrow();
+    expect(refusal("sequenceDiagram\n  A->>+B: a\n  A->>+B: b\n  B-->>-A: c").line).toBeUndefined();
   });
 
   it("reads a state machine with a start, an end, an alias, and a composite state", () => {
@@ -412,10 +595,17 @@ describe("importing the other Mermaid diagram kinds", () => {
     expect(refusal("mindmap\n  Root\n    Topic\n    :::urgent").line).toBe(4);
   });
 
-  it("refuses a note that spans two participants rather than pinning it to one", () => {
-    const refused = refusal("sequenceDiagram\n  A->>B: hi\n  Note over A,B: shared");
-    expect(refused.reason).toBe("unsupported-construct");
-    expect(refused.line).toBe(3);
+  it("keeps a note over two participants as a note beside no single one", () => {
+    const block = imported(
+      "sequenceDiagram\n  A->>B: hi\n  Note over A, C: shared\n  Note left of B: own",
+    );
+    if (block.kind !== "sequence") throw new Error("not a sequence");
+    expect(block.participants.map((entry) => entry.participantId)).toEqual(["A", "B", "C"]);
+    expect(block.notes).toEqual([
+      { noteId: "n1", text: "shared", afterMessageId: "m1" },
+      { noteId: "n2", text: "own", participantId: "B", afterMessageId: "m1" },
+    ]);
+    expect(refusal("sequenceDiagram\n  A->>B: hi\n  Note over A,B,C: three").line).toBe(3);
   });
 
   it("refuses a foreign or unique key marker it cannot keep instead of dropping it", () => {
