@@ -1116,7 +1116,7 @@ function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
     if (typeof record.$ref === "string") {
       const referenced = localJsonPointerTarget(schema, record.$ref);
       // Ajv can resolve more reference forms than this bounded inspector. Omit
-      // those tools instead of compiling a schema whose regex use is unknown.
+      // those tools instead of compiling a schema whose safety is unknown.
       if (referenced === undefined || visit(referenced)) return true;
     }
     for (const keyword of [

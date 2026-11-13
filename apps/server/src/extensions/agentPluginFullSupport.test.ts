@@ -891,6 +891,14 @@ describe("Agent Plugin MCP session manager", () => {
                                 properties: { pattern: { type: "string" } },
                               },
                             },
+                            {
+                              name: "nonrecursive-ref",
+                              inputSchema: {
+                                type: "object",
+                                properties: { value: { $ref: "#/$defs/value" } },
+                                $defs: { value: { type: "string" } },
+                              },
+                            },
                             { name: "duplicate", inputSchema: { type: "object" } },
                             {
                               name: "duplicate",
@@ -926,11 +934,17 @@ describe("Agent Plugin MCP session manager", () => {
 
     await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
 
-    expect(manager.toolDefinitions()).toHaveLength(1);
-    expect(manager.toolDefinitions()[0]?.inputSchema).toEqual({
-      type: "object",
-      properties: { pattern: { type: "string" } },
-    });
+    expect(manager.toolDefinitions().map((definition) => definition.inputSchema)).toEqual([
+      {
+        type: "object",
+        properties: { pattern: { type: "string" } },
+      },
+      {
+        type: "object",
+        properties: { value: { $ref: "#/$defs/value" } },
+        $defs: { value: { type: "string" } },
+      },
+    ]);
     await manager.drainAll();
   });
 
