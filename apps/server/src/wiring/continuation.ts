@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   decodeChatSubmissionId,
   decodeChatThreadId,
+  decodeCodeThreadId,
   decodeContextSubjectRef,
   decodeProviderSessionId,
   decodeUtcTimestamp,
@@ -52,6 +53,8 @@ import { AgentRunDependencyScheduler } from "../agentRun/agentRunDependencySched
 import { AgentRunProviderSlotScheduler } from "../agentRun/agentRunProviderSlotScheduler";
 import { AgentResultDeliveryService } from "../agentRun/agentResultDeliveryService";
 import { recordAgentRunResultIngestion } from "../agentRun/agentRunDelegation";
+import { continueAgentRunsCutOffByRestart } from "../agentRun/agentRunRestartContinuation";
+import { continueCoordinatorWakesAfterRestart } from "../coordinator/coordinatorWakeRestartContinuation";
 import {
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
@@ -67,13 +70,19 @@ import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
 export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "agentRunParentAuthority" | "agentRunPersistence"> &
+  Pick<
+    AuthorityWiring,
+    "agentRunParentAuthority" | "agentRunPersistence" | "agentRunsCutOffByRestart"
+  > &
   Pick<
     AgentRunsWiring,
     "agentRunOrchestration" | "capacityScheduler" | "externalContentIngestionStore"
   > &
   Pick<WorkspaceWiring, "contextHarness"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
+  Pick<
+    CodeRuntimeWiring,
+    "codeOperationRuntime" | "coordinatorService" | "coordinatorWakes" | "routeCodeService"
+  > &
   Pick<ChatWiring, "chatAttemptsCutOffByRestart" | "chatService"> &
   Pick<HarnessWiring, "liftRestartRecovery"> &
   Pick<WorkWiring, "goalLoopService" | "threadMessageQueue" | "workTurnService"> &
@@ -291,11 +300,15 @@ function startRestartContinuation(
   // Read and removed on every start, whether or not anything was cut off, so
   // a quit with nothing running holds nothing after a later crash.
   const quitByPerson = consumePersonQuit(deps.persistence.dataDirectory);
+  // Read before anything this start wakes can append a newer frame.
+  const openWakes = deps.coordinatorWakes.open();
   if (
     deps.persistence.codeTurnsCutOffByRestart.length === 0 &&
     deps.chatAttemptsCutOffByRestart.length === 0 &&
     deps.workTurnsCutOffByRestart.length === 0 &&
-    deps.goalLoopService.runningLoopThreads().length === 0
+    deps.goalLoopService.runningLoopThreads().length === 0 &&
+    deps.agentRunsCutOffByRestart.length === 0 &&
+    openWakes.length === 0
   )
     return () => undefined;
   let summary: HostRestartRecovery | undefined;
@@ -346,10 +359,46 @@ function startRestartContinuation(
       }),
       "Work",
     );
+    // After the threads, so a parent thread's own continuation is admitted
+    // before its children resume under its live authority.
+    const agentRuns = await settled(continueAgentRuns(deps, quitByPerson), "Subagent");
+    // After Code, so a wake never starts beside its thread's own continuation
+    // and waits with a thread Code recovery held.
+    const wakes = await settled(
+      continueCoordinatorWakesAfterRestart({
+        quitByPerson,
+        open: openWakes,
+        enabled: () => deps.persistence.readCodeSettings()?.settings.restartContinuation !== false,
+        modeEnabled: () =>
+          enabledModes(
+            deps.persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("code"),
+        optedOut: (threadId) => {
+          try {
+            return (
+              deps.persistence.readCodeThread(decodeCodeThreadId(threadId))
+                ?.restartContinuationOff === true
+            );
+          } catch {
+            return false;
+          }
+        },
+        heldByCode: new Set(
+          (code?.held ?? [])
+            .filter((entry: HostRestartRecovery["held"][number]) => entry.mode === "code")
+            .map((entry: HostRestartRecovery["held"][number]) => entry.threadId),
+        ),
+        attempts: createCodeRestartContinuationAttempts(deps.persistence.connection),
+        coordinator: deps.coordinatorService,
+      }),
+      "Coordinator wake",
+    );
     summary = mergeRestartRecoveries(decodeUtcTimestamp(new Date().toISOString()), [
       code,
       chat,
       work,
+      agentRuns,
+      wakes,
     ]);
   })();
   return () => summary;
@@ -602,6 +651,71 @@ function continueCutOffWorkTurns(deps: WorkRestartContinuationDependencies) {
       }
     },
     releaseQueue: deps.releaseQueue,
+  });
+}
+
+/** Resumes the subagent runs this start interrupted (docs/architecture.md, subagent restart recovery). */
+function continueAgentRuns(deps: ContinuationDependencies, quitByPerson: boolean) {
+  const { agentRunOrchestration, agentRunParentAuthority, agentRunPersistence, persistence } = deps;
+  return continueAgentRunsCutOffByRestart({
+    quitByPerson,
+    cutOff: deps.agentRunsCutOffByRestart,
+    readRun: (run) => agentRunPersistence.getById(run.id),
+    enabled: (mode) =>
+      mode === "chat"
+        ? persistence.readChatSettings()?.settings.restartContinuation !== false
+        : mode === "work"
+          ? deps.workThreadProjection.settings()?.restartContinuation !== false
+          : persistence.readCodeSettings()?.settings.restartContinuation !== false,
+    parentOptedOut: (run) => {
+      const threadId = String(run.parentThreadId);
+      try {
+        switch (run.workspaceReceipt.mode) {
+          case "chat":
+            return (
+              persistence.readChatThread(decodeChatThreadId(threadId))?.restartContinuationOff ===
+              true
+            );
+          case "work":
+            return (
+              deps.workThreadProjection.read(decodeWorkThreadId(threadId))
+                ?.restartContinuationOff === true
+            );
+          case "code":
+            return (
+              persistence.readCodeThread(decodeCodeThreadId(threadId))?.restartContinuationOff ===
+              true
+            );
+        }
+      } catch {
+        // A parent that cannot be read is left to the resume's own authority check.
+        return false;
+      }
+    },
+    modeEnabled: (mode) =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        mode,
+      ),
+    latestStartVersion: (run) => agentRunPersistence.latestStartVersion(run.id),
+    attempts: createCodeRestartContinuationAttempts(persistence.connection),
+    // The parent's live grant is read again inside the resume, after its
+    // preflight yields, exactly as a person's Resume reads it.
+    resume: async (run, message) => {
+      const liveAuthority = agentRunParentAuthority(run);
+      if (liveAuthority === undefined)
+        return {
+          kind: "run-command-failed",
+          reason: "unsupported-transition",
+          message: "The parent thread's grant is unavailable.",
+        };
+      return agentRunOrchestration.resume(run.id, run.version, liveAuthority, {
+        message,
+        resolveLiveAuthority: () => {
+          const current = agentRunPersistence.getById(run.id);
+          return current === undefined ? undefined : agentRunParentAuthority(current);
+        },
+      });
+    },
   });
 }
 
