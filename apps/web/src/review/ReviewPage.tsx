@@ -654,7 +654,7 @@ export function ReviewPage(props: ReviewPageProps) {
                   />
                 ) : null}
                 {notice === undefined || notice.key !== selectedEntryKey ? null : (
-                  <OctantAlert className="review-detail__notice" role="alert">
+                  <OctantAlert className="review-detail__notice" role="alert" tone="danger">
                     {notice.message}
                   </OctantAlert>
                 )}

@@ -6241,6 +6241,7 @@ describe("continuing a Work turn a restart cut off", () => {
     const releaseQueue = vi.fn(async (_threadId: string) => {});
     const recovery = await continueWorkTurns({
       cutOff,
+      quitByPerson: false,
       work: host.service,
       readThread: () => thread(),
       enabled: () => true,
@@ -6300,6 +6301,31 @@ describe("continuing a Work turn a restart cut off", () => {
     expect(recovery.held).toMatchObject([
       { mode: "work", threadId: String(ids.thread), reason: "turned-off" },
     ]);
+    expect(releaseQueue).not.toHaveBeenCalled();
+    expect(continuations(host)).toHaveLength(0);
+  });
+
+  it("holds a cut-off turn for its person after a person quit Octant, and starts nothing", async () => {
+    const connection = await hostStore();
+    const before = await runningTurn();
+    const liftHarnessRecovery = vi.fn(async (_threadId: string) => ({ kind: "none" as const }));
+
+    const { host, recovery, releaseQueue } = await hostStart([before], connection, {
+      recovery: { quitByPerson: true, liftHarnessRecovery },
+    });
+
+    expect(recovery).toEqual({
+      continued: [],
+      held: [
+        {
+          mode: "work",
+          threadId: String(ids.thread),
+          reason: "quit",
+          detail: "Octant was quit while this thread was working, so it waits for you.",
+        },
+      ],
+    });
+    expect(liftHarnessRecovery).not.toHaveBeenCalled();
     expect(releaseQueue).not.toHaveBeenCalled();
     expect(continuations(host)).toHaveLength(0);
   });

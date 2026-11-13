@@ -43,15 +43,20 @@ export function hostRestartNotice(
   });
   const held = recovery.held.flatMap((entry) => {
     const thread = visible.get(key(entry));
-    return thread === undefined ? [] : [{ thread, detail: entry.detail }];
+    return thread === undefined ? [] : [{ thread, detail: entry.detail, reason: entry.reason }];
   });
   if (continued.length + held.length === 0) return undefined;
-  const summary = `Continued ${count(continued.length, "thread", "threads")}; ${held.length} ${held.length === 1 ? "needs" : "need"} you.`;
+  // A person's quit holds every turn it cut off, so nothing was continued and
+  // "restarted" would misdescribe what they did.
+  const quit = held.some((entry) => entry.reason === "quit");
+  const summary = quit
+    ? `${count(held.length, "thread waits", "threads wait")} for you.`
+    : `Continued ${count(continued.length, "thread", "threads")}; ${held.length} ${held.length === 1 ? "needs" : "need"} you.`;
   const first = held[0];
   const open = first?.thread ?? continued[0];
   return {
     id: `restart:${recovery.at}`,
-    title: "Octant restarted",
+    title: quit ? "Octant was quit while threads were working" : "Octant restarted",
     detail: first === undefined ? summary : `${summary} ${first.thread.title}: ${first.detail}`,
     needsYou: first !== undefined,
     ...(open === undefined ? {} : { open }),
