@@ -1656,7 +1656,10 @@ the addendum left a choice open.
   most 32, each with its digest, name, program, arguments, folder, and the
   names (never the values) of its environment entries, and names the running
   session. The listing is redacted as tool output is, so a key typed as an
-  argument does not reach the provider. `start` takes one of those digests and optional breakpoints (at
+  argument does not reach the provider. The listing also keeps to the
+  48 KiB list budget: entries past it are left out, with `truncated` and
+  the number `omitted`, so every entry shown still carries its digest.
+  `start` takes one of those digests and optional breakpoints (at
   most 16 files of 64 lines). At every level outside Plan the list holds
   the configurations an approval covers as they stand and the readable
   proposals of the repository's launch file, each marked `confirmed` or
@@ -1723,7 +1726,8 @@ the addendum left a choice open.
   printed (state and output, threads, stack, scopes, variables, an
   expression's value, an adapter's own error text) is redacted as tool
   output is (known key formats and every value the credential broker handed
-  out), journaled as outside content by its digest only, and passed by
+  out) before any bound cuts it, so a cut cannot split a key out of the
+  shape the redactor recognizes, journaled as outside content by its digest only, and passed by
   Octant Shield's Watcher; one that cannot be journaled is withheld. Frames
   outside the checkout carry a label and no path.
 - **The person sees it.** The session is the thread's own. The Run and debug

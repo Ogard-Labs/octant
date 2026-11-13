@@ -1848,6 +1848,57 @@ describe("the agent's debug tool", () => {
     expect(text).toContain("--key");
   });
 
+  it("redacts a URL password that ends exactly where the listing cuts an argument", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const credential = "https://user:example-password-value";
+    const argument = `${"a".repeat(512 - credential.length - 1)} ${credential}@example.com`;
+    mkdirSync(join(test.checkout, ".vscode"));
+    writeFileSync(
+      join(test.checkout, ".vscode", "launch.json"),
+      JSON.stringify({
+        configurations: [
+          {
+            type: "fixture",
+            request: "launch",
+            name: "Long URL",
+            program: `\${workspaceFolder}/src/main.js`,
+            args: [argument],
+          },
+        ],
+      }),
+    );
+    const listed = await agentTools(test).call({ operation: "configurations" });
+    expect(listed.result).toMatchObject({ configurations: [{ name: "Long URL" }] });
+    expect(JSON.stringify(listed.result)).not.toContain("example-password-value");
+  });
+
+  it("lists the configurations that fit the result budget, each with its digest, and says how many it left out", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    mkdirSync(join(test.checkout, ".vscode"));
+    writeFileSync(
+      join(test.checkout, ".vscode", "launch.json"),
+      JSON.stringify({
+        configurations: [1, 2, 3, 4].map((index) => ({
+          type: "fixture",
+          request: "launch",
+          name: `Long ${index}`,
+          program: `\${workspaceFolder}/src/main.js`,
+          args: Array.from({ length: 64 }, (_, at) => `${index}${at}`.padEnd(256, "x")),
+        })),
+      }),
+    );
+    const listed = await agentTools(test).call({ operation: "configurations" });
+    expect(Buffer.byteLength(JSON.stringify(listed.result), "utf8")).toBeLessThan(64 * 1024);
+    const shown = listed.result.configurations as ReadonlyArray<{ configuration: string }>;
+    expect(shown.length).toBeGreaterThan(0);
+    for (const entry of shown) expect(entry.configuration).toMatch(/\S/);
+    expect(listed.result).toMatchObject({ truncated: true, omitted: 4 - shown.length });
+  });
+
   it("reads how the thread's last session ended after the program exits, until another starts", async () => {
     const test = await host(passthrough);
     await test.install(adapterFolder(test.root));

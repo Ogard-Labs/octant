@@ -304,14 +304,26 @@ export function createCodeDebugAgentTools(
     if (call.operation === "configurations") {
       const listed = await startable();
       if (listed.status === "refused") return serviceRefusal(listed.reason);
+      // A person may have typed a key as an argument. The listing is the
+      // Project's own record, so it marks nothing, but it is redacted as
+      // every other result is. It is bounded by bytes as well as count: four
+      // configurations of 64 long arguments pass every per-configuration
+      // limit yet exceed the turn's 64 KiB result limit, which would drop the
+      // whole listing and leave no digest to start.
+      const shown = withinBudget(
+        listed.configurations.map((entry) => redactHostSecretsInValue(agentConfiguration(entry))),
+        MAX_CODE_DEBUG_AGENT_CONFIGURATIONS,
+      );
       return {
-        // A person may have typed a key as an argument. The listing is the
-        // Project's own record, so it marks nothing, but it is redacted as
-        // every other result is.
-        result: redactHostSecretsInValue({
-          configurations: listed.configurations.map(agentConfiguration),
-          ...(listed.session === undefined ? {} : { session: { name: listed.session.name } }),
-        }),
+        result: {
+          configurations: shown.entries,
+          ...(shown.cut
+            ? { truncated: true, omitted: listed.configurations.length - shown.entries.length }
+            : {}),
+          ...(listed.session === undefined
+            ? {}
+            : { session: redactHostSecretsInValue({ name: listed.session.name }) }),
+        },
         isError: false,
       };
     }
@@ -591,8 +603,16 @@ function startSummary(startable: Startable): string {
   ].join("\n");
 }
 
+/**
+ * Redacts the whole text before bounding it: a cut through a credential
+ * removes the syntax the redactor reads (a URL password cut just before its
+ * `@` is no longer a URL password), so cutting first would leave it visible.
+ */
 function cut(text: string, maximum: number): { readonly text: string; readonly cut: boolean } {
-  return text.length > maximum ? { text: text.slice(0, maximum), cut: true } : { text, cut: false };
+  const redacted = redactHostSecretsInValue(text);
+  return redacted.length > maximum
+    ? { text: redacted.slice(0, maximum), cut: true }
+    : { text: redacted, cut: false };
 }
 
 /** The leading entries that fit both the count and the result's byte budget. */
