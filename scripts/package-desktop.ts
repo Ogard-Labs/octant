@@ -38,6 +38,9 @@ import {
   CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
   BROWSER_EDITABLE_PRELOAD_FILENAME,
+  CANVAS_PROTOTYPE_HOST_RUNTIME_FILENAME,
+  NIGHTLY_CLIENT_RUNTIME_FILENAME,
+  TERMINAL_LAUNCHER_RUNTIME_FILENAME,
   TERMINAL_LAUNCHER_DIRECTORY_NAME,
   DESKTOP_NODE_RUNTIME_APP,
   DESKTOP_NODE_RUNTIME_NAME,
@@ -243,6 +246,8 @@ export const PACKAGED_RUNTIME_IMPORTS = [
 export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/desktop/dist/entry.mjs",
   "apps/desktop/dist/main.mjs",
+  `apps/desktop/dist/${CANVAS_PROTOTYPE_HOST_RUNTIME_FILENAME}`,
+  `apps/desktop/dist/${TERMINAL_LAUNCHER_RUNTIME_FILENAME}`,
   `apps/desktop/dist/${DESKTOP_PRELOAD_FILENAME}`,
   `apps/desktop/dist/${BROWSER_EDITABLE_PRELOAD_FILENAME}`,
   `apps/desktop/dist/${CODE_APPROVAL_PRELOAD_FILENAME}`,
@@ -270,6 +275,14 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/server/node_modules/playwright-core/package.json",
   "apps/server/node_modules/yaml/package.json",
 ] as const;
+
+/** Flavor-specific code Stable cannot reach and therefore must not ship. */
+export const REQUIRED_NIGHTLY_STAGED_PACKAGED_FILES = [
+  `apps/desktop/dist/${NIGHTLY_CLIENT_RUNTIME_FILENAME}`,
+] as const;
+
+/** Keeps broad package barrels and optional roles out of Electron's first parsed module. */
+export const MAX_DESKTOP_BOOTSTRAP_BYTES = 256 * 1_024;
 
 /**
  * The bundled TypeScript language server (`docs/design/language-services.md`):
@@ -1050,15 +1063,29 @@ export function validatePackagedPayload(
   const paths = new Set(entries.map((entry) => entry.path));
   const required = [
     ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => flavorIconPath(path, identity)),
+    ...(identity.flavor === "nightly" ? REQUIRED_NIGHTLY_STAGED_PACKAGED_FILES : []),
     ...(target.platform === "darwin" ? [REQUIRED_DARWIN_PTY_HELPER_FILE] : []),
     ...(target.platform === "win32" ? REQUIRED_WINDOWS_PTY_FILES : []),
     ...bundledLanguageServerPaths(target, "apps/server/node_modules"),
   ];
+  const desktopRuntimes = new Set<string>([
+    ...REQUIRED_STAGED_PACKAGED_FILES,
+    ...(identity.flavor === "nightly" ? REQUIRED_NIGHTLY_STAGED_PACKAGED_FILES : []),
+  ]);
   for (const requiredPath of required) {
     if (!paths.has(requiredPath)) throw new Error(`Packaged payload is missing ${requiredPath}.`);
   }
 
   for (const entry of entries) {
+    if (
+      entry.path === "apps/desktop/dist/entry.mjs" &&
+      entry.content !== undefined &&
+      Buffer.byteLength(entry.content, "utf8") > MAX_DESKTOP_BOOTSTRAP_BYTES
+    ) {
+      throw new Error(
+        `Packaged desktop launch bootstrap exceeds ${MAX_DESKTOP_BOOTSTRAP_BYTES} bytes.`,
+      );
+    }
     if (FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS.some((pattern) => pattern.test(entry.path))) {
       throw new Error(`Packaged payload contains SDK-bundled Claude executable ${entry.path}.`);
     }
@@ -1072,6 +1099,12 @@ export function validatePackagedPayload(
       throw new Error(
         `Packaged payload contains the Nightly client smoke harness in ${entry.path}.`,
       );
+    }
+    if (
+      /^apps\/desktop\/dist\/[^/]+\.(?:cjs|mjs)$/.test(entry.path) &&
+      !desktopRuntimes.has(entry.path)
+    ) {
+      throw new Error(`Packaged payload contains unexpected desktop runtime ${entry.path}.`);
     }
   }
   validateBundledInternalRuntime(entries);
@@ -1150,6 +1183,11 @@ export async function stageDesktopRuntime(
 
   await copyBuiltDirectory(repositoryRoot, stageRoot, "apps/desktop/dist");
   await rm(resolve(stageRoot, "apps/desktop/dist/native"), { recursive: true, force: true });
+  if (identity.flavor !== "nightly") {
+    await rm(resolve(stageRoot, "apps/desktop/dist", NIGHTLY_CLIENT_RUNTIME_FILENAME), {
+      force: true,
+    });
+  }
   await cp(
     resolve(repositoryRoot, "apps/desktop/resources"),
     resolve(stageRoot, "apps/desktop/resources"),

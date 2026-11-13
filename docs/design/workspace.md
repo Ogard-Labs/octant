@@ -229,6 +229,9 @@ icon. A thread with no Project keeps the folder glyph and asks for nothing, and
 many rows in one Project share the one request. Nothing is fetched from a
 network, and a thread's authority does not change: the host shows the person
 their own files.
+The icon source belongs to the window's current host and credential. Replacing
+either or unmounting its provider cancels pending icon requests and revokes its
+object URLs; a late answer cannot retain a blob after that lifetime ends.
 
 The Project overview is one reading column in the 880px measure, starting
 below the title band. The header sits on the page: the Project tile at 40px

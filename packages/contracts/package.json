@@ -155,6 +155,7 @@
     "./zen": "./src/zen.ts",
     "./project-terminals": "./src/projectTerminals.ts",
     "./terminal-browser-grants": "./src/terminalBrowserGrants.ts",
+    "./terminal-browser-environment": "./src/terminalBrowserEnvironment.ts",
     "./nightly-browser": "./src/nightlyBrowser.ts",
     "./project-browser": "./src/projectBrowser.ts",
     "./github-catalogue": "./src/githubCatalogue.ts",

@@ -26,11 +26,13 @@ import {
   createMainBrowserWindowOptions,
   createTrustedRendererRequestRegistry,
   decorateTrustedRendererHeaders,
+  preconnectRendererOrigins,
 } from "./desktopWindowBootstrap";
 export {
   createMainBrowserWindowOptions,
   createTrustedRendererRequestRegistry,
   decorateTrustedRendererHeaders,
+  preconnectRendererOrigins,
 } from "./desktopWindowBootstrap";
 export type { TrustedRendererRequestContext } from "./desktopWindowBootstrap";
 import {
@@ -391,7 +393,7 @@ import {
   type CanvasPrototypeOwnerContentsPort,
   type CanvasPrototypeSurface,
 } from "./canvasPrototypeSurface";
-import { CANVAS_PROTOTYPE_HOST_SWITCH } from "./canvasPrototypeHost";
+import { CANVAS_PROTOTYPE_HOST_SWITCH } from "./canvasPrototypeProtocol";
 import {
   createRemoteServerPages,
   pageAccessHeader,
@@ -2389,11 +2391,23 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
   const serverUrl = host.url;
   activeServerUrl = serverUrl;
   serverInstanceId = host.instanceId;
-  await refreshHostActivity();
+  preconnectRendererOrigins(session.defaultSession, {
+    serverUrl,
+    ...(process.env.OCTANT_WEB_URL === undefined
+      ? {}
+      : { developmentUrl: process.env.OCTANT_WEB_URL }),
+  });
+  markHostInteraction("server", "renderer-preconnect-started");
   if (host.ownership === "desktop-owned") {
     await writeDesktopBridgeProjection();
   }
   ensureHostTray();
+  // Host admission already proved readiness. Menu-bar activity and fleet data
+  // may refresh beside native state and window authority preparation instead
+  // of adding another loopback round trip to first paint.
+  void refreshHostActivity().catch((error: unknown) => {
+    logQuitProblem(`Octant could not refresh host activity at launch: ${String(error)}`);
+  });
 
   const displays = screen.getAllDisplays().map(({ workArea }) => workArea);
   nativeStateStore = createNativeWindowStateStore({

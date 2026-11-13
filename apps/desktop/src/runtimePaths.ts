@@ -2,13 +2,17 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveHostRuntimePaths, type HostRuntimePaths } from "@octant/host-runtime";
+import { resolveHostRuntimePaths, type HostRuntimePaths } from "@octant/host-runtime/paths";
 
 export const BROWSER_EDITABLE_PRELOAD_FILENAME = "browserEditablePreload.cjs" as const;
 export const DESKTOP_PRELOAD_FILENAME = "preload.cjs" as const;
 export const CODE_APPROVAL_PRELOAD_FILENAME = "codeOperationApprovalViewPreload.cjs" as const;
 export const CANVAS_PROTOTYPE_PRELOAD_FILENAME = "canvasPrototypePreload.cjs" as const;
 export const EXTENSION_BRIDGE_PRELOAD_FILENAME = "extensionBridgePreload.cjs" as const;
+/** Launch-role runtimes are fixed files so the ordinary desktop bootstrap has no shared chunks. */
+export const CANVAS_PROTOTYPE_HOST_RUNTIME_FILENAME = "canvasPrototypeHost.mjs" as const;
+export const NIGHTLY_CLIENT_RUNTIME_FILENAME = "nightlyClient.mjs" as const;
+export const TERMINAL_LAUNCHER_RUNTIME_FILENAME = "terminalLauncherRuntime.mjs" as const;
 export const CODE_FILE_HELPER_FILENAME = "octant-code-file-helper" as const;
 export const WINDOWS_CREDENTIAL_HELPER_FILENAME = "octant-credential-helper.exe" as const;
 export const KEYCHAIN_HELPER_FILENAME = "octant-keychain-helper" as const;

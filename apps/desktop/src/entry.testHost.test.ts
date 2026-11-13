@@ -34,10 +34,6 @@ vi.mock("./nightlyTestData", async (original) => ({
     keychainServiceFamily: "octant-nightly-test-data",
   }),
 }));
-vi.mock("./canvasPrototypeHost", () => ({
-  CANVAS_PROTOTYPE_HOST_SWITCH: "--octant-canvas-prototype-host",
-  runCanvasPrototypeHost: vi.fn(),
-}));
 vi.mock("./desktopPeerStatus", () => ({
   loadDesktopPeerStatus: fixture.status,
   ensureNightlyHostReady: fixture.status,
@@ -48,7 +44,10 @@ vi.mock("./desktopLaunch", async (original) => ({
   ...(await original<typeof import("./desktopLaunch")>()),
   resolvePackagedDesktopLaunch: () => ({ kind: "desktop" }),
 }));
-vi.mock("./nightlyClient", () => ({ runNightlyClient: fixture.client }));
+vi.mock("./desktopRuntimeLoader", async (original) => ({
+  ...(await original<typeof import("./desktopRuntimeLoader")>()),
+  loadNightlyClientRuntime: async () => ({ runNightlyClient: fixture.client }),
+}));
 
 it("starts Nightly's own host for test data without asking Octant for status or a client window", async () => {
   await import("./entry");

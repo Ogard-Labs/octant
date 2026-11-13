@@ -29,10 +29,6 @@ vi.mock("node:fs", () => ({
   readFileSync: () =>
     JSON.stringify({ octantDesktopFlavor: "nightly", version: "0.1.0-preview.20261104.1" }),
 }));
-vi.mock("./canvasPrototypeHost", () => ({
-  CANVAS_PROTOTYPE_HOST_SWITCH: "--octant-canvas-prototype-host",
-  runCanvasPrototypeHost: vi.fn(),
-}));
 vi.mock("./desktopPeerStatus", () => ({
   loadDesktopPeerStatus: () => ({}),
   ensureNightlyHostReady: async () => ({ kind: "ready", protocol: 1, version: "0.1.0" }),
@@ -43,13 +39,16 @@ vi.mock("./desktopLaunch", async (original) => ({
   ...(await original<typeof import("./desktopLaunch")>()),
   resolvePackagedDesktopLaunch: () => ({ kind: "desktop" }),
 }));
-vi.mock("./nightlyClient", () => ({
-  runNightlyClient: async () => {
-    fixture.started = true;
-    await fixture.ready;
-    fixture.finished = true;
-    return { kind: "started" };
-  },
+vi.mock("./desktopRuntimeLoader", async (original) => ({
+  ...(await original<typeof import("./desktopRuntimeLoader")>()),
+  loadNightlyClientRuntime: async () => ({
+    runNightlyClient: async () => {
+      fixture.started = true;
+      await fixture.ready;
+      fixture.finished = true;
+      return { kind: "started" as const };
+    },
+  }),
 }));
 
 it("finishes ordinary Nightly module evaluation before its client waits for Electron ready", async () => {

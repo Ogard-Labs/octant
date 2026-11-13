@@ -2,7 +2,7 @@ import { request as httpRequest } from "node:http";
 import {
   TERMINAL_BROWSER_ENDPOINT_ENVIRONMENT,
   TERMINAL_BROWSER_TOKEN_ENVIRONMENT,
-} from "@octant/contracts";
+} from "@octant/contracts/terminal-browser-environment";
 
 /**
  * `octant mcp`: a stdio MCP server that is a pipe to the Browser endpoint a

@@ -3,7 +3,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./desktop-data-choice": "./src/desktopDataChoice.ts",
+    "./desktop-identity": "./src/desktopIdentity.ts",
+    "./owner-receipt": "./src/ownerReceipt.ts",
+    "./paths": "./src/paths.ts",
+    "./windows-desktop-launcher": "./src/windowsDesktopLauncher.ts",
+    "./windows-host-profile": "./src/windowsHostProfile.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

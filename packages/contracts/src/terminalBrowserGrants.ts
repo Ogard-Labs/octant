@@ -2,6 +2,10 @@ import { Schema } from "effect";
 import { CodeTerminalId, CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 import { WindowId } from "./shell";
+export {
+  TERMINAL_BROWSER_ENDPOINT_ENVIRONMENT,
+  TERMINAL_BROWSER_TOKEN_ENVIRONMENT,
+} from "./terminalBrowserEnvironment";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -11,9 +15,6 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * endpoint, the second the bearer token for it. A provider CLI the person types
  * into that terminal inherits them; nothing else on the machine receives them.
  */
-export const TERMINAL_BROWSER_ENDPOINT_ENVIRONMENT = "OCTANT_BROWSER_MCP_URL";
-export const TERMINAL_BROWSER_TOKEN_ENVIRONMENT = "OCTANT_BROWSER_MCP_TOKEN";
-
 export const TERMINAL_BROWSER_GRANT_EVENT_NAMES = {
   issued: "code.terminal-browser-grant-issued@1",
   revoked: "code.terminal-browser-grant-revoked@1",

@@ -36,9 +36,11 @@ import {
   FORBIDDEN_PACKAGED_FILES,
   FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS,
   FORBIDDEN_LINUX_HELPER_PATTERNS,
+  MAX_DESKTOP_BOOTSTRAP_BYTES,
   PACKAGED_RUNTIME_IMPORTS,
   REQUIRED_PACKAGED_FILES,
   REQUIRED_STAGED_PACKAGED_FILES,
+  REQUIRED_NIGHTLY_STAGED_PACKAGED_FILES,
   REQUIRED_WINDOWS_PTY_FILES,
   REQUIRED_DARWIN_HELPER_FILES,
   REQUIRED_DARWIN_MANAGED_TOOL_FILES,
@@ -445,6 +447,8 @@ describe("desktop packaging boundary", () => {
     expect(REQUIRED_STAGED_PACKAGED_FILES).toEqual([
       "apps/desktop/dist/entry.mjs",
       "apps/desktop/dist/main.mjs",
+      "apps/desktop/dist/canvasPrototypeHost.mjs",
+      "apps/desktop/dist/terminalLauncherRuntime.mjs",
       "apps/desktop/dist/preload.cjs",
       "apps/desktop/dist/browserEditablePreload.cjs",
       "apps/desktop/dist/codeOperationApprovalViewPreload.cjs",
@@ -472,6 +476,8 @@ describe("desktop packaging boundary", () => {
       "apps/server/node_modules/playwright-core/package.json",
       "apps/server/node_modules/yaml/package.json",
     ]);
+    expect(REQUIRED_NIGHTLY_STAGED_PACKAGED_FILES).toEqual(["apps/desktop/dist/nightlyClient.mjs"]);
+    expect(MAX_DESKTOP_BOOTSTRAP_BYTES).toBe(256 * 1_024);
     expect(REQUIRED_DARWIN_HELPER_FILES).toEqual([
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
@@ -637,6 +643,7 @@ describe("desktop packaging boundary", () => {
     const identity = desktopIdentity("nightly");
     const stable = [
       ...REQUIRED_STAGED_PACKAGED_FILES,
+      ...REQUIRED_NIGHTLY_STAGED_PACKAGED_FILES,
       ...bundledLanguageServerPaths(target, "apps/server/node_modules"),
       "apps/web/dist/assets/MonacoEditorPane-a.js",
       "apps/web/dist/assets/editor.api-b.js",
@@ -673,6 +680,34 @@ describe("desktop packaging boundary", () => {
       createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0-preview.20261104.1", target, identity)
         .icon,
     ).toBe("/tmp/stage/apps/desktop/resources/icon-nightly.png");
+  });
+
+  it("ships the Nightly client only in the flavor that can load it", () => {
+    const target = DESKTOP_PACKAGE_TARGETS["linux-x64"];
+    const runtime = { path: "apps/desktop/dist/nightlyClient.mjs", content: "Octant" };
+    const stable = [
+      ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => ({ path, content: "Octant" })),
+      ...bundledLanguageServerPaths(target, "apps/server/node_modules").map((path) => ({ path })),
+      { path: "apps/web/dist/assets/MonacoEditorPane-a.js", content: "Octant" },
+      { path: "apps/web/dist/assets/editor.api-b.js", content: "Octant" },
+      { path: "apps/web/dist/assets/editor.worker-c.js", content: "Octant" },
+      { path: "apps/web/dist/assets/xtermRuntime-d.js", content: "Octant" },
+      { path: "apps/web/dist/assets/xtermRuntime-e.css", content: "Octant" },
+    ];
+    expect(() => validatePackagedPayload([...stable, runtime], target)).toThrow(
+      "unexpected desktop runtime",
+    );
+
+    const nightly = stable.map((entry) => ({
+      ...entry,
+      path: entry.path.replace(/resources\/icon\.(png|icns)$/, "resources/icon-nightly.$1"),
+    }));
+    expect(() => validatePackagedPayload(nightly, target, desktopIdentity("nightly"))).toThrow(
+      "missing apps/desktop/dist/nightlyClient.mjs",
+    );
+    expect(() =>
+      validatePackagedPayload([...nightly, runtime], target, desktopIdentity("nightly")),
+    ).not.toThrow();
   });
 
   it.each(["stable", "nightly"] as const)(
@@ -1315,6 +1350,15 @@ describe("desktop packaging boundary", () => {
     expect(() => validatePackagedPayload(required.slice(1))).toThrow(
       "missing apps/desktop/dist/entry.mjs",
     );
+    expect(() =>
+      validatePackagedPayload(
+        required.map((entry) =>
+          entry.path === "apps/desktop/dist/entry.mjs"
+            ? { ...entry, content: "x".repeat(MAX_DESKTOP_BOOTSTRAP_BYTES + 1) }
+            : entry,
+        ),
+      ),
+    ).toThrow(`launch bootstrap exceeds ${MAX_DESKTOP_BOOTSTRAP_BYTES} bytes`);
     expect(() =>
       validatePackagedPayload([...required, { path: ".env", content: "TOKEN=secret" }]),
     ).toThrow("forbidden packaged path .env");

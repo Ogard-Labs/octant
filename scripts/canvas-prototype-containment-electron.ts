@@ -166,7 +166,10 @@ function surfaceFor() {
       // A packaged app always runs its own entry, as the app starts its host.
       return spawnCanvasPrototypeHost(
         packagedApp === ""
-          ? { executable: process.execPath, args: [hostEntry, ...log] }
+          ? {
+              executable: process.execPath,
+              args: [hostEntry, CANVAS_PROTOTYPE_HOST_SWITCH, ...log],
+            }
           : {
               executable: join(packagedApp, "Contents/MacOS/Octant"),
               args: [CANVAS_PROTOTYPE_HOST_SWITCH, ...log],
