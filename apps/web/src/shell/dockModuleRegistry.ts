@@ -159,7 +159,7 @@ export const dockModuleInputs = {
   debug: ["onOpenFile", "serverUrl", "subject", "windowCapability", "codeClient", "codeThreadView"],
   environment: [],
   vitals: ["serverUrl", "subject", "windowCapability"],
-  artifacts: ["canvasClient", "serverUrl", "subject", "windowCapability"],
+  artifacts: ["canvasClient", "canvasRevision", "serverUrl", "subject", "windowCapability"],
 } as const satisfies Readonly<
   Record<RightUtilityDockSurfaceId, ReadonlyArray<keyof ThreadUtilityDockContentProps>>
 >;

@@ -24,7 +24,7 @@ const dockArtifactTabId = decodeWorkspaceTabId("90000000-0000-4000-8000-00000000
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
-  "canvasClient" | "serverUrl" | "subject" | "windowCapability"
+  "canvasClient" | "canvasRevision" | "serverUrl" | "subject" | "windowCapability"
 >;
 
 type Listing =
@@ -46,6 +46,10 @@ export default function ArtifactsModule(props: Props) {
   const [state, setState] = useState<Listing>({ status: "loading" });
   const [open, setOpen] = useState<ArtifactLibraryEntry>();
   const [observedAt, setObservedAt] = useState(() => new Date().toISOString());
+  // The listing is read once per load. A Canvas this thread writes reloads it
+  // through `canvasRevision`; one written in another thread of the Project
+  // needs Refresh, because the window holds no signal for other threads.
+  const [reloads, setReloads] = useState(0);
 
   useEffect(() => {
     if (serverUrl === undefined || windowCapability === undefined || projectId === undefined) {
@@ -76,7 +80,7 @@ export default function ArtifactsModule(props: Props) {
       },
     );
     return () => controller.abort();
-  }, [projectId, serverUrl, windowCapability]);
+  }, [projectId, props.canvasRevision, reloads, serverUrl, windowCapability]);
 
   if (state.status === "loading") return <ShellState state="loading" title="Loading artifacts" />;
   if (state.status === "unavailable") {
@@ -122,15 +126,27 @@ export default function ArtifactsModule(props: Props) {
   const { entries, truncated } = state.listing;
   if (entries.length === 0) {
     return (
-      <ShellState
-        message="Canvas documents made in this Project appear here."
-        state="neutral"
-        title="No artifacts yet"
-      />
+      <section aria-label="Project artifacts" className="dock-canvas-tool">
+        <OctantButton
+          onClick={() => setReloads((count) => count + 1)}
+          type="button"
+          variant="ghost"
+        >
+          Refresh
+        </OctantButton>
+        <ShellState
+          message="Canvas documents made in this Project appear here."
+          state="neutral"
+          title="No artifacts yet"
+        />
+      </section>
     );
   }
   return (
     <section aria-label="Project artifacts" className="dock-canvas-tool">
+      <OctantButton onClick={() => setReloads((count) => count + 1)} type="button" variant="ghost">
+        Refresh
+      </OctantButton>
       <ul className="artifact-library__list">
         {entries.map((entry) => (
           <ArtifactListRow

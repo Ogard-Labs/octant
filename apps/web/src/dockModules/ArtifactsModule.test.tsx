@@ -51,6 +51,10 @@ it("asks the host for the thread's Project's artifacts and opens one beside the 
   fireEvent.click(open);
   fireEvent.click(screen.getByRole("button", { name: "All artifacts" }));
   expect(await screen.findByRole("button", { name: /Launch plan/ })).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await screen.findByRole("button", { name: /Launch plan/ });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
 it("lists nothing for a thread outside every Project", async () => {
