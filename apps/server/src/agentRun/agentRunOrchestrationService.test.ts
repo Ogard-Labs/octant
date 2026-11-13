@@ -533,6 +533,26 @@ describe("AgentRunOrchestrationService", () => {
     expect(reserve).toHaveBeenCalledOnce();
   });
 
+  it("fills recovered helper capacity without waiting for the first helper to finish", () => {
+    let ceiling = 0;
+    const capacity = createInMemoryCapacityPort(() => ({ perThread: ceiling, onHost: ceiling }));
+    const start = vi.fn();
+    const { orchestration } = createHarness(capacity, true, { start, stop: async () => undefined });
+    for (const requestId of [ids.request, ids.requestChild]) {
+      expect(
+        orchestration.admit({
+          command: requestCommand(requestId),
+          parentAuthority: authority,
+          confirmed: true,
+          liveAuthority: authority,
+        }),
+      ).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "waiting" } });
+    }
+    ceiling = 4;
+    orchestration.retryResourceWaiters();
+    expect(start).toHaveBeenCalledTimes(2);
+  });
+
   it("reserves and starts the next capacity waiter when a reservation is released", () => {
     const capacity = createInMemoryCapacityPort(() => ({ perThread: 4, onHost: 4 }));
     const starts: string[] = [];

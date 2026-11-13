@@ -3,7 +3,8 @@ import type { HostResourcePolicy } from "@octant/contracts";
 export interface HostResourceReading {
   readonly cores: number;
   readonly totalMemoryBytes: number;
-  readonly availableMemoryBytes: number;
+  readonly availableMemoryBytes: number | undefined;
+  readonly memoryPressure?: "normal" | "warning" | "critical" | "unknown";
   readonly cpuPercent: number;
   readonly load: number;
 }
@@ -39,21 +40,35 @@ export function decideHostResourceLimits(
       agents: policy.maxAgents,
       reason: "ready",
     };
+  if (reading.memoryPressure === "warning" || reading.memoryPressure === "critical")
+    return held("memory-pressure");
   if (
-    Object.values(reading).some((value) => !Number.isFinite(value) || value < 0) ||
+    (Number.isFinite(reading.cpuPercent) && reading.cpuPercent >= policy.cpuTargetPercent) ||
+    (Number.isFinite(reading.load) &&
+      reading.cores >= 1 &&
+      Number.isFinite(reading.cores) &&
+      reading.load >= (reading.cores * policy.cpuTargetPercent) / 100)
+  )
+    return held("cpu-pressure");
+  if (
+    [reading.cores, reading.totalMemoryBytes, reading.cpuPercent, reading.load].some(
+      (value) => !Number.isFinite(value) || value < 0,
+    ) ||
+    (reading.availableMemoryBytes === undefined
+      ? reading.memoryPressure !== "normal"
+      : !Number.isFinite(reading.availableMemoryBytes) || reading.availableMemoryBytes < 0) ||
     reading.cores < 1 ||
     reading.totalMemoryBytes <= 0
   ) {
     return { commands: 1, workers: 1, agents: 1, reason: "unavailable" };
   }
   const reserve = Math.max(2 ** 30, (reading.totalMemoryBytes * policy.memoryReservePercent) / 100);
-  const memoryUnits = Math.floor((reading.availableMemoryBytes - reserve) / 2 ** 30);
+  // macOS supplies pressure, not an honest available-byte count. With normal
+  // pressure, bound by hardware; warning/critical holds admission above.
+  const memoryUnits = Math.floor(
+    ((reading.availableMemoryBytes ?? reading.totalMemoryBytes) - reserve) / 2 ** 30,
+  );
   if (memoryUnits < 1) return held("memory-pressure");
-  if (
-    reading.cpuPercent >= policy.cpuTargetPercent ||
-    reading.load >= (reading.cores * policy.cpuTargetPercent) / 100
-  )
-    return held("cpu-pressure");
   // Both instantaneous CPU and the one-minute runnable load include other local work.
   const freeCores = (reading.cores * (policy.cpuTargetPercent - reading.cpuPercent)) / 100;
   const units = Math.max(

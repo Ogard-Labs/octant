@@ -150,7 +150,7 @@ export function HostResourceSettings({
       key: "memoryReservePercent",
       label: "Memory reserve (%)",
       description:
-        "Automatic mode leaves this share of RAM available, with at least 1 GiB reserved.",
+        "Reserves this share of available RAM where measured, with at least 1 GiB reserved. On macOS, kernel memory pressure controls admission and this share bounds the hardware estimate.",
       min: 10,
       max: 50,
     },
@@ -232,8 +232,10 @@ export function HostResourceSettings({
         <div role="status">
           <p>
             {snapshot.cores} cores · {Math.round(snapshot.totalMemoryBytes / 2 ** 30)} GiB RAM ·{" "}
-            {snapshot.cpuPercent}% CPU · {Math.round(snapshot.availableMemoryBytes / 2 ** 30)} GiB
-            available
+            {snapshot.cpuPercent}% CPU ·{" "}
+            {snapshot.availableMemoryBytes === undefined
+              ? `Memory pressure: ${snapshot.memoryPressure ?? "unknown"}`
+              : `${Math.round(snapshot.availableMemoryBytes / 2 ** 30)} GiB available`}
           </p>
           <p>
             Last reading: up to {snapshot.commands} command groups, {snapshot.workers} total test

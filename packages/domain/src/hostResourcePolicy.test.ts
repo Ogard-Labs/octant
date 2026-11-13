@@ -17,6 +17,37 @@ const idle = {
   load: 0.5,
 };
 describe("host resource admission", () => {
+  it("uses macOS pressure when available bytes cannot be measured", () => {
+    expect(
+      decideHostResourceLimits(policy, {
+        ...idle,
+        cpuPercent: 99,
+        availableMemoryBytes: undefined,
+        memoryPressure: "unknown",
+      }),
+    ).toMatchObject({ commands: 0, reason: "cpu-pressure" });
+    expect(
+      decideHostResourceLimits(policy, {
+        ...idle,
+        availableMemoryBytes: undefined,
+        memoryPressure: "normal",
+      }),
+    ).toMatchObject({ commands: 4, reason: "ready" });
+    expect(
+      decideHostResourceLimits(policy, {
+        ...idle,
+        availableMemoryBytes: undefined,
+        memoryPressure: "warning",
+      }),
+    ).toMatchObject({ commands: 0, reason: "memory-pressure" });
+    expect(
+      decideHostResourceLimits(policy, {
+        ...idle,
+        availableMemoryBytes: undefined,
+        memoryPressure: "unknown",
+      }),
+    ).toMatchObject({ commands: 1, reason: "unavailable" });
+  });
   it("reserves hardware capacity and honours lower manual ceilings", () => {
     expect(decideHostResourceLimits(policy, idle)).toMatchObject({
       commands: 4,

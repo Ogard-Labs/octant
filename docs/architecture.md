@@ -770,17 +770,22 @@ The panel shows hardware, last sampled load, effective ceilings and waiting/runn
 command counts, with an explicit Refresh; it does not poll while closed.
 
 Automatic uses available CPU cores, system-wide CPU time deltas, one-minute load
-and available system RAM. The initial ceilings are four command groups, four total
+and system memory capacity. Linux uses `MemAvailable` (including reclaimable cache);
+macOS uses kernel memory pressure, never free-page counts. The initial ceilings are four command groups, four total
 worker slots and four managed helper agents, with a 60% CPU admission target and
 20% RAM reserve (at least 1 GiB). The person may choose 1–16 for each ceiling,
 20–90% for CPU and 10–50% for RAM. Each estimated unit needs a core and 1 GiB
-above the memory reserve. The smallest of CPU headroom, runnable-load headroom,
+above the memory reserve where available bytes are measured. On macOS, normal
+pressure permits the hardware estimate (total RAM minus reserve); warning or critical
+pressure holds new work. The smallest of CPU headroom, runnable-load headroom,
 and memory headroom reduces the ceilings. Fewer than one memory unit, CPU at or
 above its target, or runnable load at or above the target core count holds new
 work. Missing readings admit only one command/worker/helper, except that known pressure
 stays held until valid healthy readings return. A recovered host
 must remain healthy for five seconds before admission resumes. Readings are
-cached for two seconds and gathered without launching monitoring subprocesses;
+cached for two seconds. Memory reuses the existing host memory guard sample
+(5–15 seconds, stale after 30 seconds), including its bounded macOS sysctl;
+the resource budget launches no additional monitoring subprocesses;
 queue retries run only while work waits. These are conservative heuristics, not
 hard CPU/memory quotas, thermal measurements or predictions of a tool's peak RAM.
 

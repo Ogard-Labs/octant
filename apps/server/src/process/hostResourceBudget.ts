@@ -1,3 +1,4 @@
+import type { SystemMemorySample } from "../hostMemorySignal";
 import { availableParallelism, cpus, freemem, loadavg, totalmem } from "node:os";
 import type { HostResourceBudgetSnapshot, HostResourcePolicy } from "@octant/contracts";
 import {
@@ -32,11 +33,13 @@ export class HostResourceBudget {
   constructor(options: {
     readonly policy: () => HostResourcePolicy;
     readonly read?: () => HostResourceReading;
+    readonly readMemory?: () => SystemMemorySample | undefined;
     readonly now?: () => number;
   }) {
     this.#policy = options.policy;
     this.#now = options.now ?? Date.now;
-    this.#read = options.read ?? createHostResourceReading(this.#now);
+    this.#read =
+      options.read ?? createHostResourceReading(this.#now, options.readMemory ?? (() => undefined));
   }
   snapshot(): HostResourceBudgetSnapshot {
     const policy = this.#policy();
@@ -76,7 +79,10 @@ export class HostResourceBudget {
       ...limits,
       cores: nonnegative(reading.cores),
       totalMemoryBytes: nonnegative(reading.totalMemoryBytes),
-      availableMemoryBytes: nonnegative(reading.availableMemoryBytes),
+      ...(reading.availableMemoryBytes === undefined
+        ? {}
+        : { availableMemoryBytes: nonnegative(reading.availableMemoryBytes) }),
+      ...(reading.memoryPressure === undefined ? {} : { memoryPressure: reading.memoryPressure }),
       cpuPercent: Math.min(100, nonnegative(reading.cpuPercent)),
       activeCommands: this.#active,
       queuedCommands: this.#waiting.length,
@@ -193,7 +199,10 @@ export class HostResourceBudget {
   }
 }
 
-function createHostResourceReading(now: () => number): () => HostResourceReading {
+function createHostResourceReading(
+  now: () => number,
+  readMemory: () => SystemMemorySample | undefined,
+): () => HostResourceReading {
   const times = () => {
     let idle = 0;
     let total = 0;
@@ -210,10 +219,13 @@ function createHostResourceReading(now: () => number): () => HostResourceReading
     if (cached !== undefined && now() - at < 2_000) return cached;
     const current = times();
     const elapsed = current.total - previous.total;
+    const memory = readMemory();
     cached = {
+      memoryPressure: memory?.signal ?? "unknown",
       cores: availableParallelism(),
       totalMemoryBytes: totalmem(),
-      availableMemoryBytes: freemem(),
+      availableMemoryBytes:
+        memory?.availableBytes ?? (process.platform === "win32" ? freemem() : undefined),
       cpuPercent:
         elapsed > 0
           ? Math.max(0, Math.min(100, 100 * (1 - (current.idle - previous.idle) / elapsed)))

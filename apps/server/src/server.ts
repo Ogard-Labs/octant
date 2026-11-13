@@ -240,6 +240,7 @@ export function startOctantServer(
       codeSessionConversation,
       codeEvidence,
       hostMemoryGuard,
+      readResourceMemory,
       isProjectPolicyTargetAllowed,
       providerRuntimeRegistry,
       selectCodeConversation,
@@ -339,6 +340,7 @@ export function startOctantServer(
       threadFollowUpSuggestions,
       turnMetrics,
     } = wireAgentRuns({
+      readResourceMemory,
       agentRunParentAuthority,
       agentRunPersistence,
       toolEffectLedger,

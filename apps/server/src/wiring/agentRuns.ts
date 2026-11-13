@@ -598,6 +598,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
   > &
   Pick<
     FoundationsWiring,
+    | "readResourceMemory"
     | "codeBoardEventStore"
     | "isProjectPolicyTargetAllowed"
     | "providerRuntimeRegistry"
@@ -675,6 +676,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     clock: () => new Date().toISOString(),
   });
   const hostResourceBudget = new HostResourceBudget({
+    readMemory: deps.readResourceMemory,
     policy: () => agentRunSettingsStore.current().resourcePolicy ?? DEFAULT_HOST_RESOURCE_POLICY,
   });
   // Managed worktree receipts are required to admit Code children with a
