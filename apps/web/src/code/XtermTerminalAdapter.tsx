@@ -207,6 +207,8 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
       session.current = undefined;
       latestProps.current.onSelectionReader?.(undefined);
     };
+    // Callers passing a custom loadRuntime must keep its identity stable:
+    // swapping loader disposes the xterm session and restarts from props.output.
   }, [loader, hintId]);
 
   useEffect(() => {

@@ -412,6 +412,13 @@ describe("Xterm runtime", () => {
     expect(mocks.reset).toHaveBeenCalledTimes(2);
     expect(mocks.write).toHaveBeenCalledTimes(3);
 
+    // Invalidates legacy prefix tracking when direct chunks were written so a
+    // fallback setOutput resets cleanly instead of slicing against stale text.
+    session.appendOutput?.("live\n");
+    session.setOutput("replacement\n");
+    expect(mocks.reset).toHaveBeenCalledTimes(3);
+    expect(mocks.write).toHaveBeenLastCalledWith("replacement\n");
+
     session.dispose();
   });
 });
