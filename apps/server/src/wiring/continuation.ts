@@ -369,6 +369,10 @@ function startRestartContinuation(
         quitByPerson,
         open: openWakes,
         enabled: () => deps.persistence.readCodeSettings()?.settings.restartContinuation !== false,
+        modeEnabled: () =>
+          enabledModes(
+            deps.persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("code"),
         optedOut: (threadId) => {
           try {
             return (
@@ -380,7 +384,9 @@ function startRestartContinuation(
           }
         },
         heldByCode: new Set(
-          (code?.held ?? []).filter((entry) => entry.mode === "code").map((e) => e.threadId),
+          (code?.held ?? [])
+            .filter((entry: HostRestartRecovery["held"][number]) => entry.mode === "code")
+            .map((entry: HostRestartRecovery["held"][number]) => entry.threadId),
         ),
         attempts: createCodeRestartContinuationAttempts(deps.persistence.connection),
         coordinator: deps.coordinatorService,
@@ -686,6 +692,10 @@ function continueAgentRuns(deps: ContinuationDependencies, quitByPerson: boolean
         return false;
       }
     },
+    modeEnabled: (mode) =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        mode,
+      ),
     latestStartVersion: (run) => agentRunPersistence.latestStartVersion(run.id),
     attempts: createCodeRestartContinuationAttempts(persistence.connection),
     // The parent's live grant is read again inside the resume, after its

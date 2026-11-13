@@ -30,6 +30,8 @@ export interface CoordinatorWakeRestartContinuationPorts {
   readonly open: ReadonlyArray<OpenCoordinatorWake>;
   /** Settings › Code › Continue after restart. */
   readonly enabled: () => boolean;
+  /** Whether Code is on at all; the Code turn path a wake starts through does not read the mode switch. */
+  readonly modeEnabled: () => boolean;
   readonly optedOut: (threadId: string) => boolean;
   /** Threads Code restart recovery held this start; their wakes wait with them. */
   readonly heldByCode: ReadonlySet<string>;
@@ -82,6 +84,10 @@ export async function continueCoordinatorWakesAfterRestart(
     const prior = ports.attempts.read(attemptsKey(wake))?.attempts ?? 0;
     if (prior >= MAX_RESTART_CONTINUATIONS_CUT_OFF) {
       hold("crash-loop", HOLD_DETAIL["crash-loop"]);
+      continue;
+    }
+    if (!ports.modeEnabled()) {
+      hold("refused", "Code is turned off on this host, so this thread's wake waits for you.");
       continue;
     }
     // Counted before the turn starts, so a start that takes the host down

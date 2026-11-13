@@ -5325,8 +5325,10 @@ ls-remote` against the thread's remote and the GitHub reads they already
   so a run never has two executions at once. A run waits for its person
   instead, still Interrupted and resumable only by a person's Resume, when its
   parent mode's Continue after restart setting is off, its parent thread's own
-  switch is off, a person quit Octant while it ran, its own automatic
-  continuation was cut off by a restart twice, or the resume refuses it. The
+  switch is off, a person quit Octant while it ran, the parent's mode is turned
+  off (the run resume does not read the mode switch, so it is checked here),
+  its own automatic continuation was cut off by a restart twice, or the resume
+  refuses it. The
   crash-loop count shares the thread store under the run's own key and is
   keyed by the version the host's resume moved the run to; the chain goes on
   only while the run's latest journaled start is that resume, so a person's
@@ -5348,7 +5350,9 @@ ls-remote` against the thread's remote and the GitHub reads they already
   is dropped rather than run beside it. A wake is held (journaled `held`, so no
   later start runs it, and the thread's next turn is a person's) when Settings
   › Code › Continue after restart or the thread's switch is off, a person quit
-  Octant, Code restart recovery held the same thread, or its own start was cut
+  Octant, Code is turned off (wakes only start Code turns, and that path does
+  not read the mode switch), Code restart recovery held the same thread, or
+  its own start was cut
   off by a restart twice (the crash-loop count sits in the thread store under
   the wake's own key).
 

@@ -173,6 +173,7 @@ function continuationPorts(
     cutOff: host.cutOff,
     readRun: (run) => host.persistence.getById(run.id),
     enabled: () => true,
+    modeEnabled: () => true,
     parentOptedOut: () => false,
     latestStartVersion: (run) => host.persistence.latestStartVersion(run.id),
     attempts: createCodeRestartContinuationAttempts(connection),
@@ -251,7 +252,7 @@ describe("subagent restart continuation", () => {
     expect(afterPerson.continued).toHaveLength(1);
   });
 
-  it("holds a cut-off run for its person after a deliberate quit or with the setting off", async () => {
+  it("holds a cut-off run for its person after a deliberate quit, with the setting off, or with its mode turned off", async () => {
     const connection = openJournalFile();
     const first = startHost(connection);
     const accepted = first.persistence.requestRun({
@@ -272,6 +273,7 @@ describe("subagent restart continuation", () => {
       [{ quitByPerson: true }, "quit"],
       [{ enabled: () => false }, "turned-off"],
       [{ parentOptedOut: () => true }, "opted-out"],
+      [{ modeEnabled: (mode: string) => mode !== "chat" }, "refused"],
     ] as const) {
       const { ports, resumed } = continuationPorts(host, connection, overrides);
       const recovered = await continueAgentRunsCutOffByRestart(ports);

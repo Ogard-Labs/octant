@@ -136,6 +136,7 @@ function ports(
     quitByPerson: false,
     open: host.wakes.open(),
     enabled: () => true,
+    modeEnabled: () => true,
     optedOut: () => false,
     heldByCode: new Set(),
     attempts: createCodeRestartContinuationAttempts(connection),
@@ -219,11 +220,15 @@ describe("coordinator wakes after a restart", () => {
     expect(host.wakes.open()).toEqual([]);
   });
 
-  it("holds an open wake after a deliberate quit, with the setting off, or behind a held thread", async () => {
+  it("holds an open wake after a deliberate quit, with the setting or Code off, or behind a held thread", async () => {
     for (const [overrides, held] of [
       [{ quitByPerson: true }, [{ reason: "quit" }]],
       [{ enabled: () => false }, [{ reason: "turned-off" }]],
       [{ optedOut: () => true }, [{ reason: "opted-out" }]],
+      [
+        { modeEnabled: () => false },
+        [{ reason: "refused", detail: expect.stringContaining("Code is turned off") }],
+      ],
       [{ heldByCode: new Set([COORDINATOR]) }, []],
     ] as const) {
       const connection = openStoreFile();

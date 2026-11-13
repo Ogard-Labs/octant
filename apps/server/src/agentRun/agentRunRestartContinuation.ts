@@ -33,6 +33,12 @@ export interface AgentRunRestartContinuationPorts {
   readonly readRun: (run: AgentRun) => AgentRun | undefined;
   /** The parent mode's Continue after restart setting. */
   readonly enabled: (mode: AgentRun["workspaceReceipt"]["mode"]) => boolean;
+  /**
+   * Whether the parent's mode is on at all. The run resume does not read the
+   * mode switch, so a run under a mode turned off would otherwise start
+   * provider work again.
+   */
+  readonly modeEnabled: (mode: AgentRun["workspaceReceipt"]["mode"]) => boolean;
   /** The parent thread's own Continue after restart switch is off. */
   readonly parentOptedOut: (run: AgentRun) => boolean;
   /** The run version its latest journaled start or resume reached, if the journal says. */
@@ -47,6 +53,12 @@ const HOLD_DETAIL = {
   "opted-out": "Continue after restart is off for this thread, so its subagent waits for you.",
   "crash-loop":
     "Octant stopped twice while continuing this subagent by itself. Check it before resuming.",
+} as const;
+
+const MODE_OFF_DETAIL = {
+  chat: "Chat is turned off on this host, so this subagent waits for you.",
+  work: "Work is turned off on this host, so this subagent waits for you.",
+  code: "Code is turned off on this host, so this subagent waits for you.",
 } as const;
 
 /** The crash-loop count's key: one row per run, beside the thread rows. */
@@ -105,6 +117,10 @@ export async function continueAgentRunsCutOffByRestart(
           : 0;
     if (prior >= MAX_RESTART_CONTINUATIONS_CUT_OFF) {
       hold("crash-loop", HOLD_DETAIL["crash-loop"]);
+      continue;
+    }
+    if (!ports.modeEnabled(mode)) {
+      hold("refused", MODE_OFF_DETAIL[mode]);
       continue;
     }
     // A resume moves the run one version on to Starting; counted before it
