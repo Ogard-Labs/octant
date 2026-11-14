@@ -526,6 +526,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     contextId: BrowserContextId,
     point: { readonly x: number; readonly y: number },
     signal: AbortSignal,
+    _selectionId?: string,
+    withMarkup?: boolean,
   ): Promise<BrowserPointObservation> {
     const page = await this.#page(contextId, signal);
     const owned = this.#contexts.get(contextId);
@@ -565,6 +567,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         },
         point,
         signal,
+        withMarkup === true,
       );
     } finally {
       finished = true;

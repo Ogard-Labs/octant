@@ -58,7 +58,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 8         | 3       | 3            | 2                   |
+| [Browser](#browser)                                                                   | 7         | 3       | 3            | 1                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 4       | 2            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **258**   | **155** | **97**       | **6**               |
+| **All areas**                                                                         | **257**   | **155** | **97**       | **5**               |
 
 ## Principles and hard lines
 
@@ -2900,9 +2900,10 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - At most 8 of those captures are recordings: keeping a ninth drops the thread's oldest recording, never a screenshot. It is the same journal-derived rule as the capture limit (no drop event; listing, reads, export and recovery all apply it, and purge erases everything as before), and it bounds a thread's recordings at about 16 MiB instead of about 64 MiB.
 - A thread also keeps the agent's last 50 Browser steps (operation, element role and name, page origin and path, the one-line result or failure category; never typed text, a field value, or a secret query value) on the same journal rules as captures. Beside its captures they are the thread's "Browser proof".
 - The person can draw on a kept capture and add it to the thread's message: "Draw on page" keeps a capture through the Screenshot route and draws on that picture only, then "Add to chat" hands a PNG to the thread's composer as an ordinary image attachment. It sends nothing, stores nothing beside the capture, and is offered only in a Work or Code thread's Browser.
+- "Pick element" in a Work or Code thread's Browser adds one element's selector, tag, page address, a few computed styles and its outer HTML (form values, editable text, script bodies, inline styles, event handlers and addresses left out, cut at 4,096 characters with the cut marked; a note's read never carries markup) to the thread's draft (maintainer decision, 2026-11-14). The host reads it as it reads a pointed-at note's element, refuses where that read refuses, marks the thread as holding outside content before answering, and keeps nothing.
 - Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Partly built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings), and [Draw on page toolbar](browser-captures.md#draw-on-page-toolbar).
+Status: Partly built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof), [Recordings](browser-captures.md#recordings), [Draw on page toolbar](browser-captures.md#draw-on-page-toolbar), and [Picking an element](browser-captures.md#picking-an-element).
 
 ### Browser for agents
 
@@ -3002,15 +3003,6 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 - Named account profiles have host-assigned identities, native local labels and separate persistent stores. A local person explicitly selects one; task defaults never grant site, Project or credential authority. Approval names come from the native registry, and origin grants/extensions remain isolated per identity. Unknown identities, paired/unattended callers and a missing native owner refuse. Stores and the name registry are not exported or synced; Private, Project and Personal retain their behavior.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
-
-### Browser element picker
-
-In a Work or Code thread's Browser the person may click an element to attach a structured snapshot of it to the composer: a selector, its outer HTML trimmed to a fixed bound, and a subset of its computed styles (maintainer decision, 2026-11-14).
-
-- The snapshot is read by the same host-owned top-frame reader and checks as a pointed-at feedback note and stays on this computer until the person sends the message it is attached to.
-- It is outside content and marks the thread as other page content does; picking sends, queues and approves nothing.
-
-Status: Designed, not built. Since: 2026-11-14. Detail: [Browser for agents: Attaching a picked element to the composer](browser-agent-tool.md#attaching-a-picked-element-to-the-composer).
 
 ### Page-declared tools
 

@@ -4186,6 +4186,11 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-accent) 42%, transparent);
 }
 
+/* A headless preview is a still: picking can show where a click lands, not the element under it. */
+.browser-workspace__remote--picking .browser-workspace__preview {
+  cursor: crosshair;
+}
+
 .browser-workspace__preview {
   display: block;
   width: 100%;

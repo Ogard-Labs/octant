@@ -2803,9 +2803,23 @@ describe("BrowserSurfaceHost", () => {
       host.setPointSelection(contextId, { ...owner, windowId: "other" }, true, requestId),
     ).toThrow();
     host.setPointSelection(contextId, owner, true, requestId);
+    // While armed, the element under the pointer is outlined by the page's own inspector.
+    const send = vi.mocked(created.webContents.debugger.sendCommand);
+    send.mockImplementation(async (method) =>
+      method === "DOM.getNodeForLocation" ? { backendNodeId: 7 } : undefined,
+    );
+    mouse?.({ preventDefault: () => undefined }, { type: "mouseMove", x: 150, y: 110 });
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        "Overlay.highlightNode",
+        expect.objectContaining({ backendNodeId: 7 }),
+      ),
+    );
     const selected = vi.fn();
     mouse?.({ preventDefault: selected }, { type: "mouseDown", button: "left", x: 160, y: 120 });
     expect(selected).toHaveBeenCalledOnce();
+    // The outline is gone before the read crops the element.
+    expect(send).toHaveBeenLastCalledWith("Overlay.hideHighlight");
     expect(input).toHaveBeenCalledTimes(2);
     expect(window.webContents.send).toHaveBeenLastCalledWith(
       "octant:browser-surface:state",

@@ -446,6 +446,15 @@ interface OwnedSurface {
         readonly shellWindow: BrowserSurfaceShellWindowPort;
         readonly viewportBounds: { readonly width: number; readonly height: number };
         personInputs: number | undefined;
+        /**
+         * The armed page's own hover outline: one read in flight, whether one
+         * shows, and the debugger the outline attached, released with the selection.
+         */
+        highlight: {
+          reading: boolean;
+          shown: boolean;
+          attached: BrowserSurfaceViewPort["webContents"]["debugger"] | undefined;
+        };
       }
     | undefined;
   pointSelectionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1168,7 +1177,85 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const clearPointSelection = (owned: OwnedSurface): void => {
     if (owned.pointSelectionTimer !== undefined) clearTimeout(owned.pointSelectionTimer);
     owned.pointSelectionTimer = undefined;
+    const ended = owned.pointSelection;
     owned.pointSelection = undefined;
+    const attached = ended?.highlight.attached;
+    // Detaching drops the outline with the attachment. It waits behind any
+    // surface action, so a read or agent step reusing it is never cut off.
+    if (attached !== undefined)
+      void queueSurfaceAction(owned, async () => {
+        if (owned.pointSelection?.highlight.attached !== attached) detachAgentDebugger(attached);
+      }).catch(() => undefined);
+    else if (ended?.highlight.shown === true) {
+      const client = owned.tabs.find((tab) => tab.tabId === ended.tabId)?.contents.debugger;
+      if (client?.isAttached() === true && agentDebuggers.has(client))
+        void client.sendCommand("Overlay.hideHighlight").catch(() => undefined);
+    }
+  };
+
+  // While pointing is armed the person sees which element a click would pick:
+  // the page's own inspector outline follows the pointer. It is drawn by the
+  // browser over the page, never injected into it, and only on a debugger the
+  // host holds; one someone else attached (developer tools) gets no outline.
+  // One read is in flight at a time, so a fast pointer costs at most one
+  // lookup per protocol round trip.
+  const highlightPointed = (
+    owned: OwnedSurface,
+    view: BrowserSurfaceViewPort,
+    x: number,
+    y: number,
+  ): void => {
+    const selection = owned.pointSelection;
+    const client = view.webContents.debugger;
+    if (
+      selection?.state.status !== "armed" ||
+      selection.highlight.reading ||
+      view.webContents.isDestroyed() ||
+      (client.isAttached() && !agentDebuggers.has(client))
+    )
+      return;
+    if (!client.isAttached()) {
+      try {
+        client.attach("1.3");
+      } catch {
+        return;
+      }
+      agentDebuggers.add(client);
+      selection.highlight.attached = client;
+    }
+    selection.highlight.reading = true;
+    const armed = () => owned.pointSelection === selection && selection.state.status === "armed";
+    void (async () => {
+      try {
+        await client.sendCommand("DOM.enable");
+        await client.sendCommand("Overlay.enable");
+        const hit = await client.sendCommand("DOM.getNodeForLocation", {
+          x: Math.floor(x),
+          y: Math.floor(y),
+          includeUserAgentShadowDOM: false,
+          ignorePointerEventsNone: false,
+        });
+        const backendNodeId =
+          typeof hit === "object" && hit !== null && "backendNodeId" in hit
+            ? hit.backendNodeId
+            : undefined;
+        if (!armed() || typeof backendNodeId !== "number") return;
+        await client.sendCommand("Overlay.highlightNode", {
+          backendNodeId,
+          highlightConfig: {
+            showInfo: true,
+            contentColor: { r: 64, g: 132, b: 255, a: 0.22 },
+            borderColor: { r: 64, g: 132, b: 255, a: 0.9 },
+          },
+        });
+        if (armed()) selection.highlight.shown = true;
+        else void client.sendCommand("Overlay.hideHighlight").catch(() => undefined);
+      } catch {
+        /* The outline is a courtesy; picking still works without it. */
+      } finally {
+        selection.highlight.reading = false;
+      }
+    })();
   };
 
   const surface = (contextId: string): OwnedSurface => {
@@ -1628,6 +1715,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         if (selection !== undefined && selection.expiresAt <= Date.now())
           clearPointSelection(owned);
         if (selection?.state.status === "armed" && owned.pointSelection === selection) {
+          if (
+            input.type === "mouseMove" &&
+            "x" in input &&
+            "y" in input &&
+            typeof input.x === "number" &&
+            typeof input.y === "number" &&
+            Number.isFinite(input.x) &&
+            Number.isFinite(input.y) &&
+            selection.tabId === tabId
+          )
+            highlightPointed(owned, view, input.x, input.y);
           if (input.type === "keyDown" && "key" in input && input.key === "Escape") {
             clearPointSelection(owned);
             prevent();
@@ -1664,6 +1762,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 point: { x: input.x / bounds.width, y: input.y / bounds.height },
               };
               selection.personInputs = owned.personInputs + 1;
+              // The outline must not be in the picture the read crops next.
+              if (selection.highlight.shown) {
+                selection.highlight.shown = false;
+                void view.webContents.debugger
+                  .sendCommand("Overlay.hideHighlight")
+                  .catch(() => undefined);
+              }
               owned.selectionRelease = {
                 tabId,
                 documentRevision: tab.documentRevision,
@@ -2243,6 +2348,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           documentRevision: tab.documentRevision,
           expiresAt: Date.now() + 60_000,
           personInputs: undefined,
+          highlight: { reading: false, shown: false, attached: undefined },
           shellWindow: owned.shellWindow,
           viewportBounds: { width: owned.lastBounds.width, height: owned.lastBounds.height },
         };
@@ -2713,6 +2819,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       point: { readonly x: number; readonly y: number },
       signal: AbortSignal,
       selectionId: string,
+      withMarkup = false,
     ): Promise<BrowserFeedbackPointObservation> => {
       const owned = surface(contextId);
       let checkObservation: () => void;
@@ -2771,6 +2878,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               },
               point,
               captureSignal,
+              withMarkup,
             ),
           );
         } finally {
