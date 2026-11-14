@@ -5,9 +5,10 @@ import {
   listRemoteActionCatalog,
   classifyRemoteListenerAddress,
   remoteListenerOrigin,
-  DEVICE_ABSOLUTE_TTL_MS,
-  DEVICE_INACTIVITY_TTL_MS,
+  deviceRegistrationDeadline,
   evaluateDeviceRegistration,
+  NEVER_EXPIRES_AT_MS,
+  retimeDeviceRegistration,
   evaluatePairingAttempt,
   evaluatePairingClaim,
   evaluateSession,
@@ -409,32 +410,63 @@ describe("remote access policy", () => {
     });
   });
 
-  it("expires devices by absolute and inactivity windows without inventing recovery", () => {
+  it("expires a device at its registration deadline without inventing recovery", () => {
     const createdAt = 1_000;
+    const expiresAt = deviceRegistrationDeadline({ createdAt, lifetime: "30-days" });
+    expect(expiresAt).toBe(createdAt + 30 * 24 * 60 * 60 * 1_000);
+    expect(evaluateDeviceRegistration({ state: "active", now: expiresAt - 1, expiresAt })).toEqual({
+      kind: "active",
+    });
+    expect(evaluateDeviceRegistration({ state: "active", now: expiresAt, expiresAt })).toEqual({
+      kind: "expired",
+      reason: "registration-expired",
+    });
+    expect(evaluateDeviceRegistration({ state: "revoked", now: createdAt + 1, expiresAt })).toEqual(
+      { kind: "rejected", reason: "revoked" },
+    );
+  });
+
+  it("keeps a never-expiring pairing current past every other length", () => {
+    const createdAt = 1_000;
+    const expiresAt = deviceRegistrationDeadline({ createdAt, lifetime: "never" });
+    expect(expiresAt).toBe(NEVER_EXPIRES_AT_MS);
     expect(
       evaluateDeviceRegistration({
         state: "active",
-        now: createdAt + DEVICE_ABSOLUTE_TTL_MS,
-        createdAt,
-        lastSeenAt: createdAt + 1_000,
+        now: createdAt + 50 * 365 * 24 * 60 * 60 * 1_000,
+        expiresAt,
       }),
-    ).toEqual({ kind: "expired", reason: "absolute-expiry" });
+    ).toEqual({ kind: "active" });
+  });
+
+  it("moves only a still-current registration when the length changes, from its pairing time", () => {
+    const day = 24 * 60 * 60 * 1_000;
+    const createdAt = 1_000;
+    const expiresAt = createdAt + 30 * day;
+    const now = createdAt + 10 * day;
     expect(
-      evaluateDeviceRegistration({
-        state: "active",
-        now: createdAt + DEVICE_INACTIVITY_TTL_MS,
-        createdAt,
-        lastSeenAt: createdAt,
-      }),
-    ).toEqual({ kind: "expired", reason: "inactivity-expiry" });
+      retimeDeviceRegistration({ state: "active", now, createdAt, expiresAt, lifetime: "1-year" }),
+    ).toEqual({ kind: "retimed", expiresAt: createdAt + 365 * day });
+    // Shortening below the device's age expires it at once.
     expect(
-      evaluateDeviceRegistration({
-        state: "revoked",
-        now: createdAt + 1,
-        createdAt,
-        lastSeenAt: createdAt,
-      }),
-    ).toEqual({ kind: "rejected", reason: "revoked" });
+      retimeDeviceRegistration({ state: "active", now, createdAt, expiresAt, lifetime: "7-days" }),
+    ).toEqual({ kind: "retimed", expiresAt: createdAt + 7 * day });
+    expect(
+      retimeDeviceRegistration({ state: "active", now, createdAt, expiresAt, lifetime: "never" }),
+    ).toEqual({ kind: "retimed", expiresAt: NEVER_EXPIRES_AT_MS });
+    expect(
+      retimeDeviceRegistration({ state: "active", now, createdAt, expiresAt, lifetime: "30-days" }),
+    ).toEqual({ kind: "unchanged" });
+    // A lapsed, expired, or revoked pairing is never revived by a longer length.
+    for (const lapsed of [
+      { state: "active" as const, now: expiresAt },
+      { state: "expired" as const, now },
+      { state: "revoked" as const, now },
+    ]) {
+      expect(
+        retimeDeviceRegistration({ ...lapsed, createdAt, expiresAt, lifetime: "never" }),
+      ).toEqual({ kind: "unchanged" });
+    }
   });
 
   it("treats session expiry as deny and exposes rotation without extending expiry", () => {

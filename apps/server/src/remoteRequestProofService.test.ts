@@ -7,6 +7,7 @@ import {
   buildRemoteChallengeProofPayload,
   buildRemoteRequestProofPayload,
   canonicalizeRemotePathQuery,
+  NEVER_EXPIRES_AT_MS,
   sessionExpiry,
 } from "@octant/domain";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
@@ -166,6 +167,51 @@ describe("RemoteRequestProofService", () => {
       connection.close();
     },
   );
+
+  it("refuses to sign in a device past its registration deadline, before the expiry is reconciled", () => {
+    const { service, setClock, connection } = setup();
+    setClock(now + 30 * 24 * 60 * 60 * 1_000);
+    expect(() => service.issueChallenge({ hostId, deviceId, credentialGeneration: 1 })).toThrow(
+      expect.objectContaining({ category: "invalid", reasonCode: "expired" }),
+    );
+    expect(service.deviceStanding({ hostId, deviceId, credentialGeneration: 1, origin })).toBe(
+      "credential-expired",
+    );
+    connection.close();
+  });
+
+  it("refuses an open session's request once its device's registration deadline passes", () => {
+    const { service, privateKey, setClock, connection } = setup();
+    connection
+      .prepare("UPDATE remote_device_projection SET expires_at = ? WHERE device_id = ?")
+      .run(new Date(now + 60_000).toISOString(), deviceId);
+    const session = issueSession(service, privateKey);
+    setClock(now + 60_000);
+    expect(() =>
+      service.verifyRequest(
+        makeFacts(session, privateKey, {
+          proof: { timestamp: new Date(now + 60_000).toISOString() },
+        }),
+      ),
+    ).toThrow(RemoteRequestProofError);
+    connection.close();
+  });
+
+  it("signs in a device whose pairing never expires long past the former 30-day deadline", () => {
+    const { service, privateKey, setClock, connection } = setup();
+    connection
+      .prepare("UPDATE remote_device_projection SET expires_at = ? WHERE device_id = ?")
+      .run(new Date(NEVER_EXPIRES_AT_MS).toISOString(), deviceId);
+    const later = now + 400 * 24 * 60 * 60 * 1_000;
+    setClock(later);
+    const session = issueSession(service, privateKey);
+    expect(
+      service.verifyRequest(
+        makeFacts(session, privateKey, { proof: { timestamp: new Date(later).toISOString() } }),
+      ),
+    ).toMatchObject({ deviceId, freshness: "current" });
+    connection.close();
+  });
 
   it("preserves revoked when production revocation advances the device generation", () => {
     const { connection, service } = setup();

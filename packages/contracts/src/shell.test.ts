@@ -120,6 +120,7 @@ const settings = {
   browserUploadFileCountLimit: 5,
   rememberedBrowserTransfers: [],
   persistentBrowserOwner: false,
+  pairedDeviceLifetime: "30-days" as const,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 

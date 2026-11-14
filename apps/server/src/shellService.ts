@@ -138,6 +138,13 @@ export interface ShellServiceOptions {
   readonly departedThread?: (thread: MovedThreadReference) => boolean;
 }
 
+export interface ShellSettingsChange {
+  readonly previous: ShellSettings;
+  readonly settings: ShellSettings;
+  /** Who replaced them: the paired device, or the host's actor for a window. */
+  readonly actor: EventActor;
+}
+
 export class ShellServiceError extends Error {
   override readonly name = "ShellServiceError";
 
@@ -155,6 +162,9 @@ export class ShellService implements ShellServiceApi {
   readonly #home: string | undefined;
   readonly #departedThread: ShellServiceOptions["departedThread"];
   readonly #registeredWindowIds = new Set<WindowId>();
+  readonly #settingsReplacedListeners: Array<
+    (change: ShellSettingsChange) => (() => void) | undefined
+  > = [];
 
   constructor(options: ShellServiceOptions) {
     this.#persistence = options.persistence;
@@ -376,12 +386,36 @@ export class ShellService implements ShellServiceApi {
         message: `Switch away from the active ${disabledActiveWorkspace.activeMode} workspace before disabling it.`,
       });
     }
-    const committed = this.#persistence.journal.append({
-      aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
-      expectedVersion,
-      events: [this.#pendingEvent("shell.settings-replaced", { settings }, actor)],
-    });
+    const change = {
+      previous: current,
+      settings,
+      actor: actor ?? { kind: "system" as const, actorId: OCTANT_LOCAL_ACTOR_ID },
+    };
+    // The settings and every event a listener journals for them are one
+    // journal unit: a listener that fails, or a process that stops part way,
+    // leaves neither, so no setting is in force without its consequences.
+    const { committed, afterCommit } = this.#persistence.journal.transaction(() => ({
+      committed: this.#persistence.journal.append({
+        aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
+        expectedVersion,
+        events: [this.#pendingEvent("shell.settings-replaced", { settings }, actor)],
+      }),
+      afterCommit: this.#settingsReplacedListeners.map((listener) => listener(change)),
+    }));
+    for (const action of afterCommit) action?.();
     return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+  }
+
+  /**
+   * Hears every settings replacement a person made, from a window or a paired
+   * device, inside the journal unit that records it: what the listener
+   * journals commits with the settings or not at all. It may return work with
+   * side effects outside the journal, run once the unit has committed. Remote
+   * access is wired after the shell, so it subscribes here to apply a new
+   * paired-device length to the devices.
+   */
+  onSettingsReplaced(listener: (change: ShellSettingsChange) => (() => void) | undefined): void {
+    this.#settingsReplacedListeners.push(listener);
   }
 
   /**
