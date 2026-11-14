@@ -2258,7 +2258,7 @@ function ownMemoryAccount(
     id: String(instance.id),
     displayName: instance.displayName,
     driverKind: instance.driverKind,
-    ...(instance.ownMemory === true ? { ownMemory: true as const } : {}),
+    ...(instance.ownMemory === undefined ? {} : { ownMemory: instance.ownMemory }),
   };
 }
 

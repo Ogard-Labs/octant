@@ -92,12 +92,21 @@ const DECODED_MESSAGE_KINDS = new Set([
   "ignored",
 ]);
 
-interface ClaudeFileChange {
-  readonly path: string;
-  readonly change: "modified";
-  readonly diff: string;
-  readonly successSummary: string;
-}
+/**
+ * What an Edit or Write call changes. `outside` is a file outside the
+ * thread's checkout, which the gate lets through only at Full access or in a
+ * worktree the session was let into: it is journaled as the tool step it is,
+ * with no file change or diff the checkout's views would show as theirs.
+ */
+type ClaudeFileChange =
+  | {
+      readonly kind: "checkout";
+      readonly path: string;
+      readonly change: "modified";
+      readonly diff: string;
+      readonly successSummary: string;
+    }
+  | { readonly kind: "outside"; readonly successSummary: string };
 
 export interface ClaudeToolState {
   readonly toolCallId: string;
@@ -133,6 +142,12 @@ export interface ClaudeEventContext {
   readonly occurredAt: UtcTimestamp;
   readonly projectRoot: string;
   readonly isProjectConfinedPath: (absolutePath: string) => boolean;
+  /**
+   * Whether a file outside the checkout is one the gate lets this session
+   * write: any at Full access, and those in a worktree the session was let
+   * into. Absent, or false, keeps an outside path a protocol failure.
+   */
+  readonly writesOutsideCheckout?: (absolutePath: string) => boolean;
   readonly claudeSessionId: string;
   sequence: number;
   terminal: boolean;
@@ -474,10 +489,49 @@ function jsonString(
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * The note journaled on the start of a tool whose effect the thread's views
+ * do not follow, so the record says so where the call is.
+ *
+ * - `REPL` runs code in Claude's own process: outside the command sandbox
+ *   that holds every shell command below Full access, and outside the secret
+ *   guard's file checks.
+ * - `EnterWorktree` and `ExitWorktree` move the session's working directory.
+ *   A thread is bound to one checkout, and its file views and diffs stay on
+ *   it; a worktree inside the Project still shows its files under the
+ *   worktree's own folder there.
+ */
+function toolStartNotice(
+  content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
+): string | undefined {
+  switch (content.toolName) {
+    case "REPL":
+      return "Unsandboxed: runs code in Claude's own process, outside the command sandbox and the secret guard.";
+    case "EnterWorktree": {
+      const named = jsonString(content.input, "path") ?? jsonString(content.input, "name");
+      const target = named === undefined ? undefined : normalized(named, SUMMARY_MAX_CHARACTERS);
+      return `This call moves Claude's session into a worktree${target === undefined ? "" : ` (${target})`}. The thread's file views and diffs stay on its original checkout.`;
+    }
+    case "ExitWorktree":
+      return "This call moves Claude's session back to the thread's checkout.";
+    default:
+      return undefined;
+  }
+}
+
 function contentShape(value: string): string {
   const lines = value.split("\n").length;
   const characters = Array.from(value).length;
   return `${lines} ${lines === 1 ? "line" : "lines"}, ${characters} ${characters === 1 ? "character" : "characters"}`;
+}
+
+function writesOutsideCheckout(context: ClaudeEventContext, value: string): boolean {
+  const target = isAbsolute(value) ? resolve(value) : resolve(context.projectRoot, value);
+  try {
+    return context.writesOutsideCheckout?.(target) === true;
+  } catch {
+    return false;
+  }
 }
 
 function fileChange(
@@ -486,13 +540,18 @@ function fileChange(
 ): ClaudeFileChange | undefined {
   if (content.toolName !== "Edit" && content.toolName !== "Write") return undefined;
   const pathValue = jsonString(content.input, "file_path");
-  const path = pathValue === undefined ? undefined : confinedRelativePath(context, pathValue);
-  if (path === undefined) return undefined;
+  if (pathValue === undefined) return undefined;
+  const path = confinedRelativePath(context, pathValue);
+  if (path === undefined && !writesOutsideCheckout(context, pathValue)) return undefined;
   if (content.toolName === "Edit") {
     const previous = jsonString(content.input, "old_string");
     const replacement = jsonString(content.input, "new_string");
     if (previous === undefined || replacement === undefined) return undefined;
+    if (path === undefined) {
+      return { kind: "outside", successSummary: "File edit completed outside the checkout." };
+    }
     return {
+      kind: "checkout",
       path,
       change: "modified",
       diff: truncate(
@@ -504,7 +563,11 @@ function fileChange(
   }
   const replacement = jsonString(content.input, "content");
   if (replacement === undefined) return undefined;
+  if (path === undefined) {
+    return { kind: "outside", successSummary: "File write completed outside the checkout." };
+  }
   return {
+    kind: "checkout",
     path,
     change: "modified",
     diff: truncate(
@@ -650,6 +713,18 @@ function mapToolUse(
         ...(task === undefined ? {} : { task }),
         status: "starting",
         summary: "Claude started a subagent.",
+      }),
+    ];
+  }
+  const notice = toolStartNotice(content);
+  if (notice !== undefined) {
+    return [
+      start,
+      ...inputContent(),
+      event(context, {
+        kind: "tool-progress",
+        toolCallId: resolved.state.toolCallId,
+        message: notice,
       }),
     ];
   }
@@ -966,6 +1041,16 @@ function mapToolResults(
           kind: "tool-failure",
           toolCallId: state.toolCallId,
           message: "Tool failed.",
+        }),
+      );
+      continue;
+    }
+    if (state.fileChange?.kind === "outside") {
+      results.push(
+        event(context, {
+          kind: "tool-success",
+          toolCallId: state.toolCallId,
+          summary: state.fileChange.successSummary,
         }),
       );
       continue;

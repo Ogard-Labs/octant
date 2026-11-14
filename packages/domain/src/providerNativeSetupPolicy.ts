@@ -21,6 +21,17 @@ export function accountRunsAsItself(instance: {
   return instance.nativeSetup !== false;
 }
 
+/**
+ * Whether a Claude Code or Codex account keeps the provider's own memory. On
+ * unless the person turned it off: Octant does not take a provider's own
+ * features away (maintainer decision, 2026-11-14).
+ */
+export function accountKeepsOwnMemory(instance: {
+  readonly ownMemory?: boolean | undefined;
+}): boolean {
+  return instance.ownMemory !== false;
+}
+
 export interface ProviderNativeSetupInput {
   readonly driverKind: ProviderDriverKind;
   readonly mode: "chat" | "work" | "code";
@@ -114,14 +125,15 @@ export function providerRunsAsItself(setup: ProviderNativeSetup | undefined): bo
 
 /**
  * Whether a session launches with the provider's own memory on. The account's
- * own setting decides, and nothing else turns it on: not "Run as itself", not
- * a trusted Project, not Full access. Plan keeps it off because a Plan launch
+ * own setting decides (on unless the person turned it off,
+ * `accountKeepsOwnMemory`), and nothing else turns it on: not "Run as itself",
+ * not a trusted Project, not Full access. Plan keeps it off because a Plan launch
  * may write nothing a later session would load, and the runtime's memory
  * folder is exactly that. Chat keeps it off too: its launch is confined the
  * same way, and no Chat launch has been run with a provider's memory on.
  */
 export function providerOwnMemoryLaunches(input: {
-  /** The account's own switch: `ownMemory` on the provider instance. */
+  /** The account's own switch (`accountKeepsOwnMemory`). */
   readonly accountAllows: boolean;
   readonly mode: "chat" | "work" | "code" | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;

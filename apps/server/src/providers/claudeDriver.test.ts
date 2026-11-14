@@ -17,7 +17,7 @@ import {
 } from "@octant/provider-sdk/chat-conformance";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -821,17 +821,13 @@ describe("Claude execution policy", () => {
         await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
         const open = f.opens[0]!;
         expect(open.withheldTools).toEqual(
-          expect.arrayContaining([
-            "EnterPlanMode",
-            "EnterWorktree",
-            "Workflow",
-            "CronCreate",
-            "ScheduleWakeup",
-            "REPL",
-          ]),
+          expect.arrayContaining(["EnterPlanMode", "Workflow", "CronCreate", "ScheduleWakeup"]),
         );
         // A background command or a command watch is held inside its turn.
         expect(open.withheldTools).not.toContain("Monitor");
+        for (const lifted of ["EnterWorktree", "ExitWorktree", "REPL"]) {
+          expect(open.withheldTools).not.toContain(lifted);
+        }
         // With the person's setup off, its features stay withheld too.
         expect(open.withheldTools).toEqual(
           expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill", "Artifact"]),
@@ -884,8 +880,15 @@ describe("Claude execution policy", () => {
         ).resolves.toMatchObject({
           behavior: executionPolicy === "full-access" ? "allow" : "deny",
         });
-        await expect(tool("EnterWorktree", { name: "x" }, "worktree")).resolves.toMatchObject({
-          behavior: "deny",
+        // A worktree switch and in-process code take the shell's rules.
+        await expect(tool("EnterWorktree", { name: "x" }, "worktree")).resolves.toEqual({
+          behavior: asked,
+        });
+        await expect(tool("ExitWorktree", { action: "keep" }, "exit-worktree")).resolves.toEqual({
+          behavior: asked,
+        });
+        await expect(tool("REPL", { code: "1 + 1" }, "repl")).resolves.toEqual({
+          behavior: asked,
         });
       } finally {
         await acquired.close();
@@ -899,20 +902,113 @@ describe("Claude execution policy", () => {
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
       const open = plan.opens[0]!;
-      // Plan keeps its own read-only list and nothing beyond it.
+      // Plan keeps its own read-only list and nothing beyond it: no worktree
+      // switch and no in-process code.
       expect(open.withheldTools).toBeUndefined();
-      await expect(
-        open.preToolUse({
-          sessionId: "sdk-session-1",
-          projectRoot,
-          toolName: "FutureTool",
-          input: {},
-          toolUseId: "plan-future",
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toMatchObject({ behavior: "deny" });
+      for (const [toolName, input] of [
+        ["FutureTool", {}],
+        ["EnterWorktree", { name: "x" }],
+        ["ExitWorktree", { action: "keep" }],
+        ["REPL", { code: "1 + 1" }],
+      ] as const) {
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId: `plan-${toolName}`,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      }
     } finally {
       await acquired.close();
+    }
+  });
+
+  it("follows Claude into a worktree outside the Project only once the switch is allowed", async () => {
+    const worktree = "/tmp/octant-claude-worktrees/feature";
+    for (const executionPolicy of ["approval-gated", "full-access"] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const signal = new AbortController().signal;
+        const tool = (
+          toolName: string,
+          input: Record<string, unknown>,
+          toolUseId: string,
+          cwd = projectRoot,
+        ) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot: cwd,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        const readThere = { file_path: `${worktree}/src/a.ts` };
+        // Before any switch, a call from that folder is outside the Project.
+        await expect(tool("Read", readThere, "early", worktree)).resolves.toMatchObject({
+          behavior: "deny",
+        });
+        if (executionPolicy === "approval-gated") {
+          // A worktree outside the Project's folders asks below Full access,
+          // and asking grants nothing yet.
+          await expect(tool("EnterWorktree", { path: worktree }, "enter")).resolves.toEqual({
+            behavior: "ask",
+          });
+          await expect(tool("Read", readThere, "unanswered", worktree)).resolves.toMatchObject({
+            behavior: "deny",
+          });
+          continue;
+        }
+        await expect(tool("EnterWorktree", { path: worktree }, "enter")).resolves.toEqual({
+          behavior: "allow",
+        });
+        await expect(tool("Read", readThere, "after", worktree)).resolves.toEqual({
+          behavior: "allow",
+        });
+        await expect(
+          tool("Bash", { command: "git status" }, "shell-after", worktree),
+        ).resolves.toEqual({ behavior: "allow" });
+      } finally {
+        await acquired.close();
+      }
+    }
+  });
+
+  it("drops the secret refusals at Full access and keeps them at every posture below it", async () => {
+    const protectedFile = join(homedir(), ".aws", "credentials");
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const answer = await open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: protectedFile },
+          toolUseId: `secret-${executionPolicy}`,
+          signal: new AbortController().signal,
+        });
+        if (executionPolicy === "full-access") {
+          // Full access reads any file, outside the Project and protected ones too.
+          expect(answer).toEqual({ behavior: "allow" });
+        } else {
+          expect(answer).toMatchObject({ behavior: "deny" });
+          expect(answer.behavior === "deny" ? answer.message : "").toContain(
+            "Cloud command-line credentials",
+          );
+        }
+      } finally {
+        await acquired.close();
+      }
     }
   });
 
@@ -3957,9 +4053,8 @@ describe("Claude artifact delivery", () => {
       expect(open.tools).toEqual(
         expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill"]),
       );
-      // The account's own MCP servers cannot start without a Project's, so
-      // the driver leaves them off rather than claim them.
-      expect(open.nativeSetup).toEqual({ ...ownSetup, toolServers: false });
+      // The account's own MCP servers start in an untrusted Project too.
+      expect(open.nativeSetup).toEqual(ownSetup);
       // Only the guard that kept Claude Code's own subagents off goes.
       expect(open.authEnvironment).not.toHaveProperty("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS");
       const { CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: _subagentsOff, ...channelGuards } =
@@ -3989,9 +4084,9 @@ describe("Claude artifact delivery", () => {
           behavior: "ask",
         },
       );
-      // An MCP server's tool is not held without the trusted Project's code.
-      await expect(ask("mcp__linear__search", { query: "x" }, "mcp-1")).resolves.toMatchObject({
-        behavior: "deny",
+      // The account's own MCP server's tool asks at Guarded.
+      await expect(ask("mcp__linear__search", { query: "x" }, "mcp-1")).resolves.toEqual({
+        behavior: "ask",
       });
     } finally {
       await acquired.close();

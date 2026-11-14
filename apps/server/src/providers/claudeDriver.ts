@@ -1,6 +1,7 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -287,10 +288,6 @@ const CLAUDE_WITHHELD_TOOLS = [
   // no plan to hand over and nothing to leave.
   "EnterPlanMode",
   CLAUDE_PLAN_EXIT_TOOL,
-  // A thread is bound to one checkout; a worktree switch moves the session's
-  // working directory out of it.
-  "EnterWorktree",
-  "ExitWorktree",
   // A workflow's agents report under the `Workflow` call, not an `Agent`
   // call, so the child-run display cannot show them and the decoder refuses
   // their task frames; offering it waits on that display.
@@ -303,11 +300,47 @@ const CLAUDE_WITHHELD_TOOLS = [
   // started them stays open until they end (see `ClaudeHeldTurn`).
   "CronCreate",
   "ScheduleWakeup",
-  // Runs JavaScript inside the runtime process, outside the command sandbox
-  // that holds every shell command below Full access and outside the secret
-  // guard's file checks.
-  "REPL",
 ] as const;
+/**
+ * Claude Code's tools that move the session's working directory into a git
+ * worktree and back. They take the rule for a tool the gate has no rule of
+ * its own for: each asks below Full access. A worktree outside the Project's
+ * folders becomes a folder the session holds once the person (or Reviewed's
+ * reviewer) allows the switch, so the calls Claude makes there are judged as
+ * the Project's are. `REPL` takes the same rule, which is the shell's: it runs
+ * code in the runtime process, outside the command sandbox and the secret
+ * guard, so it asks at Guarded, goes to the reviewer at Reviewed, and runs at
+ * Full access (maintainer decision, 2026-11-14).
+ */
+const CLAUDE_ENTER_WORKTREE_TOOL = "EnterWorktree";
+
+/**
+ * The folder an EnterWorktree call moves the session into, or undefined when
+ * it cannot be known before the call. With `path` it is that folder. Without
+ * one, Claude Code 2.1.211 creates the worktree under `.claude/worktrees/` of
+ * the repository that holds the working directory (read from the bundled
+ * binary, 2026-11-14). A worktree a configured hook creates may land
+ * elsewhere; Claude's calls from there then fall outside every folder the
+ * session holds and are refused.
+ */
+export function claudeWorktreeTarget(
+  input: Readonly<Record<string, unknown>>,
+  workingDirectory: string,
+): string | undefined {
+  if (typeof input.path === "string" && input.path !== "") {
+    return resolve(workingDirectory, input.path);
+  }
+  let directory = resolve(workingDirectory);
+  while (!existsSync(join(directory, ".git"))) {
+    const parent = dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
+  const managed = join(directory, ".claude", "worktrees");
+  return typeof input.name === "string" && input.name !== ""
+    ? resolve(managed, input.name)
+    : managed;
+}
 const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
@@ -379,19 +412,6 @@ const CLAUDE_WEB_TOOLS = new Set<string>(["WebSearch", "WebFetch"]);
 const CLAUDE_NATIVE_SESSION_TOOLS = new Set<string>([CLAUDE_SUBAGENT_TOOL, "Skill"]);
 
 /**
- * The person's own Claude setup as this driver loads it. MCP servers start
- * only with a trusted Project's code: the runtime has no switch that starts
- * the account's servers without the Project's `.mcp.json` too, so the
- * account's own tool servers alone are reported unsupported and left off.
- */
-export function claudeNativeSetup(
-  setup: ProviderNativeSetup | undefined,
-): ProviderNativeSetup | undefined {
-  if (setup === undefined) return undefined;
-  return { ...setup, toolServers: false };
-}
-
-/**
  * The built-in tools a session with the full tool set does not hold: the
  * fixed list above, the person's own setup features they turned off, and
  * Claude's Artifact tool unless the session offers it.
@@ -435,7 +455,11 @@ function claudeNativeToolAnswer(
     return (toolName === "Skill" ? setup.skills : setup.subagents) ? "unasked" : undefined;
   }
   if (CLAUDE_WEB_TOOLS.has(toolName)) return setup.webTools ? "ask" : undefined;
-  if (setup.projectCode && toolName.startsWith("mcp__") && !toolName.startsWith("mcp__octant__")) {
+  if (
+    (setup.toolServers || setup.projectCode) &&
+    toolName.startsWith("mcp__") &&
+    !toolName.startsWith("mcp__octant__")
+  ) {
     return "ask";
   }
   return undefined;
@@ -538,9 +562,12 @@ function claudeConfinedTarget(
   toolName: string,
   input: Readonly<Record<string, unknown>>,
   projectRoot: string,
+  workingDirectory: string,
 ): unknown {
-  if (CLAUDE_SHELL_TOOLS.has(toolName)) return input.cwd ?? projectRoot;
-  if (toolName === "Glob" || toolName === "Grep") return input.path ?? projectRoot;
+  // A shell command and a search with no folder run in the session's working
+  // directory: the Project root, or a worktree Claude moved the session into.
+  if (CLAUDE_SHELL_TOOLS.has(toolName)) return input.cwd ?? workingDirectory;
+  if (toolName === "Glob" || toolName === "Grep") return input.path ?? workingDirectory;
   if (toolName === "NotebookEdit") return input.notebook_path;
   // A Projects upload sends the local file it names to claude.ai, so it is
   // held to the Project's folders as an Artifact publish is; a call that
@@ -666,8 +693,9 @@ const CLAUDE_SEARCH_TOOLS = new Set<string>(["Grep", "Glob", "LS"]);
 
 /**
  * Why a file tool call that touches a protected file is refused, at every
- * posture. Claude's own file tools run in the runtime process, and below Full
- * access that process is not wrapped: its own sandbox holds only its commands,
+ * posture below Full access (see {@link claudeSecretGuardApplies}). Claude's
+ * own file tools run in the runtime process, and below Full access that
+ * process is not wrapped: its own sandbox holds only its commands,
  * and that sandbox cannot carry the list, because its `allowRead` (the Project
  * root) takes precedence over any `denyRead` beneath it. So this gate is what
  * keeps a Project that contains the home folder from handing over a key.
@@ -723,6 +751,17 @@ export function claudeFileToolSecretRefusal(
     if (refusal !== undefined) return refusal;
   }
   return undefined;
+}
+
+/**
+ * Whether the gate's secret-path refusals apply at this posture. Full access
+ * means everything for files (maintainer decision, 2026-11-14): Claude reads
+ * and writes any file there, as it does on its own. Guarded, Accept edits,
+ * Reviewed, and Plan keep every refusal. Octant still never journals a secret
+ * value: redaction of logs, the journal, and exports is not a posture rule.
+ */
+export function claudeSecretGuardApplies(policy: ProviderExecutionPolicy): boolean {
+  return policy !== "full-access";
 }
 
 /**
@@ -825,9 +864,9 @@ const availableCapabilities: ProviderCapabilities = {
     subagents: "supported",
     webTools: "supported",
     skills: "supported",
-    // No switch starts the account's MCP servers without a Project's
-    // `.mcp.json` too; they start with a trusted Project's code.
-    toolServers: "unsupported",
+    // The account's own servers start with only its home settings read; a
+    // Project's `.mcp.json` waits for that Project's trust.
+    toolServers: "supported",
     hooks: "supported",
     projectCode: "supported",
   },
@@ -1012,6 +1051,11 @@ interface SessionState {
   readonly approvalReuse: Set<string>;
   /** What each approved publish sent, by tool use, until its result arrives. */
   readonly publishedSnapshots: Map<string, ThreadPublishedSnapshot>;
+  /**
+   * Worktrees outside the Project's folders this session was let into: the
+   * switch was allowed, so calls in them are judged as the Project's are.
+   */
+  readonly worktrees: Set<string>;
   /** The tool uses the gate has seen, oldest first; settled ones are forgotten past a bound. */
   readonly observedToolUseIds: Set<string>;
   readonly settledToolUseIds: Set<string>;
@@ -2026,6 +2070,18 @@ function makeConnection(
           return false;
         }
       },
+      writesOutsideCheckout: (absolutePath) =>
+        state.executionPolicy === "full-access" ||
+        [...state.worktrees].some((worktree) => {
+          try {
+            return (
+              absolutePath === worktree ||
+              options.isProjectConfinedPath(worktree, absolutePath) === true
+            );
+          } catch {
+            return false;
+          }
+        }),
       claudeSessionId,
       sequence,
       terminal: false,
@@ -2517,7 +2573,7 @@ function makeConnection(
         }
         // The person's own Claude setup, as the host resolved it for this
         // session; absent on every session before the person turned it on.
-        const nativeSetup = claudeNativeSetup(input.nativeSetup);
+        const nativeSetup = input.nativeSetup;
         const policyExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
@@ -2586,6 +2642,30 @@ function makeConnection(
           sandboxedFullAccess,
         );
         let callbackState: SessionState | undefined;
+        const insideFolder = (root: string, candidate: string): boolean => {
+          try {
+            return candidate === root || options.isProjectConfinedPath(root, candidate) === true;
+          } catch {
+            return false;
+          }
+        };
+        // The Project's folders, and each worktree outside them the session
+        // was let into.
+        const sessionHolds = (state: SessionState, candidate: string): boolean =>
+          insideFolder(projectRoot, candidate) ||
+          [...state.worktrees].some((worktree) => insideFolder(worktree, candidate));
+        // A switch into a worktree outside the Project's folders, once
+        // allowed, adds that worktree to what the session holds.
+        const holdWorktree = (
+          state: SessionState,
+          toolName: string,
+          toolInput: Readonly<Record<string, unknown>>,
+          workingDirectory: string,
+        ) => {
+          if (toolName !== CLAUDE_ENTER_WORKTREE_TOOL) return;
+          const target = claudeWorktreeTarget(toolInput, workingDirectory);
+          if (target !== undefined && !sessionHolds(state, target)) state.worktrees.add(target);
+        };
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;
           const deny = (message: string) =>
@@ -2629,6 +2709,7 @@ function makeConnection(
             CLAUDE_SESSION_TOOLS.has(request.toolName) ||
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
           ) {
+            holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           }
@@ -2654,6 +2735,7 @@ function makeConnection(
             request.toolName !== "AskUserQuestion" &&
             activeState.approvalReuse.has(reusableApprovalKey)
           ) {
+            holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           }
@@ -2773,6 +2855,9 @@ function makeConnection(
               activeState.publishedSnapshots.set(request.toolUseId, snapshot);
             }
           }
+          if (decision.behavior === "allow") {
+            holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
+          }
           return decision;
         };
         const preToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
@@ -2786,7 +2871,9 @@ function makeConnection(
             activeState.releasing ||
             activeState.released ||
             request.sessionId !== activeState.claudeSessionId ||
-            request.projectRoot !== projectRoot
+            // The session's working directory: the Project root, or a
+            // worktree Claude moved it into that the session holds.
+            (request.projectRoot !== projectRoot && !sessionHolds(activeState, request.projectRoot))
           ) {
             return deny("Claude tool request is outside the Project.");
           }
@@ -2841,17 +2928,28 @@ function makeConnection(
           if (digest === undefined) {
             return deny("Claude tool request has invalid input.");
           }
-          // The secret guard answers before any posture, Full access
-          // included, and says which rule refused and which channel to use.
-          // The runtime's own account state is its own to read.
-          const secretRefusal = claudeFileToolSecretRefusal(
-            request.toolName,
-            requestInput,
-            ownClaudeAccountPaths,
-            projectRoot,
-            claudeSearchesRunUnguarded(input.executionPolicy),
-          );
+          // The secret guard answers before every posture below Full access,
+          // and says which rule refused and which channel to use. The
+          // runtime's own account state is its own to read.
+          const secretRefusal = claudeSecretGuardApplies(input.executionPolicy)
+            ? claudeFileToolSecretRefusal(
+                request.toolName,
+                requestInput,
+                ownClaudeAccountPaths,
+                request.projectRoot,
+                claudeSearchesRunUnguarded(input.executionPolicy),
+              )
+            : undefined;
           if (secretRefusal !== undefined) return deny(secretRefusal);
+          // Full access with its sandbox keeps the Project's folders, where
+          // the sandbox holds every command, so a worktree outside them is
+          // refused there rather than held.
+          if (sandboxedFullAccess && request.toolName === CLAUDE_ENTER_WORKTREE_TOOL) {
+            const target = claudeWorktreeTarget(requestInput, request.projectRoot);
+            if (target === undefined || !sessionHolds(activeState, target)) {
+              return deny("Claude tool request is outside the Project.");
+            }
+          }
           // Claude Code takes a hook "allow" as the final word and runs the
           // tool without calling `canUseTool`. Observed 2026-09-06: an
           // approval-gated thread answered "allow" here for a Project-confined
@@ -2862,6 +2960,7 @@ function makeConnection(
           // recorded here. An allowed call holds no grant: nothing will come
           // to consume it, and sixteen unconsumed grants used to end the turn.
           const settledUnasked = (): ClaudePreToolDecision => {
+            holdWorktree(activeState, request.toolName, requestInput, request.projectRoot);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           };
@@ -2923,7 +3022,12 @@ function makeConnection(
           // sandbox confines it there. Requiring a cwd field denied every
           // shell call before it could be asked about (observed 2026-09-06:
           // "git status" refused four times, then the turn failed).
-          const candidate = claudeConfinedTarget(request.toolName, requestInput, projectRoot);
+          const candidate = claudeConfinedTarget(
+            request.toolName,
+            requestInput,
+            projectRoot,
+            request.projectRoot,
+          );
           if (typeof candidate !== "string") {
             return deny("Claude tool request has no authoritative confined path.");
           }
@@ -2937,15 +3041,7 @@ function makeConnection(
           ) {
             return deny("Claude tool request is outside the Project.");
           }
-          let confined = false;
-          try {
-            confined =
-              candidate === projectRoot ||
-              options.isProjectConfinedPath(projectRoot, candidate) === true;
-          } catch {
-            confined = false;
-          }
-          if (!confined) {
+          if (!sessionHolds(activeState, candidate)) {
             return deny("Claude tool request is outside the Project.");
           }
           return decide();
@@ -3051,6 +3147,7 @@ function makeConnection(
           preToolRequests: new Map(),
           approvalReuse: new Set(),
           publishedSnapshots: new Map(),
+          worktrees: new Set(),
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
           taskList,

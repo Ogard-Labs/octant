@@ -224,6 +224,7 @@ import {
 } from "../harness/nativeHarnessEndpointRegistry";
 import {
   appToolThreadLevel,
+  accountKeepsOwnMemory,
   browserToolTransport,
   claudePlanUsageStateDirectory,
   defaultShellSettings,
@@ -450,7 +451,7 @@ export function makeConfiguredProviderDriver(
           (candidate) =>
             String(candidate.id) === String(instanceId) &&
             (candidate.driverKind === "claude" || candidate.driverKind === "codex") &&
-            candidate.ownMemory === true,
+            accountKeepsOwnMemory(candidate),
         ) === true,
       ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined

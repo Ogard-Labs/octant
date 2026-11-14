@@ -762,9 +762,9 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
   // Claude Code announces its built-in slash commands and agents here on
   // every install (2.1.258 lists `clear`, `compact`, `Explore`, `Plan`, ...)
   // and the entries are objects, not names. Their presence is not evidence of
-  // injected authority: the query is opened with no setting sources, skills,
-  // agents, plugins, or MCP servers, and the tool set is checked on the
-  // initialized message. Only the shape is validated here; requiring the
+  // injected authority: the query opens with only the setting sources,
+  // skills, plugins, and MCP servers the session's setup allows, and the tool
+  // set is checked on the initialized message. Only the shape is validated here; requiring the
   // lists to be empty rejected every current install as incompatible.
   if (
     initialized === undefined ||
@@ -942,9 +942,17 @@ export function claudeOffersTool(
 ): boolean {
   if (input.tools.includes(toolName)) return true;
   if (toolName.startsWith("mcp__")) {
-    return input.nativeSetup?.projectCode === true && !toolName.startsWith("mcp__octant__");
+    return claudeStartsOwnServers(input.nativeSetup) && !toolName.startsWith("mcp__octant__");
   }
   return input.withheldTools !== undefined && !input.withheldTools.includes(toolName);
+}
+
+/**
+ * Whether the session starts MCP servers other than Octant's: the account's
+ * own with its tool servers on, and a trusted Project's with its code.
+ */
+function claudeStartsOwnServers(setup: ClaudeOpenQueryInput["nativeSetup"]): boolean {
+  return setup?.toolServers === true || setup?.projectCode === true;
 }
 
 /** Whether a server the session reports is one this session may hold. */
@@ -955,7 +963,7 @@ function claudeOffersMcpServer(input: ClaudeOpenQueryInput, server: unknown): bo
     return input.managedToolServer === true && record.status === "connected";
   // The person's and the trusted Project's own servers; one that failed or
   // waits for sign-in simply offers no tools.
-  return input.nativeSetup?.projectCode === true && typeof record.name === "string";
+  return claudeStartsOwnServers(input.nativeSetup) && typeof record.name === "string";
 }
 
 function decodeInitializedMessage(

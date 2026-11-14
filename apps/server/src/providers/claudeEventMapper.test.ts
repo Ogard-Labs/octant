@@ -1862,6 +1862,68 @@ describe("mapClaudeMessage", () => {
     expect(JSON.stringify(results)).not.toContain(outsidePath);
   });
 
+  it("journals a Full access write outside the checkout as a tool step with no file change", () => {
+    const ctx = context({ writesOutsideCheckout: () => true });
+    mapped(ctx, {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-outside",
+      content: [
+        {
+          kind: "tool-use",
+          toolUseId: "sdk-write-outside",
+          toolName: "Write",
+          input: { file_path: "/elsewhere/notes.md", content: "notes" },
+        },
+      ],
+      usage,
+    });
+    const completed = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-write-outside", isError: false }],
+      }),
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "File write completed outside the checkout.",
+      }),
+    ]);
+  });
+
+  it("journals a worktree switch with a notice that the thread's views stay on its checkout, and marks in-process code unsandboxed", () => {
+    for (const [toolName, input, notice] of [
+      [
+        "EnterWorktree",
+        { name: "feature" },
+        /worktree \(feature\)\. The thread's file views and diffs stay on its original checkout/,
+      ],
+      ["ExitWorktree", { action: "keep" }, /back to the thread's checkout/],
+      ["REPL", { code: "1 + 1" }, /^Unsandboxed: runs code in Claude's own process/],
+    ] as const) {
+      const started = eventValues(
+        mapped(context(), {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `sdk-message-${toolName}`,
+          content: [{ kind: "tool-use", toolUseId: `sdk-${toolName}`, toolName, input }],
+          usage,
+        }),
+      );
+      expect(started).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "tool-start", toolName }),
+          expect.objectContaining({
+            kind: "tool-progress",
+            message: expect.stringMatching(notice),
+          }),
+        ]),
+      );
+    }
+  });
+
   it("fails closed when Project authority denies a lexically confined file path", () => {
     const checkedPaths: string[] = [];
     const ctx = context({

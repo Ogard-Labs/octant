@@ -3221,6 +3221,41 @@ describe("Claude running as itself", () => {
     });
   });
 
+  test("starts the account's own MCP servers in an untrusted Project and holds the Project's .mcp.json", () => {
+    // Claude Code reads `.mcp.json` only with the `project` source on, so an
+    // untrusted Project's servers stay held while the account's start.
+    expect(claudeNativeQueryOptions({ ...ownSetup, toolServers: true })).toMatchObject({
+      settingSources: ["user"],
+      strictMcpConfig: false,
+    });
+    // With the tool servers off, home settings still load and no server but
+    // Octant's starts, a plugin's included.
+    expect(
+      claudeNativeQueryOptions({ ...ownSetup, skills: false, hooks: false, toolServers: false }),
+    ).toEqual({ settingSources: [], skills: [], strictMcpConfig: true, settings: {} });
+    expect(
+      claudeNativeQueryOptions({ ...ownSetup, skills: false, hooks: false, toolServers: true }),
+    ).toEqual({
+      settingSources: ["user"],
+      skills: [],
+      strictMcpConfig: false,
+      settings: { disableAllHooks: true, autoMemoryEnabled: false },
+    });
+  });
+
+  test("loads the person's enabled plugins with home settings and runs none of their hooks with hooks off", () => {
+    // Enabled plugins load through the `user` source; the empty `plugins`
+    // option adds no session plugin folder of Octant's.
+    const chat = claudeNativeQueryOptions({ ...ownSetup, hooks: false });
+    expect(chat.settingSources).toContain("user");
+    expect(chat.settings).toMatchObject({ disableAllHooks: true });
+    // A plugin's MCP servers follow the tool-server switch.
+    expect(chat.strictMcpConfig).toBe(true);
+    const work = claudeNativeQueryOptions({ ...ownSetup, toolServers: true });
+    expect(work.settings).not.toHaveProperty("disableAllHooks");
+    expect(work.strictMcpConfig).toBe(false);
+  });
+
   test("keeps Claude's own memory working for an account that turned it on while its home settings load", () => {
     expect(claudeNativeQueryOptions(ownSetup, true).settings).toEqual({});
     expect(claudeNativeQueryOptions({ ...ownSetup, hooks: false }, true).settings).toEqual({
