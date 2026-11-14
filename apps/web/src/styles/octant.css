@@ -1754,13 +1754,16 @@ input.switch:checked::after {
 }
 
 /* ─── segmented control ─────────────────────────────────────────────── */
+/* The one enclosed track: the same 28px track of 24px items that
+   OctantToggleGroup draws by itself, for the markup that still names the
+   recipe (Agents, Automations, the Project and Rewind dialogs). */
 .segmented {
   display: inline-flex;
-  padding: var(--oct-space-1);
+  padding: 2px;
   gap: 2px;
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
+  background: var(--oct-fill-4);
 }
 /* inline-flex, not the button default, so a segment holding an icon centres it
    instead of sitting it on the text baseline. Text segments are unaffected. */
@@ -1768,17 +1771,17 @@ input.switch:checked::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--oct-space-2);
-  min-height: 26px;
-  padding-inline: var(--oct-space-3);
+  gap: var(--oct-space-1);
+  min-height: 24px;
+  padding-inline: var(--oct-space-2);
   border: 0;
-  /* A segment sits inside the track's 5px of padding and border, so it takes
-     the control corner less that gap, never below 2px. */
+  /* A segment sits inside the track's 2px of padding, so it takes the control
+     corner less that gap, never below 2px. */
   border-radius: max(2px, calc(var(--oct-radius-sm) - 2px));
   background: transparent;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
   transition:
     background var(--oct-motion-fast) var(--oct-ease-standard),
     color var(--oct-motion-fast) var(--oct-ease-standard);
@@ -1787,7 +1790,7 @@ input.switch:checked::after {
   color: var(--oct-fg);
 }
 .segment[aria-pressed="true"] {
-  background: var(--oct-fg-soft);
+  background: var(--oct-fill-2);
   color: var(--oct-fg);
 }
 
