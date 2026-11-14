@@ -248,5 +248,9 @@ describe("the person's to-do list", () => {
       expect(policy.inspect(forwarded).kind).toBe("allow");
       expect(classifyProductAction(forwarded)).toBeUndefined();
     }
+    const elsewhere = new Request(`${origin}/api/todos/export`, {
+      headers: { host: "octant.example:8443", origin, "sec-fetch-site": "same-origin" },
+    });
+    expect(policy.inspect(elsewhere).kind).not.toBe("allow");
   });
 });
