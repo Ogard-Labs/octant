@@ -3309,12 +3309,14 @@ form > .work-composer-adapter__attachments {
 
 /* The keyboard hint stands in the canvas's foot padding, out of flow: Chat
    shows it and the Work and Code composers in the same overlay do not, so in
-   flow it moved the box by its own height when the thread kind changed. */
+   flow it moved the box by its own height when the thread kind changed. Only
+   the composer's own hint: the provider search message on the agent welcome
+   shares the class and stays in its flow. */
 .draft-thread__composer {
   position: relative;
 }
 
-.draft-thread__hint {
+.draft-thread__composer > .draft-thread__hint {
   position: absolute;
   inset-inline: 0;
   top: 100%;
