@@ -20,6 +20,13 @@ import type { MobileRemoteTransport } from "@octant/client-runtime";
 import type { MobileHostRegistration } from "../hosts/HostRegistry";
 
 import {
+  MOCK_WORKING_TREE_DIFF,
+  mockCodeEnvironment,
+  mockGitHistory,
+  mockLocalServers,
+  mockUsageQuery,
+} from "./mobileMockThreadPanes";
+import {
   resolveMobileMockScenario,
   type MobileMockScenario,
   type MobileMockScenarioId,
@@ -367,11 +374,28 @@ function createCodeBoardView(threads: ReadonlyArray<CodeThread>) {
         insertions: 42,
         deletions: 12,
       },
-      linkedPullRequest: { kind: "none", freshness: "fresh" },
+      linkedPullRequest: {
+        kind: "linked",
+        freshness: "fresh",
+        number: 812,
+        url: "https://github.com/octocat/octant/pull/812",
+        baseRepository: "octocat/octant",
+        baseBranch: "development",
+        headBranch: "feature/issue-812-mobile-polish-mock",
+        state: "open",
+        matchesDeliveryBranch: true,
+      },
       pullRequestSummaries: { items: [], hiddenCount: 0 },
       checks: { freshness: "fresh", state: "passing" },
       reviewState: { freshness: "fresh", state: "approved" },
-      childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
+      childAgents: {
+        active: 1,
+        completed: 2,
+        failed: 0,
+        unacknowledgedResults: 1,
+        latestSummary: "Checked the Review pane's diff colours against the dark theme.",
+        latestActivityAt: NOW,
+      },
       planProgress: { kind: "none" },
       recovery: { kind: "ok" },
       githubFreshness: "fresh",
@@ -570,6 +594,57 @@ function createMockTransport(input: {
     head: { kind: "branch", name: "feature/issue-812-mobile-polish-mock", oid: "a".repeat(40) },
     observedAt: NOW,
   } as const;
+  // The review thread has one finished turn, so its Context & usage pane
+  // shows the window its provider reported.
+  if (codeThreads.some((thread) => String(thread.id) === CODE_THREAD_ID)) {
+    const prompt = "Bring the desktop's side panes to the phone, read-only.";
+    const reply = "Added Environment, Review, Context & usage and Agents as one sheet.";
+    const promptId = "83000000-0000-4000-8000-000000000001";
+    const replyId = "83000000-0000-4000-8000-000000000002";
+    const encoder = new TextEncoder();
+    codeEvidence.set(promptId, {
+      contentId: promptId,
+      digest: "6".repeat(64),
+      byteLength: encoder.encode(prompt).byteLength,
+      text: prompt,
+    });
+    codeEvidence.set(replyId, {
+      contentId: replyId,
+      digest: "7".repeat(64),
+      byteLength: encoder.encode(reply).byteLength,
+      text: reply,
+    });
+    codeTurns.set(CODE_THREAD_ID, [
+      {
+        operationId: "82000000-0000-4000-8000-000000000001",
+        providerInstanceId: PROVIDER_ID,
+        modelId: MODEL_ID,
+        sessionId: "82000000-0000-4000-8000-000000000002",
+        prompt: {
+          contentId: promptId,
+          digest: "6".repeat(64),
+          byteLength: encoder.encode(prompt).byteLength,
+        },
+        assistant: [
+          {
+            contentId: replyId,
+            digest: "7".repeat(64),
+            byteLength: encoder.encode(reply).byteLength,
+          },
+        ],
+        usage: {
+          inputTokens: 41_000,
+          outputTokens: 1_800,
+          cacheReadInputTokens: 37_000,
+          contextWindow: 200_000,
+          contextTokens: 42_800,
+        },
+        status: "completed",
+        startedAt: EARLIER,
+        updatedAt: NOW,
+      },
+    ]);
+  }
 
   return {
     hostId: input.hostId,
@@ -875,6 +950,29 @@ function createMockTransport(input: {
             state: "running",
           });
         }
+        if (command.kind === "observe-git" && command.operationId !== undefined) {
+          const diffId = globalThis.crypto.randomUUID();
+          const byteLength = new TextEncoder().encode(MOCK_WORKING_TREE_DIFF).byteLength;
+          codeEvidence.set(diffId, {
+            contentId: diffId,
+            digest: "8".repeat(64),
+            byteLength,
+            text: MOCK_WORKING_TREE_DIFF,
+          });
+          return mockJsonResponse({
+            kind: "git-observed",
+            operationId: command.operationId,
+            gitOperationId: (command as { readonly gitOperationId?: string }).gitOperationId,
+            head: codeCheckout.head,
+            stateToken: "9".repeat(64),
+            status: [],
+            changedPaths: [],
+            diff: { contentId: diffId, digest: "8".repeat(64), byteLength, truncated: false },
+            remotes: [],
+            upstream: null,
+            worktrees: [],
+          });
+        }
         if (command.kind === "observe-pull-request" && command.operationId !== undefined) {
           return mockJsonResponse(pullRequestReview(command.operationId));
         }
@@ -997,6 +1095,58 @@ function createMockTransport(input: {
               }
             : { ...fields, attachmentId: header("attachment-id") },
         );
+      }
+      if (
+        request.method === "GET" &&
+        request.path === `/api/projects/${CODE_PROJECT_ID}/environment`
+      ) {
+        const threadId = new URLSearchParams(request.query ?? "").get("threadId") ?? CODE_THREAD_ID;
+        return mockJsonResponse(
+          mockCodeEnvironment({ projectId: CODE_PROJECT_ID, threadId, checkoutId: CHECKOUT_ID }),
+        );
+      }
+      if (request.method === "POST" && request.path === "/api/code/local-servers/commands") {
+        const body = JSON.parse(String(request.body ?? "{}")) as {
+          readonly requestId?: string;
+          readonly threadId?: string;
+        };
+        return mockJsonResponse(
+          mockLocalServers({
+            requestId: body.requestId ?? "",
+            projectId: CODE_PROJECT_ID,
+            threadId: body.threadId ?? CODE_THREAD_ID,
+          }),
+        );
+      }
+      if (request.method === "GET" && request.path === "/api/code/git/history") {
+        const query = JSON.parse(new URLSearchParams(request.query ?? "").get("query") ?? "{}") as {
+          readonly threadId?: string;
+          readonly checkoutId?: string;
+        };
+        return mockJsonResponse(
+          mockGitHistory({
+            threadId: query.threadId ?? CODE_THREAD_ID,
+            checkoutId: query.checkoutId ?? CHECKOUT_ID,
+          }),
+        );
+      }
+      if (request.method === "POST" && request.path === "/api/usage/query") {
+        const body = JSON.parse(String(request.body ?? "{}")) as {
+          readonly filter?: { readonly subjectAggregateId?: string };
+        };
+        const threadId = body.filter?.subjectAggregateId ?? CODE_THREAD_ID;
+        return mockJsonResponse(
+          threadId === CODE_THREAD_ID
+            ? mockUsageQuery({ threadId, providerInstanceId: PROVIDER_ID, modelId: MODEL_ID })
+            : {
+                ...mockUsageQuery({ threadId, providerInstanceId: PROVIDER_ID, modelId: MODEL_ID }),
+                turnMetrics: undefined,
+              },
+        );
+      }
+      if (request.method === "POST" && request.path === "/api/context/inspect") {
+        const body = JSON.parse(String(request.body ?? "{}")) as { readonly subject?: unknown };
+        return mockJsonResponse({ kind: "not-planned", subject: body.subject });
       }
       if (request.method === "GET" && request.path === "/api/reply-detail") {
         return mockJsonResponse(mockReplyDetailReading());

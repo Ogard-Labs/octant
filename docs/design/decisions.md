@@ -475,6 +475,7 @@ The phone app is a remote-control client under the host's authority. Threads are
 
 - The phone creates Chat, Work and Code threads and sends follow-up turns under each thread's own authority; approvals, folder binding, file edits and shell stay host-only.
 - Attached photos and files go through the mode's own attachment route, and the host strips image metadata from every paired upload.
+- The thread's side panes (Environment, Review, Context & usage, Agents) are read-only on the phone and use only reads the listener already forwards; per-run subagent detail stays with a local window, whose AgentRun routes authorize a window only (maintainer request, 2026-11-14).
 - Internal mobile beta distribution grants the phone no new authority; public store distribution, external tester groups and store listing stay closed until a separate maintainer action.
 - A build counts only after the device pass in the runbook, not when the build service finishes processing it.
 

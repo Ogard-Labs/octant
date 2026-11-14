@@ -34,7 +34,9 @@ import { mobileSpacing } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
+import { IconButton } from "../ui/IconButton";
 import { NavBar } from "../ui/NativeChrome";
+import { ThreadPanesSheet } from "../panes/ThreadPanesSheet";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { RewindSheet } from "../ui/RewindSheet";
 import { modelOptionForThread } from "./thread/pendingAttachments";
@@ -96,6 +98,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [busy, setBusy] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [panesOpen, setPanesOpen] = useState(false);
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
@@ -166,6 +169,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   useEffect(() => {
     setError(undefined);
     setBusy(false);
+    setPanesOpen(false);
   }, [identity]);
 
   useEffect(() => {
@@ -337,6 +341,19 @@ export function ThreadScreen(props: ThreadScreenProps) {
         onBack={props.onBack}
         subtitle={hostLabel}
         title={title}
+        trailing={
+          offlineDemo || transport === undefined ? undefined : (
+            <IconButton
+              accessibilityLabel="Thread panes"
+              iconSize={19}
+              name="albums-outline"
+              onPress={() => setPanesOpen(true)}
+              size={34}
+              testID="mobile-thread-panes-open"
+              variant="ghost"
+            />
+          )
+        }
       />
 
       {offlineDemo ? null : (
@@ -507,6 +524,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
           testID="mobile-thread-composer"
           value={prompt}
           voice={voice}
+        />
+      )}
+      {offlineDemo || transport === undefined ? null : (
+        <ThreadPanesSheet
+          codeThread={selected.mode === "code" ? code.thread : undefined}
+          mode={selected.mode}
+          onClose={() => setPanesOpen(false)}
+          threadId={selected.threadId}
+          transport={transport}
+          visible={panesOpen}
         />
       )}
       <RewindSheet {...turnActions.sheet} />
