@@ -107,6 +107,28 @@ describe("ThemeSettingsProvider", () => {
     expect(root.dataset.octantGlassThin).toBeUndefined();
   });
 
+  it("paints the dark window coat at 78% for Subtle and 62% for Strong, and a saved low Tint at the floor", () => {
+    const root = document.documentElement;
+    const result = render(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    const coat = (level: "subtle" | "strong") =>
+      root.style.getPropertyValue(`--octant-workspace-translucent-${level}`);
+    expect(coat("subtle")).toMatch(/ 78%, transparent\)$/);
+    expect(coat("strong")).toMatch(/ 62%, transparent\)$/);
+    result.rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark", glassTint: 8 }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    // A Tint replaces both levels and is clamped at the dark floor of 62%.
+    expect(coat("subtle")).toMatch(/ 62%, transparent\)$/);
+    expect(coat("strong")).toMatch(/ 62%, transparent\)$/);
+    result.unmount();
+  });
+
   it("publishes density, text smoothing and the custom contrast step for the stylesheets", () => {
     const result = render(
       <ThemeSettingsProvider
