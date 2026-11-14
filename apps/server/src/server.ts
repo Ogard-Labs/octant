@@ -1935,6 +1935,7 @@ export function startOctantServer(
       nativeHarnessSessions,
       onWorkTurnCancelled,
       remoteDelegationHolder,
+      threadStandingAnswers,
       options,
       persistence,
       providerDataDirectory,

@@ -16,7 +16,27 @@ function rules(sessionStatus: string | undefined): DelegationParentRules {
     creationPosture: () => "automatic",
     authorizeCreation: () => WORK_PARENT,
     externalContentIngested: () => false,
+    standingAnswerCovers: () => false,
     sessionStatus: () => sessionStatus,
+  };
+}
+
+/** A parent that read outside content, at `policy`, whose person may answer once. */
+function markedParent(policy: "approval-gated" | "full-access" | "plan") {
+  let answered = false;
+  return {
+    answer: () => {
+      answered = true;
+    },
+    rules: {
+      ...rules(undefined),
+      authorizeCreation: () => ({
+        ...WORK_PARENT,
+        liveAuthority: { subagents: true, executionPolicy: policy },
+      }),
+      externalContentIngested: () => true,
+      standingAnswerCovers: () => answered,
+    } satisfies DelegationParentRules,
   };
 }
 
@@ -37,6 +57,37 @@ describe("what a parent thread must satisfy before it starts a child on another 
     expect(checkDelegationParent(rules(status), ASK)).toEqual({
       status: "allowed",
       ceiling: "approval-gated",
+    });
+  });
+
+  it("hands work to another spoke from a thread that read outside content once its person answered for the thread", () => {
+    const parent = markedParent("approval-gated");
+    expect(checkDelegationParent(parent.rules, ASK)).toEqual({
+      status: "refused",
+      kind: "parent-tainted",
+    });
+    parent.answer();
+    expect(checkDelegationParent(parent.rules, ASK)).toEqual({
+      status: "allowed",
+      ceiling: "approval-gated",
+    });
+    expect(checkDelegationParent(parent.rules, ASK)).toEqual({
+      status: "allowed",
+      ceiling: "approval-gated",
+    });
+  });
+
+  it("hands work to another spoke unasked from a Full access thread that read outside content", () => {
+    expect(checkDelegationParent(markedParent("full-access").rules, ASK)).toEqual({
+      status: "allowed",
+      ceiling: "full-access",
+    });
+  });
+
+  it("refuses a Plan thread that read outside content and holds no answer", () => {
+    expect(checkDelegationParent(markedParent("plan").rules, ASK)).toEqual({
+      status: "refused",
+      kind: "parent-tainted",
     });
   });
 });

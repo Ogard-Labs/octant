@@ -254,6 +254,7 @@ export type RemoteDependencies = {
     | "agentRunOrchestration"
     | "externalContentIngestionStore"
     | "remoteDelegationHolder"
+    | "threadStandingAnswers"
   > &
   Pick<HarnessStateWiring, "nativeHarnessSessions"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
@@ -360,6 +361,7 @@ export function wireRemote(deps: RemoteDependencies) {
     pairedMergeUnlockSlot,
     nativeHarnessSessions,
     remoteDelegationHolder,
+    threadStandingAnswers,
     canvasNetworkAccess,
     canvasPublicShareService,
     canvasRoutes,
@@ -982,6 +984,8 @@ export function wireRemote(deps: RemoteDependencies) {
             externalContentIngested: (threadId) =>
               readThreadExternalContentTaint(persistence.connection, threadId)
                 .externalContentIngested,
+            standingAnswerCovers: (threadId) =>
+              threadStandingAnswers.covers(threadId, "delegation", true),
             sessionStatus: (threadId) => nativeHarnessSessions.read(threadId)?.session.status,
           },
           input,

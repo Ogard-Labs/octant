@@ -1,4 +1,5 @@
 import type { PeerDelegationMode } from "@octant/contracts";
+import { outsideContentRefusesDelegation } from "@octant/domain/untrusted-content-policy";
 import type { AgentRunControlParentFacts } from "../agentRun/agentRunControlService";
 import type { ParentCheck } from "./delegatingSpokeService";
 
@@ -19,6 +20,12 @@ export interface DelegationParentRules {
     readonly windowId: string;
   }) => DelegationParentFacts | undefined;
   readonly externalContentIngested: (threadId: string) => boolean;
+  /**
+   * Whether the person answered for this thread, after it read outside
+   * content, that it may start helpers: the same `delegation` answer a helper
+   * on this host asks for, so one answer covers both kinds of helper.
+   */
+  readonly standingAnswerCovers: (threadId: string) => boolean;
   readonly sessionStatus: (threadId: string) => string | undefined;
 }
 
@@ -53,15 +60,23 @@ export function checkDelegationParent(
   if (!parent.parentAuthority.subagents || !parent.liveAuthority.subagents) {
     return { status: "refused", kind: "subagents-not-allowed" };
   }
-  // A thread that read outside content cannot start helpers, and a
-  // delegated result is outside content.
-  if (rules.externalContentIngested(input.threadId)) {
+  const policy = parent.liveAuthority.executionPolicy;
+  // Below Full access a thread that read outside content (a delegated result
+  // counts) starts a helper on another host only once its person has answered
+  // for the thread, as a helper on this host does. The agent's tool call asks
+  // before reaching here; Plan has no ask, so it stays refused.
+  if (
+    outsideContentRefusesDelegation({
+      externalContentIngested: rules.externalContentIngested(input.threadId),
+      fullAccessThread: policy === "full-access",
+    }) &&
+    !rules.standingAnswerCovers(input.threadId)
+  ) {
     return { status: "refused", kind: "parent-tainted" };
   }
   if (harnessSessionHoldsHelpers(rules.sessionStatus(input.threadId))) {
     return { status: "refused", kind: "session-paused" };
   }
-  const policy = parent.liveAuthority.executionPolicy;
   return {
     status: "allowed",
     ceiling:
