@@ -16,6 +16,11 @@ import type {
 export interface AutomationAuthorityLiveFacts {
   readonly hostId: string;
   readonly project: Project | undefined;
+  /**
+   * The routine's Project when it is one on a registered server, which the
+   * local catalog never names. Absent for a local Project.
+   */
+  readonly serverProject?: AutomationServerProjectFacts;
   readonly providerInstance: ProviderInstance | undefined;
   readonly providerSupportsModel: boolean;
   readonly executionProfileMatches: boolean;
@@ -26,6 +31,10 @@ export interface AutomationAuthorityLiveFacts {
   /** Work binding receipt still matches the Project root revision. */
   readonly workBindingMatches: boolean;
 }
+
+export type AutomationServerProjectFacts =
+  | { readonly kind: "bound"; readonly mode: "code" | "work"; readonly serverRegistered: boolean }
+  | { readonly kind: "removed" };
 
 export type AutomationAuthorityRevalidationResult =
   | { readonly kind: "ok" }
@@ -60,13 +69,16 @@ export function revalidateAutomationAuthority(input: {
       "Full access profiles are ineligible for Automation dispatch.",
     );
   }
-  const project = input.facts.project;
-  if (
-    project === undefined ||
-    project.lifecycle !== "active" ||
-    project.type !== snapshot.mode ||
-    String(project.id) !== String(snapshot.projectId) ||
-    project.version !== snapshot.projectVersion
+  const server = input.facts.serverProject;
+  if (server !== undefined) {
+    const refusal = serverProjectRefusal(server, snapshot);
+    if (refusal !== undefined) return refusal;
+  } else if (
+    input.facts.project === undefined ||
+    input.facts.project.lifecycle !== "active" ||
+    input.facts.project.type !== snapshot.mode ||
+    String(input.facts.project.id) !== String(snapshot.projectId) ||
+    input.facts.project.version !== snapshot.projectVersion
   ) {
     return blocked(
       "project-mismatch",
@@ -152,6 +164,44 @@ export function revalidateAutomationAuthority(input: {
   return { kind: "ok" };
 }
 
+/**
+ * A routine in a Project on a server runs as a person-started turn there
+ * would, so it is refused whenever such a turn would be: the person removed
+ * the Project, or its server left the registry. Reaching the server is the
+ * thread's own first step, which records a run that cannot reach it as failed.
+ */
+function serverProjectRefusal(
+  server: AutomationServerProjectFacts,
+  snapshot: AutomationRun["definitionSnapshot"],
+): Extract<AutomationAuthorityRevalidationResult, { readonly kind: "blocked" }> | undefined {
+  if (server.kind === "removed") {
+    return blocked(
+      "project-mismatch",
+      "This routine's Project on a server was removed, so the routine cannot run. Bind the folder again and set the routine up there.",
+    );
+  }
+  if (server.mode !== snapshot.mode) {
+    return blocked(
+      "project-mismatch",
+      "This routine's Project on a server no longer matches the definition.",
+    );
+  }
+  if (!server.serverRegistered) {
+    return blocked(
+      "binding-mismatch",
+      "This routine's server is no longer registered in Settings › Permissions › Servers, so nothing can run there.",
+    );
+  }
+  // A file routine watches a folder of this host; a server Project has none.
+  if (snapshot.trigger.kind === "file-arrival") {
+    return blocked(
+      "binding-mismatch",
+      "A file routine watches a folder on this computer, so it cannot run in a Project on a server.",
+    );
+  }
+  return undefined;
+}
+
 export function automationPromptDigest(taskPrompt: string): AutomationDigest {
   return createHash("sha256")
     .update("octant.automation-prompt.v1\0")
@@ -162,6 +212,7 @@ export function automationPromptDigest(taskPrompt: string): AutomationDigest {
 export function buildAutomationAuthorityFactsFromHost(input: {
   readonly hostId: string;
   readonly project: Project | undefined;
+  readonly serverProject?: AutomationServerProjectFacts;
   readonly providerInstance: ProviderInstance | undefined;
   readonly providerSupportsModel: boolean;
   readonly executionProfileMatches: boolean;
@@ -173,6 +224,7 @@ export function buildAutomationAuthorityFactsFromHost(input: {
   return {
     hostId: input.hostId,
     project: input.project,
+    ...(input.serverProject === undefined ? {} : { serverProject: input.serverProject }),
     providerInstance: input.providerInstance,
     providerSupportsModel: input.providerSupportsModel,
     executionProfileMatches: input.executionProfileMatches,

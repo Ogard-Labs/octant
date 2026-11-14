@@ -22,10 +22,11 @@ import {
   type ProtectedFilesLocations,
   type ResolvedProtectedEntry,
   type SecretGuardPlatform,
+  windowsGuardPath,
 } from "@octant/domain/secret-guard-policy";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 
 interface SecretGuardState {
   readonly dataDirectory?: string | undefined;
@@ -96,7 +97,8 @@ export function isProtectedPathOnServer(path: string): boolean {
 }
 
 export function secretGuardPlatform(platform: NodeJS.Platform): SecretGuardPlatform {
-  return platform === "darwin" ? "darwin" : "linux";
+  if (platform === "darwin" || platform === "win32") return platform;
+  return "linux";
 }
 
 /** The list in force for a launch whose home folder is `homeDirectory`. */
@@ -118,16 +120,21 @@ export function secretGuardEntries(input: {
   if (state.choice.removed.includes("ssh-private-keys" satisfies BuiltInProtectedFilesId)) {
     return entries;
   }
-  const sshKeys = sshPrivateKeyFiles(join(home, ".ssh")).map(
-    (path): ResolvedProtectedEntry => ({
-      ruleId: "ssh-private-keys",
-      label: "SSH private keys",
-      channel: "ssh-agent",
-      ownAccountExempt: false,
-      kind: "path",
-      path,
-    }),
-  );
+  const windows = input.platform === "win32";
+  const sshKeys = sshPrivateKeyFiles(windows ? win32.join(home, ".ssh") : join(home, ".ssh"))
+    .map((path) => (windows ? windowsGuardPath(path) : path))
+    .filter((path) => path !== undefined)
+    .map(
+      (path): ResolvedProtectedEntry => ({
+        ruleId: "ssh-private-keys",
+        label: "SSH private keys",
+        channel: "ssh-agent",
+        ownAccountExempt: false,
+        ...(windows ? { foldCase: true as const } : {}),
+        kind: "path",
+        path,
+      }),
+    );
   return [...entries, ...sshKeys];
 }
 
@@ -178,19 +185,44 @@ export function secretGuardRefusal(
     readonly homeDirectory?: string;
   } = {},
 ): string | undefined {
-  if (!path.startsWith("/")) return undefined;
+  const platform = options.platform ?? process.platform;
   const homeDirectory = options.homeDirectory ?? homedir();
-  const entries = secretGuardEntries({
-    platform: options.platform ?? process.platform,
-    homeDirectory,
-  });
+  const unjudged = unjudgedPathRefusal(path, platform, homeDirectory);
+  if (unjudged !== "judge") return unjudged;
+  const entries = secretGuardEntries({ platform, homeDirectory });
   const entry = protectedEntryFor(
-    pathForms(path),
-    withResolvedForms(entries),
-    uniqueForms(options.ownAccountPaths ?? []),
+    pathForms(path, platform),
+    withResolvedForms(entries, platform),
+    uniqueForms(options.ownAccountPaths ?? [], platform),
   );
   return entry === undefined ? undefined : protectedFileRefusal(entry, homeDirectory);
 }
+
+/**
+ * Before any rule is read: a relative path answers no (only its caller knows
+ * what it is relative to), and on Windows a path the guard cannot spell is
+ * refused rather than let through. A share or device path (`\\server\x`,
+ * `\\?\C:\x`), a drive-relative one (`C:x`) and a rooted one without a
+ * drive (`\Users\x`, the current drive's root) can all name a protected file
+ * by a spelling no entry matches, which on this list read as "not protected"
+ * until this check existed.
+ */
+function unjudgedPathRefusal(
+  path: string,
+  platform: NodeJS.Platform,
+  homeDirectory: string,
+): string | undefined | "judge" {
+  if (platform !== "win32") return path.startsWith("/") ? "judge" : undefined;
+  if (windowsGuardPath(path) === undefined) {
+    return /^(?:[\\/]|[A-Za-z]:(?![\\/]))/u.test(path) ? WINDOWS_UNSPELLED_PATH : undefined;
+  }
+  return windowsGuardPath(homeDirectory) === undefined ? WINDOWS_UNSPELLED_HOME : "judge";
+}
+
+const WINDOWS_UNSPELLED_PATH =
+  "Refused by the secret guard: on Windows it judges only drive-absolute paths such as C:\\Users\\you\\file, so a share, device, or drive-relative path is refused. Name the file by its drive-absolute path instead. The list is in Settings › Permissions › Protected files.";
+const WINDOWS_UNSPELLED_HOME =
+  "Refused by the secret guard: this Windows home folder is not a drive-absolute path, so the protected-file list cannot be placed and every file tool path is refused. The list is in Settings › Permissions › Protected files.";
 
 /**
  * Whether a path the agent wrote is one the list in force protects: an
@@ -224,13 +256,13 @@ export function secretGuardSearchRefusal(
     readonly homeDirectory?: string;
   } = {},
 ): string | undefined {
-  if (!root.startsWith("/")) return undefined;
+  const platform = options.platform ?? process.platform;
   const homeDirectory = options.homeDirectory ?? homedir();
-  const entries = withResolvedForms(
-    secretGuardEntries({ platform: options.platform ?? process.platform, homeDirectory }),
-  );
-  const own = uniqueForms(options.ownAccountPaths ?? []);
-  const roots = pathForms(root);
+  const unjudged = unjudgedPathRefusal(root, platform, homeDirectory);
+  if (unjudged !== "judge") return unjudged;
+  const entries = withResolvedForms(secretGuardEntries({ platform, homeDirectory }), platform);
+  const own = uniqueForms(options.ownAccountPaths ?? [], platform);
+  const roots = pathForms(root, platform);
   const inside = protectedEntryFor(roots, entries, own);
   const explain = (entry: ResolvedProtectedEntry) =>
     [
@@ -238,7 +270,35 @@ export function secretGuardSearchRefusal(
       `This search would read it from ${JSON.stringify(root)}. The native search cannot enforce protected-file exclusions, so no search results were returned. Search an ordinary subfolder with no protected entry instead; use the named authorized channel for the protected material.`,
     ].join(" ");
   if (inside !== undefined) return explain(inside);
-  const covered = secretGuardLinuxPaths({ entries, ownAccountPaths: own, withinRoots: roots })
+  const exempt = (entry: ResolvedProtectedEntry, location: string) =>
+    entry.ownAccountExempt && own.some((owned) => isSameOrInside(location, owned));
+  // A pattern entry also reaches a root inside its folder: a search rooted at
+  // a browser profile reads the `Cookies` and `logins.json` below it, though
+  // the profile folder itself neither matches the pattern nor contains the
+  // entry's folder. `levelsBelow` is how many levels of the entry the root
+  // still holds (the root itself was judged above).
+  const levelsBelow = (entry: ResolvedProtectedEntry & { readonly kind: "names" }, form: string) =>
+    isSameOrInside(form, entry.directory) && form !== entry.directory
+      ? entry.depth - form.slice(entry.directory.length + 1).split("/").length
+      : undefined;
+  if (platform === "win32") {
+    // No walk on Windows yet: a root at or above any entry's location, or
+    // inside a pattern entry's folder with levels of it left, is refused
+    // whether or not the file exists, which refuses more searches than the
+    // walk would, never fewer.
+    const beneath = entries.find((entry) => {
+      const location = entry.kind === "path" ? entry.path : entry.directory;
+      if (exempt(entry, location)) return false;
+      if (roots.some((form) => isSameOrInside(location, form))) return true;
+      return entry.kind === "names" && roots.some((form) => (levelsBelow(entry, form) ?? 0) > 0);
+    });
+    return beneath === undefined ? undefined : explain(beneath);
+  }
+  const covered = secretGuardLinuxPaths({
+    entries: entries.filter((entry) => entry.kind === "path"),
+    ownAccountPaths: own,
+    withinRoots: roots,
+  })
     .filter((path) => roots.some((form) => isSameOrInside(path, form)))
     .sort();
   for (const path of covered) {
@@ -246,7 +306,61 @@ export function secretGuardSearchRefusal(
     if (entry === undefined) continue;
     return explain(entry);
   }
+  // Pattern entries are walked from wherever the search starts: from the
+  // entry's folder when the root holds it, from the root when the root is
+  // inside it. A walk that runs out of its budget refuses, because the
+  // shared walk used to stop at its limit and answer "nothing found" for a
+  // folder as crowded as `~/Library/Application Support`.
+  for (const entry of entries) {
+    if (entry.kind !== "names" || exempt(entry, entry.directory)) continue;
+    for (const form of roots) {
+      const start = isSameOrInside(entry.directory, form)
+        ? { directory: entry.directory, levels: entry.depth }
+        : { directory: form, levels: levelsBelow(entry, form) ?? 0 };
+      if (start.levels <= 0) continue;
+      const found = patternMatchBeneath(start.directory, start.levels, entry);
+      if (found === "found") return explain(entry);
+      if (found === "truncated") {
+        return [
+          protectedFileRefusal(entry, homeDirectory),
+          `This search from ${JSON.stringify(root)} could not finish checking for those stores (over ${String(SEARCH_WALK_LIMIT)} entries), so no search results were returned. Search a smaller folder instead.`,
+        ].join(" ");
+      }
+    }
+  }
   return undefined;
+}
+
+const SEARCH_WALK_LIMIT = 4_096;
+
+/** Whether a file `levels` deep or less below `directory` matches the entry. */
+function patternMatchBeneath(
+  directory: string,
+  levels: number,
+  entry: ResolvedProtectedEntry & { readonly kind: "names" },
+): "found" | "none" | "truncated" {
+  const pattern = new RegExp(`^(?:${entry.name})$`, "u");
+  const except = entry.except === undefined ? undefined : new RegExp(`^(?:${entry.except})$`, "u");
+  let visited = 0;
+  const walk = (current: string, depth: number): "found" | "none" | "truncated" => {
+    let children: ReadonlyArray<import("node:fs").Dirent>;
+    try {
+      children = readdirSync(current, { withFileTypes: true });
+    } catch {
+      return "none";
+    }
+    for (const child of children) {
+      visited += 1;
+      if (visited > SEARCH_WALK_LIMIT) return "truncated";
+      if (except?.test(child.name) !== true && pattern.test(child.name)) return "found";
+      if (depth < levels && child.isDirectory() && !child.isSymbolicLink()) {
+        const below = walk(join(current, child.name), depth + 1);
+        if (below !== "none") return below;
+      }
+    }
+    return "none";
+  };
+  return walk(directory, 1);
 }
 
 /**
@@ -258,10 +372,11 @@ export function secretGuardSearchRefusal(
  */
 function withResolvedForms(
   entries: ReadonlyArray<ResolvedProtectedEntry>,
+  platform: NodeJS.Platform = process.platform,
 ): ReadonlyArray<ResolvedProtectedEntry> {
   return entries.flatMap((entry): ReadonlyArray<ResolvedProtectedEntry> => {
     const location = entry.kind === "path" ? entry.path : entry.directory;
-    return pathForms(location).map((form) =>
+    return pathForms(location, platform).map((form) =>
       entry.kind === "path" ? { ...entry, path: form } : { ...entry, directory: form },
     );
   });
@@ -531,15 +646,52 @@ function escapeSeatbeltString(path: string): string {
 }
 
 /** The lexical path and the one the kernel resolves it to, when they differ. */
-function pathForms(path: string): ReadonlyArray<string> {
+function pathForms(
+  path: string,
+  platform: NodeJS.Platform = process.platform,
+): ReadonlyArray<string> {
+  if (platform === "win32") return windowsPathForms(path);
   const lexical = normalizePosix(path);
   // Normalizing `link/..` first can erase the symlink the kernel traverses.
   const resolved = realPathOfExistingPrefix(path);
   return resolved === lexical ? [lexical] : [lexical, resolved];
 }
 
-function uniqueForms(paths: ReadonlyArray<string>): ReadonlyArray<string> {
-  return [...new Set(paths.flatMap((path) => pathForms(path)))];
+function uniqueForms(
+  paths: ReadonlyArray<string>,
+  platform: NodeJS.Platform = process.platform,
+): ReadonlyArray<string> {
+  return [...new Set(paths.flatMap((path) => pathForms(path, platform)))];
+}
+
+/**
+ * A Windows path, native (`C:\\x`) or already in guard form (`/c:/x`), in
+ * guard form and under the final path the system resolves its longest
+ * existing prefix to, so a junction or link into a protected folder is
+ * caught as it is on the other platforms. A path the guard cannot spell has
+ * no form; its caller refused it before asking.
+ */
+function windowsPathForms(path: string): ReadonlyArray<string> {
+  const native = /^\/[A-Za-z]:(?:\/|$)/u.test(path) ? `${path.slice(1, 3)}/${path.slice(4)}` : path;
+  const lexical = windowsGuardPath(native);
+  if (lexical === undefined) return [];
+  const resolved = windowsRealForm(native);
+  return resolved === undefined || resolved === lexical ? [lexical] : [lexical, resolved];
+}
+
+function windowsRealForm(native: string): string | undefined {
+  let current = win32.resolve(native);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      return windowsGuardPath(win32.join(realpathSync.native(current), ...rest));
+    } catch {
+      const parent = win32.dirname(current);
+      if (parent === current) return undefined;
+      rest.unshift(win32.basename(current));
+      current = parent;
+    }
+  }
 }
 
 /**

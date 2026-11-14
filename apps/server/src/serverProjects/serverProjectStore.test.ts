@@ -236,8 +236,12 @@ describe("server Project catalog", () => {
       folder: "/srv/app",
     });
 
+    expect(reloaded.wasRemoved(projectId)).toBe(false);
     expect(reloaded.remove({ projectId, principal: "local-window" }).kind).toBe("changed");
-    expect(storeOn(openJournal(directory), server.connection).projects()).toEqual([]);
+    const afterRemoval = storeOn(openJournal(directory), server.connection);
+    expect(afterRemoval.projects()).toEqual([]);
+    // A routine still naming the Project can say it was removed.
+    expect(afterRemoval.wasRemoved(projectId)).toBe(true);
   });
 
   it("keeps a Work Project apart from Code ones, and a Code Project's record as it was", async () => {
