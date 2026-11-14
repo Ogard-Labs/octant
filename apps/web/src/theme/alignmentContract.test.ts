@@ -116,8 +116,14 @@ describe("the shell's edges and gaps", () => {
     );
     expect(rule(settings, ".setrow-label")).toContain("var(--oct-line-label)");
     expect(rule(settings, ".setrow-hint")).toContain("var(--oct-line-detail)");
-    expect(rule(shell, ".sidebar-navigation__thread-title")).toContain("var(--oct-line-label)");
-    expect(rule(shell, ".sidebar-navigation__thread-facts")).toContain("var(--oct-line-meta)");
+    // A thread row is three whole-pixel lines: the top line (16, 14 compact),
+    // the title (20, 18 compact) and the detail line, plus 4px above and below.
+    expect(rule(shell, ".sidebar-navigation__thread-title")).toContain(
+      "line-height: var(--thread-line-title);",
+    );
+    expect(
+      rule(shell, ".sidebar-navigation__thread-context,\n.sidebar-navigation__thread-detail"),
+    ).toContain("line-height: var(--thread-line-context);");
     expect(rule(projectThreads, ".move-thread__title")).toContain("var(--oct-line-label)");
   });
 

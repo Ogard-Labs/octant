@@ -143,13 +143,14 @@ import {
   ThreadRowInfoPopup,
   ProjectThreadRows,
   ProjectThreadStatus,
-  ThreadStatusMark,
+  NO_THREAD_ROW_STATE,
+  threadRowState,
   sidebarThreadStatusIcon,
   threadRowAgeFact,
   hasInlineActions,
   ThreadRowContextMenu,
 } from "./ProjectThreadList";
-import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
+import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
@@ -1583,11 +1584,28 @@ function ActivityThreadButton(props: {
   // As in the Project tree, a rested row keeps its wake time even when Last
   // updated is hidden.
   const age = threadRowAgeFact(props.thread, shows.lastUpdated);
+  const rowState = shows.status
+    ? threadRowState({
+        activity: props.thread.activity,
+        unread: props.thread.unread,
+        woke: props.thread.woke,
+        followUp: props.thread.followUp,
+        startedAt: props.thread.turnStartedAt,
+      })
+    : NO_THREAD_ROW_STATE;
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
   const row = (
     <OctantButton
       aria-current={selected ? "page" : undefined}
+      aria-label={sidebarThreadRowLabel({
+        title: props.thread.title,
+        ...(shows.project ? { projectName: props.thread.projectName } : {}),
+        ...(checkout === undefined ? {} : { branch: checkout.label }),
+        ...(pullRequest === undefined ? {} : { pullRequest }),
+        ...(rowState.label === undefined ? {} : { state: rowState.label }),
+        ...(age === undefined ? {} : { age: age.label }),
+      })}
       className="sidebar-navigation__thread activity-nav__thread justify-start"
       data-attention={props.thread.attention}
       data-thread-id={props.thread.threadId}
@@ -1618,7 +1636,7 @@ function ActivityThreadButton(props: {
       variant="bare"
     >
       <SidebarThreadRowContent
-        {...(age === undefined ? {} : { age })}
+        {...(age === undefined || rowState.state !== undefined ? {} : { age })}
         {...(checkout === undefined ? {} : { checkout })}
         {...(props.thread.coordinator === true ? { coordinator: true } : {})}
         {...(props.thread.coordinatorTitle === undefined
@@ -1630,17 +1648,9 @@ function ActivityThreadButton(props: {
           : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(pullRequest === undefined ? {} : { pullRequest })}
+        {...(rowState.state === undefined ? {} : { state: rowState.state })}
         threadId={props.thread.threadId}
-        status={
-          shows.status ? (
-            <ThreadStatusMark
-              activity={props.thread.activity}
-              unread={props.thread.unread}
-              woke={props.thread.woke}
-              followUp={props.thread.followUp}
-            />
-          ) : null
-        }
+        unread={rowState.unread}
         title={props.thread.title}
       />
     </OctantButton>

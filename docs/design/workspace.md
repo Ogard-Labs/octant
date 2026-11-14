@@ -2102,10 +2102,17 @@ attribution, branch, linked pull request, last updated, or status mark — is th
 view's own choice, edited in Settings › Sidebar › Thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
 rather than left as a gap. The Project tree and the Activity feed draw the same
-row: the provider mark in the icon column every navigation row uses, the title
-alone on its line, and the shown facts on one line beneath it in a fixed order
-(Project, pull request, branch, then the age at the end); with no facts shown
-the age sits beside the status instead of opening a line of its own. Thread rows
+row: up to three lines (see [the sidebar in DESIGN.md](../../DESIGN.md)). A small top
+line names where the thread lives, in a fixed order (the Project's mark and name,
+then the branch in the mono face) and ends with the thread's state in words
+(Working 14m, Needs you) or, with none to report, how long ago it moved. The
+title is the strongest text on a line of its own. A third line appears only for
+the pull request and its state, who started the thread or a worker's
+coordinator, and the provider's mark ends the last line. The Project tree's top
+line is the branch alone, because the Project is its heading. A row with no place
+to name carries its state or time at the end of the title line. The row is one
+button whose accessible name reads title, Project, branch, pull request, then
+state or time; a state is never colour alone. Thread rows
 are not indented under their Project, so every row's fill sits the same
 distance from both edges of the sidebar. In Code, a Project whose threads run
 in two or more checkouts nests them under one heading per checkout, primary

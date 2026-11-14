@@ -398,7 +398,7 @@ describe("SplitWorkspace", () => {
     expect(screen.getByRole("img", { name: "Runs on Studio devbox" })).toBeVisible();
     expect(screen.queryByRole("img", { name: "Runs on this computer" })).not.toBeInTheDocument();
     // The Project leads the breadcrumb before the title.
-    expect(screen.getByText("Octant")).toHaveClass("workspace-pane__context");
+    expect(screen.getByText("Octant")).toHaveClass("workspace-pane__context-name");
     // The thread's title is a name in navigation, the Project beside it is meta.
     const title = screen.getByTitle(/^Octant \//);
     expect(title).toHaveClass("oct-nav-name");

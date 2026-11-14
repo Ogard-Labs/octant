@@ -1367,8 +1367,13 @@ html[data-octant-native-host="true"]
      "Inbox" and "Board" start. Measured before this, the sidebar had seven
      left edges: titles at 42px, destinations at 45px, feed rows at 14px. */
   gap: var(--oct-space-2);
-  /* Visible properties add lines; the button recipe's fixed height would
-     let those lines overlap the next thread instead of growing this row. */
+  /* The lines of a row and its padding sit on the 4px grid: a two-line row is
+     44px (16 for the top line, 20 for the title, 4 above and below), a
+     three-line row 60. Compact takes two pixels off each of those lines. The
+     button recipe's fixed height would let a third line overlap the next
+     thread instead of growing this row. */
+  --thread-line-context: 16px;
+  --thread-line-title: 20px;
   height: auto;
   min-height: var(--oct-nav-row-h);
   padding-block: 4px;
@@ -1381,13 +1386,6 @@ html[data-octant-native-host="true"]
   font-size: var(--octant-ui-font-size);
   cursor: default;
   text-align: left;
-}
-
-/* A row that carries a facts line is two lines of type, and at the one-line
-   row's 4px it sat 46px tall with the title and the facts pressed against the
-   fill's edges. It takes the room a two-line row needs. */
-.sidebar-navigation__thread:has(.sidebar-navigation__thread-facts) {
-  padding-block: var(--oct-space-2);
 }
 
 /* Hover-only actions take no width until their row is hovered or focused. The
@@ -1448,26 +1446,41 @@ html[data-octant-native-host="true"]
   background: var(--oct-fg);
 }
 
+html[data-octant-density="compact"] .sidebar-navigation__thread {
+  --thread-line-context: 14px;
+  --thread-line-title: 18px;
+}
+
+/* Compact: the mark steps down to the top line's 14px so the row stays 40px. */
+html[data-octant-density="compact"]
+  .sidebar-navigation__thread-context
+  :is(.project-mark, .project-icon) {
+  width: 14px;
+  height: 14px;
+}
+
 .sidebar-navigation__thread-copy {
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
-  gap: 1px;
 }
 
-/* The facts under a title: Project, pull request, branch, then the age at the
-   end. Names give way before numbers do, so a long Project or branch
-   truncates while the pull request number and the age stay whole. */
-.sidebar-navigation__thread-facts {
+/* The top line says where the thread lives and how it stands: the Project's
+   mark and name in the secondary ink, the branch in the mono face and the muted
+   ink, and at the end the state in words or the time. It is small and quiet so
+   the title beneath is the strongest text in the row. Names give way before
+   the state does: a long Project or branch truncates, the state stays whole. */
+.sidebar-navigation__thread-context,
+.sidebar-navigation__thread-detail {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-2);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-line-meta);
+  line-height: var(--thread-line-context);
 }
 
 .sidebar-navigation__thread-project,
@@ -1477,9 +1490,14 @@ html[data-octant-native-host="true"]
   flex: 0 1 auto;
   align-items: center;
   gap: var(--oct-space-1);
-  color: var(--oct-meta);
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
-  line-height: var(--oct-line-meta);
+  line-height: var(--thread-line-context);
+}
+
+.sidebar-navigation__thread-checkout {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
 }
 
 .sidebar-navigation__thread-project > svg,
@@ -1487,13 +1505,7 @@ html[data-octant-native-host="true"]
   flex: none;
 }
 
-.sidebar-navigation__thread-project-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+.sidebar-navigation__thread-project-label,
 .sidebar-navigation__thread-checkout-label {
   min-width: 0;
   overflow: hidden;
@@ -1501,35 +1513,98 @@ html[data-octant-native-host="true"]
   white-space: nowrap;
 }
 
-/* One fixed trailing slot keeps state changes from shifting the title or age. */
-.sidebar-navigation__thread-status {
+/* A Project with no icon of its own gets two letters on a small rounded square
+   whose hue comes from the Project, so it is the same colour on every row. It
+   is the one colour a row spends besides its state. */
+.project-mark {
+  --project-mark-hue: 250;
+  --project-mark-fill: oklch(0.42 0.07 var(--project-mark-hue));
+  --project-mark-ink: oklch(0.93 0.03 var(--project-mark-hue));
   display: inline-flex;
+  width: 16px;
+  height: 16px;
   flex: none;
-  width: 12px;
-  height: 12px;
   align-items: center;
   justify-content: center;
-  color: var(--octant-text-secondary);
+  border-radius: 4px;
+  background: var(--project-mark-fill);
+  color: var(--project-mark-ink);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: 0;
+  line-height: 1;
 }
 
-.sidebar-navigation__thread-status[data-activity="idle"] {
-  opacity: 0;
+/* Two capitals inside a 16px square need about 10px of type, which the scale
+   has no step for; the letters are drawn at the scale's 12px and drawn smaller. */
+.project-mark__letters {
+  display: block;
+  scale: 0.84;
 }
 
-.sidebar-navigation__thread-status[data-activity="unread"]::before {
+:root[data-octant-theme-mode="light"] .project-mark {
+  --project-mark-fill: oklch(0.92 0.045 var(--project-mark-hue));
+  --project-mark-ink: oklch(0.38 0.1 var(--project-mark-hue));
+}
+
+.project-mark[data-neutral="true"] {
+  background: var(--oct-fg-soft);
+  color: var(--oct-meta);
+}
+
+/* The title line: the thread's name, one line, the strongest text in the row.
+   With no top line the time or state stands at its end. */
+.sidebar-navigation__thread-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+/* The state in words with its icon: the only place a row spends colour besides
+   the Project's mark. The word and the icon carry the state, so the colour is
+   never the only signal. */
+.sidebar-navigation__thread-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin-inline-start: auto;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--thread-line-context);
+  white-space: nowrap;
+}
+
+.sidebar-navigation__thread-state[data-activity="working"] {
+  color: var(--octant-accent-text);
+}
+
+.sidebar-navigation__thread-state[data-activity="attention"] {
+  color: var(--oct-warn-fg);
+}
+
+.sidebar-navigation__thread-state[data-activity="working"] > svg {
+  animation: octant-thread-spin var(--oct-motion-spin) linear infinite;
+}
+
+.sidebar-navigation__thread-when {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin-inline-start: auto;
+}
+
+/* New activity is a small dot beside the time, in the ink, with its own name. */
+.sidebar-navigation__thread-unread-dot {
   width: 6px;
   height: 6px;
+  flex: none;
   border-radius: var(--oct-radius-pill);
-  background: currentColor;
-  content: "";
-}
-
-.sidebar-navigation__thread-status[data-activity="attention"] {
-  color: var(--octant-text-primary);
-}
-
-.sidebar-navigation__thread-status[data-activity="working"] > svg {
-  animation: octant-thread-spin var(--oct-motion-spin) linear infinite;
+  background: var(--oct-fg-2);
 }
 
 @keyframes octant-thread-spin {
@@ -1539,31 +1614,35 @@ html[data-octant-native-host="true"]
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-navigation__thread-status[data-activity="working"] > svg {
+  .sidebar-navigation__thread-state[data-activity="working"] > svg {
     animation: none;
   }
 }
 
-/* Provider identity sits immediately before the title, like a compact file
-   type mark. It is stable across the row and does not consume a trailing
-   action slot or change the title's indentation when the row is hovered. */
+/* Provider identity sits small at the end of the row's last line. It is stable
+   across rows and does not consume a trailing action slot. */
 .sidebar-navigation__thread-provider {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  /* As wide as a destination's icon, so the title beside it starts in the
-     same text column; the 14px glyph sits centred inside. */
-  width: var(--oct-icon-md);
-  height: 14px;
+  margin-inline-start: auto;
   opacity: 0.78;
 }
 
-/* A name in navigation (`oct-nav-name`); this rule only truncates it. */
+.sidebar-navigation__thread-main > .sidebar-navigation__thread-provider {
+  margin-inline-start: var(--oct-space-1);
+}
+
+/* A name in navigation (`oct-nav-name`); this rule makes it the row's
+   strongest text and truncates it. */
 .sidebar-navigation__thread-title {
   min-width: 0;
-  /* Whole-pixel lines, so a two-line row is a whole number of pixels tall. */
-  line-height: var(--oct-line-label);
+  flex: 1 1 auto;
+  /* Whole-pixel lines, so a row is a whole number of pixels tall. */
+  line-height: var(--thread-line-title);
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1659,8 +1738,8 @@ html[data-octant-native-host="true"]
 }
 
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
-  .sidebar-navigation__thread-status {
-  margin-inline-start: var(--oct-space-5);
+  .sidebar-navigation__thread-main {
+  padding-inline-end: var(--oct-space-5);
 }
 
 /* A view that hides the status leaves no slot to stand beside, so the room is
@@ -1761,26 +1840,26 @@ html[data-octant-native-host="true"]
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
   :is(
     .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-age,
-    .sidebar-navigation__thread-status
+    .sidebar-navigation__thread-when,
+    .sidebar-navigation__thread-state
   ),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
   :is(
     .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-age,
-    .sidebar-navigation__thread-status
+    .sidebar-navigation__thread-when,
+    .sidebar-navigation__thread-state
   ),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([aria-expanded="true"])
   :is(
     .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-age,
-    .sidebar-navigation__thread-status
+    .sidebar-navigation__thread-when,
+    .sidebar-navigation__thread-state
   ),
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
   :is(
     .sidebar-navigation__thread-meta,
-    .sidebar-navigation__thread-age,
-    .sidebar-navigation__thread-status
+    .sidebar-navigation__thread-when,
+    .sidebar-navigation__thread-state
   ) {
   opacity: 0;
 }
@@ -1876,10 +1955,7 @@ html[data-octant-native-host="true"]
   }
 
   .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
-    :is(
-      .sidebar-navigation__thread-age,
-      .sidebar-navigation__thread-status:not([data-activity="idle"])
-    ) {
+    :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state) {
     opacity: 1;
   }
 
@@ -2258,7 +2334,8 @@ html[data-octant-native-host="true"]
         var(--octant-stage-corner-left)
     );
     mask-image:
-      linear-gradient(currentColor, currentColor), linear-gradient(currentColor, currentColor), linear-gradient(currentColor, currentColor),
+      linear-gradient(currentColor, currentColor), linear-gradient(currentColor, currentColor),
+      linear-gradient(currentColor, currentColor),
       radial-gradient(
         circle at 100% 100%,
         currentColor max(0px, calc(var(--octant-stage-corner-left) - 0.5px)),
@@ -2272,7 +2349,10 @@ html[data-octant-native-host="true"]
     mask-size:
       100% var(--octant-stage-top),
       100% calc(100% - var(--octant-stage-top) - var(--octant-stage-radius)),
-      calc(100% - var(--octant-stage-clip-left) - var(--octant-stage-corner-left) - var(--octant-stage-radius) - 1px)
+      calc(
+          100% - var(--octant-stage-clip-left) - var(--octant-stage-corner-left) -
+            var(--octant-stage-radius) - 1px
+        )
         var(--octant-stage-radius),
       var(--octant-stage-corner-left) var(--octant-stage-corner-left),
       var(--octant-stage-radius) var(--octant-stage-radius);
@@ -4549,9 +4629,10 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 /* A pull request on the facts line: its state glyph and its number read as one
    mark. Colour is spent on the state only. */
 .sidebar-navigation__thread-pr {
+  display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 2px;
+  gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
@@ -4576,24 +4657,20 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   color: var(--oct-meta);
 }
 
-.pull-request-chip[data-tone="open"],
-.sidebar-navigation__thread-pr-mark[data-state="open"] {
+.pull-request-chip[data-tone="open"] {
   color: var(--octant-success-text);
 }
 
-.pull-request-chip[data-tone="merged"],
-.sidebar-navigation__thread-pr-mark[data-state="merged"] {
+.pull-request-chip[data-tone="merged"] {
   color: var(--octant-palette-purple);
 }
 
-.pull-request-chip[data-tone="closed"],
-.sidebar-navigation__thread-pr-mark[data-state="closed"] {
+.pull-request-chip[data-tone="closed"] {
   color: var(--octant-danger-text);
 }
 
 .sidebar-navigation__thread-age {
   flex: none;
-  margin-left: auto;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;

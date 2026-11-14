@@ -635,12 +635,39 @@ dock and the bottom panel) sit in one panel:
 **The sidebar.** 280px by default, resizable (180 to 420px,
 `--oct-sidebar-w-min`, `-max`); Settings shares the saved width. Its header row
 is its part of the title rail. Rows are 32px (`--oct-nav-row-h`) on a 12px
-inset (`--oct-nav-inset`), the account row 44px. A thread row with a facts line
-is 52px (8 + 18 + 1 + 17 + 8) with a 2px gap. The open thread takes
+inset (`--oct-nav-inset`), the account row 44px. A thread row is up to three
+lines, one button with one accessible name ("title, Project, branch, pull
+request, status or time"):
+
+- **Top line** (12px, secondary ink): the Project's 16px mark (its own icon, or
+  two initials on a rounded square in a hue derived from the Project, the one
+  colour a row spends besides its state) and name, then the branch in the mono
+  face and the muted ink, folded in the middle when long. At its end, the state
+  in words with its icon when the thread is running (Working 14m, in the accent)
+  or waiting on the person (Needs you, in the warning tone), otherwise how long
+  ago it moved (3h, 2d) in the muted ink; new activity is a named dot beside the
+  time. The Project tree names the Project in its heading, so its top line is
+  the branch alone.
+- **Title** (13px, 500, primary ink): one line with an ellipsis, the strongest
+  text in the row. A row with nothing to name on a top line carries the state or
+  the time at the end of this line.
+- **Detail line** (12px, muted ink), only when there is something for it: the
+  pull request with its state in words (#1205 open, merged, closed, draft), who
+  started the thread, a worker's coordinator. The provider's 12px mark ends the
+  last line the row has. Colour is spent on the state word and the Project's
+  mark only; the row's other facts keep the ink roles.
+
+A two-line row is 44px (4 + 16 + 20 + 4) and a three-line row 60px; Compact
+density takes the lines to 14 and 18, so a two-line row is 40px. A thread
+with no top line and no detail is the title alone at the row height. The open thread takes
 `--oct-wash-selected` and the primary ink; a pointed-at row takes
 `--oct-wash-hover`. A thread open in another pane
 of the window carries a 2px by 14px mark in `--oct-fg-soft` at its leading edge,
 the focused one in the ink.
+A status group's heading ("Idle 6", "Working 7") is 12px in the secondary ink with
+its count in the muted ink, and keeps its fold. A thread's pane header is the
+same breadcrumb in the title band: the Project's mark, its name in the secondary
+ink, a slash, then the thread's title in the primary ink.
 
 **Collapse.** Collapsed, the stage is the panel's left side: it keeps the
 outline's corners and the 4px gap from the window's left edge (beside the rail,

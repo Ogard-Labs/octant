@@ -802,6 +802,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
       facts.set(String(item.threadId), {
         ...(summary === undefined ? {} : { pullRequest: summary }),
         ...(projectName === undefined ? {} : { projectName }),
+        ...(project === undefined ? {} : { projectId: String(project.id) }),
       });
     }
     return facts;
@@ -862,7 +863,12 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               {...(props.onCloseContentTab === undefined
                 ? {}
                 : { onCloseContentTab: props.onCloseContentTab })}
-              {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+              {...(contextProject === undefined
+                ? {}
+                : {
+                    contextLabel: contextProject.name,
+                    contextProjectId: String(contextProject.id),
+                  })}
               {...(props.environmentNames === undefined
                 ? {}
                 : { environmentNames: props.environmentNames })}

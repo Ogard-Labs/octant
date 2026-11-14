@@ -446,13 +446,22 @@ describe("WindowChrome", () => {
     // heavier than the 400 thread titles filed under it.
     expect(projectName).toContain("font-weight: var(--oct-weight-medium);");
     expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
-    expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
-      "opacity: 0;",
+    // A thread row spends colour on its state word and the Project's mark only:
+    // the working word takes the accent, the waiting one the warning tone, and
+    // the title is the strongest ink in the row.
+    expect(cssRule('.sidebar-navigation__thread-state[data-activity="working"]')).toContain(
+      "var(--octant-accent-text)",
     );
-    // The mark fills a destination's icon slot, so a thread's title starts in
-    // the same text column as "Inbox" and "Board".
-    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("width: var(--oct-icon-md);");
+    expect(cssRule('.sidebar-navigation__thread-state[data-activity="attention"]')).toContain(
+      "var(--oct-warn-fg)",
+    );
+    expect(cssRule(".sidebar-navigation__thread-title")).toContain("color: var(--oct-fg);");
+    expect(cssRule(".sidebar-navigation__thread-title")).toContain(
+      "font-weight: var(--oct-weight-medium);",
+    );
+    // The provider's mark sits small at the end of the row's last line.
     expect(cssRule(".sidebar-navigation__thread-provider")).toContain("opacity: 0.78;");
+    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("margin-inline-start: auto;");
     expect(cssRule('.sidebar-navigation__thread[aria-current="page"]')).not.toContain(
       "var(--oct-accent)",
     );
@@ -463,9 +472,7 @@ describe("WindowChrome", () => {
     expect(sectionLabel).toContain("letter-spacing: 0;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");
-    expect(cssRule(".sidebar-navigation__thread-status")).toContain(
-      "color: var(--octant-text-secondary);",
-    );
+    expect(cssRule(".sidebar-navigation__thread-state")).toContain("color: var(--oct-fg-2);");
   });
 
   it("shows an empty Project section's add control without waiting for a hover", () => {

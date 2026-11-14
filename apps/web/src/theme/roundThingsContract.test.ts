@@ -79,7 +79,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".code-project-views__color-dot",
   ".code-overview__lifecycle-mark",
   ".code-debug-breakpoint::before, .code-debug-breakpoint-unresolved::before",
-  '.sidebar-navigation__thread-status[data-activity="unread"]::before',
+  ".sidebar-navigation__thread-unread-dot",
   ".code-home__row .code-home__badge::before",
   '.pull-request-chip[data-checks="failing"]::before, .pull-request-chip[data-checks="pending"]::before',
   '.inbox-view__row[data-unseen="true"] .oct-row-label::after',

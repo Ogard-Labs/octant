@@ -70,11 +70,14 @@ describe("ProjectThreadRows", () => {
     );
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).getByText("#12")).toBeVisible();
+    expect(within(row).getByText("#12 open")).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
-    expect(
-      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
-    ).toHaveAttribute("data-state", "open");
+    expect(within(row).getByTitle("Pull request #12 · open · checks passing")).toHaveAttribute(
+      "data-state",
+      "open",
+    );
+    // One name for the whole row: title first, then the pull request, then the time.
+    expect(row).toHaveAccessibleName("Controller foundation, pull request #12 open, 2h");
   });
 
   it("keeps a long thread list bounded to the visible window", async () => {
@@ -132,10 +135,10 @@ describe("ProjectThreadRows", () => {
 
     expect(screen.getByTitle("Claude")).toBeVisible();
     expect(screen.queryByText("gpt-5.6-luna")).toBeNull();
+    // The provider's mark ends the row's last line: here the title line.
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    const provider = row.querySelector(".sidebar-navigation__thread-provider");
-    const title = row.querySelector(".sidebar-navigation__thread-copy");
-    expect(provider?.nextElementSibling).toBe(title);
+    const main = row.querySelector(".sidebar-navigation__thread-main");
+    expect(main?.lastElementChild).toBe(row.querySelector(".sidebar-navigation__thread-provider"));
   });
 
   it.each([
@@ -143,34 +146,62 @@ describe("ProjectThreadRows", () => {
       activity: "working",
       unread: true,
       woke: true,
-      label: "Working · Snooze ended · New activity",
+      word: "Working",
+      label: "Controller foundation, Working, Snooze ended, New activity",
     },
-    { activity: "attention", unread: true, woke: false, label: "Needs attention · New activity" },
-    { activity: "unread", unread: true, woke: true, label: "Snooze ended · New activity" },
-  ] as const)("combines overlapping row states into one trailing indicator: $label", (state) => {
-    render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, ...state }]} />);
+    {
+      activity: "attention",
+      unread: true,
+      woke: false,
+      word: "Needs you",
+      label: "Controller foundation, Needs attention, New activity",
+    },
+    {
+      activity: "unread",
+      unread: true,
+      woke: true,
+      word: "Snooze ended",
+      label: "Controller foundation, Snooze ended, New activity",
+    },
+  ] as const)(
+    "says the strongest of overlapping states in words and names them all: $label",
+    (state) => {
+      render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, ...state }]} />);
+      const row = screen.getByRole("button", { name: /Controller foundation/ });
+      expect(row).toHaveAccessibleName(state.label);
+      const words = row.querySelectorAll(".sidebar-navigation__thread-state");
+      expect(words).toHaveLength(1);
+      expect(words[0]).toHaveTextContent(state.word);
+    },
+  );
+
+  it("gives a running turn's elapsed time beside the word Working", () => {
+    const fourteenMinutesAgo = new Date(Date.now() - 14 * 60_000).toISOString();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, activity: "working", turnStartedAt: fourteenMinutesAgo }]}
+      />,
+    );
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    const indicator = within(row).getByRole("img", { name: state.label });
-    expect(within(row).getAllByRole("img")).toHaveLength(1);
-    expect(row.lastElementChild).toBe(indicator);
-    expect(row.firstElementChild).toHaveClass("sidebar-navigation__thread-provider");
-    expect(within(row).queryByText("Woke")).toBeNull();
+    expect(within(row).getByText("Working 14m")).toBeVisible();
   });
 
-  it("marks an unread thread with a dot at the end of its row and clears it when read", () => {
+  it("marks an unread thread with a named dot beside its time and clears it when read", () => {
     const { rerender } = render(
       <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, unread: true }]} />,
     );
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    const dot = within(row).getByRole("img", { name: "New activity" });
-    expect(dot).toHaveAttribute("data-activity", "unread");
-    // The mark ends the row: the title comes first, the dot last.
-    expect(row.lastElementChild).toBe(dot);
+    expect(row.querySelector(".sidebar-navigation__thread-unread-dot")).toHaveAttribute(
+      "title",
+      "New activity",
+    );
+    expect(row).toHaveAccessibleName("Controller foundation, New activity");
 
     rerender(
       <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, unread: false }]} />,
     );
-    expect(within(row).queryByRole("img", { name: "New activity" })).toBeNull();
+    expect(row.querySelector(".sidebar-navigation__thread-unread-dot")).toBeNull();
   });
 
   it("marks every thread the window has open, not only the focused one", () => {
@@ -263,7 +294,7 @@ describe("ProjectThreadRows", () => {
     expect(screen.queryByText("feature/x")).toBeNull();
   });
 
-  it("says a thread needs attention through a labelled dot rather than a badge", () => {
+  it("says a thread needs attention in words rather than a badge", () => {
     render(
       <ProjectThreadRows
         onSelectThread={vi.fn()}
@@ -271,7 +302,7 @@ describe("ProjectThreadRows", () => {
       />,
     );
 
-    expect(screen.getByRole("img", { name: "Needs attention" })).toBeVisible();
+    expect(screen.getByText("Needs you")).toBeVisible();
     expect(screen.queryByText("active")).toBeNull();
   });
 
@@ -1221,7 +1252,7 @@ describe("completing and snoozing from a thread row", () => {
     expect(onSnoozeThread).not.toHaveBeenCalled();
   });
 
-  it("marks a row whose snooze ended with one labelled clock", () => {
+  it("says a row whose snooze ended in words", () => {
     render(
       <ProjectThreadRows
         onSelectThread={vi.fn()}
@@ -1234,8 +1265,7 @@ describe("completing and snoozing from a thread row", () => {
         ]}
       />,
     );
-    const woke = screen.getByRole("img", { name: "Snooze ended" });
-    expect(woke).toHaveAttribute("title", "Snooze ended");
+    const woke = screen.getByText("Snooze ended");
     expect(screen.getByRole("button", { name: /Controller foundation/ })).toContainElement(woke);
   });
 
@@ -1292,13 +1322,10 @@ describe("ProjectThreadRows display properties", () => {
     renderRows(projectsDefaults);
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).getByText("#12")).toBeVisible();
+    expect(within(row).getByText("#12 open")).toBeVisible();
     expect(within(row).getByText("feature/x")).toBeVisible();
-    expect(
-      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
-    ).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
-    expect(row.querySelector(".sidebar-navigation__thread-status")).not.toBeNull();
+    expect(row).toHaveAccessibleName("Controller foundation, feature/x, pull request #12 open, 2h");
   });
 
   it("omits a hidden property without leaving a gap in its place", () => {
@@ -1311,13 +1338,11 @@ describe("ProjectThreadRows display properties", () => {
     });
 
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).queryByText("#12")).toBeNull();
+    expect(within(row).queryByText("#12 open")).toBeNull();
     expect(within(row).queryByText("feature/x")).toBeNull();
-    expect(
-      within(row).queryByRole("img", { name: "Pull request #12 · open · checks passing" }),
-    ).toBeNull();
     expect(within(row).queryByText("2h")).toBeNull();
-    expect(row.querySelector(".sidebar-navigation__thread-status")).toBeNull();
+    expect(row.querySelector(".sidebar-navigation__thread-state")).toBeNull();
+    expect(row).toHaveAccessibleName("Controller foundation");
     // Nothing is left in their place: the copy holds the title alone.
     expect(row.querySelector(".sidebar-navigation__thread-copy")?.children).toHaveLength(1);
   });

@@ -1,4 +1,5 @@
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
+import { ProjectMark } from "../projects/ProjectMark";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
@@ -96,6 +97,8 @@ export interface SplitWorkspaceProps {
   readonly showProviderIcons?: boolean;
   /** The Project a thread pane names in its context chip when it has no facts of its own. */
   readonly contextLabel?: string;
+  /** The Project the pane's mode is in; names the mark when a thread has no facts of its own. */
+  readonly contextProjectId?: string;
   /** Host names by host id, so a thread on another host names where it runs. */
   readonly environmentNames?: ReadonlyMap<string, string>;
   /**
@@ -129,6 +132,8 @@ export interface PaneFacts {
   readonly pullRequest?: ThreadBoardPullRequestSummary;
   /** The Project the thread works in, as its own chip. */
   readonly projectName?: string;
+  /** The Project's id, so the breadcrumb can draw its mark. */
+  readonly projectId?: string;
 }
 
 interface WorkspaceNodeProps extends SplitWorkspaceProps {
@@ -538,6 +543,12 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   const selectPullRequest = props.onSelectPullRequest;
   const projectName =
     "threadId" in surface ? (facts?.projectName ?? props.contextLabel) : undefined;
+  const projectId =
+    "threadId" in surface
+      ? facts?.projectName === undefined
+        ? props.contextProjectId
+        : facts.projectId
+      : undefined;
   const running =
     environment !== undefined &&
     "threadId" in surface &&
@@ -641,7 +652,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     beside the thread it runs. */}
                 {showTabs || projectName === undefined ? null : (
                   <span className="workspace-pane__context" title={projectName}>
-                    {projectName}
+                    <ProjectMark
+                      name={projectName}
+                      {...(projectId === undefined ? {} : { projectId })}
+                    />
+                    <span className="workspace-pane__context-name">{projectName}</span>
                   </span>
                 )}
                 {showTabs ? null : (

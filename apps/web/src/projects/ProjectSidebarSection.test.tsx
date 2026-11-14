@@ -1153,14 +1153,15 @@ describe("ProjectSidebarSection activity view", () => {
         }),
       ).toBeVisible();
       expect(within(priority).getAllByText("Test")).toHaveLength(2);
+      // The strongest state is said in words at the end of the row's top line,
+      // and the row's one accessible name carries them all.
       expect(
-        within(priority).getByRole("img", {
-          name: "Working · Snooze ended · New activity · Follow-up",
+        within(priority).getByRole("button", {
+          name: "Update AuroraDocs logos, Test, Working, Snooze ended, New activity, Follow-up",
         }),
       ).toBeVisible();
-      expect(
-        within(priority).getByRole("img", { name: "Needs attention · Follow-up" }),
-      ).toBeVisible();
+      expect(within(priority).getByText("Working")).toBeVisible();
+      expect(within(priority).getByText("Needs you")).toBeVisible();
       expect(screen.getByRole("button", { name: /Estimate app rebrand effort/ })).toHaveTextContent(
         "No Project",
       );
@@ -2790,9 +2791,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     // The row names the request whether or not it can also open it. It used to
     // leave the number to a separate control that never rendered once the row
     // had a menu, so a feed with GitHub authority showed no pull requests.
-    expect(
-      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
-    ).toBeVisible();
+    expect(within(row).getByText("#12 open")).toBeVisible();
     await user.hover(row);
     const details = await screen.findByRole("group", { name: "Thread details" });
     expect(details).toHaveTextContent("Planning");
@@ -2885,18 +2884,16 @@ describe("ProjectSidebarSection row property visibility", () => {
     renderSidebar();
 
     const treeRow = screen.getByRole("button", { name: /Planning/ });
-    expect(within(treeRow).getByText("#12")).toBeVisible();
+    expect(within(treeRow).getByText("#12 open")).toBeVisible();
     expect(within(treeRow).getByText("feature/sidebar")).toBeVisible();
     expect(within(treeRow).getByText("2h")).toBeVisible();
-    expect(treeRow.querySelector(".sidebar-navigation__thread-status")).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Activity feed" }));
     const feedRow = screen.getByRole("button", { name: /Planning/ });
     expect(within(feedRow).getByText("octant")).toBeVisible();
-    expect(within(feedRow).queryByText("#12")).toBeNull();
+    expect(within(feedRow).queryByText("#12 open")).toBeNull();
     expect(within(feedRow).queryByText("feature/sidebar")).toBeNull();
     expect(within(feedRow).queryByText("2h")).toBeNull();
-    expect(feedRow.querySelector(".sidebar-navigation__thread-status")).not.toBeNull();
   });
 
   it("edits only the view the submenu names when the host record changes", async () => {
@@ -2910,7 +2907,7 @@ describe("ProjectSidebarSection row property visibility", () => {
 
     await waitFor(() =>
       expect(
-        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12"),
+        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
       ).toBeNull(),
     );
     expect(
@@ -2922,7 +2919,9 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).getByText("octant"),
     ).toBeVisible();
-    expect(within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12")).toBeNull();
+    expect(
+      within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
+    ).toBeNull();
 
     await openPropertyMenu(user);
     expect(await screen.findByText("Shown on Activity rows")).toBeVisible();
@@ -2932,14 +2931,16 @@ describe("ProjectSidebarSection row property visibility", () => {
 
     await waitFor(() => {
       const feedRow = screen.getByRole("button", { name: /Planning/ });
-      expect(within(feedRow).getByText("#12")).toBeVisible();
+      expect(within(feedRow).getByText("#12 open")).toBeVisible();
       expect(within(feedRow).queryByText("octant")).toBeNull();
     });
 
     // Back in the tree the pull request is still hidden: one view's choice
     // never rewrites the other's.
     await user.click(screen.getByRole("button", { name: "Project tree" }));
-    expect(within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12")).toBeNull();
+    expect(
+      within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
+    ).toBeNull();
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).getByText("feature/sidebar"),
     ).toBeVisible();
@@ -2954,18 +2955,18 @@ describe("ProjectSidebarSection row property visibility", () => {
 
     await waitFor(() =>
       expect(
-        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12"),
+        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
       ).toBeNull(),
     );
     const stripped = screen.getByRole("button", { name: /Planning/ });
     expect(within(stripped).queryByText("feature/sidebar")).toBeNull();
     expect(within(stripped).queryByText("2h")).toBeNull();
-    expect(stripped.querySelector(".sidebar-navigation__thread-status")).toBeNull();
+    expect(stripped.querySelector(".sidebar-navigation__thread-state")).toBeNull();
 
     fireEvent.click(await screen.findByRole("menuitem", { name: "Show all" }));
     await waitFor(() =>
       expect(
-        within(screen.getByRole("button", { name: /Planning/ })).getByText("#12"),
+        within(screen.getByRole("button", { name: /Planning/ })).getByText("#12 open"),
       ).toBeVisible(),
     );
     expect(
@@ -3055,7 +3056,7 @@ describe("ProjectSidebarSection folded Project status", () => {
     await screen.findByRole("button", { name: "Collapse Test" });
 
     expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
-    expect(screen.getByRole("img", { name: "Needs attention" })).toBeVisible();
+    expect(screen.getByText("Needs you")).toBeVisible();
   });
 
   it("stays quiet about a folded Project for a reader who turned status marks off", async () => {

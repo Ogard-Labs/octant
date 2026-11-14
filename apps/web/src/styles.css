@@ -988,7 +988,7 @@ strong {
 /* The button paints its own ink, so the heading's secondary ink is set on the
    word. */
 .activity-nav__fold > span:first-child {
-  color: var(--oct-muted);
+  color: var(--oct-fg-2);
 }
 
 .activity-nav__fold-count {
@@ -1015,12 +1015,6 @@ strong {
 
 .activity-nav__threads {
   display: grid;
-  gap: 2px;
-}
-
-.sidebar-navigation__thread-copy {
-  display: grid;
-  min-width: 0;
   gap: 2px;
 }
 
@@ -1575,16 +1569,25 @@ html[data-octant-native-host="true"]
    is mostly gone or past its own cap. The cap is in ch because the handle
    shrink-wraps its content: a share of it clipped short Project names. */
 .workspace-pane__context {
+  display: inline-flex;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 32ch;
+  align-items: center;
+  gap: var(--oct-space-2);
   overflow: hidden;
-  color: var(--oct-meta);
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
   line-height: var(--oct-leading-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-pane__context-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .workspace-pane__crumb {
