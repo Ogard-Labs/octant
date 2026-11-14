@@ -58,7 +58,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 8         | 3       | 3            | 2                   |
+| [Browser](#browser)                                                                   | 7         | 3       | 3            | 1                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 4       | 2            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **259**   | **152** | **96**       | **11**              |
+| **All areas**                                                                         | **258**   | **152** | **96**       | **10**              |
 
 ## Principles and hard lines
 
@@ -2996,15 +2996,6 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 - Named account profiles have host-assigned identities, native local labels and separate persistent stores. A local person explicitly selects one; task defaults never grant site, Project or credential authority. Approval names come from the native registry, and origin grants/extensions remain isolated per identity. Unknown identities, paired/unattended callers and a missing native owner refuse. Stores and the name registry are not exported or synced; Private, Project and Personal retain their behavior.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
-
-### Browser element picker
-
-In a Work or Code thread's Browser the person may click an element to attach a structured snapshot of it to the composer: a selector, its outer HTML trimmed to a fixed bound, and a subset of its computed styles (maintainer decision, 2026-11-14).
-
-- The snapshot is read by the same host-owned top-frame reader and checks as a pointed-at feedback note and stays on this computer until the person sends the message it is attached to.
-- It is outside content and marks the thread as other page content does; picking sends, queues and approves nothing.
-
-Status: Designed, not built. Since: 2026-11-14. Detail: [Browser for agents: Attaching a picked element to the composer](browser-agent-tool.md#attaching-a-picked-element-to-the-composer).
 
 ### Page-declared tools
 
