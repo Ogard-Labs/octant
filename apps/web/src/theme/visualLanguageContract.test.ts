@@ -606,8 +606,10 @@ describe("the public-block visual language", () => {
       "";
     expect(send).toMatch(/background:\s*var\(--octant-text-primary\)/);
     expect(send).toMatch(/color:\s*var\(--octant-workspace\)/);
+    // Nothing to send: a quiet ink-8% disc with a secondary-ink arrow, which
+    // reads as "not yet" and not as a broken control.
     expect(css).toMatch(
-      /\.composer-field__actions button\[data-variant="default"\]:disabled\s*\{[^}]*opacity:\s*0\.2/,
+      /\.composer-field__actions button\[data-variant="default"\]:disabled\s*\{[^}]*background:\s*color-mix\(in oklab, var\(--octant-text-primary\) 8%, transparent\);[^}]*color:\s*var\(--octant-text-secondary\);[^}]*opacity:\s*1/,
     );
     const grown =
       /\.thread-composer__surface\[data-shape="box"\] \.composer-field\s*\{([^}]*)\}/.exec(

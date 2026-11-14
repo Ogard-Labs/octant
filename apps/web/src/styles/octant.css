@@ -4747,7 +4747,8 @@ input.switch:checked::after {
    in from the box's edge: the one place a control is a circle, because the box
    they sit in is a pill. Attach is a quiet fill (ink 6%) with a hover step; the
    microphone is a ghost with a round hover fill; send is the ink as its fill
-   and the page colour as its arrow, at 20% when there is nothing to send, and
+   and the page colour as its arrow, and a quiet ink-8% disc with a
+   secondary-ink arrow when there is nothing to send ("not yet", not broken);
    it grows a hair on hover (not under reduced motion). */
 .composer-field__attach :is(button, [role="button"]),
 .composer-field__actions :is(button, [role="button"]) {
@@ -4779,9 +4780,9 @@ input.switch:checked::after {
   transform: scale(1.06);
 }
 .composer-field__actions button[data-variant="default"]:disabled {
-  background: var(--octant-text-primary);
-  color: var(--octant-workspace);
-  opacity: 0.2;
+  background: color-mix(in oklab, var(--octant-text-primary) 8%, transparent);
+  color: var(--octant-text-secondary);
+  opacity: 1;
 }
 html[data-octant-reduced-motion="true"] .composer-field__actions button[data-variant="default"] {
   transform: none;
