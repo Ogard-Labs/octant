@@ -467,7 +467,9 @@ Code release adds works from that release and fails closed; a path it names
 still meets the secret guard. The account's claude.ai service tools
 (`RemoteTrigger`, `PushNotification`, `Projects`, `ClaudeDesign`) are such
 tools: they use the person's own claude.ai account, a `Projects` upload's
-`local_path` meets the secret guard, and each answer marks the thread as
+`local_path` meets the secret guard and, wherever the gate confines file
+tools (below Full access and at sandboxed Full access), is held to the
+Project's folders as an Artifact publish is, and each answer marks the thread as
 outside content (`hosted-tool`), as an Artifact publish does (maintainer
 decision, 2026-11-14). Because a
 native build may serve searches through its shell, `Grep` and `Glob` are

@@ -974,6 +974,21 @@ describe("Claude execution policy", () => {
         await expect(
           tool("Read", { file_path: "/outside/project/file.ts" }, "outside-read"),
         ).resolves.toMatchObject({ behavior: "deny" });
+        // A Projects upload is held to the Project's folders, as Artifact is.
+        await expect(
+          tool(
+            "Projects",
+            { method: "upload_file", local_path: "/outside/project/notes.md" },
+            "outside-upload",
+          ),
+        ).resolves.toMatchObject({ behavior: "deny" });
+        await expect(
+          tool(
+            "Projects",
+            { method: "upload_file", local_path: `${projectRoot}/notes.md` },
+            "inside-upload",
+          ),
+        ).resolves.toEqual({ behavior: "allow" });
       } finally {
         await acquired.close();
       }

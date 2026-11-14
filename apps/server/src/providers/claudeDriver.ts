@@ -213,6 +213,8 @@ const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
  * service admits (read from the bundled binary, 2026-10-27).
  */
 export const CLAUDE_ARTIFACT_TOOL = "Artifact";
+/** Claude's claude.ai Projects tool, whose upload names a local file in `local_path`. */
+const CLAUDE_PROJECTS_TOOL = "Projects";
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
 /**
  * Tools that change only Claude's own session state: no file, shell, network,
@@ -506,6 +508,10 @@ function claudeConfinedTarget(
   if (CLAUDE_SHELL_TOOLS.has(toolName)) return input.cwd ?? projectRoot;
   if (toolName === "Glob" || toolName === "Grep") return input.path ?? projectRoot;
   if (toolName === "NotebookEdit") return input.notebook_path;
+  // A Projects upload sends the local file it names to claude.ai, so it is
+  // held to the Project's folders as an Artifact publish is; a call that
+  // uploads nothing is judged at the Project root.
+  if (toolName === CLAUDE_PROJECTS_TOOL) return input.local_path ?? projectRoot;
   if (
     CLAUDE_READ_TOOLS.has(toolName) ||
     CLAUDE_EDIT_TOOLS.has(toolName) ||
