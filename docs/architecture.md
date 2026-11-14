@@ -5974,8 +5974,8 @@ ls-remote` against the thread's remote and the GitHub reads they already
   refreshes. Hidden-thread filtering still precedes the service's result limit. An image job queued or finished journals on its own `image-jobs`
   topic, so a thread's generated-image list re-reads when the agent's image
   tool completes a job rather than on its idle cadence. Captures, tool
-  approvals, follow-up offers and message queues use their own metadata-only
-  Machine change topics. Feed sequences are per process, so every frame also
+  approvals, follow-up offers, message queues and the person's to-do list use
+  their own metadata-only Machine change topics. Feed sequences are per process, so every frame also
   carries the host process's epoch, minted at start, and a client resumes
   with both (`afterSequence` and `epoch`). A cursor from another process gets
   `snapshot-required` whatever its sequence, since a restart's changes are

@@ -20,10 +20,12 @@ for every caller but the person. The To-dos destination is built on that host:
 the page, quick add, filters, editing in place, reordering, the sidebar row and
 its badge, and New to-do in the command palette and on a shortcut. Start is
 built for this host's Projects and Chat: the draft with its source, the link,
-Link again, the thread state on a row, and Tick off. Not built yet: the list
-host setting, reaching a list on another host, Start into another host's
-Project, live updates to other clients (a window reads the list again
-every 30 seconds while it is visible), and the phone screen.
+Link again, the thread state on a row, and Tick off. Every window on the list
+host follows changes as they happen: each change publishes the host's `todos`
+change topic, and a window reads the list again on it (and every 30 seconds
+while visible, for a feed that is reconnecting). Not built yet: the list host
+setting, reaching a list on another host, Start into another host's Project,
+and the phone screen.
 [Delivery plan](#delivery-plan) lists the order of work.
 
 ## Outcome

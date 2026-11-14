@@ -2696,7 +2696,7 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
-  const todoList = useTodoList(launchedClients.todoClient);
+  const todoList = useTodoList(launchedClients.todoClient, machineChanges.todos);
   const todoListHostIdRef = useRef<TodoListView["hostId"]>(undefined);
   todoListHostIdRef.current =
     todoList.read.status === "loading" ? undefined : todoList.read.view?.hostId;

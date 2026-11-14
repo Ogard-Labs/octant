@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { TODO_AGGREGATE_TYPE } from "@octant/contracts/todos";
 import {
   BROWSER_CAPTURE_AGGREGATE_TYPE,
   BROWSER_STEP_AGGREGATE_TYPE,
@@ -261,6 +262,7 @@ function topicsForEvent(event: {
   )
     return ["thread-follow-ups"];
   if (aggregateType === "thread-message-queue") return ["thread-message-queue"];
+  if (aggregateType === TODO_AGGREGATE_TYPE) return ["todos"];
   if (aggregateType === "project") {
     return ["projects", "chat-navigation", "work-navigation", "code-navigation"];
   }

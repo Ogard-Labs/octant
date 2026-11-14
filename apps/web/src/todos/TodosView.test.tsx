@@ -65,8 +65,12 @@ function fakeHost() {
   return { client, apply, view };
 }
 
-function Page(props: { readonly client: TodoClient; readonly start?: TodoStartProps }) {
-  const list = useTodoList(props.client);
+function Page(props: {
+  readonly client: TodoClient;
+  readonly start?: TodoStartProps;
+  readonly revision?: number;
+}) {
+  const list = useTodoList(props.client, props.revision);
   return (
     <TodosView
       list={list}
@@ -318,5 +322,18 @@ describe("starting from a to-do", () => {
     expect(await screen.findByText("Thread started, not linked")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Link" }));
     expect(start.onLink).toHaveBeenCalledWith(todoId);
+  });
+});
+
+describe("a change made elsewhere", () => {
+  it("shows a to-do another device added as soon as the host says the list changed", async () => {
+    const host = fakeHost();
+    const view = render(<Page client={host.client} revision={0} />);
+    expect(await screen.findByText(/Write down what you mean to do/)).toBeVisible();
+
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Added on the phone" });
+    view.rerender(<Page client={host.client} revision={1} />);
+
+    expect(await screen.findByRole("checkbox", { name: "Added on the phone" })).toBeVisible();
   });
 });
