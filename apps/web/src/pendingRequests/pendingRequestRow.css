@@ -61,6 +61,16 @@
   white-space: nowrap;
 }
 
+/* A settled row's outcome may name a long choice, so it wraps instead of
+   pushing the worker's title out of the row. */
+.pending-request__outcome {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+}
+
 .pending-request__project {
   overflow: hidden;
   padding-inline-start: calc(16px + var(--oct-space-2));

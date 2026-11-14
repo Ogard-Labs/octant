@@ -1,0 +1,44 @@
+/* The recap and the notes open in place under their rows, like the access
+   details: facts as name over value, notes as plain text with quiet actions. */
+.thread-info__panel:has(> .thread-notes[open], > .thread-recap[open]) {
+  width: min(440px, 100cqi);
+}
+.thread-recap__facts {
+  display: grid;
+  gap: 2px;
+  margin: var(--oct-space-1) 0;
+  font-size: var(--oct-text-sm);
+}
+.thread-recap__facts dt {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+.thread-recap__facts dd {
+  margin: 0 0 var(--oct-space-1);
+  color: var(--oct-fg);
+  overflow-wrap: anywhere;
+}
+.thread-notes__list {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-1) 0 var(--oct-space-2);
+  padding: 0;
+  list-style: none;
+}
+.thread-notes__list > li + li {
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+.thread-info__panel p.thread-notes__text {
+  margin: 0;
+  color: var(--oct-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thread-notes__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-1);
+  margin-top: var(--oct-space-1);
+}
