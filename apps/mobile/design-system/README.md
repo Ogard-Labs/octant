@@ -50,7 +50,7 @@ The thread is conversation-first, following docs/design/thread-view.md:
 - A reply is bare prose with no card; only a person's message is boxed, in the
   control fill with a hairline and no accent. Markdown headings in a reply are
   labels (17 and 15, weight 600), not page titles.
-- `ReasoningPart` and `ToolPartCard` are 32pt rows; their open detail hangs
+- `ReasoningPart` is a 32pt row; `ToolActivity` draws a run of tool calls as 28pt rows on one rail, folding a settled run behind "N tool calls". Open detail hangs
   off a hairline under the row. `MessageBlocks` and `AttemptStatus` render the
   rest of the structured conversation state.
 - `ThemeProvider` supplies the Octant light and dark tokens, while Settings →
@@ -75,7 +75,7 @@ design-system/
   ScreenCanvas.tsx / GlassSurface.tsx / GlassCard.tsx / GlassChip.tsx
 src/ui/
   MessageBubble.tsx / MessageActions.tsx / MessageBlocks.tsx
-  ReasoningPart.tsx / ToolPartCard.tsx / AttemptStatus.tsx
+  ReasoningPart.tsx / ToolActivity.tsx / AttemptStatus.tsx
   FloatingComposer.tsx / CountTile.tsx / NativeChrome.tsx / TabBar.tsx
   messageDocument.ts
 ```
