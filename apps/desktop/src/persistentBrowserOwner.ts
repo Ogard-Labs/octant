@@ -34,6 +34,8 @@ export function createPersistentBrowserOwner(options: {
     owner: BrowserExecutionOwner,
   ) => Promise<void>;
   readonly close: (contextId: BrowserContextId) => Promise<void>;
+  /** Runs after each sweep, so idle pages are hibernated on the same clock that ends leases. */
+  readonly afterSweep?: () => void;
   readonly now?: () => number;
   readonly uuid?: () => string;
 }) {
@@ -213,6 +215,7 @@ export function createPersistentBrowserOwner(options: {
           .filter((lease) => !current(lease))
           .map((lease) => release(lease.owner.leaseId)),
       );
+      options.afterSweep?.();
     },
     restart: async () => {
       await retire();

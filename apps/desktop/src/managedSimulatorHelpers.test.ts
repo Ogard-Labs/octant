@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   createManagedSimulatorHelpers,
@@ -151,6 +152,38 @@ describe("managed simulator streams", () => {
       expect(frames[0]).toEqual(jpeg);
       expect(native.watch).not.toHaveBeenCalled();
       if (watch.status === "watching") watch.stop();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("stops serve-sim once the last view has been closed for the idle period", async () => {
+    const managed = tools();
+    const helpers = createManagedSimulatorHelpers(nativeHelpers(), managed, {
+      fetch: fetchStream,
+      inputConnection: connected,
+      sitsWide: async () => undefined,
+      idleMs: 50,
+    });
+    try {
+      const watch = await helpers.watch(
+        udid,
+        { maxHeight: 100, quality: 0.5, framesPerSecond: 1 },
+        { onFrame: () => undefined, onEnd: () => undefined },
+        1_000,
+      );
+      expect(watch.status).toBe("watching");
+      const serveSim = managed.trackProcess.mock.calls.find(([tool]) => tool === "serve-sim");
+      const child: ChildProcess | undefined = serveSim?.[1];
+      expect(child).toBeDefined();
+      const exited = new Promise<void>((resolve) => {
+        if (child === undefined || child.exitCode !== null || child.signalCode !== null) resolve();
+        else child.once("exit", () => resolve());
+      });
+      if (watch.status === "watching") watch.stop();
+      expect(child?.exitCode ?? child?.signalCode ?? null).toBeNull();
+      await exited;
+      expect(child?.signalCode).toBe("SIGTERM");
     } finally {
       helpers.dispose();
     }

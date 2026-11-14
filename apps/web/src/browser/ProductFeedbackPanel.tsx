@@ -8,6 +8,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ProductFeedbackEvidence } from "./ProductFeedbackEvidence";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export interface ProductFeedbackPanelProps {
   readonly pending: ReadonlyArray<ProductFeedbackNote>;
@@ -250,14 +251,13 @@ function PendingNote(props: {
           <X aria-hidden="true" size={12} /> Remove note
         </OctantButton>
       </div>
-      <details>
-        <summary>Inspect captured evidence</summary>
+      <OctantCollapsible summary="Inspect captured evidence">
         <ProductFeedbackEvidence
           element={note.element}
           capturedAt={note.capturedAt}
           {...(props.cropDataUrl === undefined ? {} : { cropDataUrl: props.cropDataUrl })}
         />
-      </details>
+      </OctantCollapsible>
     </li>
   );
 }

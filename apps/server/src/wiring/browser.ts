@@ -954,6 +954,7 @@ export function wireBrowser(deps: BrowserDependencies) {
             ...(input.expectedObservationRevision === undefined
               ? {}
               : { expectedObservationRevision: input.expectedObservationRevision }),
+            ...(input.withMarkup === true ? { withMarkup: true } : {}),
             ...(input.current === undefined ? {} : { current: input.current }),
             ...(input.signal === undefined ? {} : { signal: input.signal }),
           })) ?? { status: "unavailable" },

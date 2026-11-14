@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import { WorkspaceViewStateContext, useWorkspaceViewStore } from "./workspaceViewState";
@@ -84,7 +85,6 @@ import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMove
 import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveClient";
 import { ThreadMoveHold } from "../environment/threadMove/ThreadMoveHold";
 import type { ProviderController } from "../providers/useProviderController";
-import { ShellState } from "./ShellState";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
@@ -278,7 +278,8 @@ export interface WorkspaceViewProps {
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     paneId?: PaneId,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
-  ) => void;
+    attachments?: ReadonlyArray<File>,
+  ) => Promise<boolean | void> | void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
     draft: string,
@@ -1349,7 +1350,7 @@ function CodeThreadTabSurface(props: {
   const controller = useCodeThreadController(props.controllers, props.tab.threadId as CodeThreadId);
   if (controller === undefined) {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Code workspace"
         message="Opening this thread's own Code state."
         state="loading"
@@ -1431,7 +1432,7 @@ function renderCodeTab(
   const content = (
     <Suspense
       fallback={
-        <ShellState
+        <OctantEmpty
           eyebrow="Code workspace"
           message="Loading the selected Code surface."
           state="loading"
@@ -2035,7 +2036,7 @@ function renderNonCodeTab(
     const workThreadClient = props.workThreadClient;
     if (workThreadClient === undefined) {
       return (
-        <ShellState
+        <OctantEmpty
           eyebrow="Task"
           message="Work is unavailable in this window."
           state="warning"
@@ -2180,7 +2181,7 @@ function renderNonCodeTab(
   }
   if (tab.kind === "settings") {
     return (
-      <ShellState
+      <OctantEmpty
         {...(props.onOpenSettings === undefined
           ? {}
           : { action: { label: "Open Settings", onClick: props.onOpenSettings } })}
@@ -2194,7 +2195,9 @@ function renderNonCodeTab(
   if (tab.kind === "preview") {
     return (
       <Suspense
-        fallback={<ShellState message="Loading preview." state="loading" title="Loading preview" />}
+        fallback={
+          <OctantEmpty message="Loading preview." state="loading" title="Loading preview" />
+        }
       >
         <PreviewWorkspaceTab key={tab.id} tab={tab} client={props.previewClient} />
       </Suspense>
@@ -2203,7 +2206,7 @@ function renderNonCodeTab(
   if (tab.kind === "canvas") {
     return (
       <Suspense
-        fallback={<ShellState message="Loading canvas." state="loading" title="Loading canvas" />}
+        fallback={<OctantEmpty message="Loading canvas." state="loading" title="Loading canvas" />}
       >
         <CanvasWorkspaceTab
           key={tab.id}
@@ -2230,7 +2233,7 @@ function renderNonCodeTab(
   }
   if (tab.kind === "browser") {
     return props.browserAutomationClient === undefined ? (
-      <ShellState
+      <OctantEmpty
         eyebrow="Browser unavailable"
         message="The host browser automation client is unavailable."
         state="warning"
@@ -2283,7 +2286,7 @@ function renderNonCodeTab(
   }
   if (tab.kind === "files") {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Files surface"
         message="Files surfaces open inside the bound Project context."
         state="neutral"
@@ -2311,7 +2314,7 @@ function renderNonCodeTab(
     const project = props.projects.find((candidate) => candidate.id === tab.projectId);
     if (project === undefined || project.type !== tab.mode) {
       return (
-        <ShellState
+        <OctantEmpty
           eyebrow="Project unavailable"
           message="Refresh Project state or close this tab."
           state="warning"
@@ -2650,8 +2653,16 @@ function renderNonCodeTab(
           {...(props.extensionClient === undefined
             ? {}
             : { extensionClient: props.extensionClient })}
-          onCreateChat={(prompt, modelOptionValues, extensionSelections) => {
-            if (extensionSelections === undefined) {
+          onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
+            if (attachments !== undefined) {
+              return props.onCreateChat(
+                prompt,
+                modelOptionValues,
+                paneId,
+                extensionSelections,
+                attachments,
+              );
+            } else if (extensionSelections === undefined) {
               props.onCreateChat(prompt, modelOptionValues, paneId);
             } else {
               props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
@@ -2707,7 +2718,7 @@ class CodeWorkspaceErrorBoundary extends Component<
   override render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Reload Octant", onClick: () => globalThis.location.reload() }}
         eyebrow="Code workspace"
         message="Reload Octant to retry this Code surface."

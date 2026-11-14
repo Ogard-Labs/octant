@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   createContext,
   useCallback,
@@ -22,12 +23,13 @@ import { Copy, RefreshCw } from "lucide-react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { DiagnosticsDashboardView } from "./DiagnosticsDashboardView";
 import { HostHealthSection } from "./HostHealthSection";
 import { UsageName } from "./UsageName";
 import "./usageWorkspace.css";
 import "./turnDiagnostics.css";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export interface TurnDiagnosticsWorkspaceProps {
   /** `hostHealth` adds the Host health section; without it the section is left out. */
@@ -397,7 +399,8 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
       ) : null}
 
       {report === undefined ? null : report.turns === 0 ? (
-        <SurfaceEmpty
+        <OctantEmpty
+          layout="line"
           detail="Turns are recorded when they end, on every provider. Widen the range or clear a filter."
           title="No turns in this range"
         />
@@ -485,8 +488,7 @@ function TrendTableSection({ report }: { readonly report: TurnDiagnosticsReport 
   const label = report.bucket === "hour" ? "hour" : "day";
   return (
     <SurfaceSection label={`Turns by ${label}`}>
-      <details className="turn-diagnostics__details">
-        <summary>Show every {label}</summary>
+      <OctantCollapsible className="turn-diagnostics__details" summary={<>Show every {label}</>}>
         <div className="usage-table-scroll">
           <table aria-label={`Turns by ${label}`} className="usage-table">
             <thead>
@@ -521,7 +523,7 @@ function TrendTableSection({ report }: { readonly report: TurnDiagnosticsReport 
             </tbody>
           </table>
         </div>
-      </details>
+      </OctantCollapsible>
     </SurfaceSection>
   );
 }

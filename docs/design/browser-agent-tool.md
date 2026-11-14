@@ -1674,11 +1674,7 @@ during a capture invalidates the result even if it has already been released.
 
 ### Attaching a picked element to the composer
 
-Designed, not built (maintainer decision, 2026-11-14). In pointing mode the
-person may instead click an element to attach it to the thread's composer as a
-structured snapshot: a selector that finds it, its outer HTML trimmed to a
-fixed bound, and a fixed subset of its computed styles, read by the same
-host-owned top-frame reader and checks as a feedback note. The snapshot stays
-on this computer until the person sends the message it is attached to, can be
-removed from the draft before then, and is outside content that marks the
-thread as page content does. Picking sends, queues and approves nothing.
+In pointing mode the person may instead pick an element for the thread's
+composer. Its rules (what the snapshot holds, its bounds, its taint, and where
+it is offered) are owned by
+[Browser captures: Picking an element](browser-captures.md#picking-an-element).

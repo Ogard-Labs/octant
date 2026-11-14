@@ -41,7 +41,7 @@ const STROKE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   ["agents/AgentRunDependencyGraph.tsx", "diagram edges, a hairline weight of their own"],
   ["agents/AgentsCenterGraph.tsx", "diagram edges, a hairline weight of their own"],
   ["browser/BrowserMarkupStage.tsx", "marks a person draws on a page; the width is their choice"],
-  ["shell/ShellState.tsx", "a glyph cut into a dither mask, where it must be heavy to survive"],
+  ["ui/base/OctantEmpty.tsx", "a glyph cut into a dither mask, where it must be heavy to survive"],
 ]);
 
 describe("icon scale contract", () => {

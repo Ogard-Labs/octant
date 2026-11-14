@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -101,7 +102,6 @@ import { canvasRecipeFillTurn } from "../canvas/canvasRecipeFill";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
-import { ShellState } from "../shell/ShellState";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
@@ -523,7 +523,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
         <div className="chat-workspace__load-state">
-          <ShellState
+          <OctantEmpty
             action={{ label: "Retry chat", onClick: props.controller.retry }}
             message={
               props.controller.errorMessage ??

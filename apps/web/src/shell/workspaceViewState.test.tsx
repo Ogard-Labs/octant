@@ -46,4 +46,17 @@ describe("kept workspace presentation", () => {
     expect(restored.read("view-69")).toMatchObject({ scrollTop: 69 });
     expect(restored.read("invalid")).toBeUndefined();
   });
+
+  it("saves a scrolling view once it has been still for a moment", () => {
+    vi.useFakeTimers();
+    const store = createWorkspaceViewStore("idle");
+    for (let n = 1; n <= 5; n++) {
+      store.write("view", { kind: "review", scrollTop: n });
+      vi.advanceTimersByTime(200);
+    }
+    expect(createWorkspaceViewStore("idle").read("view")).toBeUndefined();
+    vi.advanceTimersByTime(300);
+    expect(createWorkspaceViewStore("idle").read("view")).toMatchObject({ scrollTop: 5 });
+    vi.useRealTimers();
+  });
 });

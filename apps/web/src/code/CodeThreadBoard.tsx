@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type {
   CodeBoardCard,
   CodeBoardQuery,
@@ -808,11 +809,13 @@ function CodeBoardCardView(props: {
         </span>
       ) : null}
       {props.layout === "list" ? (
-        <details className="code-board__card-details">
-          <summary aria-label={`Details for ${card.title}`}>
-            <span>Details</span>
-            <ChevronDown aria-hidden="true" size={12} />
-          </summary>
+        <OctantCollapsible
+          chevron="end"
+          chevronSize={12}
+          className="code-board__card-details"
+          summary={<span>Details</span>}
+          summaryProps={{ "aria-label": `Details for ${card.title}` }}
+        >
           <dl className="code-board__card-meta">
             {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
               <div key={row.label}>
@@ -821,7 +824,7 @@ function CodeBoardCardView(props: {
               </div>
             ))}
           </dl>
-        </details>
+        </OctantCollapsible>
       ) : null}
     </article>
   );

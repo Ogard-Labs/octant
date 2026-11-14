@@ -1,3 +1,4 @@
+import { useMinuteNow } from "../polling/useMinuteTick";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { Activity } from "lucide-react";
 import { useMemo } from "react";
@@ -73,13 +74,14 @@ export function useWorkingNowRows(source: WorkingNowCardSource): ReadonlyArray<W
 }
 
 function useWorkingNowContent(source: WorkingNowCardSource): HomeCardContent {
+  const now = useMinuteNow(source.now);
   const rows = useWorkingNowRows(source);
   return {
     status: "ready",
     count: rows.length,
     body: (
       <WorkingNowRows
-        now={source.now}
+        now={now}
         onOpenRow={source.onOpenRow}
         onOpenRunning={source.onOpenRunning}
         rows={rows}

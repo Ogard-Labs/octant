@@ -1,12 +1,12 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ThreadBoardPullRequestIdentity } from "@octant/contracts";
-import { SurfaceEmpty } from "../surface/SurfaceHeader";
-import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { ReactNode } from "react";
 import { ThreadBoardStatusMark } from "./ThreadBoardCardParts";
 import { lastUsefulView, type ThreadBoardState } from "./threadBoardState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useHeldBoardPlacement } from "./useHeldBoardPlacement";
+import { ThreadBoardCardSlots } from "./ThreadBoardCardSlots";
 
 export interface ThreadBoardCardPresentation {
   readonly layout: "list" | "card";
@@ -92,18 +92,15 @@ export function ThreadBoardListView<
             </span>
           </header>
           {column.cards.length === 0 ? (
-            <SurfaceEmpty title="No threads" tone="lane" />
+            <OctantEmpty layout="line" title="No threads" tone="lane" />
           ) : (
-            <ul className="issuelist">
-              {column.cards.map((card) => (
-                <li key={String(card.threadId)}>
-                  {props.renderCard(card, {
-                    layout: "list",
-                    statusPresentation: "visible",
-                  })}
-                </li>
-              ))}
-            </ul>
+            <ThreadBoardCardSlots
+              cards={column.cards}
+              className="issuelist"
+              renderCard={(card) =>
+                props.renderCard(card, { layout: "list", statusPresentation: "visible" })
+              }
+            />
           )}
         </section>
       ))}
@@ -161,19 +158,14 @@ export function ThreadBoardColumnView<
       </header>
       {column.cards.length === 0 ? (
         <div className="board-col-body">
-          <SurfaceEmpty title="No threads" tone="lane" />
+          <OctantEmpty layout="line" title="No threads" tone="lane" />
         </div>
       ) : (
-        <ul className="board-col-body">
-          {column.cards.map((card) => (
-            <li key={String(card.threadId)}>
-              {props.renderCard(card, {
-                layout: "card",
-                statusPresentation,
-              })}
-            </li>
-          ))}
-        </ul>
+        <ThreadBoardCardSlots
+          cards={column.cards}
+          className="board-col-body"
+          renderCard={(card) => props.renderCard(card, { layout: "card", statusPresentation })}
+        />
       )}
     </section>
   );
@@ -233,7 +225,7 @@ export function ThreadBoardBody<
   if (props.board.status === "loading") {
     return (
       <div className="code-board__body">
-        <ShellState
+        <OctantEmpty
           eyebrow={props.copy.eyebrow}
           message="Loading the board."
           state="loading"
@@ -245,7 +237,7 @@ export function ThreadBoardBody<
   if (view === undefined) {
     return (
       <div className="code-board__body">
-        <ShellState
+        <OctantEmpty
           eyebrow={props.copy.eyebrow}
           message={
             props.board.status === "error" ? props.board.message : "The board is unavailable"
@@ -292,7 +284,11 @@ export function ThreadBoardBody<
       {/* A held placement can keep a card the host no longer lists, so the
           board is empty only when nothing is drawn, not when the read is. */}
       {held.columns.every((column) => column.cards.length === 0) ? (
-        <SurfaceEmpty {...emptyProps} {...(empty ? {} : { detail: props.activeFilterSummary })} />
+        <OctantEmpty
+          layout="line"
+          {...emptyProps}
+          {...(empty ? {} : { detail: props.activeFilterSummary })}
+        />
       ) : null}
       {props.isNarrow ? (
         <ThreadBoardListView columns={held.columns} renderCard={props.renderCard} />

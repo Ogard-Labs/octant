@@ -2536,6 +2536,8 @@ export class BrowserAutomationService {
     readonly point: { readonly x: number; readonly y: number };
     readonly selectionId?: string;
     readonly expectedObservationRevision?: number;
+    /** The element picker's read; a note's read never carries markup. */
+    readonly withMarkup?: boolean;
     /** Original host principal/request identity, never provider-supplied. */
     readonly current?: () => boolean;
     readonly signal?: AbortSignal;
@@ -2591,7 +2593,14 @@ export class BrowserAutomationService {
       const queued = this.#queueAction(owned, async (): Promise<BrowserPointObservation> => {
         if (!current()) return { status: "unavailable" };
         const observed = await waitForBrowserRuntime(
-          describe.call(this.#runtime, input.contextId, input.point, signal, input.selectionId),
+          describe.call(
+            this.#runtime,
+            input.contextId,
+            input.point,
+            signal,
+            input.selectionId,
+            input.withMarkup === true,
+          ),
           signal,
         );
         if (observed.kind === "interrupted" || !current()) return { status: "unavailable" };

@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { AutomationClient } from "@octant/client-runtime";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -39,7 +40,6 @@ import type { WorkThreadOpenTarget } from "../work/WorkThreadBoard";
 import type { ReviewPageProps } from "../review/ReviewPage";
 import type { ArchivedThreadEntry, ArchiveProject } from "./ArchiveView";
 import { SurfaceLoading } from "../surface/SurfaceLoading";
-import { ShellState } from "./ShellState";
 
 const ArchiveView = lazy(() =>
   import("./ArchiveView").then((module) => ({ default: module.ArchiveView })),
@@ -193,7 +193,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
     <>
       {props.railPlaceholder === undefined ? null : (
         <div className="rail-placeholder" role="status">
-          <ShellState
+          <OctantEmpty
             action={{
               label: "Back to workspace",
               onClick: props.onDismissRailPlaceholder,

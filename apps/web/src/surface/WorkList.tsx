@@ -197,7 +197,7 @@ export function WorkListSortMenu<T extends string>(props: {
         <ArrowUpDown aria-hidden="true" size={16} />
       </WorkListMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+        <OctantMenuPositioner align="end" className="outline-none window-no-drag">
           <OctantMenuPopup aria-label={props.label} className="min-w-[14rem]">
             <OctantMenuGroup>
               <OctantMenuGroupLabel>Sort by</OctantMenuGroupLabel>

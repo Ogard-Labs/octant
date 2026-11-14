@@ -1137,7 +1137,7 @@ export function wireCode(deps: CodeDependencies) {
           repository: { owner, name },
           deliveryBranch: thread.deliveryTarget.branchIntent,
           pullRequestNumbers: pullRequestIdentitiesFromHistory(
-            codeBoardEventStore.historyForThread(thread.id),
+            codeBoardEventStore.summaryForThread(thread.id),
           ),
         });
       }
