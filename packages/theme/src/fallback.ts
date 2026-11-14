@@ -13,7 +13,7 @@ import {
   MONO_STYLE_TOKENS,
 } from "./tokens";
 import { customThemeTokens } from "./customPreset";
-import { resolveThemePresetTokens } from "./presets";
+import { resolveThemePresetTokens, type ThemePreset } from "./presets";
 
 export interface DroppedOverride {
   readonly role: string;
@@ -112,6 +112,7 @@ function inApplyOrder(
 export function resolveEffectiveTokens(
   settings: ThemeSettings,
   systemPrefersDark: boolean,
+  contributedPresets: ReadonlyArray<ThemePreset> = [],
 ): ResolvedTheme {
   const mode = resolveMode(settings, systemPrefersDark);
   const selectedPresetId = mode === "light" ? settings.lightPresetId : settings.darkPresetId;
@@ -121,7 +122,9 @@ export function resolveEffectiveTokens(
       ? customThemeTokens(customSeeds, mode)
       : undefined;
   const preset =
-    custom?.status === "built" ? custom.tokens : resolveThemePresetTokens(selectedPresetId, mode);
+    custom?.status === "built"
+      ? custom.tokens
+      : resolveThemePresetTokens(selectedPresetId, mode, contributedPresets);
   const base: Record<string, string> =
     settings.style === "mono" || settings.increasedContrast
       ? withMonoRoles(preset, mode)

@@ -46,7 +46,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Providers](#providers)                                                               | 8         | 5       | 2            | 1                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
-| [Extensions](#extensions)                                                             | 9         | 4       | 4            | 1                   |
+| [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **260**   | **155** | **96**       | **9**               |
+| **All areas**                                                                         | **260**   | **156** | **96**       | **8**               |
 
 ## Principles and hard lines
 
@@ -1716,8 +1716,9 @@ A plugin may contribute a theme as data only, validated by `@octant/theme` befor
 
 - A theme contribution is a document in the semantic theme schema and carries no renderer code, stylesheet, script or asset loader; one that fails validation is refused whole.
 - The one runtime theme authority applies a valid contribution as it applies a built-in preset; installation, trust and enablement stay separate steps.
+- A contributed theme is listed only while its plugin is installed, trusted and enabled. Switching the plugin off removes its themes; a stored choice of one draws the default theme and is kept for when the plugin returns.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Architecture: Plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extraction).
+Status: Built. Since: 2026-11-14. Detail: [Architecture: Plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extraction).
 
 ## Authority and approvals
 

@@ -6,6 +6,7 @@ import {
 } from "@octant/client-runtime/theme-client";
 import { importThemeSettings, serializeOctantTheme } from "@octant/theme/import";
 import { exportThemeTokens, type ThemeExport, type ThemeExportFormat } from "@octant/theme/export";
+import type { ThemePreset } from "@octant/theme";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type ThemeControllerStatus = "loading" | "ready" | "unavailable" | "conflict";
@@ -30,7 +31,10 @@ export interface ThemeController {
    * project consumes. Undefined before the host has answered with a theme —
    * there is nothing to export until then.
    */
-  readonly exportTokens: (format: ThemeExportFormat) => ThemeExport | undefined;
+  readonly exportTokens: (
+    format: ThemeExportFormat,
+    contributedPresets?: ReadonlyArray<ThemePreset>,
+  ) => ThemeExport | undefined;
 }
 
 export function useThemeController(options: {
@@ -235,11 +239,15 @@ export function useThemeController(options: {
   // Exports the draft when there is one: what the user is looking at is what
   // they mean to hand to the project.
   const exportTokens = useCallback(
-    (format: ThemeExportFormat) => {
+    (format: ThemeExportFormat, contributedPresets?: ReadonlyArray<ThemePreset>) => {
       const source = draft ?? settings;
       if (source === undefined) return undefined;
       try {
-        return exportThemeTokens(source, { format, includeTypography: true });
+        return exportThemeTokens(source, {
+          format,
+          includeTypography: true,
+          ...(contributedPresets === undefined ? {} : { contributedPresets }),
+        });
       } catch {
         return undefined;
       }

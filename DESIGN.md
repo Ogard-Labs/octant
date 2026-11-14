@@ -180,7 +180,10 @@ resolved roles, so a preset or custom theme gets the same ladder without
 writing it. Accent swatches and their per-mode fills are in
 [Settings: Appearance](docs/design/settings.md). The editor and terminal draw
 from the same roles through `packages/theme/src/editorColors.ts` and
-`terminalColors.ts`.
+`terminalColors.ts`. A plugin may contribute themes as data only, listed beside the built-in
+presets while the plugin is installed, trusted and enabled
+([Architecture: Themes as plugin contributions](docs/architecture.md#plugin-boundaries-and-remaining-extraction));
+a stored choice whose plugin is off draws the default theme and comes back with the plugin.
 
 ### Translucency
 
