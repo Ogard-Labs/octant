@@ -128,7 +128,10 @@ describe("the pull-request reading pane", () => {
 
   it("keeps a half-written comment when the person looks at another tab and comes back", async () => {
     const user = userEvent.setup();
-    renderPage({ loadActionContext: actionContext });
+    const act = vi.fn(async (_command: CodeProjectPullRequestActionCommand) => ({
+      status: "done" as const,
+    }));
+    renderPage({ act, loadActionContext: actionContext });
     await user.click(await screen.findByRole("tab", { name: "Timeline" }));
     await user.type(await screen.findByRole("textbox", { name: "Comment" }), "Half a thought");
     await user.click(screen.getByRole("tab", { name: "Summary" }));
