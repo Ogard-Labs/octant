@@ -1311,6 +1311,7 @@ and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-c
 Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff. There is no silent or automatic failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
 
 - A selected model is a host, provider instance and model id, and the model picker is provider-first.
+- The model picker is one fixed 360×440 float: icon tabs, a borderless search, rows with a ⌘1 to ⌘9 hint (live only while it is open), "Show more" for a long list, then always-present Reasoning and service-tier segmented rows, disabled with a reason when the model lacks them, so nothing moves when the person chooses (maintainer request, 2026-11-15; built). Owner: [Thread view](thread-view.md#model-picker).
 - Extra accounts use Octant-assigned state directories. Removing an account leaves its directory in place, and deleting it is the person's step.
 - Two instances of the same driver cannot share one effective state directory.
 - Plan-usage readings come only from the provider's own process, are kept per account, and a failed refresh keeps the last snapshot with its age.
@@ -2517,6 +2518,7 @@ The sidebar speaks about what a thread is doing now with one fixed vocabulary, a
 - The vocabulary is Working, Needs attention, Snooze ended and New activity, owned by the domain package. Nothing to report is no status, and a failure is never inferred from silence.
 - The jump goes by strength of reason (approval, then question, then unreviewed finished turn), wraps, and adds no host read.
 
+- Every sidebar view shows a short age by default (now, 12m, 3d, 52w, 2y; never past three characters), 12px meta ink, right-aligned in a fixed slot at one edge on every row. The end of a row is fixed in order and width: title, the slot (age, state in words, or the hover actions fading in over it), provider mark. Hover, focus and an open menu never move the mark or the title's truncation (maintainer request, 2026-11-15). A saved record equal to the old Activity default is read as never chosen and moves to the new default once.
 Status: Built. Since: —. Detail: [Workspace: Sidebar thread status](workspace.md#sidebar-thread-status) and [Jump to the next waiting thread](workspace.md#jump-to-the-next-waiting-thread).
 
 ### Resuming after a host restart

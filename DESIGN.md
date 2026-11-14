@@ -1494,8 +1494,9 @@ button. Chips above a composer are 24px; the start screens' suggestion chips
 are the one borderless 28px chip (see Start screen).
 
 Rows are hairline rails, never cards. They reserve stable gutters for marks;
-hover actions take no width until hovered (a section head's actions keep their
-width and fade in). The row a list shows is `--oct-wash-selected`, the row under
+hover actions fade in over a slot already kept for them (a thread row's slot
+holds its age; a section head's actions keep their width), so nothing beside
+them moves when the pointer arrives. The row a list shows is `--oct-wash-selected`, the row under
 the pointer `--oct-wash-hover`, no border.
 
 ### Tabs and segmented choices

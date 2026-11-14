@@ -2321,10 +2321,20 @@ height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
 view's own choice, edited in Settings › Sidebar › Thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
-rather than left as a gap. The last-updated age sits at the first line's
-trailing edge and reads now, 12m, 5h, 3d, 2w, then a short date, flooring each
-unit; it updates once a minute from one shared clock and carries the full date
-and time as its tooltip and accessible label. The Project tree and the Activity feed draw the same
+rather than left as a gap. Every view shows the last-updated age by
+default (a saved choice that is still the old Activity default, which a host
+stored whole without the person choosing it, is read as never chosen and
+moves to the new default once; a choice that differs, or one made after, stays).
+The age reads now, 12m, 5h, 3d, 2w, 52w, 2y, flooring each unit and never
+longer than three characters; it updates once a minute from one shared clock
+and carries the full date and time as its tooltip and accessible label. It is
+12px meta ink, right-aligned in a slot of fixed width, so a title never moves
+as an age changes, and it ends at the same edge on every row, left of the
+provider mark. The end of a row is one fixed order, never changed by hover,
+focus or an open menu: the title, then the slot (the age, or the thread's state
+in words in its place, or the row's hover actions, which fade in over the age
+inside a slot sized for them), then the provider mark. The provider mark and the
+title's truncation never move when the pointer arrives. The Project tree and the Activity feed draw the same
 row: up to three lines (see [the sidebar in DESIGN.md](../../DESIGN.md)). A small top
 line names where the thread lives, in a fixed order (the Project's mark and name,
 then the branch in the mono face) and ends with the thread's state in words

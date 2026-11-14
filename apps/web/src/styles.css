@@ -4934,16 +4934,26 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
      workspace's, so it was the one darker popup beside the menus. */
 }
 
-/* Model settings stay reachable when a long catalog or a short viewport
-   leaves only part of the picker visible. */
+/* The reasoning row and the service-tier row sit under the list in every
+   state, each behind a hairline, so the list scrolls above them and the frame
+   never changes. Pairing and other declared choices (when a model has them)
+   stack above, and scroll with the rest in a short window. */
 .composer-model-picker__settings {
   min-height: 0;
-  max-height: 45vh;
+  max-height: 200px;
   overflow-y: auto;
   display: grid;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-3);
   border-top: 1px solid var(--octant-border);
+}
+
+.composer-model-picker__settings > * + * {
+  border-top: 1px solid var(--octant-border);
+}
+
+.composer-model-picker__extras {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3);
 }
 
 .composer-model-picker__setting {
@@ -4959,185 +4969,64 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   width: 100%;
 }
 
-.composer-model-picker__settings .composer-model-picker__level {
-  padding: 0;
-  border: 0;
+.composer-model-picker__reasoning,
+.composer-model-picker__tier {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3);
 }
 
-/* The chosen model's effort/reasoning level, one tap from the list. The
-   declared levels are the slider's stops and the knob snaps to a stop. The
-   reading above names the level the knob sits on, and the ends below name the
-   range it moves in. */
-.composer-model-picker__level {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 0;
-  padding: var(--oct-space-1) var(--oct-space-3) var(--oct-space-2);
-  border-top: 1px solid var(--octant-border);
-}
-
-/* "Reasoning  High" reads as one phrase on the left, with reset on the right;
-   centring the value left it floating between two unrelated ends. */
-.composer-model-picker__level-reading {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+/* "Reasoning" on the left, the model it applies to on the right. */
+.composer-model-picker__setting-head {
+  display: flex;
+  min-height: 20px;
   align-items: center;
+  justify-content: space-between;
   gap: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
 }
 
-.composer-model-picker__level-label {
+.composer-model-picker__setting-label {
   flex: 0 0 auto;
   color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
 }
 
-.composer-model-picker__level-reading > button {
-  justify-self: end;
-  width: 24px;
-  height: 24px;
-  min-height: 0;
-}
-
-/* The current level shares the slider's ink so the value and track read together. */
-.composer-model-picker__level-value {
-  min-inline-size: 0;
+.composer-model-picker__setting-value {
+  min-width: 0;
   overflow: hidden;
-  color: color-mix(
-    in oklab,
-    var(--octant-palette-purple) calc(var(--composer-model-picker-intensity, 0) * 100%),
-    var(--octant-text-primary)
-  );
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
+  color: var(--octant-text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* "Faster" and "Smarter" sit on the slider's own line rather than a row of
-   their own beneath it. */
-.composer-model-picker__level-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.composer-model-picker__level-control {
-  position: relative;
-  height: 24px;
-}
-
-.composer-model-picker__level-track {
-  position: absolute;
-  inset-inline: 9px;
-  top: 8px;
-  height: 8px;
-  border-radius: var(--oct-radius-pill);
-  background-color: color-mix(in srgb, var(--octant-text-muted) 18%, var(--octant-surface));
-  /* A faint dot grain runs the whole track, so the fill reads as the same
-     material growing denser rather than a bar laid on top. */
-  background-image: radial-gradient(
-    circle,
-    color-mix(in oklab, var(--octant-text-muted) 45%, transparent) 0.6px,
-    transparent 1.2px
-  );
-  background-size: 4px 4px;
-  pointer-events: none;
-}
-
-.composer-model-picker__level-fill {
-  position: absolute;
-  inset-block: 0;
-  left: 0;
-  width: var(--composer-model-picker-level-fill);
-  border-radius: inherit;
-  --level-tone: color-mix(
-    in oklab,
-    var(--octant-palette-purple) calc(35% + var(--composer-model-picker-intensity, 0) * 65%),
-    var(--octant-text-muted)
-  );
-  background-color: color-mix(
-    in oklab,
-    var(--level-tone) calc(25% + var(--composer-model-picker-intensity, 0) * 55%),
-    transparent
-  );
-  background-image: radial-gradient(
-    circle,
-    color-mix(
-        in oklab,
-        var(--oct-fg) calc(30% + var(--composer-model-picker-intensity, 0) * 60%),
-        transparent
-      )
-      0.7px,
-    transparent 1.3px
-  );
-  background-size: 4px 4px;
-  box-shadow: 0 0 calc(var(--composer-model-picker-intensity, 0) * 14px)
-    color-mix(
-      in oklab,
-      var(--level-tone) calc(var(--composer-model-picker-intensity, 0) * 70%),
-      transparent
-    );
-}
-
-.composer-model-picker__level-stops {
-  position: absolute;
-  inset: 0;
+/* The shared segmented tray, stretched to the row. The chosen segment is a
+   raised step in accent ink; the others stay quiet. */
+.composer-model-picker__segments.segmented {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  width: 100%;
 }
 
-.composer-model-picker__level-stops > span {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--octant-text-primary) 70%, transparent);
+.composer-model-picker__segments > .segment {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--oct-tray-segment-h);
+  min-height: var(--oct-tray-segment-h);
+  overflow: hidden;
+  padding-inline: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.composer-model-picker__level-end {
+.composer-model-picker__segments > .segment[aria-pressed="true"] {
+  color: var(--octant-accent-text);
+  box-shadow: var(--oct-elev-subtle);
+}
+
+.composer-model-picker__segments > .segment:disabled {
   color: var(--octant-text-muted);
-  font-size: var(--oct-text-detail);
-}
-
-.composer-model-picker__reasoning-slider {
-  position: relative;
-  z-index: 1;
-  height: 24px;
-  background: transparent;
-}
-
-.composer-model-picker__level:has(.composer-model-picker__reasoning-slider:focus-visible) {
-  background: var(--octant-control-hover);
-}
-
-.composer-model-picker__level:has(.composer-model-picker__reasoning-slider:focus-visible)
-  .composer-model-picker__level-label {
-  color: var(--octant-text-primary);
-}
-
-.composer-model-picker__reasoning-slider::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: transparent;
-}
-
-.composer-model-picker__level .composer-model-picker__reasoning-slider::-webkit-slider-thumb {
-  margin-top: -5px;
-  inline-size: 16px;
-  block-size: 16px;
-}
-
-.composer-model-picker__level .composer-model-picker__reasoning-slider::-moz-range-thumb {
-  inline-size: 16px;
-  block-size: 16px;
-}
-
-.composer-model-picker__reasoning-slider::-moz-range-track {
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: transparent;
+  cursor: default;
 }
 
 .composer-model-picker__rail {
@@ -5147,7 +5036,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   padding: var(--oct-space-2);
   overflow-x: auto;
   scrollbar-width: thin;
-  border-bottom: 1px solid var(--octant-border);
 }
 
 .composer-model-picker__rail-item {
@@ -5332,9 +5220,18 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 /* The field is the shared popover search; here it keeps its inset under the
    catalog rail. */
-.composer-model-picker__search {
+.composer-model-picker__pane .composer-model-picker__search {
   flex: 0 0 auto;
-  margin: var(--oct-space-2) var(--oct-space-2) var(--oct-space-1);
+  min-height: 36px;
+  margin: 0 var(--oct-space-3) var(--oct-space-1);
+  padding: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--octant-accent);
+  border-radius: 0;
+}
+
+.composer-model-picker__pane .composer-model-picker__search:focus-within {
+  background: transparent;
 }
 
 /* Catalogs wrap onto as many short rows as they need, so every one is on
@@ -5415,8 +5312,13 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
      stand taller than the fill painted behind them. */
   flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr) 28px;
-  align-items: center;
+  min-height: 40px;
+  align-items: stretch;
   border-radius: var(--oct-radius-sm);
+}
+
+.composer-model-picker__row > .composer-model-picker__star {
+  align-self: center;
 }
 
 .composer-model-picker__row:hover,
@@ -5424,10 +5326,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: var(--octant-control-hover);
 }
 
-/* The chosen model carries a check rather than a filled row, so it does not
-   read as the hovered one. */
+/* The chosen model carries the selected wash and a check after its name. */
 .composer-model-picker__row--selected {
-  background: transparent;
+  background: var(--octant-selection);
 }
 
 .composer-model-picker__model {
@@ -5471,7 +5372,49 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-text-primary);
 }
 
+.composer-model-picker__model-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* The ⌘ digit that chooses the row while the picker is open. */
+.composer-model-picker__hint {
+  display: grid;
+  flex: 0 0 auto;
+  min-height: 20px;
+  place-items: center;
+  padding: 0 var(--oct-space-2);
+  color: var(--octant-text-muted);
+  background: var(--octant-control);
+  border-radius: var(--oct-radius-sm);
+  font: inherit;
+  font-size: var(--oct-text-xs);
+}
+
+/* "Show more" is the quiet last line of a long list, under the model names. */
+.composer-model-picker__more {
+  display: flex;
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 var(--oct-menu-row-inset) 0
+    calc(var(--oct-menu-row-inset) + 16px + var(--oct-menu-row-gap));
+  color: var(--octant-text-muted);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-detail);
+}
+
+.composer-model-picker__more:hover {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
 .composer-model-picker__model-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

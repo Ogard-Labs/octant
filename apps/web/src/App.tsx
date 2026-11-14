@@ -266,7 +266,10 @@ import {
   rememberHealthyCreateHost,
 } from "./shell/createHostPreference";
 import { useLaunchSession } from "./shell/useLaunchSession";
-import { adoptLegacySidebarRowProperties } from "./shell/sidebarRowProperties";
+import {
+  adoptLegacySidebarRowProperties,
+  adoptSidebarAgeDefault,
+} from "./shell/sidebarRowProperties";
 import {
   SidebarThreadDragContext,
   useWorkspaceSurfaceDrag,
@@ -1026,6 +1029,10 @@ function LaunchedShell(
     if (adoptedLegacySidebarRowProperties.current || settings === undefined) return;
     adoptedLegacySidebarRowProperties.current = true;
     adoptLegacySidebarRowProperties({
+      current: settings.sidebarRowProperties,
+      updateSettings: (sidebarRowProperties) => controller.updateSettings({ sidebarRowProperties }),
+    });
+    adoptSidebarAgeDefault({
       current: settings.sidebarRowProperties,
       updateSettings: (sidebarRowProperties) => controller.updateSettings({ sidebarRowProperties }),
     });

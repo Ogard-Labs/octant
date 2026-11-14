@@ -3,7 +3,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
 } from "@octant/contracts";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
@@ -76,9 +76,12 @@ describe("ChatWelcome", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const effort = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(effort, { target: { value: "2" } });
-    expect(effort).toHaveAttribute("aria-valuetext", "High");
+    const effort = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(effort).getByRole("button", { name: "High" }));
+    expect(within(effort).getByRole("button", { name: "High" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Hello");
     await user.click(screen.getByRole("button", { name: "Start chat" }));

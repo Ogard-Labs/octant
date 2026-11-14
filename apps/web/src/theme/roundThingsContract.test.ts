@@ -91,7 +91,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".inbox-view__unseen::after",
   ".composer-model-picker__rail-accent",
   ".composer-model-picker__rail-status",
-  ".composer-model-picker__level-stops > span",
   ".thread-task-viewer__mark",
   '.thread-task-viewer__steps > li[data-step-status="in-progress"] .thread-task-viewer__mark::after',
   // Count badges and numbered marks.
@@ -121,9 +120,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".context-window-popover__meter",
   ".context-window-popover__limit-meter",
   ".computers-card__track",
-  ".composer-model-picker__level-track",
-  ".composer-model-picker__reasoning-slider::-webkit-slider-runnable-track",
-  ".composer-model-picker__reasoning-slider::-moz-range-track",
   ".canvas-mockup__progress-track, .canvas-mockup__slider-track",
   ".canvas-mockup__progress-fill",
   ".canvas-ref__progress-track",

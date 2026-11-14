@@ -193,3 +193,60 @@ export function adoptLegacySidebarRowProperties(input: {
     })
     .catch(() => undefined);
 }
+
+/**
+ * What the Activity view carried until it started showing a short age. A host
+ * stores the whole record even when its person never touched it, so a record
+ * equal to this one is a default that was saved, not a choice.
+ */
+const ACTIVITY_DEFAULT_BEFORE_AGES: SidebarRowPropertyVisibility = {
+  project: true,
+  branch: false,
+  pullRequest: false,
+  lastUpdated: false,
+  status: true,
+};
+
+/** Set once the age default has been applied, so a later explicit choice of the old record stays. */
+export const SIDEBAR_AGE_DEFAULT_STORAGE_KEY = "octant.sidebar.row-age-default.v1";
+
+/**
+ * Applies the short-age default to a view whose saved record is exactly the old
+ * default, once per renderer. A record that differs in any property was chosen
+ * by a person and is left alone; so is the old record chosen again afterwards,
+ * because the marker is set after the first read.
+ */
+export function adoptSidebarAgeDefault(input: {
+  readonly current: SidebarRowProperties;
+  readonly updateSettings: (next: SidebarRowProperties) => Promise<boolean>;
+  readonly storage?: Pick<Storage, "getItem" | "setItem">;
+  readonly storageHolder?: { readonly localStorage?: Storage };
+}): void {
+  const storage = input.storage ?? (input.storageHolder ?? globalThis).localStorage;
+  if (storage === undefined) return;
+  try {
+    if (storage.getItem(SIDEBAR_AGE_DEFAULT_STORAGE_KEY) !== null) return;
+  } catch {
+    return;
+  }
+  const mark = () => {
+    try {
+      storage.setItem(SIDEBAR_AGE_DEFAULT_STORAGE_KEY, "1");
+    } catch {
+      // Without storage the check repeats next boot, which is harmless: it only acts on the old record.
+    }
+  };
+  if (!sameSidebarRowPropertyVisibility(input.current.activity, ACTIVITY_DEFAULT_BEFORE_AGES)) {
+    mark();
+    return;
+  }
+  void input
+    .updateSettings({
+      projects: input.current.projects,
+      activity: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.activity },
+    })
+    .then((committed) => {
+      if (committed) mark();
+    })
+    .catch(() => undefined);
+}

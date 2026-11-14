@@ -214,8 +214,10 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
 /**
  * The row's own age: the shortest true reading, because the row has one word
  * of room at its edge and the card beside it spells the rest out. Minutes,
- * hours, days and weeks floor, so "59m" never rounds up to a false "60m", and
- * a thread older than five weeks reads as the short date it last moved.
+ * hours, days, weeks and years floor, so "59m" never rounds up to a false
+ * "60m". It never runs past three characters ("52w", "2y"), because the age
+ * sits in a slot of fixed width and a date would not fit; the tooltip carries
+ * the full moment.
  */
 export function threadRowShortAge(
   updatedAt: string | undefined,
@@ -231,14 +233,8 @@ export function threadRowShortAge(
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d`;
-  if (days < 35) return `${Math.floor(days / 7)}w`;
-  const sameYear = date.getFullYear() === new Date(now).getFullYear();
-  return date.toLocaleDateString(
-    undefined,
-    sameYear
-      ? { month: "short", day: "numeric" }
-      : { month: "short", day: "numeric", year: "numeric" },
-  );
+  if (days < 365) return `${Math.floor(days / 7)}w`;
+  return `${Math.floor(days / 365)}y`;
 }
 
 /**

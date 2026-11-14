@@ -1,7 +1,7 @@
 import { nativeFolderTransfer } from "../../composer/folderDrop.test-fixture";
 import { decodeProviderInstance, decodeProviderModelId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -155,9 +155,12 @@ describe("CodeComposerAdapter", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const effort = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(effort, { target: { value: "2" } });
-    expect(effort).toHaveAttribute("aria-valuetext", "High");
+    const effort = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(effort).getByRole("button", { name: "High" }));
+    expect(within(effort).getByRole("button", { name: "High" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));

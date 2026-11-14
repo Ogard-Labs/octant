@@ -1,7 +1,7 @@
 import { nativeFolderTransfer } from "../../composer/folderDrop.test-fixture";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -87,8 +87,8 @@ describe("WorkComposerAdapter", () => {
     );
     const { rerender } = render(composer);
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const level = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(level, { target: { value: level.getAttribute("max") } });
+    const level = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(level).getByRole("button", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(screen.getByLabelText("First message"), "Draft the brief");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -106,10 +106,7 @@ describe("WorkComposerAdapter", () => {
     rerender(composer);
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     // Returning to this model restores its last supported effort choice.
-    expect(screen.getByRole("slider", { name: "Effort level" })).toHaveAttribute(
-      "aria-valuetext",
-      "High",
-    );
+    expect(screen.getByRole("button", { name: "High" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("renders with project folder context", () => {

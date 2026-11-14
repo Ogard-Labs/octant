@@ -773,10 +773,10 @@ describe("WindowChrome", () => {
     expect(styles).not.toContain(".thread-environment-summary");
   });
 
-  it("makes room for thread row actions only while they show, and bounds the context menu", () => {
-    // DESIGN.md: hover-only actions take no width until their row is hovered
-    // or focused. Reserved at all times, the room left the age and the status
-    // dot floating 56px short of the row's end.
+  it("keeps a thread row's trailing slots fixed while its actions show, and bounds the context menu", () => {
+    // DESIGN.md principle 7: hovering a row moved the provider mark left and
+    // narrowed the title. The end of the row is [title] [age or actions, 50px]
+    // [provider mark] at rest and on hover, so no hover rule may add padding.
     const row = ".sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)";
     for (const shown of [
       ":hover",
@@ -784,10 +784,12 @@ describe("WindowChrome", () => {
       ':has([aria-expanded="true"])',
       ":has([data-popup-open])",
     ]) {
-      expect(cssRule(`${row}${shown} > .sidebar-navigation__thread`)).toContain(
-        "padding-inline-end: 56px;",
-      );
+      expect(styles).not.toContain(`${row}${shown}\n  > .sidebar-navigation__thread {`);
     }
+    expect(cssRule(`${row} .sidebar-navigation__thread-when`)).toContain("inline-size: 50px;");
+    expect(cssRule(".sidebar-navigation__thread-actions")).toContain("right: 40px;");
+    // At rest the only room kept is for the one always-visible overflow action
+    // on a coarse pointer.
     // At rest the only room kept is for the one always-visible overflow action
     // on a coarse pointer.
     expect(cssRule(`${row} > .sidebar-navigation__thread`)).not.toContain("56px");
