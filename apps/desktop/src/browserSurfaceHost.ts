@@ -2623,6 +2623,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       point: { readonly x: number; readonly y: number },
       signal: AbortSignal,
       selectionId: string,
+      withMarkup = false,
     ): Promise<BrowserFeedbackPointObservation> => {
       const owned = surface(contextId);
       let checkObservation: () => void;
@@ -2681,6 +2682,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               },
               point,
               captureSignal,
+              withMarkup,
             ),
           );
         } finally {

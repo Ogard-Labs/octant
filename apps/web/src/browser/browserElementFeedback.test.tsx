@@ -137,4 +137,20 @@ describe("the shared host element reader", () => {
     expect(result?.context.styles).toHaveLength(18);
     expect(JSON.stringify(result)).not.toContain("secret.example");
   });
+
+  it("gives the element picker bounded markup without values, inline styles, handlers or addresses, and marks the cut", () => {
+    select(
+      `<form id="checkout"><button id="save" style="background-image:url(https://secret.example/token)" onclick="leak()" data-next="https://secret.example/next">Save</button><a href="/reset?token=secret-link" class="link">Reset</a><input value="secret-value" name="q"><textarea>secret-text</textarea><div contenteditable="true">secret-edit</div><script>var token = "secret-script";</script>${"<p>row</p>".repeat(600)}</form>`,
+      "#checkout",
+    );
+    const note = readBrowserFeedbackElement(point);
+    expect(note?.markup).toBeUndefined();
+    const picked = readBrowserFeedbackElement({ ...point, markup: true });
+    expect(picked?.markup?.html).toMatch(
+      /^<form id="checkout"><button id="save">Save<\/button><a class="link">Reset<\/a><input name="q">/,
+    );
+    expect(picked?.markup?.html).not.toMatch(/secret|leak|style=/);
+    expect(picked?.markup?.html.length).toBeLessThanOrEqual(4_096);
+    expect(picked?.markup?.truncated).toBe(true);
+  });
 });

@@ -73,6 +73,8 @@ export interface ProductFeedbackBrowserPort {
     readonly point: { readonly x: number; readonly y: number };
     readonly selectionId?: string;
     readonly expectedObservationRevision?: number;
+    /** Only the element picker asks for markup. */
+    readonly withMarkup?: boolean;
     readonly current?: () => boolean;
     readonly signal?: AbortSignal;
   }) => Promise<BrowserPointObservation | { readonly status: "unavailable" }>;
@@ -329,6 +331,7 @@ export class ProductFeedbackService {
           ...(command.expectedObservationRevision === undefined
             ? {}
             : { expectedObservationRevision: command.expectedObservationRevision }),
+          withMarkup: true,
           current,
           ...(execution.signal === undefined ? {} : { signal: execution.signal }),
         }),

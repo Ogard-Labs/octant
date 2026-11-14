@@ -2473,8 +2473,22 @@ describe.skipIf(chrome === undefined)(
         } else {
           expect(result.element.selector).toBe("#feedback-save");
           expect(result.element.text).toBe("Save changes");
-          expect(result.markup).toEqual({
-            html: expect.stringMatching(/^<button id="feedback-save"[^>]*>Save changes<\/button>$/),
+          // A note's read carries no markup; only the element picker asks for it.
+          expect(result.markup).toBeUndefined();
+          f.host.setPointSelection(f.contextId, f.owner, true, crypto.randomUUID());
+          f.personPoint(160, 125);
+          const picking = f.host.state(f.contextId).pointSelection;
+          if (picking?.status !== "selected") throw Error("Host point receipt missing");
+          const picked = await f.host.describePoint(
+            f.contextId,
+            picking.point,
+            new AbortController().signal,
+            picking.selectionId,
+            true,
+          );
+          if (picked.status !== "described") throw Error("Real element pick refused");
+          expect(picked.markup).toEqual({
+            html: '<button id="feedback-save">Save changes</button>',
             truncated: false,
           });
           expect(result.element.context?.styles).toContainEqual({

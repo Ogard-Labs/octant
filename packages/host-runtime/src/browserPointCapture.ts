@@ -48,6 +48,8 @@ export async function captureBrowserFeedbackPoint(
   port: BrowserFeedbackCapturePort,
   point: { readonly x: number; readonly y: number },
   signal: AbortSignal,
+  /** Only the element picker reads markup; a note's read never carries it. */
+  withMarkup = false,
 ): Promise<BrowserFeedbackPointObservation> {
   let refusal: Extract<BrowserFeedbackPointObservation, { status: "unavailable" }>["reason"] =
     "capture-unavailable";
@@ -110,6 +112,7 @@ export async function captureBrowserFeedbackPoint(
       viewportHeight: viewport.clientHeight,
       pageX: viewport.pageX,
       pageY: viewport.pageY,
+      ...(withMarkup ? { markup: true } : {}),
     };
     const hit = record(
       await send("DOM.getNodeForLocation", {

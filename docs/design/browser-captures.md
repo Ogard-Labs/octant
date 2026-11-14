@@ -393,9 +393,19 @@ description exists only in the composer's draft.
   and `font-weight`, and the element's outer HTML. The markup is a bounded
   copy, not the live node: `value` attributes, the text of editable regions,
   and the bodies of `script`, `style`, `noscript`, `template`, `textarea` and
-  `select` are left out, at most 400 nodes are copied and the result is cut at
-  4,096 characters. A cut is marked: the snapshot carries `truncated` and the
-  text says the markup was cut. A note never keeps the markup.
+  `select` are left out, and so are inline `style` attributes, `on…` event
+  handlers, address attributes (`href`, `src`, `srcset`, `action`,
+  `formaction`, `poster`, `data`, `ping`, `cite`, `background`,
+  `xlink:href`) and any attribute whose value holds `://`, `url(`, or a
+  `data:` or `javascript:` address. At most 400 nodes are copied and the
+  result is cut at 4,096 characters. A cut is marked: the snapshot carries
+  `truncated` and the text says the markup was cut. Rationale: an inline
+  style's `url(...)` or a link's query can carry a token the page never shows,
+  and the element is identified by its selector, tag and structure without
+  them.
+- **Notes never read markup.** Only the picker's command asks the reader for
+  markup; a pointed-at note's read is unchanged and carries none across the
+  host, its preview or its journal.
 - **Taint.** Before the snapshot leaves the host, the thread is marked as
   holding outside content with `thread.external-content-ingested@1`
   (`browser-page`), the same mark a note's capture and a kept screenshot

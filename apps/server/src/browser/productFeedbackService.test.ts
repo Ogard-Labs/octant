@@ -316,7 +316,7 @@ describe("picking a Browser element for the composer", () => {
       kind: "recorded" as const,
       taint: { externalContentIngested: true, ingestedSources: ["browser-page"] },
     }));
-    const { service, journal } = harness({
+    const { service, journal, describePoint } = harness({
       recordExternalContentIngestion,
       observation: {
         ...described,
@@ -366,6 +366,8 @@ describe("picking a Browser element for the composer", () => {
       provenance: { origin: "external-content", sourceLabel: "browser-page" },
     });
     expect(result.snapshot.markup?.html.length).toBeLessThanOrEqual(4_096);
+    // Only the picker's read asks the host for markup.
+    expect(describePoint).toHaveBeenCalledWith(expect.objectContaining({ withMarkup: true }));
     expect(recordExternalContentIngestion).toHaveBeenCalledWith(
       expect.objectContaining({
         threadId: ids.thread,

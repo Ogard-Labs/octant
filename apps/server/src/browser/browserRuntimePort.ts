@@ -373,6 +373,8 @@ export interface BrowserRuntimePort {
     point: { readonly x: number; readonly y: number },
     signal: AbortSignal,
     selectionId?: string,
+    /** The element picker's read: it alone carries the element's markup. */
+    withMarkup?: boolean,
   ) => Promise<BrowserPointObservation>;
   /**
    * Look at the page as it stands without acting on it: address, title, and

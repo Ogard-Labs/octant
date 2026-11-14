@@ -16,16 +16,17 @@ export interface BrowserFeedbackElementRead {
     readonly height: number;
   };
   readonly cropBlocked: boolean;
-  /** The element's own markup for the Browser element picker; a note never keeps it. */
-  readonly markup: { readonly html: string; readonly truncated: boolean };
+  /** The element's own markup, read only for the Browser element picker. */
+  readonly markup?: { readonly html: string; readonly truncated: boolean };
 }
 
 /**
  * Fixed host script, serialized into the document's isolated world. It reads
- * one selected element and a small structural neighborhood, never form or
- * editable values. Its markup is a bounded copy with those values, editable
- * text and script/style bodies left out. The surrounding host owns
- * origin/node/capture checks.
+ * one selected element and a small structural neighborhood, never outerHTML or
+ * form/editable values. Only the element picker asks for `markup`: a bounded
+ * copy without values, editable text, script/style bodies, inline styles,
+ * event handlers or addresses. The surrounding host owns origin/node/capture
+ * checks.
  */
 export function readBrowserFeedbackElement(argument: {
   readonly x: number;
@@ -34,6 +35,7 @@ export function readBrowserFeedbackElement(argument: {
   readonly viewportHeight: number;
   readonly pageX?: number;
   readonly pageY?: number;
+  readonly markup?: boolean;
 }): BrowserFeedbackElementRead | null {
   const element = document.elementFromPoint(argument.x, argument.y);
   if (element === null || /^(?:iframe|frame)$/i.test(element.tagName)) return null;
@@ -209,14 +211,26 @@ export function readBrowserFeedbackElement(argument: {
   // A bounded copy, not outerHTML of the live node: a picked <body> would
   // otherwise serialize the whole page, and the live markup carries typed
   // values (`value` on inputs, editable text) the reads above never return.
+  // Inline styles, event handlers and addresses are dropped too: a style's
+  // url(...) or a link's query can carry a token the page never displays.
   const markupLimit = 4_096;
+  const addressAttributes =
+    /^(?:href|src|srcset|action|formaction|poster|data|ping|cite|background|xlink:href|value|style)$/i;
   let nodeBudget = 400;
   let markupCut = false;
   const withheld = "script, style, noscript, template, textarea, select";
   const copyOf = (source: Element): Element | null => {
     const copy = source.cloneNode(false);
     if (!(copy instanceof Element)) return null;
-    if (copy.matches("input, option, button, select, textarea")) copy.removeAttribute("value");
+    for (const name of copy.getAttributeNames()) {
+      const value = copy.getAttribute(name) ?? "";
+      if (
+        addressAttributes.test(name) ||
+        /^on/i.test(name) ||
+        /:\/\/|url\(|^\s*(?:data|javascript):/i.test(value)
+      )
+        copy.removeAttribute(name);
+    }
     if (
       source.matches(withheld) ||
       source.matches("[contenteditable]:not([contenteditable=false])")
@@ -237,7 +251,7 @@ export function readBrowserFeedbackElement(argument: {
     }
     return copy;
   };
-  const serialized = copyOf(element)?.outerHTML ?? "";
+  const serialized = argument.markup === true ? (copyOf(element)?.outerHTML ?? "") : "";
   const markup = {
     html: serialized.slice(0, markupLimit),
     truncated: markupCut || serialized.length > markupLimit,
@@ -272,6 +286,6 @@ export function readBrowserFeedbackElement(argument: {
     },
     cropBounds,
     cropBlocked,
-    markup,
+    ...(argument.markup === true ? { markup } : {}),
   };
 }
