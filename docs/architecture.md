@@ -1805,7 +1805,11 @@ an older record carries reads as on. It is changed only by `set-provider-own-mem
 window or a paired device (maintainer decision, 2026-11-12; not built yet:
 today a paired device is refused) and journaled as
 `provider.instance-own-memory-changed@1`. Run as itself, a trusted Project,
-and Full access never turn it back on once the person turned it off. Each driver reads it when it launches a
+and Full access never turn it back on once the person turned it off. Before
+this default, turning the setting off left no stored value, so on upgrade
+memory reads as on for every Claude Code and Codex account, including an
+account the person had turned off; the person turns it off again if they
+want (maintainer decision, 2026-11-14). Each driver reads it when it launches a
 process: a Claude Code launch goes without `CLAUDE_CODE_DISABLE_AUTO_MEMORY`
 and keeps every other guard, and a Codex process is leased without the
 `features.memories=false` override, so Codex's own configuration decides and
