@@ -526,7 +526,9 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
     // One line and 12px above and under it: the 44px box.
-    expect(input).toMatch(/padding:\s*12px var\(--oct-composer-gutter\);/);
+    expect(input).toMatch(
+      /padding:\s*var\(--oct-composer-prompt-pad, 12px\) var\(--oct-composer-gutter\);/,
+    );
   });
 
   it("draws no focus edge, border change, or lift on the composer frame", () => {

@@ -20,7 +20,7 @@ export function HomeCard(props: { readonly definition: HomeCardDefinition }) {
   return (
     <OctantCard
       aria-labelledby={titleId}
-      className="home-card"
+      className="home-card outline-0"
       data-card={definition.id}
       // The cards stand on the start screen's ground beside the composer, so
       // they wear its material. With the plain card fill the ground's
