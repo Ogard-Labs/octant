@@ -318,17 +318,24 @@ function ReviewOutsideContentDialog(
   );
 }
 
-/** The first few sources in words, each with its count: "command output, 2 times". */
+/**
+ * The first few kinds of source in words, each with its count: "command output,
+ * 2 times". Two labels that read the same in words (a page the browser showed
+ * is recorded under more than one) are one kind here.
+ */
 function readSummary(sources: ReadonlyArray<ThreadExternalContentSource>): string {
-  const named = sources.slice(0, 3).map((source) => {
+  const kinds = new Map<string, number>();
+  for (const source of sources) {
     const words = describeSource(source.sourceLabel);
     const lower = /^(?:An? |Your |[A-Z][a-z])/.test(words)
       ? `${words.charAt(0).toLowerCase()}${words.slice(1)}`
       : words;
-    const times = source.ingestionCount === 1 ? "once" : `${String(source.ingestionCount)} times`;
-    return `${lower}, ${times}`;
+    kinds.set(lower, (kinds.get(lower) ?? 0) + source.ingestionCount);
+  }
+  const named = [...kinds].slice(0, 3).map(([words, count]) => {
+    return `${words}, ${count === 1 ? "once" : `${String(count)} times`}`;
   });
-  const more = sources.length - named.length;
+  const more = kinds.size - named.length;
   return more > 0 ? `${named.join("; ")}; and ${String(more)} more` : named.join("; ");
 }
 
