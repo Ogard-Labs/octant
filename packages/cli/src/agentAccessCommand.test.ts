@@ -1,4 +1,5 @@
 import { createHash, verify } from "node:crypto";
+import { createServer, type IncomingHttpHeaders } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { AGENT_PROOF_HEADER, decodeAgentConnectionFile } from "@octant/contracts
 import { agentProofPayload } from "@octant/domain";
 import { runAgentMcpBridge } from "./agentAccessBridge";
 import { resolveAgentAccessCliCommand, runAgentAccessJoin } from "./agentAccessCommand";
-import type { AgentListenerFetch } from "./agentAccessTransport";
+import { agentLoopbackFetch, type AgentListenerFetch } from "./agentAccessTransport";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -178,5 +179,39 @@ describe("the agent bridge", () => {
       );
     expect(answers.find((answer) => answer.id === 1)?.result).toEqual({ tools: [] });
     expect(answers.find((answer) => answer.id === 2)?.error?.code).toBe(-32001);
+  });
+
+  it("reaches the host on this computer over loopback with only the signed proof, and refuses any other address", async () => {
+    const received: Array<{ readonly url: string; readonly headers: IncomingHttpHeaders }> = [];
+    const server = createServer((request, response) => {
+      received.push({ url: request.url ?? "", headers: request.headers });
+      request.resume();
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("no port");
+      const answer = await agentLoopbackFetch(`http://127.0.0.1:${String(address.port)}`)({
+        path: "/api/agent-access/mcp",
+        headers: { "content-type": "application/json", [AGENT_PROOF_HEADER]: "v1.proof" },
+        body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+      });
+      expect(answer.status).toBe(200);
+      expect(received.map((request) => request.url)).toEqual(["/api/agent-access/mcp"]);
+      expect(received[0]?.headers[AGENT_PROOF_HEADER]).toBe("v1.proof");
+      expect(received[0]?.headers["x-octant-desktop-secret"]).toBeUndefined();
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    await expect(
+      agentLoopbackFetch("http://192.168.1.20:4800")({
+        path: "/api/agent-access/mcp",
+        headers: {},
+        body: "{}",
+      }),
+    ).rejects.toThrow("not a loopback address");
   });
 });

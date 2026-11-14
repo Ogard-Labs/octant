@@ -44,6 +44,10 @@ import {
 } from "./automationTestFixtures";
 import { buildAutomationAuthorityFactsFromHost } from "./automationDispatchService";
 import {
+  resolveAutomationAuthorityLiveFacts,
+  type AutomationServerProjectBinding,
+} from "./resolveAutomationAuthorityLiveFacts";
+import {
   WorkTurnProjection,
   hydrateWorkTurnProjectionFromJournal,
 } from "../work/workTurnProjection";
@@ -1628,6 +1632,122 @@ describe("one-time follow-ups into their own thread", () => {
       now: "2026-08-11T12:59:00.000Z",
     });
     expect(launch).toHaveBeenCalledTimes(1);
+    session.connection.close();
+  });
+});
+
+describe("routines on a Project on a server", () => {
+  // A server Project lives in its own catalog, so the local one never names it.
+  function serverFacts(
+    definition: AutomationDefinition,
+    server: AutomationServerProjectBinding | undefined,
+  ) {
+    return resolveAutomationAuthorityLiveFacts(
+      {
+        hostId: "local",
+        readProject: () => undefined,
+        readServerProject: (projectId) =>
+          projectId === String(definition.projectId) ? server : undefined,
+        readProviderInstance: () =>
+          ({ id: AUTOMATION_TEST_IDS.providerInstance, enabled: true }) as never,
+        providerSupportsModel: () => true,
+        readExecutionProfileVersion: () => ({ version: 1, executionPolicy: "approval-gated" }),
+        readCodeCheckoutAvailable: () => false,
+      },
+      { definition, run: automationRunForDefinition(definition) },
+    );
+  }
+
+  function boundServerProject(
+    definition: AutomationDefinition,
+  ): Extract<AutomationServerProjectBinding, { readonly mode: "code" }> {
+    if (definition.binding.kind !== "code") throw new Error("expected a Code binding");
+    return {
+      kind: "bound",
+      mode: "code",
+      serverRegistered: true,
+      bindingRevisionId: String(definition.binding.bindingRevisionId),
+      repositoryId: String(definition.binding.repositoryId),
+      checkoutId: String(definition.binding.checkoutId),
+    };
+  }
+
+  function dispatcherFor(
+    session: Session,
+    definition: AutomationDefinition,
+    server: AutomationServerProjectBinding | undefined,
+    code: AutomationCodeDispatchPort,
+  ) {
+    return new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      resolveFacts: () => serverFacts(definition, server),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+      schedule: (work) => {
+        void work();
+      },
+    });
+  }
+
+  it("passes revalidation and starts its turn in the server Project", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+
+    await dispatcherFor(session, definition, boundServerProject(definition), code.port).dispatchNow(
+      definition.id,
+      run.id,
+    );
+
+    expect(code.create).toHaveBeenCalledTimes(1);
+    expect(code.launch).toHaveBeenCalledTimes(1);
+    const after = session.projection.getRun(run.id);
+    expect(after?.lifecycle).toBe("running");
+    expect(after?.firstTurnAcceptance?.runtimeReceipt).toBe("code-operation:test");
+    session.connection.close();
+  });
+
+  it("refuses a routine whose server Project was removed, saying so", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+
+    await dispatcherFor(session, definition, { kind: "removed" }, code.port).dispatchNow(
+      definition.id,
+      run.id,
+    );
+
+    expect(code.create).not.toHaveBeenCalled();
+    const after = session.projection.getRun(run.id);
+    expect(after?.lifecycle).toBe("failed");
+    expect(after?.failure?.reason).toBe("project-mismatch");
+    expect(after?.failure?.message).toMatch(/Project on a server was removed/);
+    expect(session.projection.getDefinition(definition.id)?.lifecycle).toBe("paused");
+    session.connection.close();
+  });
+
+  it("refuses a routine whose server left the registry, naming the server", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+
+    await dispatcherFor(
+      session,
+      definition,
+      { ...boundServerProject(definition), serverRegistered: false },
+      code.port,
+    ).dispatchNow(definition.id, run.id);
+
+    expect(code.create).not.toHaveBeenCalled();
+    const after = session.projection.getRun(run.id);
+    expect(after?.failure?.reason).toBe("binding-mismatch");
+    expect(after?.failure?.message).toMatch(/server is no longer registered/);
     session.connection.close();
   });
 });

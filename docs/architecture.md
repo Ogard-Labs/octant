@@ -133,6 +133,13 @@ The design rests on a small set of invariants that every package obeys:
 - **The event journal is authoritative; projections are rebuildable.** Commands
   append versioned events to a SQLite journal. Read models are idempotent
   projections that can be dropped and rebuilt from the journal at any time.
+  _Rationale for no interactive raw provider terminal mode_ (maintainer
+  decision, 2026-11-14): Octant offers no mode in which the person types into
+  a provider's own terminal program inside a thread. Keystrokes typed there
+  reach the provider directly, so its tool calls bypass Octant's approvals and
+  never reach the journal; the thread would claim a record it does not hold.
+  The person can still run a provider's CLI in an ordinary terminal, outside
+  any thread's authority.
 - **Contracts are schema-only, domain is pure.** `@octant/contracts` holds
   Effect Schema definitions and nothing else. `@octant/domain` holds pure
   policy and state transitions with no I/O.
@@ -3555,6 +3562,15 @@ enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
 
+**Machines in the person's own cloud account** (maintainer decision,
+2026-11-14; not built yet). A delivery target may also be a machine Octant
+creates in the person's own cloud account, through a credential reference the
+credential broker holds. It appears as a
+[Server Project](design/server-projects.md#machines-in-the-persons-cloud-account)
+and can be suspended and resumed by the person. Octant operates no hosted
+machines of its own; an Octant-operated hosted service stays out of scope
+([Current Release Boundary](#current-release-boundary)).
+
 **Coordinator threads start and direct worker threads.** A person may make a
 Code thread a coordinator: a long-lived thread whose own actions are read-only,
 which starts worker threads without asking (or proposes them, when the person
@@ -3662,7 +3678,9 @@ definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), weekly at a
 local time in an IANA time zone, or matching file arrivals in a local Work
 Project (Work and `new-thread` only). A routine targets a Chat, Work, or Code
-Project. A **Chat routine** keeps Chat's authority, since a Chat thread has no
+Project; a Work or Code routine may target a Project on a registered server,
+whose turn runs there as a person-started turn would
+([Server Projects: Routines](design/server-projects.md#routines)). A **Chat routine** keeps Chat's authority, since a Chat thread has no
 file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
 folder or binding revision), its authority snapshot grants no filesystem,
@@ -6637,8 +6655,16 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   with no assigned directory also reads the one file `~/.claude.json`: refused
   it, the runtime retries for about six seconds, longer than the sign-in probe
   waits.
-  A thread stays on the instance it started with; there is no
-  automatic failover, rotation, or load-balancing between accounts. Discovery can find
+  A thread stays on the instance it started with until the person moves it
+  (maintainer decision, 2026-11-14; not built yet): the person may move a
+  thread to another account or instance, and the move is carried out by the
+  disclosed text handoff in
+  [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
+  journaled like any provider change. A per-thread setting the person opts
+  into, "when this account hits its usage limit, hand off to" a named account,
+  is allowed later; it hands off by the same path and names the move in the
+  thread. Octant never rotates, fails over, or load-balances between accounts
+  silently or on its own choice. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
@@ -12811,6 +12837,15 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned       |
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                      |
 
+**Themes as plugin contributions** (maintainer decision, 2026-11-14; not built
+yet). A plugin may contribute a theme as data only: a document in the semantic
+theme schema of `@octant/theme`, validated by that package's importer and
+contrast checks before it is listed. A theme contribution carries no renderer
+code, stylesheet, script, or asset loader; a contribution that fails
+validation is refused whole, and the one runtime theme authority applies a
+valid one exactly as it applies a built-in preset. Installation, trust, and
+enablement stay separate steps as for every other component.
+
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
 both read; it also marks which of them are switchable. A switchable plugin's
@@ -15337,6 +15372,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   agent key; each tool runs in process as a paired-device principal whose
   device id is the grant's own scope id, after a guard that admits only the
   routes the tools use inside the grant, so every device clamp applies too.
+  An MCP client on the host's own computer may hold such a grant too, joined
+  and confirmed the same way: the loopback server serves it the same `mcp`
+  route alone, with the same signed proof, through
+  `octant agent mcp --connection <file> --local` (maintainer decision,
+  2026-11-14); loopback adds nothing to the grant.
   It never answers approvals or adds Projects, its threads are journaled as its
   own and marked as outside content, and revoking the grant ends its sessions.
   Settings › Remote access › Agent access administers grants from a local
@@ -15907,6 +15947,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   because hub and spokes covers remote reach, and its specification, wire
   contract and pure policy are removed. The
   listener and client trust rules above are the whole of remote reachability.
+  There is still no Octant relay (maintainer decision, 2026-11-14). A person
+  who wants reach beyond their own network runs a relay or tunnel of their own
+  (a private network overlay, an SSH tunnel) in front of the listener; the
+  user guide documents that setup, and nothing in the product changes for it:
+  the listener's address rules, certificate pinning, and device-key proofs
+  apply unchanged through it.
 - **Provider keys on a host without the desktop app.** The desktop saves an
   endpoint's API key or bearer token over native IPC from its own renderer,
   so a browser client — local or paired — has no way to save one and names
@@ -17002,6 +17048,32 @@ cards; general Azure CLI credentials remain unavailable by design.
     re-allowed. A confined launch also counts as its own the read and write
     roots it was granted by name, except the bound root and the temporary
     directory. No own path ever reopens a file in another group.
+  - **On Windows** the same groups name the Windows locations (maintainer
+    decision, 2026-11-14): Credential Manager's `Credentials` folders, the
+    DPAPI `Protect` folder and the `Vault` folders under `AppData`, the
+    password managers' vault folders there, browser profile stores under
+    `AppData\Local` and `AppData\Roaming` (six levels) and the Firefox
+    profiles, the Slack and Discord `Local Storage` folders, `gcloud` under
+    `AppData\Roaming`, `_netrc`, the forge sign-in under
+    `AppData\Roaming\GitHub CLI`, and the Copilot sign-in under
+    `AppData\Local`; the home-folder files (`.ssh`, `.aws`, `.kube`,
+    `.docker`, registry tokens, provider sign-ins) keep their names. Windows
+    has no confined launch yet, so the list there is enforced only by
+    Octant's own file tools, Shield and redaction. Those judge only a
+    drive-absolute path, compared whatever its letter case and slash
+    direction, with `..` resolved inside the drive, each name stripped of the
+    trailing dots and spaces and the `:stream` suffix Windows ignores when it
+    opens a file, and under the final path its longest existing prefix
+    resolves to. A share, device (`\\?\`), drive-relative, or driveless
+    rooted path is refused rather than judged, every path is refused when the
+    home folder is not drive-absolute, and a search is refused when its root
+    is at or above any protected location, or inside a pattern entry's folder
+    with levels of it left (a browser profile folder), whether or not the
+    file exists. On macOS and Linux a search rooted inside a pattern entry's
+    folder is checked by walking from the root, and a walk that passes 4,096
+    entries refuses the search rather than answer that nothing was found.
+    An absolute path a person added is a POSIX path and names nothing on
+    Windows; only `~/` additions apply there.
 - **The person can add paths and remove built-ins.** Settings › Permissions
   › Protected files (`ProtectedFilesService`, `/api/protected-files`) shows
   each group with the paths it covers on this host and the channel that
@@ -17975,13 +18047,16 @@ by a maintainer. Existing scoped exceptions remain documented in this
 architecture.
 
 **Scope hold** (maintainer request, 2026-11-12). Bots, the Nightly shared-host
-client, public Canvas links, Browser upload and download manifests, and the
-Windows building blocks take no new scope until [the Full access
-rule](#security-and-authority) is built. Running Work and Code at Full access on
-Windows is not an exception to the hold: it is tracked as its own work and needs
-Windows forms of the confined launches first (maintainer decision, 2026-11-12).
-What is
-built or specified for them stays as it is.
+client, public Canvas links, and Browser upload and download manifests take no
+new scope until [the Full access rule](#security-and-authority) is built. What
+is built or specified for them stays as it is. The hold on the Windows building
+blocks is lifted (maintainer decision, 2026-11-14): Windows work takes new
+scope again under the sequence and confinement gate below, and running Work and
+Code on Windows still needs Windows forms of the confined launches first.
+
+Also out of scope, kept on 2026-11-14: physical phones and tablets and
+app-store upload (above), and an interactive raw provider terminal mode, whose
+rationale sits beside [the journal principle](#overview-and-principles).
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
@@ -18013,6 +18088,30 @@ and Code there on Windows is tracked as its own work and needs Windows forms
 of the confined launches first (maintainer decision, 2026-11-12); today every
 level is refused. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
+
+**Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
+deliverable and keeps every gate above:
+
+1. Built: the [secret guard](#secret-guard) names the Windows locations and
+   refuses a path it cannot judge, and the platform-independent domain and
+   contract suites also run on a hosted Windows runner (not a required check
+   until they have been seen green there).
+2. A Windows confinement design for the confined launches (process, file,
+   and network boundary equivalent to Seatbelt and Bubblewrap, with the
+   secret guard as an OS rule), approved and documented here before any
+   guarded level is admitted. Until then Work and Code stay refused on
+   Windows at every level, and the honest capability report says so.
+3. Work and Code at Full access on Windows on top of the confined launches'
+   Windows forms; Code terminals with an explicit shell setting (PowerShell
+   by default, never a guessed POSIX shell), Windows process-tree stop in
+   place of process-group signals, and no `/tmp` or POSIX path assumptions in
+   provider launches.
+4. The `octant` CLI on Windows: native host paths (today the generic host
+   paths refuse `win32`), a browser opener that runs no shell, and a service
+   manager equivalent; until then the CLI's service commands refuse Windows.
+5. An installer, Authenticode signing, and a signed update feed that builds
+   on the Linux signed-feed trust root once that path has been exercised on a
+   real image; the unsigned QA ZIP stays QA-only.
 
 The Windows owned-control prerequisite is an original in-process Node-API
 binding, not a separate owner daemon. Only a host-selected scope UUID reaches

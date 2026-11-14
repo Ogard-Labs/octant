@@ -856,6 +856,7 @@ export function startOctantServer(
       codeService,
       codeTurnDecisions,
       contributeCodeTools,
+      contributeServerCodeTools,
       coordinatorService,
       coordinatorWakes,
       routeCodeService,
@@ -1350,11 +1351,14 @@ export function startOctantServer(
       chatService,
       codeCompletedThreadSource,
       contributeCodeTools,
+      contributeServerCodeTools,
       liveTurns,
       persistence,
       projectService,
       routeCodeService,
       routineProposalService,
+      serverConnection,
+      serverProjectStore,
       windowAuthorityStore,
       workThreadProjection,
       workTurnProjection,
@@ -1873,6 +1877,7 @@ export function startOctantServer(
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
       agentAccessAdministrationRoutes,
+      agentAccessLoopbackRoutes,
       privateListenerAdministrationRoutes,
       privateListenerController,
       privateListenerSetting,
@@ -2055,6 +2060,7 @@ export function startOctantServer(
                 (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await agentAccessAdministrationRoutes(request)) ??
+                (await agentAccessLoopbackRoutes(request)) ??
                 (await personQuitRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??

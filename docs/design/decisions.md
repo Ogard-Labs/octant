@@ -43,22 +43,22 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
+| [Providers](#providers)                                                               | 8         | 5       | 2            | 1                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
-| [Extensions](#extensions)                                                             | 8         | 4       | 4            | 0                   |
+| [Extensions](#extensions)                                                             | 9         | 4       | 4            | 1                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 10        | 4       | 6            | 0                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 11        | 5       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 16        | 11      | 5            | 0                   |
+| [Workspace](#workspace)                                                               | 18        | 11      | 5            | 2                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 6         | 3       | 3            | 0                   |
+| [Browser](#browser)                                                                   | 8         | 3       | 3            | 2                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 4       | 2            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **252**   | **152** | **96**       | **4**               |
+| **All areas**                                                                         | **259**   | **153** | **96**       | **10**              |
 
 ## Principles and hard lines
 
@@ -123,6 +123,7 @@ Status: Partly built. Since: 2026-11-12. Detail: [Architecture: Security and aut
 Everything a person cares about stays on the host; Octant makes only a short, switchable list of host-initiated calls.
 
 - No Octant account, relay, or telemetry is required; artifact sync uses only a store the person owns.
+- There is no Octant relay (kept by maintainer decision, 2026-11-14). The user guide documents a relay or tunnel the person runs themselves (a private network overlay, an SSH tunnel) in front of the listener; the product does not change for it.
 - The outside calls are signed update checks, managed device-tool update checks, marketplace fetches the person starts, public Canvas link calls, and a hub's own push delivery when its person turns it on; each has an off switch.
 - Traffic among a person's own devices on their private network is not a third-party call, but it is always authenticated and encrypted.
 - Adding telemetry, an external call, credential exposure or a cloud dependency needs an explicit request and a documented boundary in the owning specification.
@@ -154,6 +155,7 @@ The server decides every authority question, the event journal is the record, an
 - Commands append versioned events; read models are idempotent projections rebuildable from the journal.
 - Startup verifies only journal rows after a disposable watermark (sequence plus a fingerprint of the exact server build, the registry's names and versions, and the schema head); the status inspection then checks only the rows after it and skips SQLite's integrity check; the first start of a new build, a source run, a migration, a suspicious tail, a refused start, or rewrite or delete of a journal row forces a full scan ([Architecture: Persistence](../architecture.md#persistence)).
 - Contracts are schema-only and domain code is pure; dependencies point inward and provider payloads stop at the adapter.
+- No thread offers an interactive raw provider terminal: typing into a provider's own terminal program bypasses approvals and the journal (maintainer decision, 2026-11-14; rationale in the owner).
 - The host refuses unknown fields in everything it decodes; a client drops unknown fields in a host answer, except inside asks a person decides on, which stay strict.
 
 Status: Built. Detail: [Architecture: Overview and principles](../architecture.md#overview-and-principles).
@@ -202,6 +204,7 @@ Below Full access, secret files stay out of every agent's reach by an operating-
 - At Full access Octant's own file tools still refuse protected paths with the same plain message, Octant Shield's Watcher flags a call that names a protected path and the Octant Harness's secret-then-network commands are tagged, both journaled and never blocking, and redaction stays on.
 - SSH works through the person's SSH agent, Git over HTTPS through the system credential helper, and keys through the credential broker, so agents use credentials without reading them.
 - The person adds paths in Settings › Permissions › Protected files; removing a built-in group needs an explicit confirm and is journaled.
+- Built: on a Windows host the list names the Windows locations (Credential Manager, DPAPI and Vault folders, password-manager vaults and browser profile stores under `AppData`, `_netrc`, and the Windows forge and Copilot sign-ins), and Octant's own file tools judge a drive-absolute path whatever its letter case, slash direction, trailing dots and spaces or `:stream` suffix; a share, device, drive-relative or driveless rooted path is refused rather than judged, and a search rooted at or above any protected location, or inside a pattern entry's folder such as a browser profile, is refused (maintainer decision, 2026-11-14). On every platform a search rooted inside a pattern entry's folder is checked from its root, and a check that cannot finish refuses. Windows has no confined launch yet, so the list is not an operating-system rule there.
 - A refused read by Octant's or Claude Code's file tools names the rule and the channel to use, at every level. Native broad-root search refusals identify the search root, state that no results were returned and offer an ordinary unprotected subfolder. Relative roots and Glob escapes receive the same resolved-path check; no exclusion or partial-result claim is invented.
 - Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log, at every level.
 - Octant Shield's Judge sends a command that reaches a secret file to the person and refuses one that reads secrets then sends something off the computer; it reads the person's protected list beside its own patterns.
@@ -362,7 +365,8 @@ The first release is the technical preview for Apple-silicon Macs with the provi
 - macOS Swift helpers use explicit deployment targets independent of the compiler host ([packaging](../architecture.md#development-loop)).
 - Connectors, a Code thread's own Git and pull-request work, a person's merge from any of their clients, host-local routines, the guardrail levels and the key providers' native features are in scope; Octant Shield is in scope and designed.
 - An agent merge or force-push on its own initiative, cloud scheduling, and an Octant-operated hosted service are out of scope.
-- Physical phones and tablets, and app-store upload, submission and release, are out of scope (maintainer decision, 2026-10-29); Octant drives the simulator only.
+- Physical phones and tablets, and app-store upload, submission and release, are out of scope (maintainer decision, 2026-10-29, kept 2026-11-14); Octant drives the simulator only.
+- An interactive raw provider terminal mode, where the person types into a provider's own terminal program inside a thread, is out of scope (maintainer decision, 2026-11-14): it would bypass approvals and the journal ([Server authority, an authoritative journal, and strict host reads](#server-authority-an-authoritative-journal-and-strict-host-reads)).
 - Public Canvas links are in scope through the self-hostable reference app at `apps/share`; Ogard Labs operates no share-service instance (maintainer decision, 2026-11-07).
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
@@ -409,6 +413,7 @@ Desktop is one product on macOS, Linux and Windows, and platform differences are
 - The Windows credential-store building block uses a scoped native Credential Manager helper and private pipes. Its atomic protected blob accepts at most 2,560 UTF-8 bytes and refuses overflow before mutation; the broker transport bound remains 12 KiB. It supplies the seven existing desktop auxiliary ports through distinct closed purpose namespaces, preserving provider target names and family/store isolation. Oversized auxiliary values are refused without mutation, not split or stored elsewhere. A fixed native per-user mutex serializes all purposes/families/stores across processes; exact User/SYSTEM ownership/access and bounded waits refuse unsafe, blocked or abandoned coordination before mutation, without retry. It does not admit host startup or Chat or remove the Work/Code gate.
 - The separate desktop identity service has a closed native Windows CNG/Credential Manager backend: a random32-byte secret, SHA256(raw-secret) fingerprint, HMAC-SHA256 signature, non-exporting ensure/sign/rotate/recovery API, and selected-store/family isolation outside all generic credential purposes. Malformed blobs refuse ensure/sign; explicit atomic rotation recovers them. The existing16KiB request bound remains separate from the2560-byte credential blob cap. This is neither the server/member/roster P-256 identity nor owner unlock/profile identity, and admits no Windows startup or Work/Code. Mac and existing Linux behavior remain unchanged.
 - The simulator, the Apple development workbench and window vibrancy stay macOS-only.
+- The remaining Windows steps are sequenced in [the Windows sequence](../architecture.md#current-release-boundary) (maintainer decision, 2026-11-14): confinement design, then Work and Code with an explicit shell setting, then the CLI, then installer, signing and the signed feed.
 
 Status: Partly built. Since: 2026-10-16; ordering gate lifted 2026-11-06. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
@@ -425,9 +430,10 @@ Status: Built. Detail: [Architecture: Current Release Boundary](../architecture.
 
 ### Scope hold until the Full access rule is built
 
-Bots, the Nightly shared-host client, public Canvas links, Browser upload and download manifests, and Windows building blocks take no new scope until [The Full access rule](#the-full-access-rule) is built (maintainer request, 2026-11-12). Running Work and Code at Full access on Windows is not an exception to the hold: it is tracked as its own work and needs Windows forms of the confined launches first (maintainer decision, 2026-11-12).
+Bots, the Nightly shared-host client, public Canvas links, and Browser upload and download manifests take no new scope until [The Full access rule](#the-full-access-rule) is built (maintainer request, 2026-11-12).
 
 - The hold adds no rule to those features and removes none: their entries keep their current text and status.
+- The hold on Windows building blocks is lifted (maintainer decision, 2026-11-14); Windows work follows [One desktop app, Linux next, Windows later](#one-desktop-app-linux-next-windows-later), and running Work and Code on Windows still needs Windows forms of the confined launches first.
 - The hosted relay is not held: it was canceled on 2026-10-30, and its specification, code and decision entry are removed.
 
 Status: Designed, not built. Since: 2026-11-12. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
@@ -928,7 +934,7 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - The person may fix the workers' level when creating the coordinator at a local window or a device the host's own person paired (maintainer decisions, 2026-11-12 and 2026-11-13; built for a person-paired device), Full access included, and a mark on the coordinator does not lower it; without that choice a worker's level is at most the coordinator's, and never Full access from a marked coordinator (maintainer request, 2026-11-12). The level is journaled on the coordinator and cannot be changed afterwards. A marked coordinator's worker starts marked (label `coordinator-start`); a mark that cannot be journaled refuses the start.
 - At most six open workers per coordinator by default (person-set, 1–16) and 60 starts per hour by default, a per-coordinator setting from 1 to 600 (maintainer request, 2026-11-12). Ordinary turn admission, capacity and spend ceilings apply.
 - A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. The coordinator's wake and round bounds apply: per-coordinator settings with defaults of 30 wakes an hour and 10 rounds (maintainer request, 2026-11-12). The three bounds are journaled on the coordinator, only a person sets them, at a local window or a device the host's own person paired (maintainer decisions, 2026-11-12 and 2026-11-13; built for a person-paired device, journaled as the device; a hub-introduced or restricted device is refused), and a coordinator journaled before them takes the defaults. The New coordinator draft sets the bounds and the workers' level; Coordinator limits in a coordinator's menus changes the bounds on a running coordinator, and Make coordinator offers the workers' level (maintainer decision, 2026-11-13). Built; the dialog and submenu are tested as components and not yet rendered in a browser.
-- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
+- A worker's approvals and questions are listed in its coordinator's composer and, as one request row each naming the worker, at the end of the coordinator's thread view (maintainer decision, 2026-11-14), answered in either through the worker's own answer path; a row whose request leaves the list reads its outcome. Only the person answers them, never the coordinator agent. Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
 - The wake switches (never the role) may also be set from a device the host's own person paired, journaled as that device, with no owner unlock (maintainer decision, 2026-11-12). A device the host knows only through the hub's roster sets them only as an owner device, through the owner routes and the owner access recovery screen on the phone and in a browser, each change under its own fresh unlock.
 - A coordinator proposal's review starts on the requested provider, model and level and offers no higher level; a device the host's own person paired approves as a local window does (maintainer decision, 2026-11-12; built on the server; not built yet: paired browsers and phones still show pending proposals read-only).
 - Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
@@ -1003,8 +1009,9 @@ Octant operates no deployment infrastructure and offers no ship target of its ow
 - A ship integration never receives a secret; it names a credential reference and the host hands it a bounded, purpose-scoped handle at use. _Here only._
 - Delivery is dormant: the ship service exists, but the host wires no target source, build observer or per-act approval bound to target, revision and build.
 - Delivery stays absent from the interface until all three exist; a standing grant never replaces the per-act approval.
+- A target may also be a machine Octant creates in the person's own cloud account through a credential reference in the credential broker; it appears as a Server Project, and the person suspends and resumes it (maintainer decision, 2026-11-14; [Server Projects: Machines in the person's cloud account](server-projects.md#machines-in-the-persons-cloud-account)). An Octant-operated hosted service stays out of scope.
 
-Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Designed, not built. Since: —; cloud machines 2026-11-14. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Project planner thread
 
@@ -1030,6 +1037,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
+- Built: a Work or Code routine may target a Project on a registered server (maintainer decision, 2026-11-14). This host's scheduler runs it and its turn runs there as a person-started turn would, over the Project's connection under the same levels and approvals. Revalidation reads the server catalog and refuses, naming why, a removed Project, a server that left the registry, or a changed mode or derived binding; a server that cannot be reached fails the run before any thread exists and runs nothing anywhere. A server Project's turns are offered the routine tools; file triggers are refused there. Not built yet: choosing a server Project in Automation Center's editor ([Server Projects: Routines](server-projects.md#routines)).
 - The scheduler is an in-process timer; nothing runs in a cloud, and a self-hosted wake service on a person's hub can wake a spoke for a routine (built; run only between hosts on loopback with a fake socket).
 - A Work run observes the exact retained first-turn request and captured receipt/thread/Project/host/binding/provider/model. Proven terminal status is journaled before the active slot is reused; missing/mismatched evidence stays active, edits do not replace the run snapshot, and replay or notification failure never redelivers the provider call. First-turn completion does not prove child/process quiescence.
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
@@ -1293,7 +1301,7 @@ and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-c
 
 ### Provider instances and accounts
 
-Providers are multi-instance, and a thread stays on the instance it started with. There is no automatic failover, rotation or load-balancing between accounts.
+Providers are multi-instance, and a thread stays on the instance it started with until the person moves it ([Moving a thread to another account](#moving-a-thread-to-another-account)). Octant never rotates, fails over or load-balances between accounts on its own.
 
 - A selected model is a host, provider instance and model id, and the model picker is provider-first.
 - Extra accounts use Octant-assigned state directories. Removing an account leaves its directory in place, and deleting it is the person's step.
@@ -1302,6 +1310,16 @@ Providers are multi-instance, and a thread stays on the instance it started with
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
 
 Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#providers).
+
+### Moving a thread to another account
+
+The person may move a thread to another provider account or instance; the move is carried out by the disclosed text handoff in [Handoffs between providers, forks and branches](#handoffs-between-providers-forks-and-branches) (maintainer decision, 2026-11-14).
+
+- Only the person moves a thread; the move is journaled like any provider change, with the handoff's counts, taint and omissions.
+- A per-thread setting the person opts into, "when this account hits its usage limit, hand off to" a named account, is allowed later; it hands off by the same path and names the move in the thread.
+- Silent or automatic rotation, failover and load-balancing between accounts stay refused.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ### Provider credentials and sign-in
 
@@ -1689,6 +1707,15 @@ New providers and tools reach the system through the published SDK, API and host
 - Each feature follows its switch on the host and in the renderer: GitHub's account, repository, clone, issue, read-tool and Gist surfaces; the Work and Code boards and every way to open them; and Zen's routes, tool and window. Git and pull requests stay core, and the board's data and the tools that read it stay available.
 
 Status: Built. Since: 2026-11-07. Detail: [Architecture: Plugin boundaries and remaining extraction](../architecture.md#plugin-boundaries-and-remaining-extraction).
+
+### Themes as plugin contributions
+
+A plugin may contribute a theme as data only, validated by `@octant/theme` before it is listed (maintainer decision, 2026-11-14).
+
+- A theme contribution is a document in the semantic theme schema and carries no renderer code, stylesheet, script or asset loader; one that fails validation is refused whole.
+- The one runtime theme authority applies a valid contribution as it applies a built-in preset; installation, trust and enablement stay separate steps.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Architecture: Plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extraction).
 
 ## Authority and approvals
 
@@ -2164,13 +2191,23 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority,
 An agent on another machine on the person's own network starts and follows work in Octant as its own principal, held to an agent grant the person creates. It is never listed as a paired device and never the person, so the rule that a paired device is the person does not reach it; product routes see it as a paired-device principal with the grant's own scope id, so every device clamp applies.
 
 - A grant names its Projects, modes, highest access level (Full access when the person chooses it for the grant; maintainer decision, 2026-11-12; the pick shows the one-time Full access warning, and `start_work` accepts an explicit Full access for such a grant and gives it to the thread alone, never the Project; maintainer decision, 2026-11-13), tools, models, spend limits and expiry, inside every clamp of a restricted device session and its own closed list of routes; its prompts stay marked as outside content at Full access, and the mark is recorded only, as at Full access anywhere. It is created or widened from a local window, the loopback CLI or a device the host's own person paired (maintainer decision, 2026-11-12). Not built yet: today it is created or widened only from a local window or the loopback CLI, and a paired device may only view and revoke it.
-- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
+- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only (and, for a client on the host's own computer, on the loopback server: [Local MCP clients use an agent grant](#local-mcp-clients-use-an-agent-grant)); the tools run in process under the principal.
 - The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
 - It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent, and every turn it sent says so under its prompt.
 - Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
 - Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
 
 Status: Partly built. Since: 2026-11-11. Detail: [Agent access from other machines](agent-access.md) and [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
+
+### Local MCP clients use an agent grant
+
+An MCP client on the host's own computer may use Octant as an MCP server under an agent grant, enrolled, scoped and confirmed as a bridge grant is (maintainer decision, 2026-11-14).
+
+- It runs `octant agent mcp --connection <file> --local`, which sends the bridge's signed requests to the loopback server's `POST /api/agent-access/mcp`; the claim stays on the private listener, and the listener must be on, as for any agent request.
+- Loopback grants nothing the grant does not: the same credential, grant and remote checks apply, an ungranted key is refused with the same `unauthorized`, `tools/list` names only the tools the grant ticks, its prompts are outside content, and its approvals wait in Needs you for the person.
+- The bridge never reads or sends the host's bridge secret; the existing local `octant agent mcp` path under that secret is unchanged.
+
+Status: Built. Since: 2026-11-14. Detail: [Agent access: Ways to connect](agent-access.md#ways-to-connect).
 
 ## Credentials and sign-in
 
@@ -2603,6 +2640,25 @@ Octant stops a local server only when it can prove the server belongs to a live 
 
 Status: Built. Since: —. Detail: [Workspace: Local-server ownership](workspace.md#local-server-ownership).
 
+### Line notes on a turn's changes
+
+The person may leave notes on lines of a turn's recorded change and send them together as one follow-up turn in the same thread (maintainer decision, 2026-11-14).
+
+- Notes stay pending and editable until the person sends them; a note never approves, resolves or reverts anything.
+- Each note names its file, side and line from the turn's record; anchors never move silently, and a line the record cannot show says why it takes no note.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Thread view: Line notes on a turn's changes](thread-view.md#line-notes-on-a-turns-changes).
+
+### Thread recaps and notes
+
+A thread has a person-visible recap of what it asked, did and left open, and the person may keep notes of their own on it (maintainer decision, 2026-11-14).
+
+- The recap is written on request by the thread's own model from its transcript, names the turn it was written through, and goes to no other provider.
+- Notes are the person's text, journaled on the thread and sent to the agent only when the person attaches one to a message.
+- Neither changes the thread's authority, level or Done.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Thread view: Thread recap and notes](thread-view.md#thread-recap-and-notes).
+
 ## Start screen
 
 ### Start-screen cards
@@ -2943,6 +2999,25 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 - Named account profiles have host-assigned identities, native local labels and separate persistent stores. A local person explicitly selects one; task defaults never grant site, Project or credential authority. Approval names come from the native registry, and origin grants/extensions remain isolated per identity. Unknown identities, paired/unattended callers and a missing native owner refuse. Stores and the name registry are not exported or synced; Private, Project and Personal retain their behavior.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
+
+### Browser element picker
+
+In a Work or Code thread's Browser the person may click an element to attach a structured snapshot of it to the composer: a selector, its outer HTML trimmed to a fixed bound, and a subset of its computed styles (maintainer decision, 2026-11-14).
+
+- The snapshot is read by the same host-owned top-frame reader and checks as a pointed-at feedback note and stays on this computer until the person sends the message it is attached to.
+- It is outside content and marks the thread as other page content does; picking sends, queues and approves nothing.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Browser for agents: Attaching a picked element to the composer](browser-agent-tool.md#attaching-a-picked-element-to-the-composer).
+
+### Page-declared tools
+
+Tools a page declares for agents (WebMCP) are read as outside content and are never added to a thread's tools by themselves (maintainer decision, 2026-11-14).
+
+- Their names, descriptions and schemas mark the thread and are framed as evidence, never instructions.
+- Each call goes through the Browser tool on the declaring page and is approval-gated for that one call; at Full access it follows [The Full access rule](#the-full-access-rule). Its result is outside content.
+- A declared tool never reaches another page, the host or the person's credentials; site approvals and navigation guards still apply.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Browser for agents: Page-declared tools](browser-agent-tool.md#page-declared-tools).
 
 ## Provider runtimes
 

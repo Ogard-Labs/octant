@@ -1,4 +1,3 @@
-import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   ArtifactLibraryClientFailure,
   loadArtifactLibrary,
@@ -12,6 +11,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { ArtifactListRow } from "../artifacts/ArtifactListRow";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantButton } from "../ui/base/OctantButton";
 
 const CanvasWorkspaceTab = lazy(() =>
@@ -126,42 +126,41 @@ export default function ArtifactsModule(props: Props) {
   }
 
   const { entries, truncated } = state.listing;
-  if (entries.length === 0) {
-    return (
-      <section aria-label="Project artifacts" className="dock-canvas-tool">
+  return (
+    <section aria-label="Project artifacts" className="dock-artifacts">
+      <div className="dock-artifacts__bar">
         <OctantButton
           onClick={() => setReloads((count) => count + 1)}
+          size="sm"
           type="button"
           variant="ghost"
         >
           Refresh
         </OctantButton>
-        <OctantEmpty
-          message="Canvas documents made in this Project appear here."
-          state="neutral"
-          title="No artifacts yet"
-        />
-      </section>
-    );
-  }
-  return (
-    <section aria-label="Project artifacts" className="dock-canvas-tool">
-      <OctantButton onClick={() => setReloads((count) => count + 1)} type="button" variant="ghost">
-        Refresh
-      </OctantButton>
-      <ul className="artifact-library__list">
-        {entries.map((entry) => (
-          <ArtifactListRow
-            key={String(entry.canvasId)}
-            entry={entry}
-            observedAt={observedAt}
-            onOpen={setOpen}
+      </div>
+      <div className="dock-artifacts__body">
+        {entries.length === 0 ? (
+          <OctantEmpty
+            message="Canvas documents made in this Project appear here."
+            state="neutral"
+            title="No artifacts yet"
           />
-        ))}
-      </ul>
-      {truncated ? (
-        <p className="dock-canvas-tool__note">Showing the most recent artifacts.</p>
-      ) : null}
+        ) : (
+          <ul className="artifact-library__list">
+            {entries.map((entry) => (
+              <ArtifactListRow
+                key={String(entry.canvasId)}
+                entry={entry}
+                observedAt={observedAt}
+                onOpen={setOpen}
+              />
+            ))}
+          </ul>
+        )}
+        {truncated ? (
+          <p className="dock-artifacts__note">Showing the most recent artifacts.</p>
+        ) : null}
+      </div>
     </section>
   );
 }
