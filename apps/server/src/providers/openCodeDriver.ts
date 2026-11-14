@@ -6,6 +6,7 @@ import {
   type OpenCodeOwnSetup,
 } from "./openCodeOwnSetup";
 import { OpenCodeMessageParts } from "./openCodeMessageParts";
+import { secretGuardEntries } from "../process/secretGuard";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import {
@@ -3117,8 +3118,8 @@ function opencodeRemembersApproval(
 }
 
 /**
- * OpenCode's own tools that only look: its task list, code and language-server
- * lookups, directory listing, and web reads. Plan cannot approve anything, so
+ * OpenCode's own tools that only look, beyond file reads: its task list, code
+ * and language-server lookups, and web reads. Plan cannot approve anything, so
  * a tool left under Plan's catch-all `ask` never ran there; Plan now runs these
  * without asking on both runtimes (maintainer decision, 2026-11-14: Octant
  * adds to a provider and does not take its core features away). The task list
@@ -3132,10 +3133,47 @@ const PLAN_READ_TOOLS = [
   "todoread",
   "codesearch",
   "lsp",
-  "list",
   "webfetch",
   "websearch",
 ] as const;
+
+/**
+ * OpenCode's file reads: reading, finding, searching, and listing. Under the
+ * catch-all `ask` they asked at Guarded and never ran in Plan, which cannot
+ * approve anything. They now run without asking inside the Project and its
+ * extra folders at every level, Plan included, as Octant's own file-read gate
+ * for Claude Code does (maintainer decision, 2026-11-14); `external_directory`
+ * still refuses every other folder.
+ */
+const PROJECT_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
+
+/**
+ * The read refusals that come after everything else, so no allow reopens
+ * them. OpenCode's own default agent refuses `.env` files but not their
+ * examples; its rules come before Octant's, so the read allow above would
+ * otherwise take that protection away. Octant's protected-file list in force
+ * on this host is refused too, as the Claude Code gate refuses it. A name
+ * pattern in that list is refused as its whole folder (`~/.ssh/*`), since
+ * OpenCode's wildcards cannot say a regular expression: stricter, never wider.
+ */
+export function openCodeReadRefusals(
+  platform: NodeJS.Platform = process.platform,
+): ReadonlyArray<PermissionV2Rule> {
+  const protectedPatterns = new Set<string>();
+  for (const entry of secretGuardEntries({ platform })) {
+    const base = entry.kind === "path" ? entry.path : entry.directory;
+    protectedPatterns.add(base);
+    protectedPatterns.add(`${base}/*`);
+  }
+  return [
+    { action: "read", resource: "*.env", effect: "deny" },
+    { action: "read", resource: "*.env.*", effect: "deny" },
+    { action: "read", resource: "*.env.example", effect: "allow" },
+    ...[...protectedPatterns].flatMap((resource) =>
+      (["read", "list"] as const).map((action) => ({ action, resource, effect: "deny" as const })),
+    ),
+  ];
+}
 
 export function permissionRules(
   policy: ProviderExecutionPolicy,
@@ -3178,6 +3216,16 @@ export function permissionRules(
       { permission: "external_directory", pattern: "*", action: "deny" },
     ];
   }
+  const [base, ...posture] = rules;
+  rules = [
+    ...(base === undefined ? [] : [base]),
+    ...PROJECT_READ_TOOLS.map((permission) => ({
+      permission,
+      pattern: "*",
+      action: "allow" as const,
+    })),
+    ...posture,
+  ];
   // The person's own rules apply over the level's allows and asks and under
   // its denies, so Plan's denials and the outside-directory refusal stand.
   rules = insertBeforeFirstDeny(
@@ -3202,6 +3250,9 @@ export function permissionRules(
   // The person's own skills load once they let OpenCode run as itself; a
   // skill is text, and OpenCode asks for it under the posture's own rule.
   if (!ownSkills) rules.push({ permission: "skill", pattern: "*", action: "deny" });
+  for (const rule of openCodeReadRefusals()) {
+    rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
+  }
   if (managedToolServerName === undefined) return rules;
   // OpenCode prefixes MCP tools as `<server>_<tool>`. Deny every other
   // namespaced tool in this session; only this session's bridge is allowed.
@@ -3263,12 +3314,18 @@ export function betaAgentPermissionRules(
       { action: "external_directory", resource: "*", effect: "deny" },
     ];
   }
+  const [base, ...posture] = rules;
+  rules = [
+    ...(base === undefined ? [] : [base]),
+    ...PROJECT_READ_TOOLS.map((action) => ({ action, resource: "*", effect: "allow" as const })),
+    ...posture,
+  ];
   rules = insertBeforeFirstDeny(rules, ownRules, (rule) => rule.effect === "deny");
   // Work follows the posture as Code does; only Plan denies the shell.
   for (const resource of extraFolderPatterns(extraFolders)) {
     rules.push({ action: "external_directory", resource, effect: "allow" });
   }
-  return rules;
+  return [...rules, ...openCodeReadRefusals()];
 }
 
 /**

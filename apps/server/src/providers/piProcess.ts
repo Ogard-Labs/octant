@@ -26,6 +26,7 @@ import type {
   ProviderToolDefinition,
 } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
+import { versionAtLeast } from "./acpProcess";
 import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
@@ -89,6 +90,8 @@ export interface PiConfinementPort {
     readonly environment: NodeJS.ProcessEnv;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
+    /** The release read before launch; it decides how tools are selected. */
+    readonly version?: string;
   }) => Effect.Effect<PiLaunchSpec, ProviderFailure>;
 }
 
@@ -149,7 +152,9 @@ export interface PiProcessOptions {
   readonly serverAccess?: ProviderServerAccessPort;
 }
 
-const SIDE_EFFECT_TOOLS = ["bash", "edit", "write"] as const;
+// The bridge asks for every tool but these known reads and Octant's own tools,
+// which the host decides, so a tool an extension registers asks by the level.
+const KNOWN_READ_TOOLS = ["read", "grep", "find", "ls"] as const;
 const ALL_TOOLS = "bash,edit,write,read,grep,find,ls";
 const BUILT_IN_TOOL_NAMES = new Set(ALL_TOOLS.split(","));
 const READ_TOOLS = "read,grep,find,ls";
@@ -200,11 +205,11 @@ const PROVIDER_CREDENTIALS: ReadonlyMap<string, ReadonlyArray<string>> = new Map
 ]);
 const APPROVAL_BRIDGE = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const sideEffects = new Set(${JSON.stringify(SIDE_EFFECT_TOOLS)});
+const knownReads = new Set(${JSON.stringify(KNOWN_READ_TOOLS)});
 
 export default function octantApprovalBridge(pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
-    if (!sideEffects.has(event.toolName)) return undefined;
+    if (knownReads.has(event.toolName)) return undefined;
     if (process.env.OCTANT_PI_APPROVALS === "disabled") return undefined;
     if (!ctx.hasUI || typeof event.toolCallId !== "string" || event.toolCallId.length === 0) {
       return { block: true, reason: "Octant approval unavailable" };
@@ -233,7 +238,8 @@ const definitions = ${javascriptLiteral(tools)};
 const bridgeUrl = process.env.OCTANT_PI_TOOL_BRIDGE_URL;
 const bridgeToken = process.env.OCTANT_PI_TOOL_BRIDGE_TOKEN;
 const catalogAttestation = "${catalogAttestation}";
-const sideEffects = new Set(${javascriptLiteral(SIDE_EFFECT_TOOLS)});
+const knownReads = new Set(${javascriptLiteral(KNOWN_READ_TOOLS)});
+const octantTools = new Set(definitions.map((definition) => definition.name));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -277,7 +283,7 @@ export default function octantManagedTools(pi: ExtensionAPI) {
   }
 
   pi.on("tool_call", async (event, ctx) => {
-    if (!sideEffects.has(event.toolName)) return undefined;
+    if (knownReads.has(event.toolName) || octantTools.has(event.toolName)) return undefined;
     if (process.env.OCTANT_PI_APPROVALS === "disabled") return undefined;
     if (!ctx.hasUI || typeof event.toolCallId !== "string" || event.toolCallId.length === 0) {
       return { block: true, reason: "Octant approval unavailable" };
@@ -443,6 +449,24 @@ export function readPiOwnResources(ownSetupPath: string): PiOwnResources {
   };
 }
 
+/** Pi's default tools (`DEFAULT_TOOL_NAMES`), which a `+name` list builds on. */
+const PI_DEFAULT_TOOLS: ReadonlySet<string> = new Set(["read", "bash", "edit", "write"]);
+
+/** Whether this Pi release reads `+name` entries in `--tools` (added in 1.1.0). */
+export function piTakesToolModifiers(version: string | undefined): boolean {
+  const match = version === undefined ? null : /^(\d+)\.(\d+)\.(\d+)$/u.exec(version);
+  if (match === null) return false;
+  return versionAtLeast([Number(match[1]), Number(match[2]), Number(match[3])], [1, 1, 0]);
+}
+
+/** The selection as additions to Pi's own defaults. */
+function piToolModifiers(selected: ReadonlyArray<string>): ReadonlyArray<string> {
+  return [
+    ...selected.filter((name) => !PI_DEFAULT_TOOLS.has(name)).map((name) => `+${name}`),
+    ...[...PI_DEFAULT_TOOLS].filter((name) => !selected.includes(name)).map((name) => `-${name}`),
+  ];
+}
+
 export function piArguments(
   bridgePath: string,
   sessionDirectory: string,
@@ -452,6 +476,7 @@ export function piArguments(
   appToolNames: ReadonlyArray<string> = [],
   resumePath?: string,
   ownResources: PiOwnResources = NO_OWN_RESOURCES,
+  version?: string,
 ): ReadonlyArray<string> {
   // Work and Code share one capability set at the thread's level, so a Work
   // session starts with Pi's bash as a Code session does.
@@ -462,8 +487,21 @@ export function piArguments(
         ? READ_TOOLS.split(",")
         : ALL_TOOLS.split(",");
   const selectedTools = [...builtInTools, ...appToolNames];
-  const tools = selectedTools.length === 0 ? ["--no-tools"] : ["--tools", selectedTools.join(",")];
   const own = piOwnSetup(mode, executionPolicy);
+  // A plain `--tools` list is an allowlist that also leaves every tool an
+  // extension registers unregistered. Where the person's extensions load,
+  // a release that takes `+name` entries (1.1.0 on) is given its default
+  // tools plus these instead, with no allowlist, so their tools are offered
+  // as in Pi itself; the bridge asks for each one by the thread's level. An
+  // older or unknown release keeps the allowlist.
+  const extensionTools =
+    own.extensions && ownResources.extensions.length > 0 && piTakesToolModifiers(version);
+  const tools =
+    selectedTools.length === 0
+      ? ["--no-tools"]
+      : extensionTools
+        ? ["--tools", piToolModifiers(selectedTools).join(",")]
+        : ["--tools", selectedTools.join(",")];
   return [
     "--mode",
     "rpc",
@@ -735,6 +773,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           tools.map((tool) => tool.name),
           resumePath,
           ownResources,
+          input.version,
         );
         const wall = piWallPolicy(input);
         if (wall === "full-access") {
@@ -965,12 +1004,6 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             root: input.root,
             executionPolicy: wall,
           });
-          const launch = yield* confinement.prepare({
-            ...input,
-            environment: baseEnvironment,
-            ...(network === undefined ? {} : { network }),
-            ...(servers === undefined ? {} : { servers }),
-          });
           const versionProbe = prepareConfinedVersionProbe({
             binaryPath: input.binaryPath,
             displayName: "Pi",
@@ -989,6 +1022,14 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             try: () => inspectVersion(versionProbe.launch, versionTimeoutMs),
             catch: () => failure("incompatible", "Pi version could not be verified."),
           }).pipe(Effect.ensuring(Effect.sync(() => versionProbe.launch.release())));
+          // The release is read first: it decides how the launch selects tools.
+          const launch = yield* confinement.prepare({
+            ...input,
+            environment: baseEnvironment,
+            version,
+            ...(network === undefined ? {} : { network }),
+            ...(servers === undefined ? {} : { servers }),
+          });
           const child = yield* Effect.try({
             try: () =>
               spawn(launch.command, [...launch.args], {

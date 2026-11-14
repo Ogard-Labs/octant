@@ -2573,6 +2573,59 @@ describe("ACP provider driver profile quirks", () => {
     },
   );
 
+  it("shows a Mistral Vibe subagent's unnamed request at Guarded with honest text and refuses it on Deny", async () => {
+    const { driver, client } = fixture(vibe, { authentication: "subscription" });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const approvals: ProviderRuntimeEvent[] = [];
+          yield* Effect.forkScoped(
+            Stream.runForEach(yield* connection.subscribe, (event) =>
+              Effect.sync(() => {
+                if (event.kind === "approval-request" || event.kind === "failed") {
+                  approvals.push(event);
+                }
+              }),
+            ),
+          );
+          yield* Effect.sleep("1 millis");
+          // Vibe 3.0.3 names only the subagent's own history entry, which the
+          // parent's updates never announced.
+          client.request({
+            kind: "request",
+            id: "subagent-permission",
+            method: "session/request_permission",
+            params: {
+              sessionId: "agent-session-1",
+              toolCall: { toolCallId: "child-entry-7" },
+              options: [
+                { optionId: "allow", name: "Allow", kind: "allow_once" },
+                { optionId: "reject", name: "Reject", kind: "reject_once" },
+              ],
+            },
+          });
+          yield* Effect.sleep("5 millis");
+          expect(approvals).toHaveLength(1);
+          const card = approvals[0];
+          if (card?.kind !== "approval-request") throw new Error("approval missing");
+          expect(card.description).toBe(
+            "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which.",
+          );
+          expect(client.respondPermission).not.toHaveBeenCalled();
+          yield* connection.answerApproval({
+            sessionId,
+            requestId: card.requestId,
+            approved: false,
+          });
+          expect(client.respondPermission).toHaveBeenCalledWith("subagent-permission", "reject");
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
   it("answers a gated session form exactly once and cancels only its pending native callback", async () => {
     const { driver, client } = fixture(
       { ...vibe, elicitationVersions: ["3.0.3"] },

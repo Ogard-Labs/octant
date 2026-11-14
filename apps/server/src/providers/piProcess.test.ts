@@ -601,6 +601,49 @@ describe("Pi process boundary", () => {
     }
   });
 
+  it("offers the person's extension tools on a release that takes tool additions, asking for each, and never in Plan", async () => {
+    const own = { extensions: ["/own/extensions/deploy.ts"] };
+    const launch = (policy: ProviderExecutionPolicy, version: string | undefined) =>
+      piArguments(
+        "/bridge.ts",
+        "/s",
+        "s-1",
+        "code",
+        policy,
+        ["octant_browser"],
+        undefined,
+        own,
+        version,
+      );
+    const toolsOf = (args: ReadonlyArray<string>) => args[args.indexOf("--tools") + 1];
+    // Additions to Pi's defaults leave no allowlist, so an extension's tool
+    // is registered and offered as in Pi itself.
+    expect(toolsOf(launch("approval-gated", "1.1.0"))).toBe("+grep,+find,+ls,+octant_browser");
+    expect(toolsOf(launch("full-access", "1.5.2"))).toBe("+grep,+find,+ls,+octant_browser");
+    // An older or unknown release keeps the allowlist, which leaves them out.
+    expect(toolsOf(launch("approval-gated", "1.0.3"))).toBe(
+      "bash,edit,write,read,grep,find,ls,octant_browser",
+    );
+    expect(toolsOf(launch("approval-gated", undefined))).toBe(
+      "bash,edit,write,read,grep,find,ls,octant_browser",
+    );
+    // Plan loads no extension and keeps its read-only allowlist.
+    const plan = launch("plan", "1.1.0");
+    expect(plan).not.toContain("/own/extensions/deploy.ts");
+    expect(toolsOf(plan)).toBe("read,grep,find,ls,octant_browser");
+    // The bridge asks for every tool but the known reads and Octant's own.
+    const bridge = piExtensionSource([
+      { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
+    ]);
+    expect(bridge).toContain(
+      "if (knownReads.has(event.toolName) || octantTools.has(event.toolName)) return undefined;",
+    );
+    expect(bridge).toContain('const knownReads = new Set(["read","grep","find","ls"]);');
+    expect(piExtensionSource([])).toContain(
+      "if (knownReads.has(event.toolName)) return undefined;",
+    );
+  });
+
   it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {
     expect(piArguments("/bridge.ts", "/sessions", "chat-1", "chat", "approval-gated")).toContain(
       "--no-tools",

@@ -1251,6 +1251,46 @@ describe("Pi provider driver", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
+  it("asks the person at Guarded before a tool from their own Pi extension runs", async () => {
+    const { driver, client } = fixture();
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "deploy", attachments: [], tools: [] }),
+    );
+    client.emit({
+      type: "tool_execution_start",
+      toolCallId: "ext-1",
+      toolName: "deploy_preview",
+      args: { target: "staging" },
+    });
+    client.emit({
+      type: "extension_ui_request",
+      id: "pi-ui-ext",
+      method: "confirm",
+      title: "Octant approval:ext-1:deploy_preview",
+      message: "Allow?",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await Effect.runPromise(
+      connection.answerApproval({ sessionId, requestId: "approval-1", approved: false }),
+    );
+    expect(client.responses).toEqual([{ id: "pi-ui-ext", response: { confirmed: false } }]);
+    client.emit({ type: "agent_settled" });
+    const events = await collected;
+    expect(events.find((event) => event.kind === "approval-request")).toMatchObject({
+      action: "deploy_preview",
+      description: "Allow Pi deploy_preview for this session?",
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
   it("sends an attached image only for a model Pi's own list says takes images", async () => {
     const { driver, client } = fixture();
     client.availableModels = [

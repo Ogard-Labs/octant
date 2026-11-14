@@ -52,6 +52,8 @@ export interface AcpEventContext {
   readonly makeRequestId: () => string;
   /** The profile's `childRunMetaKey`: where a call names the subagent it started. */
   readonly childRunMetaKey?: string;
+  /** The profile's `unnamedPermissionDescription`. */
+  readonly unnamedPermissionDescription?: string;
   /** Unset until the agent writes its first text of the turn. */
   agentText?: AcpAgentTextState;
 }
@@ -492,7 +494,8 @@ export function mapAcpPermissionRequest(
   const tool = context.tools.get(request.params.toolCall.toolCallId);
   if (
     tool === undefined &&
-    normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) === undefined
+    normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) === undefined &&
+    context.unnamedPermissionDescription === undefined
   ) {
     return {
       kind: "protocol-failure",
@@ -505,6 +508,7 @@ export function mapAcpPermissionRequest(
   const title =
     normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) ??
     tool?.title ??
+    context.unnamedPermissionDescription ??
     "Tool requires permission";
   const toolKind = request.params.toolCall.kind ?? tool?.kind ?? "tool";
   const requestId = context.makeRequestId();

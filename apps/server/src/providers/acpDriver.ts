@@ -1249,6 +1249,9 @@ function makeConnection(
         ...(profile.childRunMetaKey === undefined
           ? {}
           : { childRunMetaKey: profile.childRunMetaKey }),
+        ...(profile.unnamedPermissionDescription === undefined
+          ? {}
+          : { unnamedPermissionDescription: profile.unnamedPermissionDescription }),
       };
       let state!: SessionState;
       const removeNotification = client.onNotification((message) =>
