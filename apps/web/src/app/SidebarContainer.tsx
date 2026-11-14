@@ -90,6 +90,7 @@ export interface SidebarContainerProps {
     | "openImageLibrary"
     | "openHome"
     | "openInbox"
+    | "openTodos"
     | "openLinearIssues"
     | "openNavigator"
     | "openProjectContextHealth"
@@ -166,6 +167,7 @@ export interface SidebarContainerProps {
   readonly hosts: Parameters<typeof projectViewEnvironmentOptionsFromHosts>[0];
   readonly imageLibraryAvailable: boolean;
   readonly inboxCount: number;
+  readonly todosCount: number;
   readonly linearIssuesRead: boolean;
   readonly navigation: ShellNavigationModel;
   readonly navigatorAvailable: boolean;
@@ -238,6 +240,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     hosts,
     imageLibraryAvailable,
     inboxCount,
+    todosCount,
     linearIssuesRead,
     navigation,
     navigatorAvailable,
@@ -281,6 +284,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     openImageLibrary,
     openHome,
     openInbox,
+    openTodos,
     openNavigator,
     openProjectContextHealth,
     openProjectCreate,
@@ -673,6 +677,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                 actions: {
                   "new-chat": createChat,
                   inbox: openInbox,
+                  todos: openTodos,
                   agents: openAgentsCenter,
                   "artifact-library": openArtifactLibrary,
                   "image-library": openImageLibrary,
@@ -688,6 +693,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                 actions: {
                   "new-code-thread": () => openDraftInActiveProject("code"),
                   inbox: openInbox,
+                  todos: openTodos,
                   agents: openAgentsCenter,
                   automations: openAutomationCenter,
                   "artifact-library": openArtifactLibrary,
@@ -705,6 +711,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                 actions: {
                   "new-work-thread": () => openDraftInActiveProject("work"),
                   inbox: openInbox,
+                  todos: openTodos,
                   agents: openAgentsCenter,
                   automations: openAutomationCenter,
                   "artifact-library": openArtifactLibrary,
@@ -731,6 +738,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         onSelectMode={handleSelectVisibleMode}
         {...(githubIssuesReadAvailable ? { githubIssuesReadAvailable: true } : {})}
         inboxCount={inboxCount}
+        todosCount={todosCount}
         countTiles={{
           ...sidebarTileCounts,
           // Chat has no board (and a switched-off Board plugin has none), so its Running tile opens the Activity feed,

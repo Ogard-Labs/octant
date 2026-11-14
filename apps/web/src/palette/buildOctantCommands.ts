@@ -42,6 +42,10 @@ export interface OctantCommandSources {
   /** The tools the dock can open for the thread in front. */
   readonly dockTools?: ReadonlyArray<CommandDockTool>;
   readonly onOpenDockTool?: (tool: CommandDockTool) => void;
+  /** Opens the To-dos page. Absent when this window has no to-do list. */
+  readonly onOpenTodos?: () => void;
+  /** Opens quick add for a new to-do over the current page. */
+  readonly onNewTodo?: () => void;
   readonly threads: ReadonlyArray<CommandThread>;
   readonly onOpenThread: (thread: CommandThread) => void;
   readonly projects: ReadonlyArray<CommandProject>;
@@ -380,6 +384,24 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     }
   }
 
+  if (sources.onNewTodo !== undefined) {
+    commands.push({
+      id: "workspace:new-todo",
+      title: "New to-do",
+      group: "Actions",
+      keywords: ["todo", "to-do", "add", "remember", "list"],
+      action: { kind: "run", run: sources.onNewTodo },
+    });
+  }
+  if (sources.onOpenTodos !== undefined) {
+    commands.push({
+      id: "workspace:todos",
+      title: "Open To-dos",
+      group: "Workspace",
+      keywords: ["todo", "to-do", "list", "tags"],
+      action: { kind: "run", run: sources.onOpenTodos },
+    });
+  }
   if (sources.onOpenZen !== undefined) {
     commands.push({
       id: "workspace:zen-mode",

@@ -77,6 +77,25 @@ describe("SidebarRail", () => {
     expect(screen.getByRole("button", { name: "Settings" })).not.toHaveAttribute("data-tile");
   });
 
+  it("shows how many to-dos are open on the To-dos icon", () => {
+    render(
+      <SidebarRail
+        activeMode="code"
+        destinations={[
+          { id: "todos", label: "To-dos", onSelect: vi.fn(), active: false, count: 3 },
+        ]}
+        modes={["chat", "work", "code"]}
+        nativeHost={false}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projects={[]}
+        tiles={[]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "To-dos, 3 open" })).toHaveTextContent("3");
+  });
+
   it("draws Work with the same mark as the sidebar's mode switcher", () => {
     render(
       <SidebarRail

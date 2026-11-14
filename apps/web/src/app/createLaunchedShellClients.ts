@@ -28,6 +28,7 @@ import {
   createPersonMemoryClient,
   type PersonMemoryClient,
 } from "@octant/client-runtime/person-memory-client";
+import { createTodoClient, type TodoClient } from "@octant/client-runtime/todo-client";
 import {
   createAgentMessageClient,
   type AgentMessageClient,
@@ -240,6 +241,7 @@ export interface LaunchedShellClients {
   readonly archivedWorktreesClient: ArchivedWorktreesClient;
   readonly diskCleanupClient: DiskCleanupClient;
   readonly personMemoryClient: PersonMemoryClient;
+  readonly todoClient: TodoClient;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
   readonly workRequestClient: ReturnType<typeof createWorkRequestClient>;
@@ -413,6 +415,7 @@ export function createLaunchedShellClients(
     archivedWorktreesClient: createArchivedWorktreesClient(port),
     diskCleanupClient: createDiskCleanupClient(port),
     personMemoryClient: createPersonMemoryClient(port),
+    todoClient: createTodoClient(port),
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),
     workMutationClient: createWorkMutationClient(port),

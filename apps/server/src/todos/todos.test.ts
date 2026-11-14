@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventActor, decodeUtcTimestamp, decodeWindowId } from "@octant/contracts";
+import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { Schema } from "effect";
 import {
   TODO_AGGREGATE_TYPE,
@@ -23,6 +24,7 @@ import { createTodoRouteHandler } from "./todoRoutes";
 import { registerTodoEvents, TodoStore } from "./todoStore";
 
 const START = "2026-11-14T10:00:00.000Z";
+const HOST_ID = "11111111-1111-4111-8111-111111111111";
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000a01");
 const DEVICE = "55000000-0000-4000-8000-000000000a02";
@@ -67,6 +69,7 @@ function host() {
       },
       uuid: () => crypto.randomUUID(),
       clock: () => decodeUtcTimestamp(START),
+      hostId: () => decodeStableHostId(HOST_ID),
     });
   const store = start();
   const windows = new WindowAuthorityStore();
@@ -163,6 +166,7 @@ describe("the person's to-do list", () => {
     });
     const fromPhone = await list(await h.fromDevice("host-person", "/api/todos"));
     expect(fromPhone.todos[0]).toMatchObject({ title: "From the phone", tags: ["errand"] });
+    expect(String(fromPhone.hostId)).toBe(HOST_ID);
     expect(h.actors()).toEqual([
       { eventName: "todo.created@1", actor: expect.objectContaining({ kind: "remote-device" }) },
       { eventName: "todo.tags-set@1", actor: expect.objectContaining({ kind: "local-user" }) },

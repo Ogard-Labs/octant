@@ -220,6 +220,7 @@ export type SidebarCollapsedPresentation = typeof SidebarCollapsedPresentation.T
 export const SidebarDestinationId = Schema.Literal(
   "new-thread",
   "inbox",
+  "todos",
   "board",
   "pull-requests",
   "github-issues",

@@ -14,6 +14,7 @@ const COMMAND_KEYBINDING_ACTIONS: Readonly<Partial<Record<string, OctantKeybindi
   "thread:next-waiting": "next-waiting-thread",
   "workspace:zen-mode": "zen-mode",
   "workspace:toggle-sidebar": "toggle-sidebar",
+  "workspace:new-todo": "new-todo",
   "workspace:context-usage": "context-usage",
   "code:file-search": "code-file-search",
   "code:content-search": "code-content-search",

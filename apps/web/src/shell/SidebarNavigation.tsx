@@ -2,6 +2,7 @@ import {
   Blocks,
   Bot,
   CalendarClock,
+  CircleCheckBig,
   CircleDot,
   Folders,
   GitPullRequestArrow,
@@ -112,7 +113,11 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
         // span: the compact sidebar clips that span to one pixel, and the
         // shell's accessibility tree has reported these rows as unnamed
         // buttons. The name always starts with the visible label.
-        aria-label={count > 0 ? `${descriptor.label}, ${count} waiting` : descriptor.label}
+        aria-label={
+          count > 0
+            ? `${descriptor.label}, ${count} ${descriptor.id === "todos" ? "open" : "waiting"}`
+            : descriptor.label
+        }
         aria-current={props.activeDestination === descriptor.id ? "page" : undefined}
         className="sidebar-item window-no-drag justify-start"
         data-navigation-id={descriptor.id}
@@ -173,6 +178,9 @@ export function navigationIcon(id: SidebarNavigationDescriptorId) {
       return Blocks;
     case "inbox":
       return Inbox;
+    case "todos":
+      // The tick leaves the circle, so it does not read as Done today's mark.
+      return CircleCheckBig;
     case "artifact-library":
       return Layers;
     case "image-library":

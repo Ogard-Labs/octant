@@ -16,10 +16,13 @@ roster; [Workspace](workspace.md) owns the icon rail and pages.
 **Status: approved design 2026-11-14 (maintainer decision); partly built.**
 The list on one host is built: its events, the list rebuilt from them, the
 `/api/todos` read and command routes, version-checked edits, and the refusals
-for every caller but the person. Not built yet: the To-dos destination, Start,
-the list host setting, reaching a list on another host, live updates to other
-clients, and the phone screen. [Delivery plan](#delivery-plan) lists the order
-of work.
+for every caller but the person. The To-dos destination is built on that host:
+the page, quick add, filters, editing in place, reordering, the sidebar row and
+its badge, and New to-do in the command palette and on a shortcut. Not built
+yet: Start and a row's thread state, the list host setting, reaching a list on
+another host, live updates to other clients (a window reads the list again
+every 30 seconds while it is visible), and the phone screen.
+[Delivery plan](#delivery-plan) lists the order of work.
 
 ## Outcome
 
@@ -55,7 +58,10 @@ two never meet in one word.
 - **Notes:** optional, at most 8,000 characters, plain text.
 - **Projects:** zero to eight links, each `{ hostId, projectId }` plus the
   Project's name as last seen, so the row reads when that host is
-  unreachable. A link is a pointer; it grants nothing on that host.
+  unreachable. A link is a pointer; it grants nothing on that host. The
+  host id is the host's stable id, the one the hub and paired devices know it
+  by; the list carries its own host's id so a window links that host's
+  Projects by it.
 - **Tags:** zero to twelve, each at most 40 characters, exact labels as
   Canvas tags are: trimmed, and two tags that differ only in case are two
   tags. A repeated tag is kept once. Tags belong to to-dos only; Projects get
@@ -179,23 +185,33 @@ A to-do may be started again; each start adds a link.
 ## The To-dos destination
 
 - **Rail and sidebar.** To-dos is a sidebar destination like Board or Inbox,
-  shown or hidden by Settings › Sidebar › Sidebar destinations. Its mark is a
-  circle with a check; the count badge is the number of open to-dos that are
-  not started.
+  shown or hidden by Settings › Sidebar › Sidebar destinations, after Inbox
+  in the canonical order. Its mark is a circle with a check that runs out past
+  it; the count badge on the sidebar row and on the rail icon is the number of
+  open to-dos that are not started.
 - **Page.** Laid out like the [Inbox page](workspace.md#inbox-page): a
   display title "To-dos", one sentence of state in the meta ink ("4 open, 1
   started"), and one column at a 980px measure.
 - **Quick add.** A single line at the top of the list. Enter adds the to-do on
-  top. `#word` adds a tag and `@name` picks a Project by name; both show as
-  chips before the to-do is added and can be removed.
-- **Filters.** Quiet chips for state, then a Project picker and a tag picker,
-  on one row under quick add.
+  top. `#word` adds a tag and `@name` picks a Project by name: the Project
+  whose name, without spaces and ignoring case, is the word, or the only one
+  that starts with it. A word that names no Project or several stays in the
+  title. Both show as chips before the to-do is added, and removing a chip
+  removes its word.
+- **Filters.** Quiet chips for state (All, Open, Started, Done, with counts;
+  Open, the default, includes started to-dos), then a Project picker, a tag
+  picker shown once the list has a tag, and Show dropped, on one row under
+  quick add. The filter is held by the open page and starts at Open.
 - **Rows.** A round check, the title, Project chips, tags, and the linked
-  thread's state badge; Start and a more menu (Edit, Drop, Delete) appear on
-  hover and keyboard focus. Selecting a row opens it in place for notes,
-  Projects and tags. Rows drag to reorder.
-- **Everywhere else.** The command palette offers New to-do, with a keyboard
-  shortcut, and opens quick add over the current page. The phone app shows the
+  thread's state badge; Start and a more menu (Edit, Move up, Move down, Drop
+  or Bring back, Delete) appear on hover and keyboard focus. Selecting a row
+  opens it in place for the title, notes, tags and this host's Projects; a
+  link to another host's Project is kept as it is. Rows drag to reorder, and
+  Move up and Move down do the same from the keyboard. Delete asks first and
+  removes the to-do from every device; Drop keeps it out of the list.
+- **Everywhere else.** The command palette offers New to-do and Open To-dos.
+  New to-do, also on Mod+Shift+L (Settings › Keybindings), opens quick
+  add in a dialog over the current page. The phone app shows the
   list with quick add, Tick off and Start.
 - **Empty.** One sentence: what goes here and that a to-do can be handed to
   an agent.

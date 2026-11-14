@@ -251,6 +251,7 @@ export const ChevronsUpDown = /* @__PURE__ */ makeIcon("chevrons-up-down", Caret
 export const Circle = /* @__PURE__ */ makeIcon("circle", CircleIcon);
 export const CircleAlert = /* @__PURE__ */ makeIcon("circle-alert", WarningCircleIcon);
 export const CircleCheck = /* @__PURE__ */ makeIcon("circle-check", CheckCircleIcon);
+export const CircleCheckBig = /* @__PURE__ */ makeIcon("circle-check-big", CheckCircleIcon);
 export const CircleDashed = /* @__PURE__ */ makeIcon("circle-dashed", CircleDashedIcon);
 export const CircleDot = /* @__PURE__ */ makeIcon("circle-dot", RadioButtonIcon);
 export const CircleHelp = /* @__PURE__ */ makeIcon("circle-help", QuestionIcon);

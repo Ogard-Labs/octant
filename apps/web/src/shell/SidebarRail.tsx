@@ -52,6 +52,8 @@ export interface SidebarRailProps {
     readonly label: string;
     readonly onSelect: () => void;
     readonly active: boolean;
+    /** What the sidebar row counts (To-dos' open ones), drawn as the tiles' badge. */
+    readonly count?: number;
   }>;
   /** The automatic list: the first Projects, drawn only in the collapsed rail. */
   readonly projects: ReadonlyArray<SidebarRailProject>;
@@ -237,9 +239,14 @@ export function SidebarRail(props: SidebarRailProps) {
             return Icon === undefined ? null : (
               <RailButton
                 active={destination.active}
+                {...(destination.count === undefined ? {} : { badge: destination.count })}
                 icon={Icon}
                 key={destination.id}
-                label={destination.label}
+                label={
+                  destination.count === undefined || destination.count === 0
+                    ? destination.label
+                    : `${destination.label}, ${String(destination.count)} ${destination.id === "todos" ? "open" : "waiting"}`
+                }
                 onSelect={destination.onSelect}
               />
             );

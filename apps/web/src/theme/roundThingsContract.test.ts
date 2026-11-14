@@ -31,6 +31,8 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   '.check input[type="radio"]:checked::after',
   ".device-pick__radio",
   ".code-where__dot",
+  // A to-do's tick: the To-dos design draws it as a circle, as a radio is.
+  ".todo-row__check",
   // Avatars and monogram glyphs.
   ".avatar",
   ".user-avatar",
