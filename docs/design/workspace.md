@@ -845,6 +845,22 @@ wording, and reads are specified in [Start screen](start-screen.md).
   a thread; it answers nothing. See
   [Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
 
+### List pages and empty states
+
+Running and Done today are sidebar lists and To review is a master-detail
+page with its own keys, so they keep their own layouts; they do not render the
+Inbox row. An empty list page ends in one action: Inbox, To review and Agents
+offer Start a thread; Artifacts, the Image generator and Agents describe in two
+short lines what the page is for beside their existing add button. The
+Projects list shows each Work or Code Project's thread count at the trailing
+edge in place of "Available"; only a state that needs the person (Archived,
+Relink required, Unverified) is a word. Issues open on the current Project's
+GitHub repository when the Project has one and the host has used it. The
+Agents toolbar is one row: the All, Active and History chips, one mode menu,
+and the List and Graph switch. The Automations notice about notification
+delivery sits under the creation cards, and the suggested templates are a
+three-column grid of equal-height cards.
+
 ### Inbox page
 
 The Inbox opens as a few flat cards in one readable column, not as sections
@@ -856,17 +872,20 @@ under rules.
   waiting on you.", "3 threads are waiting on you."), with the urgent count when
   there is one. There is no greeting by time of day and no separate count line.
   Refresh is a quiet icon button with a tooltip at the trailing edge.
-- **One column.** The content keeps a measure of 980px, left-aligned under the
-  title's inset; a wide window leaves ground, it does not stretch the cards.
+- **Columns.** The content keeps a measure of 980px, left-aligned under the
+  title's inset, and opens to 1240px in a window 1200px wide or more; a wide
+  window leaves ground, it does not stretch the cards.
 - **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
-  **Plan usage** stack to its right at about three to two (the list is the wider column), in one column when the
-  page's own width (a container query, not the window's) is under 720px. Each
+  **Plan usage** stack to its right: Needs you takes a 560px column when the page's own width
+  (a container query, not the window's) is 900px or more, and every card is one
+  column below that. Each
   card's label sits inside it at the top in the meta ink. The Needs you filters
   (All, Urgent, Decide, Stuck, Finished, with counts) are quiet chips at the
   trailing edge of that label row and filter only that card. An empty Needs you
-  says what will show up there in one sentence, with Open the Board as a quiet
-  text button beside it. Loading, empty and failed GitHub and Linear are one
-  sentence in their card.
+  says what will show up there in one sentence, with Start a thread as its one
+  quiet text button. A GitHub or Linear source still loading is one quiet
+  skeleton row, never a sentence that reads as an error; empty and failed are
+  one sentence in their card.
 - **Plan usage** lists each provider account that reports a plan window: its
   name, the share left on the plan usage meter and, where the reading carries
   it, when the window resets. It reads the host observation the composer and the
@@ -1600,7 +1619,7 @@ Work and Code have server-authoritative thread boards
 Chat has no board. The boards are the bundled Board plugin. Switching it off
 is a presentation switch only: the Work and Code board views, the sidebar
 Board row, and every other way to open them (the Running tile and cards on the
-start screen, the Inbox's Open the Board button, back and forward, keyboard and
+start screen, back and forward, keyboard and
 command palette) are gone, and a board that is open closes. Running tiles and
 cards lead to the Activity list instead, as they do in Chat. Nothing is
 deleted, and the host keeps deriving the board data and status policy
@@ -1651,11 +1670,11 @@ is one column, the list or the pull request, with a back button over the
 pane.
 
 A row is two lines. Line one is the title at medium weight, cut after
-two lines, and at its trailing edge the one thing that needs attention, in
-words and as the quiet chip (Draft, Conflicts, Checks failing, Changes
-requested, Checks pending, Review pending), or a small check when the pull
-request is mergeable and nothing blocks it. Line two is one meta line: a state
-glyph coloured by state, the repository's name, the author, the age ("2h",
+one line, and at its trailing edge the one thing that needs attention, in
+words and as the quiet chip (Conflicts, Checks failing, Changes
+requested, Checks pending, Review pending; a draft has none, its glyph says it), or a small check when the pull
+request is mergeable and nothing blocks it. A state
+glyph coloured by state sits at the row's start across both lines. Line two is one meta line: the repository's name, the author, the age ("2h",
 "5d") and a link mark when a thread is linked, with the number (`#2344`) in
 tabular numerals at the trailing edge. The repository's name is the bare name
 in a group and `owner/name` on an ungrouped list that spans repositories, in both
@@ -2761,10 +2780,12 @@ whole catalogue. Start a Code thread leaves the surface with the issue
 attached to a new draft as its Create from context.
 
 The Pull requests page is the list column and reading pane above: rows of a
-13px title (two lines at most) and one 12px meta line (state glyph, repository,
-author, age, and the number in tabular numerals at the trailing edge); one
-quiet chip or a success check at the trailing edge of the title line instead of
-three chips; no hairline between rows. Rows carry no avatar or folder mark and
+13px title (one line) and one 12px meta line (repository, author, age, and the
+number in tabular numerals at the trailing edge), 52px tall with 8px above and
+below; the state (open, draft, merged, closed) is a 16px glyph at the row's start
+in the meta ink or its semantic ink, so a draft has no pill; one
+quiet chip for what needs the person (Review pending, Conflicts) or a success
+check at the trailing edge of the title line instead of three chips; no hairline between rows. Rows carry no avatar or folder mark and
 the filter has no Labels submenu or Closed and Merged status, because the
 snapshot holds no avatar, label or closed pull request. Grouping by repository gives each group a slim header with a "..." menu holding
 Auto-refresh, Agents may merge, Agents may comment on pull requests and Refresh. A Project that is not on GitHub is

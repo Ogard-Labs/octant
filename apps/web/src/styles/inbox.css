@@ -44,10 +44,10 @@
   gap: var(--oct-space-4);
 }
 
-/* From a pane of about 1100px: Needs you takes a 560px column on the left and
+/* From a pane of about 900px: Needs you takes a 560px column on the left and
    the sources (GitHub, Linear, plan usage) stack on the right. Below that the
    cards are one column. */
-@container inbox-cards (min-width: 1100px) {
+@container inbox-cards (min-width: 900px) {
   .inbox-page__cards {
     grid-template-columns: 560px minmax(0, 1fr);
   }
@@ -55,7 +55,7 @@
 
 /* A Needs you card with nothing in it is one quiet line, and the sources take
    the page's full width under it instead of leaving the wide column empty. */
-@container inbox-cards (min-width: 1100px) {
+@container inbox-cards (min-width: 900px) {
   .inbox-page__cards[data-needs-you="empty"] {
     grid-template-columns: minmax(0, 1fr);
   }

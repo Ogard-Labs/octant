@@ -5,14 +5,7 @@ import {
   type OctantKeybindingActionId,
   type OctantKeybindings,
 } from "@octant/domain";
-import {
-  Check,
-  Clock,
-  CornerUpLeft,
-  Minus,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { Check, Clock, CornerUpLeft, Minus, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedDiffFile } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
@@ -505,7 +498,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     </OctantButton>
                   ),
                 })}
-            title="Nothing waiting for review."
+            title="Nothing waiting for review"
           />
         ) : (
           <>

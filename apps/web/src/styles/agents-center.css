@@ -88,6 +88,12 @@
   color: var(--oct-muted);
 }
 
+/* The mode menu is as wide as its longest word, so the toolbar stays one row. */
+.agents-center__mode.agents-center__mode {
+  width: 9.5rem;
+  flex: none;
+}
+
 .agents-center__search input {
   flex: 1;
   min-width: 0;
