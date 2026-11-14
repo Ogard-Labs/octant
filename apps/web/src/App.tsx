@@ -359,7 +359,7 @@ import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
-import { countTodos } from "./todos/todoListModel";
+import { countTodos, todoListIsReadOnly } from "./todos/todoListModel";
 import {
   createTodoClient,
   type TodoClient,
@@ -2797,7 +2797,9 @@ function LaunchedShell(
       : todoList.read.status !== "loading" && !todoListSource.remote
         ? todoList.read.view?.hostId
         : undefined;
-  const todoListReadOnly = todoListSource.unreachable !== undefined;
+  // A paired computer can drop off while its transport still reads as ready:
+  // a failed read of a remote list is read-only too, until a read succeeds.
+  const todoListReadOnly = todoListIsReadOnly(todoListSource, todoList.read.status);
   const todoListHostSettings = useMemo(
     () => ({
       read: todoListHost.read,

@@ -195,3 +195,16 @@ export function tagsInList(todos: ReadonlyArray<Todo>): ReadonlyArray<string> {
   for (const todo of todos) for (const tag of todo.tags) seen.add(tag);
   return [...seen];
 }
+
+/**
+ * Whether the list takes no change from this window: its host cannot be
+ * reached, or it lives on another computer whose last read failed. A paired
+ * computer can drop off while its transport still reads as ready, so the
+ * failed read is what says so; the next read that succeeds unlocks it.
+ */
+export function todoListIsReadOnly(
+  source: { readonly remote: boolean; readonly unreachable?: string },
+  readStatus: "loading" | "ready" | "failed",
+): boolean {
+  return source.unreachable !== undefined || (source.remote && readStatus === "failed");
+}

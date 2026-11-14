@@ -11,7 +11,7 @@ import {
 } from "@octant/contracts/todos";
 import type { OctantMode } from "@octant/contracts";
 import { Check, Ellipsis, Folder, Hash } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { WorkListMenuTrigger } from "../surface/WorkList";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -116,10 +116,32 @@ export function TodosView(props: TodosPageProps) {
     setUnsentKey(draftsKey);
     setUnsent(readUnsentTodos(draftsKey));
   }
-  const keepUnsent = (next: ReadonlyArray<UnsentTodo>) => {
-    setUnsent(next);
+  // Every write starts from what storage holds now, not from this window's
+  // copy: two windows holding drafts for one list must not erase each other's.
+  const holdUnsent = (draft: UnsentTodo) => {
+    const stored = readUnsentTodos(draftsKey);
+    const next = stored.some((held) => String(held.command.todoId) === String(draft.command.todoId))
+      ? stored
+      : [...stored, draft];
     writeUnsentTodos(draftsKey, next);
+    setUnsent(next);
   };
+  const dropUnsent = (todoId: string) => {
+    const next = readUnsentTodos(draftsKey).filter(
+      (held) => String(held.command.todoId) !== todoId,
+    );
+    writeUnsentTodos(draftsKey, next);
+    setUnsent(next);
+  };
+  useEffect(() => {
+    const follow = (event: StorageEvent) => {
+      if (event.key === null || event.key === unsentStorageKey(draftsKey)) {
+        setUnsent(readUnsentTodos(draftsKey));
+      }
+    };
+    globalThis.addEventListener("storage", follow);
+    return () => globalThis.removeEventListener("storage", follow);
+  }, [draftsKey]);
   const choices = useMemo(
     () => todoProjectChoices(localHostId, props.projects),
     [localHostId, props.projects],
@@ -177,7 +199,7 @@ export function TodosView(props: TodosPageProps) {
             // not queued as offline work. The person sends it when the list
             // host is back.
             if (command.kind === "add-todo") {
-              keepUnsent([...unsent, { command, title: command.title }]);
+              holdUnsent({ command, title: command.title });
             }
             return { status: "saved" };
           }}
@@ -195,13 +217,7 @@ export function TodosView(props: TodosPageProps) {
                     disabled={readOnly}
                     onClick={async () => {
                       const outcome = await send(draft.command);
-                      if (outcome.status === "saved") {
-                        keepUnsent(
-                          readUnsentTodos(draftsKey).filter(
-                            (held) => String(held.command.todoId) !== String(draft.command.todoId),
-                          ),
-                        );
-                      }
+                      if (outcome.status === "saved") dropUnsent(String(draft.command.todoId));
                     }}
                     size="sm"
                     type="button"
@@ -211,13 +227,7 @@ export function TodosView(props: TodosPageProps) {
                   </OctantButton>
                   <OctantButton
                     aria-label={`Discard ${draft.title}`}
-                    onClick={() =>
-                      keepUnsent(
-                        unsent.filter(
-                          (held) => String(held.command.todoId) !== String(draft.command.todoId),
-                        ),
-                      )
-                    }
+                    onClick={() => dropUnsent(String(draft.command.todoId))}
                     size="sm"
                     type="button"
                     variant="ghost"

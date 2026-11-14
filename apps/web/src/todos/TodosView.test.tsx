@@ -426,3 +426,50 @@ describe("unsent drafts", () => {
     expect(await screen.findByText("For the studio")).toBeVisible();
   });
 });
+
+describe("unsent drafts in two windows", () => {
+  it("keeps both windows' drafts for the same list", async () => {
+    globalThis.localStorage.clear();
+    const user = userEvent.setup();
+    const host = fakeHost();
+    function Window(props: { readonly label: string }) {
+      const list = useTodoList(host.client, undefined, {
+        key: "other-host:studio",
+        unreachable: "That computer cannot be reached.",
+      });
+      return (
+        <section aria-label={props.label}>
+          <TodosView
+            list={list}
+            listKey="other-host:studio"
+            onClose={() => undefined}
+            projects={[]}
+            readOnly
+          />
+        </section>
+      );
+    }
+    render(
+      <>
+        <Window label="First window" />
+        <Window label="Second window" />
+      </>,
+    );
+    const first = screen.getByRole("region", { name: "First window" });
+    const second = screen.getByRole("region", { name: "Second window" });
+    await user.type(
+      within(first).getByRole("textbox", { name: "New to-do" }),
+      "From the first{Enter}",
+    );
+    await user.type(
+      within(second).getByRole("textbox", { name: "New to-do" }),
+      "From the second{Enter}",
+    );
+
+    const stored = JSON.parse(
+      globalThis.localStorage.getItem("octant.todos.unsent.v1:other-host:studio") ?? "[]",
+    ) as ReadonlyArray<{ readonly title: string }>;
+    expect(stored.map((draft) => draft.title)).toEqual(["From the first", "From the second"]);
+    expect(within(second).getByText("From the first")).toBeVisible();
+  });
+});
