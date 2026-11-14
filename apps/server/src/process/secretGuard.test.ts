@@ -162,6 +162,64 @@ describe("secret guard refusals for host file tools", () => {
   });
 });
 
+describe("secret guard on a Windows host", () => {
+  const options = { platform: "win32" as const, homeDirectory: "C:\\Users\\Person" };
+
+  it("refuses Windows credential stores and home secrets named by drive-absolute paths", () => {
+    expect(
+      secretGuardRefusal(
+        "C:\\Users\\Person\\AppData\\Roaming\\Microsoft\\Credentials\\A1",
+        options,
+      ),
+    ).toContain("Keychains and password vaults");
+    expect(secretGuardRefusal("C:\\Users\\Person\\.aws\\credentials", options)).toContain(
+      "~/.aws/credentials",
+    );
+    expect(secretGuardRefusal("c:/users/person/.ssh/ID_RSA.", options)).toContain(
+      "SSH private keys",
+    );
+    expect(secretGuardRefusal("C:\\Users\\Person\\project\\README.md", options)).toBeUndefined();
+    expect(isProtectedSecretPath("~/.aws/credentials", options)).toBe(true);
+  });
+
+  it("refuses a share, device, drive-relative, or driveless rooted path instead of letting it through", () => {
+    for (const path of [
+      "\\\\localhost\\c$\\Users\\Person\\.aws\\credentials",
+      "\\\\?\\C:\\Users\\Person\\.aws\\credentials",
+      "C:.aws\\credentials",
+      "\\Users\\Person\\.aws\\credentials",
+    ]) {
+      expect(secretGuardRefusal(path, options), path).toContain("drive-absolute");
+    }
+    expect(secretGuardRefusal("project\\README.md", options)).toBeUndefined();
+  });
+
+  it("refuses every path when the home folder cannot be placed", () => {
+    expect(
+      secretGuardRefusal("C:\\work\\README.md", {
+        platform: "win32",
+        homeDirectory: "\\\\server\\profiles\\Person",
+      }),
+    ).toContain("home folder");
+  });
+
+  it("refuses a search rooted at or above a protected location even before the file exists", () => {
+    expect(secretGuardSearchRefusal("C:\\Users\\Person", options)).toContain(
+      "This search would read it",
+    );
+    expect(secretGuardSearchRefusal("C:\\Users\\Person\\AppData", options)).toContain("Refused");
+    expect(secretGuardSearchRefusal("C:\\Users\\Person\\project", options)).toBeUndefined();
+  });
+
+  it("shows Windows locations in Settings instead of the Linux ones", () => {
+    const shown = secretGuardEntries(options).map((entry) =>
+      entry.kind === "path" ? entry.path : entry.directory,
+    );
+    expect(shown).toContain("/c:/users/person/appdata/roaming/microsoft/credentials");
+    expect(shown).not.toContain("/c:/users/person/.local/share/keyrings");
+  });
+});
+
 describe("secret guard on Linux", () => {
   it("covers the protected files that exist and skips the ones that do not", () => {
     const home = fakeHome();

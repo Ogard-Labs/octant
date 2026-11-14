@@ -126,6 +126,23 @@ jobs:
       # The web and server suites have their own sharded jobs below.
       - run: bun run test --filter=!@octant/desktop --filter=!@octant/scripts --filter=!@octant/server --filter=!@octant/web
 
+  # The pure policy and schema suites on Windows, so a POSIX path assumption in
+  # them shows up before a Windows host relies on it. Not a required check (not
+  # in `checks` below) until it has been seen green on the hosted runner.
+  packages-windows:
+    name: Package tests on Windows (domain, contracts)
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      # Keep fixtures byte-identical to the Linux checkout.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run test --filter=@octant/domain --filter=@octant/contracts
+
   # The self-hostable share service (apps/share) ships as a Docker image. Build
   # it on every PR so the Dockerfile never rots, and push it to GHCR when the
   # merge queue lands the commit, so users can `docker pull` instead of building.
