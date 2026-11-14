@@ -3752,7 +3752,7 @@ form > .work-composer-adapter__attachments {
   --browser-row-inset: calc(
     var(--oct-space-3) - (var(--oct-rail-button-h) - var(--oct-icon-md)) / 2
   );
-  border-bottom: 1px solid var(--oct-border-soft);
+  border-bottom: 1px solid var(--octant-pane-line, var(--oct-border-soft));
   background: var(--oct-surface);
 }
 

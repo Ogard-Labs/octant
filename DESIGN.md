@@ -694,6 +694,8 @@ dock and the bottom panel) sit in one panel:
   its top edge only where it starts below another pane (the bottom panel); the
   stage and the dock start on the outline's top edge, which draws it, so every
   edge is drawn once at one strength.
+  A tile's header rule, its control row and the Browser's address row use the
+  same line, so every hairline in the panel is one colour.
 - The stage clips to the outline's inside (`clip-path: inset(calc(38px + 1px)
 1px 1px …)` with the inner radius), so no pane paints over a rounded corner.
 - Opaque, the sidebar paints `--octant-sidebar-fill` (its colour at 82%, so the

@@ -435,7 +435,7 @@
   align-items: center;
   margin: 0;
   padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
   overflow: hidden;
 }
 
@@ -475,7 +475,7 @@
 
 .dock-utility-launcher__group + .dock-utility-launcher__group {
   margin-top: var(--oct-space-1);
-  border-top: 1px solid var(--oct-border-soft);
+  border-top: 1px solid var(--octant-pane-line, var(--oct-border-soft));
 }
 
 .dock-utility-launcher__group-title {
@@ -527,7 +527,7 @@
   gap: var(--oct-space-2);
   padding: 4px var(--oct-space-3) var(--oct-rail-pad-end);
   background: transparent;
-  border-bottom: 1px solid var(--oct-border);
+  border-bottom: 1px solid var(--octant-pane-line, var(--oct-border));
 }
 
 /* A tool whose controls stand in the tile's bar keeps no header of its own. A
@@ -544,7 +544,7 @@
   min-height: 32px;
   padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
   border-bottom: 0;
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
 .right-utility-dock__tool
@@ -691,7 +691,7 @@
   min-height: 32px;
   padding: 0 calc(var(--oct-space-2) + 24px + var(--oct-space-1)) 0 var(--oct-space-3);
   border-bottom: 0;
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
 .right-utility-dock__tool
@@ -972,7 +972,7 @@
   font-size: var(--oct-text-xs);
   /* The hairline is inside the 32px bar, not a border that takes a pixel
      off the content box: the controls centre on the whole-pixel row. */
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
 .dock-tile[data-focused="true"] > .dock-tile__bar {
@@ -1079,7 +1079,7 @@
   padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
 /* Navigation keeps its words: a small tray of segments, the tray 28px and each
@@ -1208,7 +1208,7 @@
   flex-wrap: wrap;
   min-height: 32px;
   padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
 :is(.dock-tile__bar, .dock-tile__row)[data-fold="row"] .dock-tile__tool-cues > * {

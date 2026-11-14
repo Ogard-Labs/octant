@@ -2647,7 +2647,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   flex-wrap: nowrap;
   margin: 0 calc(-1 * var(--oct-space-3));
   padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
 .code-project-pull-requests[data-bar-hosted="true"] .surface-toolbar__search {

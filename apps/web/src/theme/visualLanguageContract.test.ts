@@ -385,6 +385,12 @@ describe("the public-block visual language", () => {
     expect(panel('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
       /--octant-pane-line:\s*var\(--octant-border-strong\)/,
     );
+    // A header's rule inside a tile is the same line as the panel's: the tile
+    // bar, its control row and the Browser's address row take the pane line, not
+    // the softer border, so no two rules in the dock read at different strengths.
+    const dockStyles = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    expect(dockStyles).not.toMatch(/inset 0 -1px 0 var\(--octant-border-soft\)/);
+    expect(panel(".browser-workspace__chrome")).toMatch(/border-bottom:[^;]*--octant-pane-line/);
     // The rail and the band draw no line or fill of their own: the sidebar
     // stands on the ground, and nothing is drawn across the rail.
     expect(shell).not.toContain(".shell-frame::before {");
