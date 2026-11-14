@@ -90,16 +90,52 @@ describe("CodeFileExplorer", () => {
     expect(unavailable).toBeDisabled();
   });
 
-  it("caps oversized projections and reports that the visible tree is incomplete", () => {
+  it("caps oversized projections and reports that the visible tree is incomplete", async () => {
+    const user = userEvent.setup();
     const many = Array.from({ length: MAX_CODE_FILE_EXPLORER_ENTRIES + 1 }, (_, index) =>
       file(`generated/file-${String(index).padStart(4, "0")}.txt`),
     );
-    render(<CodeFileExplorer entries={many} onOpenFile={vi.fn()} />);
+    await withTreeViewportHeight(280, async () => {
+      render(<CodeFileExplorer entries={many} onOpenFile={vi.fn()} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      `Showing the first ${MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString()}`,
+      expect(screen.getByRole("status")).toHaveTextContent(
+        `Showing the first ${MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString()}`,
+      );
+      const renderedRows = screen.getAllByRole("treeitem");
+      expect(renderedRows.length).toBeGreaterThan(0);
+      expect(renderedRows.length).toBeLessThan(50);
+
+      renderedRows[0]?.focus();
+      await user.keyboard("{End}");
+      expect(screen.getByRole("treeitem", { name: /file-0999\.txt/ })).toHaveFocus();
+      expect(screen.queryByRole("treeitem", { name: /file-1000\.txt/ })).not.toBeInTheDocument();
+    });
+  });
+
+  it("virtualizes large trees to bounded DOM rows and navigates across offscreen rows", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 500 }, (_, index) =>
+      file(`src/module-${String(index).padStart(3, "0")}.ts`),
     );
-    expect(screen.getAllByRole("treeitem")).toHaveLength(MAX_CODE_FILE_EXPLORER_ENTRIES);
+    await withTreeViewportHeight(280, async () => {
+      render(<CodeFileExplorer entries={many} onOpenFile={vi.fn()} />);
+
+      const initialRows = screen.getAllByRole("treeitem");
+      expect(initialRows.length).toBeGreaterThan(0);
+      expect(initialRows.length).toBeLessThan(50);
+      expect(screen.queryByRole("treeitem", { name: /module-499\.ts/ })).not.toBeInTheDocument();
+
+      initialRows[0]?.focus();
+      await user.keyboard("{End}");
+      expect(screen.getByRole("treeitem", { name: /module-499\.ts/ })).toHaveFocus();
+      expect(screen.getAllByRole("treeitem").length).toBeLessThan(50);
+
+      const tree = screen.getByRole("tree");
+      expect(tree.firstElementChild).toHaveStyle({ height: `${String(500 * 28)}px` });
+      tree.scrollTop = 500 * 28 - 280;
+      fireEvent.scroll(tree);
+      expect(screen.queryByRole("treeitem", { name: /module-000\.ts/ })).not.toBeInTheDocument();
+    });
   });
 
   it("searches the complete authoritative projection before capping visible matches", async () => {
@@ -330,6 +366,94 @@ describe("CodeFileExplorer", () => {
     );
     expect(codeStylesheet).toMatch(/\.code-file-explorer__search input \{[^}]*height:\s*30px/);
   });
+
+  it("keeps focus on a folder when expanding or collapsing crosses the virtualization threshold", async () => {
+    const user = userEvent.setup();
+    const topFiles = Array.from({ length: 39 }, (_, index) =>
+      file(`file-${String(index).padStart(2, "0")}.ts`),
+    );
+    const expandedChildren = Array.from({ length: 5 }, (_, index) =>
+      file(`big/child-${String(index).padStart(2, "0")}.ts`),
+    );
+    await withTreeViewportHeight(280, async () => {
+      render(
+        <CodeFileExplorer
+          entries={[{ kind: "directory", path: "big" as never }, ...expandedChildren, ...topFiles]}
+          onOpenFile={vi.fn()}
+        />,
+      );
+
+      const folder = screen.getByRole("treeitem", { name: "big" });
+      folder.focus();
+      expect(folder).toHaveFocus();
+
+      await user.keyboard("{ArrowRight}");
+      expect(screen.getByRole("treeitem", { name: "big" })).toBe(folder);
+      expect(folder).toHaveAttribute("aria-expanded", "true");
+      expect(folder).toHaveFocus();
+
+      await user.keyboard("{ArrowLeft}");
+      expect(screen.getByRole("treeitem", { name: "big" })).toBe(folder);
+      expect(folder).toHaveAttribute("aria-expanded", "false");
+      expect(folder).toHaveFocus();
+    });
+  });
+
+  it("sets aria-posinset and aria-setsize within each sibling group", () => {
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: "src" as never },
+          file("src/a.ts"),
+          file("src/b.ts"),
+          file("README.md"),
+        ]}
+        onOpenFile={vi.fn()}
+        selectedPath={"src/a.ts" as never}
+      />,
+    );
+
+    const src = screen.getByRole("treeitem", { name: "src" });
+    expect(src).toHaveAttribute("aria-posinset", "1");
+    expect(src).toHaveAttribute("aria-setsize", "2");
+
+    const readme = screen.getByRole("treeitem", { name: "README.md" });
+    expect(readme).toHaveAttribute("aria-posinset", "2");
+    expect(readme).toHaveAttribute("aria-setsize", "2");
+
+    const childA = screen.getByRole("treeitem", { name: "src/a.ts" });
+    expect(childA).toHaveAttribute("aria-posinset", "1");
+    expect(childA).toHaveAttribute("aria-setsize", "2");
+
+    const childB = screen.getByRole("treeitem", { name: "src/b.ts" });
+    expect(childB).toHaveAttribute("aria-posinset", "2");
+    expect(childB).toHaveAttribute("aria-setsize", "2");
+  });
+
+  it("measures rows taller than the 28px minimum so adjacent rows do not overlap", async () => {
+    const getBoundingClientRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function mockRowRect() {
+      if (this instanceof HTMLElement && this.dataset.index === "0") {
+        return new DOMRect(0, 0, 300, 44);
+      }
+      if (this instanceof HTMLElement && this.getAttribute("role") === "treeitem") {
+        return new DOMRect(0, 0, 300, 28);
+      }
+      return getBoundingClientRect.call(this);
+    };
+    const many = Array.from({ length: 50 }, (_, index) =>
+      file(`src/row-${String(index).padStart(2, "0")}.ts`),
+    );
+    try {
+      await withTreeViewportHeight(280, async () => {
+        render(<CodeFileExplorer entries={many} onOpenFile={vi.fn()} />);
+        const secondRow = screen.getByRole("treeitem", { name: /row-01\.ts/ });
+        expect(secondRow).toHaveStyle({ transform: "translateY(44px)" });
+      });
+    } finally {
+      Element.prototype.getBoundingClientRect = getBoundingClientRect;
+    }
+  });
 });
 
 function entries(): ReadonlyArray<CodeFileExplorerEntry> {
@@ -370,6 +494,43 @@ function unavailable(path: string): Extract<CodeFileExplorerEntry, { readonly ki
     path: path as never,
     availability: { status: "unavailable", reason: "The file no longer exists." },
   };
+}
+
+async function withTreeViewportHeight(height: number, run: () => Promise<void>): Promise<void> {
+  const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+  const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get() {
+      if (this instanceof HTMLElement && this.classList.contains("code-file-explorer__tree")) {
+        return height;
+      }
+      return offsetHeight?.get?.call(this) ?? 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get() {
+      if (this instanceof HTMLElement && this.classList.contains("code-file-explorer__tree")) {
+        return height;
+      }
+      return clientHeight?.get?.call(this) ?? 0;
+    },
+  });
+  try {
+    await run();
+  } finally {
+    if (offsetHeight === undefined) {
+      Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+    } else {
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+    }
+    if (clientHeight === undefined) {
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    } else {
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeight);
+    }
+  }
 }
 
 function ruleBody(css: string, selector: string): string {

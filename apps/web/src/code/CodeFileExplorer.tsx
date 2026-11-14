@@ -1,7 +1,9 @@
 import type { CodeFileId, CodeFileMetadata, CodeRelativePath } from "@octant/contracts/code";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, File, Folder, FolderOpen, RefreshCw, Search, X } from "lucide-react";
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,6 +17,9 @@ import { ShellState } from "../shell/ShellState";
 import { FileName, pathBasename, pathParent } from "../lib/fileName";
 
 export const MAX_CODE_FILE_EXPLORER_ENTRIES = 1_000;
+const EXPLORER_VIRTUALIZATION_THRESHOLD = 40;
+const EXPLORER_ROW_HEIGHT_PX = 28;
+const EXPLORER_OVERSCAN = 10;
 
 export type CodeFileExplorerEntry =
   | {
@@ -108,6 +113,32 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         .map(([name]) => name),
     );
   }, [visible]);
+  const visibleIndexByPath = useMemo(() => {
+    const indexes = new Map<string, number>();
+    visible.forEach((entry, index) => {
+      indexes.set(String(entry.path), index);
+    });
+    return indexes;
+  }, [visible]);
+  const siblingPositions = useMemo(() => {
+    const groups = new Map<string, number[]>();
+    visible.forEach((entry, index) => {
+      const parent = pathParent(entry.path);
+      const bucket = groups.get(parent);
+      if (bucket === undefined) groups.set(parent, [index]);
+      else bucket.push(index);
+    });
+    const positions = Array.from<
+      { readonly posInSet: number; readonly setSize: number } | undefined
+    >({ length: visible.length });
+    for (const bucket of groups.values()) {
+      const setSize = bucket.length;
+      bucket.forEach((index, offset) => {
+        positions[index] = { posInSet: offset + 1, setSize };
+      });
+    }
+    return positions;
+  }, [visible]);
   /**
    * One tab stop for the whole tree, moved by the row that last held focus.
    * Every row otherwise stays reachable with Tab first and then the arrow
@@ -124,66 +155,130 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
     const first = visible.find(canReceiveFocus);
     return first === undefined ? undefined : String(first.path);
   }, [focusedPath, visible]);
+  const virtualized = visible.length > EXPLORER_VIRTUALIZATION_THRESHOLD;
+  const pendingFocusPath = useRef<string | undefined>(undefined);
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>({
+    count: virtualized ? visible.length : 0,
+    getScrollElement: () => tree.current,
+    estimateSize: () => EXPLORER_ROW_HEIGHT_PX,
+    measureElement: measureExplorerRowElement,
+    overscan: EXPLORER_OVERSCAN,
+    initialRect: { width: 320, height: 480 },
+    getItemKey: (index) => {
+      const entry = visible[index];
+      if (entry === undefined) return String(index);
+      return entry.kind === "directory"
+        ? `directory:${entry.path}`
+        : `file:${entry.fileId}:${entry.path}`;
+    },
+    rangeExtractor: (range) => {
+      const extracted = defaultRangeExtractor(range);
+      const pinned = new Set(extracted);
+      for (const pinnedPath of [tabbable, pendingFocusPath.current]) {
+        if (pinnedPath === undefined) continue;
+        const index = visibleIndexByPath.get(pinnedPath);
+        if (index !== undefined && index >= 0 && index < range.count) {
+          pinned.add(index);
+        }
+      }
+      if (pinned.size === extracted.length) return extracted;
+      return [...pinned].sort((left, right) => left - right);
+    },
+    ...(!virtualized ? { enabled: false } : {}),
+  });
+  const virtualItems = virtualized ? virtualizer.getVirtualItems() : [];
+
+  useLayoutEffect(() => {
+    const targetPath = pendingFocusPath.current;
+    if (targetPath === undefined) return;
+    const row = findTreeRowElement(tree.current, targetPath);
+    if (row === undefined || row.hasAttribute("disabled")) return;
+    pendingFocusPath.current = undefined;
+    row.focus();
+  }, [virtualItems]);
 
   const toggle = (path: string): void => {
     setExpanded((current) => toggleExpandedDirectory(current, path));
   };
 
+  const focusEntryAt = (targetIndex: number): void => {
+    const entry = visible[targetIndex];
+    if (entry === undefined || !canReceiveFocus(entry)) return;
+    const targetPath = String(entry.path);
+    setFocusedPath(targetPath);
+    if (virtualized) virtualizer.scrollToIndex(targetIndex, { align: "auto" });
+    const mounted = findTreeRowElement(tree.current, targetPath);
+    if (mounted !== undefined && !mounted.hasAttribute("disabled")) {
+      pendingFocusPath.current = undefined;
+      mounted.focus();
+      return;
+    }
+    pendingFocusPath.current = targetPath;
+  };
+
   const onTreeKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const target = event.target;
     if (!(target instanceof HTMLElement) || target.getAttribute("role") !== "treeitem") return;
-    const container = tree.current;
-    if (container === null) return;
-    // A disabled row refuses focus, so Arrow Up/Down and Home/End step over
-    // it to the next row that can actually take focus.
-    const rows = Array.from(container.querySelectorAll<HTMLElement>('[role="treeitem"]')).filter(
-      (row) => !row.hasAttribute("disabled"),
-    );
-    const index = rows.indexOf(target);
-    if (index === -1) return;
-    const level = Number(target.getAttribute("aria-level") ?? "1");
-    const next = rows[index + 1];
-    const previous = rows[index - 1];
+    const currentPath = target.dataset.path;
+    if (currentPath === undefined) return;
+    const index = visibleIndexByPath.get(currentPath);
+    if (index === undefined) return;
+    const currentEntry = visible[index];
+    if (currentEntry === undefined) return;
+    const level = entryLevel(currentEntry.path);
     switch (event.key) {
-      case "ArrowDown":
-        next?.focus();
+      case "ArrowDown": {
+        const nextIndex = findFocusableIndex(visible, index + 1, 1);
+        if (nextIndex !== undefined) focusEntryAt(nextIndex);
         break;
-      case "ArrowUp":
-        previous?.focus();
+      }
+      case "ArrowUp": {
+        const previousIndex = findFocusableIndex(visible, index - 1, -1);
+        if (previousIndex !== undefined) focusEntryAt(previousIndex);
         break;
-      case "Home":
-        rows[0]?.focus();
+      }
+      case "Home": {
+        const firstIndex = findFocusableIndex(visible, 0, 1);
+        if (firstIndex !== undefined) focusEntryAt(firstIndex);
         break;
-      case "End":
-        rows.at(-1)?.focus();
+      }
+      case "End": {
+        const lastIndex = findFocusableIndex(visible, visible.length - 1, -1);
+        if (lastIndex !== undefined) focusEntryAt(lastIndex);
         break;
+      }
       case "ArrowRight": {
-        const path = target.dataset.path;
-        if (path === undefined) return;
-        if (target.getAttribute("aria-expanded") === "false") {
-          toggle(path);
-        } else if (
-          target.getAttribute("aria-expanded") === "true" &&
-          next !== undefined &&
-          Number(next.getAttribute("aria-level")) > level
+        if (currentEntry.kind !== "directory") break;
+        if (!expanded.has(currentPath)) {
+          toggle(currentPath);
+          break;
+        }
+        const childIndex = findFocusableIndex(visible, index + 1, 1);
+        const childEntry = childIndex === undefined ? undefined : visible[childIndex];
+        if (
+          childIndex !== undefined &&
+          childEntry !== undefined &&
+          entryLevel(childEntry.path) > level
         ) {
-          next.focus();
+          focusEntryAt(childIndex);
         }
         break;
       }
       case "ArrowLeft": {
-        if (target.getAttribute("aria-expanded") === "true") {
-          const path = target.dataset.path;
-          if (path === undefined) return;
-          toggle(path);
+        if (currentEntry.kind === "directory" && expanded.has(currentPath)) {
+          toggle(currentPath);
           break;
         }
         // A collapsed folder and a file both go back to the folder holding
         // them, which is the row above at the parent's level.
         for (let candidate = index - 1; candidate >= 0; candidate -= 1) {
-          const row = rows[candidate];
-          if (row !== undefined && Number(row.getAttribute("aria-level")) === level - 1) {
-            row.focus();
+          const entry = visible[candidate];
+          if (
+            entry !== undefined &&
+            canReceiveFocus(entry) &&
+            entryLevel(entry.path) === level - 1
+          ) {
+            focusEntryAt(candidate);
             break;
           }
         }
@@ -219,6 +314,91 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         ],
   );
   const hosted = placement !== undefined;
+
+  const renderEntry = (entry: CodeFileExplorerEntry, index: number, virtualStart?: number) => {
+    const label = String(entry.path);
+    const level = entryLevel(entry.path);
+    const selected = props.selectedPath === entry.path;
+    const siblingPosition = siblingPositions[index];
+    const rowProps = {
+      "aria-level": level,
+      ...(siblingPosition === undefined
+        ? {}
+        : {
+            "aria-posinset": siblingPosition.posInSet,
+            "aria-setsize": siblingPosition.setSize,
+          }),
+      "data-index": index,
+      "data-path": label,
+      ref: virtualized ? virtualizer.measureElement : undefined,
+      role: "treeitem" as const,
+      style: virtualRowStyle(level - 1, virtualStart),
+      tabIndex: label === tabbable ? 0 : -1,
+      title: label,
+    };
+    if (entry.kind === "directory") {
+      const open = expanded.has(label);
+      return (
+        <OctantButton
+          {...rowProps}
+          aria-expanded={open}
+          aria-label={label}
+          className="code-file-explorer__entry code-file-explorer__entry--directory"
+          key={`directory:${entry.path}`}
+          onClick={() => toggle(label)}
+          type="button"
+          variant="bare"
+        >
+          <ChevronRight aria-hidden="true" className="code-file-explorer__chevron" size={16} />
+          {open ? (
+            <FolderOpen aria-hidden="true" size={14} />
+          ) : (
+            <Folder aria-hidden="true" size={14} />
+          )}
+          <FileName name={pathBasename(entry.path)} />
+        </OctantButton>
+      );
+    }
+    const unavailable = entry.availability.status === "unavailable";
+    const availability = availabilityLabel(entry.availability);
+    const name = pathBasename(entry.path);
+    const parent = pathParent(entry.path);
+    // A filtered list is flat, and two files can share one name, so
+    // the folder is named when the row cannot show it itself. A row
+    // that already explains why it cannot open keeps that explanation
+    // instead; the whole path stays in the row's accessible name and
+    // hover title either way.
+    const parentHint =
+      availability === undefined &&
+      parent !== "" &&
+      (normalized !== "" || duplicateBasenames.has(name))
+        ? pathBasename(parent)
+        : undefined;
+    const title = `${label}${availability === undefined ? "" : ` ${availability}`}`;
+    return (
+      <OctantButton
+        {...rowProps}
+        aria-label={title}
+        aria-selected={selected}
+        className="code-file-explorer__entry code-file-explorer__entry--file"
+        disabled={unavailable}
+        key={`file:${entry.fileId}:${entry.path}`}
+        onClick={() => props.onOpenFile(entry)}
+        title={title}
+        type="button"
+        variant="bare"
+      >
+        <File aria-hidden="true" size={14} />
+        <FileName name={name} />
+        {parentHint === undefined ? null : (
+          <span className="code-file-explorer__hint">{parentHint}</span>
+        )}
+        {availability === undefined ? null : (
+          <small className="code-file-explorer__detail">{availability}</small>
+        )}
+      </OctantButton>
+    );
+  };
 
   return (
     <section
@@ -304,93 +484,71 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
           ref={tree}
           role="tree"
         >
-          {visible.map((entry) => {
-            const label = String(entry.path);
-            const level = String(entry.path).split("/").length;
-            const selected = props.selectedPath === entry.path;
-            const rowProps = {
-              "aria-level": level,
-              "data-path": label,
-              role: "treeitem" as const,
-              style: depthStyle(level - 1),
-              tabIndex: label === tabbable ? 0 : -1,
-              title: label,
-            };
-            if (entry.kind === "directory") {
-              const open = expanded.has(label);
-              return (
-                <OctantButton
-                  {...rowProps}
-                  aria-expanded={open}
-                  aria-label={label}
-                  className="code-file-explorer__entry code-file-explorer__entry--directory"
-                  key={`directory:${entry.path}`}
-                  onClick={() => toggle(label)}
-                  type="button"
-                  variant="bare"
-                >
-                  <ChevronRight
-                    aria-hidden="true"
-                    className="code-file-explorer__chevron"
-                    size={16}
-                  />
-                  {open ? (
-                    <FolderOpen aria-hidden="true" size={14} />
-                  ) : (
-                    <Folder aria-hidden="true" size={14} />
-                  )}
-                  <FileName name={pathBasename(entry.path)} />
-                </OctantButton>
-              );
-            }
-            const unavailable = entry.availability.status === "unavailable";
-            const availability = availabilityLabel(entry.availability);
-            const name = pathBasename(entry.path);
-            const parent = pathParent(entry.path);
-            // A filtered list is flat, and two files can share one name, so
-            // the folder is named when the row cannot show it itself. A row
-            // that already explains why it cannot open keeps that explanation
-            // instead; the whole path stays in the row's accessible name and
-            // hover title either way.
-            const parentHint =
-              availability === undefined &&
-              parent !== "" &&
-              (normalized !== "" || duplicateBasenames.has(name))
-                ? pathBasename(parent)
-                : undefined;
-            const title = `${label}${availability === undefined ? "" : ` ${availability}`}`;
-            return (
-              <OctantButton
-                {...rowProps}
-                aria-label={title}
-                aria-selected={selected}
-                className="code-file-explorer__entry code-file-explorer__entry--file"
-                disabled={unavailable}
-                key={`file:${entry.fileId}:${entry.path}`}
-                onClick={() => props.onOpenFile(entry)}
-                title={title}
-                type="button"
-                variant="bare"
-              >
-                <File aria-hidden="true" size={14} />
-                <FileName name={name} />
-                {parentHint === undefined ? null : (
-                  <span className="code-file-explorer__hint">{parentHint}</span>
-                )}
-                {availability === undefined ? null : (
-                  <small className="code-file-explorer__detail">{availability}</small>
-                )}
-              </OctantButton>
-            );
-          })}
+          {/* Keep one wrapper across the virtualization threshold so expanding
+              a folder past EXPLORER_VIRTUALIZATION_THRESHOLD never drops focus. */}
+          <div
+            className="code-file-explorer__virtual"
+            style={virtualized ? { height: virtualizer.getTotalSize() } : undefined}
+          >
+            {virtualized
+              ? virtualItems.map((virtualItem) => {
+                  const entry = visible[virtualItem.index];
+                  return entry === undefined
+                    ? null
+                    : renderEntry(entry, virtualItem.index, virtualItem.start);
+                })
+              : visible.map((entry, index) => renderEntry(entry, index))}
+          </div>
         </div>
       )}
     </section>
   );
 }
 
-function depthStyle(depth: number): CSSProperties {
-  return { "--oct-file-depth": String(depth) } as CSSProperties;
+function entryLevel(path: CodeRelativePath): number {
+  return String(path).split("/").length;
+}
+
+function measureExplorerRowElement(element: Element): number {
+  if (element instanceof HTMLElement) {
+    const height = element.getBoundingClientRect().height;
+    if (height > 0) return height;
+  }
+  return EXPLORER_ROW_HEIGHT_PX;
+}
+
+function findFocusableIndex(
+  entries: ReadonlyArray<CodeFileExplorerEntry>,
+  startIndex: number,
+  step: 1 | -1,
+): number | undefined {
+  for (let index = startIndex; index >= 0 && index < entries.length; index += step) {
+    const entry = entries[index];
+    if (entry !== undefined && canReceiveFocus(entry)) return index;
+  }
+  return undefined;
+}
+
+function findTreeRowElement(container: HTMLElement | null, path: string): HTMLElement | undefined {
+  if (container === null) return undefined;
+  for (const row of container.querySelectorAll<HTMLElement>('[role="treeitem"]')) {
+    if (row.dataset.path === path) return row;
+  }
+  return undefined;
+}
+
+function virtualRowStyle(depth: number, start?: number): CSSProperties {
+  if (start === undefined) {
+    return { "--oct-file-depth": String(depth) } as CSSProperties;
+  }
+  return {
+    "--oct-file-depth": String(depth),
+    left: 0,
+    position: "absolute",
+    top: 0,
+    transform: `translateY(${String(start)}px)`,
+    width: "100%",
+  } as CSSProperties;
 }
 
 /**
