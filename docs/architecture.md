@@ -15427,9 +15427,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
     other device session is refused). Changing it moves every still-current
     pairing to its own pairing time plus the new length, one
     `remote.device-registration-deadline-changed@1` per device journaled as
-    the person who changed it, whether or not the listener is on: a shorter
-    length can expire some devices at once (their sessions and streams end
-    when the listener is on), and a longer one or Never lifts the deadline.
+    the person who changed it, whether or not the listener is on, in the same
+    journal transaction as the setting: a failure or a stop part way keeps
+    neither, so the chosen length is never in force with older deadlines. A
+    shorter length can expire some devices at once (their sessions and streams
+    end when the listener is on), and a longer one or Never lifts the deadline.
+    While the listener is on, its once-a-minute sweep expires every active
+    device past its deadline the way reconciling expired devices does, ending
+    its sessions and any product stream it opened before the deadline, which
+    no later request check would otherwise reach.
     A pairing already past its deadline, expired, or revoked is never
     revived. Rationale: counting from pairing makes the outcome of a change
     predictable from the device list alone, and refusing to revive a lapsed

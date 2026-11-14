@@ -526,10 +526,11 @@ export function wireRemote(deps: RemoteDependencies) {
   // server shape. Callers read it through the accessors below.
   let currentRemoteGateway: RemoteGateway | undefined;
   // A new paired-device length moves every still-current registration's
-  // deadline, journaled as the person who chose it, whether or not the
-  // listener is on; a device it already expires loses its sessions at once.
+  // deadline, journaled as the person who chose it in the same journal unit
+  // as the setting, whether or not the listener is on; a device it already
+  // expires loses its sessions once that unit commits.
   shellService.onSettingsReplaced(({ previous, settings, actor }) => {
-    if (previous.pairedDeviceLifetime === settings.pairedDeviceLifetime) return;
+    if (previous.pairedDeviceLifetime === settings.pairedDeviceLifetime) return undefined;
     const { expiredNow } = retimeDeviceRegistrations({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -538,8 +539,10 @@ export function wireRemote(deps: RemoteDependencies) {
       now: Date.now(),
       uuid: randomUUID,
     });
-    if (expiredNow.length > 0)
+    if (expiredNow.length === 0) return undefined;
+    return () => {
       currentRemoteGateway?.localDeviceAdministration()?.reconcileExpired();
+    };
   });
   let startupRemoteListener: PrivateListener | undefined;
   const remoteHost = {

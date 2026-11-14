@@ -318,6 +318,11 @@ interface GatewayServices {
   readonly sweepServerProxySessions: () => void;
   /** Remove approved devices whose pairing window never signed in with its key. */
   readonly sweepAbandonedPairings: () => void;
+  /**
+   * Expire active devices past their registration deadline, ending their
+   * sessions and open product streams the way Revoke does.
+   */
+  readonly sweepExpiredRegistrations: () => void;
   /** True for a live, pending pairing ticket whose proof matches. */
   readonly pairingTicketIsLive: (ticket: {
     readonly ticketId: string;
@@ -400,6 +405,11 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
         }
         try {
           sweeping.sweepAbandonedPairings();
+        } catch {
+          // Retried on the next tick.
+        }
+        try {
+          sweeping.sweepExpiredRegistrations();
         } catch {
           // Retried on the next tick.
         }
@@ -914,6 +924,21 @@ function assembleServices(
           reasonCode: "pairing-abandoned",
         });
       }),
+    // Requests are refused at the deadline, but a product stream admitted
+    // before it stays open until something ends it: a deadline that passes
+    // with no request, or one a shorter length moved closer, would otherwise
+    // keep streaming to the device. Reconciled only when a device is due, so
+    // an idle tick journals no receipt.
+    sweepExpiredRegistrations: () => {
+      const nowMs = Date.parse(clock());
+      const due = readDeviceRegistrations(options.connection).some(
+        (device) =>
+          String(device.host_id) === String(identity.hostId) &&
+          device.state === "active" &&
+          Date.parse(device.expires_at) <= nowMs,
+      );
+      if (due) localDeviceAdministration.reconcileExpired();
+    },
     pairingTicketIsLive: (ticket) => lifecycle.isLiveTicket(ticket),
     approvedPairingDevice: (ticket) => {
       const status = lifecycle.ticketStatus(ticket);

@@ -18,7 +18,23 @@ vi.mock("./remoteGatewayFinalization", async (importOriginal) => {
     executeFinalizationSequence: vi.fn(actual.executeFinalizationSequence),
   };
 });
-import { decodeStableHostId } from "@octant/contracts/remote-access";
+// The gateway's request registry is captured so a test can hold an open
+// product stream in it the way an admitted request does.
+const capturedRegistries: import("./remoteRequestRegistry").RemoteRequestRegistry[] = [];
+vi.mock("./remoteRequestRegistry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./remoteRequestRegistry")>();
+  return {
+    ...actual,
+    createRemoteRequestRegistry: (
+      options: Parameters<typeof actual.createRemoteRequestRegistry>[0],
+    ) => {
+      const registry = actual.createRemoteRequestRegistry(options);
+      capturedRegistries.push(registry);
+      return registry;
+    },
+  };
+});
+import { decodeStableHostId, type PairedDeviceLifetime } from "@octant/contracts/remote-access";
 import { buildHostHelloSignaturePayload } from "@octant/domain";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { Journal } from "../persistence/journal";
@@ -113,6 +129,8 @@ interface SetupOptions {
   readonly designPage?: RemoteGatewayOptions["designPage"];
   readonly serve?: Serve;
   readonly now?: () => number;
+  readonly clock?: () => string;
+  readonly registrationLifetime?: () => PairedDeviceLifetime;
   readonly uuid?: () => string;
 }
 
@@ -186,7 +204,10 @@ function setup(options: SetupOptions = {}) {
     serve: options.serve ?? defaultServe,
     now: options.now ?? (() => nowMs),
     uuid,
-    clock: () => nowIso,
+    clock: options.clock ?? (() => nowIso),
+    ...(options.registrationLifetime === undefined
+      ? {}
+      : { registrationLifetime: options.registrationLifetime }),
     pushTokenStore: pushRegistrations,
     config: options.config ?? makeConfig(),
   };
@@ -1315,9 +1336,17 @@ describe("RemoteGateway — approval for a window that never finished", () => {
     vi.useRealTimers();
   });
 
-  async function approveForWindow(wall: { value: number }) {
+  async function approveForWindow(
+    wall: { value: number },
+    registrationLifetime?: () => PairedDeviceLifetime,
+  ) {
     const { serve, getFetch } = createCapturingServe();
-    const made = setup({ serve, now: () => wall.value });
+    const made = setup({
+      serve,
+      now: () => wall.value,
+      clock: () => new Date(wall.value).toISOString(),
+      ...(registrationLifetime === undefined ? {} : { registrationLifetime }),
+    });
     await made.gateway.start();
     const fetch = getFetch()!;
     const admin = made.gateway.localDeviceAdministration()!;
@@ -1480,6 +1509,88 @@ describe("RemoteGateway — approval for a window that never finished", () => {
     wall.value += TICKET_LIFE_MS + 1_000;
     await vi.advanceTimersByTimeAsync(TICKET_LIFE_MS + 2 * 60_000);
 
+    expect(admin.listDevices().map((entry) => entry.state)).toEqual(["active"]);
+    await gateway.stop();
+  });
+
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60_000;
+
+  function holdOpenStream(
+    connection: ReturnType<typeof openSqlite>,
+    deviceId: string,
+    at: number,
+  ): { readonly ended: () => boolean } {
+    const sessionIdDigest = "d".repeat(64);
+    connection
+      .prepare(
+        `INSERT INTO remote_session_store (
+          session_id_digest, host_id, device_id, credential_generation, origin,
+          protocol_version, capability_digest, issued_at, last_seen_at,
+          idle_expires_at, absolute_expires_at, csrf_digest, state
+        ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+      )
+      .run(
+        sessionIdDigest,
+        hostId,
+        deviceId,
+        ORIGIN,
+        "c".repeat(64),
+        at,
+        at,
+        at + 60_000,
+        at + 600_000,
+        "e".repeat(64),
+      );
+    const registry = capturedRegistries.at(-1);
+    if (registry === undefined) throw new Error("The gateway made no request registry.");
+    let ended = false;
+    registry.register({
+      hostId,
+      deviceId,
+      sessionIdDigest,
+      cancel: () => {
+        ended = true;
+      },
+    });
+    return { ended: () => ended };
+  }
+
+  it("ends a device's open product stream within one sweep of its registration deadline", async () => {
+    // The gateway's clock refuses a wall-clock jump the monotonic clock did
+    // not see, so the days pass on the faked timers rather than as one step.
+    vi.useFakeTimers({ now: nowMs });
+    const wall = {
+      get value() {
+        return Date.now();
+      },
+    };
+    const { gateway, admin, device, connection } = await approveForWindow(wall, () => "7-days");
+    const stream = holdOpenStream(connection, device.deviceId, wall.value);
+
+    await vi.advanceTimersByTimeAsync(SEVEN_DAYS_MS - 2 * 60_000);
+    expect(stream.ended()).toBe(false);
+    expect(admin.listDevices().map((entry) => entry.state)).toEqual(["active"]);
+
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(stream.ended()).toBe(true);
+    expect(admin.listDevices().map((entry) => entry.state)).toEqual(["expired"]);
+    expect(countActiveSessions(connection)).toBe(0);
+    await gateway.stop();
+  });
+
+  it("keeps the open product stream of a device paired with no deadline", async () => {
+    vi.useFakeTimers({ now: nowMs });
+    const wall = {
+      get value() {
+        return Date.now();
+      },
+    };
+    const { gateway, admin, device, connection } = await approveForWindow(wall, () => "never");
+    const stream = holdOpenStream(connection, device.deviceId, wall.value);
+
+    await vi.advanceTimersByTimeAsync(SEVEN_DAYS_MS + 3 * 60_000);
+
+    expect(stream.ended()).toBe(false);
     expect(admin.listDevices().map((entry) => entry.state)).toEqual(["active"]);
     await gateway.stop();
   });

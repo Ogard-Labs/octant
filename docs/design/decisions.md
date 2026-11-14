@@ -2118,7 +2118,8 @@ The person chooses how long a paired device's registration lasts, Never expires 
 
 - Choices are 7 days, 30 days, 90 days, 1 year and Never expires; the default is 30 days, the deadline every registration recorded before the setting existed. It is a host shell setting a local window or a device the host's own person paired changes, journaled with its actor; any other device session is refused.
 - The deadline is the pairing time plus the length; using a device does not move it. Sign-in and every signed request refuse a device past it as expired, before the expiry is reconciled, and the device must pair again. Revoke ends any pairing at any time; with Never expires it is the only end.
-- A change moves every still-current pairing to its pairing time plus the new length, journaled per device as the person: a shorter length can expire devices at once, a longer one or Never lifts the deadline, and a pairing already past its deadline, expired or revoked is never revived.
+- A change moves every still-current pairing to its pairing time plus the new length, journaled per device as the person in the same journal transaction as the setting, so neither commits without the other: a shorter length can expire devices at once, a longer one or Never lifts the deadline, and a pairing already past its deadline, expired or revoked is never revived.
+- While the listener is on, a device whose deadline passes is expired within one sweep (a minute), and its sessions and open product streams end as on Revoke.
 - Session lifetimes (idle and absolute, with rotation) are a separate mechanism and unchanged.
 
 Status: Built. Since: 2026-11-13. Detail: [Architecture: Security and authority, How long a pairing lasts](../architecture.md#security-and-authority).
