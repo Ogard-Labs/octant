@@ -773,8 +773,9 @@
   --oct-ground-fade: linear-gradient(
     to bottom,
     currentColor 62%,
-    color-mix(in srgb, currentColor 35%, transparent) 80%,
-    transparent 94%
+    color-mix(in srgb, currentColor 62%, transparent) 74%,
+    color-mix(in srgb, currentColor 30%, transparent) 88%,
+    transparent 100%
   );
   display: none;
   z-index: -1;
@@ -833,7 +834,9 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
 
 /* The picture layers soften behind the question, which sits in the middle of
    the stage, and fade out toward the foot, so the composer docked there keeps
-   a calm page to be read against; under the sidebar they keep a third. The
+   a calm page to be read against: full strength down to about three fifths of
+   the window, then about a third of it across the lower third, and the window
+   ground itself at the foot (sooner on a light page). Under the sidebar they keep a third. The
    mask is on the layers and not on the ground, so the page paint under them is
    never cut away. */
 .app-backdrop[data-placement="welcome"] > * {
@@ -865,18 +868,20 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
   --oct-ground-fade: linear-gradient(
     to bottom,
     currentColor 56%,
-    color-mix(in srgb, currentColor 25%, transparent) 74%,
-    transparent 90%
+    color-mix(in srgb, currentColor 58%, transparent) 68%,
+    color-mix(in srgb, currentColor 28%, transparent) 84%,
+    transparent 98%
   );
 }
 
 /* The character field and the pixel ground dim their own middle and their
    sidebar (see appBackdropAscii.ts and appBackdropPrint.ts), so the question and
    the composer read on a calm page without the ground being cut away in a fixed
-   ellipse. Each fades in once it has drawn its first frame. */
+   ellipse. They take the same fade toward the foot as the pictures, and nothing
+   else. Each fades in once it has drawn its first frame. */
 .app-backdrop[data-octant-app-backdrop="characters"][data-placement="welcome"] > *,
 .app-backdrop[data-octant-app-backdrop="pixels"][data-placement="welcome"] > * {
-  mask-image: none;
+  mask-image: var(--oct-ground-fade);
 }
 
 .app-backdrop__characters,
