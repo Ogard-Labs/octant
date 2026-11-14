@@ -15325,6 +15325,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   agent key; each tool runs in process as a paired-device principal whose
   device id is the grant's own scope id, after a guard that admits only the
   routes the tools use inside the grant, so every device clamp applies too.
+  An MCP client on the host's own computer may hold such a grant too, joined
+  and confirmed the same way: the loopback server serves it the same `mcp`
+  route alone, with the same signed proof, through
+  `octant agent mcp --connection <file> --local` (maintainer decision,
+  2026-11-14); loopback adds nothing to the grant.
   It never answers approvals or adds Projects, its threads are journaled as its
   own and marked as outside content, and revoking the grant ends its sessions.
   Settings › Remote access › Agent access administers grants from a local
