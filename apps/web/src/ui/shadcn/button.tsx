@@ -50,7 +50,7 @@ const buttonVariants = cva(
         // A small outlined chip that suggests something to type or pick: a
         // suggestion chip. Quiet until hovered, so a row of them reads as a
         // set rather than a row of calls to action.
-        chip: "border-border bg-transparent text-muted-foreground hover:text-foreground",
+        chip: "border-transparent bg-(--oct-fill-4) text-muted-foreground hover:bg-(--oct-fill-2) hover:text-foreground focus-visible:bg-(--oct-fill-2) focus-visible:text-foreground",
       },
       // Heights are rem so a control grows with the interface size. The root is
       // 13px, not the 16px these steps assume, so the odd steps landed between
@@ -70,13 +70,12 @@ const buttonVariants = cva(
           "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-(--oct-icon-sm)",
       },
     },
-    // A chip is one line on the small button's height (24px at the default
-    // size), so a row of suggestions shares one height with the controls beside
-    // it. Its own padding and height win over the size step.
+    // A chip is one line, 28px at the default size, borderless on a resting
+    // ink fill. Its own padding and height win over the size step.
     compoundVariants: [
       {
         variant: "chip",
-        class: "h-[round(1.846rem,2px)] px-2 py-0 text-xs",
+        class: "h-[round(2.154rem,2px)] px-3 py-0 text-xs",
       },
     ],
     defaultVariants: {
