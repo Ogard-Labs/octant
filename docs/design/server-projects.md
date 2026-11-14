@@ -616,8 +616,8 @@ service stays out of scope
   broker reference. For each act the host resolves it to a handle scoped to
   that target and act; the target names the handle and never sees the value.
   The journal records the reference, never a value or a handle.
-- **Every act is the person's.** Creating, binding, suspending, resuming and
-  destroying are the person's acts at a local window
+- **Every act is the person's.** Creating, binding, refreshing, suspending,
+  resuming and destroying are the person's acts at a local window
   (`/api/cloud-machines`). An agent and a routine are refused `needs-person`
   before any target or broker is asked; a paired device is refused
   `needs-local-window`, as binding a server Project still is.
@@ -632,8 +632,21 @@ service stays out of scope
   provider's decoded answer, or `creation-ended@1` as `refused` (the target
   asserts nothing was created) or `uncertain` (no answer, or one that did not
   decode: a machine may exist, and the person is told to check their
-  account). `project-bound@1`, `state-changed@1` (suspend, resume) and
-  `destroyed@1` follow. The machines are rebuilt from the journal at startup.
+  account). `project-bound@1`, `state-changed@1` (suspend, resume, a destroy
+  the provider is still finishing, or a refresh) and `destroyed@1` follow.
+  The machines are rebuilt from the journal at startup.
+- **In-between states are reconciled, never gated on.** A provider may accept
+  an act and finish it later, answering `suspending`, `resuming` or
+  `destroying` (or `provisioning`, `unknown`). Before a suspend or resume on a
+  machine journaled in such a state, the host asks the target to describe it
+  and journals the answer, then decides; the person may also refresh a
+  machine (`refresh-cloud-machine`). A machine is recorded destroyed only when
+  its provider reports it destroyed or no longer has it; one still
+  `destroying` stays live, counts against the limit of 32 live machines, and
+  is refreshed until it is gone.
+- **The list is bounded.** The view lists every live machine (at most 32)
+  and only the 16 most recent destroyed machines and refused creations; older
+  settled ones stay in the journal.
 - **Binding.** A created machine's endpoint is registered as a server
   (Read-only profile, the person's SSH agent), or the person's existing
   registration at the same address and login is reused, and the Project is

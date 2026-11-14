@@ -21,7 +21,7 @@ export interface CloudMachineRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly service: Pick<
     CloudMachineService,
-    "view" | "create" | "bindProject" | "suspend" | "resume" | "requestDestroy" | "destroy"
+    "view" | "create" | "bindProject" | "refresh" | "suspend" | "resume" | "requestDestroy" | "destroy"
   >;
   readonly now?: () => number;
 }
@@ -135,6 +135,8 @@ function run(
       });
     case "bind-cloud-machine-project":
       return service.bindProject({ machineId: String(command.machineId), principal });
+    case "refresh-cloud-machine":
+      return service.refresh({ machineId: String(command.machineId), principal });
     case "suspend-cloud-machine":
       return service.suspend({ machineId: String(command.machineId), principal });
     case "resume-cloud-machine":

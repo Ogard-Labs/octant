@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CLOUD_MACHINES_AGGREGATE,
   CLOUD_MACHINES_EVENT_NAMES,
+  CloudMachinesView,
+  MAX_SETTLED_CLOUD_MACHINES_SHOWN,
 } from "@octant/contracts/cloud-machines";
+import { Schema } from "effect";
 import type { CloudMachineTarget } from "@octant/plugin-api/cloud-machine-target";
 import { offeredCloudMachineTargets } from "@octant/plugin-host/cloud-machine-targets";
 import { decodeWindowId } from "@octant/contracts";
@@ -401,5 +404,74 @@ describe("machines in the person's cloud account", () => {
         ],
       },
     });
+  });
+
+  it("asks the provider again for a machine it left in between states, and lets the next act through", async () => {
+    const journal = openJournal();
+    const fake = fakeCloudMachineTarget({ transitional: true });
+    const { machines } = host(journal, fake.target);
+    const created = await machines.create({ ...createInput, principal: "local-window" });
+    if (created.kind !== "changed" || created.machine === undefined) throw Error("Expected fixture");
+    const machineId = String(created.machine.id);
+
+    expect(await machines.suspend({ machineId, principal: "local-window" })).toMatchObject({
+      kind: "changed",
+      machine: { state: "suspending" },
+    });
+    // The provider has since finished; the next act reads that before it is gated.
+    expect(await machines.resume({ machineId, principal: "local-window" })).toMatchObject({
+      kind: "changed",
+      machine: { state: "resuming" },
+    });
+    expect(fake.calls.map((call) => call.act)).toEqual(["create", "suspend", "describe", "resume"]);
+
+    // A person's refresh journals what the provider reports, so a restart keeps it.
+    expect(await machines.refresh({ machineId, principal: "local-window" })).toMatchObject({
+      kind: "changed",
+      machine: { state: "running" },
+    });
+    expect(host(journal, fake.target).machines.view().machines).toEqual([
+      expect.objectContaining({ state: "running", lifecycle: "created" }),
+    ]);
+    expect(await machines.refresh({ machineId, principal: "agent" })).toMatchObject({
+      reason: "needs-person",
+    });
+  });
+
+  it("keeps a machine whose destroy is still in progress live until the provider reports it gone", async () => {
+    const journal = openJournal();
+    const fake = fakeCloudMachineTarget({ transitional: true });
+    const { machines } = host(journal, fake.target);
+    const created = await machines.create({ ...createInput, principal: "local-window" });
+    if (created.kind !== "changed" || created.machine === undefined) throw Error("Expected fixture");
+    const machineId = String(created.machine.id);
+    const ask = machines.requestDestroy({ machineId, principal: "local-window" });
+    if (ask.kind !== "confirm") throw Error("Expected a confirmation");
+
+    expect(
+      await machines.destroy({ machineId, confirmation: ask.confirmation, principal: "local-window" }),
+    ).toMatchObject({ kind: "changed", machine: { lifecycle: "created", state: "destroying" } });
+    expect(journaledEventNames(journal)).not.toContain(CLOUD_MACHINES_EVENT_NAMES.destroyed);
+
+    expect(await machines.refresh({ machineId, principal: "local-window" })).toMatchObject({
+      kind: "changed",
+      machine: { lifecycle: "destroyed", state: "destroyed" },
+    });
+    expect(journaledEventNames(journal)).toContain(CLOUD_MACHINES_EVENT_NAMES.destroyed);
+  });
+
+  it("keeps the view within its schema however many creations were refused", async () => {
+    const journal = openJournal();
+    const fake = fakeCloudMachineTarget({ create: "refused" });
+    const { machines } = host(journal, fake.target);
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await machines.create({ ...createInput, name: `Box ${attempt}`, principal: "local-window" });
+    }
+
+    const view = machines.view();
+    expect(() => Schema.decodeUnknownSync(CloudMachinesView)(view)).not.toThrow();
+    expect(view.machines).toHaveLength(MAX_SETTLED_CLOUD_MACHINES_SHOWN);
+    // The most recent settled machines are the ones shown.
+    expect(view.machines.at(-1)).toMatchObject({ name: "Box 39", lifecycle: "creation-refused" });
   });
 });

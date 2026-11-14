@@ -19,6 +19,7 @@ import {
   CloudMachineStateChangedPayload,
   decodeCloudMachineDescription,
   MAX_CLOUD_MACHINES,
+  MAX_SETTLED_CLOUD_MACHINES_SHOWN,
   type CloudMachine,
   type CloudMachineDescription,
   type CloudMachineRecipe,
@@ -66,6 +67,14 @@ const decodeStateChanged = Schema.decodeUnknownSync(CloudMachineStateChangedPayl
 const decodeDestroyed = Schema.decodeUnknownSync(CloudMachineDestroyedPayload);
 
 const REPLAY_BATCH = 500;
+/** States a provider reports while it finishes an act; never a basis for gating the next one. */
+const IN_BETWEEN_STATES: ReadonlySet<string> = new Set([
+  "provisioning",
+  "suspending",
+  "resuming",
+  "destroying",
+  "unknown",
+]);
 const MAX_DETAIL = 512;
 /** Long enough to read the dialog, short enough that a stale one cannot be replayed later. */
 const DESTROY_CONFIRMATION_MS = 5 * 60_000;
@@ -156,7 +165,7 @@ export class CloudMachineService {
       targets: this.#options
         .targets()
         .map(({ targetId, displayName }) => ({ targetId, displayName })),
-      machines: [...this.#machines.values()],
+      machines: shownMachines([...this.#machines.values()]),
     };
   }
 
@@ -186,10 +195,7 @@ export class CloudMachineService {
   }): Promise<CloudMachinesChange> {
     const person = personRefusal(input.principal);
     if (person !== undefined) return person;
-    const live = [...this.#machines.values()].filter(
-      (machine) => machine.lifecycle !== "destroyed" && machine.lifecycle !== "creation-refused",
-    );
-    if (live.length >= MAX_CLOUD_MACHINES) return refused("too-many-machines");
+    if (this.#liveCount() >= MAX_CLOUD_MACHINES) return refused("too-many-machines");
     const target = this.#target(input.targetId);
     if (target === undefined) return refused("target-not-offered");
     const credential = await this.#options.credentialHandle({
@@ -198,6 +204,8 @@ export class CloudMachineService {
       act: "create",
     });
     if (credential === undefined) return refused("credential-unavailable");
+    // Read again: another creation may have filled the limit while the broker answered.
+    if (this.#liveCount() >= MAX_CLOUD_MACHINES) return refused("too-many-machines");
 
     const requested = decodeRequested({
       machine: {
@@ -258,6 +266,10 @@ export class CloudMachineService {
     } finally {
       this.#busy.delete(machineId);
     }
+  }
+
+  #liveCount(): number {
+    return [...this.#machines.values()].filter((machine) => !isSettled(machine)).length;
   }
 
   /** Registers and binds a created machine again, after a binding that was refused. */
@@ -344,17 +356,29 @@ export class CloudMachineService {
     try {
       const answer = await this.#ask(machine, target, providerMachineId, "destroy");
       if (answer.kind === "refused") return answer;
-      // A machine the provider no longer has is gone either way.
-      const state = answer.result.status === "missing" ? "destroyed" : answer.result.machine.state;
-      const payload = {
-        machineId: machine.id,
-        state,
-        observedAt: this.#options.clock(),
-        principal: { kind: "local-window" as const },
-      };
-      if (!this.#record(input.machineId, CLOUD_MACHINES_EVENT_NAMES.destroyed, payload))
-        return refused("unavailable", "The machine was destroyed but could not be recorded.");
-      return { kind: "changed", machine: this.#machines.get(input.machineId) ?? machine };
+      return this.#settle(machine, "destroy", answer.result);
+    } finally {
+      this.#busy.delete(input.machineId);
+    }
+  }
+
+  /**
+   * Asks the provider where a machine stands now and journals its answer.
+   * This is how a machine left in between states (a suspend, resume or
+   * destroy the provider accepted and finishes later) is reconciled; the
+   * same read runs before any act on such a machine.
+   */
+  async refresh(input: {
+    readonly machineId: string;
+    readonly principal: CloudMachinePrincipal;
+  }): Promise<CloudMachinesChange> {
+    const person = personRefusal(input.principal);
+    if (person !== undefined) return person;
+    const ready = this.#ready(input.machineId);
+    if (ready.kind === "refused") return ready;
+    this.#busy.add(input.machineId);
+    try {
+      return await this.#observe(ready.machine, ready.target, ready.providerMachineId);
     } finally {
       this.#busy.delete(input.machineId);
     }
@@ -368,29 +392,73 @@ export class CloudMachineService {
     if (person !== undefined) return person;
     const ready = this.#ready(input.machineId);
     if (ready.kind === "refused") return ready;
-    const { machine, target, providerMachineId } = ready;
-    if (act === "suspend" && machine.state !== "running") return refused("machine-not-running");
-    if (act === "resume" && machine.state !== "suspended") return refused("machine-not-suspended");
+    const { target, providerMachineId } = ready;
     this.#busy.add(input.machineId);
     try {
+      let machine = ready.machine;
+      // A journaled in-between state is only what the provider said when it
+      // accepted the last act. Gating on it would refuse every act forever,
+      // so read where the machine stands first.
+      if (machine.state === undefined || IN_BETWEEN_STATES.has(machine.state)) {
+        const observed = await this.#observe(machine, target, providerMachineId);
+        if (observed.kind === "refused") return observed;
+        const current = this.#machines.get(input.machineId);
+        if (current?.lifecycle !== "created") return observed;
+        machine = current;
+      }
+      if (act === "suspend" && machine.state !== "running") return refused("machine-not-running");
+      if (act === "resume" && machine.state !== "suspended")
+        return refused("machine-not-suspended");
       const answer = await this.#ask(machine, target, providerMachineId, act);
       if (answer.kind === "refused") return answer;
-      if (answer.result.status === "missing") {
-        return refused("provider-failed", "The provider no longer has this machine.");
-      }
-      const payload = {
-        machineId: machine.id,
-        act,
-        state: answer.result.machine.state,
-        observedAt: this.#options.clock(),
-        principal: { kind: "local-window" as const },
-      };
-      if (!this.#record(input.machineId, CLOUD_MACHINES_EVENT_NAMES.stateChanged, payload))
-        return refused("unavailable");
-      return { kind: "changed", machine: this.#machines.get(input.machineId) ?? machine };
+      return this.#settle(machine, act, answer.result);
     } finally {
       this.#busy.delete(input.machineId);
     }
+  }
+
+  async #observe(
+    machine: CloudMachine,
+    target: CloudMachineTarget,
+    providerMachineId: string,
+  ): Promise<CloudMachinesChange> {
+    const answer = await this.#ask(machine, target, providerMachineId, "describe");
+    if (answer.kind === "refused") return answer;
+    return this.#settle(machine, "observe", answer.result);
+  }
+
+  /**
+   * Journals what the provider answered. Only a machine the provider no
+   * longer has, or reports destroyed, is recorded destroyed; one still
+   * `destroying` stays live, counted against the limit and open to refresh,
+   * because the person's account may still be paying for it.
+   */
+  #settle(
+    machine: CloudMachine,
+    act: "suspend" | "resume" | "destroy" | "observe",
+    result:
+      | { readonly status: "missing" }
+      | { readonly status: "accepted"; readonly machine: CloudMachineDescription },
+  ): CloudMachinesChange {
+    const machineId = String(machine.id);
+    const observedAt = this.#options.clock();
+    const principal = { kind: "local-window" as const };
+    if (result.status === "missing" || result.machine.state === "destroyed") {
+      const payload = { machineId: machine.id, state: "destroyed" as const, observedAt, principal };
+      if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.destroyed, payload))
+        return refused("unavailable", "The machine is gone but that could not be recorded.");
+    } else {
+      const payload = {
+        machineId: machine.id,
+        act,
+        state: result.machine.state,
+        observedAt,
+        principal,
+      };
+      if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.stateChanged, payload))
+        return refused("unavailable");
+    }
+    return { kind: "changed", machine: this.#machines.get(machineId) ?? machine };
   }
 
   /** A created machine with no act in flight, and the target that created it, offered now. */
@@ -416,7 +484,7 @@ export class CloudMachineService {
     machine: CloudMachine,
     target: CloudMachineTarget,
     providerMachineId: string,
-    act: "suspend" | "resume" | "destroy",
+    act: "describe" | "suspend" | "resume" | "destroy",
   ): Promise<
     | {
         readonly kind: "answered";
@@ -625,6 +693,22 @@ function personRefusal(
   // server Project it would bind still refuses one, so it is refused here too.
   if (principal === "remote-device") return refused("needs-local-window");
   return undefined;
+}
+
+/** A machine that holds nothing in the person's account any more. */
+function isSettled(machine: CloudMachine): boolean {
+  return machine.lifecycle === "destroyed" || machine.lifecycle === "creation-refused";
+}
+
+/**
+ * Every live machine, which the creation limit bounds, and only the most
+ * recent settled ones: refused creations and destroyed machines accumulate
+ * without limit in the journal, and the view must stay within its schema.
+ */
+function shownMachines(machines: ReadonlyArray<CloudMachine>): ReadonlyArray<CloudMachine> {
+  const settled = machines.filter(isSettled);
+  const shownSettled = new Set(settled.slice(-MAX_SETTLED_CLOUD_MACHINES_SHOWN));
+  return machines.filter((machine) => !isSettled(machine) || shownSettled.has(machine));
 }
 
 function machineIdOf(payload: unknown): string | undefined {

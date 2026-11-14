@@ -33,7 +33,10 @@ export const CLOUD_MACHINES_EVENT_NAMES = {
   destroyed: "cloud-machines.destroyed@1",
 } as const;
 
+/** Machines that may hold something in the person's account at once. */
 export const MAX_CLOUD_MACHINES = 32;
+/** Destroyed machines and refused creations the view still lists, most recent first kept. */
+export const MAX_SETTLED_CLOUD_MACHINES_SHOWN = 16;
 export const MAX_CLOUD_MACHINE_SETUP_SCRIPT_BYTES = 16_384;
 
 const boundedToken = (max: number) =>
@@ -167,7 +170,8 @@ export const CloudMachineProjectBoundPayload = Schema.Struct({
 
 export const CloudMachineStateChangedPayload = Schema.Struct({
   machineId: AggregateId,
-  act: Schema.Literal("suspend", "resume"),
+  /** `destroy` is a destroy the provider is still finishing; `observe` is a refresh. */
+  act: Schema.Literal("suspend", "resume", "destroy", "observe"),
   state: CloudMachineState,
   observedAt: UtcTimestamp,
   principal: localWindow,
@@ -189,7 +193,9 @@ export type CloudMachineTargetEntry = typeof CloudMachineTargetEntry.Type;
 
 export const CloudMachinesView = Schema.Struct({
   targets: Schema.Array(CloudMachineTargetEntry),
-  machines: Schema.Array(CloudMachine).pipe(Schema.maxItems(MAX_CLOUD_MACHINES)),
+  machines: Schema.Array(CloudMachine).pipe(
+    Schema.maxItems(MAX_CLOUD_MACHINES + MAX_SETTLED_CLOUD_MACHINES_SHOWN),
+  ),
 }).annotations(strict);
 export type CloudMachinesView = typeof CloudMachinesView.Type;
 
@@ -206,6 +212,11 @@ export const CloudMachinesCommand = Schema.Union(
   /** Registers and binds the machine again after a binding that was refused. */
   Schema.Struct({
     kind: Schema.Literal("bind-cloud-machine-project"),
+    machineId: AggregateId,
+  }).annotations(strict),
+  /** Reads where the machine stands from its provider and records it. */
+  Schema.Struct({
+    kind: Schema.Literal("refresh-cloud-machine"),
     machineId: AggregateId,
   }).annotations(strict),
   Schema.Struct({
