@@ -8,8 +8,9 @@
  *
  * Nothing fires unseen. A wake-up that came due while the host was down, or
  * while its timer was held back past the grace window, is journaled as
- * missed and waits for the person to run or cancel it. A thread archived,
- * deleted, or purged ends every wake-up it had.
+ * missed and waits for the person to run or cancel it. A thread archived or
+ * deleted ends every wake-up it had; a purged thread's wake-ups leave with
+ * its events, and nothing new is journaled for them.
  */
 import { Schema } from "effect";
 import {
@@ -245,13 +246,25 @@ export class ThreadWakeupService {
     } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
       const purged = decodeThreadRetentionThreadPurged(event.payload);
       if (purged.mode === "work" || purged.mode === "code") {
-        this.#closeThread(purged.mode, String(purged.threadId));
+        this.#forgetThread(purged.mode, String(purged.threadId));
       }
     }
   }
 
   #closeThread(mode: ThreadWakeupMode, threadId: string): void {
     for (const held of this.#waitingIn(mode, threadId)) this.#end(held, "thread-closed", undefined);
+  }
+
+  /**
+   * A purge already removed the thread's wake-up events from the journal, so
+   * its wake-ups are only dropped here: ending one would append a new event
+   * naming the purged thread, which a restart would replay.
+   */
+  #forgetThread(mode: ThreadWakeupMode, threadId: string): void {
+    for (const held of this.#waitingIn(mode, threadId)) {
+      this.#clearTimer(held);
+      this.#held.delete(String(held.wakeup.id));
+    }
   }
 
   async #schedule(

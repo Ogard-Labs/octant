@@ -4371,7 +4371,10 @@ with **Run now** and Cancel, and only the person's Run now starts its turn.
 Bounds: at most 8 waiting wake-ups a thread, a first fire at least a minute
 away (a delayed one held to one minute to one hour, the runtime's own
 range), a recurring one at most every 5 minutes and ending on its own after
-7 days, and a thread archived, deleted, or purged ends every wake-up it had.
+7 days, and a thread archived or deleted ends every wake-up it had. A purge
+takes the thread's wake-ups with the rest of its journal (each
+`thread-wakeup` event names its thread) and journals nothing new for them,
+so no event naming the purged thread is left behind.
 The agent may list and delete only its own thread's. Work and Code outside
 Plan take them; Chat runs Claude in Plan, so a Chat thread is never offered
 the tools, and Plan and single-use sessions are not either. Only a local

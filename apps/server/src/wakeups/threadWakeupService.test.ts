@@ -321,7 +321,7 @@ describe("thread wake-ups", () => {
     ).resolves.toMatchObject({ status: "scheduled" });
   });
 
-  it("clears every wake-up of a thread that is archived", async () => {
+  it("drops a purged thread's wake-ups and journals nothing after the purge", async () => {
     const time = fakeTime();
     const { journal } = openJournal(time.now);
     const code = port();
@@ -349,7 +349,9 @@ describe("thread wake-ups", () => {
     expect(wakeups.list("code", threadId)).toEqual([]);
     await time.advanceTo(START + 60 * 60_000);
     expect(code.startTurn).not.toHaveBeenCalled();
-    expect(journaledChanges(journal)).toEqual(["scheduled", "ended"]);
+    // The purge already took the wake-up's events; ending it would journal
+    // the purged thread's id again.
+    expect(journaledChanges(journal)).toEqual(["scheduled"]);
   });
 
   it("lets the agent delete its own wake-up and end its delayed loop, and nobody else's", async () => {
