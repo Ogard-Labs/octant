@@ -158,17 +158,17 @@ export function useHostReportedGlassRefusal(
  */
 export function glassOffNote(refusal: GlassRefusalReason | null, hostPresent: boolean): string {
   if (!hostPresent) {
-    return "Glass is off because this is a browser window; only the desktop app can show the frosted material.";
+    return "Glass is off because a browser window has no material to frost.";
   }
   switch (refusal) {
     case "unsupported-platform":
-      return "Glass is off because this system cannot draw it; Glass is a macOS material.";
+      return "Glass is off because this system has no window material.";
     case "reduced-transparency":
       return "Glass is off because macOS Reduce transparency is on.";
     case "increased-contrast":
       return "Glass is off because macOS Increase contrast is on.";
     case "thermal-pressure":
-      return "Glass is off because this Mac is under thermal pressure; it returns when the Mac cools.";
+      return "Glass is off because this Mac is under thermal pressure.";
     case null:
       return "Glass is off because the desktop app has not applied it yet.";
   }

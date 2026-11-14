@@ -1140,7 +1140,7 @@ describe("SettingsView", () => {
       within(screen.getByRole("group", { name: "Glass" })).getByRole("button", { name: "Subtle" }),
     ).toHaveAttribute("aria-pressed", "true");
     const note = screen.getByText(
-      "Glass is off because this is a browser window; only the desktop app can show the frosted material.",
+      "Glass is off because a browser window has no material to frost.",
     );
     expect(note).toHaveClass("settings-view__effective-note");
     expect(note).toHaveAttribute("data-visible-when-material", "opaque");
