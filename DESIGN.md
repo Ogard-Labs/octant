@@ -1220,9 +1220,14 @@ narrowest pane's width.
   20% opacity while there is nothing to send, and it grows to 106% on hover (not
   under reduced motion); Stop takes the same round shape.
 - **The row under the box**: 28px, 4px below, no fill or edge, on the box's
-  columns: a 28px leading cell under attach, the Project's name starting where
-  the prompt's text does (44px in), the context ring last under send. Labels
-  12px meta, icons 16px, nothing filled at rest.
+  columns, the context ring last under send. On a start screen it names the
+  Project where the prompt's text starts (44px in). Under a thread's box it
+  holds only how the next message runs: the model, the mode and the ring, plus
+  the outside-content mark at its start while that applies. The thread's
+  Project, branch, folder, pull requests and plan usage live in the Environment
+  panel, and its info and plan proposal are items of the + menu: a full row
+  truncated every label in a thread's column. Labels 12px meta, icons 16px,
+  nothing filled at rest.
 - **The row above the box** (start screens): where the work runs, as quiet
   chips (meta ink, no fill at rest, 24px).
 - **Notices** are never in the box: each is the callout's compact card directly
