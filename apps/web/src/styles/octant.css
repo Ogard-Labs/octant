@@ -235,6 +235,8 @@
 
   --oct-motion-fast: 150ms;
   --oct-motion-base: 200ms;
+  /* The sidebar sliding open or shut, the one motion long enough to be watched. */
+  --oct-motion-panel: 300ms;
   /* Ambient loops, not interaction durations: a spinner turn and the breathing
      dot that says something is live. */
   --oct-motion-spin: 900ms;

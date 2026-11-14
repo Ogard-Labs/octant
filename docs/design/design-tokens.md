@@ -50,7 +50,8 @@ export have the same name and there is no mapping table to maintain:
   `--oct-border`) that point at the roles.
 - One value with one meaning has one token. Motion has `--oct-motion-fast` (150ms, colour
   and overlay entry), `--oct-motion-base` (200ms, geometry) and `--oct-dur-fast` (100ms,
-  an overlay leaving); weight has `--oct-weight-regular`, `-medium`, `-strong` and
+  an overlay leaving), and `--oct-motion-panel` (300ms, on `--oct-ease-panel`, the
+  sidebar's slide); weight has `--oct-weight-regular`, `-medium`, `-strong` and
   `-title`; spacing has `--oct-space-*`. Do not add a second name for a value one of
   these already carries. Tokens that share a value by chance but mean different things
   (a control height and an avatar size, a gutter and a space step) stay separate.

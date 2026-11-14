@@ -319,12 +319,13 @@ html[data-octant-native-host="true"]
 
 .shell.shell-frame.shell--sidebar-collapsed {
   --octant-rendered-sidebar-width: 0px;
-  grid-template-columns: minmax(0, 1fr);
 }
 
-.shell--sidebar-collapsed.shell-frame > .window-chrome,
-.shell--sidebar-collapsed.shell-frame > .workspace-layer {
-  grid-column: 1;
+/* The chrome spans both columns while the sidebar is shut so its leading
+   cluster stays where it is as the stage slides; the stage keeps column 2,
+   whose start is the sidebar's shrinking width. */
+.shell--sidebar-collapsed.shell-frame > .window-chrome {
+  grid-column: 1 / -1;
 }
 
 /* A collapsed sidebar can stay as an icon rail. It keeps the sidebar's
@@ -360,9 +361,11 @@ html[data-octant-native-host="true"]
    frame's two arms visibly differ. */
 .shell.shell-frame.shell--rail-beside {
   --octant-rail-offset: var(--oct-title-rail-h);
-  grid-template-columns:
-    var(--octant-rail-offset) var(--octant-rendered-sidebar-width)
-    minmax(0, 1fr);
+  /* One column for the rail and the sidebar together, so a collapse to the
+     rail keeps the same number of tracks and the stage's column can slide. */
+  grid-template-columns: calc(
+      var(--octant-rail-offset) + var(--octant-rendered-sidebar-width)
+    ) minmax(0, 1fr);
 }
 
 /* Beside the open sidebar the rail stays one narrow icon column in the desktop
@@ -376,13 +379,18 @@ html[data-octant-native-host="true"]
   );
 }
 
+.shell--rail-beside.shell-frame > .sidebar-rail {
+  width: var(--octant-rail-offset);
+}
+
 .shell--rail-beside.shell-frame > .sidebar {
-  grid-column: 2;
+  grid-column: 1;
+  margin-left: var(--octant-rail-offset);
 }
 
 .shell--rail-beside.shell-frame > .window-chrome,
 .shell--rail-beside.shell-frame > .workspace-layer {
-  grid-column: 3;
+  grid-column: 2;
 }
 
 /* The traffic lights sit over the rail, so the sidebar beside it does not
@@ -2225,6 +2233,33 @@ html[data-octant-density="compact"]
    headers and dock tabs keep sitting in the band. The ground lies over the
    stage's paint and under everything else. A narrow window keeps its overlay
    drawer and has no panel. */
+/* Registered so the stage's left edge and corners interpolate as the sidebar
+   slides; an unregistered custom property flips at the first frame and opens a
+   notch at the corner. */
+@property --octant-stage-clip-left {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --octant-stage-corner-left {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --octant-stage-gap-left {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --octant-panel-left {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 @media (min-width: 681px) {
   /* The sheet's stage piece sits at a negative level so the ground can lie
      over it; the shell has to hold that level itself; without a ground the
@@ -2263,12 +2298,46 @@ html[data-octant-density="compact"]
     --octant-panel-left: var(--octant-rail-offset);
   }
 
+  /* The sidebar slides like a Mac sidebar. The stage's corner and clip leave
+     at once when it opens, and arrive only once the slide has landed when it
+     shuts, so no notch shows at the stage's left edge. The title band's drag
+     strip and traffic-light reserve do not take part: they are placed by
+     measured widths, not by this column. */
+  .shell.shell-frame {
+    transition:
+      grid-template-columns var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-gap-left var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-panel-left var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-clip-left var(--oct-motion-fast) var(--oct-ease-standard),
+      --octant-stage-corner-left var(--oct-motion-fast) var(--oct-ease-standard);
+  }
+
+  html[data-octant-reduced-motion="true"] .shell.shell-frame,
+  html[data-octant-reduced-motion="true"] .shell.shell-frame.shell--sidebar-collapsed {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shell.shell-frame,
+    .shell.shell-frame.shell--sidebar-collapsed {
+      transition: none;
+    }
+  }
+
   /* Without the sidebar the stage is the panel's left side, so it takes the
      outline's inset and its rounded corners, and keeps the gap from the
      window's edge (beside the rail, the rail is that gap). */
   .shell--sidebar-collapsed.shell-frame {
     --octant-stage-clip-left: 1px;
     --octant-stage-corner-left: calc(var(--oct-radius-md) - 1px);
+    transition:
+      grid-template-columns var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-gap-left var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-panel-left var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-clip-left var(--oct-motion-fast) var(--oct-ease-standard)
+        var(--oct-motion-base),
+      --octant-stage-corner-left var(--oct-motion-fast) var(--oct-ease-standard)
+        var(--oct-motion-base);
   }
 
   .shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) {

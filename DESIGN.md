@@ -497,20 +497,20 @@ its fills from the float (`--octant-float-control`, `-hover`, `-pressed`,
 
 ### Motion
 
-| Token                    | Value                                            | Use                                |
-| ------------------------ | ------------------------------------------------ | ---------------------------------- |
-| `--oct-motion-fast`      | 150ms                                            | Feedback; an overlay arriving      |
-| `--oct-motion-base`      | 200ms                                            | Geometry; a switch thumb           |
-| `--oct-dur-fast`         | 100ms                                            | An overlay leaving                 |
-| `--oct-motion-panel`     | 300ms (not built yet)                            | The sidebar sliding open or closed |
-| `--oct-motion-spin`      | 900ms                                            | A spinner turn                     |
-| `--oct-motion-pulse`     | 1.6s                                             | A live dot                         |
-| `--oct-motion-flowing`   | 36s                                              | The Flowing ground's CSS fallback  |
-| `--oct-motion-ground-in` | 1200ms                                           | A drawn ground fading in           |
-| `--oct-ease-standard`    | `ease`                                           | Ordinary transitions               |
-| `--oct-ease-motion`      | `cubic-bezier(0.22, 1, 0.36, 1)`                 | Overlays arriving                  |
-| `--oct-ease-color`       | `cubic-bezier(0.4, 0, 0.2, 1)`                   | Overlays leaving, colour           |
-| `--oct-ease-panel`       | `cubic-bezier(0.32, 0.72, 0, 1)` (not built yet) | The sidebar's slide                |
+| Token                    | Value                            | Use                                |
+| ------------------------ | -------------------------------- | ---------------------------------- |
+| `--oct-motion-fast`      | 150ms                            | Feedback; an overlay arriving      |
+| `--oct-motion-base`      | 200ms                            | Geometry; a switch thumb           |
+| `--oct-dur-fast`         | 100ms                            | An overlay leaving                 |
+| `--oct-motion-panel`     | 300ms                            | The sidebar sliding open or closed |
+| `--oct-motion-spin`      | 900ms                            | A spinner turn                     |
+| `--oct-motion-pulse`     | 1.6s                             | A live dot                         |
+| `--oct-motion-flowing`   | 36s                              | The Flowing ground's CSS fallback  |
+| `--oct-motion-ground-in` | 1200ms                           | A drawn ground fading in           |
+| `--oct-ease-standard`    | `ease`                           | Ordinary transitions               |
+| `--oct-ease-motion`      | `cubic-bezier(0.22, 1, 0.36, 1)` | Overlays arriving                  |
+| `--oct-ease-color`       | `cubic-bezier(0.4, 0, 0.2, 1)`   | Overlays leaving, colour           |
+| `--oct-ease-panel`       | `cubic-bezier(0.32, 0.72, 0, 1)` | The sidebar's slide                |
 
 - **Overlays** (menu, context menu, select, combobox, popover, tooltip, hover
   card, dialog, sheet, their scrims) fade in over 150ms and out over 100ms. A
@@ -716,8 +716,9 @@ outline's corners and the 4px gap from the window's left edge (beside the rail,
 the rail is that gap) and draws no left line. The sidebar slides over
 `--oct-motion-panel` on `--oct-ease-panel`, and the stage's left corners round
 only once the slide has ended (`--oct-motion-fast` after `--oct-motion-base`), so
-no notch opens on the way; reduced motion is immediate. Not built yet: the
-sidebar still collapses at once.
+no notch opens on the way; reduced motion is immediate. Opening, the corners
+leave at once. The title band's drag strip and the traffic-light reserve stay
+where they are through the slide.
 
 **Docks.** The right dock's tiles and the bottom panel are panes inside the
 panel: flat, touching, one line between neighbours, no corner or gap of their

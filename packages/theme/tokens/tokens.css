@@ -323,10 +323,12 @@
   --oct-dur-fast: 0.1s;
   --oct-ease-color: cubic-bezier(0.4, 0, 0.2, 1);
   --oct-ease-motion: cubic-bezier(0.22, 1, 0.36, 1);
+  --oct-ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
   --oct-ease-standard: ease;
   --oct-motion-base: 200ms;
   --oct-motion-fast: 150ms;
   --oct-motion-flowing: 36s;
+  --oct-motion-panel: 300ms;
   --oct-motion-pulse: 1.6s;
   --oct-motion-spin: 900ms;
   /* ── Page layout: containers, gutters, measures, breakpoints and layers ── */

@@ -113,6 +113,8 @@
   --oct-dur-fast: 0.1s;
   --oct-ease-color: cubic-bezier(0.4, 0, 0.2, 1);
   --oct-ease-motion: cubic-bezier(0.22, 1, 0.36, 1);
+  /* A Mac sidebar's slide: quick off the mark, a long soft landing. */
+  --oct-ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
 
   /* ─── accent ────────────────────────────────────────────────────────
      accent-text is a real theme role (contrast target: workspace, bar:
