@@ -223,7 +223,7 @@ button.home-list__row:hover {
   grid-area: glyph;
   width: 16px;
   height: 16px;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
 }
 
 .home-list__skeleton-title {
