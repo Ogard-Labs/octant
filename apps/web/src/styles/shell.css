@@ -112,6 +112,24 @@ html[data-octant-theme-mode="light"] .shell {
   --octant-window-surface: var(--octant-workspace-translucent-strong);
 }
 
+/* Over a ground in the desktop app a card is near opaque even under Glass: a
+   4% ink wash let the field of characters read through the text on it, and the
+   packaged window has no blur to calm it. The card keeps its one step of ink,
+   mixed into the page colour at 94%. */
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  .shell.shell--app-backdrop.shell--material-translucent {
+  --octant-card: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--octant-text-primary) 4%, var(--octant-workspace)) 94%,
+    transparent
+  );
+  --card: var(--octant-card);
+  --octant-outline-rest: var(--octant-card);
+}
+
 /* Thin glass: below the secondary ink's floor the muted role takes the
    secondary ink inside the shell, so meta text keeps 4.5:1 over a light desktop
    behind a thin dark coat. The attribute lists the levels that are thin. */

@@ -225,28 +225,39 @@ on mid-grey glass) and never a blur (the packaged window does not frost
 page content over its native material: a backdrop filter there lays a sharp copy
 under the fill).
 
-| Surface                                                                | Opaque window                                                | Window glass                                    | Reduced transparency / increased contrast                       |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------- | --------------------------------------------------------------- |
-| Rail, band, sidebar, stage, tiles, bottom panel                        | frame ground; pane; sidebar fill                             | clear on the coat                               | opaque                                                          |
-| Card (`--octant-card`, `bg-card`), Code Home cards, approval card      | card colour + hairline                                       | ink 4% + hairline                               | card colour + hairline (strong border under increased contrast) |
-| Settings group                                                         | ink 2% + hairline                                            | ink 2% + hairline                               | ink 2% + hairline                                               |
-| Dock card, Environment card                                            | ink 4% (oklab)                                               | ink 4% (oklab)                                  | same                                                            |
-| Control fill, chip, segmented track                                    | control roles                                                | ink 7%, 11% hover, 15% pressed; chosen ink 12%  | control roles                                                   |
-| Outline button                                                         | rests on the page colour                                     | rests on the card step                          | page colour                                                     |
-| Composer box                                                           | card colour + faint hairline + float shadow                  | ink 7% + faint hairline + float shadow, no blur | card colour                                                     |
-| Person's message (bubble)                                              | card colour, no hairline                                     | ink 4%, no blur                                 | card colour; strong border under increased contrast             |
-| Composer notice card                                                   | callout ground                                               | ink 4% with its tone at 14% over it, no blur    | callout ground                                                  |
-| Menu, popover, select, combobox, hover card, palette, toast, tour card | float at 66% (dark) / 78% (light) over `--octant-float-blur` | float at 96%, no blur                           | opaque float, no blur                                           |
-| Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                     | float at 96%, no blur                           | opaque float                                                    |
-| Tooltip (inverted)                                                     | the ink as a fill                                            | the same                                        | the same                                                        |
+| Surface                                                                | Opaque window                                                                                                        | Window glass                                    | Reduced transparency / increased contrast                       |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| Rail, band, sidebar, stage, tiles, bottom panel                        | frame ground; pane; sidebar fill                                                                                     | clear on the coat                               | opaque                                                          |
+| Card (`--octant-card`, `bg-card`), Code Home cards, approval card      | card colour + hairline                                                                                               | ink 4% + hairline                               | card colour + hairline (strong border under increased contrast) |
+| Settings group                                                         | ink 2% + hairline                                                                                                    | ink 2% + hairline                               | ink 2% + hairline                                               |
+| Dock card, Environment card                                            | ink 4% (oklab)                                                                                                       | ink 4% (oklab)                                  | same                                                            |
+| Control fill, chip, segmented track                                    | control roles                                                                                                        | ink 7%, 11% hover, 15% pressed; chosen ink 12%  | control roles                                                   |
+| Outline button                                                         | rests on the page colour                                                                                             | rests on the card step                          | page colour                                                     |
+| Composer box                                                           | card colour + faint hairline + float shadow                                                                          | ink 7% + faint hairline + float shadow, no blur | card colour                                                     |
+| Person's message (bubble)                                              | card colour, no hairline                                                                                             | ink 4%, no blur                                 | card colour; strong border under increased contrast             |
+| Composer notice card                                                   | callout ground                                                                                                       | ink 4% with its tone at 14% over it, no blur    | callout ground                                                  |
+| Menu, popover, select, combobox, hover card, palette, toast, tour card | float at 66% (dark) / 78% (light) over `--octant-float-blur` in a browser; float at 96%, no blur, in the desktop app | float at 96%, no blur                           | opaque float, no blur                                           |
+| Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                                                                             | float at 96%, no blur                           | opaque float                                                    |
+| Tooltip (inverted)                                                     | the ink as a fill                                                                                                    | the same                                        | the same                                                        |
 
 - **Why floats are dense on glass.** A frosted menu works over an opaque
   window because the blur hides the page under it. On a translucent window it
   cannot, so at 66% the text behind a menu would read through it. At 96% the
   menu's own text holds 5.9:1 (secondary, dark) over a white desktop.
+- **Text never sits on a fill that only a blur makes readable.** The desktop
+  app's window is transparent on macOS and its renderer draws no backdrop filter
+  there, with Glass on or off
+  (`html[data-octant-native-host="true"]`). In the desktop app every float
+  (menu, popover, select, combobox, hover card, palette, toast, notice, tour
+  card, dialog, the Settings sheet) is the dense 96% float with no blur whether
+  Glass is on or off, and a surface that sits over the application ground (the
+  composer box, a person's message, a glass card, Zen's windows and bars) is the
+  float colour at 96% with no tint image and no blur; a card over the ground
+  under Glass is its card colour at 94%. A browser keeps the frosted fills,
+  where the blur is drawn over an opaque page.
 - **Blur stays** where a surface has an opaque page under it: floats on an
   opaque window, the composer, bubbles and notice cards over the application
-  ground on an opaque window, Zen's windows and bars, the activity
+  ground in a browser, Zen's windows and bars in a browser, the activity
   picture-in-picture and the phone's glass. Each keeps the glass floor
   (`--oct-glass-floor`, the page colour at 66%) under its tint, so a photograph
   never carries body text alone.
@@ -1093,15 +1104,17 @@ and two quiet rows, at the reading measure; in a split every composer takes the
 narrowest pane's width.
 
 - **The box** is the one resting surface that floats: the frosted float fill
-  with its blur on an opaque window and the control wash (ink 7%) under glass,
+  with its blur in a browser, the float colour at 96% with no blur in the desktop
+  app, and the control wash (ink 7%) under glass in a browser,
   one faint outline (`--oct-border-faint`, ink 5%), `--oct-shadow-float`. At one
   row it is a full pill 44px tall (`data-shape="pill"`); once the prompt grows
   past one line, or a queue or chips stand above it, it takes `--oct-radius-lg`
   and the prompt takes the full width on top with the controls in one row along
   the bottom: attach at the leading edge, the microphone and send at the
   trailing edge. A grown box returns to a pill only when the prompt is empty, so
-  the wider layout cannot flip it back and forth. Over an application ground on
-  an opaque window it is the glass surface (floor, thick tint, blur).
+  the wider layout cannot flip it back and forth. Over an application ground in
+  a browser it is the glass surface (floor, thick tint, blur); in the desktop app
+  it is the float colour at 96%.
 - **Inside**: attach, the frameless prompt, then the microphone and send at the
   trailing edge. They are round 28px buttons (`--oct-composer-cell`), 8px
   (`--oct-composer-inset`) from the box's edge, the one place a control is a

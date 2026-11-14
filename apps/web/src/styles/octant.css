@@ -7001,6 +7001,28 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   }
 }
 
+/* In the desktop app a surface that sits over the application ground is near
+   opaque, with or without Glass. The packaged window is transparent and its
+   renderer does not draw a backdrop filter there, so the glass material's
+   floor and tint (66% and 56%) or an ink wash showed the field of characters
+   through the composer, a person's message and a glass card, and typed text sat
+   on a fill only a blur could have made readable. The fill is the float's own
+   colour at 96%, no tint image and no blur. A browser keeps the material above,
+   which works over its opaque page. */
+html[data-octant-native-host="true"]
+  :is(
+    .shell--app-backdrop
+      :is(.turn-user .bubble, .thread-composer__surface, .composer:not(.composer--carded)),
+    .zen-el,
+    .zen-bar,
+    .zen-pill,
+    [data-slot="card"][data-variant="glass"]
+  ) {
+  background: color-mix(in srgb, var(--octant-float) 96%, transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 /* ══════════════════════════════════════════════════════════════════════
    AGENT RUNS
 
