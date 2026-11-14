@@ -1,6 +1,6 @@
 import type { TodoClient } from "@octant/client-runtime/todo-client";
 import type { TodoCommand, TodoListView, TodoRefused } from "@octant/contracts/todos";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 
 export type TodoListRead =
@@ -35,15 +35,46 @@ export function useTodoList(
   client: TodoClient | undefined,
   /** The host's to-do change count; a new value reads the list again. */
   revision?: number,
+  where?: {
+    /** Names the list host; a new one is a different list, read from nothing. */
+    readonly key: string;
+    /**
+     * Set while the list host cannot be reached: the last list read stays on
+     * screen with this reason, and no change is sent.
+     */
+    readonly unreachable?: string;
+  },
 ): TodoList {
   const [read, setRead] = useState<TodoListRead>({ status: "loading" });
+  const key = where?.key;
+  const unreachable = where?.unreachable;
+  const shownKey = useRef(key);
+  // Bumped with each list host, so an answer from the previous one is dropped.
+  const generation = useRef(0);
+  if (shownKey.current !== key) {
+    generation.current += 1;
+    // Render-time reset: the list of the previous host must not be drawn,
+    // even for one frame, under the new one.
+    shownKey.current = key;
+    setRead({ status: "loading" });
+  }
+  useEffect(() => {
+    if (unreachable === undefined) return;
+    setRead((current) =>
+      current.status === "loading"
+        ? { status: "failed", message: unreachable }
+        : current.status === "ready"
+          ? { status: "failed", message: unreachable, view: current.view }
+          : { ...current, message: unreachable },
+    );
+  }, [unreachable, key]);
   // A read that started before a change answered must not put the older list
   // back: each change's answer is the list as the host left it.
   const changes = useRef(0);
 
   const refresh = useCallback(
     async (signal: AbortSignal) => {
-      if (client === undefined) return;
+      if (client === undefined || unreachable !== undefined) return;
       const before = changes.current;
       try {
         const view = await client.read(signal);
@@ -60,15 +91,21 @@ export function useTodoList(
         );
       }
     },
-    [client],
+    [client, unreachable],
   );
   useVisibleRefresh(refresh, revision, REREAD_MS);
 
   const change = useCallback(
     async (command: TodoCommand): Promise<TodoChangeOutcome> => {
-      if (client === undefined) return { status: "failed", message: "To-dos are not available." };
+      if (client === undefined || unreachable !== undefined) {
+        return { status: "failed", message: unreachable ?? "To-dos are not available." };
+      }
+      const sentTo = generation.current;
       try {
         const result = await client.change(command);
+        if (generation.current !== sentTo) {
+          return { status: "failed", message: "The list moved while this change was sent." };
+        }
         if (result.kind === "todo-refused") {
           if (result.reason === "changed-elsewhere") {
             // The answer to a stale edit is the list as it is now.
@@ -83,7 +120,7 @@ export function useTodoList(
         return { status: "failed", message: messageOf(error, "The to-do could not be saved.") };
       }
     },
-    [client, refresh],
+    [client, refresh, unreachable],
   );
 
   return useMemo(() => ({ read, change }), [read, change]);

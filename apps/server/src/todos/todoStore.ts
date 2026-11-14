@@ -2,6 +2,15 @@ import type { EventActor, EventEnvelope, UtcTimestamp } from "@octant/contracts"
 import type { StableHostId } from "@octant/contracts/remote-access";
 import {
   TODO_AGGREGATE_TYPE,
+  TODO_LIST_HOST_AGGREGATE_ID,
+  TODO_LIST_HOST_AGGREGATE_TYPE,
+  TODO_LIST_HOST_CHOSEN,
+  TodoListHostChosen,
+  decodeTodoListHostResult,
+  type TodoListHostChoice,
+  type TodoListHostCommand,
+  type TodoListHostResult,
+  type TodoListHostView,
   TODO_CREATED,
   TODO_DELETED,
   TODO_EDITED,
@@ -43,6 +52,7 @@ const decodeTagsSet = Schema.decodeUnknownSync(TodoTagsSet);
 const decodeOrderChanged = Schema.decodeUnknownSync(TodoOrderChanged);
 const decodeThreadLinked = Schema.decodeUnknownSync(TodoThreadLinked);
 const decodeDeleted = Schema.decodeUnknownSync(TodoDeleted);
+const decodeListHostChosen = Schema.decodeUnknownSync(TodoListHostChosen);
 
 export function registerTodoEvents(registry: EventRegistry): EventRegistry {
   return registry
@@ -53,7 +63,8 @@ export function registerTodoEvents(registry: EventRegistry): EventRegistry {
     .register(TODO_TAGS_SET, 1, TodoTagsSet)
     .register(TODO_ORDER_CHANGED, 1, TodoOrderChanged)
     .register(TODO_THREAD_LINKED, 1, TodoThreadLinked)
-    .register(TODO_DELETED, 1, TodoDeleted);
+    .register(TODO_DELETED, 1, TodoDeleted)
+    .register(TODO_LIST_HOST_CHOSEN, 1, TodoListHostChosen);
 }
 
 /** A journaled row read back as the to-do event it holds; undefined for another kind of row. */
@@ -101,12 +112,24 @@ export class TodoStore {
   readonly #dependencies: TodoStoreDependencies;
   readonly #todos = new Map<string, TodoRecord>();
   readonly #deleted = new Set<string>();
+  #listHost: { readonly choice: TodoListHostChoice; readonly version: number } = {
+    choice: { kind: "this-host" },
+    version: 0,
+  };
 
   constructor(dependencies: TodoStoreDependencies) {
     this.#dependencies = dependencies;
     for (const envelope of replayAggregateTypesInOrder(dependencies.journal, [
       TODO_AGGREGATE_TYPE,
+      TODO_LIST_HOST_AGGREGATE_TYPE,
     ])) {
+      if (envelope.eventName === TODO_LIST_HOST_CHOSEN) {
+        this.#listHost = {
+          choice: decodeListHostChosen(envelope.payload).choice,
+          version: envelope.aggregateVersion,
+        };
+        continue;
+      }
       const event = todoEventOf(envelope);
       if (event === undefined) continue;
       this.#apply(event, {
@@ -124,7 +147,81 @@ export class TodoStore {
     };
   }
 
+  listHost(): TodoListHostView {
+    return {
+      kind: "todo-list-host",
+      thisHostId: this.#dependencies.hostId(),
+      choice: this.#listHost.choice,
+      ownListEmpty: this.#todos.size === 0,
+    };
+  }
+
+  /**
+   * The list moves to another host only while this one holds none: moving a
+   * list's to-dos is later work, and a choice that hid them would read as
+   * losing them. Coming back to this host is always allowed.
+   */
+  chooseListHost(command: TodoListHostCommand, actor: EventActor): TodoListHostResult {
+    const { choice } = command;
+    if (choice.kind === "other-host") {
+      if (String(choice.hostId) === String(this.#dependencies.hostId())) {
+        return decodeTodoListHostResult({
+          kind: "todo-refused",
+          reason: "malformed",
+          message: "That is this computer.",
+        });
+      }
+      if (this.#todos.size > 0) {
+        return decodeTodoListHostResult({
+          kind: "todo-refused",
+          reason: "list-not-empty",
+          message:
+            "This computer already keeps to-dos, so the list stays here. Delete them first to keep the list on another computer.",
+        });
+      }
+    }
+    const current = this.#listHost.choice;
+    const unchanged =
+      current.kind === choice.kind &&
+      (choice.kind === "this-host" ||
+        (current.kind === "other-host" &&
+          String(current.hostId) === String(choice.hostId) &&
+          current.name === choice.name));
+    if (unchanged) return this.listHost();
+    const appended = this.#dependencies.journal.append({
+      aggregate: {
+        aggregateType: TODO_LIST_HOST_AGGREGATE_TYPE,
+        aggregateId: TODO_LIST_HOST_AGGREGATE_ID,
+      },
+      expectedVersion: this.#listHost.version,
+      events: [
+        {
+          eventId: this.#dependencies.uuid(),
+          eventName: TODO_LIST_HOST_CHOSEN,
+          eventVersion: 1,
+          correlationId: this.#dependencies.uuid(),
+          actor,
+          occurredAt: this.#dependencies.clock(),
+          payload: { choice },
+        },
+      ],
+    });
+    this.#listHost = { choice, version: appended.aggregateVersion };
+    return this.listHost();
+  }
+
   change(command: TodoCommand, actor: EventActor): TodoResult {
+    // A list kept elsewhere is changed there. A to-do added here, by a stale
+    // window or a phone paired with this host, would sit in a list nobody is
+    // shown, and would lock the choice that hid it.
+    const keptOn = this.#listHost.choice;
+    if (keptOn.kind === "other-host") {
+      return decodeTodoResult({
+        kind: "todo-refused",
+        reason: "kept-elsewhere",
+        message: `${keptOn.name} keeps the to-do list, so it is changed there.`,
+      });
+    }
     const decision = decideTodoCommand({ todos: this.#todos, deleted: this.#deleted }, command);
     if (decision.kind === "refused") {
       return decodeTodoResult({

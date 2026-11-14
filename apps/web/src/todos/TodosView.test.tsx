@@ -337,3 +337,92 @@ describe("a change made elsewhere", () => {
     expect(await screen.findByRole("checkbox", { name: "Added on the phone" })).toBeVisible();
   });
 });
+
+describe("a list host that cannot be reached", () => {
+  it("shows the last list read-only, keeps a quick add on this device, and sends it on request", async () => {
+    globalThis.localStorage.clear();
+    const user = userEvent.setup();
+    const host = fakeHost();
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Already there" });
+    function Unreachable(props: { readonly away: boolean }) {
+      const list = useTodoList(host.client, undefined, {
+        key: "other-host:studio",
+        ...(props.away ? { unreachable: "Studio Mac cannot be reached." } : {}),
+      });
+      return (
+        <TodosView list={list} onClose={() => undefined} projects={[]} readOnly={props.away} />
+      );
+    }
+    const view = render(<Unreachable away={false} />);
+    await screen.findByRole("checkbox", { name: "Already there" });
+
+    view.rerender(<Unreachable away />);
+    expect(await screen.findByText(/^Studio Mac cannot be reached\./)).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "Already there" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Actions for Already there" })).toBeNull();
+
+    await user.type(screen.getByRole("textbox", { name: "New to-do" }), "Call the bank{Enter}");
+    const held = screen.getByRole("region", { name: "Not sent" });
+    expect(within(held).getByText("Call the bank")).toBeVisible();
+    expect(within(held).getByRole("button", { name: "Send Call the bank" })).toBeDisabled();
+    expect(host.view().todos.map((todo) => todo.title)).toEqual(["Already there"]);
+
+    view.rerender(<Unreachable away={false} />);
+    await user.click(within(held).getByRole("button", { name: "Send Call the bank" }));
+    expect(await screen.findByRole("checkbox", { name: "Call the bank" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Not sent" })).toBeNull();
+    expect(host.view().todos.map((todo) => todo.title)).toEqual(["Call the bank", "Already there"]);
+  });
+
+  it("draws nothing of the previous host's list after the list moves", async () => {
+    const first = fakeHost();
+    first.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "On this computer" });
+    const second = fakeHost();
+    second.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "On the hub" });
+    function Moving(props: { readonly onHub: boolean }) {
+      const list = useTodoList(props.onHub ? second.client : first.client, undefined, {
+        key: props.onHub ? "other-host:hub" : "this-host",
+      });
+      return <TodosView list={list} onClose={() => undefined} projects={[]} />;
+    }
+    const view = render(<Moving onHub={false} />);
+    await screen.findByRole("checkbox", { name: "On this computer" });
+    view.rerender(<Moving onHub />);
+    expect(screen.queryByRole("checkbox", { name: "On this computer" })).toBeNull();
+    expect(await screen.findByRole("checkbox", { name: "On the hub" })).toBeVisible();
+  });
+});
+
+describe("unsent drafts", () => {
+  it("belong to the list host they were written for", async () => {
+    globalThis.localStorage.clear();
+    const user = userEvent.setup();
+    const host = fakeHost();
+    function Held(props: { readonly listKey: string }) {
+      const list = useTodoList(host.client, undefined, {
+        key: props.listKey,
+        unreachable: "That computer cannot be reached.",
+      });
+      return (
+        <TodosView
+          list={list}
+          listKey={props.listKey}
+          onClose={() => undefined}
+          projects={[]}
+          readOnly
+        />
+      );
+    }
+    const view = render(<Held listKey="other-host:studio" />);
+    await user.type(
+      await screen.findByRole("textbox", { name: "New to-do" }),
+      "For the studio{Enter}",
+    );
+    expect(screen.getByRole("region", { name: "Not sent" })).toBeVisible();
+
+    view.rerender(<Held listKey="other-host:hub" />);
+    expect(screen.queryByRole("region", { name: "Not sent" })).toBeNull();
+    view.rerender(<Held listKey="other-host:studio" />);
+    expect(await screen.findByText("For the studio")).toBeVisible();
+  });
+});

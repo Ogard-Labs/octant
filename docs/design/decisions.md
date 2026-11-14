@@ -3475,11 +3475,11 @@ Status: Designed, not built. Since: 2026-11-08. Detail: [Bots](bots.md).
 
 A person keeps their own to-dos in one list that every device and computer they connected shows, tags each to Projects and their own tags, filters them, and starts a thread from one when ready.
 
-- The list lives on one list host: the hub when the host belongs to one, otherwise the host itself, or a paired computer the person names; only that host journals to-dos and projects them. Built: the list on one host. Not built yet: choosing the list host and reaching a list on another host.
+- The list lives on one list host: the hub when the host belongs to one, otherwise the host itself, or a paired computer the person names; only that host journals to-dos and projects them. Built: the list on one host, choosing the list host in Settings › To-dos (journaled on this host, refused once it keeps a to-do), and a window reaching a list on a paired computer, read-only with unsent drafts while it cannot be reached. Not built yet: the hub as the default list host.
 - A local window and the person's paired devices may change the list; agents, routines, delegated runs and peer hosts are refused.
 - Edits to the title or notes are version-checked and refused as changed elsewhere when stale; there is no merge. An unreachable list host shows a stale, read-only list, and quick add keeps an unsent draft the person sends; nothing is queued as offline work.
 - A to-do's Project and thread links carry no authority. Starting opens that Project's ordinary new-thread draft on its own host, whose checks decide; the mode follows the Project; nothing starts until the person sends. Built for this host's Projects and Chat; Start into another host's Project is not built yet.
 - Only the person ticks a to-do off; an agent never changes a to-do.
-- The destination and every name in code and copy are To-dos, never Tasks. Built: the To-dos page on one host, with quick add, filters, editing in place, reordering, the sidebar row and its badge, and New to-do in the command palette and on a shortcut. Start, the thread state on a row, and live updates to the list host's own windows are built too. Not built yet: reaching the list from other hosts, and the phone screen.
+- The destination and every name in code and copy are To-dos, never Tasks. Built: the To-dos page on one host, with quick add, filters, editing in place, reordering, the sidebar row and its badge, and New to-do in the command palette and on a shortcut. Start, the thread state on a row, and live updates to the list host's own windows are built too. Not built yet: live updates to windows on other computers, and the phone screen.
 
 Status: Partly built. Since: 2026-11-14. Detail: [To-dos](todos.md).
