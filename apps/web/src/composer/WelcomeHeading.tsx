@@ -4,6 +4,9 @@ import "./welcome-heading.css";
 /** The start screen's question, shared by every mode's welcome. */
 export const WELCOME_QUESTION = "What are we building today?";
 
+/** The start screen's question when a Project is chosen; the name follows. */
+const WELCOME_PROJECT_LEAD = "What should we work on in ";
+
 /**
  * The mark above the question: the Octant aperture from the icon sprite. It is
  * drawn in the text ink, so it follows the theme without a colour of its own.
@@ -30,11 +33,32 @@ function OctantMark() {
  * and hands the rest of the page to the composer. Renders into the caller's
  * heading grid.
  */
-export function WelcomeHeading(props: { readonly projectChosen?: boolean }) {
+export function WelcomeHeading(props: {
+  readonly projectChosen?: boolean;
+  /** The chosen Project's display name; the question then names it. */
+  readonly projectName?: string;
+}) {
+  const projectName = props.projectName?.trim();
   return (
     <Fragment>
       <OctantMark />
-      <h1 className="oct-title oct-title--hero welcome__question">{WELCOME_QUESTION}</h1>
+      {projectName === undefined || projectName === "" ? (
+        <h1 className="oct-title oct-title--hero welcome__question">{WELCOME_QUESTION}</h1>
+      ) : (
+        // One line always, so choosing another Project changes the words in
+        // place and nothing below the heading moves. A long name gives way
+        // to an ellipsis; the full name stays in the title.
+        <h1
+          aria-label={`${WELCOME_PROJECT_LEAD}${projectName}?`}
+          className="oct-title oct-title--hero welcome__question welcome__question--project"
+        >
+          <span className="welcome__question-lead">{WELCOME_PROJECT_LEAD}</span>
+          <span className="welcome__project" title={projectName}>
+            {projectName}
+          </span>
+          <span className="welcome__question-tail">?</span>
+        </h1>
+      )}
       {/* With a Project already chosen, asking for one reads as if the choice
           did not take. */}
       <p className="oct-row-detail welcome__status">

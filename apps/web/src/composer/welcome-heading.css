@@ -12,6 +12,35 @@
   line-height: calc(30 * var(--oct-text-step));
 }
 
+/* With a Project named the question stays on one line: the words before and
+   after the name keep their size and the name alone gives way to an ellipsis,
+   so a long name never makes the heading taller and nothing below moves. */
+.oct-title.oct-title--hero.welcome__question.welcome__question--project {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  max-width: min(100%, 52ch);
+  white-space: pre;
+}
+
+/* The heading grid sizes its column to the widest child; a one-line question
+   would then widen it past the page instead of letting the name truncate. */
+.welcome__heading:has(.welcome__question--project) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.welcome__question-lead,
+.welcome__question-tail {
+  flex: none;
+}
+
+.welcome__project {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The mark sits two pixels nearer the question than the heading's usual gap. */
 svg.welcome__mark {
   margin-bottom: calc(var(--oct-space-2) - 2px);

@@ -1255,7 +1255,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     <section aria-label={`New ${presentation.eyebrow} thread`} className="draft-thread">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <WelcomeHeading />
+          <WelcomeHeading
+            {...(selectedProjectName === undefined
+              ? {}
+              : { projectChosen: true, projectName: selectedProjectName })}
+          />
         </div>
         <div className="draft-thread__composer composer-stack">
           <ThreadComposer

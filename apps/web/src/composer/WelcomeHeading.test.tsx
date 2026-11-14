@@ -18,6 +18,35 @@ describe("WelcomeHeading", () => {
     expect(screen.queryByText(/Pick a Project/)).toBeNull();
   });
 
+  it("asks the general question when no Project is chosen", () => {
+    render(<WelcomeHeading projectName="   " />);
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+  });
+
+  it("names the chosen Project in the question and keeps the full name available", () => {
+    render(<WelcomeHeading projectChosen projectName="Octant" />);
+    expect(
+      screen.getByRole("heading", { name: "What should we work on in Octant?" }),
+    ).toBeVisible();
+    expect(screen.getByTitle("Octant")).toHaveTextContent("Octant");
+    expect(screen.queryByText("What are we building today?")).toBeNull();
+  });
+
+  it("keeps a very long Project name whole in the markup so CSS can truncate it to one line", () => {
+    const name = "A very long Project name that would never fit on the one line of the question";
+    render(<WelcomeHeading projectChosen projectName={name} />);
+    expect(screen.getByTitle(name)).toHaveTextContent(name);
+    expect(screen.getByRole("heading")).toHaveClass("welcome__question--project");
+  });
+
+  it("changes the words in place when another Project is chosen", () => {
+    const { rerender } = render(<WelcomeHeading projectChosen projectName="One" />);
+    const heading = screen.getByRole("heading");
+    rerender(<WelcomeHeading projectChosen projectName="Two" />);
+    expect(screen.getByRole("heading")).toBe(heading);
+    expect(heading).toHaveTextContent("What should we work on in Two?");
+  });
+
   it("draws the aperture mark at 22px above the question", () => {
     const { container } = render(<WelcomeHeading />);
     const mark = container.querySelector("svg.welcome__mark");

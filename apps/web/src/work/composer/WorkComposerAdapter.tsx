@@ -354,7 +354,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     <section aria-label="New task" className="work-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading projectChosen={props.projectId !== undefined} />
+          <WelcomeHeading
+            projectChosen={props.projectId !== undefined}
+            {...(props.projectId !== undefined && props.projectName !== undefined
+              ? { projectName: props.projectName }
+              : {})}
+          />
         </div>
         <div className="composer-stack">
           <ThreadComposer

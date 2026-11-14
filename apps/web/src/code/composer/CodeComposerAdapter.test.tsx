@@ -196,7 +196,7 @@ describe("CodeComposerAdapter", () => {
 
   it("renders composer with project and branch context", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toMatch(/What are we building today\?/);
+    expect(html).toContain("What should we work on in ");
     expect(html).not.toContain("What should we build");
     expect(html).toContain("My Repo");
     expect(html).toContain("development");
@@ -287,11 +287,13 @@ describe("CodeComposerAdapter", () => {
 
   it("shows a caller's decision heading in place of the start screen's question", () => {
     const { rerender } = render(<CodeComposerAdapter {...defaultProps} />);
-    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "What should we work on in My Repo?" }),
+    ).toBeVisible();
     rerender(<CodeComposerAdapter {...defaultProps} heading={<h2>Review the proposal</h2>} />);
     expect(screen.getByRole("heading", { name: "Review the proposal" })).toBeVisible();
     expect(
-      screen.queryByRole("heading", { name: "What are we building today?" }),
+      screen.queryByRole("heading", { name: "What should we work on in My Repo?" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/just start typing/)).not.toBeInTheDocument();
   });
@@ -309,7 +311,9 @@ describe("CodeComposerAdapter", () => {
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     const row = container.querySelector(".composer-row");
-    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "What should we work on in My Repo?" }),
+    ).toBeVisible();
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
     if (frame === null || dock === null || row === null) {

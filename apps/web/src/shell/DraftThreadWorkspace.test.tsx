@@ -331,7 +331,9 @@ describe("DraftThreadWorkspace", () => {
           projects={projects}
         />,
       );
-      expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+      expect(
+        screen.getByRole("heading", { name: /^What should we work on in .+\?$/ }),
+      ).toBeVisible();
       expect(screen.getByRole("textbox", { name: /message|prompt|describe/i })).toBeVisible();
       expect(screen.queryByRole("group", { name: "Quick actions" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Add a folder|Open terminal/ })).toBeNull();
@@ -615,7 +617,10 @@ describe("DraftThreadWorkspace", () => {
         approvalLabel="Approval gated"
       />,
     );
-    expect(screen.getByText("my-repo")).toBeVisible();
+    expect(screen.getAllByText("my-repo").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("heading", { name: "What should we work on in my-repo?" }),
+    ).toBeVisible();
     // The branch context now lives on the branch selector trigger.
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
     expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName("Mode: Ask first");
