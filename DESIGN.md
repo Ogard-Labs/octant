@@ -304,7 +304,7 @@ the body.
 | ---------------- | --------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Hero             | 26 (20 phone)   | 400    | 30px    | primary     | `oct-title--hero`: the welcome question only                                                                              |
 | Title            | 28              | 700    | 1.15    | primary     | `oct-title`: a page about one thing (a Project, a thread under review)                                                    |
-| Page title       | 14              | 600    | 1.35    | primary     | `oct-page-title`: every destination and Settings page toolbar; its one line of state sits on the baseline, 13px secondary |
+| Page title       | 26              | 600    | 1.15    | primary     | `oct-page-title`: every destination and Settings page, tracking -0.025em; its one line of state sits on the baseline, 13px secondary |
 | Dialog title     | 17              | 600    | 1.35    | primary     | `.octant-dialog__title`; a part of a dialog 15 / 600                                                                      |
 | Reply heading    | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####`, 24px above, 12px below                                                                            |
 | Section label    | 14              | 600    | 1.3     | secondary   | `oct-section-label`                                                                                                       |
@@ -330,7 +330,7 @@ the body.
   `--oct-weight-strong` (section labels, card titles, page and dialog titles),
   700 `--oct-weight-title` (the large title only).
 - **Tracking**: `--oct-tracking-tight` -0.025em (title, display and dialog
-  titles), `--oct-tracking-snug` -0.01em (page title, section labels), none on
+  and page titles), `--oct-tracking-snug` -0.01em (section labels), none on
   body, `--oct-tracking-wide` 0.06em on mono meta.
 - **Leadings**: `--oct-leading-label` 1.35, `-meta` 1.4, `-detail` 1.45,
   `-snug` 1.3, `-heading` 1.14, `-tight` 1.1, `-body` 1.5, `-reading` 1.6,
@@ -1162,9 +1162,9 @@ Surface (measure 880px, or wide)
   SurfaceLoading  the page in outline
 ```
 
-- The header is a window toolbar in the page title role; a destination that
-  opens a day (Inbox) uses the display title with its detail beside it on the
-  same baseline, in the detail role.
+- The header is the page title role, the large one (26px, 600), on every
+  destination, with its detail beside it on the same baseline in the detail
+  role (13px, secondary). The page starts 24-32px under the window controls.
   Detail is a fact that changes (a count, a time zone), never a sentence about
   the page.
 - At rest the header has no fill; once a row passes beneath it takes the opaque

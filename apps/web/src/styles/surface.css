@@ -48,18 +48,20 @@
   line-height: 1.1;
 }
 
-/* The section labels' size and tracking in primary ink: one step above them.
-   Destinations and Settings share it, so the two page heads cannot drift. A
-   thread's title in the title band is a name in navigation, not a page title. */
+/* The page title is the large one: the display size (26, the start screen's
+   question size), the strong weight and a slight negative tracking, so a page
+   opens as a place. Destinations and Settings share it, so the two page heads
+   cannot drift. A thread's title in the title band is a name in navigation,
+   not a page title. */
 .oct-page-title {
   margin: 0;
   overflow: hidden;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-2xl);
   font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: var(--oct-leading-label);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -168,7 +170,7 @@
 .surface__inner {
   width: min(100% - var(--oct-surface-gutter) * 2, var(--oct-surface-measure));
   min-width: 0;
-  padding: 0 0 64px;
+  padding: var(--oct-space-6) 0 64px;
   margin: 0 auto;
 }
 
@@ -250,9 +252,9 @@
   gap: 0 var(--oct-space-2);
 }
 
-/* Every destination page opens on one header: the page title at its small
-   role, and the one line of state on its baseline as a subtitle in the
-   secondary ink at the detail role. Inbox and Projects read alike. */
+/* Every destination page opens on one header: the large page title, and the
+   one line of state on its baseline as a subtitle in the secondary ink at the
+   detail role. Inbox and Projects read alike. */
 .surface-header__detail {
   overflow: hidden;
   color: var(--oct-fg-2);

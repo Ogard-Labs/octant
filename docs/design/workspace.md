@@ -850,8 +850,8 @@ wording, and reads are specified in [Start screen](start-screen.md).
 The Inbox opens as a few flat cards in one readable column, not as sections
 under rules.
 
-- **Title line.** "Inbox" as a display title (`--oct-text-2xl` at the strong weight, a modifier on the page title), and on
-  its baseline, in the meta ink, one sentence of state in the person's locale:
+- **Title line.** "Inbox" in the page title role (`--oct-text-2xl` at the strong weight, shared by every destination), and on
+  its baseline, in the secondary ink, one sentence of state in the person's locale:
   today's date and what waits ("Nothing is waiting on you.", "1 thread is
   waiting on you.", "3 threads are waiting on you."), with the urgent count when
   there is one. There is no greeting by time of day and no separate count line.

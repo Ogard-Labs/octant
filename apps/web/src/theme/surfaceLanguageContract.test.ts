@@ -78,8 +78,9 @@ describe("surface language", () => {
   it("gives destinations and Settings one page title", () => {
     const surface = read("styles/surface.css");
     const title = surface.match(/\.oct-page-title \{[^}]*\}/)?.[0] ?? "";
-    expect(title).toContain("font-size: var(--oct-text-sm);");
+    expect(title).toContain("font-size: var(--oct-text-2xl);");
     expect(title).toContain("font-weight: var(--oct-weight-strong);");
+    expect(title).toContain("letter-spacing: var(--oct-tracking-tight);");
     expect(read("surface/SurfaceHeader.tsx")).toContain('className="oct-page-title"');
     expect(read("shell/SettingsView.tsx")).toContain('<h1 className="oct-page-title"');
   });
