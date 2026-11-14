@@ -1030,7 +1030,7 @@ float follows [Translucency](#translucency).
   (`--octant-float-glass`, frosted on an opaque window and dense with no blur on
   glass), `--oct-radius-lg`, one 1px `--oct-border-faint` outline, 8px by 12px
   padding, 8px by 12px gaps, 13px primary ink, title 500. The tone is one
-  property, `--callout-tone`: a 16px icon on a 24px round dot of the tone at 15%
+  property, `--callout-tone`: a 16px icon on a 24px round dot of the tone at 20%
   and nothing else, so no tone tints the fill or the edge. A second part of the
   message (a reset time) is the secondary ink (`.callout__second`); the action is
   a small secondary button at the trailing edge. A notice above the composer and

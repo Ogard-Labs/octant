@@ -572,6 +572,10 @@ describe("the public-block visual language", () => {
     expect(card).toMatch(/outline:\s*1px solid var\(--oct-border-faint\)/);
     expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
     expect(card).toMatch(/flex-wrap:\s*wrap/);
+    // The card stays neutral; its tone is the icon in the full tone on a 20% dot.
+    expect(/\n\.callout > svg\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
+      /background:\s*color-mix\(in oklab, var\(--callout-tone\) 20%, transparent\)[^}]*color:\s*var\(--callout-tone\)/,
+    );
     // One soft float shadow and a short rise on entry (200ms), none under reduced motion.
     expect(group).toMatch(/justify-items:\s*start/);
     expect(floating).toMatch(/width:\s*fit-content/);

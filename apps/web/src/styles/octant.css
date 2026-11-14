@@ -1029,7 +1029,7 @@ html {
    A notice is a small floating glass card, not a tinted box: the float's fill
    (the frosted one on an opaque window, the dense one with no blur on window
    glass), the float's corner, one faint hairline and a compact 8px by 12px
-   inside. Its tone is a 16px icon on a small round dot of that tone at 15% and
+   inside. Its tone is a 16px icon on a small round dot of that tone at 20% and
    nothing else: no tinted fill and no coloured edge, for any tone, so a warning
    or an error reads as part of the interface and not as a generic alert box.
    The words are the primary ink; a second part (a reset time) is secondary.
@@ -1068,7 +1068,7 @@ html {
   gap: var(--oct-space-1);
   margin-inline-start: auto;
 }
-/* The tone's icon: 16px on a 24px round dot of the tone at 15%. A neutral
+/* The tone's icon: 16px on a 24px round dot of the tone at 20%. A neutral
    notice states a fact, so its dot is the neutral ink; only a tone that means
    something takes its text role, and the icon shape pairs with the hue so the
    colour is never the only signal. */
@@ -1077,7 +1077,7 @@ html {
   flex: 0 0 auto;
   padding: var(--oct-space-1);
   border-radius: var(--oct-radius-pill);
-  background: color-mix(in oklab, var(--callout-tone) 15%, transparent);
+  background: color-mix(in oklab, var(--callout-tone) 20%, transparent);
   color: var(--callout-tone);
 }
 .callout .callout-title {
