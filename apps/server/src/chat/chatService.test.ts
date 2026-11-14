@@ -2881,7 +2881,9 @@ describe("ChatService", () => {
   });
 
   it("creates a thread, uploads an attachment, sends a turn, and confines provider access to scratch", async () => {
-    const { service, fakeDriver, dataDirectory, contextHarness } = openFixture({ probe: searxngResearchProbe() });
+    const { service, fakeDriver, dataDirectory, contextHarness } = openFixture({
+      probe: searxngResearchProbe(),
+    });
     const planSpy = vi.spyOn(contextHarness, "planTurn");
     const userProjectRoot = join(dataDirectory, "user-project-root");
     mkdtempSync(userProjectRoot);
@@ -3266,7 +3268,10 @@ describe("ChatService", () => {
         execute: vi.fn(async () => ({ result: { status: "built" } })),
       },
     }));
-    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext, probe: searxngResearchProbe() });
+    const { service, fakeDriver } = openFixture({
+      resolveExtensionSelectionContext,
+      probe: searxngResearchProbe(),
+    });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
