@@ -19,7 +19,8 @@ import {
   Redo2,
   Square,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -310,6 +311,78 @@ function sameLines(left: ReadonlyArray<number>, right: ReadonlyArray<number>): b
   return left.length === right.length && left.every((line, index) => line === right[index]);
 }
 
+const FRAME_VIRTUALIZATION_THRESHOLD = 40;
+const FRAME_ROW_ESTIMATE = 28;
+
+/**
+ * The host asks the adapter for up to 200 frames, and a deep recursion fills
+ * them all; past the threshold only the rows in view are mounted. The selected
+ * frame stays mounted so its `aria-current` and focus survive scrolling, and
+ * each row states its place so assistive technology still hears the length.
+ */
+function FrameList(props: {
+  readonly frames: ReadonlyArray<CodeDebugStackFrame>;
+  readonly selectedFrameId: number | undefined;
+  readonly renderFrame: (frame: CodeDebugStackFrame) => ReactNode;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const virtualized = props.frames.length > FRAME_VIRTUALIZATION_THRESHOLD;
+  const virtualizer = useVirtualizer({
+    count: virtualized ? props.frames.length : 0,
+    estimateSize: () => FRAME_ROW_ESTIMATE,
+    getItemKey: (index) => String(props.frames[index]?.id ?? index),
+    getScrollElement: () => listRef.current,
+    overscan: 8,
+    rangeExtractor: (range) => {
+      const indexes = defaultRangeExtractor(range);
+      const selected = props.frames.findIndex((frame) => frame.id === props.selectedFrameId);
+      return selected < 0 || indexes.includes(selected)
+        ? indexes
+        : [...indexes, selected].sort((left, right) => left - right);
+    },
+  });
+  if (!virtualized) {
+    return (
+      <ol className="run-debug__frames">
+        {props.frames.map((frame) => (
+          <li key={frame.id}>{props.renderFrame(frame)}</li>
+        ))}
+      </ol>
+    );
+  }
+  return (
+    <div className="run-debug__frames-scroll" ref={listRef}>
+      <ol
+        className="run-debug__frames"
+        style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+      >
+        {virtualizer.getVirtualItems().map((item) => {
+          const frame = props.frames[item.index];
+          if (frame === undefined) return null;
+          return (
+            <li
+              aria-posinset={item.index + 1}
+              aria-setsize={props.frames.length}
+              data-index={item.index}
+              key={item.key}
+              ref={virtualizer.measureElement}
+              style={{
+                left: 0,
+                position: "absolute",
+                top: 0,
+                transform: `translateY(${String(item.start)}px)`,
+                width: "100%",
+              }}
+            >
+              {props.renderFrame(frame)}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function CallStack(props: {
   readonly view: SessionView;
   readonly controls: DebugSessionControls;
@@ -329,35 +402,35 @@ function CallStack(props: {
           {props.stopped ? "The adapter named no frames." : "Shown when the program pauses."}
         </p>
       ) : (
-        <ol className="run-debug__frames">
-          {frames.map((frame) => (
-            <li key={frame.id}>
-              <OctantButton
-                aria-current={frame.id === props.view.selectedFrameId ? "true" : undefined}
-                className="run-debug__frame"
-                onClick={() => {
-                  props.controls.selectFrame(frame.id);
-                  const location = frame.location;
-                  if (location.kind === "checkout") {
-                    props.onShowLocation(location.path, location.line);
-                  } else if (
-                    location.kind === "outside-checkout" &&
-                    location.sourceReference !== undefined
-                  ) {
-                    void props.controls.source(location.sourceReference).then((text) => {
-                      if (text !== undefined) setSource({ title: frame.name, text });
-                    });
-                  }
-                }}
-                type="button"
-                variant="bare"
-              >
-                <span className="run-debug__frame-name">{frame.name}</span>
-                <span className="run-debug__frame-place">{framePlace(frame)}</span>
-              </OctantButton>
-            </li>
-          ))}
-        </ol>
+        <FrameList
+          frames={frames}
+          renderFrame={(frame) => (
+            <OctantButton
+              aria-current={frame.id === props.view.selectedFrameId ? "true" : undefined}
+              className="run-debug__frame"
+              onClick={() => {
+                props.controls.selectFrame(frame.id);
+                const location = frame.location;
+                if (location.kind === "checkout") {
+                  props.onShowLocation(location.path, location.line);
+                } else if (
+                  location.kind === "outside-checkout" &&
+                  location.sourceReference !== undefined
+                ) {
+                  void props.controls.source(location.sourceReference).then((text) => {
+                    if (text !== undefined) setSource({ title: frame.name, text });
+                  });
+                }
+              }}
+              type="button"
+              variant="bare"
+            >
+              <span className="run-debug__frame-name">{frame.name}</span>
+              <span className="run-debug__frame-place">{framePlace(frame)}</span>
+            </OctantButton>
+          )}
+          selectedFrameId={props.view.selectedFrameId}
+        />
       )}
       {props.view.framesTruncated ? (
         <p className="run-debug__empty">More frames are not shown.</p>

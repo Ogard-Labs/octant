@@ -554,7 +554,11 @@ silently clipped.
 
 A new-task composer keeps its identity while its Project binding changes.
 Message text and local input state reset only for an explicit New task action.
-A refused binding keeps the prior authorized Project and draft. Cross-Project
+A refused binding keeps the prior authorized Project and draft. A new Chat's
+first-run composer stages chosen or captured files as removable chips before the
+thread exists; they upload to the thread once it is created and leave with the
+first message, as a Work draft's images do, and the server's attachment checks
+apply to them unchanged. Cross-Project
 notices appear once beside the active draft composer, with a separate-window
 action when available, as one of the composer's notice cards above the box. A note that stays until
 the person acts is a card too; only a state its surface marks as passing is the

@@ -491,3 +491,10 @@
 .code-debug-stopped-line {
   background: color-mix(in oklab, var(--oct-warn) 24%, transparent);
 }
+
+/* A deep stack is virtualized, so it scrolls in its own box rather than
+   stretching the panel by up to 200 rows. */
+.run-debug__frames-scroll {
+  max-height: 24rem;
+  overflow-y: auto;
+}

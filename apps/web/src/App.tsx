@@ -99,8 +99,10 @@ import { useStableActions } from "./app/useStableActions";
 import { WindowChromeContainer } from "./app/WindowChromeContainer";
 import { ZenContainer } from "./app/ZenContainer";
 import {
+  decodeChatAttachmentId,
   decodeChatThreadId,
   decodeChatTurnId,
+  type ChatAttachmentId,
   type ChatThreadId,
   type ChatTurnId,
 } from "@octant/contracts/chat";
@@ -6311,6 +6313,7 @@ function LaunchedShell(
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     paneId?: PaneId,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
+    attachments?: ReadonlyArray<File>,
   ) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
@@ -6328,6 +6331,7 @@ function LaunchedShell(
       undefined,
       undefined,
       undefined,
+      attachments,
       undefined,
       undefined,
       undefined,
@@ -7082,8 +7086,23 @@ function LaunchedShell(
         const draftExtensionSelections =
           extensionSelections ?? (computerUseSelection === undefined ? [] : [computerUseSelection]);
         try {
+          // Files staged on the welcome composer upload to the thread that now
+          // exists, then leave with the first message, as a Work draft's images do.
+          const attachmentIds: ChatAttachmentId[] = [];
+          for (const file of images ?? []) {
+            const attachmentId = decodeChatAttachmentId(globalThis.crypto.randomUUID());
+            await chatController.upload({
+              threadId: thread.id,
+              attachmentId,
+              displayName: pastedImageName(file),
+              mediaType: file.type,
+              bytes: new Uint8Array(await file.arrayBuffer()),
+            });
+            attachmentIds.push(attachmentId);
+          }
           const sent = await chatController.execute({
             kind: "send-chat-turn",
+            ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
             ...(draftExtensionSelections.length === 0
               ? {}
               : { extensionSelections: draftExtensionSelections }),

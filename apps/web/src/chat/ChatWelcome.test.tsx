@@ -220,20 +220,32 @@ describe("ChatWelcome", () => {
     expect(onCreateChat).not.toHaveBeenCalled();
   });
 
-  it("keeps the attach control reachable and explains that attachments come after the chat starts", async () => {
+  it("stages a file before the chat exists and sends it with the first message", async () => {
     const user = userEvent.setup();
     const onCreateChat = vi.fn();
     render(<ChatWelcome onCreateChat={onCreateChat} />);
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
 
-    await user.click(screen.getByRole("button", { name: "Add attachment" }));
+    await user.upload(screen.getByLabelText("Choose attachment file"), file);
+    expect(screen.getByRole("list", { name: "Attachments" })).toHaveTextContent("notes.txt");
 
-    expect(await screen.findByText("Attachments can be added once the chat starts.")).toBeVisible();
-    expect(
-      screen
-        .getByText("Attachments can be added once the chat starts.")
-        .closest(".composer-notices"),
-    ).not.toBeNull();
-    expect(onCreateChat).not.toHaveBeenCalled();
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Summarize{Enter}");
+
+    expect(onCreateChat).toHaveBeenCalledWith("Summarize", undefined, undefined, [file]);
+    expect(screen.queryByRole("list", { name: "Attachments" })).toBeNull();
+  });
+
+  it("drops a staged file the person removes before sending", async () => {
+    const user = userEvent.setup();
+    const onCreateChat = vi.fn();
+    render(<ChatWelcome onCreateChat={onCreateChat} />);
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+
+    await user.upload(screen.getByLabelText("Choose attachment file"), file);
+    await user.click(screen.getByRole("button", { name: "Remove notes.txt attachment" }));
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Hello{Enter}");
+
+    expect(onCreateChat).toHaveBeenCalledWith("Hello");
   });
 
   it("disables creation and surfaces a retry path while Chat is disconnected", async () => {

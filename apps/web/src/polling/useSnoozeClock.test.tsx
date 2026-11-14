@@ -26,8 +26,6 @@ describe("useSnoozeClock", () => {
     act(() => {
       vi.advanceTimersByTime(160 * 60_000 + 1_000);
     });
-    expect(result.current.getTime()).toBeGreaterThanOrEqual(
-      Date.parse("2026-09-07T13:00:00.000Z"),
-    );
+    expect(result.current.getTime()).toBeGreaterThanOrEqual(Date.parse("2026-09-07T13:00:00.000Z"));
   });
 });

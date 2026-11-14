@@ -2392,6 +2392,7 @@ A new window, its background and its drafts behave predictably.
 - A photo ground comes from the host's background image library (8 MiB, 4096x4096, PNG, JPEG or WebP). The host refuses to delete a photo while it is showing, and ground settings are kept across kinds. _Here only._
 - While an everywhere background covers the sidebar, the sidebar's own background is not drawn and its controls are disabled with a note; saved sidebar values are kept. _Here only._
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
+- A new Chat's first-run composer stages attachments before the thread exists and sends them with the first message.
 - If first-turn startup fails after the task opens, the provisional prompt is withdrawn and its text returns to the composer with the refusal reason. _Here only._
 
 Status: Built. Since: —. Detail: [Workspace: Right dock and bottom panel](workspace.md#right-dock-and-bottom-panel), [Application ground](application-ground.md), [DESIGN.md: Depth and material](../../DESIGN.md#depth-and-material), [Composer row](../../DESIGN.md#composer-row) and [Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).

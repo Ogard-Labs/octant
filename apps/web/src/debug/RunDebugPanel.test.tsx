@@ -75,6 +75,8 @@ function fakeHost(
     readonly children?: boolean;
     /** Holds the program's stack reads until it settles. */
     readonly programStackGate?: Promise<void>;
+    /** Frames below the program's two, as a deep recursion reports. */
+    readonly deepStack?: number;
   } = {},
 ) {
   let approved = false;
@@ -152,6 +154,11 @@ function fakeHost(
               name: "node:internal",
               location: { kind: "outside-checkout", label: "elsewhere" },
             },
+            ...Array.from({ length: options.deepStack ?? 0 }, (_, index) => ({
+              id: 100 + index,
+              name: `recurse ${String(index)}`,
+              location: { kind: "outside-checkout" as const, label: "elsewhere" },
+            })),
           ],
           truncated: false,
         });
@@ -747,6 +754,28 @@ describe("Run and debug panel", () => {
     expect(within(processes).queryByRole("button", { name: /Subprocess 4242/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
     expect(screen.queryByText("You stopped the session.")).toBeNull();
+  });
+
+  it("mounts only part of a deep call stack and keeps the selected frame current and reachable", async () => {
+    const user = userEvent.setup();
+    const store = new CodeDebugWindowState();
+    const { client } = fakeHost({ deepStack: 150 });
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    render(
+      <RunDebugPanel
+        checkoutId={checkoutId}
+        client={client}
+        pollMs={fast}
+        store={store}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+    const stack = await screen.findByRole("region", { name: "Call stack" });
+    const selected = await within(stack).findByRole("button", { current: true });
+    expect(selected).toHaveTextContent("main");
+    expect(within(stack).getAllByRole("listitem").length).toBeLessThan(152);
+    expect(selected.closest("li")).toHaveAttribute("aria-setsize", "152");
   });
 
   it("keeps a selected child's stop when the program's slower stack read answers after the switch", async () => {

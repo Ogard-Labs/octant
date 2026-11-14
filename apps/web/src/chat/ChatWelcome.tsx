@@ -10,6 +10,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
+import { pastedImageName } from "./composerImagePaste";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
@@ -292,41 +293,51 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             }
             chips={
               extensionDraft.receipts.length > 0 || stagedFiles.length > 0 ? (
-                <ul aria-label="Selected extensions" className="composer-chips">
-                  {stagedFiles.map((file, index) => (
-                    <li className="chip" key={`${file.name}-${index}`}>
-                      <span>{pastedImageName(file)}</span>
-                      <OctantButton
-                        aria-label={`Remove ${pastedImageName(file)} attachment`}
-                        className="chip-x window-no-drag"
-                        onClick={() =>
-                          setStagedFiles((current) => current.filter((staged) => staged !== file))
-                        }
-                        type="button"
-                        variant="bare"
-                      >
-                        ×
-                      </OctantButton>
-                    </li>
-                  ))}
-                  {extensionDraft.receipts.map((receipt) => (
-                    <li className="chip" key={receipt.reference}>
-                      <span>{receipt.label}</span>
-                      {receipt.status.kind === "blocked" ? (
-                        <span>{`Blocked: ${receipt.status.reason}`}</span>
-                      ) : null}
-                      <OctantButton
-                        aria-label={`Remove ${receipt.label} extension`}
-                        className="chip-x window-no-drag"
-                        onClick={() => extensionDraft.remove(receipt.reference)}
-                        type="button"
-                        variant="bare"
-                      >
-                        ×
-                      </OctantButton>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  {stagedFiles.length === 0 ? null : (
+                    <ul aria-label="Attachments" className="composer-chips">
+                      {stagedFiles.map((file, index) => (
+                        <li className="chip" key={`${file.name}-${index}`}>
+                          <span>{pastedImageName(file)}</span>
+                          <OctantButton
+                            aria-label={`Remove ${pastedImageName(file)} attachment`}
+                            className="chip-x window-no-drag"
+                            onClick={() =>
+                              setStagedFiles((current) =>
+                                current.filter((staged) => staged !== file),
+                              )
+                            }
+                            type="button"
+                            variant="bare"
+                          >
+                            ×
+                          </OctantButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {extensionDraft.receipts.length === 0 ? null : (
+                    <ul aria-label="Selected extensions" className="composer-chips">
+                      {extensionDraft.receipts.map((receipt) => (
+                        <li className="chip" key={receipt.reference}>
+                          <span>{receipt.label}</span>
+                          {receipt.status.kind === "blocked" ? (
+                            <span>{`Blocked: ${receipt.status.reason}`}</span>
+                          ) : null}
+                          <OctantButton
+                            aria-label={`Remove ${receipt.label} extension`}
+                            className="chip-x window-no-drag"
+                            onClick={() => extensionDraft.remove(receipt.reference)}
+                            type="button"
+                            variant="bare"
+                          >
+                            ×
+                          </OctantButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               ) : undefined
             }
             typeahead={
