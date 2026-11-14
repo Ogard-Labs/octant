@@ -2454,7 +2454,7 @@ The Usage page reports what was measured and shows each provider with a bundled 
 - Local provider history and Octant records are separate sources; their totals are never added.
 - Unknown prices and missing quota measurements are unavailable, never zero. A period change cancels the previous read and cannot render a late result.
 - Provider logos are locally bundled and licensed, never fetched at runtime, and never drawn approximately. Unknown providers get a truthful fallback.
-- Interface icons use four sizes (12, 14, 16, 20) and one stroke (1.5), set once for the app; a contract test refuses any other.
+- Interface icons use four sizes (12, 14, 16, 20) and come from one module (`apps/web/src/ui/icons`) backed by Phosphor, whose weight follows the size: regular up to 16, light from 20, bold for a tick inside a filled mark, fill for a selected state. A maintainer chose the family on 2026-11-14; call sites move to the module in a separate sweep, and until then the previous family's one stroke (1.5) draws them. A contract test refuses any other size.
 
 Status: Built. Since: —. Detail: [Settings: Usage](settings.md#usage) and [DESIGN.md: Icons](../../DESIGN.md#icons).
 
