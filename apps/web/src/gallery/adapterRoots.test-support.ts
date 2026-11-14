@@ -91,6 +91,7 @@ export const ADAPTER_ROOTS: Readonly<Record<string, AdapterRoot>> = {
   OctantSelectPositioner: { selector: '[data-slot="select-content"]', portalled: true },
   OctantSelectPopup: { selector: '[data-slot="select-content"]', portalled: true },
   OctantSelectItem: { selector: '[data-slot="select-item"]', portalled: true },
+  OctantCollapsible: { selector: "details.group\\/collapsible" },
   OctantSeparator: { selector: '[data-slot="separator"]' },
   OctantSeparatorWithLabel: { selector: '[data-slot="separator-label"]' },
   OctantSlider: { selector: '[data-slot="slider"]' },
