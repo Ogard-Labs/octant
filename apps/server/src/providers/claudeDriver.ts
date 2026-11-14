@@ -316,7 +316,14 @@ export function claudeExecutionOptions(
 ): ClaudeExecutionOptions {
   // Work and Code share one capability set at the thread's level, so a Work
   // session starts with Bash exactly as a Code session at that level does.
-  const options = claudePolicyOptions(policy, autoApprove);
+  const policyOptions = claudePolicyOptions(policy, autoApprove);
+  // Only Work and Code hold Claude Code's whole built-in set. Chat withholds
+  // the filesystem and shell at every level, so it keeps the earlier list of
+  // tools Octant names one by one rather than every tool a new runtime adds.
+  const options: ClaudeExecutionOptions = {
+    ...policyOptions,
+    fullToolSet: policyOptions.fullToolSet && (mode === "work" || mode === "code"),
+  };
   // A Code Plan turn may run read-only commands where its sandbox can hold the
   // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
   // the sandbox, not a person, is what keeps those commands read-only.

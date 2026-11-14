@@ -473,7 +473,9 @@ decision, 2026-11-14). Because a
 native build may serve searches through its shell, `Grep` and `Glob` are
 also listed in `allowedTools`; the `PreToolUse` hook still answers each call
 first. Plan keeps its explicit list (`Read`, `Glob`, `Grep`, the checklist,
-and `Bash` where its sandbox confines it).
+and `Bash` where its sandbox confines it). Chat keeps the earlier explicit
+list at every level and holds no part of the preset: its filesystem and shell
+stay withheld, so it gains nothing from tools Octant has not named.
 
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a

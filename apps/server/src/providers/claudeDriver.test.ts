@@ -695,7 +695,7 @@ describe("Claude execution policy", () => {
   });
 
   it("maps every Octant policy to the exact Claude permission options", () => {
-    expect(claudeExecutionOptions("full-access")).toEqual({
+    expect(claudeExecutionOptions("full-access", false, "work")).toEqual({
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
@@ -703,7 +703,7 @@ describe("Claude execution policy", () => {
     });
     expect(claudeExecutionOptions("approval-gated", true).permissionMode).toBe("auto");
     expect(claudeExecutionOptions("auto-accept-edits", true).permissionMode).toBe("auto");
-    expect(claudeExecutionOptions("approval-gated")).toEqual({
+    expect(claudeExecutionOptions("approval-gated", false, "code")).toEqual({
       permissionMode: "default",
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
@@ -719,6 +719,21 @@ describe("Claude execution policy", () => {
       expect(claudeExecutionOptions(policy, autoApprove, "work")).toEqual(
         claudeExecutionOptions(policy, autoApprove, "code"),
       );
+    }
+    // Chat keeps the earlier list outside Plan, without the whole built-in set.
+    for (const policy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const chat = claudeExecutionOptions(policy, false, "chat");
+      expect(chat.tools).toEqual([
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "Bash",
+        "AskUserQuestion",
+        "TodoWrite",
+      ]);
+      expect(chat.fullToolSet).toBe(false);
     }
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
@@ -746,6 +761,30 @@ describe("Claude execution policy", () => {
         "Grep",
         "TodoWrite",
       ]);
+    }
+  });
+
+  it("keeps a Chat session on the earlier tool list without Claude Code's whole built-in set", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0]!;
+      expect(open.withheldTools).toBeUndefined();
+      expect(open.tools).toEqual([
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "Bash",
+        "AskUserQuestion",
+        "TodoWrite",
+      ]);
+    } finally {
+      await acquired.close();
     }
   });
 
