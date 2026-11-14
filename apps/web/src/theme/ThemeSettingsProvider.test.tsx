@@ -26,10 +26,10 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-focus")).toBe("#1f6f96");
     expect(root.style.getPropertyValue("--octant-palette-green")).toBe("#41761c");
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe(
-      "color-mix(in srgb, #fafaf9 78%, transparent)",
+      "color-mix(in srgb, #fafaf9 92%, transparent)",
     );
     expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe(
-      "color-mix(in srgb, #ffffff 78%, transparent)",
+      "color-mix(in srgb, #ffffff 92%, transparent)",
     );
 
     result.unmount();
@@ -76,38 +76,35 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-workspace")).toBe("");
   });
 
-  it("lays a chosen glass tint over the whole window at every level, and keeps it readable under increased contrast", () => {
+  it("clamps a chosen glass tint at paint time and marks thin glass for the stylesheet", () => {
     const result = render(
       <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light", glassTint: 20 }}>
         <div>Theme content</div>
       </ThemeSettingsProvider>,
     );
     const root = document.documentElement;
-    for (const level of ["", "-subtle", "-strong"]) {
-      expect(root.style.getPropertyValue(`--octant-sidebar-translucent${level}`)).toBe(
-        "color-mix(in srgb, #fafaf9 20%, transparent)",
-      );
-    }
-    // The window surface is the workspace colour, so the tint lies over it too.
+    // The light floor is 50; the saved 20 is untouched, only the paint is clamped.
     for (const level of ["", "-subtle", "-strong"]) {
       expect(root.style.getPropertyValue(`--octant-workspace-translucent${level}`)).toBe(
-        "color-mix(in srgb, #ffffff 20%, transparent)",
+        "color-mix(in srgb, #ffffff 50%, transparent)",
       );
     }
+    expect(root.dataset.octantGlassThin).toBe("subtle strong");
     result.rerender(
-      <ThemeSettingsProvider
-        settings={{
-          ...DEFAULT_THEME_SETTINGS,
-          mode: "light",
-          glassTint: 20,
-          increasedContrast: true,
-        }}
-      >
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
         <div>Theme content</div>
       </ThemeSettingsProvider>,
     );
-    expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toMatch(/ 80%, /);
+    // Dark Strong (62) is under the secondary floor; dark Subtle (78) is not.
+    expect(root.dataset.octantGlassThin).toBe("strong");
+    result.rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    expect(root.dataset.octantGlassThin).toBeUndefined();
     result.unmount();
+    expect(root.dataset.octantGlassThin).toBeUndefined();
   });
 
   it("publishes accessibility state on the data-octant-* attributes the stylesheets read", () => {

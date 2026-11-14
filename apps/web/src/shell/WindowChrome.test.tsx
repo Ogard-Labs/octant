@@ -802,10 +802,10 @@ describe("WindowChrome", () => {
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
     expect(cssRule(".shell.shell-frame")).toContain("background: var(--octant-window-surface);");
     expect(cssRule(".shell.shell--material-translucent")).toContain(
-      "--octant-window-surface: var(--octant-sidebar-translucent);",
+      "--octant-window-surface: var(--octant-workspace-translucent);",
     );
     expect(cssRule(".shell.shell--material-translucent")).toContain(
-      "--octant-sheet-surface: var(--octant-workspace-translucent);",
+      "--octant-panel-surface: transparent;",
     );
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("overflow: clip;");
     expect(cssRule(".shell.shell-frame--standalone")).toContain("position: fixed;");
@@ -836,9 +836,12 @@ describe("WindowChrome", () => {
     // Opaque unless transparency is allowed; then the ground shows faintly.
     // It takes the sheet's colour, so a thread on a black ground is not a
     // black hole inside the grey sheet.
-    expect(flattened).toContain("--octant-thread-veil: var(--octant-sheet-surface);");
+    // Under Glass the sheet is clear, so the veil is the window's one coat.
     expect(flattened).toContain(
-      "--octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);",
+      "--octant-thread-veil: var(--octant-veil-surface, var(--octant-sheet-surface));",
+    );
+    expect(flattened).toContain(
+      "--octant-thread-veil: color-mix( in srgb, var(--octant-veil-surface, var(--octant-sheet-surface)) 80%, transparent );",
     );
     // The thread's own container stays clear under the veil and under Glass,
     // or it paints a solid slab over both.
@@ -859,7 +862,7 @@ describe("WindowChrome", () => {
     ];
     const flattened = styles.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
     const veiled =
-      /\.shell--app-backdrop\.shell-frame :is\( (\.workspace-pane:not\([^)]*\), \.primary-workspace-layer > :is\([^)]*\)) \) \{ --octant-thread-veil: var\(--octant-sheet-surface\);/.exec(
+      /\.shell--app-backdrop\.shell-frame :is\( (\.workspace-pane:not\([^)]*\), \.primary-workspace-layer > :is\([^)]*\)) \) \{ --octant-thread-veil: var\(--octant-veil-surface, var\(--octant-sheet-surface\)\);/.exec(
         flattened,
       )?.[1] ?? "";
     expect(veiled).toContain(
@@ -870,35 +873,27 @@ describe("WindowChrome", () => {
     }
   });
 
-  it("keeps glass on input surfaces without enclosing agent replies", () => {
+  it("keeps glass on input surfaces over a ground and washes under window glass, without enclosing agent replies", () => {
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\s+/g, " ");
-    const glass =
+    const ground =
       systemStyles.match(
-        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) :is\(\.turn-user \.bubble, \.composer:not\(\.composer--carded\)\) \{([^}]*)\}/,
+        /\.shell--app-backdrop:not\(\.shell--material-translucent\) :is\(\.turn-user \.bubble, \.composer:not\(\.composer--carded\)\) \{([^}]*)\}/,
       )?.[1] ?? "";
     // The floor goes under the tint, as on Zen's cards: without it body text
     // over a white photo falls under 3:1.
-    expect(glass).toContain("background-color: var(--oct-glass-floor);");
-    expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
-    expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // The composer's box is the glass surface, with the glass stroke as its
-    // ring; the frame around it and its rows draws nothing.
-    const surface =
-      systemStyles.match(
-        /html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) \.thread-composer__surface \{([^}]*)\}/,
-      )?.[1] ?? "";
-    expect(surface).toContain("background-color: var(--oct-glass-floor);");
-    expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // The surface's one soft shadow is not repainted by the glass material.
-    expect(surface).not.toContain("box-shadow");
-    expect(surface).not.toContain("--oct-glass-stroke");
+    expect(ground).toContain("background-color: var(--oct-glass-floor);");
+    expect(ground).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
+    expect(ground).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
     expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
-    // Under Window glass the box is a step lighter than the glass around
-    // it: the floor made it the darker of the two.
+    // Under window glass the box is the control wash and the message and notice
+    // are the card wash, none with a blur.
     expect(systemStyles).toMatch(
-      /\.shell--material-translucent \.thread-composer__surface \{ background: var\(--octant-control\); \}/,
+      /\.shell--material-translucent :is\(\.thread-composer__surface, \.composer:not\(\.composer--carded\)\) \{ background: var\(--octant-control\); backdrop-filter: none;/,
+    );
+    expect(systemStyles).toMatch(
+      /\.shell--material-translucent :is\(\.turn-user \.bubble, \.callout\.composer-notice\) \{ background: var\(--octant-card\); backdrop-filter: none;/,
     );
   });
 

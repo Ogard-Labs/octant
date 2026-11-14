@@ -1141,7 +1141,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
         .artifact-library-layer
       )
   ) {
-  --octant-thread-veil: var(--octant-sheet-surface);
+  --octant-thread-veil: var(--octant-veil-surface, var(--octant-sheet-surface));
   background: linear-gradient(
     to bottom,
     transparent var(--oct-title-rail-h),
@@ -1166,7 +1166,11 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
           .artifact-library-layer
         )
     ) {
-    --octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
+    --octant-thread-veil: color-mix(
+      in srgb,
+      var(--octant-veil-surface, var(--octant-sheet-surface)) 80%,
+      transparent
+    );
   }
 }
 

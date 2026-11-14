@@ -1,4 +1,9 @@
-import { GLASS_TINT_DEFAULTS, type ThemeSettings } from "@octant/contracts/theme";
+import {
+  GLASS_TINT_DEFAULTS,
+  GLASS_TINT_FLOOR,
+  GLASS_TINT_SECONDARY_FLOOR,
+  type ThemeSettings,
+} from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import {
   DEFAULT_EDITOR_COLORS,
@@ -49,6 +54,33 @@ const HIGH_CONTRAST_TEXT_ROLES: ReadonlySet<string> = new Set([
   "text-secondary",
   "text-muted",
 ]);
+
+/**
+ * The coat each glass level paints, in percent. A Tint a person chose replaces
+ * both levels and is clamped at paint time to the mode's floor; the saved value
+ * is untouched.
+ */
+function glassCoat(
+  mode: "light" | "dark",
+  tint: number | undefined,
+): { readonly subtle: number; readonly strong: number } {
+  if (tint === undefined) return GLASS_TINT_DEFAULTS[mode];
+  const clamped = Math.max(tint, GLASS_TINT_FLOOR[mode]);
+  return { subtle: clamped, strong: clamped };
+}
+
+/**
+ * The glass levels whose coat is under the secondary-ink floor, as a
+ * space-separated list the stylesheet matches with ~=. Empty when none is.
+ */
+function thinGlassLevels(mode: "light" | "dark", tint: number | undefined): string {
+  const coat = glassCoat(mode, tint);
+  const floor = GLASS_TINT_SECONDARY_FLOOR[mode];
+  const thin: string[] = [];
+  if (coat.subtle < floor) thin.push("subtle");
+  if (coat.strong < floor) thin.push("strong");
+  return thin.join(" ");
+}
 
 const IncreasedContrastContext = createContext<boolean | undefined>(undefined);
 
@@ -162,27 +194,10 @@ export function ThemeSettingsProvider(props: {
           root.style.setProperty(`--octant-${alias}`, color);
         }
         if (role === "sidebar" || role === "workspace") {
-          const defaults = GLASS_TINT_DEFAULTS[resolved.mode];
-          // A tint the person set replaces every level's, for the sidebar's
-          // own picture wash and for the window surface, which is the
-          // workspace colour over the whole window. Increased contrast keeps
-          // enough of the colour under the text.
-          const chosen = accessible.glassTint;
-          const tint =
-            chosen === undefined
-              ? undefined
-              : accessible.increasedContrast
-                ? Math.max(chosen, 80)
-                : chosen;
-          const opacity =
-            tint !== undefined
-              ? { regular: tint, subtle: tint, strong: tint }
-              : resolved.mode === "light"
-                ? { regular: 86, ...defaults }
-                : { regular: 80, ...defaults };
+          const opacity = glassCoat(resolved.mode, accessible.glassTint);
           root.style.setProperty(
             `--octant-${role}-translucent`,
-            `color-mix(in srgb, ${color} ${opacity.regular}%, transparent)`,
+            `color-mix(in srgb, ${color} ${opacity.subtle}%, transparent)`,
           );
           root.style.setProperty(
             `--octant-${role}-translucent-subtle`,
@@ -195,6 +210,9 @@ export function ThemeSettingsProvider(props: {
         }
       }
       root.dataset.octantThemeMode = resolved.mode;
+      const thin = thinGlassLevels(resolved.mode, accessible.glassTint);
+      if (thin === "") delete root.dataset.octantGlassThin;
+      else root.dataset.octantGlassThin = thin;
       if (rememberMode) rememberThemeMode(accessible.mode);
       root.dataset.octantReducedMotion = String(accessible.reducedMotion);
       root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
@@ -228,6 +246,7 @@ export function ThemeSettingsProvider(props: {
       root.style.removeProperty("--octant-workspace-translucent-subtle");
       root.style.removeProperty("--octant-workspace-translucent-strong");
       delete root.dataset.octantThemeMode;
+      delete root.dataset.octantGlassThin;
       delete root.dataset.octantReducedMotion;
       delete root.dataset.octantReducedTransparency;
       delete root.dataset.octantStyle;

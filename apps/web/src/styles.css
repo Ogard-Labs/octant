@@ -259,6 +259,20 @@ html[data-octant-theme-mode="light"] {
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
 }
 
+/* Floats on window glass are dense. The host's word that glass is on already
+   folds in system reduced transparency, high contrast and thermals. The packaged
+   window's material is not re-blurred, so a menu at 66% would show the thread's
+   sharp text through a third of it; a blur cannot hide that. An opaque window
+   keeps the frosted float, which works over its opaque page. Declared after the
+   dark and light blocks so it wins in both. */
+html[data-octant-host-vibrancy="active"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  ) {
+  --octant-float-glass: color-mix(in srgb, var(--octant-float) 96%, transparent);
+  --octant-float-blur: none;
+}
+
 /* Every Octant-owned scroll surface inherits one quiet, visible scrollbar.
    Feature panels may change geometry, but not silently fall back to browser
    chrome or hide the only pointer affordance.

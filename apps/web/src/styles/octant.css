@@ -6876,18 +6876,22 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   outline-offset: -1px;
 }
 
-/* Input surfaces retain the glass material over the application ground,
-   and under window Glass with no ground too, so the
-   composer is one material whichever of the two a window shows. Under Glass
-   alone it was the opaque card colour, a black slab on an OLED preset.
-   Replies share the quiet conversation ground; adding glass to each one would
-   bring back the repeated card silhouettes. The floor protects input text
-   over bright photos. Reduced transparency and engines without the filter
-   keep the ordinary opaque paints. */
+/* Input surfaces over the application ground on an opaque window keep the glass
+   material: a floor, a thick tint and a blur, so typed text never sits on a
+   photo. Under window glass they are ink washes with no blur (the composer 7%,
+   a person's message and a notice card 4%): the packaged window's material is
+   not re-blurred, so a blur there lays a second copy of the coat under the
+   surface and the wash is what reads as raised. Replies share the quiet
+   conversation ground; glass on each one would bring back the repeated card
+   silhouettes. Reduced transparency, increased contrast and engines without the
+   filter keep the ordinary opaque paints. */
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   @media (prefers-reduced-transparency: no-preference) {
-    html:not([data-octant-reduced-transparency="true"])
-      :is(.shell--app-backdrop, .shell--material-translucent)
+    html:not(
+        [data-octant-reduced-transparency="true"],
+        [data-octant-increased-contrast="true"]
+      )
+      .shell--app-backdrop:not(.shell--material-translucent)
       :is(.turn-user .bubble, .composer:not(.composer--carded)) {
       border-color: var(--oct-glass-stroke);
       background-color: var(--oct-glass-floor);
@@ -6895,30 +6899,54 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
     }
-    /* The composer draws no border, so a stroke colour alone never showed and
-       the glass had no edge. Its stroke is an inset ring, which also keeps the
-       ring inside the rounded corners and out of layout. */
-    html:not([data-octant-reduced-transparency="true"])
-      :is(.shell--app-backdrop, .shell--material-translucent)
+    html:not(
+        [data-octant-reduced-transparency="true"],
+        [data-octant-increased-contrast="true"]
+      )
+      .shell--app-backdrop:not(.shell--material-translucent)
       .composer:not(.composer--carded) {
       box-shadow: none;
     }
-    /* Over a ground or under Glass the box is the glass surface: floor,
-       thick tint, blur, and the glass stroke as its ring. The opaque border
-       is near black there and drew a dark outline around the box. */
-    html:not([data-octant-reduced-transparency="true"])
-      :is(.shell--app-backdrop, .shell--material-translucent)
+    /* Over a ground the box is the glass surface: floor, thick tint, blur. */
+    html:not(
+        [data-octant-reduced-transparency="true"],
+        [data-octant-increased-contrast="true"]
+      )
+      .shell--app-backdrop:not(.shell--material-translucent)
       .thread-composer__surface {
       background-color: var(--oct-glass-floor);
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
     }
-    /* The notice card above the box is the same glass: an opaque callout
-       ground beside a translucent box read as a block. A tone is its tint
-       laid over the thick glass, so the card keeps the callout's colours. */
-    html:not([data-octant-reduced-transparency="true"])
-      :is(.shell--app-backdrop, .shell--material-translucent)
+    /* Under window glass: washes, no blur. */
+    html:not(
+        [data-octant-reduced-transparency="true"],
+        [data-octant-increased-contrast="true"]
+      )
+      .shell--material-translucent
+      :is(.thread-composer__surface, .composer:not(.composer--carded)) {
+      background: var(--octant-control);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    html:not(
+        [data-octant-reduced-transparency="true"],
+        [data-octant-increased-contrast="true"]
+      )
+      .shell--material-translucent
+      :is(.turn-user .bubble, .callout.composer-notice) {
+      background: var(--octant-card);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    /* The notice card above the box over a ground on an opaque window is the
+       same glass: an opaque callout beside a translucent box read as a block. */
+    html:not(
+        [data-octant-reduced-transparency="true"],
+        [data-octant-increased-contrast="true"]
+      )
+      .shell--app-backdrop:not(.shell--material-translucent)
       .callout.composer-notice {
       border-color: var(--oct-glass-stroke);
       background-color: var(--oct-glass-floor);
@@ -6926,29 +6954,25 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
     }
-    html:not([data-octant-reduced-transparency="true"])
-      :is(.shell--app-backdrop, .shell--material-translucent)
+    html:not(
+        [data-octant-reduced-transparency="true"],
+        [data-octant-increased-contrast="true"]
+      )
+      .shell--app-backdrop:not(.shell--material-translucent)
       .callout.composer-notice[data-tone="warning"] {
       background-image:
         linear-gradient(var(--oct-warn-soft), var(--oct-warn-soft)),
         linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
     }
-    html:not([data-octant-reduced-transparency="true"])
-      :is(.shell--app-backdrop, .shell--material-translucent)
+    html:not(
+        [data-octant-reduced-transparency="true"],
+        [data-octant-increased-contrast="true"]
+      )
+      .shell--app-backdrop:not(.shell--material-translucent)
       .callout.composer-notice[data-tone="danger"] {
       background-image:
         linear-gradient(var(--oct-danger-soft), var(--oct-danger-soft)),
         linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
-    }
-    /* Under Window glass the box takes the control tint in place of the
-       floor, and keeps the blur and the stroke. The floor is the page colour
-       at part strength, there to hold text over a picture in an opaque
-       window; on a see-through window it made the box darker than the glass
-       around it, a well where a raised surface should be. */
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--material-translucent
-      .thread-composer__surface {
-      background: var(--octant-control);
     }
   }
 }

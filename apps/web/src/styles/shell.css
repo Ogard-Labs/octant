@@ -84,31 +84,43 @@ html[data-octant-theme-mode="light"] .shell {
   --octant-panel-keep: 99.5%;
 }
 
+/* One coat. The window paints the workspace colour at the glass level's alpha;
+   the rail, band, sidebar, stage, panes and tiles are clear over it, so the
+   window reads as one tone and the panel's hairline is the only edge between
+   frame and panel. Stacking a second coat in the panes made two tones and
+   about 93% / 78% / 49% in dark. Everything that sits on the coat is an ink
+   wash with no blur: the packaged window's material is not re-blurred by a
+   backdrop filter, so a blur here lays a second copy of the coat under the
+   surface. A ground's veil is the one place a second tint is kept, so a picture
+   stays readable. */
 .shell.shell--material-translucent {
-  --octant-window-surface: var(--octant-sidebar-translucent);
-  --octant-sheet-surface: var(--octant-workspace-translucent);
-  --octant-stage-surface: var(--octant-workspace-translucent);
-  /* Panels are a tint of the theme colour over the window's native material,
-     not a blur of it: the packaged window's material is not re-blurred by a
-     backdrop filter. Every panel (the thread, a tile, the bottom panel) is
-     this one tint, over a ground that is itself a tint, so text reads on a
-     saturated desktop. */
-  --octant-panel-surface: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
+  --octant-window-surface: var(--octant-workspace-translucent);
+  --octant-sheet-surface: transparent;
+  --octant-stage-surface: transparent;
+  --octant-panel-surface: transparent;
+  --octant-veil-surface: var(--octant-window-surface);
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
 }
 
 .shell.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
-  --octant-window-surface: var(--octant-sidebar-translucent-subtle);
-  --octant-sheet-surface: var(--octant-workspace-translucent-subtle);
-  --octant-stage-surface: var(--octant-workspace-translucent-subtle);
+  --octant-window-surface: var(--octant-workspace-translucent-subtle);
 }
 
 .shell.shell--material-translucent[data-octant-sidebar-vibrancy="strong"] {
-  --octant-window-surface: var(--octant-sidebar-translucent-strong);
-  --octant-sheet-surface: var(--octant-workspace-translucent-strong);
-  --octant-stage-surface: var(--octant-workspace-translucent-strong);
+  --octant-window-surface: var(--octant-workspace-translucent-strong);
+}
+
+/* Thin glass: below the secondary ink's floor the muted role takes the
+   secondary ink inside the shell, so meta text keeps 4.5:1 over a light desktop
+   behind a thin dark coat. The attribute lists the levels that are thin. */
+html[data-octant-host-vibrancy="active"][data-octant-glass-thin~="subtle"]
+  .shell.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"],
+html[data-octant-host-vibrancy="active"][data-octant-glass-thin~="strong"]
+  .shell.shell--material-translucent[data-octant-sidebar-vibrancy="strong"] {
+  --octant-text-muted: var(--octant-text-secondary);
+  --oct-meta: var(--octant-text-secondary);
 }
 
 /* The material class already carries the host's contrast and
@@ -117,17 +129,12 @@ html[data-octant-theme-mode="light"] .shell {
    Each names the vibrancy attribute too, so it outranks the Subtle and Strong
    levels; matching only the shell, it lost to them and left the glass on.
    The card colour inherits the theme's opaque one again. */
-html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sidebar-vibrancy]) {
+html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  :is(.shell, .shell[data-octant-sidebar-vibrancy]) {
   --octant-window-surface: var(--octant-ground-opaque);
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
   --octant-panel-surface: var(--octant-panel-opaque);
-  --octant-card: inherit;
-  --card: inherit;
-  --octant-outline-rest: initial;
-}
-
-html[data-octant-increased-contrast="true"] .shell {
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;

@@ -199,7 +199,8 @@ html[data-octant-theme-mode="light"] {
    another is resolved where it is declared: left at the root they would keep
    the opaque colour. Menus, popovers and dialogs are portalled outside the
    shell and keep the opaque floating surface. */
-html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent {
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent {
   --octant-control: color-mix(in srgb, var(--octant-text-primary) 7%, transparent);
   --octant-control-hover: color-mix(in srgb, var(--octant-text-primary) 11%, transparent);
   --octant-control-pressed: color-mix(in srgb, var(--octant-text-primary) 15%, transparent);

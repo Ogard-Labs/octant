@@ -70,11 +70,12 @@
   background: transparent;
 }
 
-/* The narrow navigation is a drawer over the page, so it keeps a blur over
-   the text it covers. */
+/* The narrow navigation is a drawer over the page, so under Glass it is a
+   dense float: a blur cannot hide the page's sharp text on a translucent
+   window. */
 .shell--material-translucent .settings-view__sidebar {
-  background: var(--octant-window-surface);
-  backdrop-filter: blur(22px) saturate(125%);
+  background: var(--octant-float-glass);
+  backdrop-filter: none;
 }
 
 /* A section card is the same step of ink over the sheet as every card under

@@ -391,11 +391,27 @@ export const ThemeSettings = Schema.Struct({
 }).annotations(strict);
 export type ThemeSettings = typeof ThemeSettings.Type;
 
-/** The tint each glass level uses until a person sets one, by theme mode. */
+/**
+ * The coat each glass level lays over the window until a person sets a Tint, by
+ * theme mode: one coat of the workspace colour, in percent.
+ */
 export const GLASS_TINT_DEFAULTS = {
-  light: { subtle: 78, strong: 62 },
-  dark: { subtle: 58, strong: 32 },
+  light: { subtle: 92, strong: 80 },
+  dark: { subtle: 78, strong: 62 },
 } as const;
+
+/**
+ * The thinnest coat painted, by theme mode, whatever Tint is saved: primary text
+ * keeps 4.5:1 over a white desktop behind a dark coat and a black one behind a
+ * light coat. The saved value is untouched; only the paint is clamped.
+ */
+export const GLASS_TINT_FLOOR = { light: 50, dark: 62 } as const;
+
+/**
+ * Below these coats the secondary and muted inks fall under 4.5:1 over the worst
+ * desktop, so the muted role takes the secondary ink (data-octant-glass-thin).
+ */
+export const GLASS_TINT_SECONDARY_FLOOR = { light: 72, dark: 77 } as const;
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "system",
