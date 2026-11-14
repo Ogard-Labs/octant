@@ -1105,10 +1105,9 @@ seven exclusive choices use `OctantToggleGroup` instead.
 **Purpose.** A disclosure: a summary row that opens a body below it.
 **Anatomy.** Props `summary`, `summaryClassName`, `children`, and every native
 `<details>` prop (`open`, `onToggle`, `className`).
-**Sizes and tokens.** A 14px chevron 6px before the summary, inheriting the
+**Sizes and tokens.** A 14px chevron 8px before the summary, inheriting the
 row's ink; the user-agent triangle is hidden.
-**States.** Closed, open (the chevron turns 90 degrees; no turn under reduced
-motion).
+**States.** Closed, open (the chevron turns 90 degrees, without motion).
 **Keyboard and accessibility.** It stays a native `<details>`: Enter and Space on
 the summary toggle it, the browser reports expanded state, and find-in-page opens
 a closed body that holds a match.

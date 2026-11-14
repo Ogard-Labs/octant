@@ -1562,6 +1562,7 @@ describe("the public-block visual language", () => {
         ".phone-scroll",
         ".setnav",
         ".sidebar-rail__scroll",
+        ".workspace-content-tabs",
       ];
       const strays: string[] = [];
       for (const path of cssFiles(webRoot)) {

@@ -25,7 +25,7 @@ export function OctantCollapsible({
     <details className={["group/collapsible", className].filter(Boolean).join(" ")} {...props}>
       <summary
         className={[
-          "flex cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden",
+          "flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden",
           summaryClassName,
         ]
           .filter(Boolean)
@@ -33,7 +33,7 @@ export function OctantCollapsible({
       >
         <ChevronRight
           aria-hidden="true"
-          className="shrink-0 transition-transform group-open/collapsible:rotate-90 motion-reduce:transition-none"
+          className="shrink-0 group-open/collapsible:rotate-90"
           size={14}
         />
         {summary}
