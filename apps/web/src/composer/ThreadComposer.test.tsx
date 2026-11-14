@@ -9,7 +9,15 @@ import { OutsideContentContext } from "./OutsideContentNotice";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { FrozenBarScope } from "./frozenBarScope";
 import { ComposerStartTray } from "./ComposerStartTray";
+import { ComposerAttachButton } from "./ComposerAttachButton";
+import { useRegisterComposerMenuAction } from "./ComposerMenuActions";
 import { ThreadComposer } from "./ThreadComposer";
+import { ThreadInfo } from "./ThreadInfo";
+
+function ChecklistOffer() {
+  useRegisterComposerMenuAction("propose-plan", { label: "Propose plan", onSelect: vi.fn() });
+  return null;
+}
 
 describe("ThreadComposer", () => {
   it("keeps attach, the prompt and send in the card and the thread's controls in the row under it", () => {
@@ -49,11 +57,10 @@ describe("ThreadComposer", () => {
     expect(trailing).not.toContainElement(screen.getByText("Access"));
   });
 
-  it("holds one row under the box: the Project first, then the model, the approval control and the ring last", () => {
+  it("holds one row under a thread's box: the model, the approval control and the ring, and nothing else", () => {
     const { container } = render(
       <ThreadComposer
         presentation="follow-up"
-        context={<span>Project</span>}
         input={<textarea aria-label="Message" className="composer-input" />}
         row={{
           attach: <button type="button">Attach</button>,
@@ -66,18 +73,55 @@ describe("ThreadComposer", () => {
     const under = container.querySelector(".composer-under");
     expect(container.querySelectorAll(".composer-under")).toHaveLength(1);
     const order = [
-      screen.getByText("Project"),
       screen.getByRole("button", { name: "Model name" }),
       screen.getByRole("button", { name: "Mode: Ask first" }),
     ];
     for (const element of order) expect(under).toContainElement(element);
-    // Reading order is visual order: tab goes Project, model, approvals.
+    // Reading order is visual order: tab goes model, then approvals.
     order.forEach((element, index) => {
       const next = order[index + 1];
       if (next === undefined) return;
       expect(element.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     });
-    expect(container.querySelector(".composer-actions")).toContainElement(order[2] as HTMLElement);
+    expect(container.querySelector(".composer-actions")).toContainElement(order[1] as HTMLElement);
+    expect(
+      within(under as HTMLElement)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Model name", "Mode: Ask first"]);
+  });
+
+  it("offers the thread's info and a plan to propose from the + menu, not from the row under the box", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ThreadComposer
+        info={
+          <ThreadInfo>
+            <p>Saved commands</p>
+          </ThreadInfo>
+        }
+        input={<textarea aria-label="Message" className="composer-input" />}
+        presentation="follow-up"
+        row={{
+          attach: <ComposerAttachButton onFileSelected={vi.fn()} onRefused={vi.fn()} />,
+          leading: <ChecklistOffer />,
+          actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
+        }}
+      />,
+    );
+    expect(
+      within(container.querySelector(".composer-under") as HTMLElement).queryByRole("button", {
+        name: "Thread info",
+      }),
+    ).toBeNull();
+    expect(screen.getByText("Saved commands")).not.toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /^Add attachment/ }));
+    expect(await screen.findByRole("menuitem", { name: "Propose plan" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Thread info" }));
+
+    expect(screen.getByRole("region", { name: "Thread info" })).toBeVisible();
+    expect(screen.getByText("Saved commands")).toBeVisible();
   });
 
   it("keeps send disabled while there is nothing to send, and enabled once there is", () => {

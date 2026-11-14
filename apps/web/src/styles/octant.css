@@ -4911,32 +4911,9 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
   font-family: var(--oct-font-mono);
   font-weight: var(--oct-weight-regular);
 }
-.composer-place--control {
-  max-width: 100%;
-  height: var(--oct-composer-cell);
-  min-height: var(--oct-composer-cell);
-  padding: 0 var(--oct-space-2) 0 0;
-  font-size: var(--oct-text-xs);
-}
-.composer-place--control .composer-place__icon {
-  color: var(--oct-meta);
-}
-.composer-place--control .thread-info__attention {
-  flex: 0 0 auto;
-  margin-inline-start: var(--oct-space-1);
-}
-.composer-under > .thread-info:has(.composer-place--control) {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 55%;
-  /* The recipe's 1px edge is transparent but takes room: pull the wrapper out
-     so the icon stands exactly under attach. */
-  margin-inline-start: -1px;
-}
-/* At a phone's width the row cannot be one line. It is then two: the Project
-   (with the thread's info beside it) and under it the row of controls, whose
-   trailing cells stay under send. A thread with no place to name keeps its
-   info and its controls on the one line. */
+/* At a phone's width the row cannot be one line. A thread on a server, which
+   names where it runs, is then two: that place and under it the row of
+   controls, whose trailing cells stay under send. */
 @container composer-under (max-width: 440px) {
   .composer-under {
     flex-wrap: wrap;
@@ -4947,15 +4924,8 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
     flex: 1 1 0;
     max-width: none;
   }
-  .composer-under > .thread-info:has(.composer-place--control) {
-    flex: 1 1 0;
-    max-width: none;
-  }
   .composer-under
-    > :is(
-      .thread-composer__context:not(:empty, :has(> :only-child:empty)),
-      .thread-info:has(.composer-place--control)
-    )
+    > .thread-composer__context:not(:empty, :has(> :only-child:empty))
     ~ .composer-row {
     flex: 1 0 100%;
   }
@@ -4987,11 +4957,6 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
   /* The row's gap (4px) and this make one --oct-space-2 between the left group
      and the right, at every width; the labels that shorten give the room. */
   padding-inline-start: calc(var(--oct-space-2) - var(--oct-space-1));
-}
-.composer-actions > .thread-plan-windows {
-  /* The compact meter is small, and its figure never shrinks under what follows. */
-  flex: 0 0 auto;
-  margin-inline-end: var(--oct-space-1);
 }
 /* A narrow column shortens the model's name before anything else moves, and
    when even that is not enough the row wraps rather than pushing the send

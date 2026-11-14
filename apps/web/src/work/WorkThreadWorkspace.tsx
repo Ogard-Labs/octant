@@ -2248,20 +2248,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   // subfolder that happens to share the Project's name is still named.
   const folderRepeatsProject =
     path !== undefined && (folder === undefined || folder === ".") && folderLabel === projectLabel;
-  const placeName = [
-    projectLabel,
-    path === undefined || folderRepeatsProject ? undefined : folderLabel,
-  ]
-    .filter((part): part is string => part !== undefined)
-    .join(" / ");
-  // The full place for a pointer user when the row cuts the name short; the
-  // spans inside the button carry no title of their own.
-  const placeTooltip = [
-    "Thread info",
-    [projectLabel, path].filter((part): part is string => part !== undefined).join(" · "),
-  ]
-    .filter((part) => part !== "")
-    .join(": ");
   const placeControl = (
     <>
       <span className="composer-place__icon">
@@ -2913,9 +2899,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             ? {}
             : {
                 info: (
-                  <ThreadInfo
-                    place={{ label: placeName, content: placeControl, tooltip: placeTooltip }}
-                  >
+                  <ThreadInfo>
                     <ThreadGuardrailLevel
                       factsVersion={thread.version}
                       factsActivity={`${runningTurn?.requestId ?? ""}:${latestStatus ?? "idle"}`}
@@ -2950,8 +2934,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   </ThreadInfo>
                 ),
               })}
+          // A local thread's Project and folder are in the Environment panel. A
+          // thread on a server has no such panel row, so the row keeps saying
+          // where it runs.
           context={
-            thread === undefined ? (
+            thread === undefined || serverWorkProject !== undefined ? (
               <div className="composer-place" role="group" aria-label="Project and folder">
                 {placeControl}
               </div>

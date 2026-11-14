@@ -29,6 +29,12 @@ const mentionedThreadId = "90000000-0000-4000-8000-000000000001" as never;
 const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
 
+/** Opens the + menu and chooses one of the thread's own actions from it. */
+async function chooseFromAddMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(await screen.findByRole("button", { name: /^Add attachment/ }));
+  await user.click(await screen.findByRole("menuitem", { name }));
+}
+
 describe("Code plan proposals", () => {
   it.each([0, 503])(
     "keeps plan retry reachable after an initial read fails with %s",
@@ -46,7 +52,7 @@ describe("Code plan proposals", () => {
         </ThreadPlanProvider>,
       );
 
-      await user.click(await screen.findByRole("button", { name: "Propose plan" }));
+      await chooseFromAddMenu(user, "Propose plan");
       const dialog = await screen.findByRole("dialog", { name: "New plan" });
       expect(within(dialog).queryByRole("textbox", { name: "Plan title" })).not.toBeInTheDocument();
       await user.click(within(dialog).getByRole("button", { name: "Retry" }));
@@ -80,14 +86,11 @@ describe("Code plan proposals", () => {
         </ThreadPlanProvider>,
       );
 
-      const entry = await screen.findByRole("button", { name: "Propose plan" });
-      entry.focus();
-      await user.keyboard("{Enter}");
+      await chooseFromAddMenu(user, "Propose plan");
       await screen.findByRole("dialog", { name: "New plan" });
       await user.keyboard("{Escape}");
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(entry).toHaveFocus();
-      await user.keyboard("{Enter}");
+      await chooseFromAddMenu(user, "Propose plan");
       const dialog = await screen.findByRole("dialog", { name: "New plan" });
       await user.type(
         within(dialog).getByRole("textbox", { name: "Plan title" }),
@@ -105,7 +108,9 @@ describe("Code plan proposals", () => {
         expect.objectContaining({ kind: "propose-thread-plan", title: "Review the change" }),
       );
       expect(code.sendFollowUp).not.toHaveBeenCalled();
-      expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^Add attachment/ }));
+      expect(await screen.findByRole("menuitem", { name: "Thread info" })).toBeVisible();
+      expect(screen.queryByRole("menuitem", { name: "Propose plan" })).not.toBeInTheDocument();
     },
   );
 });
@@ -427,7 +432,11 @@ describe("CodeThreadWorkspace", () => {
       screen.getByRole("button", { name: /Continue elsewhere/, hidden: true }),
     ).not.toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Thread info" }));
+    // The row under the box holds no button for it: the + menu offers it.
+    expect(
+      screen.queryByRole("button", { name: "Thread info", hidden: true }),
+    ).not.toBeInTheDocument();
+    await chooseFromAddMenu(user, "Thread info");
 
     expect(level).toBeVisible();
     expect(screen.getByRole("region", { name: "Thread info" })).toBe(panel);
@@ -437,7 +446,6 @@ describe("CodeThreadWorkspace", () => {
     await user.keyboard("{Escape}");
 
     expect(level).not.toBeVisible();
-    expect(screen.getByRole("button", { name: "Thread info" })).toHaveFocus();
   });
 
   it("shows how long a completed Code turn worked and leaves unsettled turns without a duration", async () => {
@@ -547,7 +555,7 @@ describe("CodeThreadWorkspace", () => {
     );
     // Under the pill the row reads the model's name, then the approval control,
     // then the context ring: attach, the prompt, the microphone and send above.
-    const attach = screen.getByRole("button", { name: "Add attachment" });
+    const attach = screen.getByRole("button", { name: /^Add attachment/ });
     const access = screen.getByRole("button", { name: /^Mode:/ });
     const model = screen.getByRole("button", { name: "Provider and model" });
     const follows = (before: Node, after: Node) =>
@@ -1993,7 +2001,7 @@ describe("CodeThreadWorkspace", () => {
 
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "match this mockup");
-    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Add attachment/ })).toBeEnabled();
     await user.upload(
       screen.getByLabelText("Choose attachment file"),
       new File(["png"], "pasted.png", { type: "image/png" }),
@@ -3705,7 +3713,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await screen.findByRole("button", { name: "Add attachment" });
+    await screen.findByRole("button", { name: /^Add attachment/ });
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
     expect(onOpenImageSettings).not.toHaveBeenCalled();
   });
@@ -3719,7 +3727,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await screen.findByRole("button", { name: "Add attachment" });
+    await screen.findByRole("button", { name: /^Add attachment/ });
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
   });
 

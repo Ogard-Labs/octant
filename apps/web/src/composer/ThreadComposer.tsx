@@ -22,9 +22,9 @@ import {
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import { ThreadPlanWindows } from "../threadStats/ThreadStats";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
 import "./composer-plan-usage.css";
+import { ComposerMenuActionProvider } from "./ComposerMenuActions";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   focusComposerThreadDrop,
@@ -139,7 +139,7 @@ export interface ThreadComposerProps {
   readonly presentation?: "follow-up";
   /** Existing-thread checkout context, in the strip above the message surface. */
   readonly context?: ReactNode;
-  /** The thread's info panel and its button, at the end of that strip. */
+  /** The thread's info panel; its item in the + menu opens it. */
   readonly info?: ReactNode;
   /** Naming the frame promotes it to a `<section>` landmark (Chat). */
   readonly ariaLabel?: string | undefined;
@@ -154,7 +154,7 @@ export interface ThreadComposerProps {
   /**
    * The provider a new thread will send to. Its remaining plan usage stands
    * at the right of the start context's row. A thread's own composer never
-   * takes it: its windows stand in the thread's strip above the box.
+   * takes it: the Environment panel's Usage row says it.
    */
   readonly planUsage?: {
     readonly providerInstanceId: string | undefined;
@@ -388,15 +388,15 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     props.row.actions.kind === "send-or-stop"
       ? `composer-actions ${props.row.actions.cellClassName}`
       : "composer-actions";
-  // One row under the box, on the box's own columns: the Project's icon
-  // stands under attach and its name starts where the prompt's text does; at
-  // the other end the model's name, the approval control and the context ring
-  // stand in cells as wide as send, the ring last, under it. The thread's info
-  // is reached from the Project when the surface hangs it there, and from a
-  // small icon after it otherwise. Only the surface's controls are inside
-  // `.composer-row`: the row restyles every control in it to one quiet
-  // treatment, which the info panel's fields and the checkout's actions must
-  // not take.
+  // One row under the box, on the box's own columns: at the start, the
+  // outside-content mark when it applies; at the other end the model's name,
+  // the approval control and the context ring, the last two in cells as wide
+  // as send so the ring stands under it. Where the thread runs (Project,
+  // branch, folder, pull requests) and its plan usage are in the Environment
+  // panel, and its info and plan proposal are items of the + menu. Only the
+  // surface's controls are inside `.composer-row`: the row restyles every
+  // control in it to one quiet treatment, which the info panel's fields and
+  // a server thread's Git actions must not take.
   const under = (
     <div className="composer-under">
       {held || !followUp || props.context === undefined ? null : (
@@ -416,7 +416,6 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           {props.row.leading}
           {followUp ? <ComposerOutsideContentChip busy={props.threadBusy === true} /> : null}
           <div className={trailingClassName}>
-            {followUp ? <ThreadPlanWindows /> : null}
             {props.row.trailing}
             {props.row.approval}
             <ComposerContextMeter />
@@ -502,7 +501,13 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         {body}
       </section>
     );
-  return <ComposerNoticeSinkProvider set={publish}>{frame}</ComposerNoticeSinkProvider>;
+  return (
+    <ComposerNoticeSinkProvider set={publish}>
+      <ComposerMenuActionProvider offered={!props.held && props.row.attach !== undefined}>
+        {frame}
+      </ComposerMenuActionProvider>
+    </ComposerNoticeSinkProvider>
+  );
 }
 
 function ComposerThreadDropCue() {

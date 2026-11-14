@@ -2444,19 +2444,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               />
             </ThreadInfo>
           }
+          // The Environment panel names the Project, branch, folder and pull
+          // requests of a local checkout, so the row under the box does not. A
+          // thread on a server has no checkout there to read: the row keeps
+          // saying where it runs, and its Git.
           context={
-            <CodeCheckoutBar
-              {...(props.onCreatePullRequest === undefined
-                ? {}
-                : { onCreatePullRequest: props.onCreatePullRequest })}
-              {...(serverProject === undefined ? {} : { serverLocation: serverProject.location })}
-              {...(serverProject === undefined || props.onOpenGit === undefined
-                ? {}
-                : { onOpenServerGit: props.onOpenGit })}
-              {...(props.onOpenReview === undefined
-                ? {}
-                : { onOpenReview: () => props.onOpenReview?.() })}
-            />
+            serverProject === undefined ? undefined : (
+              <CodeCheckoutBar
+                {...(props.onCreatePullRequest === undefined
+                  ? {}
+                  : { onCreatePullRequest: props.onCreatePullRequest })}
+                serverLocation={serverProject.location}
+                {...(props.onOpenGit === undefined ? {} : { onOpenServerGit: props.onOpenGit })}
+              />
+            )
           }
           className="thread-composer code-thread-workspace__composer thread-column"
           chips={
