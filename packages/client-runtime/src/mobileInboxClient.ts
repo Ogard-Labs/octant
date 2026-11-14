@@ -44,6 +44,33 @@ export interface MobileInboxRow {
   readonly projectId?: string;
   readonly pinned?: boolean;
   readonly live?: MobileThreadLiveState;
+  /** The thread's aggregate version, which a row action sends as its expected version. */
+  readonly version?: number;
+  /** Put away (completed) at this time; absent while the thread is on the active list. */
+  readonly completedAt?: string;
+  readonly snooze?: { readonly until: string; readonly at: string; readonly duringTurn?: boolean };
+}
+
+function restFields(thread: {
+  readonly version: number;
+  readonly completedAt?: string | undefined;
+  readonly snooze?:
+    | { readonly until: string; readonly at: string; readonly duringTurn?: boolean | undefined }
+    | undefined;
+}): Pick<MobileInboxRow, "version" | "completedAt" | "snooze"> {
+  return {
+    version: thread.version,
+    ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+    ...(thread.snooze === undefined
+      ? {}
+      : {
+          snooze: {
+            until: thread.snooze.until,
+            at: thread.snooze.at,
+            ...(thread.snooze.duringTurn === true ? { duringTurn: true } : {}),
+          },
+        }),
+  };
 }
 
 /** The live state a runtime report gives, if any. */
@@ -113,6 +140,7 @@ function chatRow(hostId: string, thread: ChatThread): MobileInboxRow {
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    ...restFields(thread),
     ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
   };
 }
@@ -126,6 +154,7 @@ function workRow(hostId: string, thread: WorkThread, live?: MobileThreadLiveStat
     status: thread.lifecycle,
     freshness: thread.updatedAt,
     projectId: String(thread.projectId),
+    ...restFields(thread),
     ...(live === undefined ? {} : { live }),
   };
 }
@@ -144,6 +173,7 @@ function codeRow(
     status: thread.lifecycle,
     freshness: thread.updatedAt,
     projectId: String(thread.projectId),
+    ...restFields(thread),
     ...(thread.pinned === true ? { pinned: true } : {}),
     ...(reviewState === undefined ? {} : { reviewState }),
     ...(live === undefined ? {} : { live }),

@@ -50,6 +50,7 @@ export const MOBILE_COPY = {
   toolStatusFailed: "Failed",
   threadViewReturn: "Conversation",
   workNoFolder: "No folder",
+  searchMessages: "Messages",
   noProject: "No Project",
   threadViews: "Views",
   threadViewsAndPanes: "Views and panes",

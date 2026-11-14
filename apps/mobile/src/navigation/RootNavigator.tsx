@@ -399,6 +399,7 @@ const shellStyles = StyleSheet.create({
 
 export function RootNavigator(props: RootNavigatorProps) {
   const [selectedThread, setSelectedThread] = useState<MobileInboxRow | undefined>();
+  const [focusTurnId, setFocusTurnId] = useState<string | undefined>();
   const [threadReturnRoute, setThreadReturnRoute] = useState<"home" | "agents">("home");
   const [homeMode, setHomeMode] = useState<MobileHomeView>("inbox");
   // Each tab keeps its own arrangement while the app runs, as each desktop
@@ -528,6 +529,7 @@ export function RootNavigator(props: RootNavigatorProps) {
           }}
           onOpenThread={(row) => {
             setSelectedThread(row);
+            setFocusTurnId(undefined);
             setThreadReturnRoute("home");
             props.onSelectRoute("thread");
           }}
@@ -536,8 +538,9 @@ export function RootNavigator(props: RootNavigatorProps) {
       {props.activeRoute === "agents" ? (
         <AgentsListScreen
           onBack={() => props.onSelectRoute("home")}
-          onOpenThread={(row) => {
+          onOpenThread={(row, turnId) => {
             setSelectedThread(row);
+            setFocusTurnId(turnId);
             setThreadReturnRoute("agents");
             props.onSelectRoute("thread");
           }}
@@ -548,7 +551,11 @@ export function RootNavigator(props: RootNavigatorProps) {
       {props.activeRoute === "thread" ? (
         <ThreadScreen
           onBack={() => props.onSelectRoute(threadReturnRoute)}
-          onOpenThread={setSelectedThread}
+          focusTurnId={focusTurnId}
+          onOpenThread={(row) => {
+            setSelectedThread(row);
+            setFocusTurnId(undefined);
+          }}
           selected={selectedThread}
         />
       ) : null}

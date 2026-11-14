@@ -101,6 +101,8 @@ export * from "./threadExportClient";
 export * from "./validationEvidenceClient";
 export * from "./expoSecureDeviceKeyStore";
 export * from "./mobileInboxClient";
+export * from "./mobileThreadRestClient";
+export * from "./mobileTranscriptSearchClient";
 export * from "./mobileAttachmentClient";
 export * from "./mobileThreadSurfaceClient";
 export * from "./mobileChatAttempt";

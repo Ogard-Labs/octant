@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -35,6 +35,11 @@ export interface ThreadTranscriptProps {
   ) => ReadonlyArray<MessageActionItem>;
   /** The thread's Reply detail level, the host's per-thread choice or its default. */
   readonly replyDetail: ReplyDetailLevel;
+  /**
+   * A Chat turn to bring into view, from a message search hit: the transcript
+   * reports where that turn's message sits so the screen can scroll to it.
+   */
+  readonly focus?: { readonly turnId: string; readonly onFound: (y: number) => void };
 }
 
 export function ThreadTranscript(props: ThreadTranscriptProps) {
@@ -128,6 +133,21 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
     </View>
   );
   const looseAttachments = attachmentsByMessage.get("") ?? [];
+  const focusContentId =
+    props.focus === undefined || view === undefined
+      ? undefined
+      : view.turns
+          .find((turn) => String(turn.id) === props.focus?.turnId)
+          ?.userMessageRef.contentId.toString();
+  const sectionY = useRef<number | undefined>(undefined);
+  const messageY = useRef<number | undefined>(undefined);
+  const reported = useRef(false);
+  const reportFocus = () => {
+    if (reported.current || sectionY.current === undefined || messageY.current === undefined)
+      return;
+    reported.current = true;
+    props.focus?.onFound(sectionY.current + messageY.current);
+  };
 
   return (
     <>
@@ -235,7 +255,14 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         </View>
       ) : null}
       {view !== undefined ? (
-        <View style={styles.transcript} testID="mobile-thread-transcript">
+        <View
+          onLayout={(event) => {
+            sectionY.current = event.nativeEvent.layout.y;
+            reportFocus();
+          }}
+          style={styles.transcript}
+          testID="mobile-thread-transcript"
+        >
           {chat.pendingPrompt !== undefined ? (
             <Text style={styles.metaText} testID="mobile-chat-pending">
               Sending… {chat.pendingPrompt}
@@ -308,7 +335,19 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 props.allowProductMutations;
               const sentWith = attachmentsByMessage.get(String(content.contentId)) ?? [];
               return (
-                <View key={content.contentId} style={styles.messageWithAttachments}>
+                <View
+                  key={content.contentId}
+                  {...(String(content.contentId) === focusContentId
+                    ? {
+                        onLayout: (event: { nativeEvent: { layout: { y: number } } }) => {
+                          messageY.current = event.nativeEvent.layout.y;
+                          reportFocus();
+                        },
+                        testID: "mobile-thread-focused-message",
+                      }
+                    : {})}
+                  style={styles.messageWithAttachments}
+                >
                   <MessageBubble
                     replyDetail={props.replyDetail}
                     body={content.body}

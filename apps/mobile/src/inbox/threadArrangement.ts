@@ -1,4 +1,5 @@
 import type { MobileInboxRow } from "@octant/client-runtime";
+import { threadShelf, type ThreadShelf } from "@octant/domain/thread-completion-policy";
 
 /**
  * The desktop sidebar's three arrangements of one mode's threads
@@ -130,14 +131,47 @@ function byActivity(
   return groups;
 }
 
+/** Where the desktop sidebar would file the row now, from the same policy. */
+export function mobileThreadShelf(row: MobileInboxRow, now: Date): ThreadShelf {
+  return threadShelf(
+    {
+      ...(row.completedAt === undefined ? {} : { completedAt: row.completedAt }),
+      ...(row.snooze === undefined ? {} : { snooze: row.snooze }),
+    },
+    {
+      executing: row.live === "working",
+      awaitingInput: row.live === "needs-input",
+      now: now.toISOString(),
+    },
+  );
+}
+
+/**
+ * The chosen arrangement of the active threads, then Snoozed (hidden until a
+ * wake time, or until the agent needs the person) and Put away, as the
+ * desktop sidebar shelves them below the list.
+ */
 export function arrangeMobileThreads(input: {
   readonly rows: ReadonlyArray<MobileInboxRow>;
   readonly arrangement: MobileThreadArrangement;
   readonly projectName: (row: MobileInboxRow) => string | undefined;
   readonly now?: Date;
 }): ReadonlyArray<MobileThreadGroup> {
+  const now = input.now ?? new Date();
   const rows = newestFirst(input.rows);
-  if (input.arrangement === "projects") return byProject(rows, input.projectName);
-  if (input.arrangement === "activity") return byActivity(rows, input.now ?? new Date());
-  return byStatus(rows);
+  const shelf = new Map(rows.map((row) => [row, mobileThreadShelf(row, now)]));
+  const active = rows.filter((row) => shelf.get(row) === "active");
+  const snoozed = rows.filter((row) => shelf.get(row) === "snoozed");
+  const putAway = rows.filter((row) => shelf.get(row) === "completed");
+  const arranged =
+    input.arrangement === "projects"
+      ? byProject(active, input.projectName)
+      : input.arrangement === "activity"
+        ? byActivity(active, now)
+        : byStatus(active);
+  return [
+    ...arranged,
+    ...(snoozed.length > 0 ? [{ id: "snoozed", label: "Snoozed", rows: snoozed }] : []),
+    ...(putAway.length > 0 ? [{ id: "put-away", label: "Put away", rows: putAway }] : []),
+  ];
 }

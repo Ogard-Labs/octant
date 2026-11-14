@@ -252,6 +252,8 @@ export interface ListRowProps {
   readonly labelTone?: string | undefined;
   readonly last?: boolean;
   readonly onPress?: (() => void) | undefined;
+  /** A long press opens the row's actions, as a desktop row's context menu does. */
+  readonly onLongPress?: (() => void) | undefined;
   readonly testID?: string | undefined;
   readonly accessibilityLabel?: string | undefined;
 }
@@ -371,6 +373,15 @@ export function ListRow(props: ListRowProps) {
     <Pressable
       accessibilityLabel={props.accessibilityLabel}
       accessibilityRole="button"
+      {...(props.onLongPress === undefined
+        ? {}
+        : {
+            onLongPress: props.onLongPress,
+            accessibilityActions: [{ name: "longpress", label: "Thread actions" }],
+            onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => {
+              if (event.nativeEvent.actionName === "longpress") props.onLongPress?.();
+            },
+          })}
       onPress={props.onPress}
       style={({ pressed }) => [styles.row, pressed ? styles.pressed : null]}
       testID={props.testID}

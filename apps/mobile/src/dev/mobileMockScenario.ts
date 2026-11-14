@@ -1,6 +1,7 @@
 import {
   decodeChatBootstrap,
   decodeChatThread,
+  decodeCodeThread,
   decodeChatThreadView,
   decodeCodeBootstrap,
   decodeCodeBoardView,
@@ -88,6 +89,52 @@ const capabilities = {
   appManagedTools: "supported",
   citations: "supported",
 } as const;
+
+/**
+ * The mock host's answer to a row action (snooze, wake, put away, reopen, pin):
+ * it changes the thread as the real host's journal would and returns the
+ * updated thread, so the phone's shelves can be seen working in the preview.
+ */
+function applyMockRest<T extends { readonly id: unknown; readonly version: number }>(
+  threads: T[],
+  command: {
+    readonly kind?: string;
+    readonly threadId?: string;
+    readonly until?: string;
+    readonly pinned?: boolean;
+  },
+  decode: (value: unknown) => T,
+): T | undefined {
+  const verb = command.kind?.match(
+    /^(snooze|wake|complete|reopen|pin)-(chat|work|code)-thread$/,
+  )?.[1];
+  if (verb === undefined || command.threadId === undefined) return undefined;
+  const index = threads.findIndex((thread) => String(thread.id) === command.threadId);
+  const current = threads[index];
+  if (current === undefined) return undefined;
+  const {
+    snooze: _snooze,
+    completedAt: _completedAt,
+    ...rest
+  } = current as T & {
+    readonly snooze?: unknown;
+    readonly completedAt?: unknown;
+  };
+  const kept = current as T & { readonly snooze?: unknown; readonly completedAt?: unknown };
+  const next = decode({
+    ...(verb === "snooze" || verb === "complete" || verb === "pin" ? kept : rest),
+    ...(verb === "wake" && kept.completedAt !== undefined ? { completedAt: kept.completedAt } : {}),
+    ...(verb === "reopen" && kept.snooze !== undefined ? { snooze: kept.snooze } : {}),
+    ...(verb === "snooze" && command.until !== undefined
+      ? { snooze: { until: command.until, at: NOW } }
+      : {}),
+    ...(verb === "complete" ? { completedAt: NOW } : {}),
+    ...(verb === "pin" ? { pinned: command.pinned === true } : {}),
+    version: current.version + 1,
+  });
+  threads[index] = next;
+  return next;
+}
 
 function createChatThread(input: {
   readonly id: string;
@@ -839,6 +886,10 @@ function createMockTransport(input: {
             readonly deliveryTarget?: CodeThread["deliveryTarget"];
           };
         };
+        const restedCode = applyMockRest(codeThreads, command, decodeCodeThread);
+        if (restedCode !== undefined) {
+          return mockJsonResponse({ kind: "thread-updated", thread: restedCode });
+        }
         if (command.kind === "prepare-code-project-checkout") {
           return mockJsonResponse({
             kind: "checkout-prepared",
@@ -1004,6 +1055,41 @@ function createMockTransport(input: {
           byteLength,
         });
       }
+      if (request.method === "GET" && request.path === "/api/chat/transcript-search") {
+        // Matches message bodies the way the host does, naming the turn each one is in.
+        const needle = new URLSearchParams(request.query ?? "").get("q")?.toLowerCase() ?? "";
+        const hits = chatThreads.flatMap((thread) => {
+          const view = chatViews.get(String(thread.id));
+          if (view === undefined || needle.length === 0) return [];
+          return view.contents
+            .filter((content) => content.body.toLowerCase().includes(needle))
+            .flatMap((content) => {
+              const turn = view.turns.find(
+                (entry) =>
+                  String(entry.userMessageRef.contentId) === String(content.contentId) ||
+                  entry.attempts.some((attempt) =>
+                    attempt.responseRefs.some(
+                      (ref) => String(ref.contentId) === String(content.contentId),
+                    ),
+                  ),
+              );
+              // The seeded rich view keeps messages without turns; its hits name a
+              // placeholder turn, which the phone opens at the top of the thread.
+              const turnId = turn?.id ?? "88000000-0000-4000-8000-000000000001";
+              const at = content.body.toLowerCase().indexOf(needle);
+              return [
+                {
+                  threadId: thread.id,
+                  title: thread.title,
+                  lifecycle: thread.lifecycle,
+                  turnId,
+                  snippet: content.body.slice(at < 40 ? 0 : at - 40, at + 100),
+                },
+              ];
+            });
+        });
+        return mockJsonResponse({ query: needle, hits, truncated: false });
+      }
       if (request.method === "POST" && request.path === "/api/chat/commands") {
         const command = JSON.parse(String(request.body ?? "{}")) as {
           readonly kind?: string;
@@ -1011,6 +1097,10 @@ function createMockTransport(input: {
           readonly threadId?: string;
           readonly prompt?: string;
         };
+        const restedChat = applyMockRest(chatThreads, command, decodeChatThread);
+        if (restedChat !== undefined) {
+          return mockJsonResponse({ kind: "thread-updated", thread: restedChat });
+        }
         if (command.kind === "create-chat-thread") {
           const thread = createChatThread({
             id: command.threadId ?? mockUuid(0x84, ++mockChatMutationSequence),
@@ -1061,6 +1151,10 @@ function createMockTransport(input: {
           readonly providerInstanceId?: string;
           readonly modelId?: string;
         };
+        const restedWork = applyMockRest(workThreads, command, decodeWorkThread);
+        if (restedWork !== undefined) {
+          return mockJsonResponse({ kind: "thread-updated", thread: restedWork });
+        }
         if (command.kind !== "create-work-thread") {
           return new Response("Mock route not found", { status: 404 });
         }

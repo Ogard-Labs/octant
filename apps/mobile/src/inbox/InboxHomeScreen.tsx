@@ -24,6 +24,7 @@ import { mobileCreateModePresentation, type MobileCreateMode } from "./createMod
 import type { MobileHomeView } from "./homeView";
 import { inboxPriorityRows, inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
 import { HomeComposerSheet } from "./HomeComposerSheet";
+import { ThreadRowActionsSheet } from "./ThreadRowActionsSheet";
 import { inboxEmptyState } from "./inboxEmptyState";
 import { FloatingComposer } from "../ui/FloatingComposer";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
@@ -92,6 +93,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const [composerError, setComposerError] = useState<string | undefined>();
   const [modelOpen, setModelOpen] = useState(false);
   const [composerSheetOpen, setComposerSheetOpen] = useState(false);
+  const [actionRow, setActionRow] = useState<MobileInboxRow | undefined>();
   const [composerMode, setComposerMode] = useState<MobileCreateMode>("chat");
   const [workProjects, setWorkProjects] = useState<ReadonlyArray<MobileWorkProjectOption>>([]);
   const [codeProjects, setCodeProjects] = useState<ReadonlyArray<MobileCodeProjectOption>>([]);
@@ -249,12 +251,36 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           ),
     [props.homeMode, rows],
   );
+  // Project names from every paired computer, not only the one new threads go
+  // to: a thread on a second computer otherwise grouped under a bare "Project".
+  const [projectNamesByHost, setProjectNamesByHost] = useState<
+    ReadonlyMap<string, ReadonlyMap<string, string>>
+  >(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      transports.map(async (transport) => {
+        const [work, code] = await Promise.all([
+          fetchMobileWorkProjects(transport).catch(() => []),
+          fetchMobileCodeProjects(transport).catch(() => []),
+        ]);
+        const names = new Map<string, string>();
+        for (const project of [...work, ...code]) names.set(project.projectId, project.name);
+        return [transport.hostId, names] as const;
+      }),
+    ).then((entries) => {
+      if (!cancelled) setProjectNamesByHost(new Map(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transports]);
   const projectName = useCallback(
     (row: MobileInboxRow): string | undefined =>
-      (row.mode === "code" ? codeProjects : workProjects).find(
-        (project) => project.projectId === row.projectId,
-      )?.name,
-    [codeProjects, workProjects],
+      row.projectId === undefined
+        ? undefined
+        : projectNamesByHost.get(row.hostId)?.get(row.projectId),
+    [projectNamesByHost],
   );
   const groups = useMemo(
     () => arrangeMobileThreads({ rows: modeRows, arrangement: props.arrangement, projectName }),
@@ -516,6 +542,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       key={`${row.hostId}:${row.mode}:${row.threadId}`}
       label={formatScreenshotSafeLabel(row.title)}
       last={last}
+      onLongPress={() => setActionRow(row)}
       onPress={() => props.onOpenThread(row)}
       testID={`mobile-home-thread-row-${row.mode}-${row.threadId}`}
       {...(showMode
@@ -817,6 +844,16 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           />
         </>
       )}
+      <ThreadRowActionsSheet
+        onChanged={() => void refresh()}
+        onClose={() => setActionRow(undefined)}
+        row={actionRow}
+        transport={
+          actionRow === undefined
+            ? undefined
+            : transports.find((transport) => transport.hostId === actionRow.hostId)
+        }
+      />
       <HomeComposerSheet
         busy={creating}
         editable={composerEditable}

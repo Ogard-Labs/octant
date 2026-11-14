@@ -76,4 +76,27 @@ describe("arranging a mode's threads on the phone", () => {
       ["Earlier", ["old"]],
     ]);
   });
+
+  it("shelves snoozed and put-away threads below the list, and wakes a snooze when the agent needs the person", () => {
+    const groups = arrangeMobileThreads({
+      arrangement: "status",
+      projectName: () => undefined,
+      now,
+      rows: [
+        row("open"),
+        row("asleep", { snooze: { until: "2026-11-15T09:00:00", at: "2026-11-14T08:00:00" } }),
+        row("asleep-but-asks", {
+          live: "needs-input",
+          snooze: { until: "2026-11-15T09:00:00", at: "2026-11-14T08:00:00" },
+        }),
+        row("done", { completedAt: "2026-11-13T08:00:00" }),
+      ],
+    });
+    expect(names(groups)).toEqual([
+      ["Needs input", ["asleep-but-asks"]],
+      ["Idle", ["open"]],
+      ["Snoozed", ["asleep"]],
+      ["Put away", ["done"]],
+    ]);
+  });
 });
