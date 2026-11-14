@@ -1140,7 +1140,7 @@ describe("Claude execution policy", () => {
           ? {
               enabled: true,
               failIfUnavailable: true,
-              allowUnsandboxedCommands: false,
+              allowUnsandboxedCommands: true,
               autoAllowBashIfSandboxed: false,
               filesystem: {
                 denyRead: ["/"],
@@ -2152,6 +2152,86 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("asks about every command that leaves Claude's sandbox below Full access and refuses one in Plan", async () => {
+    const escaped = { command: "ls ~/Documents", dangerouslyDisableSandbox: true };
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "auto-accept-edits" }),
+      );
+      const open = f.opens[0]!;
+      // Ordinary commands stay in the sandbox; the runtime may let one out.
+      expect(open.sandbox).toMatchObject({
+        enabled: true,
+        allowUnsandboxedCommands: true,
+        filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
+      });
+      const signal = new AbortController().signal;
+      const approvals: Array<{ readonly requestId: string }> = [];
+      const watched = Effect.runFork(
+        Stream.runForEach(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter((event) => event.kind === "approval-request"),
+          ),
+          (event) =>
+            Effect.sync(() => {
+              if (event.kind === "approval-request") approvals.push(event);
+            }),
+        ),
+      );
+      const run = async (toolUseId: string) => {
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName: "Bash",
+            input: escaped,
+            toolUseId,
+            signal,
+          }),
+        ).resolves.toEqual({ behavior: "ask" });
+        const callback = open.canUseTool({ toolName: "Bash", input: escaped, toolUseId, signal });
+        await vi.waitFor(() => expect(approvals.length).toBeGreaterThan(0));
+        const raised = approvals.shift();
+        if (raised === undefined) throw new Error("Expected an approval card");
+        await Effect.runPromise(
+          acquired.connection.answerApproval({
+            sessionId,
+            requestId: raised.requestId,
+            approved: true,
+          }),
+        );
+        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+      };
+      await run("escape-1");
+      // A remembered answer never carries over to a command that leaves the sandbox.
+      await run("escape-2");
+      await Effect.runPromise(Fiber.interrupt(watched));
+    } finally {
+      await acquired.close();
+    }
+    const plan = harness();
+    const planConnection = await acquire(plan.driver, "code");
+    try {
+      await Effect.runPromise(
+        planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      await expect(
+        plan.opens[0]!.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: escaped,
+          toolUseId: "plan-escape",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+    } finally {
+      await planConnection.close();
+    }
+  });
+
   it.each([
     ["approval-gated", false],
     ["approval-gated", true],
@@ -2261,7 +2341,7 @@ describe("Claude execution policy", () => {
     expect(open.sandbox).toMatchObject({
       enabled: true,
       failIfUnavailable: true,
-      allowUnsandboxedCommands: false,
+      allowUnsandboxedCommands: true,
       autoAllowBashIfSandboxed: false,
     });
     await Effect.runPromise(

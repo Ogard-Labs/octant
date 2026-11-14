@@ -660,7 +660,12 @@ export function claudeSandboxSettings(
     enabled: true,
     failIfUnavailable: true,
     autoAllowBashIfSandboxed: false,
-    allowUnsandboxedCommands: false,
+    // Below Full access a command may leave the sandbox the way Claude Code
+    // lets it on its own (`dangerouslyDisableSandbox` on `Bash`); the gate
+    // asks about every such command and Plan refuses it (maintainer decision,
+    // 2026-11-14). A Full access thread that kept its sandbox chose it, so its
+    // commands stay inside.
+    allowUnsandboxedCommands: policy !== "full-access",
     filesystem: {
       denyRead: ["/"],
       // An extra folder is granted exactly what the root is.
@@ -998,6 +1003,8 @@ interface ClaudePreToolGrant {
   readonly expiresAt: number;
   /** The call names a path outside the Project's folders, so it always asks. */
   readonly outsideProject?: true;
+  /** A command that leaves the sandbox, asked about every time, never reused. */
+  readonly unsandboxed?: true;
 }
 
 interface ClaudePendingApprovalState extends ClaudePendingApproval {
@@ -2737,6 +2744,7 @@ function makeConnection(
           const reusableApprovalKey = approvalReuseKey(request.toolName, digest);
           if (
             request.toolName !== "AskUserQuestion" &&
+            grant.unsandboxed !== true &&
             activeState.approvalReuse.has(reusableApprovalKey)
           ) {
             holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
@@ -2954,6 +2962,19 @@ function makeConnection(
               return deny("Claude tool request is outside the Project.");
             }
           }
+          // A command that asks to leave Claude's sandbox. Below Full access
+          // the sandbox lets it (`allowUnsandboxedCommands`), so the gate asks
+          // about every such command and never reuses an earlier answer for
+          // it; Plan's commands never leave its sandbox. At Full access no
+          // command is sandboxed, and a Full access thread that kept its
+          // sandbox does not let one out, so the flag changes nothing there.
+          const escapesSandbox =
+            CLAUDE_SHELL_TOOLS.has(request.toolName) &&
+            requestInput.dangerouslyDisableSandbox === true;
+          if (escapesSandbox && input.executionPolicy === "plan") {
+            return deny("Plan runs every command inside its sandbox.");
+          }
+          const asksUnsandboxed = escapesSandbox && input.executionPolicy !== "full-access";
           // Claude Code takes a hook "allow" as the final word and runs the
           // tool without calling `canUseTool`. Observed 2026-09-06: an
           // approval-gated thread answered "allow" here for a Project-confined
@@ -2985,6 +3006,7 @@ function makeConnection(
               inputDigest: digest,
               expiresAt: factories.authorityNow() + PRE_TOOL_GRANT_TTL_MS,
               ...(outsideProject ? { outsideProject: true as const } : {}),
+              ...(asksUnsandboxed ? { unsandboxed: true as const } : {}),
             });
             return { behavior: "ask" };
           };

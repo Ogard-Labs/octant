@@ -81,7 +81,12 @@ export interface ClaudeSandboxSettings {
   readonly enabled: true;
   readonly failIfUnavailable: true;
   readonly autoAllowBashIfSandboxed: false;
-  readonly allowUnsandboxedCommands: false;
+  /**
+   * True below Full access, so a `Bash` call may leave the sandbox with
+   * `dangerouslyDisableSandbox` once the gate asked about it; false for a Full
+   * access thread that kept its sandbox.
+   */
+  readonly allowUnsandboxedCommands: boolean;
   readonly filesystem: {
     readonly denyRead: readonly ["/"];
     /** The Project root, then its extra folders. */
@@ -940,7 +945,7 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
       sandbox.enabled !== true ||
       sandbox.failIfUnavailable !== true ||
       sandbox.autoAllowBashIfSandboxed !== false ||
-      sandbox.allowUnsandboxedCommands !== false ||
+      sandbox.allowUnsandboxedCommands !== (input.executionPolicy !== "full-access") ||
       !hasExactKeys(sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
       return false;

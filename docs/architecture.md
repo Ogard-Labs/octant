@@ -219,8 +219,11 @@ The design rests on a small set of invariants that every package obeys:
 - **Work and Code share one capability set.** Chat Projects are virtual,
   memory-scoped containers with no implicit filesystem or shell authority.
   Work binds one project root and Code binds one directory (each with any extra
-  folders the person adds, granted the same access), each meant to be
-  OS-confined, and both run under the same guardrail levels: shell, local
+  folders the person adds, granted the same access). Each binds its root:
+  commands run OS-confined to it by default, and reaching outside its folders
+  asks below Full access, is allowed at Full access, and is refused in Plan
+  (maintainer decision, 2026-11-14; see
+  [Approvals](#security-and-authority)). Both run under the same guardrail levels: shell, local
   command-line tools, SSH to the person's own machines, file reads and
   writes, Git, provider-native tools, subagents, routines, and Full access
   are governed identically in both. Work is for documents,
@@ -3225,9 +3228,14 @@ so a command can use the host's forge command-line login and Git credential
 helper; that reach is the person's choice at that level, as above.) Under
 Codex's prompting postures, a shell command the person approves escalates out of
 Codex's `read-only` sandbox with the same reach. Claude's prompting postures
-run inside the runtime's own sandbox, which denies reads outside the project
-root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
+run each command inside the runtime's own sandbox, which denies reads outside
+the project root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
 Keychain-backed credential helper is reachable there has not been measured.
+A command may leave that sandbox the way Claude Code lets it on its own
+(`dangerouslyDisableSandbox`), and every such command asks first at Guarded
+and Accept edits and goes to the reviewer at Reviewed, is journaled as
+unsandboxed, and is refused in Plan (maintainer decision, 2026-11-14); once
+allowed it has the same reach as an approved Codex escalation.
 A push or pull-request change made through that gap is journaled as a
 forge change where Octant sees the command (above), but none of the rules
 above can be enforced after it starts. The pre-action refusals above cover
@@ -13820,8 +13828,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   id. Under auto-accept-edits, and under Plan (a Work round has no read-only
   path, so it would still write what a person approves), the loop pauses as
   `checkpoint-unavailable` and says so in its panel. A checkpoint that fails to mark reads as none.
-  Nothing else about a Work turn widens:
-  it stays confined to the Project root, and providers without an auto-accept
+  Nothing else about a Work turn widens. Its access is set by the host,
+  never the renderer: the Project's folders are open by default, access
+  outside them (access outside the bound root, an approval category above)
+  asks below Full access and is allowed at Full access, Plan refuses it
+  (maintainer decision, 2026-11-14), and providers without an auto-accept
   path keep asking;
   Code threads run in one of five modes, picked in one click from the
   composer of any thread and in the same words as the native apps: Auto,
@@ -14445,7 +14456,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   mapping under Bubblewrap and is not yet measured.
   Claude's unwrapped postures rest on the runtime's own sandbox because its
   sign-in and tools need reach that a deny-default profile would have to
-  re-grant.
+  re-grant. A command may leave that sandbox as Claude Code lets it
+  (`allowUnsandboxedCommands` with `dangerouslyDisableSandbox` on `Bash`),
+  only after it asks at Guarded and Accept edits or passes the reviewer at
+  Reviewed, and never in Plan (maintainer decision, 2026-11-14;
+  [detail](design/provider-runtimes.md#full-built-in-tool-set)).
   At Full access a Codex command reaches the whole disk,
   and the launch environment is the same in every posture. Octant
   therefore gives the Codex runtime no reusable cloud credential the person
@@ -17627,8 +17642,9 @@ cards; general Azure CLI credentials remain unavailable by design.
   have to create a placeholder in the person's home folder first; a file
   created mid-session is covered from the next launch. Below Full access
   Claude Code's commands run in Claude Code's own sandbox, which the guard
-  cannot join; the Project-root rule and the approvals hold them, and its
-  file tools are refused by Octant's gate. Linux launches are covered by
+  cannot join; the Project-root rule and the approvals hold them, a command
+  that leaves that sandbox asks first, and its file tools are refused by
+  Octant's gate. Linux launches are covered by
   tests of the covers they build, not yet by a measured run.
 
 ### Octant Shield

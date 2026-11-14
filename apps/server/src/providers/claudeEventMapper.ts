@@ -496,6 +496,8 @@ function jsonString(
  * - `REPL` runs code in Claude's own process: outside the command sandbox
  *   that holds every shell command below Full access, and outside the secret
  *   guard's file checks.
+ * - A `Bash` call with `dangerouslyDisableSandbox` leaves that sandbox, which
+ *   the gate asked about first.
  * - `EnterWorktree` and `ExitWorktree` move the session's working directory.
  *   A thread is bound to one checkout, and its file views and diffs stay on
  *   it; a worktree inside the Project still shows its files under the
@@ -507,6 +509,10 @@ function toolStartNotice(
   switch (content.toolName) {
     case "REPL":
       return "Unsandboxed: runs code in Claude's own process, outside the command sandbox and the secret guard.";
+    case "Bash":
+      return content.input.dangerouslyDisableSandbox === true
+        ? "Unsandboxed: this command runs outside Claude's command sandbox."
+        : undefined;
     case "EnterWorktree": {
       const named = jsonString(content.input, "path") ?? jsonString(content.input, "name");
       const target = named === undefined ? undefined : normalized(named, SUMMARY_MAX_CHARACTERS);

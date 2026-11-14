@@ -1893,7 +1893,7 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
-  it("journals a worktree switch with a notice that the thread's views stay on its checkout, and marks in-process code unsandboxed", () => {
+  it("journals a worktree switch with a notice that the thread's views stay on its checkout, and marks in-process code and an escaped command unsandboxed", () => {
     for (const [toolName, input, notice] of [
       [
         "EnterWorktree",
@@ -1902,6 +1902,11 @@ describe("mapClaudeMessage", () => {
       ],
       ["ExitWorktree", { action: "keep" }, /back to the thread's checkout/],
       ["REPL", { code: "1 + 1" }, /^Unsandboxed: runs code in Claude's own process/],
+      [
+        "Bash",
+        { command: "ls ~/Documents", dangerouslyDisableSandbox: true },
+        /^Unsandboxed: this command runs outside Claude's command sandbox/,
+      ],
     ] as const) {
       const started = eventValues(
         mapped(context(), {

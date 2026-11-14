@@ -650,6 +650,20 @@ command sandbox keeps its own folders, so below Full access a sandboxed shell
 command cannot reach an outside folder. Redaction of logs, the journal, and
 exports applies at every level.
 
+Below Full access Claude's command sandbox lets a command out the way Claude
+Code does on its own (maintainer decision, 2026-11-14): the launch sets
+`sandbox.allowUnsandboxedCommands: true` (the bundled SDK 0.3.211 and Claude
+Code 2.1.211 name it so; when false the runtime ignores the flag), and a
+`Bash` call with `dangerouslyDisableSandbox: true` runs outside it. Every
+such command asks through the gate at Guarded and Accept edits and goes to
+the reviewer at Reviewed, who sees the flag among the judged fields; a
+remembered answer never covers one, so each asks again. Its start is
+journaled with an "Unsandboxed" notice. Plan refuses it, since Plan's
+commands never leave its sandbox. Ordinary commands stay sandboxed, the
+secret-path refusals still apply to the file tools, and at Full access
+nothing changes: no command is sandboxed there, and a thread that kept its
+sandbox at Full access keeps `allowUnsandboxedCommands: false`.
+
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
 grant are never forgotten, and the caps on pending approvals (4) and

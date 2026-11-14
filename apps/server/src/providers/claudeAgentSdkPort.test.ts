@@ -188,7 +188,7 @@ const openInput = {
   sandbox: {
     enabled: true,
     failIfUnavailable: true,
-    allowUnsandboxedCommands: false,
+    allowUnsandboxedCommands: true,
     autoAllowBashIfSandboxed: false,
     filesystem: {
       denyRead: ["/"],
@@ -513,6 +513,8 @@ describe("Claude Agent SDK port", () => {
 
   test("keeps the sandbox when Full access explicitly asks for it", async () => {
     const harness = makeHarness();
+    // A Full access thread that kept its sandbox lets no command out of it.
+    const sandbox = { ...openInput.sandbox, allowUnsandboxedCommands: false };
     await expect(
       Effect.runPromise(
         Effect.scoped(
@@ -520,12 +522,13 @@ describe("Claude Agent SDK port", () => {
             ...openInput,
             executionPolicy: "full-access",
             fullAccessSandbox: true,
+            sandbox,
           }),
         ),
       ),
     ).resolves.toBeDefined();
     expect(harness.invocation?.options).toMatchObject({
-      sandbox: openInput.sandbox,
+      sandbox,
       permissionMode: "bypassPermissions",
     });
   });
@@ -535,6 +538,7 @@ describe("Claude Agent SDK port", () => {
     const roots = [openInput.projectRoot, "/extra-folder"] as const;
     const sandbox = {
       ...openInput.sandbox,
+      allowUnsandboxedCommands: false,
       filesystem: { denyRead: ["/"] as ["/"], allowRead: roots, allowWrite: roots },
     };
     await expect(
@@ -584,8 +588,12 @@ describe("Claude Agent SDK port", () => {
       },
     ],
     [
-      "an unsandboxed-command escape",
-      { ...openInput, sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: true } },
+      "an unsandboxed-command escape in a Full access sandbox",
+      { ...openInput, executionPolicy: "full-access", fullAccessSandbox: true },
+    ],
+    [
+      "a guarded sandbox without the runtime's own escape",
+      { ...openInput, sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: false } },
     ],
     [
       "an unsupported sandbox surface",
