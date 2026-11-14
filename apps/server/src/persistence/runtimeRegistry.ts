@@ -460,6 +460,7 @@ import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
 import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareService";
 import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
+import { registerTodoEvents } from "../todos/todoStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
@@ -869,6 +870,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasPublicShareEvents(events);
   registerProtectedFilesEvents(events);
   registerPersonMemoryEvents(events);
+  registerTodoEvents(events);
   registerCanvasExportFolderEvents(events);
   registerCanvasNetworkAccessEvents(events);
   registerCanvasOutsideContentEvents(events);
