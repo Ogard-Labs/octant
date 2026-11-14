@@ -5,11 +5,7 @@ import { elapsedLabel, relativeTimeLabel } from "../lib/relativeTime";
 import type { HomeListCardDefinition, HomeListRead } from "./homeCards";
 import { workingNowListRow } from "./homeListRows";
 import { useActiveAgentRuns } from "./useActiveAgentRuns";
-import {
-  buildWorkingNowRows,
-  type WorkingNowInput,
-  type WorkingNowRow,
-} from "./workingNow";
+import { buildWorkingNowRows, type WorkingNowInput, type WorkingNowRow } from "./workingNow";
 
 export const WORKING_NOW_CARD_ID = "working-now";
 

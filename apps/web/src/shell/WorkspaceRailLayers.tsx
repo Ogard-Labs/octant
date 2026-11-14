@@ -228,9 +228,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.onOpenLinearIssues === undefined
                 ? {}
                 : { onOpenLinearIssues: props.onOpenLinearIssues })}
-              {...(props.onStartThread === undefined
-                ? {}
-                : { onStartThread: props.onStartThread })}
+              {...(props.onStartThread === undefined ? {} : { onStartThread: props.onStartThread })}
             />
           </LazyRailSurface>
         </div>
@@ -441,9 +439,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               narrow={props.isNarrow}
               onClose={props.onCloseAgentsCenter}
               onOpenThread={props.onOpenAgentsThread}
-              {...(props.onStartThread === undefined
-                ? {}
-                : { onStartThread: props.onStartThread })}
+              {...(props.onStartThread === undefined ? {} : { onStartThread: props.onStartThread })}
               {...(props.onOpenAgentsCanvas === undefined
                 ? {}
                 : { onOpenCanvas: props.onOpenAgentsCanvas })}

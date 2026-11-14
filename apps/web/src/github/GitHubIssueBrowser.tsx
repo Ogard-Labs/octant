@@ -208,7 +208,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
     return () => {
       cancelled = true;
     };
-  // The Project's repository only decides the opening scope, once per client.
+    // The Project's repository only decides the opening scope, once per client.
   }, [client]);
 
   const clearSelection = () => {
