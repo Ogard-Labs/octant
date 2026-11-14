@@ -7,6 +7,11 @@
   justify-self: stretch;
   margin-top: var(--oct-space-3);
 }
+/* The wrapper makes each row its own first child, which drops the card's
+   hairline between rows; draw it again unless the row opens the card. */
+.octant-instructions-row:not(:first-child) > .setrow {
+  border-top: 1px solid var(--oct-border-soft);
+}
 .octant-instructions-field {
   display: flex;
   flex-direction: column;

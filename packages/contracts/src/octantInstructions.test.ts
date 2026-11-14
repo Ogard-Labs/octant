@@ -19,6 +19,16 @@ describe("Octant instructions contracts", () => {
     ).toEqual({ projectId, instructions: "Ship from main only." });
   });
 
+  it("carries orchestration in the person's record, held to 4,000 characters", () => {
+    expect(decodePersonInstructionsChanged({ instructions: "", orchestration: "Split." })).toEqual({
+      instructions: "",
+      orchestration: "Split.",
+    });
+    expect(() =>
+      decodePersonInstructionsChanged({ instructions: "", orchestration: "a".repeat(4_001) }),
+    ).toThrow();
+  });
+
   it("accepts a cleared text, which turns it off", () => {
     expect(decodePersonInstructionsChanged({ instructions: "" }).instructions).toBe("");
   });

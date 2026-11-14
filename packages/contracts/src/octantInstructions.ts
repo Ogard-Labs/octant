@@ -21,6 +21,9 @@ export const PersonInstructionsText = Schema.String.pipe(
 export const ProjectInstructionsText = Schema.String.pipe(
   Schema.maxLength(PROJECT_INSTRUCTIONS_MAX_CHARACTERS),
 );
+export const OrchestrationInstructionsText = Schema.String.pipe(
+  Schema.maxLength(ORCHESTRATION_INSTRUCTIONS_MAX_CHARACTERS),
+);
 
 export const PERSON_INSTRUCTIONS_AGGREGATE_TYPE = "person-instructions";
 export const PROJECT_INSTRUCTIONS_AGGREGATE_TYPE = "project-instructions";
@@ -31,6 +34,8 @@ export const PROJECT_INSTRUCTIONS_CHANGED = "project-instructions.changed@1";
 /** The person's whole record as changed: every change carries the whole new text. */
 export const PersonInstructionsChanged = Schema.Struct({
   instructions: PersonInstructionsText,
+  /** The orchestration text for coordinator threads; absent means empty. */
+  orchestration: Schema.optional(OrchestrationInstructionsText),
 }).annotations(strict);
 export type PersonInstructionsChanged = typeof PersonInstructionsChanged.Type;
 
@@ -50,6 +55,7 @@ const RecordVersion = Schema.Int.pipe(Schema.nonNegative());
 export const OctantInstructionsView = Schema.Struct({
   kind: Schema.Literal("octant-instructions"),
   instructions: PersonInstructionsText,
+  orchestration: OrchestrationInstructionsText,
   /** The person record's version; a change names the one it read. */
   version: RecordVersion,
   canChange: Schema.Boolean,
@@ -72,6 +78,11 @@ export const OctantInstructionsCommand = Schema.Union(
     kind: Schema.Literal("change-person-instructions"),
     expectedVersion: RecordVersion,
     instructions: PersonInstructionsText,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-orchestration-instructions"),
+    expectedVersion: RecordVersion,
+    orchestration: OrchestrationInstructionsText,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("read-project-instructions"),

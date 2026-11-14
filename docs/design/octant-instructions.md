@@ -9,13 +9,14 @@ own instruction files. Architecture owns the context a turn is built from
 memory ([Person memory](../architecture.md#person-memory)); Coordinator threads
 owns the coordinator role ([Coordinator threads](coordinator-threads.md)).
 
-Status: partly built. Built: the contracts and journal events, your
-instructions as a `person-instructions` block in Chat, Work, and Code on every
-provider and in Octant Harness's system prompt, the route that changes them,
-the inspector label, Export my data, the Your instructions field in
-Settings › General, and Project instructions with their `project-instructions`
-block and field beside Project memory. Designed, not built: orchestration
-(delivery slice 4).
+Status: built. The contracts and journal events; your instructions as a
+`person-instructions` block in Chat, Work, and Code on every provider and in
+Octant Harness's system prompt; Project instructions as a
+`project-instructions` block and a field beside Project memory; orchestration
+as an `orchestration-instructions` block for coordinator threads and a
+Project's designated planner; the route that changes them, the inspector
+labels, Export my data, and the Your instructions and Orchestration fields in
+Settings › General.
 
 ## Why
 
@@ -89,6 +90,11 @@ it. Limiting the texts to what only Octant knows keeps Octant a supplement.
   worker), because they are rules the person wrote for all work in Octant. A
   provider's own subagent sees them only if its provider passes the lead's
   context to it; Octant does not inject them into a subagent.
+- **Who orchestrates.** The Code turn runner asks whether the thread reads as
+  a coordinator (its own role, or its Project's designated planner) on every
+  turn, so Stop coordinating takes the orchestration block away at the next
+  turn, which the held standing context sends as a restatement without it.
+  Work coordinators are not built, so a Work or Chat turn never gets it.
 - **Plan and Chat.** Plan and Chat get them too. They change nothing about
   what Plan or Chat may do: Plan stays read-only and Chat keeps no folder and
   no shell.
@@ -114,7 +120,8 @@ it. Limiting the texts to what only Octant knows keeps Octant a supplement.
   agent, routine, peer, hub, or spoke may read-modify-write them, and no tool
   writes them.
 - **Journal.** Each change is journaled with the whole new text under the
-  record's expected version (`person-instructions.changed@1`,
+  record's expected version; orchestration shares the person's record, so its
+  event carries both texts (`person-instructions.changed@1`,
   `project-instructions.changed@1`); a stale version is refused. Agents may
   read the texts only as the context blocks above. The route
   (`/api/octant-instructions`) answers a client that does not act as the

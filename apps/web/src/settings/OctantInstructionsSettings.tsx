@@ -20,6 +20,9 @@ import "./octant-instructions.css";
 export const YOUR_INSTRUCTIONS_PURPOSE =
   "Rules for working inside Octant, sent with every new turn on every provider: which provider or model takes which job, and when to use Work, Canvas, routines, or the board. A provider's own instruction files still apply and come first on how it works.";
 
+export const ORCHESTRATION_PURPOSE =
+  "For coordinator threads and a Project's planner only, after your instructions: when to start a worker, which provider and model suits which task, how workers report back, and when to stop and ask. It grants nothing; a coordinator's start setting and bounds still apply.";
+
 export const PROJECT_INSTRUCTIONS_PURPOSE =
   "Rules for this Project's threads in Octant, sent after your instructions with every new turn in this Project. A provider's own instruction files in the folder still apply and come first on how it works.";
 
@@ -151,7 +154,10 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
   const [view, setView] = useState<OctantInstructionsView>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string>();
+  const [problem, setProblem] = useState<{
+    readonly field: "instructions" | "orchestration";
+    readonly message: string;
+  }>();
 
   const load = useCallback(async () => {
     if (client === undefined) return;
@@ -167,26 +173,34 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
     void load();
   }, [load]);
 
-  async function save(instructions: string) {
+  async function save(field: "instructions" | "orchestration", text: string) {
     if (client === undefined || view === undefined) return;
     setBusy(true);
     setProblem(undefined);
     try {
-      const result = await client.change({
-        kind: "change-person-instructions",
-        expectedVersion: view.version,
-        instructions,
-      });
+      const result = await client.change(
+        field === "instructions"
+          ? {
+              kind: "change-person-instructions",
+              expectedVersion: view.version,
+              instructions: text,
+            }
+          : {
+              kind: "change-orchestration-instructions",
+              expectedVersion: view.version,
+              orchestration: text,
+            },
+      );
       if (result.kind === "octant-instructions") {
         setView(result);
         return;
       }
       if (result.kind === "octant-instructions-refused") {
-        setProblem(result.message);
+        setProblem({ field, message: result.message });
         if (result.reason === "stale-version") await load();
       }
     } catch {
-      setProblem("Your instructions could not be saved.");
+      setProblem({ field, message: "Your instructions could not be saved." });
     } finally {
       setBusy(false);
     }
@@ -211,19 +225,34 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
     );
   }
   return (
-    <InstructionsField
-      busy={busy}
-      canChange={view.canChange}
-      focused={props.focusedSetting === "your-instructions"}
-      label="Your instructions"
-      onSave={(value) => void save(value)}
-      problem={problem}
-      purpose={YOUR_INSTRUCTIONS_PURPOSE}
-      scope="host"
-      settingId="your-instructions"
-      text="person"
-      value={view.instructions}
-    />
+    <>
+      <InstructionsField
+        busy={busy}
+        canChange={view.canChange}
+        focused={props.focusedSetting === "your-instructions"}
+        label="Your instructions"
+        onSave={(value) => void save("instructions", value)}
+        problem={problem?.field === "instructions" ? problem.message : undefined}
+        purpose={YOUR_INSTRUCTIONS_PURPOSE}
+        scope="host"
+        settingId="your-instructions"
+        text="person"
+        value={view.instructions}
+      />
+      <InstructionsField
+        busy={busy}
+        canChange={view.canChange}
+        focused={props.focusedSetting === "orchestration-instructions"}
+        label="Orchestration"
+        onSave={(value) => void save("orchestration", value)}
+        problem={problem?.field === "orchestration" ? problem.message : undefined}
+        purpose={ORCHESTRATION_PURPOSE}
+        scope="host"
+        settingId="orchestration-instructions"
+        text="orchestration"
+        value={view.orchestration}
+      />
+    </>
   );
 }
 

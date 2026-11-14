@@ -1523,7 +1523,11 @@ function inSystemPrompt(block: ProviderContextBlock): boolean {
  * no prompt of their own, reads them as standing rules rather than a message.
  */
 function personWrittenInstructions(block: ProviderContextBlock): boolean {
-  return block.kind === "person-instructions" || block.kind === "project-instructions";
+  return (
+    block.kind === "person-instructions" ||
+    block.kind === "project-instructions" ||
+    block.kind === "orchestration-instructions"
+  );
 }
 
 function splitInstructions(context: ReadonlyArray<ProviderContextBlock> | undefined): {
