@@ -141,6 +141,12 @@ export interface ClaudeOpenQueryInput {
   readonly persistSession?: false;
   readonly tools: readonly string[];
   /**
+   * Present: the session holds Claude Code's whole built-in tool set except
+   * these, and `tools` names the ones Octant's gate has its own rule for.
+   * Absent: the session holds exactly `tools`.
+   */
+  readonly withheldTools?: readonly string[];
+  /**
    * What this session loads of the person's own Claude setup, already held to
    * what the driver supports for the session's mode and posture. Absent opens
    * the query with no setting sources, skills, agents, plugins, or MCP
@@ -679,7 +685,9 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly mcpServers: Readonly<Record<string, never>>;
   readonly strictMcpConfig: boolean;
   readonly additionalDirectories: readonly string[];
-  readonly tools: readonly string[];
+  readonly tools: readonly string[] | ClaudeToolPreset;
+  readonly disallowedTools?: readonly string[];
+  readonly allowedTools?: readonly string[];
   readonly agents: Readonly<Record<string, never>>;
   readonly plugins: readonly [];
   readonly includePartialMessages: true;
@@ -928,6 +936,31 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   }
 }
 
+/** Claude Code's whole built-in tool set, as the SDK names it. */
+interface ClaudeToolPreset {
+  readonly type: "preset";
+  readonly preset: "claude_code";
+}
+
+/**
+ * The tool options for a launch. With the full set the runtime gets its own
+ * preset less the withheld tools. The SDK notes that a native build may drop
+ * Grep and Glob from the preset in favour of searching through its shell
+ * unless they are listed in `allowedTools`; they are listed so a search stays
+ * a read the gate answers, not a command that asks. The `PreToolUse` hook
+ * still answers every call to them first.
+ */
+function claudeToolSetOptions(
+  input: Pick<ClaudeOpenQueryInput, "tools" | "withheldTools">,
+): Pick<ClaudeAgentSdkInvocationOptions, "tools" | "disallowedTools" | "allowedTools"> {
+  if (input.withheldTools === undefined) return { tools: [...input.tools] };
+  return {
+    tools: { type: "preset", preset: "claude_code" },
+    disallowedTools: [...input.withheldTools],
+    allowedTools: ["Grep", "Glob"],
+  };
+}
+
 function requestsUnavailableBackgroundTool(toolName: unknown, input: unknown): boolean {
   if (
     toolName !== "Bash" ||
@@ -944,7 +977,8 @@ function requestsUnavailableBackgroundTool(toolName: unknown, input: unknown): b
 function liveBridge(): ClaudeAgentSdkBridge {
   return {
     query: (invocation) => {
-      const { sandbox, settings, ...baseOptions } = invocation.options;
+      const { sandbox, settings, allowedTools, disallowedTools, ...baseOptions } =
+        invocation.options;
       const options: ClaudeSdkOptions = {
         ...baseOptions,
         ...(settings === undefined
@@ -965,7 +999,12 @@ function liveBridge(): ClaudeAgentSdkBridge {
         skills: invocation.options.skills === "all" ? "all" : [],
         mcpServers: { ...invocation.options.mcpServers },
         additionalDirectories: [...invocation.options.additionalDirectories],
-        tools: [...invocation.options.tools],
+        tools:
+          "preset" in invocation.options.tools
+            ? { type: "preset", preset: "claude_code" }
+            : [...invocation.options.tools],
+        ...(disallowedTools === undefined ? {} : { disallowedTools: [...disallowedTools] }),
+        ...(allowedTools === undefined ? {} : { allowedTools: [...allowedTools] }),
         agents: { ...invocation.options.agents },
         plugins: [...invocation.options.plugins],
         ...(sandbox === undefined
@@ -1340,7 +1379,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               // The Project's extra folders, which Claude Code then counts as
               // its workspace beside `cwd`; its sandbox lists them too.
               additionalDirectories: [...(input.additionalDirectories ?? [])],
-              tools: [...input.tools],
+              ...claudeToolSetOptions(input),
               agents: {},
               plugins: [],
               includePartialMessages: true,

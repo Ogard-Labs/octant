@@ -405,8 +405,8 @@ the account setting and the thread's choice at each start, so turning either
 off reaches the next turn with every guard; nothing restarts a running turn,
 and its next publish is refused at once. `CLAUDE_CODE_ARTIFACT` is an internal
 switch of the runtime, not a documented interface: a runtime that ignores or
-renames it leaves the tool out, and Octant never admits a tool its own list
-did not request.
+renames it leaves the tool out, and Octant admits `Artifact` only in a session
+that offers it ([full built-in tool set](#full-built-in-tool-set)).
 
 Each Claude session owns its runtime process, so the connection implements
 `forceStop`, reported as the `forceStop` capability: it sends `SIGKILL` to that
@@ -432,8 +432,56 @@ same probe showed that
 `strictMcpConfig: true`, which every Octant query sets, keeps the account's
 claude.ai connectors (listed by 2.1.304 with `settingSources: []` when the
 option is absent) out of the session. The decoder tolerates the narrower list
-(the runtime may drop a requested tool, never add one), so a launch that lacks
-a requested tool still runs.
+(the runtime may drop a requested tool, never add one the launch does not
+allow), so a launch that lacks a requested tool still runs.
+
+### Full built-in tool set
+
+A Work or Code session outside Plan launches with Claude Code's own tool
+preset (`tools: { type: "preset", preset: "claude_code" }`) rather than a
+fixed list, so it holds what Claude Code holds in its own app (maintainer
+decision, 2026-11-14). `disallowedTools` withholds only what would break a
+rule the server enforces, and the decoder refuses a runtime or a call that
+names a withheld tool:
+
+| Withheld                                                        | Why                                                                                                                                                  |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EnterPlanMode`, `ExitPlanMode`                                 | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list                                                      |
+| `EnterWorktree`, `ExitWorktree`                                 | The thread is bound to one checkout                                                                                                                  |
+| `Monitor`, `Workflow`, `CronCreate`, `ScheduleWakeup`           | Each wakes the model later and starts a turn Octant never sent; a result with no turn pending ends the session, and the decoder refuses their frames |
+| `RemoteTrigger`, `PushNotification`, `Projects`, `ClaudeDesign` | Calls to the account's claude.ai services that no Octant setting covers (the Artifact tool has its own switch)                                       |
+| `REPL`                                                          | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                   |
+| `Agent`, `WebSearch`, `WebFetch`, `Skill`                       | Only while the person's own setup has that feature off                                                                                               |
+| `Artifact`                                                      | Unless the session offers Claude artifacts                                                                                                           |
+
+Octant's gate keeps its own rules for the tools it names: reads run unasked
+inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits held
+to the Project and the secret guard, and `Bash`, `TaskOutput`, and
+`TaskStop` take the shell's approval rules. Every other built-in tool is
+judged at the Project root and asks below Full access, which runs without
+asking, so a tool a later Claude Code release adds works from that release
+and fails closed; a path it names still meets the secret guard. Because a
+native build may serve searches through its shell, `Grep` and `Glob` are
+also listed in `allowedTools`; the `PreToolUse` hook still answers each call
+first. Plan keeps its explicit list (`Read`, `Glob`, `Grep`, the checklist,
+and `Bash` where its sandbox confines it).
+
+A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
+forgets the oldest settled ones past that; ids still pending or holding a
+grant are never forgotten, and the caps on pending approvals (4) and
+pre-tool grants (16) stay. A repeat of a forgotten id passes the whole gate
+again. Rationale: the earlier caps of 64 calls a turn and 256 a session
+failed long turns that Claude Code runs to the end in its own app.
+
+Not built yet: background commands. `Bash` with `run_in_background` stays
+refused before the gate and `Monitor` stays withheld, because a finished
+background command wakes the model in a turn Octant never sent, and the
+decoder refuses the background task frames they report. The task tools
+(`TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`) stay off through
+`CLAUDE_CODE_ENABLE_TASKS: "false"`: the panel needs the whole list each
+call, which `TodoWrite` gives, while a task list carries runtime-assigned
+ids and persists outside the session, so a resumed session would show a
+list Octant never saw whole.
 
 ## Codex
 

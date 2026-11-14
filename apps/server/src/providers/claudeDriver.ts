@@ -188,6 +188,13 @@ function claudeTurnMessage(
   };
 }
 
+/**
+ * The tools Octant's gate has its own rule for in a Work or Code session
+ * outside Plan. The session holds Claude Code's whole built-in set beside
+ * them (see {@link claudeWithheldTools}); any other built-in tool asks below
+ * Full access, so a tool a new Claude Code release adds works from that
+ * release on and is never run unasked by a posture that asks.
+ */
 const CLAUDE_TOOLS = [
   "Read",
   "Grep",
@@ -225,14 +232,62 @@ const CLAUDE_INCOMPATIBLE_REASONS = new Set([
   "Claude returned an invalid SDK response.",
 ]);
 /** The tools that write files inside the Project, and nothing else. */
-const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write"]);
+const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write", "NotebookEdit"]);
+/**
+ * Claude Code's tools that run or manage its shell commands: each takes the
+ * shell's approval rules, so it asks below Full access and runs in the
+ * Project root, where the command sandbox holds it.
+ */
+const CLAUDE_SHELL_TOOLS = new Set<string>(["Bash", "TaskOutput", "TaskStop"]);
+/**
+ * Claude Code's built-in tools a Work or Code session outside Plan does not
+ * hold. Octant adds to Claude Code and does not take its core features away
+ * (maintainer decision, 2026-11-14), so the session holds the runtime's whole
+ * built-in set except this list, and each entry is here only because it
+ * would break a rule the server enforces.
+ */
+const CLAUDE_WITHHELD_TOOLS = [
+  // The thread's mode is the server's. Claude switching its own permission
+  // mode would leave the posture Octant granted mid-session; Plan is a
+  // thread mode with its own read-only tool set, not a runtime switch.
+  "EnterPlanMode",
+  "ExitPlanMode",
+  // A thread is bound to one checkout; a worktree switch moves the session's
+  // working directory out of it.
+  "EnterWorktree",
+  "ExitWorktree",
+  // Each of these wakes the model later and starts a turn Octant never sent,
+  // which the journal cannot hold: a result with no turn pending ends the
+  // session. The decoder also refuses every background task frame but a
+  // subagent's, and a workflow's outright, so a granted call fails the turn.
+  "Monitor",
+  "Workflow",
+  "CronCreate",
+  "ScheduleWakeup",
+  // These reach the account's claude.ai services from the session, an
+  // outward call no Octant setting covers; Claude's Artifact tool has its
+  // own switch and gate instead.
+  "RemoteTrigger",
+  "PushNotification",
+  "Projects",
+  "ClaudeDesign",
+  // Runs JavaScript inside the runtime process, outside the command sandbox
+  // that holds every shell command below Full access and outside the secret
+  // guard's file checks.
+  "REPL",
+] as const;
 const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
 const MAX_PENDING_APPROVALS = 4;
 const MAX_PRE_TOOL_GRANTS = 16;
-const MAX_TOOL_USES_PER_SESSION = 256;
-const MAX_TOOL_USES_PER_TURN = 64;
+/**
+ * How many tool-use ids a session remembers. Settled ids are forgotten oldest
+ * first past this, so a long turn never runs out: a turn used to fail at its
+ * 64th tool call. Only ids still pending or holding a grant are never
+ * forgotten, and the caps above keep those few.
+ */
+const MAX_TRACKED_TOOL_USES = 256;
 const PRE_TOOL_GRANT_TTL_MS = 30_000;
 const USER_ANSWER_MAX_CHARACTERS = 4_096;
 const USER_QUESTION_MAX_CHARACTERS = 1_024;
@@ -244,6 +299,11 @@ export interface ClaudeExecutionOptions {
   readonly permissionMode: ClaudePermissionMode;
   readonly allowDangerouslySkipPermissions: boolean;
   readonly tools: readonly string[];
+  /**
+   * Whether the session holds Claude Code's whole built-in tool set beside
+   * `tools`, less {@link claudeWithheldTools}. Plan holds exactly `tools`.
+   */
+  readonly fullToolSet: boolean;
 }
 
 export function claudeExecutionOptions(
@@ -284,6 +344,24 @@ export function claudeNativeSetup(
 ): ProviderNativeSetup | undefined {
   if (setup === undefined) return undefined;
   return { ...setup, toolServers: false };
+}
+
+/**
+ * The built-in tools a session with the full tool set does not hold: the
+ * fixed list above, the person's own setup features they turned off, and
+ * Claude's Artifact tool unless the session offers it.
+ */
+export function claudeWithheldTools(
+  setup: ProviderNativeSetup | undefined,
+  offersArtifacts: boolean,
+): readonly string[] {
+  return [
+    ...CLAUDE_WITHHELD_TOOLS,
+    ...(setup?.subagents === true ? [] : [CLAUDE_SUBAGENT_TOOL]),
+    ...(setup?.webTools === true ? [] : [...CLAUDE_WEB_TOOLS]),
+    ...(setup?.skills === true ? [] : ["Skill"]),
+    ...(offersArtifacts ? [] : [CLAUDE_ARTIFACT_TOOL]),
+  ];
 }
 
 /** The tools a session adds for the person's own Claude setup. */
@@ -405,6 +483,30 @@ export function claudeArtifactCallRefusal(input: {
   return confined ? undefined : "Claude tool request is outside the Project.";
 }
 
+/**
+ * The path a call is confined by. A tool that names no file (a question, the
+ * checklist, or a built-in tool the gate has no rule of its own for) is judged
+ * at the Project root and asks below Full access, so a new tool is neither
+ * refused for lacking a path nor run unasked.
+ */
+function claudeConfinedTarget(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  projectRoot: string,
+): unknown {
+  if (CLAUDE_SHELL_TOOLS.has(toolName)) return input.cwd ?? projectRoot;
+  if (toolName === "Glob" || toolName === "Grep") return input.path ?? projectRoot;
+  if (toolName === "NotebookEdit") return input.notebook_path;
+  if (
+    CLAUDE_READ_TOOLS.has(toolName) ||
+    CLAUDE_EDIT_TOOLS.has(toolName) ||
+    toolName === CLAUDE_ARTIFACT_TOOL
+  ) {
+    return input.file_path;
+  }
+  return projectRoot;
+}
+
 /** Whether this call is a Plan turn's shell command, which its sandbox confines. */
 function isPlanShellCommand(
   policy: ProviderExecutionPolicy,
@@ -424,6 +526,7 @@ function claudePolicyOptions(
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         tools: [...CLAUDE_TOOLS],
+        fullToolSet: true,
       };
     case "auto-accept-edits":
     case "approval-gated":
@@ -437,12 +540,14 @@ function claudePolicyOptions(
         permissionMode: autoApprove === true ? "auto" : "default",
         allowDangerouslySkipPermissions: false,
         tools: [...CLAUDE_TOOLS],
+        fullToolSet: true,
       };
     case "plan":
       return {
         permissionMode: "plan",
         allowDangerouslySkipPermissions: false,
         tools: [...CLAUDE_PLAN_TOOLS, CLAUDE_CHECKLIST_TOOL],
+        fullToolSet: false,
       };
   }
 }
@@ -546,7 +651,10 @@ export function claudeFileToolSecretRefusal(
     }
     return undefined;
   }
-  if (!CLAUDE_READ_TOOLS.has(toolName) && !CLAUDE_EDIT_TOOLS.has(toolName)) return undefined;
+  // Every built-in tool that names a file is checked, a tool the gate has no
+  // rule of its own for included; an MCP server's tool runs in its own
+  // process and its arguments are its own.
+  if (toolName.startsWith("mcp__")) return undefined;
   for (const key of ["file_path", "notebook_path", "path"] as const) {
     const value = input[key];
     if (typeof value !== "string") continue;
@@ -838,9 +946,9 @@ interface SessionState {
   readonly approvalReuse: Set<string>;
   /** What each approved publish sent, by tool use, until its result arrives. */
   readonly publishedSnapshots: Map<string, ThreadPublishedSnapshot>;
+  /** The tool uses the gate has seen, oldest first; settled ones are forgotten past a bound. */
   readonly observedToolUseIds: Set<string>;
   readonly settledToolUseIds: Set<string>;
-  readonly turnToolUseIds: Set<string>;
   claudeSessionId?: string;
   context?: ClaudeEventContext;
   collector?: Fiber.RuntimeFiber<void, never>;
@@ -1007,6 +1115,23 @@ function expireClaudePreToolGrants(state: SessionState, now: number): void {
     if (grant.expiresAt > now) continue;
     state.preToolRequests.delete(toolUseId);
     state.settledToolUseIds.add(toolUseId);
+  }
+}
+
+/**
+ * Forgets the oldest settled tool-use ids once the session remembers as many
+ * as it may. A settled id's decision is already made, so forgetting it gives
+ * nothing new: a repeat of it passes the whole gate again, and `canUseTool`
+ * still needs the grant `PreToolUse` records. An id still pending or holding
+ * a grant is never settled, so it is never forgotten.
+ */
+function forgetSettledToolUses(state: SessionState): void {
+  if (state.observedToolUseIds.size < MAX_TRACKED_TOOL_USES) return;
+  for (const toolUseId of state.observedToolUseIds) {
+    if (state.observedToolUseIds.size < MAX_TRACKED_TOOL_USES) return;
+    if (!state.settledToolUseIds.has(toolUseId)) continue;
+    state.observedToolUseIds.delete(toolUseId);
+    state.settledToolUseIds.delete(toolUseId);
   }
 }
 
@@ -1764,10 +1889,8 @@ function makeConnection(
     });
     const admitToolUse = (state: SessionState, toolUseId: string): boolean => {
       if (state.observedToolUseIds.has(toolUseId)) return true;
-      if (
-        state.observedToolUseIds.size >= MAX_TOOL_USES_PER_SESSION ||
-        state.turnToolUseIds.size >= MAX_TOOL_USES_PER_TURN
-      ) {
+      forgetSettledToolUses(state);
+      if (state.observedToolUseIds.size >= MAX_TRACKED_TOOL_USES) {
         terminal(state, {
           kind: "failed",
           failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
@@ -1775,7 +1898,6 @@ function makeConnection(
         return false;
       }
       state.observedToolUseIds.add(toolUseId);
-      state.turnToolUseIds.add(toolUseId);
       return true;
     };
     const closeAfterPublishedTerminal = (state: SessionState) => {
@@ -2123,6 +2245,11 @@ function makeConnection(
               tools: [...baseExecutionOptions.tools, CLAUDE_ARTIFACT_TOOL],
             }
           : baseExecutionOptions;
+        // Outside Plan the session holds Claude Code's whole built-in set
+        // less what Octant withholds, so the gate below sees every tool.
+        const withheldTools = executionOptions.fullToolSet
+          ? claudeWithheldTools(nativeSetup, offersArtifacts)
+          : undefined;
         // The switch is read again at every call: a session opened while it
         // was on keeps the tool in its list after the person turns it off.
         const artifactCallRefusal = (toolInput: Readonly<Record<string, unknown>>) =>
@@ -2372,6 +2499,7 @@ function makeConnection(
             !claudeOffersTool(
               {
                 tools: executionOptions.tools,
+                ...(withheldTools === undefined ? {} : { withheldTools }),
                 ...(nativeSetup === undefined ? {} : { nativeSetup }),
               },
               request.toolName,
@@ -2490,14 +2618,7 @@ function makeConnection(
           // sandbox confines it there. Requiring a cwd field denied every
           // shell call before it could be asked about (observed 2026-09-06:
           // "git status" refused four times, then the turn failed).
-          const candidate =
-            request.toolName === "AskUserQuestion" || CLAUDE_SESSION_TOOLS.has(request.toolName)
-              ? projectRoot
-              : request.toolName === "Bash"
-                ? (requestInput?.cwd ?? projectRoot)
-                : request.toolName === "Glob" || request.toolName === "Grep"
-                  ? (requestInput?.path ?? projectRoot)
-                  : requestInput?.file_path;
+          const candidate = claudeConfinedTarget(request.toolName, requestInput, projectRoot);
           if (typeof candidate !== "string") {
             return deny("Claude tool request has no authoritative confined path.");
           }
@@ -2566,6 +2687,7 @@ function makeConnection(
               // the account's configuration directory.
               ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
+              ...(withheldTools === undefined ? {} : { withheldTools }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
               ...claudeAutoCompactWindow(input.compactionPoint),
               ...(sandbox === undefined ? {} : { sandbox }),
@@ -2611,7 +2733,6 @@ function makeConnection(
           publishedSnapshots: new Map(),
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
-          turnToolUseIds: new Set(),
           outputAccepted: false,
           pendingTurns: 0,
           promptHookRuns: claudePromptHookRuns(nativeSetup, runtimeVersion),
@@ -2866,7 +2987,6 @@ function makeConnection(
           if (state.pendingTurns === 0) {
             state.terminalResult = deferred<void>();
             state.outputAccepted = false;
-            state.turnToolUseIds.clear();
           }
           state.appToolsEnabled = input.tools.length > 0;
           state.pendingTurns += 1;
