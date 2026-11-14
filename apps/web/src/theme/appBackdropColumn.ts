@@ -5,13 +5,17 @@
  * livelier at the edges and in the empty areas beside it.
  */
 
-/** Behind the column a drawn ground keeps about a third of its strength. */
-export const COLUMN_SHARE = 1 / 3;
+/**
+ * Behind the column a drawn ground keeps a fifth of its strength: the start
+ * screen's list of rows sits on it, and at a third its characters ran through
+ * the row text.
+ */
+export const COLUMN_SHARE = 1 / 5;
 /**
  * On a light page the ground's dark ink reads louder against small text than
- * light ink on a dark page does, so behind the column it keeps a quarter.
+ * light ink on a dark page does, so behind the column it keeps a sixth.
  */
-export const LIGHT_PAGE_COLUMN_SHARE = 1 / 4;
+export const LIGHT_PAGE_COLUMN_SHARE = 1 / 6;
 /** Past the column's edge the ground is back at full strength after this many pixels. */
 export const COLUMN_MARGIN = 140;
 /** A page whose column cannot be measured is taken to have one this wide, centred. */
@@ -73,7 +77,7 @@ export function readContentColumns(
 
 /**
  * The sidebar, when the ground runs under it: its rows are text, so the ground
- * keeps a third of its strength there whatever the scene's own floor is.
+ * keeps a fifth of its strength there whatever the scene's own floor is.
  */
 export function readSidebarColumns(canvas: HTMLElement): ReadonlyArray<ContentColumn> {
   const origin = canvas.getBoundingClientRect();

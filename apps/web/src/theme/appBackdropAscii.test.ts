@@ -176,7 +176,7 @@ describe("character ground", () => {
     expect(PEAK_ALPHA).toBeLessThanOrEqual(0.18);
   });
 
-  it("dims the ground behind the content column to a third and leaves the edges at full strength", () => {
+  it("dims the ground behind the content column to a fifth and leaves the edges at full strength", () => {
     const column = { left: 300, right: 700 };
     expect(columnShare(500, [column])).toBeCloseTo(CENTRE_SHARE, 5);
     expect(columnShare(300, [column])).toBeCloseTo(CENTRE_SHARE, 5);
@@ -187,13 +187,13 @@ describe("character ground", () => {
     );
   });
 
-  it("dims the ground behind the content column to a quarter on a light page, where dark ink reads louder", () => {
+  it("dims the ground behind the content column to a sixth on a light page, where dark ink reads louder", () => {
     const column = { left: 300, right: 700 };
     expect(isDarkPage([240, 240, 240])).toBe(true);
     expect(isDarkPage([20, 20, 20])).toBe(false);
     expect(columnFloor(true)).toBeCloseTo(CENTRE_SHARE, 5);
-    expect(columnFloor(false)).toBe(0.25);
-    expect(columnShare(500, [column], columnFloor(false))).toBeCloseTo(0.25, 5);
+    expect(columnFloor(false)).toBeCloseTo(1 / 6, 5);
+    expect(columnShare(500, [column], columnFloor(false))).toBeCloseTo(1 / 6, 5);
     expect(columnShare(0, [column], columnFloor(false))).toBe(1);
   });
 

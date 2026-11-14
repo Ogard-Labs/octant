@@ -58,7 +58,7 @@ const WAVE_FRAME_MS = 1000 / 24;
 const WAVE_SECONDS = 1.9;
 /** The backing store never exceeds this ratio, however dense the display. */
 const MAX_RATIO = 2;
-/** Behind the content column a scene keeps a third of its strength. */
+/** Behind the sidebar a scene keeps a third of its strength. */
 const CALM_FLOOR = 1 / 3;
 /**
  * Ridges is the bold scene, so it runs at full strength outside the text: its
