@@ -324,6 +324,12 @@ reaches the person through the coordinator they are already talking to.
   are listed in its coordinator's composer, the way a child run's requests are
   listed in its parent's, with the worker named and an Open worker action. The
   person answers them there or in the worker; both answer the same request.
+- **In the coordinator's thread view** (maintainer decision, 2026-11-14;
+  designed, not built). A worker's pending ask also shows in the coordinator's
+  transcript where it arrived, as a request row naming the worker, which the
+  person answers in place; it is the same request, so answering it anywhere
+  settles every copy, and the row reads its outcome once answered. The
+  coordinator agent is never offered a way to answer it.
 - **The person answers, not the coordinator.** A coordinator agent never answers
   a worker's approval or question. It can read the worker, ask the person with
   `ask-user`, and `send` the worker what the person decided, but a pending

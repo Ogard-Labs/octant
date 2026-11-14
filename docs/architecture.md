@@ -133,6 +133,13 @@ The design rests on a small set of invariants that every package obeys:
 - **The event journal is authoritative; projections are rebuildable.** Commands
   append versioned events to a SQLite journal. Read models are idempotent
   projections that can be dropped and rebuilt from the journal at any time.
+  _Rationale for no interactive raw provider terminal mode_ (maintainer
+  decision, 2026-11-14): Octant offers no mode in which the person types into
+  a provider's own terminal program inside a thread. Keystrokes typed there
+  reach the provider directly, so its tool calls bypass Octant's approvals and
+  never reach the journal; the thread would claim a record it does not hold.
+  The person can still run a provider's CLI in an ordinary terminal, outside
+  any thread's authority.
 - **Contracts are schema-only, domain is pure.** `@octant/contracts` holds
   Effect Schema definitions and nothing else. `@octant/domain` holds pure
   policy and state transitions with no I/O.
@@ -3555,6 +3562,15 @@ enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
 
+**Machines in the person's own cloud account** (maintainer decision,
+2026-11-14; not built yet). A delivery target may also be a machine Octant
+creates in the person's own cloud account, through a credential reference the
+credential broker holds. It appears as a
+[Server Project](design/server-projects.md#machines-in-the-persons-cloud-account)
+and can be suspended and resumed by the person. Octant operates no hosted
+machines of its own; an Octant-operated hosted service stays out of scope
+([Current Release Boundary](#current-release-boundary)).
+
 **Coordinator threads start and direct worker threads.** A person may make a
 Code thread a coordinator: a long-lived thread whose own actions are read-only,
 which starts worker threads without asking (or proposes them, when the person
@@ -3662,7 +3678,14 @@ definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), weekly at a
 local time in an IANA time zone, or matching file arrivals in a local Work
 Project (Work and `new-thread` only). A routine targets a Chat, Work, or Code
-Project. A **Chat routine** keeps Chat's authority, since a Chat thread has no
+Project in this host's local catalog. A routine cannot target a
+[Server Project](design/server-projects.md) today: Server Projects are a
+catalog of their own, the dispatcher revalidates the routine's Project against
+the local catalog only (a server Project's id reads as missing and the run is
+blocked as `project-mismatch`), and a turn in a server Project is offered no
+routine tool. Routines on a Server Project's host, run by this host's
+scheduler and executed on the server through the Project's SSH connection,
+are designed and not built (maintainer decision, 2026-11-14). A **Chat routine** keeps Chat's authority, since a Chat thread has no
 file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
 folder or binding revision), its authority snapshot grants no filesystem,
@@ -6624,8 +6647,16 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   with no assigned directory also reads the one file `~/.claude.json`: refused
   it, the runtime retries for about six seconds, longer than the sign-in probe
   waits.
-  A thread stays on the instance it started with; there is no
-  automatic failover, rotation, or load-balancing between accounts. Discovery can find
+  A thread stays on the instance it started with until the person moves it
+  (maintainer decision, 2026-11-14; not built yet): the person may move a
+  thread to another account or instance, and the move is carried out by the
+  disclosed text handoff in
+  [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
+  journaled like any provider change. A per-thread setting the person opts
+  into, "when this account hits its usage limit, hand off to" a named account,
+  is allowed later; it hands off by the same path and names the move in the
+  thread. Octant never rotates, fails over, or load-balances between accounts
+  silently or on its own choice. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
@@ -12799,6 +12830,15 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned       |
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                      |
 
+**Themes as plugin contributions** (maintainer decision, 2026-11-14; not built
+yet). A plugin may contribute a theme as data only: a document in the semantic
+theme schema of `@octant/theme`, validated by that package's importer and
+contrast checks before it is listed. A theme contribution carries no renderer
+code, stylesheet, script, or asset loader; a contribution that fails
+validation is refused whole, and the one runtime theme authority applies a
+valid one exactly as it applies a built-in preset. Installation, trust, and
+enablement stay separate steps as for every other component.
+
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
 both read; it also marks which of them are switchable. A switchable plugin's
@@ -15895,6 +15935,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   because hub and spokes covers remote reach, and its specification, wire
   contract and pure policy are removed. The
   listener and client trust rules above are the whole of remote reachability.
+  There is still no Octant relay (maintainer decision, 2026-11-14). A person
+  who wants reach beyond their own network runs a relay or tunnel of their own
+  (a private network overlay, an SSH tunnel) in front of the listener; the
+  user guide documents that setup, and nothing in the product changes for it:
+  the listener's address rules, certificate pinning, and device-key proofs
+  apply unchanged through it.
 - **Provider keys on a host without the desktop app.** The desktop saves an
   endpoint's API key or bearer token over native IPC from its own renderer,
   so a browser client — local or paired — has no way to save one and names
@@ -17963,13 +18009,16 @@ by a maintainer. Existing scoped exceptions remain documented in this
 architecture.
 
 **Scope hold** (maintainer request, 2026-11-12). Bots, the Nightly shared-host
-client, public Canvas links, Browser upload and download manifests, and the
-Windows building blocks take no new scope until [the Full access
-rule](#security-and-authority) is built. Running Work and Code at Full access on
-Windows is not an exception to the hold: it is tracked as its own work and needs
-Windows forms of the confined launches first (maintainer decision, 2026-11-12).
-What is
-built or specified for them stays as it is.
+client, public Canvas links, and Browser upload and download manifests take no
+new scope until [the Full access rule](#security-and-authority) is built. What
+is built or specified for them stays as it is. The hold on the Windows building
+blocks is lifted (maintainer decision, 2026-11-14): Windows work takes new
+scope again under the sequence and confinement gate below, and running Work and
+Code on Windows still needs Windows forms of the confined launches first.
+
+Also out of scope, kept on 2026-11-14: physical phones and tablets and
+app-store upload (above), and an interactive raw provider terminal mode, whose
+rationale sits beside [the journal principle](#overview-and-principles).
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
