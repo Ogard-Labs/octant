@@ -198,7 +198,13 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
     const layout = new MutationObserver(() => void sync());
     resize.observe(element);
     visibility.observe(element);
-    overlays.observe(document.body, { childList: true, subtree: true });
+    // Some overlays open by toggling `hidden` rather than by insertion.
+    overlays.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["hidden"],
+    });
     layout.observe(element.parentElement ?? element, {
       attributes: true,
       attributeFilter: ["class", "style"],
