@@ -99,6 +99,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".endpoint-flow__step-number",
   ".provider-catalog__step-marker",
   ".library__step-mark",
+  ".add-provider-wizard__steps li > span",
   ".canvas-flow-board__callout",
   ".canvas-mockup__callout-mark",
   ".settings-app-background__preset-mark",
