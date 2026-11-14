@@ -1594,6 +1594,22 @@ export const ProviderCapabilities = Schema.Struct({
    */
   sessionRollback: Schema.optional(ProviderCapabilitySupport),
   /**
+   * Where this host lets the runtime run turns, when that is narrower than
+   * every mode: `chat` for Chat, `plan` for Plan in Work and Code, `work` and
+   * `code` for those modes at any other level. `unsupportedReason` says why a
+   * mode reads unsupported. Absent means every mode the other capabilities
+   * allow.
+   */
+  turnModes: Schema.optional(
+    Schema.Struct({
+      chat: ProviderCapabilitySupport,
+      plan: ProviderCapabilitySupport,
+      work: ProviderCapabilitySupport,
+      code: ProviderCapabilitySupport,
+      unsupportedReason: Schema.optional(Schema.Literal("host-confinement")),
+    }).annotations(strict),
+  ),
+  /**
    * Whether one session's runtime process can be killed on its own, through
    * the connection's `forceStop`. A runtime that serves several threads from
    * one process reports `unsupported`, since killing it would end the others.

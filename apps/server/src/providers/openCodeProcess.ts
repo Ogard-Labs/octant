@@ -256,10 +256,38 @@ const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$
  * The jail allows fork plus exec of exactly this one binary — no real git,
  * no shell, no other exec. The stand-in is macOS only. Linux confinement
  * cannot grant that one exec without also allowing fork, which reopens the
- * Plan jail, so a 2.x Chat, Plan, or Work launch on Linux keeps both denied
- * and the readiness probe fails closed.
+ * Plan jail, so a 2.x Chat or Plan launch on Linux is refused before it
+ * starts (`openCodeRefusesTurnHere`).
  */
 const GIT_STANDIN_TARGET = "/usr/bin/false";
+
+/**
+ * Why a 2.x Chat or Plan launch is refused off macOS. Linux confinement can
+ * only deny fork outright, and 2.x has to start `git` to serve a work tree,
+ * so the jail those modes need cannot serve one there. Work and Code outside
+ * Plan already allow a shell, so 2.x runs there (maintainer decision,
+ * 2026-11-14).
+ */
+export const OPENCODE_LINUX_CHAT_PLAN_REFUSAL =
+  "OpenCode 2 runs on Linux only in Work and Code outside Plan: Chat and Plan allow no process, and OpenCode 2 cannot serve a Git work tree without starting one. Use Work or Code at Ask first or above, or another provider for Chat and Plan.";
+
+/**
+ * Whether this launch is one the host's confinement cannot give a 2.x
+ * runtime: Chat or Plan (no fork, no exec) wherever the git stand-in is not
+ * available. Work and Code outside Plan launch as they always have.
+ */
+export function openCodeRefusesTurnHere(input: {
+  readonly runtime: OpenCodeRuntime;
+  readonly platform: NodeJS.Platform;
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+}): boolean {
+  return (
+    input.runtime === "beta" &&
+    input.platform !== "darwin" &&
+    (input.mode === "chat" || input.executionPolicy === "plan")
+  );
+}
 /** A 2.x launch whose caller named no posture runs nothing without refusal. */
 const BETA_DENY_ALL: ReadonlyArray<PermissionV2Rule> = [
   { action: "*", resource: "*", effect: "deny" },
@@ -1098,6 +1126,9 @@ function prepareOpenCodeLaunch(
   // OpenCode 2 removed the legacy `--pure` serve flag. Keep the runtime
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
+  if (openCodeRefusesTurnHere({ runtime, platform, mode, executionPolicy })) {
+    return Effect.fail(failure("unsupported", OPENCODE_LINUX_CHAT_PLAN_REFUSAL));
+  }
   return Effect.try({
     try: () => {
       const root = realpathSync(input.cwd);
@@ -1169,7 +1200,7 @@ function prepareOpenCodeLaunch(
       // project". The jail allows fork plus exec of exactly /usr/bin/false
       // and nothing else. Linux confinement cannot express that one exec
       // without also allowing fork, which is the hole the Plan jail exists
-      // to close, so Linux keeps fork denied and the probe fails closed.
+      // to close, so a 2.x Chat or Plan launch on Linux was refused above.
       // OpenCode 1.x and Work and Code modes are unchanged.
       const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
       if (betaGitStandin) {

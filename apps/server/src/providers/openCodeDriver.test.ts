@@ -173,9 +173,11 @@ describe("OpenCode driver", () => {
       expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
     } else {
       expect(probe.capabilities.appManagedTools).toBe("unsupported");
+      // Off macOS turns run only in Work and Code outside Plan, so the probe
+      // attests that jail.
       expect(fixture.processInputs[0]).toMatchObject({
-        mode: "chat",
-        executionPolicy: "plan",
+        mode: "code",
+        executionPolicy: "approval-gated",
       });
       expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
       expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
@@ -1687,6 +1689,18 @@ describe("OpenCode driver", () => {
       userQuestions: "supported",
       fileChanges: "unsupported",
     });
+    // Off macOS the launch refuses Chat and Plan, and the report says so.
+    expect(probe.capabilities.turnModes).toEqual(
+      process.platform === "darwin"
+        ? undefined
+        : {
+            chat: "unsupported",
+            plan: "unsupported",
+            work: "supported",
+            code: "supported",
+            unsupportedReason: "host-confinement",
+          },
+    );
   });
 
   it("lists a 2.x runtime without offering turns when its confined server cannot resolve a Git work tree", async () => {

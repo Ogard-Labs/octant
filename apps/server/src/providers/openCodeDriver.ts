@@ -391,6 +391,7 @@ function openCodeChatCapabilities(
 function openCodeBetaCapabilities(
   reported: ProviderCapabilities,
   version: string | undefined,
+  platform: NodeJS.Platform,
 ): ProviderCapabilities {
   // File changes and compaction are claimed only for a release whose events
   // and routes were read (`openCodeServesNativeRoutes`); an older one keeps
@@ -407,6 +408,18 @@ function openCodeBetaCapabilities(
     fileChanges: native ? "supported" : "unsupported",
     sessionCompaction: { chat: compaction, work: compaction, code: compaction },
     appManagedTools: reported.appManagedTools,
+    // Off macOS the launch refuses Chat and Plan (`openCodeRefusesTurnHere`).
+    ...(platform === "darwin"
+      ? {}
+      : {
+          turnModes: {
+            chat: "unsupported",
+            plan: "unsupported",
+            work: "supported",
+            code: "supported",
+            unsupportedReason: "host-confinement",
+          },
+        }),
   };
 }
 
@@ -414,8 +427,8 @@ function openCodeBetaCapabilities(
  * A 2.x runtime whose confined jail cannot serve a Git work tree even with
  * the always-failing `git` stand-in. Models stay visible; no turn is offered.
  * The probe attests at a directory with a `.git` marker under the Chat/Plan
- * confinement; if a future OpenCode treats the failing `git` as fatal, the
- * probe fails closed here.
+ * confinement on macOS (under Code at Ask first elsewhere); if a future
+ * OpenCode treats the failing `git` as fatal, the probe fails closed here.
  */
 const BETA_GIT_WORKTREE_REFUSAL_MESSAGE =
   "OpenCode 2 cannot resolve a Git project inside the Chat and Plan jail, so turns are not offered.";
@@ -1289,16 +1302,20 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                     (ownedBridge) => Effect.promise(() => ownedBridge.close()),
                   )
                 : undefined;
-            // Probe under the Chat/Plan jail, not the Code jail: the git
-            // stand-in (fork plus exec of /usr/bin/false only) is what makes
-            // a 2.x runtime serve a Git work tree in Chat, Plan, and Work.
-            // Attesting under Code confinement would pass even without it.
+            // On macOS, probe under the Chat/Plan jail, not the Code jail:
+            // the git stand-in (fork plus exec of /usr/bin/false only) is
+            // what makes a 2.x runtime serve a Git work tree in Chat and
+            // Plan. Attesting under Code confinement would pass even without
+            // it. Elsewhere a 2.x Chat or Plan launch is refused, so the probe
+            // attests the jail turns do run in there: Work and Code at Ask
+            // first, which allows a process.
+            const probesTurnJail = process.platform !== "darwin";
             const runtime = yield* acquireRuntime(
               options,
               projectRoot,
               bridge === undefined ? [] : [bridge.port],
-              "chat",
-              "plan",
+              probesTurnJail ? "code" : "chat",
+              probesTurnJail ? "approval-gated" : "plan",
             );
             const client = clientFactory(runtime, projectRoot);
             const health = yield* request(client.health);
@@ -1376,7 +1393,11 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               }
               return {
                 ...normalized,
-                capabilities: openCodeBetaCapabilities(normalized.capabilities, health.version),
+                capabilities: openCodeBetaCapabilities(
+                  normalized.capabilities,
+                  health.version,
+                  process.platform,
+                ),
               };
             }
             if (
@@ -2541,7 +2562,7 @@ function makeConnection(
             const rejected = validateChatTurnInput(
               input,
               runtimeKind === "beta"
-                ? openCodeBetaCapabilities(reportedCapabilities, runtimeVersion)
+                ? openCodeBetaCapabilities(reportedCapabilities, runtimeVersion, process.platform)
                 : reportedCapabilities,
               model,
             );

@@ -14939,9 +14939,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   confinement and fails closed — listing-only, no turns — if a future
   OpenCode treats the failing git as fatal. Linux confinement cannot express
   that one exec without also allowing fork, which is the hole the Plan jail
-  exists to close, so a 2.x Chat, Plan, or Work launch on Linux keeps fork
-  and exec denied. The probe fails closed and the runtime stays listing-only
-  there until Linux confinement can express the narrow per-path exec grant.
+  exists to close. On Linux a 2.x runtime therefore runs turns where a shell
+  is already allowed, Work and Code at Ask first, Auto, Accept edits and Full
+  access, whose launches allow fork and exec as they do on macOS; a Chat or
+  Plan launch is refused before it starts, naming that reason (maintainer
+  decision, 2026-11-14). The Linux probe attests the Code jail at Ask first,
+  and the capability report says so per mode (`turnModes`: Chat and Plan
+  unsupported, `host-confinement`). App-managed tools stay macOS only and
+  pinned to the measured releases.
   Discovery re-allowances — a runtime asking whether a path exists and what it
   resolves to, not to read it — follow one rule. Each names an exact literal
   node, never a subpath, so entries inside it stay denied; a subpath grant is

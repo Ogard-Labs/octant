@@ -1009,8 +1009,15 @@ its tools. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
 launches get the failing `git` stand-in described under
 [Security and authority](../architecture.md#security-and-authority), so 2.x offers turns in
-every mode there; on Linux the probe fails closed and the runtime is listed
-without turns. 2.0.22 names its turn events without the `session.next.`
+every mode there. On Linux (maintainer decision, 2026-11-14) 2.x runs turns
+in Work and Code outside Plan, at Ask first, Auto, Accept edits and Full
+access, where the launch already allows a shell; a Chat or Plan launch is
+refused before it starts with a sentence naming why, and the probe attests
+the Code jail at Ask first and reports `turnModes` with Chat and Plan
+unsupported (`host-confinement`), which the provider's Settings page shows
+as where it runs turns. Rationale: Linux confinement can only deny
+fork outright, so it cannot give Chat and Plan the one `git` exec the
+stand-in needs, while Work and Code outside Plan launch with a shell anyway. 2.0.22 names its turn events without the `session.next.`
 prefix earlier 2.x builds used (`session.text.*`, `session.reasoning.*`,
 `session.tool.*`, `session.step.*`, `session.execution.*`), identifies a
 tool call by `id`, and names the tool only on `session.tool.input.started`;
