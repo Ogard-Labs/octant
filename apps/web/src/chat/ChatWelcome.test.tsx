@@ -40,7 +40,7 @@ describe("ChatWelcome", () => {
             }),
             runtime: "provider",
             readiness: "ready",
-            driverLabel: "Codex CLI",
+            driverLabel: "Codex",
             endpointHost: undefined,
             executionHost: "This computer",
             sections: [

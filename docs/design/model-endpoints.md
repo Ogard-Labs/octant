@@ -36,7 +36,7 @@ page outline's links into it, and a deep link to a setting inside it, open it
 first. Opened, it lists every
 bundled provider driver in the Model endpoints row style. Agent runtimes and
 model endpoints are two sections. A row is one link named with its state
-("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·
+("Codex, off. Open setup") and shows the mark, the name, "Agent runtime ·
 Bundled" or "Model endpoint · Bundled", and the state in words beside the same
 dot shapes. The states are Ready, Sign in to use, Partly working, Checking…,
 Not checked yet, Found, not added, Not looked for yet, Not on this host, Not

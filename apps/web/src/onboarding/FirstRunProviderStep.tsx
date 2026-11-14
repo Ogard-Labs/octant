@@ -31,7 +31,7 @@ export interface FirstRunProviderStepProps {
   readonly scanning: boolean;
   /**
    * Turn a configured provider on or off from this step. First run may enable
-   * a detected Claude Code or Codex CLI; every other detected runtime still
+   * a detected Claude Code or Codex; every other detected runtime still
    * arrives switched off, so this switch is how those get turned on here.
    */
   readonly onSetProviderEnabled?: (instanceId: ProviderInstanceId, enabled: boolean) => void;
@@ -94,9 +94,8 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
       <div className="first-run__step">
         <p className="first-run__intro">
           Octant runs on {computer} and talks to the AI providers you choose. If Claude Code or
-          Codex CLI is already installed, first run enables it so a thread can start without
-          visiting Settings; you can turn it off later. Other detected CLIs stay off until you
-          enable them.
+          Codex is already installed, first run enables it so a thread can start without visiting
+          Settings; you can turn it off later. Other detected CLIs stay off until you enable them.
         </p>
 
         {/* The verdict is the section's own second line, not a row: it speaks

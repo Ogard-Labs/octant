@@ -211,7 +211,7 @@ describe("ProviderSettingsView", () => {
     expect(screen.getByRole("heading", { name: "Agent runtime" })).toBeVisible();
     await user.click(screen.getByRole("combobox", { name: "Provider type" }));
     // The list opens on the next frame; asking at once failed about half the runs.
-    expect(await screen.findByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Codex" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Qwen Code ACP" })).toBeInTheDocument();
     for (const elsewhere of [
       "OpenAI-compatible HTTP",
@@ -308,7 +308,7 @@ describe("ProviderSettingsView", () => {
     const user = userEvent.setup();
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
-    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode CLI");
+    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode");
     await user.type(screen.getByLabelText("Provider name"), "OpenCode local");
     await user.type(screen.getByLabelText("OpenCode binary"), "/opt/homebrew/bin/opencode");
     await user.click(screen.getByRole("button", { name: "Add OpenCode" }));
@@ -386,7 +386,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Codex CLI");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Codex");
     await user.type(screen.getByLabelText("Provider name"), "Codex local");
     await user.type(screen.getByLabelText("Codex binary"), "/opt/homebrew/bin/codex");
     await user.click(screen.getByRole("button", { name: "Add Codex" }));
@@ -750,7 +750,7 @@ describe("ProviderSettingsView", () => {
 
     const create = screen.getByRole("form", { name: "Add provider" });
     expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
-      "Codex CLI",
+      "Codex",
     );
     expect(within(create).getByLabelText("Provider name")).toHaveValue("Codex local (2)");
     expect(within(create).getByLabelText("Codex binary")).toHaveValue("/opt/homebrew/bin/codex");
@@ -2823,7 +2823,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode CLI");
+    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode");
     await user.type(screen.getByLabelText("Provider name"), "OpenCode local");
     await user.type(screen.getByLabelText("OpenCode binary"), "/opt/homebrew/bin/opencode");
     await user.click(screen.getByRole("button", { name: "Add OpenCode" }));
@@ -3819,7 +3819,7 @@ describe("ProviderSettingsView", () => {
           async () =>
             ({
               kind: "refused",
-              message: "The chosen file did not answer Codex CLI's version check.",
+              message: "The chosen file did not answer Codex's version check.",
             }) as const,
         )}
       />,
@@ -3829,7 +3829,7 @@ describe("ProviderSettingsView", () => {
     await user.click(within(card).getByRole("button", { name: /^Use the one found at/ }));
 
     expect(
-      await within(card).findByText("The chosen file did not answer Codex CLI's version check."),
+      await within(card).findByText("The chosen file did not answer Codex's version check."),
     ).toBeVisible();
   });
 
@@ -6032,7 +6032,7 @@ function discoverySnapshot(patch: Partial<DiscoverySnapshot> = {}): DiscoverySna
 function codexCandidate(): DiscoverySnapshot["candidates"][number] {
   return {
     driverKind: "codex",
-    displayName: "Codex CLI",
+    displayName: "Codex",
     // Homebrew installs the CLI through a `bin/codex` symlink; the scan probes
     // the realpath, so the canonical path and the discovered spelling differ.
     binaryPath: "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js",
@@ -6047,7 +6047,7 @@ function codexCandidate(): DiscoverySnapshot["candidates"][number] {
 function scannedCodexCandidate(): DiscoverySnapshot["candidates"][number] {
   return {
     driverKind: "codex",
-    displayName: "Codex CLI",
+    displayName: "Codex",
     binaryPath: "/Users/example/.local/share/codex/versions/0.49.1/codex",
     discoveredPath: "/Users/example/.local/bin/codex",
     version: "codex-cli 0.49.1",

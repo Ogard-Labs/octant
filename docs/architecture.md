@@ -6627,7 +6627,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
-  Code or Codex CLI instance is created enabled; every other detected runtime
+  Code or Codex instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness. A
   runtime created from a scan saves the launcher the scan examined, not the
@@ -7165,7 +7165,7 @@ when the session opens (Claude Code 2.1.287 answers `getContextUsage` with
 of a 200000 window), and the Claude mapper stamps it on every usage report of the
 session together with the input the latest request read as `contextTokens`. The
 runtime's separate `autocompact_state` message is only sent to remote workers, so
-the host does not depend on it. Codex CLI and every other runtime report no
+the host does not depend on it. Codex and every other runtime report no
 point and stay `unknown`.
 
 **Provider capacity.** One in-memory `ProviderCapacityScheduler` per host admits

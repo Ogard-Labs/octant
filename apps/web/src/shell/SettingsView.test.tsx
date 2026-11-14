@@ -789,8 +789,8 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "providers" },
     });
 
-    fireEvent.click(await screen.findByRole("link", { name: /^Codex CLI, / }));
-    expect(screen.getByRole("heading", { level: 1, name: "Codex CLI" })).toBeDefined();
+    fireEvent.click(await screen.findByRole("link", { name: /^Codex, / }));
+    expect(screen.getByRole("heading", { level: 1, name: "Codex" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Back to Provider catalog" })).toBeDefined();
     // The page's own look on this host runs once when it opens; browsing the
     // catalog and opening a driver's setup start no other.

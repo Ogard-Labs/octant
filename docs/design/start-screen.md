@@ -583,7 +583,7 @@ image is a composer affordance and is available here.
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a small
 notice floats above the context chips: which account by its spoken name
-("Codex", not "Codex CLI"), that it has reached or is close to its usage limit,
+(a saved "Codex CLI" reads "Codex"), that it has reached or is close to its usage limit,
 and the reset time the provider gave. It is amber while close and red once
 reached ([OctantAlert](../../DESIGN.md#octantalert)). It only tells: it offers
 no other account to switch to, since which account runs is the person's choice

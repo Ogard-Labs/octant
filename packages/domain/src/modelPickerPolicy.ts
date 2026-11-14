@@ -27,9 +27,9 @@ import {
 } from "./providerPolicy";
 
 const driverLabels: Readonly<Record<Exclude<ProviderDriverKind, AcpAgentKind>, string>> = {
-  codex: "Codex CLI",
+  codex: "Codex",
   claude: "Claude Agent SDK",
-  opencode: "OpenCode CLI",
+  opencode: "OpenCode",
   pi: "Pi RPC",
   "oh-my-pi": "Oh My Pi",
   ollama: "Ollama",

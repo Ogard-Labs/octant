@@ -237,7 +237,7 @@ function input(
 describe("model picker policy", () => {
   describe("driverLabel", () => {
     it("labels every driver kind without implying authority from branding", () => {
-      expect(driverLabel("codex")).toBe("Codex CLI");
+      expect(driverLabel("codex")).toBe("Codex");
       expect(driverLabel("claude")).toBe("Claude Agent SDK");
       expect(driverLabel("openai-compatible")).toBe("OpenAI-compatible HTTP");
       expect(driverLabel("anthropic-compatible")).toBe("Anthropic-compatible HTTP");
@@ -247,7 +247,7 @@ describe("model picker policy", () => {
       expect(driverLabel("bfl-image")).toBe("Black Forest Labs Image");
       expect(driverLabel("ideogram-image")).toBe("Ideogram Image");
       expect(driverLabel("ollama")).toBe("Ollama");
-      expect(driverLabel("opencode")).toBe("OpenCode CLI");
+      expect(driverLabel("opencode")).toBe("OpenCode");
       expect(driverLabel("kimi-code")).toBe("Kimi Code ACP");
       expect(driverLabel("kilo")).toBe("Kilo ACP");
       expect(driverLabel("devin")).toBe("Devin ACP");
@@ -1084,7 +1084,7 @@ describe("model picker policy", () => {
       id: "00000000-0000-4000-8000-000000000101",
       displayName: "DeepSeek Production",
     });
-    const b = codexInstance("00000000-0000-4000-8000-000000000102", "Local Codex");
+    const b = codexInstance("00000000-0000-4000-8000-000000000102", "Work account");
     const observedByInstance = new Map([
       [a.id, observed(a.id, [model({ id: "deepseek-chat", displayName: "DeepSeek Chat" })])],
       [b.id, observed(b.id, [model({ id: "gpt-5", displayName: "GPT-5" })])],
@@ -1097,9 +1097,9 @@ describe("model picker policy", () => {
       ).toEqual(["DeepSeek Production"]);
     });
     it("matches driver/protocol label", () => {
-      expect(
-        filterModelPickerGroups(groups, "codex cli").map((g) => g.instance.displayName),
-      ).toEqual(["Local Codex"]);
+      expect(filterModelPickerGroups(groups, "codex").map((g) => g.instance.displayName)).toEqual([
+        "Work account",
+      ]);
     });
     it("matches endpoint host", () => {
       expect(
@@ -1108,7 +1108,7 @@ describe("model picker policy", () => {
     });
     it("matches model display name", () => {
       expect(filterModelPickerGroups(groups, "gpt-5").map((g) => g.instance.displayName)).toEqual([
-        "Local Codex",
+        "Work account",
       ]);
     });
     it("matches model ID", () => {
@@ -1118,7 +1118,7 @@ describe("model picker policy", () => {
     });
     it("is case-insensitive and trims whitespace", () => {
       expect(filterModelPickerGroups(groups, "  GPT  ").map((g) => g.instance.displayName)).toEqual(
-        ["Local Codex"],
+        ["Work account"],
       );
     });
     it("returns all groups for an empty query", () => {

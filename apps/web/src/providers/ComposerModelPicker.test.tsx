@@ -150,7 +150,7 @@ describe("ComposerModelPicker", () => {
   it("warns that the chosen account is at its limit by its spoken name and offers no other account", async () => {
     const named = groups().map((group) =>
       String(group.instance.id) === String(providerA)
-        ? { ...group, instance: { ...group.instance, displayName: "Codex CLI" } }
+        ? { ...group, instance: { ...group.instance, displayName: "Codex" } }
         : group,
     );
     render(

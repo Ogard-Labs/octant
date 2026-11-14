@@ -120,7 +120,7 @@ describe("plugin-api manifest re-exports", () => {
           {
             id: "provider-driver",
             kind: "provider-driver",
-            displayName: "Codex CLI",
+            displayName: "Codex",
             declaredCapabilities: [],
             entryPoint: "builtin:provider-driver/codex",
           },
@@ -137,7 +137,7 @@ describe("plugin-api manifest re-exports", () => {
             {
               id: "provider-driver",
               kind: "provider-driver",
-              displayName: "Codex CLI",
+              displayName: "Codex",
               declaredCapabilities: [],
             },
           ],

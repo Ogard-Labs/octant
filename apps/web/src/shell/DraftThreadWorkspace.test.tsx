@@ -1794,7 +1794,7 @@ describe("Chat draft reasoning", () => {
             }),
             runtime: "provider",
             readiness: "ready",
-            driverLabel: "Codex CLI",
+            driverLabel: "Codex",
             endpointHost: undefined,
             executionHost: "This computer",
             sections: [

@@ -67,13 +67,13 @@ describe("ProviderGlyph", () => {
 
   it.each([
     ["claude", "Claude Code"],
-    ["codex", "Codex CLI"],
+    ["codex", "Codex"],
     ["devin", "Devin ACP"],
     ["grok", "Grok Build"],
     ["kilo", "Kilo ACP"],
     ["kimi-code", "Kimi Code CLI"],
     ["mistral-vibe", "Mistral Vibe ACP"],
-    ["opencode", "OpenCode CLI"],
+    ["opencode", "OpenCode"],
     ["oh-my-pi", "Oh My Pi"],
     ["pi", "Pi RPC"],
     ["copilot", "GitHub Copilot"],

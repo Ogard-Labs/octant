@@ -28,9 +28,9 @@ interface BundledDriverSpec {
 }
 
 const NATIVE_PROVIDER_DRIVERS = [
-  { driverKind: "codex", displayName: "Codex CLI", digestNibble: "0", uuidNibble: "01" },
+  { driverKind: "codex", displayName: "Codex", digestNibble: "0", uuidNibble: "01" },
   { driverKind: "claude", displayName: "Claude Code", digestNibble: "1", uuidNibble: "02" },
-  { driverKind: "opencode", displayName: "OpenCode CLI", digestNibble: "2", uuidNibble: "03" },
+  { driverKind: "opencode", displayName: "OpenCode", digestNibble: "2", uuidNibble: "03" },
   { driverKind: "pi", displayName: "Pi RPC", digestNibble: "4", uuidNibble: "05" },
   { driverKind: "oh-my-pi", displayName: "Oh My Pi", digestNibble: "5", uuidNibble: "06" },
   { driverKind: "ollama", displayName: "Ollama", digestNibble: "8", uuidNibble: "09" },

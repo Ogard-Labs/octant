@@ -2054,7 +2054,7 @@ function providerGroup(id: string, conversation: "native" | "replayed"): PickerG
     }),
     runtime: conversation === "native" ? "provider" : "octant-harness",
     readiness: "ready",
-    driverLabel: conversation === "native" ? "Codex CLI" : "OpenAI-compatible",
+    driverLabel: conversation === "native" ? "Codex" : "OpenAI-compatible",
     endpointHost: undefined,
     executionHost: "This computer",
     sections: [],

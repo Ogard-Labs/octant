@@ -132,7 +132,7 @@ describe("SidebarThreadRowContent", () => {
   });
 
   it("opens a third line only when there is something for it, and puts the provider at the end of the last line", () => {
-    const provider = { displayName: "Codex CLI", driverKind: "codex-cli" } as never;
+    const provider = { displayName: "Codex", driverKind: "codex-cli" } as never;
     const { container, rerender } = render(
       <SidebarThreadRowContent provider={provider} title="Fix the editor return key" />,
     );
@@ -141,7 +141,7 @@ describe("SidebarThreadRowContent", () => {
       container.querySelector(
         ".sidebar-navigation__thread-main > .sidebar-navigation__thread-provider",
       ),
-    ).toHaveAttribute("title", "Codex CLI");
+    ).toHaveAttribute("title", "Codex");
 
     rerender(
       <SidebarThreadRowContent
@@ -154,7 +154,7 @@ describe("SidebarThreadRowContent", () => {
       container.querySelector(
         ".sidebar-navigation__thread-detail > .sidebar-navigation__thread-provider",
       ),
-    ).toHaveAttribute("title", "Codex CLI");
+    ).toHaveAttribute("title", "Codex");
     expect(
       container.querySelector(
         ".sidebar-navigation__thread-main .sidebar-navigation__thread-provider",

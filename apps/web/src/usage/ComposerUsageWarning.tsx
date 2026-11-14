@@ -24,8 +24,8 @@ function isDismissed(key: string, now: number): boolean {
 }
 
 /**
- * The account's name as a person says it in a sentence: "Codex", not
- * "Codex CLI". The suffix only tells the picker which program runs it.
+ * The account's name as a person says it in a sentence. Accounts saved before
+ * the default names dropped "CLI" still carry the suffix, so it is trimmed.
  */
 function spokenName(displayName: string): string {
   return displayName.replace(/ CLI$/, "");
