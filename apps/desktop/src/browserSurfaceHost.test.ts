@@ -4004,6 +4004,120 @@ describe("the native execution owner boundary", () => {
     await host.closeAll();
   });
 
+  async function executionContexts(
+    hibernation: { readonly idleMs?: number; readonly hotLimit?: number },
+    count: number,
+  ) {
+    const views: BrowserSurfaceViewPort[] = [];
+    const host = createBrowserSurfaceHost({
+      hibernation,
+      createView: () => {
+        const native = view();
+        views.push(native);
+        return native;
+      },
+    });
+    const policy = decodeBrowserContextPolicy({
+      profileMode: "isolated",
+      profile: { kind: "personal" },
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 1,
+      sessionTimeoutMs: 60000,
+    });
+    const ready = await host.persistentOwner.configure(true);
+    if (ready.status !== "ready") throw Error("owner missing");
+    const executionIds = [];
+    for (let index = 0; index < count; index += 1) {
+      const executionId = decodeBrowserContextId(
+        `60000000-0000-4000-8000-${String(100 + index).padStart(12, "0")}`,
+      );
+      const binding = decodePersistentBrowserLeaseBinding({
+        ownerId: ready.ownerId,
+        grantId: contextId,
+        executionId,
+        threadId,
+        mode: "work",
+        projectId: contextId,
+        providerId: "provider",
+        modelId: "model",
+        authorityRevision: "revision",
+        profile: { kind: "personal" },
+        origins: policy.allowedOrigins,
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+      });
+      expect(
+        await host.persistentOwner.createContext(
+          executionId,
+          policy,
+          new AbortController().signal,
+          binding,
+        ),
+      ).toMatchObject({ status: "created" });
+      executionIds.push(executionId);
+    }
+    return { host, views, executionIds };
+  }
+
+  /** Hold the next screenshot a page takes until the returned release runs. */
+  function holdCapture(native: BrowserSurfaceViewPort | undefined): () => void {
+    let release = () => {};
+    const capture = native?.webContents.capturePage;
+    if (capture === undefined) throw Error("view missing");
+    vi.mocked(capture).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ isEmpty: () => false, toJPEG: () => Uint8Array.from([1]) });
+        }) as never,
+    );
+    return () => release();
+  }
+
+  it("keeps an idle execution page live while an action on it is still running", async () => {
+    const { host, views, executionIds } = await executionContexts({ idleMs: 0 }, 1);
+    const executionId = executionIds[0];
+    if (executionId === undefined) throw Error("context missing");
+    const release = holdCapture(views[0]);
+    const reading = host.peek(executionId);
+    await vi.waitFor(() => expect(views[0]?.webContents.capturePage).toHaveBeenCalled());
+
+    await host.persistentOwner.sweep();
+    expect(views[0]?.webContents.close).not.toHaveBeenCalled();
+
+    release();
+    await reading;
+    await host.persistentOwner.sweep();
+    expect(views[0]?.webContents.close).toHaveBeenCalled();
+    await host.closeAll();
+  });
+
+  it("past four live execution contexts, closes the least recently used one that is not busy", async () => {
+    let tick = Date.now();
+    const now = vi.spyOn(Date, "now").mockImplementation(() => (tick += 1));
+    try {
+      const { host, views, executionIds } = await executionContexts({}, 5);
+      const [first, second, third, fourth, fifth] = executionIds;
+      if (fifth === undefined || first === undefined || second === undefined)
+        throw Error("missing");
+      // The second context is busy and is now the least recently used; the
+      // first, created earliest, is touched after it.
+      const release = holdCapture(views[1]);
+      const busy = host.peek(second);
+      await vi.waitFor(() => expect(views[1]?.webContents.capturePage).toHaveBeenCalled());
+      for (const id of [third, fourth, fifth, first]) if (id !== undefined) await host.peek(id);
+
+      await host.persistentOwner.sweep();
+      expect(views.map((native) => vi.mocked(native.webContents.close).mock.calls.length)).toEqual([
+        0, 0, 1, 0, 0,
+      ]);
+      release();
+      await busy;
+      await host.closeAll();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("releases an execution's native reservation when its last page crashes", async () => {
     const views: BrowserSurfaceViewPort[] = [];
     const host = createBrowserSurfaceHost({

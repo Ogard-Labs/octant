@@ -11,6 +11,7 @@ import { decodeCodeProjectFilePath } from "@octant/contracts";
 import type { EditorDraftStore } from "../editor/editorDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 interface Replacement {
   readonly path: CodeRelativePath;
@@ -152,8 +153,7 @@ export function CodeWorkspaceReplace(props: {
     }
   };
   return (
-    <details className="code-editor-pane__references">
-      <summary>Replace in matching files</summary>
+    <OctantCollapsible className="code-editor-pane__references" summary="Replace in matching files">
       <p>Case-insensitive literal replacements. Review every affected file before saving.</p>
       {props.truncated ? (
         <p role="status">
@@ -206,6 +206,6 @@ export function CodeWorkspaceReplace(props: {
           {props.readOnly ? <p>Plan · read-only</p> : null}
         </>
       )}
-    </details>
+    </OctantCollapsible>
   );
 }

@@ -1100,6 +1100,23 @@ is `--oct-focus-edge-on-accent`.
 seven exclusive choices use `OctantToggleGroup` instead.
 **Gallery.** Fields and toggles.
 
+### OctantCollapsible
+
+**Purpose.** A disclosure: a summary row that opens a body below it.
+**Anatomy.** Props `summary`, `summaryClassName`, `children`, and every native
+`<details>` prop (`open`, `onToggle`, `className`).
+**Sizes and tokens.** A 14px chevron 6px before the summary, inheriting the
+row's ink; the user-agent triangle is hidden.
+**States.** Closed, open (the chevron turns 90 degrees; no turn under reduced
+motion).
+**Keyboard and accessibility.** It stays a native `<details>`: Enter and Space on
+the summary toggle it, the browser reports expanded state, and find-in-page opens
+a closed body that holds a match.
+**Do and do not.** Use it for every new disclosure; do not ship a raw
+`<details>` with the browser triangle. A body that is costly to render mounts
+only while open.
+**Gallery.** Composed patterns.
+
 ### OctantCombobox
 
 **Purpose.** A searchable choice from a bounded list.

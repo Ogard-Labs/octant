@@ -60,6 +60,11 @@ export interface ChatWelcomeProps {
     prompt: string,
     modelOptionValues?: ProviderModelOptionValues,
     extensionSelections?: ReadonlyArray<ExtensionSelection>,
+    /**
+     * Files staged before the chat exists. They upload to the new thread once it
+     * is created and leave with the first message, as a Work draft's images do.
+     */
+    attachments?: ReadonlyArray<File>,
   ) => void;
   readonly onSelectProvider?: (selection: ModelPickerSelection) => void;
   readonly onOpenSettings?: () => void;
@@ -95,6 +100,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   const presentation = draftThreadModePresentation("chat");
   const [prompt, setPrompt] = useNewTaskPrompt();
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
+  const [stagedFiles, setStagedFiles] = useState<ReadonlyArray<File>>([]);
   // This composer has no suggestion list, so a capability token typed here can
   // only ever leave as unattached prose; the refusal says where one attaches.
   const slash = useComposerSlashCommands({
@@ -142,12 +148,21 @@ export function ChatWelcome(props: ChatWelcomeProps) {
       receipt.selection === undefined ? [] : [receipt.selection],
     );
     const options = Object.keys(modelOptionValues).length === 0 ? undefined : modelOptionValues;
-    if (extensionSelections.length > 0) {
+    if (stagedFiles.length > 0) {
+      props.onCreateChat(
+        trimmed,
+        options,
+        extensionSelections.length > 0 ? extensionSelections : undefined,
+        stagedFiles,
+      );
+      setStagedFiles([]);
+      if (extensionSelections.length > 0) extensionDraft.clear();
+    } else if (extensionSelections.length > 0) {
       props.onCreateChat(trimmed, options, extensionSelections);
       extensionDraft.clear();
     } else if (options === undefined) props.onCreateChat(trimmed);
     else props.onCreateChat(trimmed, options);
-  }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues]);
+  }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues, stagedFiles]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (atMenu.handleKeyDown(event)) return;
@@ -276,8 +291,24 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               />
             }
             chips={
-              extensionDraft.receipts.length > 0 ? (
+              extensionDraft.receipts.length > 0 || stagedFiles.length > 0 ? (
                 <ul aria-label="Selected extensions" className="composer-chips">
+                  {stagedFiles.map((file, index) => (
+                    <li className="chip" key={`${file.name}-${index}`}>
+                      <span>{pastedImageName(file)}</span>
+                      <OctantButton
+                        aria-label={`Remove ${pastedImageName(file)} attachment`}
+                        className="chip-x window-no-drag"
+                        onClick={() =>
+                          setStagedFiles((current) => current.filter((staged) => staged !== file))
+                        }
+                        type="button"
+                        variant="bare"
+                      >
+                        ×
+                      </OctantButton>
+                    </li>
+                  ))}
                   {extensionDraft.receipts.map((receipt) => (
                     <li className="chip" key={receipt.reference}>
                       <span>{receipt.label}</span>
@@ -308,9 +339,12 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             row={{
               attach: (
                 <ComposerAttachButton
-                  refusedReason="Attachments can be added once the chat starts."
+                  busy={!ready || props.creating === true}
                   onRefused={setAttachmentNotice}
-                  onFileSelected={() => undefined}
+                  onFileSelected={(file) => {
+                    setAttachmentNotice(undefined);
+                    setStagedFiles((current) => [...current, file]);
+                  }}
                 />
               ),
               leading: <></>,

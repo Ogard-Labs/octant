@@ -25,6 +25,7 @@ import {
 import { formatCanvasValue } from "../canvasRuntime";
 import { sankeyNodeLabels } from "@octant/domain/canvas-sankey-layout";
 import { FlowChart, FlowTable, StageTable, isFlowChart, sankeyNodeId } from "./FlowCharts";
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 
 const PLOT_WIDTH = 320;
 const PLOT_HEIGHT = 168;
@@ -1050,8 +1051,7 @@ function ChartLegend({
 
 function ChartData({ block }: { readonly block: CanvasChartBlock }) {
   return (
-    <details className="canvas-block__chart-data">
-      <summary>View chart data</summary>
+    <OctantCollapsible className="canvas-block__chart-data" summary="View chart data">
       <div aria-label="Chart data" className="canvas-block__chart-table" role="region" tabIndex={0}>
         {block.chartType === "pie" || block.chartType === "donut" ? (
           <SliceTable block={block} />
@@ -1063,7 +1063,7 @@ function ChartData({ block }: { readonly block: CanvasChartBlock }) {
           <SeriesTable block={block} />
         )}
       </div>
-    </details>
+    </OctantCollapsible>
   );
 }
 

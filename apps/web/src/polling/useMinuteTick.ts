@@ -17,3 +17,12 @@ export function useMinuteTick(): Date {
   useEffect(() => scheduleVisibleInterval(() => setNow(new Date()), MINUTE_MS), []);
   return now;
 }
+
+/**
+ * `seed` kept current while the component stays mounted: the shell hands down
+ * a clock that moves only on snooze wakes, and a relative-time label below it
+ * still has to move every minute without re-rendering the shell.
+ */
+export function useMinuteNow(seed: number): number {
+  return Math.max(seed, useMinuteTick().getTime());
+}

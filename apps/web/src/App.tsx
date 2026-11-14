@@ -141,7 +141,7 @@ import {
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
-import { useMinuteTick } from "./polling/useMinuteTick";
+import { useSnoozeClock } from "./polling/useSnoozeClock";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import { ThreadActivityRevisionsContext } from "./polling/ThreadActivityRevisions";
 import type {
@@ -1113,8 +1113,6 @@ function LaunchedShell(
   }, [automationCenterOpen]);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  // Snoozed rows wake on the clock, so the sidebar keeps a minute-coarse one.
-  const minuteNow = useMinuteTick();
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] = useState<
@@ -4833,6 +4831,23 @@ function LaunchedShell(
   // This model is rebuilt only when its inputs change. It used to be recomputed
   // by every App render — including the once-a-minute clock tick and every
   // machine-change revision — and handed fresh array identities to the sidebar.
+  // Snoozed rows wake on the clock with no journal event, so the shell reads
+  // the clock at each wake (and label or day change) instead of every minute.
+  const snoozeUntil = useMemo(
+    () =>
+      [
+        ...chatController.navigation,
+        ...(codeController.status === "ready" ? codeController.navigation : []),
+        ...workNavigation.navigation,
+      ].flatMap((thread) => (thread.snooze === undefined ? [] : [thread.snooze.until])),
+    [
+      chatController.navigation,
+      codeController.navigation,
+      codeController.status,
+      workNavigation.navigation,
+    ],
+  );
+  const snoozeClockNow = useSnoozeClock(snoozeUntil);
   const navigationModel = useMemo(() => {
     // A worker names its coordinator by title only while that coordinator is
     // still in the list; an archived one leaves the worker an ordinary row.
@@ -4886,7 +4901,7 @@ function LaunchedShell(
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
             ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
             ...threadRest(thread, {
-              now: minuteNow,
+              now: snoozeClockNow,
               awaitingInput:
                 thread.awaitingInput === true ||
                 (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
@@ -4899,7 +4914,10 @@ function LaunchedShell(
     const workProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
       workNavigation.navigation.map((thread) => ({
         ...thread,
-        ...threadRest(thread, { now: minuteNow, awaitingInput: thread.activity === "attention" }),
+        ...threadRest(thread, {
+          now: snoozeClockNow,
+          awaitingInput: thread.activity === "attention",
+        }),
       }));
     const sidebarThreadGroups = sidebarThreadGroupsForMode({
       activeMode,
@@ -4958,7 +4976,10 @@ function LaunchedShell(
       // Chat's durable follow-up never wakes a row, but the agent's own
       // approval or the turn's question is the host's live signal that the
       // thread needs the person.
-      ...threadRest(thread, { now: minuteNow, awaitingInput: thread.awaitingKind !== undefined }),
+      ...threadRest(thread, {
+        now: snoozeClockNow,
+        awaitingInput: thread.awaitingKind !== undefined,
+      }),
     }));
     // The pane header says "Running" for exactly the threads the sidebar's
     // status mark calls working, so the two never disagree.
@@ -4991,7 +5012,7 @@ function LaunchedShell(
     codeController.navigation,
     codeController.status,
     codeProviderRequestsByThreadId,
-    minuteNow,
+    snoozeClockNow,
     providerController.instances,
     workNavigation.navigation,
   ]);
@@ -5006,9 +5027,9 @@ function LaunchedShell(
               ...(chatController.status === "ready" ? navigationModel.markedChatNavigation : []),
               ...navigationModel.workProjectThreads,
             ],
-        minuteNow,
+        snoozeClockNow,
       ),
-    [activeMode, chatController.status, minuteNow, navigationModel],
+    [activeMode, chatController.status, snoozeClockNow, navigationModel],
   );
 
   // The start-screen cards read these, so they are held here with the other
@@ -5539,7 +5560,7 @@ function LaunchedShell(
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
     needsYouAskClients,
-    now: minuteNow.getTime(),
+    now: snoozeClockNow.getTime(),
     openRunningServiceLive,
     pendingRequestClient,
     remoteRunningServicesClient,
@@ -7933,7 +7954,6 @@ function LaunchedShell(
                     loadAssignedLinearIssues={loadAssignedLinearIssues}
                     navigationRevision={pendingRequestFeedRevision}
                     needsYouAskClients={needsYouAskClients}
-                    now={minuteNow.getTime()}
                     projectNames={workingNowProjectNames}
                     projects={projectController.projects}
                     projectsListOpen={projectsListOpen}
@@ -8111,7 +8131,6 @@ function LaunchedShell(
                     {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
                     isNarrow={isNarrow}
                     navigation={navigationModel}
-                    now={minuteNow.getTime()}
                     {...(dockOverviewThread === undefined
                       ? {}
                       : { overviewThread: dockOverviewThread })}

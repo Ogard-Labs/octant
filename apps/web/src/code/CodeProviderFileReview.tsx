@@ -12,6 +12,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 type Reader = NonNullable<CodeClient["readProviderFileReview"]>;
 const refusal: Readonly<
@@ -152,14 +153,13 @@ export function CodeProviderFileReview(props: {
               />
             </div>
           )}
-          <details>
-            <summary>Session checkpoint</summary>
+          <OctantCollapsible summary="Session checkpoint">
             {result.file.checkpoint.length === 0 ? (
               <p>The checkpoint is empty.</p>
             ) : (
               <pre>{result.file.checkpoint}</pre>
             )}
-          </details>
+          </OctantCollapsible>
           {result.file.anchors.length === 0 ? null : (
             <p className="code-provider-file-review__anchors">
               Scope anchors:{" "}

@@ -14,6 +14,7 @@ import {
   layoutCanvasBarList,
   type CanvasBarListRowLayout,
 } from "@octant/domain/canvas-bar-list-layout";
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 
 type BarListDirection = "desc" | "asc";
 
@@ -235,8 +236,7 @@ function BarListData({
   const hasFile =
     actionRuntime !== undefined && block.rows.some((row) => row.sourceId !== undefined);
   return (
-    <details className="canvas-block__bar-list-data">
-      <summary>View bar list data</summary>
+    <OctantCollapsible className="canvas-block__bar-list-data" summary="View bar list data">
       <div
         aria-label="Bar list data"
         className="canvas-block__bar-list-table"
@@ -286,7 +286,7 @@ function BarListData({
           </tbody>
         </table>
       </div>
-    </details>
+    </OctantCollapsible>
   );
 }
 

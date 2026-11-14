@@ -240,6 +240,7 @@ type HistoryFrame = typeof CodeOperationEventFrame.Type;
  * - the last pull-request review, the last pull-request state, and per pull
  *   request number the last frame that identifies it;
  * - the last `git-observed` result;
+ * - the last `repository-test-state` result, which the Tests surface reads;
  * - provider-turn evidence: once a completed provider turn is proven, only the
  *   frames that prove it; until then every turn start, provider turn result
  *   and completed operation, since a later completion may pair with any.
@@ -259,6 +260,7 @@ export function summarizeThreadHistory(
   let lastState: number | undefined;
   const lastPerPullRequest = new Map<number, number>();
   let lastGitObserved: number | undefined;
+  let lastRepositoryTest: number | undefined;
   const providerEvidence: Array<number> = [];
   const providerTurnMarker = new Map<string, number>();
   const completedOperations = new Map<string, number>();
@@ -288,6 +290,8 @@ export function summarizeThreadHistory(
           lastPerPullRequest.set(result.number, index);
       } else if (result.kind === "git-observed") {
         lastGitObserved = index;
+      } else if (result.kind === "repository-test-state") {
+        lastRepositoryTest = index;
       } else if (result.kind === "provider-turn-state" && providerWitness === undefined) {
         providerEvidence.push(index);
         if (result.state === "completed") providerWitness = [index];
@@ -322,6 +326,7 @@ export function summarizeThreadHistory(
     lastReview,
     lastState,
     lastGitObserved,
+    lastRepositoryTest,
     ...lastPerChild.values(),
     ...lastPerPullRequest.values(),
     ...(providerWitness ?? providerEvidence),
@@ -922,7 +927,7 @@ export class CodeOperationEventStore {
 
   /**
    * The thread's history reduced by {@link summarizeThreadHistory}, for the
-   * readers that poll it. It is remembered per thread and extended from only
+   * readers that poll it or read only a latest fact. It is remembered per thread and extended from only
    * the rows after it, so a periodic read decodes what the thread did since the
    * last one, and it is refused exactly where {@link historyForThread} is.
    */

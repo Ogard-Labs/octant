@@ -23,6 +23,7 @@ import {
   type HistoryMetric,
   type HistoryCostBasis,
 } from "./usageHistoryPresentation";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 const ranges: ReadonlyArray<{ readonly value: Range; readonly label: string }> = [
   { value: "24h", label: "Past 24h" },
   { value: "7d", label: "7 days" },
@@ -456,8 +457,7 @@ export function ProviderUsageHistoryWorkspace(props: {
           ) : null}
         </HistoryBlock>
         {data === undefined ? null : (
-          <details className="provider-history__coverage">
-            <summary>Source coverage</summary>
+          <OctantCollapsible className="provider-history__coverage" summary="Source coverage">
             <ul>
               {data.coverage.map((source) => (
                 <li
@@ -490,7 +490,7 @@ export function ProviderUsageHistoryWorkspace(props: {
               Activity recorded by provider tools on this computer can include Octant sessions. It
               is not added to Octant’s own ledger. Read {new Date(data.queryAt).toLocaleString()}.
             </p>
-          </details>
+          </OctantCollapsible>
         )}
       </div>
     </section>

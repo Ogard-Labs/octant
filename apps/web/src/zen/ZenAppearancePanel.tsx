@@ -14,6 +14,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export interface ZenAppearancePanelProps {
   readonly appearance: ZenAppearance;
@@ -314,8 +315,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         {/* Controls that only matter to someone mixing their own colour.
             Open they doubled the sheet's height and pushed the built-in
             pictures off the bottom of it. */}
-        <details className="zen-appearance__custom">
-          <summary>Custom fill</summary>
+        <OctantCollapsible className="zen-appearance__custom" summary="Custom fill">
           <label>
             Solid color
             <OctantInput
@@ -392,7 +392,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
           >
             Apply custom gradient
           </OctantButton>
-        </details>
+        </OctantCollapsible>
       </Section>
     </div>
   );

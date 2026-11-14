@@ -1,3 +1,4 @@
+import { useMinuteNow } from "../polling/useMinuteTick";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import { BellRing } from "lucide-react";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
@@ -61,7 +62,8 @@ export function createNeedsYouCard(source: NeedsYouCardSource): HomeCardDefiniti
 }
 
 function useNeedsYouContent(source: NeedsYouCardSource): HomeCardContent {
-  const { now, onOpenThread, onOpenInbox } = source;
+  const { onOpenThread, onOpenInbox } = source;
+  const now = useMinuteNow(source.now);
   const { rows, answer, defer, asks, answerAsk } = usePendingRequestRows(source);
 
   // Before the first read the card says nothing rather than "Looking…": it

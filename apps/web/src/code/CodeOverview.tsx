@@ -31,6 +31,7 @@ import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
 import { CodeProjectCoordinatorStarting } from "./CodeProjectCoordinatorStarting";
 import { CodeProjectPlanner } from "./CodeProjectPlanner";
 import type { PlannerProposalReview } from "./plannerProposalCreation";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export type CodeOverviewProps =
   | {
@@ -611,8 +612,7 @@ function CodeProjectThreadRow(props: {
         )}
       </div>
       {detail.length === 0 ? null : (
-        <details className="code-project-thread__more">
-          <summary>Details</summary>
+        <OctantCollapsible className="code-project-thread__more" summary="Details">
           <dl className="kv">
             {detail.map((fact) => (
               <Fragment key={fact.label}>
@@ -621,7 +621,7 @@ function CodeProjectThreadRow(props: {
               </Fragment>
             ))}
           </dl>
-        </details>
+        </OctantCollapsible>
       )}
     </article>
   );

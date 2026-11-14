@@ -882,6 +882,22 @@ describe("Code thread history summary", () => {
         at(12),
       ],
     ];
+    const repositoryTest = (testRunId: string, state: "running" | "interrupted") =>
+      ({
+        kind: "operation-result",
+        result: {
+          kind: "repository-test-state",
+          operationId: ids.operation,
+          testRunId,
+          concerns: [],
+          state,
+        },
+      }) as never;
+    events.splice(5, 0, [repositoryTest("91000000-0000-4000-8000-000000000001", "running"), at(5)]);
+    events.splice(9, 0, [
+      repositoryTest("91000000-0000-4000-8000-000000000002", "interrupted"),
+      at(7),
+    ]);
     for (let index = 0; index < 20; index += 1) {
       events.push([{ kind: "operation-state", state: "running" }, at(12)]);
     }
@@ -898,6 +914,15 @@ describe("Code thread history summary", () => {
       ]);
       expect(extended).toEqual(summary);
     }
+    // The Tests surface reads the newest repository test result.
+    const latestTest = (history: ReadonlyArray<CodeOperationEventFrame>) =>
+      history.findLast(
+        (entry) =>
+          entry.event.kind === "operation-result" &&
+          entry.event.result.kind === "repository-test-state",
+      );
+    expect(latestTest(summary)).toEqual(latestTest(frames));
+    expect(latestTest(summary)).toBeDefined();
     expect(pullRequestIdentitiesFromHistory({ status: "ok", frames: summary })).toEqual(
       pullRequestIdentitiesFromHistory({ status: "ok", frames }),
     );

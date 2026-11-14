@@ -28,6 +28,7 @@ import { HostHealthSection } from "./HostHealthSection";
 import { UsageName } from "./UsageName";
 import "./usageWorkspace.css";
 import "./turnDiagnostics.css";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export interface TurnDiagnosticsWorkspaceProps {
   /** `hostHealth` adds the Host health section; without it the section is left out. */
@@ -485,8 +486,7 @@ function TrendTableSection({ report }: { readonly report: TurnDiagnosticsReport 
   const label = report.bucket === "hour" ? "hour" : "day";
   return (
     <SurfaceSection label={`Turns by ${label}`}>
-      <details className="turn-diagnostics__details">
-        <summary>Show every {label}</summary>
+      <OctantCollapsible className="turn-diagnostics__details" summary={<>Show every {label}</>}>
         <div className="usage-table-scroll">
           <table aria-label={`Turns by ${label}`} className="usage-table">
             <thead>
@@ -521,7 +521,7 @@ function TrendTableSection({ report }: { readonly report: TurnDiagnosticsReport 
             </tbody>
           </table>
         </div>
-      </details>
+      </OctantCollapsible>
     </SurfaceSection>
   );
 }
