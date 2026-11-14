@@ -122,8 +122,9 @@ draft; it does not send. Code's five prompt
 suggestions are one compact row of label-only chips directly under the composer
 they fill in, above the cards (under the cards they were a screen away from
 the box they act on), and
-Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
-button: hairline, resting fill, hover and focus fill); the prompt rides as the
+Work's Write, Learn, Plan, and Explore starters use the same chip (`StartSuggestionChip`:
+a borderless 28px pill with 12px text, a resting ink fill of 4% and a deeper
+one, 8%, on hover and keyboard focus); the prompt rides as the
 chip's tooltip and description and fills the composer when chosen, nothing more.
 
 ### Code agent home
