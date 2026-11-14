@@ -37,6 +37,7 @@ import {
   authorizeAgentRunCreation,
   type CodeParentActiveTurn,
   layoutContainsAgentRunThread,
+  parentRunsAtFullAccess,
 } from "../agentRun/authorizeAgentRunCreation";
 import { readChatThreadView } from "../chat/chatService";
 import { WorkThreadProjection } from "../work/workThreadProjection";
@@ -481,10 +482,8 @@ export function createAgentRunControlWorkspace(
 
 /**
  * Whether what a thread read from outside stops it from starting or keeping a
- * helper. The level is the one the thread's running turn holds, which a
- * routine or a narrowed turn may hold below the thread's own; with no turn
- * running it is the thread's own as it stands now, so lowering a thread from
- * Full access gates its next delegation.
+ * helper, judged at the level the thread runs at (`parentRunsAtFullAccess`),
+ * so lowering a thread from Full access gates its next delegation.
  */
 function outsideContentGatesHelpers(
   persistence: PersistenceService,
@@ -495,26 +494,13 @@ function outsideContentGatesHelpers(
   },
   parentThreadId: string,
 ): boolean {
-  const readLevel = (): boolean => {
-    try {
-      const work = workThreadProjection.read(decodeWorkThreadId(parentThreadId));
-      if (work !== undefined) {
-        return (turnLevels.runningWorkTurnAccess(parentThreadId) ?? work.access) === "full-access";
-      }
-      const code = persistence.readCodeThread(decodeCodeThreadId(parentThreadId));
-      return (
-        code !== undefined &&
-        turnLevels.codeParentActiveTurn(code).executionPolicy === "full-access"
-      );
-    } catch {
-      // An id neither mode decodes is a Chat thread, which has no Full access.
-      return false;
-    }
-  };
   return outsideContentRefusesDelegation({
     externalContentIngested: readThreadExternalContentTaint(persistence.connection, parentThreadId)
       .externalContentIngested,
-    fullAccessThread: readLevel(),
+    fullAccessThread: parentRunsAtFullAccess(
+      { persistence, workThreadProjection, ...turnLevels },
+      parentThreadId,
+    ),
   });
 }
 
@@ -1500,6 +1486,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   return {
     hostResourceBudget,
     agentRunAdmission,
+    /** The level a parent thread runs at, for the outside-content gate on helpers. */
+    parentRunsAtFullAccess: (parentThreadId: string) =>
+      parentRunsAtFullAccess(
+        { persistence, workThreadProjection, runningWorkTurnAccess, codeParentActiveTurn },
+        parentThreadId,
+      ),
     agentRunChildWorktree,
     agentRunLiveConversations,
     agentRunOrchestration,

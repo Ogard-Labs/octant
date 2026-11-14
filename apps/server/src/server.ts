@@ -327,6 +327,7 @@ export function startOctantServer(
       contributeChildTools,
       coordinatorWorkersHolder,
       externalContentIngestionStore,
+      parentRunsAtFullAccess,
       threadStandingAnswers,
       managedWorktreeReceipts,
       nativeHarnessRouter,
@@ -1935,6 +1936,7 @@ export function startOctantServer(
       nativeHarnessSessions,
       onWorkTurnCancelled,
       remoteDelegationHolder,
+      threadStandingAnswers,
       options,
       persistence,
       providerDataDirectory,
@@ -1957,6 +1959,7 @@ export function startOctantServer(
       workTurnService,
       agentRunAdmission,
       agentRunOrchestration,
+      parentRunsAtFullAccess,
     });
     benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(

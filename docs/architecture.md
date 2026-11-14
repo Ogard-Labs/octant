@@ -2818,7 +2818,9 @@ helpers start unasked and a waiting helper is kept; Plan stays refused
 Built for a Code thread, which asks in the thread's tool approval. Not built
 yet: a Work or Chat thread below Full access is still refused, because their
 turns have no way to ask a person from a host tool, and the reviewer at Auto
-does not answer in the person's place.
+does not answer in the person's place. A helper on another hub member follows
+the same rule, and the same answer covers it (maintainer decision, 2026-11-13;
+[Hub and spokes: delegation](design/hub-and-spokes.md#spoke-to-spoke-discovery-and-delegation)).
 
 Parent conversation context is opt-in and fixed at admission. Chat uses its
 admitted conversation; Work and Code expose bounded accepted prompts and
