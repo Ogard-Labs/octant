@@ -270,18 +270,35 @@ export function secretGuardSearchRefusal(
       `This search would read it from ${JSON.stringify(root)}. The native search cannot enforce protected-file exclusions, so no search results were returned. Search an ordinary subfolder with no protected entry instead; use the named authorized channel for the protected material.`,
     ].join(" ");
   if (inside !== undefined) return explain(inside);
+  const exempt = (entry: ResolvedProtectedEntry, location: string) =>
+    entry.ownAccountExempt && own.some((owned) => isSameOrInside(location, owned));
+  // A pattern entry also reaches a root inside its folder: a search rooted at
+  // a browser profile reads the `Cookies` and `logins.json` below it, though
+  // the profile folder itself neither matches the pattern nor contains the
+  // entry's folder. `levelsBelow` is how many levels of the entry the root
+  // still holds (the root itself was judged above).
+  const levelsBelow = (entry: ResolvedProtectedEntry & { readonly kind: "names" }, form: string) =>
+    isSameOrInside(form, entry.directory) && form !== entry.directory
+      ? entry.depth - form.slice(entry.directory.length + 1).split("/").length
+      : undefined;
   if (platform === "win32") {
-    // No walk on Windows yet: a root at or above any entry's location is
-    // refused whether or not the file exists, which refuses more searches
-    // than the walk would, never fewer.
+    // No walk on Windows yet: a root at or above any entry's location, or
+    // inside a pattern entry's folder with levels of it left, is refused
+    // whether or not the file exists, which refuses more searches than the
+    // walk would, never fewer.
     const beneath = entries.find((entry) => {
       const location = entry.kind === "path" ? entry.path : entry.directory;
-      const exempt = entry.ownAccountExempt && own.some((owned) => isSameOrInside(location, owned));
-      return !exempt && roots.some((form) => isSameOrInside(location, form));
+      if (exempt(entry, location)) return false;
+      if (roots.some((form) => isSameOrInside(location, form))) return true;
+      return entry.kind === "names" && roots.some((form) => (levelsBelow(entry, form) ?? 0) > 0);
     });
     return beneath === undefined ? undefined : explain(beneath);
   }
-  const covered = secretGuardLinuxPaths({ entries, ownAccountPaths: own, withinRoots: roots })
+  const covered = secretGuardLinuxPaths({
+    entries: entries.filter((entry) => entry.kind === "path"),
+    ownAccountPaths: own,
+    withinRoots: roots,
+  })
     .filter((path) => roots.some((form) => isSameOrInside(path, form)))
     .sort();
   for (const path of covered) {
@@ -289,7 +306,61 @@ export function secretGuardSearchRefusal(
     if (entry === undefined) continue;
     return explain(entry);
   }
+  // Pattern entries are walked from wherever the search starts: from the
+  // entry's folder when the root holds it, from the root when the root is
+  // inside it. A walk that runs out of its budget refuses, because the
+  // shared walk used to stop at its limit and answer "nothing found" for a
+  // folder as crowded as `~/Library/Application Support`.
+  for (const entry of entries) {
+    if (entry.kind !== "names" || exempt(entry, entry.directory)) continue;
+    for (const form of roots) {
+      const start = isSameOrInside(entry.directory, form)
+        ? { directory: entry.directory, levels: entry.depth }
+        : { directory: form, levels: levelsBelow(entry, form) ?? 0 };
+      if (start.levels <= 0) continue;
+      const found = patternMatchBeneath(start.directory, start.levels, entry);
+      if (found === "found") return explain(entry);
+      if (found === "truncated") {
+        return [
+          protectedFileRefusal(entry, homeDirectory),
+          `This search from ${JSON.stringify(root)} could not finish checking for those stores (over ${String(SEARCH_WALK_LIMIT)} entries), so no search results were returned. Search a smaller folder instead.`,
+        ].join(" ");
+      }
+    }
+  }
   return undefined;
+}
+
+const SEARCH_WALK_LIMIT = 4_096;
+
+/** Whether a file `levels` deep or less below `directory` matches the entry. */
+function patternMatchBeneath(
+  directory: string,
+  levels: number,
+  entry: ResolvedProtectedEntry & { readonly kind: "names" },
+): "found" | "none" | "truncated" {
+  const pattern = new RegExp(`^(?:${entry.name})$`, "u");
+  const except = entry.except === undefined ? undefined : new RegExp(`^(?:${entry.except})$`, "u");
+  let visited = 0;
+  const walk = (current: string, depth: number): "found" | "none" | "truncated" => {
+    let children: ReadonlyArray<import("node:fs").Dirent>;
+    try {
+      children = readdirSync(current, { withFileTypes: true });
+    } catch {
+      return "none";
+    }
+    for (const child of children) {
+      visited += 1;
+      if (visited > SEARCH_WALK_LIMIT) return "truncated";
+      if (except?.test(child.name) !== true && pattern.test(child.name)) return "found";
+      if (depth < levels && child.isDirectory() && !child.isSymbolicLink()) {
+        const below = walk(join(current, child.name), depth + 1);
+        if (below !== "none") return below;
+      }
+    }
+    return "none";
+  };
+  return walk(directory, 1);
 }
 
 /**

@@ -160,6 +160,28 @@ describe("secret guard refusals for host file tools", () => {
     expect(secretGuardSearchRefusal(home, options)).toContain("Refused");
     expect(secretGuardSearchRefusal(join(home, "project"), options)).toBeUndefined();
   });
+
+  it("refuses a search rooted inside a browser profile whose stores the list names by pattern", () => {
+    const home = fakeHome();
+    const profile = join(home, ".config/google-chrome/Default");
+    mkdirSync(join(profile, "Network"), { recursive: true });
+    writeFileSync(join(profile, "Network/Cookies"), "fake");
+    writeFileSync(join(profile, "Preferences"), "{}");
+    const options = { platform: "linux" as const, homeDirectory: home };
+    expect(secretGuardSearchRefusal(profile, options)).toContain(
+      "Browser cookies and saved logins",
+    );
+    expect(secretGuardSearchRefusal(join(home, ".config/nvim"), options)).toBeUndefined();
+  });
+
+  it("refuses a search when checking it for pattern-named stores could not finish", () => {
+    const home = fakeHome();
+    const crowded = join(home, ".config/crowded");
+    mkdirSync(crowded, { recursive: true });
+    for (let index = 0; index < 5_000; index += 1) writeFileSync(join(crowded, `f${index}`), "");
+    const refusal = secretGuardSearchRefusal(crowded, { platform: "linux", homeDirectory: home });
+    expect(refusal).toContain("could not finish");
+  });
 });
 
 describe("secret guard on a Windows host", () => {
@@ -209,6 +231,17 @@ describe("secret guard on a Windows host", () => {
     );
     expect(secretGuardSearchRefusal("C:\\Users\\Person\\AppData", options)).toContain("Refused");
     expect(secretGuardSearchRefusal("C:\\Users\\Person\\project", options)).toBeUndefined();
+  });
+
+  it("refuses a search rooted inside a folder whose stores the list names by pattern", () => {
+    for (const root of [
+      "C:\\Users\\Person\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\abc.default",
+      "C:\\Users\\Person\\AppData\\Local\\Google\\Chrome\\User Data\\Default",
+    ]) {
+      expect(secretGuardSearchRefusal(root, options), root).toContain(
+        "Browser cookies and saved logins",
+      );
+    }
   });
 
   it("shows Windows locations in Settings instead of the Linux ones", () => {
