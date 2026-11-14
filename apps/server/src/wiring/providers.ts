@@ -130,6 +130,7 @@ import { makeOhMyPiProcessLive, type OhMyPiProcessPort } from "../providers/ohMy
 import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
+import { readThreadProjectCode } from "../providers/threadProjectCode";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -1924,6 +1925,16 @@ export function wireProviders(deps: ProvidersDependencies) {
           }
           return threadNativeSetupStore.set(request.threadId, request.choice, actor);
         },
+        projectCode: (request) =>
+          readThreadProjectCode(
+            {
+              readWorkThread: (threadId) => workThreadProjection.read(threadId),
+              readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+              readProject: (projectId) => persistence.readProject(projectId),
+              readProviderInstance: (id) => persistence.readProviderInstance(id),
+            },
+            request,
+          ),
       },
       service: providerService,
       windowAuthorityStore,

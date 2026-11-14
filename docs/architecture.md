@@ -6512,6 +6512,30 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     its own setup on in that Project and lets it load the Project's own
     settings, hooks, MCP servers, plugins, and tools. A Chat Project has no
     folder and holds no trust.
+  - **Trust prompt.** One trust prompt per Project (maintainer decision,
+    2026-11-14): the person's own setup loads everywhere, and a Project's own
+    code loads after one click, as the providers' own folder-trust prompts
+    ask. A Work or Code thread reads `project-code` on
+    `POST /api/providers/thread-native-setup`, which a local window and a
+    paired device may read and which changes nothing; the host answers from
+    the thread's Project and provider account whether the Project root holds
+    that provider's own Project code and whether the Project trusts it
+    (`projectCodeTrust` in `@octant/domain`, from file presence only). The
+    entries are the ones each driver keeps out until the Project is trusted:
+    Claude Code's `.claude/settings.json`, `.claude/settings.local.json`,
+    `.mcp.json`, and `.claude/skills`; Mistral Vibe's `.vibe/config.toml`,
+    `.vibe/hooks.toml`, `.vibe/plugins`, `.vibe/tools`, and `.vibe/agents`.
+    Codex and OpenCode list none, because Octant's trust loads none of their
+    Project configuration (Codex's own folder trust decides it, and
+    OpenCode's launch keeps it off), and any other provider answers none.
+    Untrusted Project code shows one quiet notice card above the thread's
+    composer ([Thread view](design/thread-view.md#project-trust-prompt)):
+    **Trust for <provider>** sends the same `change-project-native-providers`
+    command as Trusted providers, under the same authority rule, and **Not
+    now** hides the prompt for that Project and provider in this viewer's
+    browser storage. The thread's next session or turn loads the Project's
+    code, because the host resolves trust for every session it starts or
+    resumes.
   - **Thread.** Each Chat, Work, and Code thread of a key provider carries its
     own choice: Account default, On, or Off (the **Provider tools** row of the
     thread's info panel). `set` on `POST /api/providers/thread-native-setup`

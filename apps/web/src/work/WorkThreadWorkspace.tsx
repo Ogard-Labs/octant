@@ -44,6 +44,7 @@ import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermi
 import { ThreadGuardrailLevel } from "../code/GuardrailLevelIndicator";
 import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
+import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
   parkedStopReleased,
@@ -838,6 +839,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     props.providerGroups,
     thread?.providerInstanceId,
   );
+  const projectTrustNotice = useProjectTrustNotice({
+    mode: "work",
+    threadId: String(props.threadId),
+    projectId: thread?.projectId,
+    providerInstanceId: thread?.providerInstanceId,
+  });
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
@@ -3331,6 +3338,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           }
           notices={[
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+            ...(projectTrustNotice === undefined ? [] : [projectTrustNotice]),
             ...(images.message === undefined
               ? []
               : [{ key: "image", tone: "warning" as const, text: images.message }]),
