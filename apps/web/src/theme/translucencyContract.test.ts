@@ -60,19 +60,21 @@ describe("window glass", () => {
     expect(Number(alpha)).toBeGreaterThanOrEqual(92);
   });
 
-  it("shows the ground and never the content through a modal surface in the desktop app", () => {
+  it("shows the window blurred past reading, not hidden, through a modal surface in the desktop app", () => {
     const css = read("styles/components.css");
     const fade =
       /html\[data-octant-native-host="true"\]:not\([\s\S]*?\):has\(\.octant-sheet__popup\[data-open\], \.octant-dialog__popup\[data-open\]\)\s*\.shell-frame\s*>\s*:is\(([^)]*)\)\s*\{([^}]*)\}/.exec(
         css,
       );
-    // The layers that hold content fade out; the ground and the frame stay.
+    // The layers that hold content blur past reading and dim, so Settings shows
+    // the window's appearance live without its words; the ground and frame stay.
     for (const layer of [".sidebar-rail", ".sidebar", ".window-chrome", ".workspace-layer"]) {
       expect(fade?.[1]).toContain(layer);
     }
     expect(fade?.[1]).not.toContain("app-backdrop");
-    expect(fade?.[2]).toContain("opacity: 0;");
-    // Only opacity changes, so focus and the content itself are untouched.
+    expect(Number(/blur\((\d+)px\)/.exec(fade?.[2] ?? "")?.[1])).toBeGreaterThanOrEqual(12);
+    expect(fade?.[2]).not.toContain("opacity: 0;");
+    // Only paint changes, so focus and the content itself are untouched.
     expect(fade?.[2]).not.toMatch(/visibility|display|pointer-events/);
     // The modal keeps the float fill at its normal alpha, never the dense one.
     expect(css).toContain("color-mix(in srgb, var(--octant-float) 66%, transparent)");
