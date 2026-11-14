@@ -79,7 +79,7 @@ describe("ThreadComposer", () => {
     expect(container.querySelector(".composer-actions")).toContainElement(order[2] as HTMLElement);
   });
 
-  it("draws send as a quiet tile until there is something to send, then as the card's primary accent control", () => {
+  it("keeps send disabled while there is nothing to send, and enabled once there is", () => {
     const { rerender } = render(
       <ThreadComposer
         input={<textarea aria-label="Message" className="composer-input" />}
@@ -88,17 +88,14 @@ describe("ThreadComposer", () => {
         }}
       />,
     );
-    expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute(
-      "data-variant",
-      "secondary",
-    );
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     rerender(
       <ThreadComposer
         input={<textarea aria-label="Message" className="composer-input" />}
         row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
       />,
     );
-    expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute("data-variant", "default");
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
   });
 
   it("puts the plan meters at the right of the start screen's context row", async () => {

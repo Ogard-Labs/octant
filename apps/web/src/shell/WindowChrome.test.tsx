@@ -894,7 +894,7 @@ describe("WindowChrome", () => {
       /\.shell--material-translucent :is\(\.thread-composer__surface, \.composer:not\(\.composer--carded\)\) \{ background: var\(--octant-control\); backdrop-filter: none;/,
     );
     expect(systemStyles).toMatch(
-      /\.shell--material-translucent :is\(\.turn-user \.bubble, \.callout\.composer-notice\) \{ background: var\(--octant-card\); backdrop-filter: none;/,
+      /\.shell--material-translucent \.turn-user \.bubble \{ background: var\(--octant-card\); backdrop-filter: none;/,
     );
   });
 

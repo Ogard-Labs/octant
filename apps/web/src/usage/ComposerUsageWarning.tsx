@@ -82,7 +82,7 @@ export function ComposerUsageWarning(props: {
     >
       <p>
         {limited ? `${name} has reached its usage limit.` : `${name} is close to its usage limit.`}
-        {reset === undefined ? "" : ` ${reset}.`}
+        {reset === undefined ? null : <span className="callout__second">{` ${reset}.`}</span>}
       </p>
     </OctantAlert>
   );

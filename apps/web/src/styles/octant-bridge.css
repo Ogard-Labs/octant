@@ -63,6 +63,8 @@
      one ground; below a certain surface it turns darker than the thing
      it borders. Hairlines are drawn as inset rings rather than borders
      so they never take part in layout or fight overflow clipping. */
+  /* One step of Contrast on a Custom theme scales every derived wash and edge. */
+  --oct-contrast-scale: 1;
   --oct-fill-1: color-mix(
     in oklab,
     var(--octant-text-primary) calc(14% * var(--oct-contrast-scale, 1)),
@@ -261,16 +263,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   --oct-glass-chrome: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
 }
 
-/* A plain notice inside the shell is drawn on the raised surface, which is
-   opaque; under Glass it takes the control tint. A switch that is off keeps a
-   thumb the eye can find: the page colour it is drawn in was the same black as
-   its track. */
-html:not([data-octant-reduced-transparency="true"])
-  .shell--material-translucent
-  .callout[data-tone="neutral"] {
-  background: var(--octant-control);
-}
-
+/* A switch that is off keeps a thumb the eye can find: the page colour it is
+   drawn in was the same black as its track. */
 html:not([data-octant-reduced-transparency="true"])
   .shell--material-translucent
   .octant-switch[data-unchecked]

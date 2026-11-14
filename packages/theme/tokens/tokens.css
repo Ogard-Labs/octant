@@ -15,10 +15,26 @@
   /* ── Surfaces: the page, cards, floating surfaces, controls and the chosen row ── */
   --oct-bg: var(--octant-workspace);
   --oct-fg-soft: color-mix(in oklab, var(--octant-text-primary) 7%, transparent);
-  --oct-fill-1: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
-  --oct-fill-2: color-mix(in oklab, var(--octant-text-primary) 8%, transparent);
-  --oct-fill-3: color-mix(in oklab, var(--octant-text-primary) 6%, transparent);
-  --oct-fill-4: color-mix(in oklab, var(--octant-text-primary) 4%, transparent);
+  --oct-fill-1: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(14% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-2: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(8% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-3: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(6% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-4: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(4% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
   --oct-selection: var(--octant-selection);
   --oct-surface: var(--octant-card);
   --oct-surface-warm: var(--octant-control);
@@ -61,8 +77,16 @@
   /* ── Borders and hairlines ── */
   --oct-border: var(--octant-border);
   --oct-border-soft: color-mix(in oklab, var(--octant-border) 55%, var(--octant-workspace));
-  --oct-hairline: color-mix(in oklab, var(--octant-text-primary) 10%, transparent);
-  --oct-hairline-strong: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
+  --oct-hairline: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(10% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-hairline-strong: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(14% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
   --octant-border: #303030;
   --octant-border-soft: color-mix(in srgb, var(--octant-border) 60%, var(--octant-workspace));
   --octant-border-strong: #4d4d4d;
@@ -322,6 +346,8 @@
   --oct-z-popup: 60;
   --oct-z-sticky: 20;
   --oct-z-toast: 55;
+  /* ── Support: tokens an exported value reads ── */
+  --oct-contrast-scale: 1;
 }
 
 :root[data-theme="light"] {

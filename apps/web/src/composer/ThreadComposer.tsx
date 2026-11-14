@@ -329,19 +329,30 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     prompt.dataset["composerDescribed"] = added.join(" ");
   });
   // The box is a full pill while it holds one row and takes the large radius
-  // once it grows (a longer message, a queue, chips above the prompt), so the
-  // corner never swells with the height. The stylesheet reads data-shape.
+  // once it grows (a longer message, a queue, chips above the prompt). Then the
+  // prompt takes the full width on top and the controls stand in a row along
+  // the bottom. The prompt's own height decides, not the box's: the grown
+  // layout is wider for the text and taller for the row, so reading the box
+  // would flip the shape back and forth. A grown box returns to a pill only once
+  // the prompt is empty. The stylesheet reads data-shape.
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
     if (surface === null) return;
     const apply = () => {
-      surface.dataset["shape"] =
-        surface.offsetHeight <= COMPOSER_ONE_ROW_MAX_HEIGHT ? "pill" : "box";
+      const prompt = surface.querySelector<HTMLElement>(".composer-input");
+      const field = surface.querySelector<HTMLElement>(".composer-field");
+      const empty = prompt instanceof HTMLTextAreaElement && prompt.value === "";
+      const crowded = field !== null && field.previousElementSibling !== null;
+      const grown = prompt !== null && prompt.offsetHeight > COMPOSER_ONE_ROW_MAX_HEIGHT;
+      const wasBox = surface.dataset["shape"] === "box";
+      surface.dataset["shape"] = crowded || grown || (wasBox && !empty) ? "box" : "pill";
     };
     apply();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(apply);
     observer.observe(surface);
+    const prompt = surface.querySelector<HTMLElement>(".composer-input");
+    if (prompt !== null) observer.observe(prompt);
     return () => observer.disconnect();
   }, [props.held]);
   const noticeCard = (
@@ -517,22 +528,10 @@ function ComposerThreadDropCue() {
 }
 
 /**
- * Send is a quiet raised tile until there is something to send, then the
- * primary action: the accent as a gradient with a glow under it. Filled with
- * the accent at every moment, it was the loudest thing on the page under an
- * empty prompt.
+ * Send is the ink as a round fill with the page colour as its arrow, and it
+ * rests at 20% while there is nothing to send. The stylesheet draws both from
+ * the button's disabled state.
  */
-function sendVariant(refused: boolean): "secondary" | "default" {
-  return refused ? "secondary" : "default";
-}
-
-/**
- * A refused send keeps its quiet fill at full strength and dims only the
- * arrow: the blanket disabled opacity left the circle at 1.07:1 on the page,
- * so the box no longer showed where send is.
- */
-const SEND_REFUSED_PAINT = "disabled:opacity-100 disabled:[&_svg]:opacity-50";
-
 function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefined): boolean {
   return (
     compactingNoteId !== undefined || send.disabled === true || send.disabledReason !== undefined
@@ -558,12 +557,11 @@ function ComposerSendCell(props: {
         <OctantButton
           aria-describedby={props.compactingNoteId}
           aria-label={send.ariaLabel}
-          className={SEND_REFUSED_PAINT}
           disabled={refused}
           {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
           size="icon"
           type={send.onSend === undefined ? "submit" : "button"}
-          variant={sendVariant(refused)}
+          variant="default"
         >
           <ArrowUp aria-hidden="true" size={16} />
         </OctantButton>
@@ -600,12 +598,11 @@ function ComposerSendCell(props: {
       <OctantButton
         aria-describedby={props.compactingNoteId}
         aria-label={send.ariaLabel}
-        className={SEND_REFUSED_PAINT}
         disabled={refused}
         {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
         size="icon"
         type="button"
-        variant={sendVariant(refused)}
+        variant="default"
       >
         <ArrowUp aria-hidden="true" size={16} />
       </OctantButton>

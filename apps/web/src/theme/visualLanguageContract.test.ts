@@ -543,41 +543,62 @@ describe("the public-block visual language", () => {
     expect(rule).not.toMatch(/overflow-x:\s*auto/);
   });
 
-  it("draws a composer's notices as callout cards above the box, with the callout's corner, not inside it", () => {
+  it("draws a composer's notices as small floating glass cards above the box, with the tone only in the icon", () => {
     const css = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const group = /\.composer-notices\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    const card = /\.callout\.composer-notice\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    const body = /\.callout\.composer-notice > \.callout__body\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    const actions =
-      /\.callout\.composer-notice > \.callout__actions\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const card = /\n\.callout\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const floating =
+      /\.callout:is\(\.composer-notice, \.composer-usage-warning\),\s*\.thread-column > \.callout\s*\{([^}]*)\}/.exec(
+        css,
+      )?.[1] ?? "";
 
-    // One group of cards, with a gap from the box on the spacing scale and no
-    // room when there is nothing to say.
+    // One group of cards, with a gap from the box and no room when empty.
     expect(group).toMatch(/display:\s*grid/);
     expect(group).toMatch(/margin-bottom:\s*var\(--oct-space-1\)/);
     expect(css).toMatch(/\.composer-notices:empty\s*\{\s*display:\s*none/);
-    // The words wrap, and the action wraps under them in a narrow composer.
-    expect(card).toMatch(/flex-wrap:\s*wrap/);
-    // The compact form: the 12px meta step and tight padding, so the card is
-    // visibly lighter than the box.
-    expect(card).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    // The float's fill and blur, its corner, a faint hairline and compact padding.
+    expect(card).toMatch(/background:\s*var\(--octant-float-glass\)/);
+    expect(card).toMatch(/backdrop-filter:\s*var\(--octant-float-blur\)/);
+    expect(card).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
+    expect(card).toMatch(/outline:\s*1px solid var\(--oct-border-faint\)/);
     expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
-    expect(body).toMatch(/flex:\s*1 1 200px/);
-    expect(actions).toMatch(/margin-inline-start:\s*auto/);
-    // The corner is the callout's own (12px), the same as the composer's: no
-    // radius is set on the card here, so a second corner cannot come back.
-    expect(card).not.toMatch(/border-radius/);
-    expect(css).toMatch(/--oct-radius-md:\s*12px/);
-    expect(/\n\.callout\s*\{([^}]*)\}/.exec(css)?.[1] ?? "").toMatch(
-      /border-radius:\s*var\(--oct-radius-md\)/,
-    );
-    // Over a ground or under Window glass the card is the glass the box is.
+    expect(card).toMatch(/flex-wrap:\s*wrap/);
+    // One soft float shadow and a short rise on entry (200ms), none under reduced motion.
+    expect(floating).toMatch(/box-shadow:\s*var\(--oct-shadow-float\)/);
+    expect(floating).toMatch(/animation:\s*composer-notice-in var\(--oct-motion-base\)/);
+    expect(css).toMatch(/@keyframes composer-notice-in\s*\{\s*from\s*\{[^}]*translateY\(4px\)/);
     expect(css).toMatch(
-      /\.shell--app-backdrop:not\(\.shell--material-translucent\)\s*\.callout\.composer-notice\s*\{[^}]*backdrop-filter/,
+      /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.callout\s*\{\s*animation:\s*none/,
     );
     // Nothing the box held for a notice survives: no feedback strip in it.
     expect(css).not.toMatch(/\.thread-composer__feedback/);
     expect(css).not.toMatch(/\.composer-status\b/);
+  });
+
+  it("draws the composer's controls as 28px circles with send as the ink, and the grown box with its controls in a row below the prompt", () => {
+    const css = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const controls =
+      /\.composer-field__attach :is\(button, \[role="button"\]\),\s*\.composer-field__actions :is\(button, \[role="button"\]\)\s*\{([^}]*)\}/.exec(
+        css,
+      )?.[1] ?? "";
+    expect(controls).toMatch(/height:\s*var\(--oct-composer-cell\)/);
+    expect(controls).toMatch(/border-radius:\s*var\(--oct-radius-pill\)/);
+    expect(css).toMatch(/--oct-composer-cell:\s*28px/);
+    const send =
+      /\.composer-field__actions button\[data-variant="default"\]\s*\{([^}]*)\}/.exec(css)?.[1] ??
+      "";
+    expect(send).toMatch(/background:\s*var\(--octant-text-primary\)/);
+    expect(send).toMatch(/color:\s*var\(--octant-workspace\)/);
+    expect(css).toMatch(
+      /\.composer-field__actions button\[data-variant="default"\]:disabled\s*\{[^}]*opacity:\s*0\.2/,
+    );
+    const grown =
+      /\.thread-composer__surface\[data-shape="box"\] \.composer-field\s*\{([^}]*)\}/.exec(
+        css,
+      )?.[1] ?? "";
+    expect(grown).toMatch(/display:\s*grid/);
+    expect(grown).toMatch(/"prompt prompt prompt"/);
+    expect(grown).toMatch(/"attach \. actions"/);
   });
 
   it("keeps the outside-content chip in the row, and drops its words but not its globe in a narrow row", () => {

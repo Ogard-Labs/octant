@@ -1025,18 +1025,33 @@ html {
   border-color: color-mix(in oklab, var(--oct-accent-fg) 30%, transparent);
 }
 
-/* ─── callout ───────────────────────────────────────────────────────── */
+/* ─── callout ───────────────────────────────────────────────────────────
+   A notice is a small floating glass card, not a tinted box: the float's fill
+   (the frosted one on an opaque window, the dense one with no blur on window
+   glass), the float's corner, one faint hairline and a compact 8px by 12px
+   inside. Its tone is a 16px icon on a small round dot of that tone at 15% and
+   nothing else: no tinted fill and no coloured edge, for any tone, so a warning
+   or an error reads as part of the interface and not as a generic alert box.
+   The words are the primary ink; a second part (a reset time) is secondary.
+   The action is a small secondary button at the trailing edge. A notice above
+   the composer and one inside a thread are this same card; only those two also
+   lift on a soft shadow and rise in. */
 .callout {
+  --callout-tone: var(--oct-meta);
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--oct-space-4);
-  padding: var(--oct-space-5);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-sm);
+  align-items: center;
+  gap: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 0;
+  border-radius: var(--oct-radius-lg);
+  background: var(--octant-float-glass);
+  backdrop-filter: var(--octant-float-blur);
+  -webkit-backdrop-filter: var(--octant-float-blur);
+  outline: 1px solid var(--oct-border-faint);
+  outline-offset: -1px;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
 }
 .callout p {
   margin: 0;
@@ -1047,18 +1062,23 @@ html {
   overflow-wrap: anywhere;
 }
 .callout__actions {
+  display: flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin-inline-start: auto;
 }
-/* A leading status mark sits with the sentence; the half-line offset keeps
-   it on the first line's optical axis for multi-line text. A neutral notice
-   states a fact, so its mark is in neutral ink (a yellow icon on a message
-   that is not a warning is wrong); only a tone that means something takes its
-   text role - hue alone must never be the only signal (DESIGN.md colour roles
-   pair each status surface with its text role). */
+/* The tone's icon: 16px on a 24px round dot of the tone at 15%. A neutral
+   notice states a fact, so its dot is the neutral ink; only a tone that means
+   something takes its text role, and the icon shape pairs with the hue so the
+   colour is never the only signal. */
 .callout > svg {
+  box-sizing: content-box;
   flex: 0 0 auto;
-  margin-top: 1px;
-  color: var(--oct-meta);
+  padding: var(--oct-space-1);
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--callout-tone) 15%, transparent);
+  color: var(--callout-tone);
 }
 .callout .callout-title {
   font-family: var(--oct-font-display);
@@ -1066,44 +1086,24 @@ html {
   color: var(--oct-fg);
   margin-bottom: var(--oct-space-1);
 }
-/* A tone is a tinted ground with a tinted hairline - the same language as
-   the approval and severity surfaces - never a saturated edge stripe,
-   which made a thread notice read as a generic chat-app warning box. */
 .callout-accent,
 .callout[data-tone="accent"] {
-  background: var(--oct-accent-soft);
-  border-color: color-mix(in oklab, var(--oct-accent-fg) 30%, transparent);
+  --callout-tone: var(--oct-accent-fg);
 }
 .callout-ok,
 .callout[data-tone="success"] {
-  background: var(--oct-success-soft);
-  border-color: color-mix(in oklab, var(--oct-success-fg) 30%, transparent);
-}
-.callout-ok > svg,
-.callout[data-tone="success"] > svg {
-  color: var(--oct-success-fg);
-}
-.callout-accent > svg,
-.callout[data-tone="accent"] > svg {
-  color: var(--oct-accent-fg);
+  --callout-tone: var(--oct-success-fg);
 }
 .callout-warn,
 .callout[data-tone="warning"] {
-  background: var(--oct-warn-soft);
-  border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
+  --callout-tone: var(--oct-warn-fg);
 }
 .callout-danger,
 .callout[data-tone="danger"] {
-  background: var(--oct-danger-soft);
-  border-color: color-mix(in oklab, var(--oct-danger-fg) 30%, transparent);
+  --callout-tone: var(--oct-danger-fg);
 }
-.callout-warn > svg,
-.callout[data-tone="warning"] > svg {
-  color: var(--oct-warn-fg);
-}
-.callout-danger > svg,
-.callout[data-tone="danger"] > svg {
-  color: var(--oct-danger-fg);
+.callout .callout__second {
+  color: var(--oct-fg-2);
 }
 
 /* ─── thread column ─────────────────────────────────────────────────────
@@ -4733,15 +4733,54 @@ input.switch:checked::after {
 .composer-field__prompt .composer-input {
   padding-inline-end: var(--oct-space-1);
 }
-/* The composer's attach and send are controls like any other: a 28px tile
-   with the control corner, 8px in from the 12px corner of the box. */
+/* The composer's attach, microphone, send and stop are round 28px buttons, 8px
+   in from the box's edge: the one place a control is a circle, because the box
+   they sit in is a pill. Attach is a quiet fill (ink 6%) with a hover step; the
+   microphone is a ghost with a round hover fill; send is the ink as its fill
+   and the page colour as its arrow, at 20% when there is nothing to send, and
+   it grows a hair on hover (not under reduced motion). */
 .composer-field__attach :is(button, [role="button"]),
 .composer-field__actions :is(button, [role="button"]) {
   min-height: var(--oct-composer-cell);
   height: var(--oct-composer-cell);
   border-color: transparent;
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-pill);
   box-shadow: none;
+}
+.composer-field__attach :is(button, [role="button"])[data-variant="secondary"] {
+  background: color-mix(in oklab, var(--octant-text-primary) 6%, transparent);
+}
+.composer-field__attach
+  :is(button, [role="button"])[data-variant="secondary"]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--octant-text-primary) 11%, transparent);
+}
+.composer-field__actions :is(button, [role="button"])[data-variant="ghost"]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--octant-text-primary) 8%, transparent);
+}
+.composer-field__actions button[data-variant="default"] {
+  background: var(--octant-text-primary);
+  color: var(--octant-workspace);
+  transition:
+    transform var(--oct-motion-fast) var(--oct-ease-standard),
+    opacity var(--oct-motion-fast) var(--oct-ease-standard);
+}
+.composer-field__actions button[data-variant="default"]:hover:not(:disabled) {
+  background: var(--octant-text-primary);
+  transform: scale(1.06);
+}
+.composer-field__actions button[data-variant="default"]:disabled {
+  background: var(--octant-text-primary);
+  color: var(--octant-workspace);
+  opacity: 0.2;
+}
+html[data-octant-reduced-motion="true"] .composer-field__actions button[data-variant="default"] {
+  transform: none;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-field__actions button[data-variant="default"]:hover:not(:disabled) {
+    transform: none;
+  }
 }
 .composer-field__attach button[data-size="icon"],
 .composer-field__actions button[data-size="icon"] {
@@ -5109,7 +5148,12 @@ input.switch:checked::after {
    8px in from the corner, so each is concentric with it to within a pixel. */
 .thread-composer__surface {
   min-width: 0;
-  background: var(--octant-card);
+  /* The frosted float fill with its blur on an opaque window; the stylesheet
+     below swaps it for the ink wash under window glass, where a blur is not
+     applied. */
+  background: var(--octant-float-glass);
+  backdrop-filter: var(--octant-float-blur);
+  -webkit-backdrop-filter: var(--octant-float-blur);
   border: 0;
   border-radius: var(--oct-radius-lg);
   box-shadow: var(--oct-shadow-float);
@@ -5118,6 +5162,36 @@ input.switch:checked::after {
 }
 .thread-composer__surface[data-shape="pill"] {
   border-radius: var(--oct-radius-pill);
+}
+/* Grown past one line, the prompt takes the box's full width on top and the
+   controls stand in one row along the bottom: attach at the leading edge, the
+   microphone and send at the trailing edge. */
+.thread-composer__surface[data-shape="box"] .composer-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "prompt prompt prompt"
+    "attach . actions";
+  align-items: center;
+  padding-block-end: var(--oct-space-2);
+}
+.thread-composer__surface[data-shape="box"] .composer-field__prompt {
+  grid-area: prompt;
+}
+.thread-composer__surface[data-shape="box"] .composer-field__attach {
+  grid-area: attach;
+  margin-bottom: 0;
+}
+.thread-composer__surface[data-shape="box"] .composer-field__actions {
+  grid-area: actions;
+  margin-bottom: 0;
+}
+.thread-composer__surface[data-shape="box"]
+  .composer-field__attach
+  + .composer-field__prompt
+  .composer-input,
+.thread-composer__surface[data-shape="box"] .composer-input {
+  padding-inline: var(--oct-space-2);
 }
 /* The notice card: what the composer has to say about its thread or about
    sending, as the system's callout directly above the box, in the box's
@@ -5174,28 +5248,27 @@ input.switch:checked::after {
 .composer-notices:empty {
   display: none;
 }
-/* The words wrap and the action takes the trailing edge; in a narrow
-   composer it drops under the words instead of crowding them. */
-.callout.composer-notice {
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--oct-space-1) var(--oct-space-3);
-  padding: var(--oct-space-2) var(--oct-space-3);
-  font-size: var(--oct-text-xs);
+/* A notice above the box floats just clear of it, in the box's width, and lifts
+   on the box's own soft shadow. It enters with a short fade and a 4px rise, and
+   not at all under reduced motion. */
+.callout:is(.composer-notice, .composer-usage-warning),
+.thread-column > .callout {
+  box-shadow: var(--oct-shadow-float);
+  animation: composer-notice-in var(--oct-motion-base) var(--oct-ease-standard) both;
 }
-/* The mark sits on the first line's axis, however many lines follow. */
-.callout.composer-notice > svg {
-  margin-top: calc((1lh - 16px) / 2);
+@keyframes composer-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
-.callout.composer-notice > .callout__body {
-  flex: 1 1 200px;
+html[data-octant-reduced-motion="true"] .callout {
+  animation: none;
 }
-.callout.composer-notice > .callout__actions {
-  display: flex;
-  align-self: center;
-  flex-wrap: wrap;
-  gap: var(--oct-space-1);
-  margin-inline-start: auto;
+@media (prefers-reduced-motion: reduce) {
+  .callout {
+    animation: none;
+  }
 }
 /* While the empty composer shows the reply's suggested next message, a quiet
    key cap at its top-right says that Tab takes it. The prompt keeps clear of
@@ -6916,35 +6989,11 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
     }
     html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--material-translucent
-      :is(.turn-user .bubble, .callout.composer-notice) {
+      .turn-user
+      .bubble {
       background: var(--octant-card);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
-    }
-    /* The notice card above the box over a ground on an opaque window is the
-       same glass: an opaque callout beside a translucent box read as a block. */
-    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
-      .shell--app-backdrop:not(.shell--material-translucent)
-      .callout.composer-notice {
-      border-color: var(--oct-glass-stroke);
-      background-color: var(--oct-glass-floor);
-      background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
-      backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
-      -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
-    }
-    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
-      .shell--app-backdrop:not(.shell--material-translucent)
-      .callout.composer-notice[data-tone="warning"] {
-      background-image:
-        linear-gradient(var(--oct-warn-soft), var(--oct-warn-soft)),
-        linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
-    }
-    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
-      .shell--app-backdrop:not(.shell--material-translucent)
-      .callout.composer-notice[data-tone="danger"] {
-      background-image:
-        linear-gradient(var(--oct-danger-soft), var(--oct-danger-soft)),
-        linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
     }
   }
 }
