@@ -127,6 +127,9 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   ...PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS,
   // Reviewing what a thread read and clearing its outside-content mark.
   "/api/thread-external-content",
+  // The person's notes on a thread and its recap; the route refuses any
+  // principal that does not act as the host's person.
+  "/api/thread-notes/commands",
   "/api/terminal-sessions/list",
   "/api/terminal-sessions/history",
   "/api/person-memory/commands",

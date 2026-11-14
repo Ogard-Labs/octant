@@ -112,6 +112,7 @@ export * from "./nativeHarness";
 export * from "./nativeHarnessTranscript";
 export * from "./followUpSuggestions";
 export * from "./sideTasks";
+export * from "./threadNotes";
 export * from "./navigatorAssistant";
 export * from "./userProfile";
 export * from "./previews";

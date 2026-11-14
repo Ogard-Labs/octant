@@ -2,7 +2,7 @@ import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { resolveSnoozePresets } from "@octant/domain";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
-import { CirclePause } from "lucide-react";
+import { CircleCheck, CirclePause } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { elapsedLabel } from "../lib/relativeTime";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
@@ -42,6 +42,11 @@ export interface PendingRequestRowProps {
    * its refusal line but offers no answer.
    */
   readonly settled?: boolean;
+  /**
+   * How the request left the host's list, in words, for a row that stays in
+   * view after it settled. It takes the place of the wait and the answers.
+   */
+  readonly outcome?: string | undefined;
   /**
    * The row sits inside a card that already names the thread, its Project, and
    * its provider: it keeps the wait, the text, and the answers.
@@ -109,7 +114,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     };
   }, []);
   const choices = pendingRequestChoices(request);
-  const open = props.settled !== true;
+  const open = props.settled !== true && props.outcome === undefined;
 
   async function answer(response: PendingRequestResponse) {
     if (busy || !open || deferred) return;
@@ -230,10 +235,17 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
         {differs ? (
           <span className="oct-meta pending-request__differs">Second opinion differs</span>
         ) : null}
-        <span className="oct-meta pending-request__wait">
-          <CirclePause aria-hidden="true" size={12} />
-          {`Waiting ${elapsedLabel(request.requestedAt, props.now)}`}
-        </span>
+        {props.outcome === undefined ? (
+          <span className="oct-meta pending-request__wait">
+            <CirclePause aria-hidden="true" size={12} />
+            {`Waiting ${elapsedLabel(request.requestedAt, props.now)}`}
+          </span>
+        ) : (
+          <span className="oct-meta pending-request__outcome" role="status">
+            <CircleCheck aria-hidden="true" size={12} />
+            {props.outcome}
+          </span>
+        )}
       </div>
       {embedded || props.projectName === undefined ? null : (
         <span className="oct-meta pending-request__project">{props.projectName}</span>
