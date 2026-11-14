@@ -85,17 +85,24 @@ never saw and carrying no title, is shown through the ordinary approval path
 as "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with
 Allow and Deny, and the thread's level decides it as any other request
 (`unnamedPermissionDescription` on the profile; another agent's such request
-still fails the turn). At Full access `VIBE_AGENT_PATHS`,
+still fails the turn). Wherever the subagents run, `VIBE_AGENT_PATHS`,
 `VIBE_INSTALLED_AGENTS`, and `VIBE_ENABLED_AGENTS` are unset too, so a
-subagent runs as one of the person's own agents; below it a custom agent
-could approve its own tools, so the allowlist stays and adds Vibe's
-read-only built-in `explore` for subagents to run as. The allowlist keeps a
-session opening and switching only on the modes Octant selects:
-`ask`, `plan`, `accept-edits` (Accept edits in Work and Code; it approves
-Vibe's own writes and edits and asks for the rest, inside the Accept edits
-wall), and `auto-approve` (maintainer decision, 2026-11-14). With the
-allowlist unset at Full access, a person whose own agent lists leave out
-`auto-approve` gets a refused session start, not a different mode.
+subagent runs as one of the person's own agents at every level outside
+Plan. Such an agent may approve its own tools, as it does in Vibe itself;
+the maintainer accepted that (2026-11-14). Its calls stay in the child's
+history, which Octant never sees, so `unseenChildCalls` on the profile makes
+each child run name the agent it ran as (from the call's `agent`) and say
+that Octant cannot see its tool calls and that the agent may approve them
+itself; a run as any agent but Vibe's read-only built-in `explore` (grep,
+read_file and skill in 3.0.3) also marks the thread as having read outside
+content, under `hosted-tool`, since it may have done so unseen. In Plan and
+Chat the allowlist keeps a session opening and switching only on the modes
+Octant selects: `ask`, `plan`, `accept-edits` (Accept edits in Work and
+Code; it approves Vibe's own writes and edits and asks for the rest, inside
+the Accept edits wall), and `auto-approve` (maintainer decision,
+2026-11-14). With the allowlist unset, a person whose own agent lists leave
+out a mode Octant selects gets a refused session start, not a different
+mode.
 
 The setup is on by default for every key provider account at every level;
 the person turns it off per account or per thread

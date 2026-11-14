@@ -63,7 +63,8 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
             <>
               {" "}
               Vibe doesn’t say which tool its subagents ask to run, so their approvals show no tool
-              name.
+              name, and a subagent running as one of your own Vibe agents may approve its own tools,
+              as in Vibe.
             </>
           ) : null}
           {unsupported.length === 0 ? null : (

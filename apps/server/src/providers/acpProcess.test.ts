@@ -2227,7 +2227,7 @@ describe("Mistral Vibe running as itself", () => {
     expect(readOnly.VIBE_TOOL_PATHS).toBe("[]");
   });
 
-  it("lets Vibe start its own subagents in Work or Code outside Plan, as the person's own agents only at Full access", () => {
+  it("lets Vibe start its own subagents, as the person's own agents, in Work or Code at every level outside Plan", () => {
     expect(sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x" }).VIBE_ENABLE_SUBAGENTS).toBe(
       "false",
     );
@@ -2237,10 +2237,11 @@ describe("Mistral Vibe running as itself", () => {
       ["full-access", "work", everything, true, true],
       ["full-access", "chat", everything, false, false],
       ["full-access", "code", { ...everything, subagents: false }, false, false],
-      ["approval-gated", "code", everything, true, false],
-      ["approval-gated", "work", everything, true, false],
-      ["auto-accept-edits", "code", everything, true, false],
+      ["approval-gated", "code", everything, true, true],
+      ["approval-gated", "work", everything, true, true],
+      ["auto-accept-edits", "code", everything, true, true],
       ["plan", "code", everything, false, false],
+      ["plan", "work", everything, false, false],
     ] as const) {
       const environment = sanitizeAcpEnvironment(
         vibe,

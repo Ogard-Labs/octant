@@ -1252,6 +1252,9 @@ function makeConnection(
         ...(profile.unnamedPermissionDescription === undefined
           ? {}
           : { unnamedPermissionDescription: profile.unnamedPermissionDescription }),
+        ...(profile.unseenChildCalls === undefined
+          ? {}
+          : { unseenChildCalls: profile.unseenChildCalls }),
       };
       let state!: SessionState;
       const removeNotification = client.onNotification((message) =>
