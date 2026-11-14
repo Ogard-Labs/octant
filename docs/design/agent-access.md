@@ -74,7 +74,7 @@ listener, pairing, or other grants; agent-to-agent work between hosts (that is
                                              └──────────────────────────────────────┘
 ```
 
-### Two ways to connect
+### Ways to connect
 
 1. **Bridge (recommended, AA-5).** The outside agent's machine runs the Octant
    CLI: `octant agent mcp --connection <file>` is the same stdio MCP server a
@@ -91,6 +91,15 @@ listener, pairing, or other grants; agent-to-agent work between hosts (that is
    ([Hub and spokes](hub-and-spokes.md), H14), which the person turns on after
    the certificate-transparency note. Direct access is off per grant until the
    person chooses it, because a bearer key can be replayed by whoever holds it.
+3. **Local MCP clients (designed, not built; maintainer decision,
+   2026-11-14).** An MCP client on the host's own machine (an editor's
+   assistant, another local tool) may use Octant as an MCP server under an
+   agent grant too, enrolled and confirmed exactly as a bridge is and held to
+   the same grant scope, outside-content mark and approvals in Needs you. It
+   connects to the agent endpoint over loopback with the bridge's signed
+   requests; loopback grants it nothing a grant does not. The existing
+   `octant agent mcp` with no connection file stays the local CLI path under
+   the bridge secret, which never answers an approval or starts at Full access.
 
 ### Enrolling an agent
 
