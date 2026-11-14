@@ -413,6 +413,13 @@ disabled for any other reason, such as a running turn or no ready provider,
 keeps the ordinary disabled look. The chosen model carries a check, not a
 filled row; a row's star shows on hover, on focus, or once it is on; and a
 provider mark leads each row only in a list mixed from several providers.
+The popup is one fixed frame, 360px wide
+and 440px tall (shorter only when the window is), opening 8px above its
+trigger with its edge aligned to the trigger's end: switching Favorites,
+Recent or a provider, an empty or short list, and choosing a model never
+resize or move it or its trigger; the list scrolls inside, and the reasoning
+and service-tier settings stay pinned beneath a hairline. The mode menu and
+the other composer-row menus open 8px above their button and never over it.
 Choosing a model keeps the menu open, since the
 reasoning level beneath is often the next choice. Its reasoning control shows
 the full track, discrete stops, and filled range, with the reading ("Reasoning
