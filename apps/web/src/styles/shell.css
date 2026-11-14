@@ -1395,21 +1395,30 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   text-align: left;
 }
 
-/* Hover-only actions take no width until their row is hovered or focused. The
-   room for them used to be reserved at all times, which left 56px of nothing
-   at the end of every row: the age and the status dot floated mid-row and a
-   title had about 70px of a 232px sidebar. The room is made only while the
-   actions show, and the age and status give their place to them, so nothing
-   is seen to slide. */
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):hover
-  > .sidebar-navigation__thread,
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):focus-within
-  > .sidebar-navigation__thread,
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([aria-expanded="true"])
-  > .sidebar-navigation__thread,
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has([data-popup-open])
-  > .sidebar-navigation__thread {
-  padding-inline-end: 56px;
+/* A row's trailing end is built once and never changes on hover, focus or an
+   open menu: [title] [age or actions, 50px] [provider mark]. The slot is the
+   width of the two actions, so the age right-aligns inside it, the actions
+   fade in over it, and neither the title's truncation nor the mark moves. A
+   row whose age stands on its top line, or that carries a state, keeps the
+   same room on the title line empty. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+  .sidebar-navigation__thread-when {
+  inline-size: 50px;
+}
+
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+  .sidebar-navigation__thread-main:not(
+    :has(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state)
+  )::after {
+  flex: none;
+  inline-size: 50px;
+  content: "";
+}
+
+/* On the top line the age ends where a title line's age does: before the
+   provider mark's column, so the age stands at one edge on every row. */
+.sidebar-navigation__thread-context {
+  padding-inline-end: 28px;
 }
 
 .sidebar-navigation__thread:hover {
@@ -1774,17 +1783,12 @@ html[data-octant-density="compact"]
    sitting under them, and the row makes that much more room. */
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
     .sidebar-navigation__thread-lineage
-  ):is(:hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
+  )
   > .sidebar-navigation__thread {
   padding-inline-end: 80px;
 }
 
-.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):is(
-    :hover,
-    :focus-within,
-    :has([aria-expanded="true"]),
-    :has([data-popup-open])
-  )
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
   .sidebar-navigation__thread-lineage {
   right: 58px;
 }
@@ -1831,7 +1835,7 @@ html[data-octant-density="compact"]
 .sidebar-navigation__thread-actions {
   position: absolute;
   top: 50%;
-  right: 4px;
+  right: 40px;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -4516,11 +4520,22 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   color: var(--octant-danger-text);
 }
 
+/* The age holds a slot of one width, right-aligned, so a title never gives or
+   takes room as "now" becomes "3d" and every row's age ends at the same edge.
+   Three characters at the 12px meta size, which is the longest it reads
+   ("52w"). The unread dot beside it is reserved with it. */
 .sidebar-navigation__thread-age {
   flex: none;
+  inline-size: 28px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.sidebar-navigation__thread-when:has(.sidebar-navigation__thread-age) {
+  inline-size: 38px;
+  justify-content: flex-end;
 }
 
 .whats-new__dialog {

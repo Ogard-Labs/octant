@@ -1683,25 +1683,14 @@ describe("A thread row's short age", () => {
     expect(threadRowShortAge(ago(23 * HOUR + 50 * MINUTE), now)).toBe("23h");
   });
 
-  it("counts days to six and then weeks to four before it gives a short date", () => {
+  it("counts days to six, then weeks, then years, never past three characters", () => {
     expect(threadRowShortAge(ago(DAY), now)).toBe("1d");
     expect(threadRowShortAge(ago(6 * DAY + 23 * HOUR), now)).toBe("6d");
     expect(threadRowShortAge(ago(7 * DAY), now)).toBe("1w");
     expect(threadRowShortAge(ago(34 * DAY), now)).toBe("4w");
-    expect(threadRowShortAge(ago(35 * DAY), now)).toBe(
-      new Date(now - 35 * DAY).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    );
-  });
-
-  it("adds the year to a short date from an earlier year", () => {
-    const old = new Date(2025, 9, 4, 9, 0, 0).toISOString();
-    expect(threadRowShortAge(old, now)).toBe(
-      new Date(old).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
-    );
+    expect(threadRowShortAge(ago(70 * DAY), now)).toBe("10w");
+    expect(threadRowShortAge(ago(364 * DAY), now)).toBe("52w");
+    expect(threadRowShortAge(ago(800 * DAY), now)).toBe("2y");
   });
 
   it("carries the full date and time as the row's tooltip", () => {
