@@ -15,7 +15,13 @@ const MAX_RULE_FILES = 64;
 
 export interface ClaudeInstructionSkip {
   readonly path: string;
-  readonly reason: "too-large" | "outside-folder" | "not-text" | "total-exceeded" | "unreadable";
+  readonly reason:
+    | "too-large"
+    | "outside-folder"
+    | "not-text"
+    | "total-exceeded"
+    | "unreadable"
+    | "protected";
 }
 
 export interface ClaudeInstructionFiles {
@@ -25,6 +31,8 @@ export interface ClaudeInstructionFiles {
 }
 
 interface Reading {
+  /** Whether a file is one this session may not read, in any form it resolves to. */
+  readonly refuses: (path: string) => boolean;
   readonly parts: string[];
   readonly skipped: ClaudeInstructionSkip[];
   readonly seen: Set<string>;
@@ -44,14 +52,22 @@ interface Reading {
  * files they import with `@path`. Ancestors above the Project root are
  * outside the Project and are not read; nested folders' files Claude Code
  * loads only when it reads inside them. A file is skipped, with its reason,
- * when it is too large, not text, or resolves (through a symlink or an
- * import) outside the folder it came from.
+ * when it is too large, not text, resolves (through a symlink or an import)
+ * outside the folder it came from, or is one `refuses` names: a file or
+ * import the session may not read is skipped before it is opened.
  */
 export async function readClaudeInstructionFiles(input: {
   readonly configDir?: string;
   readonly projectRoot?: string;
+  readonly refuses?: (path: string) => boolean;
 }): Promise<ClaudeInstructionFiles> {
-  const reading: Reading = { parts: [], skipped: [], seen: new Set(), bytes: 0 };
+  const reading: Reading = {
+    refuses: input.refuses ?? (() => false),
+    parts: [],
+    skipped: [],
+    seen: new Set(),
+    bytes: 0,
+  };
   if (input.configDir !== undefined && isAbsolute(input.configDir)) {
     await readFolderFiles(reading, input.configDir, [join(input.configDir, "CLAUDE.md")]);
   }
@@ -120,6 +136,12 @@ async function readOne(reading: Reading, realFolder: string, path: string, depth
   }
   if (reading.seen.has(real)) return;
   reading.seen.add(real);
+  // An import is judged here too, as the path it names and the file it
+  // resolves to, so `@.env` or a link to a key is skipped before it is opened.
+  if (reading.refuses(path) || reading.refuses(real)) {
+    reading.skipped.push({ path, reason: "protected" });
+    return;
+  }
   if (!inside(realFolder, real)) {
     reading.skipped.push({ path, reason: "outside-folder" });
     return;

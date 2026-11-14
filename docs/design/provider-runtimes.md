@@ -172,7 +172,12 @@ loads a nested folder's file only once it reads inside it, so neither is
 added. Where the source is on, Claude Code loads the files itself and Octant
 adds nothing, so nothing doubles. A file over 64 KiB, past 256 KiB in all,
 not UTF-8 text, or resolving through a symlink or import outside its folder
-is skipped and the reason logged. Chat (no folder) and single-use sessions
+is skipped and the reason logged. The host reads these files outside every
+gate, so below Full access a file or import the secret guard protects (the
+check a `Read` of it meets) is skipped as `protected` before it is opened,
+and at every level so is the account's own sign-in (`.credentials.json`,
+`.claude.json` and its backups, a secure-storage folder of its own); at Full
+access the secret guard does not apply, as for Claude's own tools. Chat (no folder) and single-use sessions
 read none.
 
 The setup is on by default for every key provider account at every level;

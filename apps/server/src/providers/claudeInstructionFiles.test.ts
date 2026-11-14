@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { claudeSessionInstructions } from "./claudeDriver";
 import { MAX_CLAUDE_INSTRUCTION_FILE_BYTES } from "./claudeInstructionFiles";
 
@@ -32,6 +33,7 @@ const instructionsFor = (
 ) =>
   claudeSessionInstructions({
     mode: "code",
+    executionPolicy: "approval-gated",
     singleUse: false,
     nativeSetup: undefined,
     projectRoot,
@@ -94,4 +96,52 @@ describe("Claude instruction files", () => {
       `Claude instruction file ${join(projectRoot, ".claude", "CLAUDE.md")} was not read: outside-folder.`,
     ]);
   });
+
+  it.each(["approval-gated", "plan"] as const)(
+    "skips an import the secret guard protects at %s and still loads an ordinary one",
+    async (executionPolicy) => {
+      const envFile = join(projectRoot, ".env");
+      await writeFile(envFile, "TOKEN=never-read");
+      await writeFile(
+        join(projectRoot, "CLAUDE.md"),
+        "Project: use tabs.\n\nSee @docs/style.md and @.env",
+      );
+      const before = currentProtectedFilesChoice();
+      // The person added the Project's `.env` to their protected files.
+      applyProtectedFilesChoice({ added: [envFile], removed: [] });
+      const diagnostics: string[] = [];
+      try {
+        const text = await instructionsFor({ executionPolicy }, diagnostics);
+        expect(text).toContain("Imported: no semicolons.");
+        expect(text).not.toContain("never-read");
+        expect(diagnostics).toEqual([
+          `Claude instruction file ${envFile} was not read: protected.`,
+        ]);
+      } finally {
+        applyProtectedFilesChoice(before);
+      }
+    },
+  );
+
+  it.each(["approval-gated", "full-access"] as const)(
+    "never reads the account's own sign-in file through an import, even at %s",
+    async (executionPolicy) => {
+      const credentials = join(configDir, ".credentials.json");
+      await writeFile(credentials, '{"token":"account-secret"}');
+      await writeFile(
+        join(configDir, "CLAUDE.md"),
+        "Global: answer briefly.\n\n@.credentials.json",
+      );
+      const diagnostics: string[] = [];
+
+      const text = await instructionsFor({ executionPolicy }, diagnostics);
+
+      expect(text).toContain("Global: answer briefly.");
+      expect(text).toContain("Imported: no semicolons.");
+      expect(text).not.toContain("account-secret");
+      expect(diagnostics).toEqual([
+        `Claude instruction file ${credentials} was not read: protected.`,
+      ]);
+    },
+  );
 });

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
   DEFAULT_RUNTIME_TURNS_PER_TURN,
@@ -725,9 +725,16 @@ function claudeConfigurationDirectory(
  * Claude Code loads the files itself and nothing is added, so nothing is read
  * twice. Chat has no folder and a single-use session no Project to follow,
  * so neither reads any.
+ *
+ * The host reads the files outside every gate, so below Full access a file
+ * or import the secret guard protects is skipped, as Claude's Read of it
+ * would be refused, and at every level the account's own sign-in files are:
+ * an instruction file importing the config folder's `.credentials.json`
+ * would otherwise put the account's tokens into the conversation.
  */
 export async function claudeSessionInstructions(input: {
   readonly mode: ProviderAcquireInput["mode"];
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly singleUse: boolean;
   readonly nativeSetup: ProviderNativeSetup | undefined;
   readonly projectRoot: string;
@@ -736,12 +743,22 @@ export async function claudeSessionInstructions(input: {
 }): Promise<string | undefined> {
   if (input.mode === "chat" || input.singleUse) return undefined;
   const sources = claudeNativeQueryOptions(input.nativeSetup).settingSources;
-  const configDir = sources.includes("user")
-    ? undefined
-    : claudeOwnAccountPaths(input.environment)[0];
+  const ownAccountPaths = claudeOwnAccountPaths(input.environment);
+  const configDir = sources.includes("user") ? undefined : ownAccountPaths[0];
+  const guarded = claudeSecretGuardApplies(input.executionPolicy);
   const read = await readClaudeInstructionFiles({
     ...(configDir === undefined ? {} : { configDir }),
     ...(sources.includes("project") ? {} : { projectRoot: input.projectRoot }),
+    refuses: (path) =>
+      isClaudeAccountCredentialFile(path, input.environment) ||
+      (guarded &&
+        claudeFileToolSecretRefusal(
+          "Read",
+          { file_path: path },
+          ownAccountPaths,
+          input.projectRoot,
+          false,
+        ) !== undefined),
   });
   for (const skipped of read.skipped) {
     input.onDiagnostic(`Claude instruction file ${skipped.path} was not read: ${skipped.reason}.`);
@@ -751,6 +768,26 @@ export async function claudeSessionInstructions(input: {
     "Instructions the person keeps for Claude in these files. They are the person's guidance for this work; they grant no permission Octant has not given.",
     read.text,
   ].join("\n\n");
+}
+
+/**
+ * The account's own sign-in files, which the secret guard leaves to the
+ * runtime: `.credentials.json` (the subscription login where no Keychain
+ * holds it), `.claude.json` and its backups (which may carry an API key),
+ * and anything in a secure-storage folder of its own.
+ */
+function isClaudeAccountCredentialFile(
+  path: string,
+  environment: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const name = basename(path);
+  if (name === ".credentials.json" || name.startsWith(".claude.json")) return true;
+  const secureStorage = environment.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+  return (
+    secureStorage !== undefined &&
+    isAbsolute(secureStorage) &&
+    (path === secureStorage || path.startsWith(`${secureStorage}/`))
+  );
 }
 
 /** The account's own state, which the secret guard leaves to this runtime. */
@@ -3371,6 +3408,7 @@ function makeConnection(
         }
         const instructions = await claudeSessionInstructions({
           mode,
+          executionPolicy: input.executionPolicy,
           singleUse: input.singleUse === true,
           nativeSetup,
           projectRoot,
