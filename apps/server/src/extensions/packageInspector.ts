@@ -5,6 +5,7 @@ import type {
   ExtensionDiagnostic,
   ExtensionPackageManifest,
 } from "@octant/contracts/extensions";
+import { refusedThemeContribution } from "@octant/plugin-host/themes";
 import {
   decodeExtensionContentDigest,
   decodeExtensionPackageManifest,
@@ -132,6 +133,16 @@ export function inspectExtensionPackage(
     rawContentReferences = prepared.contentReferences;
   } catch {
     fail("manifest-invalid", "Package manifest is invalid.");
+  }
+
+  // A theme is data the renderer paints with, so one that would be refused
+  // at listing is refused here, whole, before anything is stored.
+  const refusedTheme = refusedThemeContribution(manifest);
+  if (refusedTheme !== undefined) {
+    fail(
+      "theme-invalid",
+      `Theme ${refusedTheme.componentId} does not meet the theme schema: ${refusedTheme.errors.slice(0, 3).join("; ")}.`,
+    );
   }
 
   validateProvenanceAndLicense(manifest);

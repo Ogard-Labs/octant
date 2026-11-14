@@ -390,6 +390,7 @@ import { useChatTranscriptSearch } from "./chat/useChatTranscriptSearch";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
+import { PluginThemesContext, useHostPluginThemes } from "./theme/pluginThemes";
 import { useRepositoryPullRequests } from "./environment/useRepositoryPullRequests";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import type { AgentRunViewRequest } from "./agents/AgentRunHierarchy";
@@ -1744,6 +1745,8 @@ function LaunchedShell(
     extensionClient,
     machineChanges.extensions,
   );
+  // Themes the person's installed, trusted and enabled plugins contribute.
+  const pluginThemes = useHostPluginThemes(extensionClient, machineChanges.extensions);
   const zenSwitchedOn = firstPartyPluginsEffective.get("zen") === true;
   useEffect(() => setZenPluginEffective(zenSwitchedOn), [zenSwitchedOn]);
   // Switching the Board plugin off hides the board layers and every opener;
@@ -8500,6 +8503,7 @@ function LaunchedShell(
     <AgentThreadAttributionProvider client={launchedClients.agentGrantClient}>
       <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
         <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
+          <PluginThemesContext.Provider value={pluginThemes}>
           <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
             <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
               <SpeechCapabilityProvider
@@ -8640,12 +8644,16 @@ function LaunchedShell(
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                      <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                                        <MarkdownLinkActionsContext.Provider
+                                          value={rootLinkActions}
+                                        >
                                         <WorkKindChoiceContext.Provider value={workKindChoice}>
                                           <ModelToolVerificationContext.Provider
                                             value={providerController.verifyModelTools}
                                           >
-                                            <HostFederationStackContext.Provider value={federation}>
+                                              <HostFederationStackContext.Provider
+                                                value={federation}
+                                              >
                                               <PlanUsageProvider
                                                 barStyle={
                                                   controller.settings?.usageBars ?? "smooth"
@@ -8653,7 +8661,9 @@ function LaunchedShell(
                                                 client={launchedClients.providerUsageLimitsClient}
                                                 instances={providerController.instances}
                                               >
-                                                <HostPlatformContext.Provider value={hostPlatform}>
+                                                  <HostPlatformContext.Provider
+                                                    value={hostPlatform}
+                                                  >
                                                   <ServerCodeProjectsContext.Provider
                                                     value={serverCodeProjects}
                                                   >
@@ -8691,6 +8701,7 @@ function LaunchedShell(
               </SpeechCapabilityProvider>
             </ThreadActivityRevisionsContext.Provider>
           </ImageJobChangeRevisionContext.Provider>
+          </PluginThemesContext.Provider>
         </FirstPartyPluginsEffectiveContext.Provider>
       </GuardrailDefaultsContext.Provider>
     </AgentThreadAttributionProvider>

@@ -421,7 +421,10 @@ their hues in every style ([Thread view: context meter](docs/design/thread-view.
 
 The warm charcoal-and-brass `Octant` preset remains an optional theme. Custom
 themes may override only validated semantic roles; incomplete or low-contrast
-imports fall back safely. The theme schema keeps its focus compatibility role for
+imports fall back safely. A plugin may contribute themes as data only, listed
+beside the built-in presets while the plugin is installed, trusted and enabled
+([Architecture: Themes as plugin contributions](docs/architecture.md#plugin-boundaries-and-remaining-extraction)).
+The theme schema keeps its focus compatibility role for
 imports, but Appearance offers no focus ring colour control, because the focus
 indicator is the neutral edge, never the theme's focus role.
 
