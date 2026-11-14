@@ -130,6 +130,8 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   "/api/terminal-sessions/list",
   "/api/terminal-sessions/history",
   "/api/person-memory/commands",
+  // The person's own to-do list: every change.
+  "/api/todos/commands",
   "/api/benchmarks/suites/save",
   "/api/benchmarks/suites/delete",
   "/api/benchmarks/runs/start",
@@ -1121,6 +1123,12 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   {
     kind: "exact" as const,
     path: "/api/person-memory",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/todos",
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   },
