@@ -139,6 +139,7 @@ export function ProjectBrandKitSection(props: ProjectBrandKitSectionProps) {
           onClick={() => void commit(draft)}
           size="sm"
           type="button"
+          variant="secondary"
         >
           Save brand kit
         </OctantButton>

@@ -6,10 +6,9 @@ import type {
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
-import { Check, Image as ImageIcon, Images, Upload } from "lucide-react";
+import { Check, Image as ImageIcon, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SettingRow } from "./primitives";
 import { SliderField } from "./SliderField";
@@ -23,6 +22,8 @@ export interface BackgroundImageLibrary {
   readonly list: () => Promise<ReadonlyArray<SidebarBackgroundMetadata>>;
   readonly upload: (file: File) => Promise<SidebarBackgroundMetadata>;
   readonly fetch: (backgroundId: string) => Promise<Blob>;
+  /** Absent when the host cannot delete a photo; the gallery then offers no Remove. */
+  readonly remove?: (backgroundId: string) => Promise<void>;
 }
 
 export interface AppBackgroundSettingsProps {
@@ -43,6 +44,8 @@ function choiceFor(kind: AppBackground["kind"]): Choice {
 }
 
 const ACCEPTED_TYPES = "image/png,image/jpeg,image/webp";
+const PHOTO_ADDED = "Photo added.";
+const PHOTO_REMOVED = "Photo removed.";
 const LIMITS = "PNG, JPEG, or WebP up to 8 MiB and 4096×4096";
 
 const CATALOG_GROUPS = ["gradient", "landscape", "forest", "wood", "abstract"] as const;
@@ -144,7 +147,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const [photos, setPhotos] = useState<ReadonlyArray<SidebarBackgroundMetadata>>([]);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const library = props.library;
   const background = props.background;
@@ -254,8 +257,23 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
 
   const pick = (photo: SidebarBackgroundMetadata) => {
     setStatus(undefined);
-    setLibraryOpen(false);
     props.onChange(withPhoto(photo.id));
+  };
+
+  const removePhoto = async (photo: SidebarBackgroundMetadata) => {
+    setConfirmingRemoval(null);
+    if (library?.remove === undefined) return;
+    setBusy(true);
+    setStatus(undefined);
+    try {
+      await library.remove(String(photo.id));
+      setPhotos((current) => current.filter((candidate) => candidate.id !== photo.id));
+      setStatus(PHOTO_REMOVED);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "The photo could not be removed.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const setPhotoOpacity = (value: number) => {
@@ -273,6 +291,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
       const uploaded = await library.upload(file);
       setPhotos((current) => [uploaded, ...current.filter((photo) => photo.id !== uploaded.id)]);
       props.onChange(withPhoto(uploaded.id));
+      setStatus(PHOTO_ADDED);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The photo could not be uploaded.");
     } finally {
@@ -432,37 +451,51 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               >
                 <Upload aria-hidden="true" size={14} />
               </OctantIconButton>
-              {photos.length === 0 ? null : (
-                <OctantPopover
-                  align="end"
-                  onOpenChange={setLibraryOpen}
-                  open={libraryOpen}
-                  title="Photos on this host"
-                  trigger={<Images aria-hidden="true" size={14} />}
-                  triggerClassName="shell-icon-button"
-                  triggerLabel="Choose an uploaded photo"
-                  triggerVariant="ghost-icon"
-                >
-                  <div
-                    aria-label="Photos on this host"
-                    className="settings-app-background__grid"
-                    onKeyDown={moveWithinRadioGroup}
-                    role="radiogroup"
-                  >
-                    {photos.map((photo) => (
-                      <PhotoChoice
-                        checked={selectedId === String(photo.id)}
-                        key={String(photo.id)}
-                        library={library}
-                        onPick={() => pick(photo)}
-                        photo={photo}
-                      />
-                    ))}
-                  </div>
-                </OctantPopover>
-              )}
             </div>
           </SettingRow>
+          {library === undefined ? null : (
+            <div className="settings-app-background__gallery">
+              {/* The row and its status line hold their height from the first
+                  paint, so a list that arrives, a photo that is added or a
+                  refusal moves nothing around them. */}
+              <div className="settings-app-background__gallery-head">
+                <span className="settings-app-background__gallery-title">On this host</span>
+                <span
+                  className="settings-app-background__gallery-status"
+                  data-tone={status === PHOTO_ADDED || status === PHOTO_REMOVED ? "done" : "note"}
+                  role="status"
+                >
+                  {status ?? ""}
+                </span>
+              </div>
+              <div
+                aria-label="Photos on this host"
+                className="settings-app-background__gallery-row"
+                onKeyDown={moveWithinRadioGroup}
+                role="radiogroup"
+              >
+                {photos.map((photo) => (
+                  <PhotoTile
+                    busy={busy}
+                    checked={selectedId === String(photo.id)}
+                    confirming={confirmingRemoval === String(photo.id)}
+                    key={String(photo.id)}
+                    library={library}
+                    onAskRemove={() => setConfirmingRemoval(String(photo.id))}
+                    onCancelRemove={() => setConfirmingRemoval(null)}
+                    onPick={() => pick(photo)}
+                    onRemove={() => void removePhoto(photo)}
+                    photo={photo}
+                  />
+                ))}
+                {photos.length === 0 ? (
+                  <p className="settings-app-background__gallery-empty">
+                    Photos you add appear here.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          )}
           {background.kind === "photo" ? (
             <>
               <SettingRow
@@ -619,7 +652,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
       {props.increasedContrast === true ? (
         <p className="settings-app-background__note">Hidden while Increased contrast is on.</p>
       ) : null}
-      {status === undefined ? null : (
+      {status === undefined || (showPhoto && library !== undefined) ? null : (
         <p className="settings-app-background__note" role="status">
           {status}
         </p>
@@ -679,29 +712,66 @@ function PhotoThumbnail(props: {
   );
 }
 
-function PhotoChoice(props: {
+/**
+ * One photo in the gallery: a radio that uses it, and a small Remove that
+ * shows when the tile is pointed at or focused. Asking to remove swaps that
+ * control for Remove and Keep over the same tile, so nothing around it moves.
+ * The photo in use has no Remove: the host refuses to delete it.
+ */
+function PhotoTile(props: {
+  readonly busy: boolean;
   readonly checked: boolean;
+  readonly confirming: boolean;
   readonly library: BackgroundImageLibrary | undefined;
+  readonly onAskRemove: () => void;
+  readonly onCancelRemove: () => void;
   readonly onPick: () => void;
+  readonly onRemove: () => void;
   readonly photo: SidebarBackgroundMetadata;
 }) {
   const url = usePhotoUrl(props.library, String(props.photo.id));
+  const canRemove = props.library?.remove !== undefined && !props.checked;
   return (
-    <OctantButton
-      aria-checked={props.checked}
-      aria-label={props.photo.displayName}
-      className="settings-view__preset-swatch settings-view__preset-swatch--photo"
-      onClick={props.onPick}
-      role="radio"
-      type="button"
-      variant="bare"
-    >
-      {url === null ? null : <img alt="" src={url} />}
-      {props.checked ? (
-        <span aria-hidden="true" className="settings-view__selection-mark">
-          ✓
-        </span>
+    <div className="settings-app-background__tile" data-confirming={props.confirming}>
+      <OctantButton
+        aria-checked={props.checked}
+        aria-label={props.photo.displayName}
+        className="settings-app-background__tile-pick"
+        onClick={props.onPick}
+        role="radio"
+        title={props.photo.displayName}
+        type="button"
+        variant="bare"
+      >
+        {url === null ? null : <img alt="" src={url} />}
+      </OctantButton>
+      {canRemove && !props.confirming ? (
+        <OctantIconButton
+          className="settings-app-background__tile-remove"
+          disabled={props.busy}
+          label={`Remove ${props.photo.displayName}`}
+          onClick={props.onAskRemove}
+          type="button"
+        >
+          <span aria-hidden="true" className="settings-app-background__tile-remove-mark">
+            <X size={12} />
+          </span>
+        </OctantIconButton>
       ) : null}
-    </OctantButton>
+      {props.confirming ? (
+        <div
+          className="settings-app-background__tile-confirm"
+          role="group"
+          aria-label={`Remove ${props.photo.displayName}?`}
+        >
+          <OctantButton onClick={props.onRemove} size="xs" type="button" variant="destructive">
+            Remove
+          </OctantButton>
+          <OctantButton onClick={props.onCancelRemove} size="xs" type="button" variant="secondary">
+            Keep
+          </OctantButton>
+        </div>
+      ) : null}
+    </div>
   );
 }

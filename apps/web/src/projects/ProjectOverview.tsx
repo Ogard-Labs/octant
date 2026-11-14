@@ -23,7 +23,7 @@ import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { ProjectIcon } from "./ProjectIcon";
+import { ProjectIcon, useProjectIconDetails, useProjectIconSource } from "./ProjectIcon";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
@@ -140,6 +140,8 @@ export interface ProjectOverviewProps {
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
 }
 
+const MAX_ICON_BYTES = 262_144;
+
 /** The Project's own icon when its folder has one, else the coloured tile; the colour menu opens from either. */
 function ProjectPageMark(props: { readonly project: ProjectOverviewProps["project"] }) {
   return (
@@ -169,7 +171,32 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   // Relink and Archive are occasional; New thread is the page's one action.
   // An unavailable root is the exception: choosing a new one is then the
   // remedy, so it stays beside New thread instead of waiting in the menu.
+  const iconSource = useProjectIconSource();
+  const iconDetails = useProjectIconDetails(String(props.project.id));
+  const iconFile = useRef<HTMLInputElement>(null);
+  // The picture is chosen with the desktop's own file picker; a browser tab
+  // has no such picker, so the item says why it is off.
+  const canChooseIcon = props.hostBridge !== undefined && iconSource?.choose !== undefined;
+  const iconItems: ReadonlyArray<OctantMenuItem> =
+    archived || connectionStale || iconSource?.choose === undefined
+      ? []
+      : [
+          {
+            label: "Change icon…",
+            value: "icon-change",
+            disabled: !canChooseIcon,
+            ...(canChooseIcon ? {} : { description: "Choose an icon in the desktop app." }),
+          },
+          ...(iconDetails?.custom === true
+            ? [
+                iconDetails.foundAvailable
+                  ? { label: "Use found icon", value: "icon-reset" }
+                  : { label: "Remove custom icon", value: "icon-reset" },
+              ]
+            : []),
+        ];
   const overflowItems: ReadonlyArray<OctantMenuItem> = [
+    ...iconItems,
     ...(canRelink && !unavailable ? [{ label: "Relink folder", value: "relink" }] : []),
     { label: props.project.type === "chat" ? "Archive" : "Archive Project", value: "archive" },
   ];
@@ -212,6 +239,32 @@ export function ProjectOverview(props: ProjectOverviewProps) {
       relinkGeneration.current += 1;
     };
   }, [props.project.id]);
+
+  async function chooseIcon(file: File | undefined) {
+    if (file === undefined || iconSource?.choose === undefined) return;
+    const operation = ++relinkGeneration.current;
+    setRelinkFailed(false);
+    setRelinkStatus("");
+    // The host checks again; this only spares a round trip for a plain mistake.
+    if (file.size > MAX_ICON_BYTES) {
+      setRelinkFailed(true);
+      setRelinkStatus("That image is larger than 256 KB. Choose a smaller icon.");
+      return;
+    }
+    const outcome = await iconSource.choose(String(props.project.id), file);
+    if (!alive.current || operation !== relinkGeneration.current) return;
+    setRelinkFailed(outcome.status === "refused");
+    setRelinkStatus(outcome.status === "changed" ? "Icon changed." : outcome.message);
+  }
+
+  async function resetIcon() {
+    if (iconSource?.reset === undefined) return;
+    const operation = ++relinkGeneration.current;
+    const outcome = await iconSource.reset(String(props.project.id));
+    if (!alive.current || operation !== relinkGeneration.current) return;
+    setRelinkFailed(outcome.status === "refused");
+    setRelinkStatus(outcome.status === "changed" ? "Icon changed." : outcome.message);
+  }
 
   async function commitName() {
     const normalized = nameInput.current?.value.trim() ?? "";
@@ -362,6 +415,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 Choose new root
               </OctantButton>
             ) : null}
+            <input
+              accept="image/png,image/svg+xml,image/x-icon,.png,.svg,.ico"
+              aria-label="Choose an icon image"
+              className="sr-only"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.item(0) ?? undefined;
+                event.currentTarget.value = "";
+                void chooseIcon(file);
+              }}
+              ref={iconFile}
+              tabIndex={-1}
+              type="file"
+            />
             {archived || connectionStale ? (
               <span className="project-overview__archived">
                 {archived ? "Archived Project · read-only" : "Stale snapshot · read-only"}
@@ -372,6 +438,8 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 onValueChange={(value) => {
                   if (value === "relink") void relink();
                   else if (value === "archive") props.onArchive(props.project.id);
+                  else if (value === "icon-change") iconFile.current?.click();
+                  else if (value === "icon-reset") void resetIcon();
                 }}
                 selectionMode="action"
                 trigger={<Ellipsis aria-hidden="true" size={16} />}
@@ -387,9 +455,30 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             className="project-overview__context project-overview__repo"
             aria-label="Project binding"
           >
-            <h2 className="project-overview__card-title">
-              {props.project.type === "code" ? "Repository" : "Folders"}
-            </h2>
+            <header className="project-overview__card-header">
+              <h2 className="project-overview__card-title">
+                {props.project.type === "code" ? "Repository" : "Folders"}
+              </h2>
+              {unavailable ? null : (
+                <span
+                  className="project-overview__availability"
+                  data-state={
+                    archived
+                      ? "quiet"
+                      : props.availability?.status === "unverified"
+                        ? "quiet"
+                        : "ok"
+                  }
+                >
+                  <span aria-hidden="true" className="project-overview__availability-dot" />
+                  {archived
+                    ? "Archived · read-only"
+                    : props.availability?.status === "unverified"
+                      ? "Availability unverified"
+                      : "Available"}
+                </span>
+              )}
+            </header>
             <ProjectFoldersSection
               key={String(props.project.id)}
               disabled={archived || connectionStale}
@@ -418,21 +507,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   <p>{props.availability?.reason}</p>
                 </div>
               </OctantAlert>
-            ) : (
-              <span
-                className="project-overview__availability"
-                data-state={
-                  archived ? "quiet" : props.availability?.status === "unverified" ? "quiet" : "ok"
-                }
-              >
-                <span aria-hidden="true" className="project-overview__availability-dot" />
-                {archived
-                  ? "Archived · read-only"
-                  : props.availability?.status === "unverified"
-                    ? "Availability unverified"
-                    : "Available"}
-              </span>
-            )}
+            ) : null}
             <p className="project-overview__description">{authorityCopy(props.project.type)}</p>
           </section>
         ) : null}

@@ -132,7 +132,24 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 .project-overview[data-project-type] .project-overview__actions {
+  position: relative;
   gap: var(--oct-space-2);
+}
+
+/* A change's outcome ("Icon changed.", a refusal) is said under the buttons,
+   out of the row: beside them it pushed New thread left every time. */
+.project-overview[data-project-type] .project-overview__status {
+  position: absolute;
+  inset-block-start: calc(100% + var(--oct-space-1));
+  inset-inline-end: 0;
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.project-overview[data-project-type] .project-overview__status:empty {
+  display: none;
 }
 
 /* ---- cards ----------------------------------------------------------- */
@@ -143,7 +160,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
      title must not widen the card past the side column. */
   grid-template-columns: minmax(0, 1fr);
   align-content: start;
-  gap: var(--oct-space-2);
+  /* One rhythm for every card: title row, one-line help, control. */
+  gap: var(--oct-space-3);
   padding: var(--oct-space-4);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
@@ -182,12 +200,21 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   gap: var(--oct-space-2);
 }
 
+.project-overview[data-project-type] .project-overview__card-header {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
 .project-overview[data-project-type] .project-overview__availability {
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-1);
-  justify-self: start;
   color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
 }
 
 .project-overview[data-project-type] .project-overview__availability-dot {
@@ -205,8 +232,19 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   box-shadow: inset 0 0 0 1.5px currentColor;
 }
 
-.project-overview[data-project-type] .project-overview__description {
+.project-overview[data-project-type] :is(.project-overview__description, .project-folders__note) {
   grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-overview[data-project-type] .project-folders {
+  gap: var(--oct-space-3);
+}
+
+.project-overview[data-project-type] .project-folders__status:empty {
+  display: none;
 }
 
 .project-overview[data-project-type] .project-overview__repo .project-overview__warning {
@@ -215,11 +253,27 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 
 /* The planner and Starting workers: a short help line, then the one control. */
 .project-overview[data-project-type] .code-project-planner .code-project-overview__section-header {
+  min-height: 24px;
   align-items: center;
 }
 
-.project-overview[data-project-type] .code-project-planner__help {
+.project-overview[data-project-type]
+  :is(.code-project-planner__help, .code-project-planner .oct-row-detail) {
   margin: 0;
+  overflow: hidden;
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A refusal fills a line the card already holds, so the card never grows. */
+.project-overview[data-project-type] .code-project-planner__status {
+  min-height: 1lh;
+  margin-block-start: calc(var(--oct-space-2) * -1);
+}
+
+.project-overview[data-project-type] .code-project-planner__proposals:empty {
+  display: none;
 }
 
 .project-overview[data-project-type] .code-project-planner__controls {
@@ -227,6 +281,12 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex-wrap: wrap;
   align-items: center;
   gap: var(--oct-space-2);
+}
+
+/* A select takes the card's whole row, so its button sits under it at the
+   same gap every other control in the card uses. */
+.project-overview[data-project-type] .code-project-planner__controls > [role="combobox"] {
+  flex: 1 1 100%;
 }
 
 .project-overview[data-project-type]
@@ -377,4 +437,74 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   display: grid;
   min-width: 0;
   gap: var(--oct-space-6);
+}
+
+/* ---- Manage panels ------------------------------------------------------- */
+
+/* A panel opened from a row is one inset section under that row: a faint well
+   inside the card, one rhythm between its parts, quiet 12px help, and buttons
+   in a row. It repeats nothing the row above already says. */
+.project-overview[data-project-type] .project-overview-inspector__content {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin-block-end: var(--oct-space-4);
+  padding: var(--oct-space-4);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+  background: color-mix(in oklab, var(--oct-fg) 3%, transparent);
+}
+
+.project-overview[data-project-type]
+  .project-overview-inspector__content
+  :is(
+    .project-provider-policy,
+    .project-brand-kit,
+    .project-design-system,
+    .project-desktop-recipe,
+    .project-actions,
+    .project-overview__memory
+  ) {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* The section's own heading would say the row's label a second time. */
+.project-overview[data-project-type]
+  .project-overview-inspector__content
+  .project-provider-policy__header
+  > div
+  > h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.project-overview[data-project-type]
+  .project-overview-inspector__content
+  :is(.project-provider-policy__header p, .project-provider-policy__hint) {
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.project-overview[data-project-type]
+  .project-overview-inspector__content
+  div:has(> button):not(:has(> :not(button))) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.project-overview[data-project-type] .project-overview-inspector__content :is(h3, h4) {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
 }

@@ -810,6 +810,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
             onClick={() => void commit(recipeOf(draft, saved, providers), takeTypedKey())}
             size="sm"
             type="button"
+            variant="secondary"
           >
             {saved === undefined ? "Set recipe" : "Save recipe"}
           </OctantButton>

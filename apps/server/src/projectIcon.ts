@@ -65,6 +65,10 @@ export type ProjectIconLookup =
       readonly mediaType: ProjectIconMediaType;
       /** Size and modification time: enough to notice an edited file without hashing it. */
       readonly etag: string;
+      /** Where it came from; absent means the folder's own icon. */
+      readonly source?: "custom" | "found";
+      /** For a custom icon: whether the folder also has one, so the page can offer to use it. */
+      readonly foundAvailable?: boolean;
     }
   | { readonly status: "none" };
 
@@ -122,7 +126,7 @@ function startsWith(bytes: Uint8Array, signature: ReadonlyArray<number>): boolea
   return signature.every((value, index) => bytes[index] === value);
 }
 
-function mediaTypeFor(candidate: string): ProjectIconMediaType | undefined {
+export function mediaTypeFor(candidate: string): ProjectIconMediaType | undefined {
   if (candidate.endsWith(".svg")) return "image/svg+xml";
   if (candidate.endsWith(".png")) return "image/png";
   if (candidate.endsWith(".ico")) return "image/x-icon";
@@ -130,7 +134,7 @@ function mediaTypeFor(candidate: string): ProjectIconMediaType | undefined {
 }
 
 /** The extension names the type; the first bytes must agree, or the file is not an icon. */
-function bytesMatch(mediaType: ProjectIconMediaType, bytes: Uint8Array): boolean {
+export function bytesMatch(mediaType: ProjectIconMediaType, bytes: Uint8Array): boolean {
   if (mediaType === "image/png") return startsWith(bytes, PNG_SIGNATURE);
   if (mediaType === "image/x-icon") return startsWith(bytes, ICO_SIGNATURE);
   let text: string;
@@ -217,7 +221,7 @@ async function openCandidate(
   return undefined;
 }
 
-async function readCandidate(
+export async function readCandidate(
   root: string,
   candidate: string,
   platform: NodeJS.Platform,
@@ -277,22 +281,35 @@ export interface ProjectIconReader {
   readonly read: (windowId: WindowId, projectId: ProjectId) => Promise<ProjectIconLookup>;
 }
 
+/** The icon a person chose for a Project, kept in the host's own data folder. */
+export interface ProjectCustomIconLookup {
+  readonly read: (projectId: ProjectId) => Promise<ProjectIconLookup>;
+}
+
 /**
- * Reads the icon for a Project this window can reach. A Project that is not
- * bound to a folder (Chat), is not active, or is unknown to this window has no
- * icon, the same answer as a folder without one.
+ * Reads the icon for a Project this window can reach: the one the person chose
+ * first, then the favicon found in the Project's folder. A Project that is not
+ * active or is unknown to this window has no icon. A Chat Project has no
+ * folder, so only a chosen icon can show there.
  */
 export function createProjectIconReader(dependencies: {
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly find?: (canonicalRoot: string) => Promise<ProjectIconLookup>;
+  readonly custom?: ProjectCustomIconLookup;
 }): ProjectIconReader {
   const find = dependencies.find ?? findProjectIcon;
   return {
     read: async (windowId, projectId) => {
       const bootstrap = await dependencies.projects.bootstrap(windowId);
       const project = bootstrap.active.find((candidate) => candidate.id === projectId);
-      if (project === undefined || project.type === "chat") return { status: "none" };
-      return find(project.binding.canonicalRoot);
+      if (project === undefined) return { status: "none" };
+      const found: ProjectIconLookup =
+        project.type === "chat" ? { status: "none" } : await find(project.binding.canonicalRoot);
+      const chosen = (await dependencies.custom?.read(projectId)) ?? { status: "none" };
+      if (chosen.status === "found") {
+        return { ...chosen, source: "custom", foundAvailable: found.status === "found" };
+      }
+      return found;
     },
   };
 }

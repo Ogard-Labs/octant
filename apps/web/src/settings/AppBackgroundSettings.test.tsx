@@ -83,7 +83,6 @@ describe("AppBackgroundSettings", () => {
 
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole("img", { name: "No photo chosen" })).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Choose an uploaded photo" }));
     expect(photos.list).toHaveBeenCalled();
     await user.click(await screen.findByRole("radio", { name: "harbour.png" }));
 
@@ -180,7 +179,6 @@ describe("AppBackgroundSettings", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Choose an uploaded photo" }));
     await user.click(await screen.findByRole("radio", { name: "harbour.png" }));
 
     expect(onChange).toHaveBeenLastCalledWith(
@@ -289,7 +287,6 @@ describe("AppBackgroundSettings", () => {
     // The list answers late and knows nothing of the upload.
     settleList([photo(PHOTO_ID, "harbour.png")]);
 
-    await user.click(await screen.findByRole("button", { name: "Choose an uploaded photo" }));
     expect(await screen.findByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "harbour.png" })).toBeInTheDocument();
   });
@@ -536,5 +533,127 @@ describe("AppBackgroundSettings", () => {
       />,
     );
     expect(screen.queryByRole("switch", { name: "Cover the sidebar" })).not.toBeInTheDocument();
+  });
+
+  it("says the photo was added and shows it in the gallery, marked as the one in use", async () => {
+    const user = userEvent.setup();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library()}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await user.upload(
+      screen.getByLabelText("Choose a photo to upload"),
+      new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "sunrise.png", { type: "image/png" }),
+    );
+
+    expect(await screen.findByText("Photo added.")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "harbour.png" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("marks the photo in use in the gallery and uses another one when it is clicked", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library({
+          list: vi.fn(async () => [
+            photo(PHOTO_ID, "harbour.png"),
+            photo(UPLOADED_ID, "sunrise.png"),
+          ]),
+        })}
+        onChange={onChange}
+      />,
+    );
+
+    const current = await screen.findByRole("radio", { name: "harbour.png" });
+    expect(current).toHaveAttribute("aria-checked", "true");
+    await user.click(await screen.findByRole("radio", { name: "sunrise.png" }));
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...dials,
+      kind: "photo",
+      backgroundId: UPLOADED_ID,
+    });
+  });
+
+  it("removes a photo only after the person confirms, and never offers it for the photo in use", async () => {
+    const user = userEvent.setup();
+    const remove = vi.fn(async () => undefined);
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library({
+          list: vi.fn(async () => [
+            photo(PHOTO_ID, "harbour.png"),
+            photo(UPLOADED_ID, "sunrise.png"),
+          ]),
+          remove,
+        })}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("radio", { name: "sunrise.png" });
+    expect(screen.queryByRole("button", { name: "Remove harbour.png" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove sunrise.png" }));
+    expect(remove).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole("group", { name: "Remove sunrise.png?" })).getByRole("button", {
+        name: "Keep",
+      }),
+    );
+    expect(screen.getByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Remove sunrise.png" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Remove sunrise.png?" })).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+
+    expect(remove).toHaveBeenCalledExactlyOnceWith(UPLOADED_ID);
+    await waitFor(() =>
+      expect(screen.queryByRole("radio", { name: "sunrise.png" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Photo removed.")).toBeInTheDocument();
+  });
+
+  it("keeps a photo the host refuses to remove and says why", async () => {
+    const user = userEvent.setup();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library({
+          list: vi.fn(async () => [
+            photo(PHOTO_ID, "harbour.png"),
+            photo(UPLOADED_ID, "sunrise.png"),
+          ]),
+          remove: vi.fn(async () => {
+            throw new Error("The sidebar is showing this photo, so it cannot be deleted.");
+          }),
+        })}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("radio", { name: "sunrise.png" });
+    await user.click(screen.getByRole("button", { name: "Remove sunrise.png" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Remove sunrise.png?" })).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+
+    expect(await screen.findByText(/cannot be deleted/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
   });
 });

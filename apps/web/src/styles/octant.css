@@ -7073,8 +7073,9 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
    its opaque page. */
 html[data-octant-native-host="true"]
   :is(
-    .shell--app-backdrop
-      :is(.turn-user .bubble, .thread-composer__surface, .composer:not(.composer--carded)),
+    .shell--app-backdrop .turn-user .bubble,
+    .shell--app-backdrop:not(.shell--material-translucent)
+      :is(.thread-composer__surface, .composer:not(.composer--carded)),
     .zen-el,
     .zen-bar,
     .zen-pill,

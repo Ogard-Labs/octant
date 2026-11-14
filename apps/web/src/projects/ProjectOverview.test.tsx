@@ -3,7 +3,9 @@ import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { ProjectSummary } from "@octant/contracts/projects";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { ProjectIconContext, createProjectIconSource } from "./ProjectIcon";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectsDirectory } from "./ProjectsDirectory";
 import { ProjectThreadsProvider, type ProjectThreadsAccess } from "./ProjectThreadsSection";
@@ -933,5 +935,132 @@ describe("ProjectOverview threads and recent activity", () => {
       screen.queryByRole("heading", { name: "Threads and recent activity" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("No threads in this Project yet.")).not.toBeInTheDocument();
+  });
+
+  describe("icon choice", () => {
+    const project = {
+      id: "20000000-0000-4000-8000-0000000000a1",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+
+    function iconHost(custom: boolean, foundAvailable: boolean) {
+      URL.createObjectURL = vi.fn(() => "blob:icon");
+      const fetcher = vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
+        if (init?.method === "PUT" || init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => new Blob(["x"]),
+          headers: new Headers({
+            "x-octant-project-icon-source": custom ? "custom" : "found",
+            "x-octant-project-icon-found": foundAvailable ? "1" : "0",
+          }),
+        };
+      }) as unknown as typeof fetch;
+      return {
+        fetcher,
+        source: createProjectIconSource({
+          serverUrl: "http://127.0.0.1:1/",
+          windowCapability: "c",
+          fetcher,
+        }),
+      };
+    }
+
+    function view(source: ReturnType<typeof createProjectIconSource>, desktop: boolean) {
+      return render(
+        <ProjectIconContext.Provider value={source}>
+          <ProjectOverview
+            {...(desktop
+              ? {
+                  hostBridge: {
+                    selectProjectRoot: vi.fn(),
+                  } as unknown as NonNullable<ComponentProps<typeof ProjectOverview>["hostBridge"]>,
+                }
+              : {})}
+            onArchive={vi.fn()}
+            onRelink={vi.fn()}
+            onRename={vi.fn()}
+            project={project}
+          />
+        </ProjectIconContext.Provider>,
+      );
+    }
+
+    it("turns Change icon off in a browser and says where to choose one", async () => {
+      const user = userEvent.setup();
+      view(iconHost(false, true).source, false);
+
+      await user.click(screen.getByRole("button", { name: "More Project actions" }));
+
+      const item = await screen.findByRole("menuitem", { name: "Change icon…" });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      expect(item).toHaveAccessibleDescription("Choose an icon in the desktop app.");
+    });
+
+    it("copies a chosen picture to the host and says so", async () => {
+      const user = userEvent.setup();
+      const { fetcher, source } = iconHost(false, true);
+      view(source, true);
+
+      await user.upload(
+        screen.getByLabelText("Choose an icon image"),
+        new File(["x"], "mark.png", { type: "image/png" }),
+      );
+
+      expect(await screen.findByText("Icon changed.")).toBeVisible();
+      expect(vi.mocked(fetcher).mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true);
+    });
+
+    it("refuses a picture over 256 KB without asking the host", async () => {
+      const user = userEvent.setup();
+      const { fetcher, source } = iconHost(false, true);
+      view(source, true);
+      const big = new File([new Uint8Array(262_145)], "big.png", { type: "image/png" });
+
+      await user.upload(screen.getByLabelText("Choose an icon image"), big);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("larger than 256 KB");
+      expect(vi.mocked(fetcher).mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+    });
+
+    it("offers the folder's own icon back when one is chosen and the folder has one", async () => {
+      const user = userEvent.setup();
+      const { fetcher, source } = iconHost(true, true);
+      view(source, true);
+      await waitFor(() => expect(source.details?.(String(project.id))?.custom).toBe(true));
+
+      await user.click(screen.getByRole("button", { name: "More Project actions" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Use found icon" }));
+
+      await waitFor(() =>
+        expect(vi.mocked(fetcher).mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(
+          true,
+        ),
+      );
+    });
+
+    it("offers to remove a chosen icon when the folder has none", async () => {
+      const user = userEvent.setup();
+      const { source } = iconHost(true, false);
+      view(source, true);
+      await waitFor(() => expect(source.details?.(String(project.id))?.custom).toBe(true));
+
+      await user.click(screen.getByRole("button", { name: "More Project actions" }));
+
+      expect(await screen.findByRole("menuitem", { name: "Remove custom icon" })).toBeVisible();
+      expect(screen.queryByRole("menuitem", { name: "Use found icon" })).not.toBeInTheDocument();
+    });
   });
 });

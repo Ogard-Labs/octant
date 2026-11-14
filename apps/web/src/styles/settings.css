@@ -2703,9 +2703,8 @@ html[data-octant-increased-contrast="true"]
   color: var(--octant-accent-foreground);
 }
 
-/* The photo in use is a small frame beside two icon buttons, upload and
-   library; the library opens as a popover grid whose pictures reuse the
-   preset swatch as a radio, sized for a picture. */
+/* The photo in use is a small frame beside the upload button; the photos on
+   this host sit in a gallery row under it. */
 .settings-app-background__photo {
   display: inline-flex;
   align-items: center;
@@ -2725,24 +2724,77 @@ html[data-octant-increased-contrast="true"]
 }
 
 .settings-app-background__thumb img,
-.settings-view__preset-swatch--photo img {
+.settings-app-background__tile-pick img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.settings-app-background__grid {
+/* The gallery holds its height from the first paint: a head line of 20px and
+   one row of 48px tiles with room for the selection ring, whether the list has
+   loaded, is empty, or holds one photo or thirty. Too many photos scroll
+   sideways inside the row instead of wrapping to a second one. */
+.settings-app-background__gallery {
   display: grid;
-  grid-template-columns: repeat(3, 64px);
   gap: var(--oct-space-2);
-  padding: var(--oct-space-1);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-top: 1px solid var(--oct-hairline);
 }
 
-.settings-view__preset-swatch--photo {
-  width: 64px;
-  height: 40px;
-  min-height: 0;
+.settings-app-background__gallery-head {
+  display: flex;
+  height: 20px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-app-background__gallery-title {
+  color: var(--octant-text-secondary);
+}
+
+.settings-app-background__gallery-status {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-app-background__gallery-status[data-tone="done"] {
+  color: var(--octant-text-primary);
+}
+
+.settings-app-background__gallery-row {
+  display: flex;
+  height: 56px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding-inline: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.settings-app-background__gallery-empty {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-app-background__tile {
+  position: relative;
+  flex: none;
+  width: 80px;
+  height: 48px;
+}
+
+.settings-app-background__tile-pick {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -2795,6 +2847,57 @@ html[data-octant-increased-contrast="true"]
 /* Provider card details moved from styles.css. */
 .provider-card {
   border-radius: var(--oct-radius-md);
+  background: var(--octant-control);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+/* The photo in use wears a ring drawn over its picture, inside the tile. */
+.settings-app-background__tile-pick[aria-checked="true"]::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 2px var(--octant-text-primary),
+    inset 0 0 0 3px var(--octant-surface, var(--oct-bg));
+  content: "";
+  pointer-events: none;
+}
+
+.settings-app-background__tile-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+}
+
+/* The mark carries the paint: the button stays the shared recipe's. */
+.settings-app-background__tile-remove-mark {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: var(--octant-text-primary);
+  background: color-mix(in oklab, var(--oct-bg) 80%, transparent);
+  border-radius: var(--oct-radius-pill);
+}
+
+.settings-app-background__tile:hover .settings-app-background__tile-remove,
+.settings-app-background__tile:focus-within .settings-app-background__tile-remove {
+  opacity: 1;
+}
+
+.settings-app-background__tile-confirm {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  background: color-mix(in oklab, var(--oct-bg) 86%, transparent);
+  border-radius: var(--oct-radius-sm);
   transition:
     border-color var(--oct-motion-fast) ease,
     background-color var(--oct-motion-fast) ease;
