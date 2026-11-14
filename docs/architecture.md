@@ -13048,10 +13048,20 @@ mechanisms are:
   before anything executes. Tool results and external content are data with
   provenance, never instructions.
   Every Project check inside a Code turn's tool call is judged on the turn's
-  window as it stands when the call runs (its persisted Project binding, and
-  only while the window is still live), never on the admission of the
-  request that started the turn, whether that request has ended or is still
-  open. A closed window's turn keeps running but its tool calls reach no
+  window as it stands when the call runs (the Projects its persisted
+  workspace shows, and only while the window is still live), never on the
+  admission of the request that started the turn, whether that request has
+  ended or is still open. The call reaches only the turn's own Project: a
+  window that shows threads of several Projects side by side never lets one
+  pane's turn read or drive another pane's Project
+  ([Workspace: Panes and content navigation](design/workspace.md#panes-and-content-navigation)).
+  **A window reaches the Projects it shows.** A window's reach in a mode is
+  its lead Project plus the Project of every visible pane that holds another
+  one, and every host check that judges a named Project asks that set
+  (`windowAdmitsProject`). A pane's Project is resolved by the host from the
+  surface it shows, never taken from the renderer; a pane showing the
+  welcome, and every stowed layout, reaches nothing; closing a pane ends its
+  reach. Mode and host still never mix in one layout. A closed window's turn keeps running but its tool calls reach no
   Project until the same window registers again, as a reopened primary
   window does; a renderer reload keeps the window live. A paired device's
   scope holds no binding, so its wider in-request reach never carries into

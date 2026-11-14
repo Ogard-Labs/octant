@@ -166,9 +166,9 @@ it("judges work that outlives its request on the window's standing binding, neve
   await access.run(context, async () => {
     deferred = waiting.then(() => [
       access.canAccessProject(scopeId, projectId),
-      access.standingAuthority(() => access.canAccessProject(scopeId, projectId)),
+      access.standingAuthority(projectId, () => access.canAccessProject(scopeId, projectId)),
       // The device's request reached any active Project; standing does not.
-      access.standingAuthority(() => access.canAccessProject(scopeId, otherProject)),
+      access.standingAuthority(otherProject, () => access.canAccessProject(scopeId, otherProject)),
     ]);
   });
   release();
@@ -190,17 +190,46 @@ it("refuses a closed window on its standing authority until the same window is l
     isWindowLive: () => live,
   });
   const standing = () =>
-    access.standingAuthority(() => access.canAccessProject(scopeId, projectId));
+    access.standingAuthority(projectId, () => access.canAccessProject(scopeId, projectId));
   expect(standing()).toBe(true);
   // Closing revokes the window; its persisted workspace stays behind.
   live = false;
   expect(standing()).toBe(false);
   expect(
-    access.standingAuthority(() => access.canAccessProject(ROUTINE_HOST_SCOPE_ID, projectId)),
+    access.standingAuthority(projectId, () =>
+      access.canAccessProject(ROUTINE_HOST_SCOPE_ID, projectId),
+    ),
   ).toBe(true);
   // The primary window reopens under the same id.
   live = true;
   expect(standing()).toBe(true);
+});
+
+describe("a turn's standing authority", () => {
+  it("reaches only the turn's own Project, even when the window reaches another", () => {
+    const workspace = defaultWindowWorkspace(scopeId);
+    const paneProject = decodeProjectId("00000000-0000-4000-8000-00000000c011");
+    const access = new CodeProjectAccess({
+      // The window reaches the other pane's Project, as a window holding
+      // threads of two Projects side by side does.
+      readWorkspace: () => ({
+        ...workspace,
+        contextByMode: {
+          ...workspace.contextByMode,
+          code: contextKeyForProject("code", LOCAL_HOST_ID, paneProject, "/other"),
+        },
+      }),
+      hasActiveCodeProject: () => true,
+      isWindowLive: () => true,
+    });
+    expect(access.canAccessProject(scopeId, paneProject)).toBe(true);
+    expect(
+      access.standingAuthority(projectId, () => access.canAccessProject(scopeId, paneProject)),
+    ).toBe(false);
+    expect(
+      access.standingAuthority(paneProject, () => access.canAccessProject(scopeId, paneProject)),
+    ).toBe(true);
+  });
 });
 
 describe("retained Code admission for a held stream", () => {
@@ -267,9 +296,9 @@ describe("a paired device's queued message", () => {
       expect(access.canAccessProject(other, projectId)).toBe(false);
       // A tool call of the turn is judged on the device's standing reach,
       // which is none, exactly as for a turn the device sent itself.
-      expect(access.standingAuthority(() => access.canAccessProject(scopeId, projectId))).toBe(
-        false,
-      );
+      expect(
+        access.standingAuthority(projectId, () => access.canAccessProject(scopeId, projectId)),
+      ).toBe(false);
       // Nothing is kept for a stream: a queued dispatch has no connection.
       expect(access.retain(scopeId)).toBeUndefined();
       active = false;

@@ -1,3 +1,4 @@
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { BrowserDownloadPermissions } from "../browser/browserDownloadPermissions";
 import { browserDownloadPermissionJournal } from "../browser/browserDownloadPermissionJournal";
 import { BrowserUploadPermissions } from "../browser/browserUploadPermissions";
@@ -715,12 +716,14 @@ export function wireBrowser(deps: BrowserDependencies) {
       projectId: ProjectId,
       mode: "work" | "code",
     ): boolean => {
-      const context = persistence.readWindowWorkspace(windowId)?.workspace.contextByMode[mode];
+      const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+      const context = workspace?.contextByMode[mode];
       return (
+        workspace !== undefined &&
         context !== undefined &&
         context.mode === mode &&
         String(context.host) === String(LOCAL_HOST_ID) &&
-        String(context.projectId) === String(projectId)
+        windowAdmitsProject(workspace, mode, projectId)
       );
     };
     const liveProjectBrowsers = new ProjectBrowserService({

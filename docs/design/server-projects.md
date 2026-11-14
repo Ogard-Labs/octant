@@ -393,7 +393,10 @@ checks never change registry/configuration or journal state.
   on this host.
 - **Windows.** A window binds a server Project with no folder of this host
   (`boundRoot: null`), so Files, Browser, and every root-backed surface fail
-  closed, and a server thread opens only its own view.
+  closed, and a server thread opens only its own view. A server Project's
+  thread can also sit in its own pane beside a local Project's, under the same
+  rule: its pane's context has no bound root, and its terminal is reached only
+  while a visible pane shows it.
 - **Checkpoints.** A turn on a server takes no checkpoint, so restoring
   files is not offered there and Rewind to here rewinds the conversation
   only, saying why; Git on the server is the way back for files.

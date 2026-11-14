@@ -48,6 +48,7 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import {
+  activePaneContext,
   defaultPermissionModeFor,
   listEligibleImageProfiles,
   permissionModeOf,
@@ -1531,10 +1532,9 @@ function LaunchedShell(
     dockThreadKey === undefined
       ? fallbackDockState
       : threadUtilityDockState(dockStatesByThread, dockThreadKey);
-  // One drag pipeline for pane grips and sidebar rows. A sidebar row whose
-  // thread belongs to a different Project is rerouted through the ordinary
-  // open path on drop, so a drag cannot place a cross-Project thread without
-  // the switch-Project handling every other open gets.
+  // One drag pipeline for pane grips and sidebar rows. A sidebar row of
+  // another Project of this mode lands as its own pane; the host resolves that
+  // pane's Project and judges every call made from it.
   const sidebarDragRows = useRef(new Map<string, SidebarThreadDragRow>());
   // The Chat list's thread ids, read when a drag starts; filled in below once
   // the Chat controller exists.
@@ -2583,8 +2583,12 @@ function LaunchedShell(
           ?.projectId)
       : undefined) ??
     // Preserve Project context when a utility tab (browser/files/side-chat) is
-    // active: the mode context remains bound even without an active Project tab.
-    controller.workspace?.contextByMode[activeMode].projectId ??
+    // active: the active pane's Project stays bound even without a Project tab,
+    // and in a window showing several Projects it is that pane's own, so the
+    // dock, skills and plugins follow the pane the person is working in.
+    (controller.workspace === undefined
+      ? undefined
+      : activePaneContext(controller.workspace, activeMode).projectId) ??
     undefined;
   // Skills and plugin MCP servers this host reports as installed and
   // effective. They become the Skills and Plugins groups of the `/` composer

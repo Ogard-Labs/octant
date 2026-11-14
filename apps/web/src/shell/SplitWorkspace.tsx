@@ -97,6 +97,11 @@ export interface SplitWorkspaceProps {
   readonly showProviderIcons?: boolean;
   /** The Project a thread pane names in its context chip when it has no facts of its own. */
   readonly contextLabel?: string;
+  /**
+   * Project names by id, for a pane that holds another Project than the
+   * layout's lead. Such a pane never borrows the lead's name.
+   */
+  readonly projectNamesById?: ReadonlyMap<string, string>;
   /** Host names by host id, so a thread on another host names where it runs. */
   readonly environmentNames?: ReadonlyMap<string, string>;
   /**
@@ -444,6 +449,13 @@ function PaneProviderMark(props: { readonly provider: ThreadProviderIdentity | u
   );
 }
 
+/** Whether any pane of a layout holds another Project than the layout's lead. */
+function layoutHoldsAnotherProject(layout: WorkspaceLayoutNode): boolean {
+  return layout.kind === "split"
+    ? layoutHoldsAnotherProject(layout.first) || layoutHoldsAnotherProject(layout.second)
+    : layout.context !== undefined && layout.surface.kind !== "welcome";
+}
+
 function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: WorkspacePane }) {
   const pane = props.pane;
   const surface = pane.surface;
@@ -546,8 +558,22 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
   const pullRequest = facts?.pullRequest;
   const selectPullRequest = props.onSelectPullRequest;
+  // In a window showing several Projects every pane names its own, so the
+  // person never types or approves into the wrong one; a pane of another
+  // Project than the lead never borrows the lead's name.
+  const mixedProjects = layoutHoldsAnotherProject(props.layout);
+  const paneProjectName =
+    pane.context === undefined
+      ? props.contextLabel
+      : pane.context.projectId === null
+        ? undefined
+        : props.projectNamesById?.get(String(pane.context.projectId));
   const projectName =
-    "threadId" in surface ? (facts?.projectName ?? props.contextLabel) : undefined;
+    "threadId" in surface
+      ? (facts?.projectName ?? paneProjectName)
+      : mixedProjects && surface.kind !== "welcome"
+        ? paneProjectName
+        : undefined;
   const running =
     environment !== undefined &&
     "threadId" in surface &&
@@ -597,7 +623,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     <WorkspaceContentViewContext.Provider value={contentView}>
       <section
         aria-current={active ? "true" : undefined}
-        aria-label={`Workspace pane: ${title}`}
+        aria-label={
+          mixedProjects && projectName !== undefined
+            ? `Workspace pane: ${projectName}, ${title}`
+            : `Workspace pane: ${title}`
+        }
         className="workspace-pane"
         data-active={active ? "true" : "false"}
         data-focused={focused ? "true" : "false"}
@@ -615,6 +645,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
               aria-expanded={menuOpen}
               className="workspace-pane__header"
               data-header-kind={showTabs ? "tabs" : "title"}
+              data-mixed-projects={mixedProjects ? "true" : undefined}
               render={<div />}
             >
               <span
@@ -649,7 +680,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     ahead of them read as a tab of its own, so it moves to the
                     handle's tooltip. The branch lives in the composer's strip,
                     beside the thread it runs. */}
-                {showTabs || projectName === undefined ? null : (
+                {(showTabs && !mixedProjects) || projectName === undefined ? null : (
                   <span className="workspace-pane__context" title={projectName}>
                     {projectName}
                   </span>

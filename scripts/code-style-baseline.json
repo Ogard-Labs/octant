@@ -154,5 +154,21 @@
     "packages/client-runtime/src/zenClient.ts": 1,
     "packages/domain/src/linkedThreadPromptPolicy.ts": 3,
     "packages/domain/src/modelPickerPolicy.ts": 1
+  },
+  "window-lead-read": {
+    "apps/server/src/agentRun/authorizeAgentRunCreation.ts": 3,
+    "apps/server/src/browser/browserAuthorityResolver.ts": 1,
+    "apps/server/src/canvasRoutes.ts": 1,
+    "apps/server/src/chat/threadMentionService.ts": 1,
+    "apps/server/src/fleetActivityService.ts": 3,
+    "apps/server/src/hub/departedThreadWindow.ts": 1,
+    "apps/server/src/persistence/hostIdentityTransforms.ts": 3,
+    "apps/server/src/persistence/shellPersistenceSchema.ts": 6,
+    "apps/server/src/previewRoutes.ts": 1,
+    "apps/server/src/shellService.ts": 16,
+    "apps/server/src/wiring/agentRuns.ts": 4,
+    "apps/server/src/wiring/browser.ts": 1,
+    "apps/server/src/wiring/usage.ts": 1,
+    "apps/server/src/wiring/workspace.ts": 3
   }
 }

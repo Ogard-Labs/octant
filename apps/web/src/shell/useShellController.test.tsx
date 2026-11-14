@@ -2749,12 +2749,12 @@ describe("useShellController", () => {
     expect(result.current.announcement).toBe("First selected.");
   });
 
-  it("refuses a cross-Project pin and offers a new window instead of mixing authority", async () => {
+  it("pins a thread of another Project in a pane of this window and offers no new window", async () => {
     const currentProjectId = decodeProjectId("00000000-0000-4000-8000-000000000898");
     const nextProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000897");
     const base = codeBootstrap();
-    const bootstrap: ShellBootstrap = {
+    const host = statefulClient({
       ...base,
       workspace: {
         ...base.workspace,
@@ -2767,21 +2767,9 @@ describe("useShellController", () => {
           },
         },
       },
-    };
-    const client: ShellClient = {
-      bootstrap: vi.fn(async () => bootstrap),
-      execute: vi.fn(async () => {
-        throw new Error("cross-Project pin must not journal a layout mutation");
-      }),
-    };
-    const openInNewWindow = vi.fn(async () => undefined);
+    });
     const { result } = renderHook(() =>
-      useShellController({
-        client,
-        nativeHost: { resetBounds: vi.fn(), openInNewWindow },
-        serverUrl: "http://127.0.0.1:13773",
-        windowId,
-      }),
+      useShellController({ client: host.client, serverUrl: "http://127.0.0.1:13773", windowId }),
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
@@ -2789,26 +2777,17 @@ describe("useShellController", () => {
       result.current.pinInPane(mintedCodeThreadSurface(threadId, "Other Project"), nextProjectId),
     );
 
-    expect(client.execute).not.toHaveBeenCalled();
-    expect(result.current.crossContextOffer).toMatchObject({
-      newWindowProjectId: nextProjectId,
-    });
-    expect(result.current.workspace?.layouts.code.kind).toBe("pane");
-    await act(async () => result.current.openCrossContextInNewWindow());
-    expect(openInNewWindow).toHaveBeenCalledWith({
-      kind: "project-thread",
-      projectId: nextProjectId,
-      mode: "code",
-      threadId: String(threadId),
-    });
+    expect(host.execute).toHaveBeenCalled();
+    expect(result.current.crossContextOffer).toBeUndefined();
+    expect(result.current.workspace?.contextByMode.code.projectId).toBe(currentProjectId);
   });
 
-  it("refuses a cross-Project drop instead of switching this window's Project", async () => {
+  it("places a thread of another Project beside this one without a refusal or a switch", async () => {
     const currentProjectId = decodeProjectId("00000000-0000-4000-8000-000000000898");
     const nextProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000897");
     const base = codeBootstrap();
-    const bootstrap: ShellBootstrap = {
+    const host = statefulClient({
       ...base,
       workspace: {
         ...base.workspace,
@@ -2821,15 +2800,9 @@ describe("useShellController", () => {
           },
         },
       },
-    };
-    const client: ShellClient = {
-      bootstrap: vi.fn(async () => bootstrap),
-      execute: vi.fn(async () => {
-        throw new Error("cross-Project drop must not journal a layout mutation");
-      }),
-    };
+    });
     const { result } = renderHook(() =>
-      useShellController({ client, serverUrl: "http://127.0.0.1:13773", windowId }),
+      useShellController({ client: host.client, serverUrl: "http://127.0.0.1:13773", windowId }),
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
     const targetPane = firstPane(result.current.workspace!.layouts.code);
@@ -2842,9 +2815,12 @@ describe("useShellController", () => {
       ),
     );
 
-    expect(client.execute).not.toHaveBeenCalled();
-    expect(result.current.crossContextOffer?.message).toMatch(/different Project/);
-    expect(result.current.workspace?.layouts.code.kind).toBe("pane");
+    expect(host.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: expect.objectContaining({ kind: "split-pane" }) }),
+    );
+    expect(result.current.crossContextOffer).toBeUndefined();
+    expect(result.current.workspace?.layouts.code.kind).toBe("split");
+    expect(result.current.workspace?.contextByMode.code.projectId).toBe(currentProjectId);
   });
 
   it("reloads authoritative state after a conflict", async () => {

@@ -1741,6 +1741,31 @@ html[data-octant-native-host="true"]
   }
 }
 
+/* A window showing several Projects keeps each pane's Project at every width,
+   so a person never types or approves into the wrong one. The Project keeps a
+   short cap and its full name in the tooltip, and does not shrink below it: in
+   the top-right pane, whose header leaves room for the window's own controls,
+   sharing the room left the Project at two letters. The title gives way and
+   stays whole in its tooltip and the pane's accessible name. The "/" between
+   them stays hidden: the chip's meta colour and size already set it apart, and
+   the narrow header has no room to spare. */
+@media (max-width: 680px) {
+  .workspace-pane__header[data-mixed-projects="true"] .workspace-pane__context {
+    display: inline;
+    flex-shrink: 0;
+    max-width: 10ch;
+  }
+}
+
+@container pane-header (max-width: 520px) {
+  .workspace-pane__header[data-mixed-projects="true"]:has(.workspace-pane__title)
+    .workspace-pane__context {
+    display: inline;
+    flex-shrink: 0;
+    max-width: 10ch;
+  }
+}
+
 /* A turn is executing. The chip keeps its width while the chips shrink, so
    the state stays readable in a narrow pane. */
 .workspace-pane__status {

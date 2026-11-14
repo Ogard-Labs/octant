@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ThreadMentionClient } from "@octant/client-runtime";
-import type { SideChatSidecar, ThreadMentionCandidate } from "@octant/contracts";
+import {
+  decodeMentionableThreadId,
+  type MentionableThreadId,
+  type SideChatSidecar,
+  type ThreadMentionCandidate,
+} from "@octant/contracts";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { useThreadMentions } from "./useThreadMentions";
 
@@ -40,6 +45,7 @@ function Harness(props: {
   readonly initialDraft?: string;
   readonly onSideChatOpened?: (sidecar: SideChatSidecar) => void;
   readonly onThreadIds?: (threadIds: ReadonlyArray<string>) => void;
+  readonly readerThreadId?: MentionableThreadId;
 }) {
   const [draft, setDraft] = useState(props.initialDraft ?? "");
   const mentions = useThreadMentions({
@@ -47,6 +53,7 @@ function Harness(props: {
     draft,
     requestId: () => requestId,
     ...(props.onSideChatOpened === undefined ? {} : { onSideChatOpened: props.onSideChatOpened }),
+    ...(props.readerThreadId === undefined ? {} : { readerThreadId: props.readerThreadId }),
   });
   return (
     <div>
@@ -79,6 +86,17 @@ function Harness(props: {
       </button>
       <button onClick={mentions.clear} type="button">
         clear
+      </button>
+      <button
+        onClick={() =>
+          void mentions.attachDroppedThread({
+            threadId: "00000000-0000-4000-8000-0000000003b1",
+            onDraftChange: setDraft,
+          })
+        }
+        type="button"
+      >
+        drop
       </button>
       <button
         onClick={() =>
@@ -120,6 +138,37 @@ describe("useThreadMentions", () => {
       expect(screen.getByLabelText("candidates")).toHaveTextContent("Release notes"),
     );
     expect(client.search).toHaveBeenCalledWith(requestId, "rel", expect.anything());
+  });
+
+  it("tells the host which thread's composer is searching, so it lists only what that composer may attach", async () => {
+    const user = userEvent.setup();
+    const client = stubClient();
+    const reader = decodeMentionableThreadId("00000000-0000-4000-8000-0000000003a1");
+    render(<Harness client={client} readerThreadId={reader} />);
+
+    await user.click(screen.getByRole("button", { name: "search" }));
+
+    await waitFor(() =>
+      expect(client.search).toHaveBeenCalledWith(requestId, "rel", expect.anything(), reader),
+    );
+  });
+
+  it("asks the host about a dropped thread for the receiving composer's own thread", async () => {
+    const user = userEvent.setup();
+    const client = stubClient();
+    const reader = decodeMentionableThreadId("00000000-0000-4000-8000-0000000003a1");
+    render(<Harness client={client} readerThreadId={reader} />);
+
+    await user.click(screen.getByRole("button", { name: "drop" }));
+
+    await waitFor(() =>
+      expect(client.searchThread).toHaveBeenCalledWith(
+        requestId,
+        "00000000-0000-4000-8000-0000000003b1",
+        undefined,
+        reader,
+      ),
+    );
   });
 
   it("shows no candidates when the host search fails", async () => {

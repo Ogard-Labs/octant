@@ -67,7 +67,8 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **256**   | **154** | **98**       | **4**               |
+| [To-dos](#to-dos)                                                                     | 1         | 0       | 0            | 1                   |
+| **All areas**                                                                         | **257**   | **154** | **97**       | **6**               |
 
 ## Principles and hard lines
 
@@ -2521,7 +2522,8 @@ Status: Built. Since: —. Detail: [Workspace: Thread visibility and completion]
 
 The central workspace is one recursive split tree with one surface per leaf, and all layout operations are server-authoritative.
 
-- One visible tree belongs to one authority context. A cross-Project, cross-mode or cross-host placement is refused or offered in a new window.
+- One visible tree belongs to one host and one mode; each pane keeps its own Project's authority, resolved by the host from its surface (maintainer decision, 2026-11-14). A turn reaches only its own Project, a window reaches only the Projects its visible panes show, and a cross-mode or cross-host placement, or a preview or Canvas of another Project, is refused or offered in a new window.
+- In a window showing several Projects every pane names its Project at every width, a `#` mention or dropped thread reaches nothing a single-Project window would not, and a click on a thread of a stowed mixed layout brings that layout back. Detail: [Threads from several Projects in one window](mixed-project-panes.md).
 - Kept content references and order persist locally per endpoint/window/pane and exact authority context; temporary thread previews are omitted. Restoration reuses the authoritative selected surface and performs no open or side effect; every later activation is authorized by the host. Tabs add no persisted layout or authority. Dropping a sidebar thread on a composer attaches it as bounded context; nothing is sent and the source is not moved.
 - Layout persists per client window, mode and Project context and restores after restart. A mode preset applies only when no saved layout exists or the person restores it. _Here only._
 - File and artifact previews are host-authorized and read-only. The renderer never receives a host path, every open is re-authorized, scripts, remote resources, macros and formulas are disabled, and a missing source restores as a placeholder, never another file. _Here only._
@@ -3447,3 +3449,18 @@ A bot is a lasting, app-wide assistant on one host: a name, avatar, role, instru
 - Bots ask each other by name and share rooms under the existing agent messaging limits; a person can call a bot by voice; a bot can carry on with a fallback model.
 
 Status: Designed, not built. Since: 2026-11-08. Detail: [Bots](bots.md).
+
+## To-dos
+
+### The person's to-do list
+
+A person keeps their own to-dos in one list that every device and computer they connected shows, tags each to Projects and their own tags, filters them, and starts a thread from one when ready.
+
+- The list lives on one list host: the hub when the host belongs to one, otherwise the host itself, or a paired computer the person names; only that host journals to-dos and projects them.
+- A local window and the person's paired devices may change the list; agents, routines, delegated runs and peer hosts are refused.
+- Edits to the title or notes are version-checked and refused as changed elsewhere when stale; there is no merge. An unreachable list host shows a stale, read-only list, and quick add keeps an unsent draft the person sends; nothing is queued as offline work.
+- A to-do's Project and thread links carry no authority. Starting opens that Project's ordinary new-thread draft on its own host, whose checks decide; the mode follows the Project; nothing starts until the person sends.
+- Only the person ticks a to-do off; an agent never changes a to-do.
+- The destination and every name in code and copy are To-dos, never Tasks.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [To-dos](todos.md).
