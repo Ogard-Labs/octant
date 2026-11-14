@@ -159,7 +159,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   return (
     <aside
       aria-label="Right Utility Dock"
-      className="right-utility-dock window-no-drag"
+      className="right-utility-dock"
       id="right-utility-dock"
       ref={dock}
     >

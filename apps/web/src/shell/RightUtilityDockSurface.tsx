@@ -398,6 +398,9 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       ref={root}
     >
       <header className="dock-head right-utility-dock__toolbar">
+        {/* Under the title band the header's empty space is the window's handle; the
+            controls above it opt out themselves, as the pane header's do. */}
+        <span aria-hidden="true" className="right-utility-dock__drag-space window-drag-region" />
         <div className="right-utility-dock__tabs">
           {props.toolRow === undefined ? null : <DockToolButtons {...props.toolRow} />}
         </div>

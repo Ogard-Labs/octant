@@ -39,6 +39,14 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
 }
 
 describe("RightUtilityDock", () => {
+  it("does not mark the whole dock no-drag, so its header's empty space can move the window", () => {
+    render(<RightUtilityDock {...props()} />);
+    const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+    // A no-drag ancestor overrides every drag region inside it.
+    expect(dock).not.toHaveClass("window-no-drag");
+    expect(dock.querySelector(".right-utility-dock__toolbar > .window-drag-region")).not.toBeNull();
+  });
+
   it("renders one opaque docked landmark with bounded pointer and keyboard resize", () => {
     const handlers = props();
     render(<RightUtilityDock {...handlers} />);

@@ -57,6 +57,7 @@
    the height: the title rail the thread tab band beside it also takes, with
    compact tabs 4px down, so the two hairlines close on one line. */
 .right-utility-dock__toolbar {
+  position: relative;
   min-width: 0;
   min-height: var(--oct-title-rail-h);
   justify-content: space-between;
@@ -72,6 +73,19 @@
   font-family: var(--oct-font-display);
   letter-spacing: normal;
   text-transform: none;
+}
+
+/* The header is a drag handle wherever no control sits: this layer fills it
+   and the tabs and actions stack above it, each control carrying its own
+   no-drag. It stands behind them so it never takes a click. */
+.right-utility-dock__drag-space {
+  position: absolute;
+  inset: 0;
+}
+
+.right-utility-dock__tabs,
+.right-utility-dock__actions {
+  position: relative;
 }
 
 .right-utility-dock__tabs {
