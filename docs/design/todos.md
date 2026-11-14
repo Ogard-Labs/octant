@@ -13,9 +13,13 @@ scope ([Current Release Boundary](../architecture.md#current-release-boundary)).
 [Hub and spokes](hub-and-spokes.md) owns the hub, owner devices and the
 roster; [Workspace](workspace.md) owns the icon rail and pages.
 
-**Status: approved design 2026-11-14 (maintainer decision); not built.**
-Nothing in this file exists in code yet. Each section says what it decides;
-[Delivery plan](#delivery-plan) lists the order of work.
+**Status: approved design 2026-11-14 (maintainer decision); partly built.**
+The list on one host is built: its events, the list rebuilt from them, the
+`/api/todos` read and command routes, version-checked edits, and the refusals
+for every caller but the person. Not built yet: the To-dos destination, Start,
+the list host setting, reaching a list on another host, live updates to other
+clients, and the phone screen. [Delivery plan](#delivery-plan) lists the order
+of work.
 
 ## Outcome
 
@@ -52,14 +56,21 @@ two never meet in one word.
 - **Projects:** zero to eight links, each `{ hostId, projectId }` plus the
   Project's name as last seen, so the row reads when that host is
   unreachable. A link is a pointer; it grants nothing on that host.
-- **Tags:** zero to twelve, each at most 40 characters, with the same
-  normalization as Canvas tags (trimmed, case-insensitive match, the person's
-  first spelling kept). Tags belong to to-dos only; Projects get no tags.
+- **Tags:** zero to twelve, each at most 40 characters, exact labels as
+  Canvas tags are: trimmed, and two tags that differ only in case are two
+  tags. A repeated tag is kept once. Tags belong to to-dos only; Projects get
+  no tags.
 - **State:** `open`, `done` or `dropped`. Started is derived (open with a
   linked thread), not stored.
 - **Thread links:** each thread started from the to-do, as
   `{ hostId, threadId, mode }`, newest last.
-- **Order:** a rank the person sets by dragging; new to-dos go on top.
+- **Order:** a rank the person sets by dragging; new to-dos go on top. A
+  move takes the rank halfway between its new neighbours; once repeated moves
+  into one gap leave no number between them, every to-do is renumbered in
+  the new order.
+
+One list holds at most 5,000 to-dos, done and dropped included; adding past
+that is refused as `list-full`.
 
 To-do text is the person's own typing and is treated like a message they
 type: the journal's secret redaction applies before it is appended, and it is
@@ -81,13 +92,18 @@ Every person has one **list host**.
   `todo.created@1`, `todo.edited@1` (title or notes), `todo.state-changed@1`,
   `todo.projects-set@1`, `todo.tags-set@1`, `todo.order-changed@1`,
   `todo.thread-linked@1` and `todo.deleted@1`. Each event carries its
-  principal (a local window or the paired device). A `todo_projection` read
-  model is rebuildable from those events.
+  principal (a local window or the paired device). The list is held in
+  memory and rebuilt from those events at every start, as person memory is;
+  no table holds it. The client names a new to-do's id, so a draft sent twice
+  is added once, and a draft for a deleted to-do does not bring it back.
 - **Who may change it.** A window on the list host, and a device the list
-  host's own person paired, which acts as the person. A window on another
+  host's own person paired, which acts as the person. Both read
+  `GET /api/todos` and send changes to `POST /api/todos/commands`; the
+  private listener forwards both, and every other caller is refused, a read
+  included. A window on another
   computer reaches the list as such a paired device, through the paired
   computer channel, or as an owner device after a fresh unlock
-  ([Owner devices](hub-and-spokes.md#owner-devices)). Agents, routines,
+  ([Owner devices](hub-and-spokes.md#owner-devices); not built yet). Agents, routines,
   delegated runs and peer hosts are refused: a peer grant has no to-do item.
 
 ## Sync, conflicts and offline
@@ -96,8 +112,9 @@ Every person has one **list host**.
   their windows read it the way they read any other host, through the host
   federation registry, and changes stream to every connected client.
 - **Conflicts.** There is one journal, so nothing is merged. An edit to the
-  title or notes carries the version it was made on; an edit made on an older
-  version is refused as `changed-elsewhere`, and the client shows the current
+  title or notes carries the version it was made on; when the title or notes
+  changed after that version it is refused as `changed-elsewhere` (a tick or a
+  tag does not make an edit stale), and the client shows the current
   text while keeping the person's own text to apply again. State, Projects,
   tags and order apply in the order they arrive.
 - **Unreachable list host.** The page shows the last list it read, marked

@@ -67,8 +67,8 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| [To-dos](#to-dos)                                                                     | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **252**   | **151** | **96**       | **5**               |
+| [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
+| **All areas**                                                                         | **252**   | **151** | **97**       | **4**               |
 
 ## Principles and hard lines
 
@@ -3389,11 +3389,11 @@ Status: Designed, not built. Since: 2026-11-08. Detail: [Bots](bots.md).
 
 A person keeps their own to-dos in one list that every device and computer they connected shows, tags each to Projects and their own tags, filters them, and starts a thread from one when ready.
 
-- The list lives on one list host: the hub when the host belongs to one, otherwise the host itself, or a paired computer the person names; only that host journals to-dos and projects them.
+- The list lives on one list host: the hub when the host belongs to one, otherwise the host itself, or a paired computer the person names; only that host journals to-dos and projects them. Built: the list on one host. Not built yet: choosing the list host and reaching a list on another host.
 - A local window and the person's paired devices may change the list; agents, routines, delegated runs and peer hosts are refused.
 - Edits to the title or notes are version-checked and refused as changed elsewhere when stale; there is no merge. An unreachable list host shows a stale, read-only list, and quick add keeps an unsent draft the person sends; nothing is queued as offline work.
-- A to-do's Project and thread links carry no authority. Starting opens that Project's ordinary new-thread draft on its own host, whose checks decide; the mode follows the Project; nothing starts until the person sends.
+- A to-do's Project and thread links carry no authority. Starting opens that Project's ordinary new-thread draft on its own host, whose checks decide; the mode follows the Project; nothing starts until the person sends (not built yet).
 - Only the person ticks a to-do off; an agent never changes a to-do.
-- The destination and every name in code and copy are To-dos, never Tasks.
+- The destination and every name in code and copy are To-dos, never Tasks. The destination is not built yet.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [To-dos](todos.md).
+Status: Partly built. Since: 2026-11-14. Detail: [To-dos](todos.md).
