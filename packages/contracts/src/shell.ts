@@ -25,6 +25,7 @@ import {
   MAX_THREAD_TOOL_STEPS_SETTING,
 } from "./threadToolSteps";
 import { AggregateVersion, UtcTimestamp } from "./events";
+import { DEFAULT_PAIRED_DEVICE_LIFETIME, PairedDeviceLifetime } from "./remoteAccess";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
@@ -1058,6 +1059,15 @@ export const ShellSettings = Schema.Struct({
   ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */
   persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * How long a paired device stays paired, counted from its pairing. A host
+   * setting; changing it moves every still-current registration's deadline
+   * to its pairing time plus the new length. A store persisted before this
+   * shipped decodes to the 30 days every registration was given.
+   */
+  pairedDeviceLifetime: Schema.optionalWith(PairedDeviceLifetime, {
+    default: () => DEFAULT_PAIRED_DEVICE_LIFETIME,
+  }),
 }).annotations(strict);
 export type ShellSettings = typeof ShellSettings.Type;
 

@@ -75,6 +75,18 @@ interface SessionRow {
   readonly device_state: "active" | "expired" | "revoked";
   readonly device_origin: string;
   readonly device_credential_generation: number;
+  readonly device_expires_at: string | null;
+}
+
+/**
+ * Whether a paired device is still before its registration deadline. The
+ * deadline is authoritative as soon as it passes, before the expiry is
+ * reconciled into the device's state: sign-in and every request read it.
+ */
+function beforeRegistrationDeadline(expiresAt: string | null, now: number): boolean {
+  if (expiresAt === null) return false;
+  const deadline = Date.parse(expiresAt);
+  return Number.isFinite(deadline) && now < deadline;
 }
 
 export interface RemoteSessionFacts {
@@ -183,17 +195,17 @@ export class RemoteRequestProofService {
     if (device === undefined || device.hostId !== input.hostId) {
       throw new RemoteRequestProofError("invalid");
     }
-    if (device.state === "expired") {
-      throw new RemoteRequestProofError("invalid", "expired");
-    }
     if (device.state === "revoked") {
       throw new RemoteRequestProofError("invalid", "revoked");
+    }
+    const now = this.#now();
+    if (device.state === "expired" || !beforeRegistrationDeadline(device.expiresAt, now)) {
+      throw new RemoteRequestProofError("invalid", "expired");
     }
     if (device.credentialGeneration !== input.credentialGeneration) {
       throw new RemoteRequestProofError("invalid");
     }
 
-    const now = this.#now();
     this.#connection
       .prepare("DELETE FROM remote_auth_challenge_store WHERE expires_at <= ?")
       .run(now);
@@ -269,17 +281,19 @@ export class RemoteRequestProofService {
         if (consumed !== 1) throw new RemoteRequestProofError("replayed");
         const currentDevice = this.#connection
           .prepare(
-            "SELECT state, credential_generation FROM remote_device_projection WHERE device_id = ? AND host_id = ?",
+            "SELECT state, credential_generation, expires_at FROM remote_device_projection WHERE device_id = ? AND host_id = ?",
           )
           .get(issued.deviceId, issued.hostId) as
           | {
               readonly state: "active" | "expired" | "revoked";
               readonly credential_generation: number;
+              readonly expires_at: string;
             }
           | undefined;
         if (
           currentDevice === undefined ||
           currentDevice.state !== "active" ||
+          !beforeRegistrationDeadline(currentDevice.expires_at, this.#now()) ||
           currentDevice.credential_generation !== issued.credentialGeneration
         ) {
           throw new RemoteRequestProofError("invalid");
@@ -372,6 +386,7 @@ export class RemoteRequestProofService {
     if (device === undefined || device.hostId !== input.hostId) return "revoked";
     if (device.state === "revoked") return "revoked";
     if (device.state === "expired") return "credential-expired";
+    if (!beforeRegistrationDeadline(device.expiresAt, this.#now())) return "credential-expired";
     if (device.credentialGeneration !== input.credentialGeneration) return "credential-rotated";
     if (device.origin !== input.origin) return "revoked";
     return "current";
@@ -566,7 +581,8 @@ export class RemoteRequestProofService {
     const session = this.#connection
       .prepare(
         `SELECT s.*, d.device_public_key, d.state AS device_state,
-                d.origin AS device_origin, d.credential_generation AS device_credential_generation
+                d.origin AS device_origin, d.credential_generation AS device_credential_generation,
+                d.expires_at AS device_expires_at
          FROM remote_session_store s
          LEFT JOIN remote_device_projection d ON d.device_id = s.device_id
          WHERE s.session_id_digest = ?`,
@@ -576,6 +592,7 @@ export class RemoteRequestProofService {
       session === undefined ||
       session.state !== "active" ||
       session.device_state !== "active" ||
+      !beforeRegistrationDeadline(session.device_expires_at, this.#now()) ||
       session.host_id !== facts.hostId ||
       session.device_id !== facts.deviceId ||
       session.credential_generation !== facts.credentialGeneration ||
