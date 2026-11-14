@@ -2010,7 +2010,7 @@ const ProviderRetryEvent = Schema.Struct(HarnessRetryEventFields)
  */
 const RuntimeTurnStartedEvent = Schema.Struct({
   kind: Schema.Literal("runtime-turn-started"),
-  trigger: Schema.Literal("background-task"),
+  trigger: Schema.Literal("background-task", "person-message"),
 }).annotations(strict);
 const ResultEvent = Schema.Struct({
   kind: Schema.Literal("operation-result"),

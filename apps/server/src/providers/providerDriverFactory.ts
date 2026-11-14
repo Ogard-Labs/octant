@@ -86,6 +86,8 @@ export interface ProviderDriverFactoryOptions {
    * journal at each call. Absent leaves artifact delivery off.
    */
   readonly claudeArtifactDelivery?: (instanceId: ProviderInstanceId) => boolean;
+  /** The person's runtime-turn count from Settings, read each time Claude starts a turn itself. */
+  readonly runtimeTurnsPerTurn?: () => number;
   /** The person's current own-memory switch for a Claude Code or Codex account. */
   readonly providerOwnMemory?: (instanceId: ProviderInstanceId) => boolean;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
@@ -267,6 +269,9 @@ export function makeProviderDriver(
       const readArtifactDelivery = options.claudeArtifactDelivery;
       const readClaudeOwnMemory = options.providerOwnMemory;
       return makeClaudeDriver({
+        ...(options.runtimeTurnsPerTurn === undefined
+          ? {}
+          : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
         ...(readClaudeOwnMemory === undefined
           ? {}
           : { ownMemory: () => readClaudeOwnMemory(instance.id) }),

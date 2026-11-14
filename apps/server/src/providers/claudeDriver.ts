@@ -8,6 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
+  DEFAULT_RUNTIME_TURNS_PER_TURN,
   decodeProviderFailure,
   decodeProviderProbeResult,
   type ClaudeAuthentication,
@@ -354,12 +355,6 @@ const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
 const MAX_PENDING_APPROVALS = 4;
-/**
- * How many turns the runtime may start by itself inside one person's turn.
- * A watch that keeps printing wakes the model on every line; past this the
- * person's turn completes and its session, with the watch, is stopped.
- */
-const MAX_RUNTIME_TURNS = 16;
 const MAX_PRE_TOOL_GRANTS = 16;
 /**
  * How many tool-use ids a session remembers. Settled ids are forgotten oldest
@@ -1009,6 +1004,14 @@ export interface ClaudeDriverOptions {
   readonly toolCallId?: () => string;
   readonly startupTimeoutMs?: number;
   readonly interruptTimeoutMs?: number;
+  /**
+   * How many turns the runtime may start by itself inside one person's turn
+   * below Full access, from Settings; read each time the runtime starts one.
+   * A watch that keeps printing wakes the model on every line; past this the
+   * person's turn completes and its session, with the watch, is stopped. At
+   * Full access there is no such count. Absent uses the default.
+   */
+  readonly runtimeTurnsPerTurn?: () => number;
   /** Told why an instruction file was not read; absent logs a warning. */
   readonly onDiagnostic?: (message: string) => void;
 }
@@ -1173,7 +1176,8 @@ interface SessionState {
  * the person's turn, each opened by a `runtime-turn-started` event, and pass
  * the same gate at the same level. The completion goes out once no background
  * task runs and the runtime has gone idle; the stalled-turn limit, the
- * person's stop, and {@link MAX_RUNTIME_TURNS} end it sooner.
+ * person's stop, and the runtime-turn setting below Full access end it
+ * sooner. A message the person sends meanwhile is steered into it.
  */
 interface ClaudeHeldTurn {
   /** The completion the runtime's last result made, without its envelope. */
@@ -1189,6 +1193,8 @@ interface ClaudeHeldTurn {
   /** The runtime is running a turn it started itself. */
   runtimeTurnOpen: boolean;
   runtimeTurns: number;
+  /** The person steered a message in, so the next turn the runtime runs answers it. */
+  steered: boolean;
   /**
    * What the person's turn used up to the last result, the runtime's earlier
    * turns included. Each runtime turn counts only its own requests and cost,
@@ -2293,6 +2299,7 @@ function makeConnection(
         idle: !state.reportsSessionState,
         runtimeTurnOpen: false,
         runtimeTurns: state.heldTurn?.runtimeTurns ?? 0,
+        steered: false,
         usageBase: state.turnUsage,
       };
       state.context = makeEventContext(state, previous.claudeSessionId, sequence);
@@ -2330,23 +2337,53 @@ function makeConnection(
       }
       releaseHeldTurn(state, held);
     };
+    /**
+     * Delivers a person's message into a held turn (maintainer decision,
+     * 2026-11-14: a held turn takes messages rather than refusing them). The
+     * runtime answers it in a turn of its own, which is folded into the
+     * person's turn as any runtime turn is, opened as `person-message`, so the
+     * held completion waits for that answer.
+     */
+    const steerHeldTurn = (state: SessionState, held: ClaudeHeldTurn, text: string) => {
+      held.steered = true;
+      held.idle = false;
+      return state.query.send({ text }).pipe(
+        Effect.as("steered" as const),
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            held.steered = false;
+            settleHeldTurn(state);
+          }),
+        ),
+      );
+    };
     const openRuntimeTurn = (state: SessionState, held: ClaudeHeldTurn) => {
       const context = state.context;
       if (context === undefined) return;
+      const trigger = held.steered ? "person-message" : "background-task";
+      held.steered = false;
       // A runtime that keeps waking itself ends with the person's turn: the
       // completion goes out, and the session, with its background work, is
-      // stopped rather than left running turns nobody reads.
-      if (held.runtimeTurns >= MAX_RUNTIME_TURNS) {
-        releaseHeldTurn(state, held);
-        closeAfterPublishedTerminal(state);
-        return;
+      // stopped rather than left running turns nobody reads. The count is
+      // the person's setting below Full access, and none at Full access; a
+      // turn the person's own message started is never counted.
+      if (trigger === "background-task") {
+        const limit =
+          state.executionPolicy === "full-access"
+            ? undefined
+            : (options.runtimeTurnsPerTurn?.() ?? DEFAULT_RUNTIME_TURNS_PER_TURN);
+        if (limit !== undefined && held.runtimeTurns >= limit) {
+          releaseHeldTurn(state, held);
+          closeAfterPublishedTerminal(state);
+          return;
+        }
+        held.runtimeTurns += 1;
       }
-      held.runtimeTurns += 1;
       held.runtimeTurnOpen = true;
       held.idle = false;
       publish({
         kind: "runtime-turn-started",
-        trigger: "background-task",
+        trigger,
         instanceId: options.instanceId,
         sessionId: state.sessionId,
         correlationId: state.correlationId,
@@ -3617,6 +3654,18 @@ function makeConnection(
           })),
         );
       },
+      steer: ({ sessionId, message }) => {
+        const state = sessions.get(sessionId);
+        if (state === undefined || state.terminal || state.released) {
+          return Effect.fail(failure("protocol", "Claude session is not active."));
+        }
+        // Only a held turn takes a message without starting another turn of
+        // the person's; anything else is queued by the caller.
+        if (state.heldTurn === undefined || state.compaction !== undefined) {
+          return Effect.succeed("unsupported" as const);
+        }
+        return steerHeldTurn(state, state.heldTurn, message);
+      },
       send: (input) => {
         const state = sessions.get(input.sessionId);
         if (state === undefined || state.terminal || state.released) {
@@ -3635,10 +3684,11 @@ function makeConnection(
           model,
         );
         if (rejected !== undefined) return Effect.fail(rejected);
-        // The runtime may still start turns of its own inside the held one.
+        // The runtime may still start turns of its own inside the held one,
+        // so the message is steered into it rather than refused.
         if (state.heldTurn !== undefined) {
-          return Effect.fail(
-            failure("unavailable", "Claude is still finishing background work from the last turn."),
+          return steerHeldTurn(state, state.heldTurn, renderProviderTurnPrompt(input)).pipe(
+            Effect.asVoid,
           );
         }
         if ((input.tools.length > 0 || state.appToolsEnabled) && state.pendingTurns > 0) {

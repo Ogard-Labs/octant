@@ -248,6 +248,7 @@ describe("Journal", () => {
         keepToolCallRecords: true,
         toolStepsPerTurn: 64,
         fullAccessToolStepsPerTurn: 0,
+        runtimeTurnsPerTurn: 256,
         browserTransferFileLimitMegabytes: 25,
         browserHeldDownloadLimit: 5,
         browserUploadFileCountLimit: 5,

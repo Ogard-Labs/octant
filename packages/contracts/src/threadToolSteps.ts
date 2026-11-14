@@ -22,6 +22,15 @@ export const MAX_THREAD_TOOL_STEPS_SETTING = 4_096;
  * by default) stops no turn (maintainer decision, 2026-11-14).
  */
 export const RUNTIME_EVENTS_PER_TOOL_STEP = 64;
+/**
+ * How many turns a runtime may start by itself inside one person's turn below
+ * Full access until a person changes it: generous, since a watch the person
+ * asked for may report many times (maintainer decision, 2026-11-14; it was a
+ * fixed 16).
+ */
+export const DEFAULT_RUNTIME_TURNS_PER_TURN = 256;
+/** The most a person may set the runtime-turn count to. */
+export const MAX_RUNTIME_TURNS_PER_TURN_SETTING = 4_096;
 /** The most a step's progress or result message keeps. */
 export const MAX_THREAD_TOOL_STEP_SUMMARY_BYTES = 2_048;
 

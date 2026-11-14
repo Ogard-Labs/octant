@@ -736,9 +736,18 @@ tool steps, and task rows into the person's turn without a separate marker
 The hold is bounded. The stalled-turn limit counts its silence as it counts
 any other; the person's stop ends it, and on an idle runtime the driver
 reports the turn interrupted and stops the session, which ends every
-background task in it; at the 17th turn the runtime starts by itself, the
-person's turn completes and the session is stopped. A new turn is refused
-while one is held. A `Monitor` call that asks for a WebSocket (opened by the
+background task in it. Below Full access, past the person's count of turns
+the runtime may start by itself (Settings › Permissions › Tool steps, **Turns
+a runtime starts by itself**, `runtimeTurnsPerTurn`, 1 to 4,096, default 256;
+a fixed 16 until the maintainer decision of 2026-11-14), the person's turn
+completes and the session is stopped; at Full access there is no such count.
+A held turn takes messages (maintainer decision, 2026-11-14): a message the
+person sends while a turn is held, through the driver's `send` or `steer`,
+is delivered into it, the runtime answers it in a turn folded in as
+`runtime-turn-started` with `trigger: "person-message"` (never counted), and
+the held completion waits for that answer. `steer` answers `unsupported`
+when no turn is held, and the thread's message queue keeps the message for
+the next turn as it does for any running turn. A `Monitor` call that asks for a WebSocket (opened by the
 runtime process, outside the command sandbox and its network rules) or a
 watch for the whole session is refused before the gate. Plan keeps its
 read-only commands in the foreground: `run_in_background` is refused there.

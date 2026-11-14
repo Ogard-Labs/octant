@@ -230,6 +230,7 @@ function harness(
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
     readonly maxTrackedToolUses?: number;
+    readonly runtimeTurnsPerTurn?: () => number;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -359,6 +360,9 @@ function harness(
       instanceId,
       binaryPath: "/opt/homebrew/bin/claude",
       authentication: selectedAuthentication,
+      ...(options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
@@ -7322,11 +7326,26 @@ describe("Claude background work", () => {
     event: { kind: "text-delta", index: 0, text: value },
   });
 
-  async function startTurn() {
-    const f = harness();
+  async function startTurn(
+    options: {
+      readonly executionPolicy?: "approval-gated" | "full-access";
+      readonly runtimeTurnsPerTurn?: () => number;
+    } = {},
+  ) {
+    const f = harness(
+      "subscription",
+      "current-session",
+      options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn },
+    );
     const acquired = await acquire(f.driver, "code");
     await Effect.runPromise(
-      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: options.executionPolicy ?? "approval-gated",
+      }),
     );
     const seen: ProviderRuntimeEvent[] = [];
     const collected = Effect.runPromise(
@@ -7376,13 +7395,6 @@ describe("Claude background work", () => {
     await query.emit(state("idle"));
     // The command still runs, so the person's turn is not over.
     expect(seen.some((event) => event.kind === "completed")).toBe(false);
-    await expect(
-      Effect.runPromise(
-        Effect.flip(
-          acquired.connection.send({ sessionId, prompt: "next", attachments: [], tools: [] }),
-        ),
-      ),
-    ).resolves.toMatchObject({ category: "unavailable" });
 
     await query.emit(backgroundEnded);
     await query.emit(state("running"));
@@ -7506,8 +7518,45 @@ describe("Claude background work", () => {
     await acquired.close();
   });
 
-  it("ends the person's turn once the runtime has started as many turns of its own as it may", async () => {
+  it("steers a message the person sends into the held turn and waits for its answer", async () => {
     const { acquired, query, seen, collected } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "also lint", attachments: [], tools: [] }),
+    );
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "and format" })),
+    ).toBe("steered");
+    expect(query.sent).toEqual(["run the tests", "also lint", "and format"]);
+    // The steered message keeps the turn held even once the command ends.
+    await query.emit(backgroundEnded);
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+    await query.emit(state("running"));
+    await query.emit(text("Linted."));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await collected;
+
+    expect(seen.find((event) => event.kind === "runtime-turn-started")).toMatchObject({
+      trigger: "person-message",
+    });
+    expect(seen.filter((event) => event.kind === "completed")).toHaveLength(1);
+    await acquired.close();
+  });
+
+  it("refuses to steer when no turn is held, so the message queue keeps it", async () => {
+    const { acquired } = await startTurn();
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "later" })),
+    ).toBe("unsupported");
+    await acquired.close();
+  });
+
+  it("ends the person's turn once the runtime has started as many turns of its own as the person allows", async () => {
+    const { acquired, query, seen, collected } = await startTurn({ runtimeTurnsPerTurn: () => 3 });
     await query.emit(backgroundStarted);
     await query.emit(completed(sdk));
     await query.emit(state("idle"));
@@ -7519,9 +7568,31 @@ describe("Claude background work", () => {
     }
     await collected;
 
-    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(16);
+    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(3);
     expect(seen.at(-1)).toMatchObject({ kind: "completed" });
     expect(query.close).toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("counts no runtime turns at Full access", async () => {
+    const { acquired, query, seen, collected } = await startTurn({
+      executionPolicy: "full-access",
+      runtimeTurnsPerTurn: () => 3,
+    });
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    for (let line = 0; line < 20; line += 1) {
+      await query.emit(state("running"));
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+    }
+    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(20);
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+    await query.emit(backgroundEnded);
+    await query.emit(state("idle"));
+    await collected;
+    expect(seen.at(-1)).toMatchObject({ kind: "completed" });
     await acquired.close();
   });
 

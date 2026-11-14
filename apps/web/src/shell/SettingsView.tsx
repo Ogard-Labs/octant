@@ -207,6 +207,8 @@ import {
   MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_THREAD_TOOL_STEPS_SETTING,
   RUNTIME_EVENTS_PER_TOOL_STEP,
+  DEFAULT_RUNTIME_TURNS_PER_TURN,
+  MAX_RUNTIME_TURNS_PER_TURN_SETTING,
 } from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
@@ -1777,6 +1779,21 @@ function ActiveSectionContent({
                     props.onSettingsChange({ fullAccessToolStepsPerTurn: value })
                   }
                   value={props.settings.fullAccessToolStepsPerTurn}
+                />
+              </SettingRow>
+              <SettingRow
+                description={`How many turns a runtime may start by itself inside one of your turns below Full access, when a background command ends or a watch reports. Default ${DEFAULT_RUNTIME_TURNS_PER_TURN}. Past it your turn completes and its session stops. Full access has no such count, and a message you send meanwhile goes into the turn.`}
+                focused={focusedSetting === settingId("runtime-turns-per-turn")}
+                label="Turns a runtime starts by itself"
+                scope="host"
+                settingId="runtime-turns-per-turn"
+              >
+                <OctantNumberStepper
+                  label="Turns a runtime starts by itself"
+                  max={MAX_RUNTIME_TURNS_PER_TURN_SETTING}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ runtimeTurnsPerTurn: value })}
+                  value={props.settings.runtimeTurnsPerTurn}
                 />
               </SettingRow>
             </div>

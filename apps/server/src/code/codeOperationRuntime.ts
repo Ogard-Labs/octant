@@ -6915,8 +6915,11 @@ function normalizedOperationEvent(
       };
     }
   }
-  if (event.category === "runtime-turn" && event.status === "background-task") {
-    return { kind: "runtime-turn-started", trigger: "background-task" };
+  if (
+    event.category === "runtime-turn" &&
+    (event.status === "background-task" || event.status === "person-message")
+  ) {
+    return { kind: "runtime-turn-started", trigger: event.status };
   }
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };

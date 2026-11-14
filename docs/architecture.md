@@ -4943,7 +4943,7 @@ truncated flag when it called more; the calls past the limit still run and
 have no row.
 
 - **The tool-step limit is a setting** (maintainer decision, 2026-11-13).
-  Settings › Permissions › Tool steps holds two numbers: **Tool steps kept
+  Settings › Permissions › Tool steps holds two numbers (and, beside them, the count of turns a runtime may start by itself inside a held turn; [Provider runtimes](design/provider-runtimes.md)): **Tool steps kept
   per turn** (`toolStepsPerTurn`, 1 to 4,096, default 64) for a turn below
   Full access, and **Tool steps kept per turn at Full access**
   (`fullAccessToolStepsPerTurn`, 0 to 4,096, default 0). At Full access 0 is

@@ -21,7 +21,9 @@ import {
 } from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
 import {
+  DEFAULT_RUNTIME_TURNS_PER_TURN,
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  MAX_RUNTIME_TURNS_PER_TURN_SETTING,
   MAX_THREAD_TOOL_STEPS_SETTING,
 } from "./threadToolSteps";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -1023,6 +1025,17 @@ export const ShellSettings = Schema.Struct({
   fullAccessToolStepsPerTurn: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(0, MAX_THREAD_TOOL_STEPS_SETTING)),
     { default: () => 0 },
+  ),
+  /**
+   * How many turns a runtime may start by itself inside one person's turn
+   * below Full access (a background command's end, a watch's line). Past it
+   * the person's turn completes and the session is stopped. At Full access
+   * there is no such count. A store persisted before this shipped decodes to
+   * the default.
+   */
+  runtimeTurnsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_RUNTIME_TURNS_PER_TURN_SETTING)),
+    { default: () => DEFAULT_RUNTIME_TURNS_PER_TURN },
   ),
   /**
    * The largest file, in megabytes, an agent may upload through a page or have
