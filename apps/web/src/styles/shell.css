@@ -397,7 +397,7 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   /* The first face centres on the title rail's centreline, as the band's
      controls do, so it starts (rail − face) / 2 down, and the edge fade ends
      there instead of dimming the face. */
-  --sidebar-rail-top: calc((var(--oct-title-rail-h) - 32px) / 2);
+  --sidebar-rail-top: calc((var(--oct-title-rail-h) - 40px) / 2);
   padding: var(--sidebar-rail-top) 0 var(--oct-space-3);
   overflow-x: hidden;
   overflow-y: auto;
@@ -443,8 +443,8 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   --sidebar-rail-fill: transparent;
   position: relative;
   display: flex;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);
@@ -455,8 +455,8 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 /* The shared button recipe sizes every glyph inside a button to 1rem, which
    drew the rail's icons at 13px; the rail keeps the size it asks for. */
 .sidebar-rail__face > svg {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
 }
 
 .sidebar-rail__button:hover .sidebar-rail__face,

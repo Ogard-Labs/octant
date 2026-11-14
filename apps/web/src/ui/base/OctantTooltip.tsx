@@ -102,7 +102,7 @@ export function OctantTooltip(props: OctantTooltipProps) {
       }}
       open={open}
     >
-      <TooltipTrigger closeOnClick delay={350} render={props.children} />
+      <TooltipTrigger closeOnClick delay={150} render={props.children} />
       <TooltipPortal>
         <TooltipPositioner
           align={props.align ?? "center"}

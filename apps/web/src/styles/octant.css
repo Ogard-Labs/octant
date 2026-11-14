@@ -266,7 +266,7 @@
   --oct-title-rail-h: 44px;
   /* The icon rail is wider than the band is tall: at 44px its 32px faces had
      6px either side and the rail read as a thin strip beside the sidebar. */
-  --oct-rail-w: 52px;
+  --oct-rail-w: 60px;
   --oct-rail-tab-h: 30px;
   --oct-rail-button-h: 28px;
   /* A segment in a tray: the small control step. A tray is the segment plus
@@ -2264,26 +2264,26 @@ input.switch:checked::after {
 .octant-tooltip {
   max-width: min(280px, calc(100vw - 24px));
   padding: var(--oct-space-2) var(--oct-space-3);
-  border: 1px solid color-mix(in srgb, var(--oct-fg) 12%, var(--oct-border));
+  /* The theme's own float, not the ink inverted: a white chip on a dark
+     window read as a browser tooltip, not part of the app. */
+  border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
-  background: var(--oct-fg);
-  color: var(--oct-surface);
-  /* No inset bevel: the raised elevation's white top line drew on the dark
-     tooltip in light. */
+  background: var(--octant-float);
+  color: var(--oct-fg);
   box-shadow:
     0 1px 2px color-mix(in srgb, var(--octant-scrim) 20%, transparent),
     0 8px 20px -10px color-mix(in srgb, var(--octant-scrim) 40%, transparent);
   font-size: var(--oct-text-sm);
   line-height: 1.25;
 }
-/* A key cap after the label: quieter than the words, on the chip's own
-   inverted ground, with no fill so it is not a second button. */
+/* A key cap after the label: quieter than the words, with no fill so it is
+   not a second button. */
 .octant-tooltip__key {
   margin-inline-start: var(--oct-space-2);
   padding: 0 var(--oct-space-1);
-  border: 1px solid color-mix(in srgb, var(--oct-surface) 32%, transparent);
+  border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
-  color: color-mix(in srgb, var(--oct-surface) 70%, transparent);
+  color: var(--oct-muted);
   font-family: inherit;
   font-size: var(--oct-text-xs);
   line-height: 1.4;
@@ -2295,8 +2295,7 @@ input.switch:checked::after {
   font-size: var(--oct-text-detail);
   line-height: 1.3;
 }
-/* Structured content carries its own foreground tokens, so it needs the
-   ordinary raised ground rather than the label chip's inverted one. */
+/* Structured content gets the wider, roomier raised card. */
 .octant-tooltip--card {
   max-width: min(320px, calc(100vw - 24px));
   padding: var(--oct-space-3) 12px;

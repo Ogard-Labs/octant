@@ -251,7 +251,7 @@ under the fill).
 | Composer notice card                                                   | callout ground                                                                                                       | ink 4% with its tone at 14% over it, no blur    | callout ground                                                  |
 | Menu, popover, select, combobox, hover card, palette, toast, tour card | float at 66% (dark) / 78% (light) over `--octant-float-blur` in a browser; float at 96%, no blur, in the desktop app | float at 96%, no blur                           | opaque float, no blur                                           |
 | Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                                                                             | float at 96%, no blur                           | opaque float                                                    |
-| Tooltip (inverted)                                                     | the ink as a fill                                                                                                    | the same                                        | the same                                                        |
+| Tooltip                                                                | the float, opaque                                                                                                    | the same                                        | the same                                                        |
 
 - **Why floats are dense on glass.** A frosted menu works over an opaque
   window because the blur hides the page under it. On a translucent window it
@@ -650,9 +650,10 @@ coat), painted once on the shell. Neither has a fill or line of its own.
   opens or closes or the dock opens, only when the sidebar is resized or
   toggled. A slot a Project
   fills only sometimes takes no room while empty.
-- **Icon rail**: `--oct-rail-w`, 52px, a little wider than the band is tall:
-  at 44px its 32px faces had 6px either side and the rail read as a thin strip. Faces are 32px, 2px apart (the button's `rail` variant); the first face is
-  centred on the band's centreline (6px down). The current face takes
+- **Icon rail**: `--oct-rail-w`, 60px, wider than the band is tall: at 44px
+  and at 52px it read as a thin strip. Its faces are 40px with 20px icons,
+  2px apart (the button's `rail` variant); the first face is centred on the band's
+  centreline (2px down). The current face takes
   `--oct-wash-selected`, the pointed-at face `--oct-wash-hover`, no border.
 - **Desktop title bar**: Electron's native frame with `titleBarStyle:
 hiddenInset` and no custom `trafficLightPosition` (it would grow the native
