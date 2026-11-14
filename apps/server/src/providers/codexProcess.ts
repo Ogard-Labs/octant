@@ -62,6 +62,8 @@ export interface CodexAppServerConnection {
   readonly pid: number;
   readonly rpc: CodexRpcClient;
   readonly exited: Promise<void>;
+  /** Set when the launch took no egress proxy, so the process keeps open network. */
+  readonly networkOpen?: boolean;
 }
 
 /**
@@ -1201,7 +1203,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               onProcessStarted,
             );
             terminate = managed.terminate;
-            return managed.connection;
+            return network === undefined
+              ? { ...managed.connection, networkOpen: true }
+              : managed.connection;
           }),
           () => (terminate === undefined ? Effect.void : cleanupEffect(terminate)),
         );

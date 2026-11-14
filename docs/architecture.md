@@ -11037,23 +11037,29 @@ proofs that suite already holds:
 
 ### Provider runtime network
 
-**Status: built on macOS and Linux, behind the Network limits switch, on by default for sandboxed runtimes (maintainer request, 2026-10-31; Linux, Claude's own process, and the composed reviewer 2026-11-01; on by default, 2026-11-09).** The decision is
+**Status: built on macOS and Linux, behind the Network limits switch, off by default (maintainer request, 2026-10-31; Linux, Claude's own process, and the composed reviewer 2026-11-01; off by default, maintainer decision 2026-11-14).** The decision is
 `decideProviderRuntimeEgress` in `packages/domain/src/safeNetworkPolicy.ts`,
 the places and records are in `packages/contracts/src/safeNetworks.ts`, and
 the host side is `apps/server/src/network/` (`providerRuntimeNetwork.ts`,
 `safeNetworkStore.ts`, `safeNetworkRoutes.ts`), composed in
 `wiring/runtimeNetwork.ts`. On Linux OpenCode keeps open network (below).
 
-**Network limits ship on, for sandboxed runtimes only.** The proxy is behind
-a host setting, Settings › Permissions › Network limits, which reads on until a
-person turns it off (maintainer request, 2026-11-09: "network limits on by
-default — only if sandbox is enabled though"). It applies only where the
-runtime runs inside Octant's sandbox: the guarded levels, and Full access
-when the thread keeps the sandbox. Full access without the sandbox stays
-open network whatever the switch says. A host that recorded a choice keeps
-it: the default applies only while no `safe-networks.limits-set@1` exists,
-so a host that turned limits off before this change stays off, and one that
-never touched the switch starts limiting from its next runtime launch. The
+**Network limits ship off; a person turns them on, for sandboxed runtimes
+only.** The proxy is behind a host setting, Settings › Permissions › Network
+limits, which reads off until a person turns it on (maintainer decision,
+2026-11-14: Octant adds capabilities and never takes a provider's core
+features away, so no host rule applies out of the box). With the switch off a
+runtime's commands reach every host: Codex's turns name its external sandbox
+`networkAccess: "enabled"`, and Claude's command sandbox gets
+`allowedDomains: ["*"]` so its own proxy neither restricts nor asks about a
+host. Outside-content marks and secret redaction apply either way. Limits,
+once on, apply only where the runtime runs inside Octant's sandbox: the
+guarded levels, and Full access when the thread keeps the sandbox. Full
+access without the sandbox stays open network whatever the switch says. A
+host that recorded a choice keeps it: the default applies only while no
+`safe-networks.limits-set@1` exists, so a host that turned limits on stays
+on, one that turned them off stays off, and one that never touched the
+switch has open network from its next runtime launch. With limits on, the
 risk is a workflow that reaches a host nobody approved (a private registry,
 an internal API); the proxy's refusal names the host and says to trust it
 under Recently refused in Settings › Permissions › Safe networks, and turning
@@ -13643,8 +13649,8 @@ mechanisms are:
       endpoints and approved hosts where the host routes them through its
       egress proxy: Codex's app-server, Claude Code, Pi, OpenCode and ACP
       agents ask for the runtime proxy with the Accept edits posture, and Harness commands run
-      on their own proxy. The runtime's proxy follows the Network limits switch, which
-      ships on ([provider runtime network](#provider-runtime-network)); with
+      on their own proxy. The runtime's proxy follows the Network limits switch, which ships
+      off ([provider runtime network](#provider-runtime-network)); with
       the switch off the OS rule is `allow`, as at the guarded levels.
     - **Helpers.** A helper run carries a posture, not the parent's sandbox
       choice, so a helper of a sandboxed Full access Code thread runs at
@@ -14446,7 +14452,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   [provider runtime network](#provider-runtime-network): its OS rules reach
   only its own listener, which allows the provider's endpoints, the Project's
   rules, and the person's safe networks, while Network limits are on (they
-  ship on). On Linux, while the limits are off, and wherever the host
+  ship off). On Linux, while the limits are off, and wherever the host
   does not route runtimes, `provider-endpoints-only` still materializes as plain OS
   network `allow` (`materializeOsNetworkEgress`). Native-harness commands run
   on `proxied` under the [harness tool egress rules](#harness-tool-egress-rules)
@@ -14495,7 +14501,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Pi, OpenCode and an ACP agent for a thread that keeps the sandbox, which takes the Accept edits wall. Egress at Guarded and Reviewed is
     the provider's endpoints, the Project's egress rules, and the person's
     safe networks rather than a blanket `allow` (built on macOS, behind the
-    Network limits switch, which ships on;
+    Network limits switch, which ships off;
     [provider runtime network](#provider-runtime-network)).
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
@@ -17818,7 +17824,7 @@ private-network tags. Egress to a trusted place passes by rule; anything else
 goes to the Judge at Reviewed and to the person at Guarded. Each decision is
 journaled per host. Built for provider runtimes on macOS and Linux and for
 Octant Harness commands, behind the Network limits switch, which
-ships on ([provider runtime network](#provider-runtime-network)): a `host` place
+ships off ([provider runtime network](#provider-runtime-network)): a `host` place
 matches that name, a `domain` the name and every name under it, a range is
 CIDR, and the tags are `this-mac` (loopback), `local-network` (the private
 IPv4 ranges and IPv6 unique-local addresses), and `overlay-network`

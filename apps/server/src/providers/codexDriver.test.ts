@@ -2850,6 +2850,18 @@ describe("Codex execution authority and approvals", () => {
     }
   });
 
+  it("tells Codex its sandbox has network when the launch took no egress proxy", () => {
+    // Network limits are off by default, so the process keeps open network;
+    // `restricted` would tell the model it has none.
+    expect(codexTurnExecutionSettings("approval-gated", false, false, true).sandboxPolicy).toEqual({
+      type: "externalSandbox",
+      networkAccess: "enabled",
+    });
+    expect(codexTurnExecutionSettings("approval-gated", false, false, false).sandboxPolicy).toEqual(
+      { type: "externalSandbox", networkAccess: "restricted" },
+    );
+  });
+
   it("carries the posture into a turn on a thread created under an older one", async () => {
     // `thread/start` settles a thread once, and codex-cli 0.154.0 accepts
     // `approvalPolicy`/`sandbox` on `thread/resume` while keeping what the

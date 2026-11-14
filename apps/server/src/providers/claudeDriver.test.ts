@@ -1169,6 +1169,8 @@ describe("Claude execution policy", () => {
                 allowRead: [projectRoot],
                 allowWrite: [projectRoot],
               },
+              // No egress proxy routes this host, so no host is limited.
+              network: { allowedDomains: ["*"] },
             }
           : undefined,
       );

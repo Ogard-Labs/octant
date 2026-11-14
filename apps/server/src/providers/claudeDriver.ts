@@ -660,8 +660,10 @@ function claudeRunsSandbox(policy: ProviderExecutionPolicy, fullAccessSandbox = 
 /**
  * Claude's own sandbox for its commands. With `proxyPort` the sandbox's
  * network goes to Octant's egress proxy for the session, which reaches only
- * the Project's egress rules and the person's safe networks; without it (a
- * host that does not route runtimes) the sandbox keeps its own network rules.
+ * the Project's egress rules and the person's safe networks. Without it
+ * (Network limits off, the default, or a host that does not route runtimes)
+ * the sandbox reaches every host: Claude's own proxy would otherwise refuse
+ * or ask about each host, a limit the person did not choose.
  */
 export function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
@@ -687,7 +689,8 @@ export function claudeSandboxSettings(
       allowRead: [projectRoot, ...extraFolders],
       allowWrite: [projectRoot, ...extraFolders],
     },
-    ...(proxyPort === undefined ? {} : { network: { httpProxyPort: proxyPort } }),
+    network:
+      proxyPort === undefined ? { allowedDomains: ["*"] as const } : { httpProxyPort: proxyPort },
   };
 }
 

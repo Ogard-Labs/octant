@@ -511,6 +511,20 @@ describe("Claude Agent SDK port", () => {
     expect(Object.keys(options?.sandbox?.network ?? {})).toEqual(["httpProxyPort"]);
   });
 
+  test("lets the sandbox reach every host when Network limits are off", async () => {
+    const harness = makeHarness();
+    const open = {
+      ...openInput,
+      sandbox: { ...openInput.sandbox, network: { allowedDomains: ["*"] } },
+    } as const;
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(open))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).toMatchObject({
+      sandbox: { network: { allowedDomains: ["*"] } },
+    });
+  });
+
   test("keeps the sandbox when Full access explicitly asks for it", async () => {
     const harness = makeHarness();
     // A Full access thread that kept its sandbox lets no command out of it.
@@ -604,8 +618,11 @@ describe("Claude Agent SDK port", () => {
       { ...openInput, sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: false } },
     ],
     [
-      "an unsupported sandbox surface",
-      { ...openInput, sandbox: { ...openInput.sandbox, network: { allowedDomains: ["*"] } } },
+      "a sandbox domain list narrower than every host",
+      {
+        ...openInput,
+        sandbox: { ...openInput.sandbox, network: { allowedDomains: ["example.com"] } },
+      },
     ],
     [
       "a network setting beside the proxy port",

@@ -24,12 +24,12 @@ export interface SafeNetworksSettingsProps {
 }
 
 export const SAFE_NETWORKS_INTRO =
-  "Sandboxed provider runtimes and Claude's commands reach only their provider's own endpoints, the Project's network rules, and the places listed here. Anything else is refused and shows under Recently refused.";
+  "With Network limits on, sandboxed provider runtimes and Claude's commands reach only their provider's own endpoints, the Project's network rules, and the places listed here. Anything else is refused and shows under Recently refused.";
 
 export const NETWORK_LIMITS_ON_NOTE =
   "Network limits are on. Sandboxed runtimes launched from now on reach only their provider, the Project's rules, and the places below. Full access without the sandbox keeps open network.";
 export const NETWORK_LIMITS_OFF_NOTE =
-  "Network limits are off. Runtimes have open network, and the places below are saved but not applied.";
+  "Network limits are off, the default. Runtimes have open network, and the places below are saved but not applied.";
 export const NETWORK_LIMITS_TIMING_NOTE =
   "A change applies to the next runtime you start. Runtimes already running keep the network they began with.";
 
