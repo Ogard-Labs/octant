@@ -41,7 +41,13 @@ function sameCodeProviderRequestsByThreadId(
 export interface CodeThreadControllers {
   readonly get: (threadId: CodeThreadId) => CodeController | undefined;
   readonly holdAccessNotice: (threadId: CodeThreadId, text: string) => void;
+  /** Wakes the listener when any open thread's controller moves. */
   readonly subscribe: (listener: () => void) => () => void;
+  /**
+   * Wakes the listener only when this thread's controller moves. A surface
+   * bound to one thread must not re-read on every other thread's stream delta.
+   */
+  readonly subscribeThread: (threadId: CodeThreadId, listener: () => void) => () => void;
 }
 
 export interface CodeThreadControllerRegistry extends CodeThreadControllers {
@@ -72,8 +78,10 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
     { readonly prompt: string; readonly refusal: string | undefined }
   >();
   const listeners = new Set<() => void>();
-  const announce = () => {
-    for (const listener of listeners) listener();
+  const threadListeners = new Map<string, Set<() => void>>();
+  const announce = (key: string) => {
+    for (const listener of [...(threadListeners.get(key) ?? [])]) listener();
+    for (const listener of [...listeners]) listener();
   };
   return {
     announceFirstPrompt: (threadId, prompt) => {
@@ -110,7 +118,7 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       const key = String(threadId);
       if (byThread.get(key) !== controller) {
         byThread.set(key, controller);
-        announce();
+        announce(key);
       }
       const firstPrompt = firstPromptWhenPublished.get(key);
       if (firstPrompt !== undefined) {
@@ -147,11 +155,26 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
       draftWhenPublished.delete(key);
       // The origin tab is released on switch; keep its notice for when it returns.
       if (!byThread.delete(key)) return;
-      announce();
+      announce(key);
     },
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    subscribeThread: (threadId, listener) => {
+      const key = String(threadId);
+      let set = threadListeners.get(key);
+      if (set === undefined) {
+        set = new Set();
+        threadListeners.set(key, set);
+      }
+      set.add(listener);
+      return () => {
+        const current = threadListeners.get(key);
+        if (current === undefined) return;
+        current.delete(listener);
+        if (current.size === 0) threadListeners.delete(key);
+      };
     },
   };
 }
@@ -167,8 +190,11 @@ export function useCodeThreadController(
   threadId: CodeThreadId | undefined,
 ): CodeController | undefined {
   const subscribe = useCallback(
-    (listener: () => void) => controllers?.subscribe(listener) ?? (() => undefined),
-    [controllers],
+    (listener: () => void) =>
+      controllers === undefined || threadId === undefined
+        ? () => undefined
+        : controllers.subscribeThread(threadId, listener),
+    [controllers, threadId],
   );
   const read = useCallback(
     () =>
@@ -190,8 +216,15 @@ export function useOpenCodeThreadProviderRequests(
     EMPTY_CODE_PROVIDER_REQUESTS_BY_THREAD_ID,
   );
   const subscribe = useCallback(
-    (listener: () => void) => controllers.subscribe(listener),
-    [controllers],
+    (listener: () => void) => {
+      const unsubscribes = threadIds.map((threadId) =>
+        controllers.subscribeThread(threadId, listener),
+      );
+      return () => {
+        for (const unsubscribe of unsubscribes) unsubscribe();
+      };
+    },
+    [controllers, threadIds],
   );
   const read = useCallback(() => {
     const next: Record<string, ReadonlyArray<CodeController["providerRequests"][number]>> = {};

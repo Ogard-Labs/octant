@@ -588,6 +588,8 @@ export interface OctantHostBridge
    * Absent on a host that does not report it, which is read as system frame.
    */
   readonly windowChrome?: "hidden-inset" | "system-frame";
+  /** Reports the window entering and leaving macOS full screen; returns an unsubscribe. */
+  readonly onFullScreenChange?: (listener: (fullScreen: boolean) => void) => () => void;
   readonly initialProjectTarget?: ProjectWindowTarget;
   readonly maximizeOrRestore: () => Promise<void> | void;
   readonly minimize: () => Promise<void> | void;
@@ -605,6 +607,11 @@ export interface OctantHostBridge
   ) => Promise<void>;
   /** Cancels any pending native approval owned by this window. */
   readonly cancelCodeOperationApproval?: () => Promise<void>;
+  /**
+   * Reports that a dialog, sheet, command palette, or menu covers the window,
+   * so the native approval view leaves it and an extension popup closes.
+   */
+  readonly setRendererOverlayOpen?: (open: boolean) => Promise<void>;
   /** Reports the resolved theme an approval view should draw. */
   readonly setApprovalSurfacePalette?: (palette: ApprovalSurfacePalette) => Promise<void> | void;
   readonly projectWindowCapability: string;
@@ -683,6 +690,11 @@ export interface OctantHostBridge
     listener: (material: ResolvedSidebarMaterial) => void,
   ) => () => void;
   /**
+   * The native window entering (true) or leaving (false) full screen. In full
+   * screen macOS hides the traffic lights, so no titlebar inset is reserved.
+   */
+  readonly subscribeWindowFullScreen?: (listener: (fullScreen: boolean) => void) => () => void;
+  /**
    * The host's word that native window vibrancy is actually applied. The
    * renderer keeps its near-opaque native sidebar wash until this reports
    * "sidebar", because CSS backdrop-filter cannot frost another app's window —
@@ -695,7 +707,7 @@ export interface OctantHostBridge
   readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
   readonly subscribeOpenSettings?: (listener: () => void) => () => void;
   /**
-   * Prepare to Shut Down… from the application menu, or Move threads first…
+   * Prepare to shut down… from the application menu, or Move threads first…
    * from the quit confirmation (`fromQuit`). Absent outside the desktop app.
    */
   readonly subscribePrepareToShutDown?: (

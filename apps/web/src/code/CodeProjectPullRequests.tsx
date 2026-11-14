@@ -677,7 +677,7 @@ function FilterMenu(props: {
         <ListFilter aria-hidden="true" size={16} />
       </WorkListMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+        <OctantMenuPositioner align="end" className="outline-none window-no-drag">
           <OctantMenuPopup aria-label="Filter pull requests" className="min-w-[14rem]">
             <FilterGroup<PullRequestStateFilter>
               label="State"
@@ -858,7 +858,7 @@ function RepositorySettingsMenu(props: {
         <Settings2 aria-hidden="true" size={16} />
       </WorkListMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+        <OctantMenuPositioner align="end" className="outline-none window-no-drag">
           <OctantMenuPopup aria-label="Repository settings" className="min-w-[14rem]">
             {props.projects.map((project, index) => (
               <div key={String(project.projectId)}>
@@ -918,7 +918,7 @@ function RepositoryGroup(props: {
               <MoreHorizontal aria-hidden="true" size={14} />
             </WorkListMenuTrigger>
             <OctantMenuPortal>
-              <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+              <OctantMenuPositioner align="end" className="outline-none window-no-drag">
                 <OctantMenuPopup aria-label={`${props.title} settings`} className="min-w-[14rem]">
                   <OctantMenuGroup>
                     <OctantMenuGroupLabel>{props.title}</OctantMenuGroupLabel>

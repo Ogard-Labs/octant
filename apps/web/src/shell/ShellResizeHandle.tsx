@@ -1,4 +1,18 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
+
+/**
+ * Covers the window while a divider is dragged. A native Browser page sits
+ * above the document and would swallow the pointer as the drag crosses it;
+ * this shield matches the Browser overlay selector, so the page leaves the
+ * window for the length of the drag.
+ */
+export function ResizeDragShield(props: { readonly axis: "column" | "row" }) {
+  return createPortal(
+    <div aria-hidden="true" className="shell-resize-shield" data-axis={props.axis} />,
+    document.body,
+  );
+}
 
 export interface ShellResizeHandleProps {
   readonly accessibleName: string;
@@ -26,14 +40,17 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
       }
     | undefined
   >(undefined);
+  const [resizing, setResizing] = useState(false);
 
   useEffect(() => {
     function handleWindowKeyDown(event: KeyboardEvent): void {
       if (event.key !== "Escape" || activePointer.current === undefined) return;
       event.preventDefault();
+      setResizing(false);
       cancelActivePointer(activePointer, latestProps.current);
     }
     function handleWindowBlur(): void {
+      setResizing(false);
       cancelActivePointer(activePointer, latestProps.current);
     }
     window.addEventListener("keydown", handleWindowKeyDown);
@@ -62,6 +79,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
   }
 
   function cancelPointerResize(): void {
+    setResizing(false);
     cancelActivePointer(activePointer, props);
   }
 
@@ -70,6 +88,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
     if (pointer === undefined || pointer.pointerId !== event.pointerId) return;
     const value = pointerValue(event) ?? pointer.lastValue;
     activePointer.current = undefined;
+    setResizing(false);
     if (!pointer.moved) return;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -97,6 +116,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
   }
 
   return (
+    <>
     <div
       aria-label={props.accessibleName}
       aria-orientation={verticalResize(props.edge) ? "horizontal" : "vertical"}
@@ -120,12 +140,15 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
           moved: false,
         };
         event.currentTarget.setPointerCapture(event.pointerId);
+        setResizing(true);
       }}
       onPointerMove={pointerValue}
       onPointerUp={finishPointerResize}
       role="separator"
       tabIndex={0}
     />
+    {resizing ? <ResizeDragShield axis={verticalResize(props.edge) ? "row" : "column"} /> : null}
+    </>
   );
 }
 

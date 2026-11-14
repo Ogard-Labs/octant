@@ -25,7 +25,7 @@ final class DisplayStream {
     private let token = NSUUID()
     private let callbacks = DispatchQueue(label: "app.octant.device-helper.frames", qos: .userInteractive)
     private let encoder = DispatchQueue(label: "app.octant.device-helper.encode", qos: .userInitiated)
-    private let context = CIContext(options: nil)
+    private let context = CIContext(options: [.cacheIntermediates: false])
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private let lock = NSLock()
     /// Held for the length of one frame write, and by `stop()` once it has
@@ -170,7 +170,12 @@ final class DisplayStream {
     }
 
     private func drain() {
-        while true {
+        // A GCD worker drains its autorelease pool only when the dispatched
+        // block returns. Under continuous Simulator motion `dirty` is set again
+        // before each encode finishes, so this loop never returns and every
+        // frame's IOSurface proxy, CIImage and JPEG buffer would accumulate
+        // until motion stops. Each iteration gets its own pool.
+        while autoreleasepool(invoking: { () -> Bool in
             let settings = lock.withLock { () -> (Int, Double, UInt64, ((Data) -> Bool)?)? in
                 guard running, dirty else {
                     encoding = false
@@ -179,12 +184,12 @@ final class DisplayStream {
                 dirty = false
                 return (maximumHeight, quality, minimumInterval, write)
             }
-            guard let (height, quality, interval, write) = settings, let write else { return }
+            guard let (height, quality, interval, write) = settings, let write else { return false }
             let now = DispatchTime.now().uptimeNanoseconds
             let earliest = lastFrameAt.uptimeNanoseconds + interval
             if now < earliest { Thread.sleep(forTimeInterval: Double(earliest - now) / 1_000_000_000) }
             lastFrameAt = DispatchTime.now()
-            guard let frame = encode(maximumHeight: height, quality: quality) else { continue }
+            guard let frame = encode(maximumHeight: height, quality: quality) else { return true }
             // The stream may have been stopped while this frame was being
             // paced or encoded; a frame of a view nobody has any more is not
             // written into the next view's stream. The check and the write are
@@ -195,36 +200,41 @@ final class DisplayStream {
             writeGate.unlock()
             guard stillRunning else {
                 lock.withLock { encoding = false }
-                return
+                return false
             }
             if !written {
                 // The reader is gone. Stopped outside the gate, which `stop()` takes.
                 stop()
                 lock.withLock { encoding = false }
-                return
+                return false
             }
-        }
+            return true
+        }) {}
     }
 
     private func encode(maximumHeight: Int, quality: Double) -> Data? {
         typealias Surface = @convention(c) (AnyObject, Selector) -> AnyObject?
         guard let send = try? SimulatorBridge.messageSend(Surface.self) else { return nil }
-        var value: AnyObject?
-        if descriptor.responds(to: NSSelectorFromString("framebufferSurface")) {
-            value = send(descriptor, NSSelectorFromString("framebufferSurface"))
+        // The surface proxy, scaled image and JPEG intermediates are
+        // autoreleased; release them per frame rather than per drain.
+        return autoreleasepool { () -> Data? in
+            var value: AnyObject?
+            if descriptor.responds(to: NSSelectorFromString("framebufferSurface")) {
+                value = send(descriptor, NSSelectorFromString("framebufferSurface"))
+            }
+            if value == nil, descriptor.responds(to: NSSelectorFromString("ioSurface")) {
+                value = send(descriptor, NSSelectorFromString("ioSurface"))
+            }
+            guard let surface = value as? IOSurface else { return nil }
+            var image = CIImage(ioSurface: unsafeBitCast(surface, to: IOSurfaceRef.self))
+            let height = image.extent.height
+            if height > CGFloat(maximumHeight) {
+                let scale = CGFloat(maximumHeight) / height
+                image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            }
+            return context.jpegRepresentation(
+                of: image, colorSpace: colorSpace,
+                options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality])
         }
-        if value == nil, descriptor.responds(to: NSSelectorFromString("ioSurface")) {
-            value = send(descriptor, NSSelectorFromString("ioSurface"))
-        }
-        guard let surface = value as? IOSurface else { return nil }
-        var image = CIImage(ioSurface: unsafeBitCast(surface, to: IOSurfaceRef.self))
-        let height = image.extent.height
-        if height > CGFloat(maximumHeight) {
-            let scale = CGFloat(maximumHeight) / height
-            image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        }
-        return context.jpegRepresentation(
-            of: image, colorSpace: colorSpace,
-            options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality])
     }
 }

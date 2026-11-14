@@ -287,6 +287,17 @@ describe("TurnActivityRows", () => {
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
   });
 
+  it("does not render closed thinking as Markdown until it is opened", async () => {
+    const user = userEvent.setup();
+    render(<TurnActivityRows activity={{ reasoning: "Read **this** first.", rows: [] }} running />);
+
+    const thinking = disclosure("Thinking");
+    expect(thinking.querySelector("strong")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Thinking" }));
+    expect(thinking.querySelector("strong")).toHaveTextContent("this");
+  });
+
   it("remembers each row's expanded state across a streaming update", async () => {
     const user = userEvent.setup();
     const running: TurnActivity = {

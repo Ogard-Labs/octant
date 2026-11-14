@@ -1666,7 +1666,9 @@ after the traffic lights and, when the sidebar is collapsed, after the measured
 leading cluster. Pane tabs and window controls share the compact visual rail at a
 higher stacking layer; unused spans remain drag regions. Collapsed-sidebar Show
 sidebar and New thread actions reserve their own no-drag space after the same
-traffic-light width the sidebar uses. Packaged smoke checks both compact geometry
+traffic-light width the sidebar uses. In native full screen macOS hides the
+traffic lights, so the desktop reports the change and no traffic-light width is
+reserved there. Packaged smoke checks both compact geometry
 and real native state transitions for Open in, Environment, bottom panel, right
 dock, and sidebar recovery.
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildApplicationMenuTemplate,
-  buildStableMenuTemplate,
+  buildWindowsLinuxMenuTemplate,
   developerToolsAllowed,
 } from "./applicationMenu";
 
@@ -31,7 +31,7 @@ describe("native application menu", () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
-  it("offers Prepare to Shut Down just above Quit when the desktop can move threads", () => {
+  it("offers Prepare to shut down just above Quit when the desktop can move threads", () => {
     const onPrepareToShutDown = vi.fn();
     const template = buildApplicationMenuTemplate({
       appName: "Octant",
@@ -42,8 +42,8 @@ describe("native application menu", () => {
     });
     const items = Array.isArray(template[0]?.submenu) ? template[0].submenu : [];
     const labels = items.map((item) => item.label);
-    const prepare = items.find((item) => item.label === "Prepare to Shut Down…");
-    expect(labels.indexOf("Prepare to Shut Down…")).toBe(labels.indexOf("Quit Octant") - 1);
+    const prepare = items.find((item) => item.label === "Prepare to shut down…");
+    expect(labels.indexOf("Prepare to shut down…")).toBe(labels.indexOf("Quit Octant") - 1);
     prepare?.click?.({} as never, {} as never, {} as never);
     expect(onPrepareToShutDown).toHaveBeenCalledOnce();
   });
@@ -109,12 +109,17 @@ describe("developer tools by build", () => {
   });
 });
 
-describe("stable Windows and Linux menu", () => {
-  it("keeps zoom, fullscreen and the Edit menu and offers neither reload nor developer tools", () => {
-    const template = buildStableMenuTemplate();
+describe("Windows and Linux menu", () => {
+  it("keeps zoom, fullscreen and the Edit menu and offers neither reload nor developer tools in a stable release", () => {
+    const template = buildWindowsLinuxMenuTemplate({
+      appName: "Octant",
+      onOpenSettings: vi.fn(),
+      onQuit: vi.fn(),
+      developerTools: false,
+    });
     const roles = JSON.stringify(template);
     expect(template.map((item) => item.role ?? item.label)).toEqual([
-      "fileMenu",
+      "File",
       "editMenu",
       "View",
       "windowMenu",
@@ -125,5 +130,32 @@ describe("stable Windows and Linux menu", () => {
     for (const role of ["reload", "forceReload", "toggleDevTools", "viewMenu"]) {
       expect(roles).not.toContain(`"${role}"`);
     }
+  });
+
+  it("moves Settings, Prepare to shut down and the guarded Quit into File", () => {
+    const onOpenSettings = vi.fn();
+    const onPrepareToShutDown = vi.fn();
+    const onQuit = vi.fn();
+    const template = buildWindowsLinuxMenuTemplate({
+      appName: "Octant",
+      onOpenSettings,
+      onPrepareToShutDown,
+      onQuit,
+      developerTools: false,
+    });
+    const file = Array.isArray(template[0]?.submenu) ? template[0].submenu : [];
+    const item = (label: string) => file.find((entry) => entry.label === label);
+    expect(item("Settings…")?.accelerator).toBe("CommandOrControl+,");
+    expect(file.map((entry) => entry.label).filter(Boolean)).toEqual([
+      "Settings…",
+      "Prepare to shut down…",
+      "Quit Octant",
+    ]);
+    item("Settings…")?.click?.({} as never, {} as never, {} as never);
+    item("Prepare to shut down…")?.click?.({} as never, {} as never, {} as never);
+    item("Quit Octant")?.click?.({} as never, {} as never, { triggeredByAccelerator: true } as never);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(onPrepareToShutDown).toHaveBeenCalledOnce();
+    expect(onQuit).toHaveBeenCalledWith({ viaShortcut: true });
   });
 });

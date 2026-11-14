@@ -1329,7 +1329,7 @@ function ProjectActionsMenu(props: {
         <MoreHorizontal aria-hidden="true" size={14} />
       </OctantMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner className="z-50 outline-none window-no-drag">
+        <OctantMenuPositioner className="outline-none window-no-drag">
           <OctantMenuPopup className="window-no-drag">
             <OctantMenuActionItem onClick={() => props.onOpen(project)}>
               Open Project
@@ -1957,7 +1957,7 @@ function ProjectViewFilterMenu(props: {
         <OctantMenuPortal>
           <OctantMenuPositioner
             align="end"
-            className="z-50 outline-none window-no-drag"
+            className="outline-none window-no-drag"
             side="bottom"
           >
             <OctantMenuPopup

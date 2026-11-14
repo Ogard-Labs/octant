@@ -242,6 +242,49 @@ describe("database recovery", () => {
     connection.close();
   });
 
+  it("skips the integrity check and verified rows on a start that trusts its watermark", () => {
+    const connection = openConnection();
+    const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
+    const journal = createJournal(connection, projections);
+    appendTwo(journal);
+    const pragmas: Array<string> = [];
+    const watched: SqliteConnection = {
+      ...connection,
+      pragma: (source, options) => {
+        pragmas.push(source);
+        return connection.pragma(source, options);
+      },
+    };
+
+    expect(databaseStatus({ connection: watched, journal, projections, verifiedThrough: 2 })).toEqual(
+      databaseStatus({ connection, journal, projections }),
+    );
+    expect(pragmas).not.toContain("integrity_check");
+    connection.close();
+  });
+
+  it("still finds a version gap and a stale head in rows above the watermark", () => {
+    const connection = openConnection();
+    const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
+    const journal = createJournal(connection, projections);
+    appendTwo(journal);
+    connection
+      .prepare("UPDATE event_journal SET aggregate_version = 3 WHERE global_sequence = 2")
+      .run();
+
+    expect(
+      databaseStatus({ connection, journal, projections, verifiedThrough: 1 }),
+    ).toMatchObject({ state: "invalid" });
+    connection
+      .prepare("UPDATE event_journal SET aggregate_version = 2 WHERE global_sequence = 2")
+      .run();
+    connection.prepare("UPDATE aggregate_heads SET last_sequence = 1, aggregate_version = 1").run();
+    expect(
+      databaseStatus({ connection, journal, projections, verifiedThrough: 1 }),
+    ).toMatchObject({ state: "invalid" });
+    connection.close();
+  });
+
   it("reports quarantined and lagging states without claiming a store is current", () => {
     const connection = openConnection();
     const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());

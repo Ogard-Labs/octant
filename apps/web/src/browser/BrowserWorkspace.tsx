@@ -110,6 +110,8 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".code-board-layer",
   // A divider being dragged across a tile, or a tab being dragged onto the dock.
   ".dock-tiles__drag-shield",
+  // A shell or split divider mid-drag: the native page would swallow the pointer.
+  ".shell-resize-shield",
   ".rail-placeholder",
   ".workspace-drag-preview",
   ".workspace-drop-overlay",
@@ -122,6 +124,19 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".octant-sheet__backdrop",
   ".octant-sheet__viewport",
   ".octant-sheet__popup",
+  // Floating chrome: notices, menus, popovers, tooltips and disclosures that
+  // can open over the page area. A tooltip on the Browser toolbar would
+  // otherwise open underneath the native view and never be seen.
+  ".toast-stack",
+  '[data-slot="popover-content"]',
+  '[data-slot="combobox-content"]',
+  '[data-slot="tooltip-content"]',
+  '[data-slot="select-content"]',
+  '[data-slot="dropdown-menu-content"]',
+  '[data-slot="context-menu-content"]',
+  ".thread-info__panel:not([hidden])",
+  ".window-chrome__disclosure",
+  ".zen-panel",
 ].join(", ");
 
 const BROWSER_REFRESH_INTERVAL_MS = 500;

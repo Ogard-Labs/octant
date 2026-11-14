@@ -314,6 +314,7 @@ import {
   useAutomaticUpdateCheckSync,
   useQuitShortcutSecondPressSync,
   useReleaseRingSync,
+  useHostFullScreen,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useSidebarDrawerViewport,
@@ -799,7 +800,11 @@ function LaunchedShell(
   // A system-framed host (Windows, Linux) and a remote client in a browser both
   // keep their own title bar, so reserving the inset there wastes a strip of the
   // window and lays a drag region over chrome the OS already draws.
-  const hostReservesTitlebarInset = props.hostBridge?.windowChrome === "hidden-inset";
+  // In macOS full screen the titlebar and traffic lights are gone, so the inset
+  // is released for as long as the host reports full screen.
+  const hostFullScreen = useHostFullScreen(props.hostBridge);
+  const hostReservesTitlebarInset =
+    props.hostBridge?.windowChrome === "hidden-inset" && !hostFullScreen;
   useLayoutEffect(() => {
     const root = document.documentElement;
     if (!hostReservesTitlebarInset) {
@@ -6117,36 +6122,70 @@ function LaunchedShell(
   // through props. It carries the same list the sidebar nests, so neither can
   // claim a Project has threads the other cannot see. `errorMessage` is read
   // only from a disconnected bootstrap, never from a failed command.
-  const projectThreadsAccess = projectThreadsAccessForMode({
-    activeMode,
-    chat: {
-      status: chatController.status,
-      ...(chatController.errorMessage === undefined
-        ? {}
-        : { errorMessage: chatController.errorMessage }),
-      onRetry: () => void chatController.retry(),
-      onSelectThread: selectChatThread,
-      threads: markedChatNavigation,
-    },
-    code: {
-      status: codeController.status,
-      ...(codeController.errorMessage === undefined
-        ? {}
-        : { errorMessage: codeController.errorMessage }),
-      onRetry: () => void codeController.retry(),
-      onSelectThread: selectCodeThread,
-      threads: codeProjectThreads,
-    },
-    work: {
-      status: workNavigation.status,
-      ...(workNavigation.errorMessage === undefined
-        ? {}
-        : { errorMessage: workNavigation.errorMessage }),
-      onRetry: () => void workNavigation.refresh(),
-      onSelectThread: selectWorkThread,
-      threads: workProjectThreads,
-    },
+  // Memoized on the data it carries. The callbacks are recreated on every
+  // shell render, so the provider reaches them through a ref; otherwise every
+  // unrelated shell render handed the Project Overview a new value.
+  const projectThreadsActions = useRef({
+    retryChat: () => void chatController.retry(),
+    retryCode: () => void codeController.retry(),
+    refreshWork: () => void workNavigation.refresh(),
+    selectChatThread,
+    selectCodeThread,
+    selectWorkThread,
   });
+  projectThreadsActions.current = {
+    retryChat: () => void chatController.retry(),
+    retryCode: () => void codeController.retry(),
+    refreshWork: () => void workNavigation.refresh(),
+    selectChatThread,
+    selectCodeThread,
+    selectWorkThread,
+  };
+  const chatStatus = chatController.status;
+  const codeStatus = codeController.status;
+  const workStatus = workNavigation.status;
+  const chatErrorMessage = chatController.errorMessage;
+  const codeErrorMessage = codeController.errorMessage;
+  const workErrorMessage = workNavigation.errorMessage;
+  const projectThreadsAccess = useMemo(
+    () =>
+      projectThreadsAccessForMode({
+        activeMode,
+        chat: {
+          status: chatStatus,
+          ...(chatErrorMessage === undefined ? {} : { errorMessage: chatErrorMessage }),
+          onRetry: () => projectThreadsActions.current.retryChat(),
+          onSelectThread: (threadId) => projectThreadsActions.current.selectChatThread(threadId),
+          threads: markedChatNavigation,
+        },
+        code: {
+          status: codeStatus,
+          ...(codeErrorMessage === undefined ? {} : { errorMessage: codeErrorMessage }),
+          onRetry: () => projectThreadsActions.current.retryCode(),
+          onSelectThread: (threadId) => projectThreadsActions.current.selectCodeThread(threadId),
+          threads: codeProjectThreads,
+        },
+        work: {
+          status: workStatus,
+          ...(workErrorMessage === undefined ? {} : { errorMessage: workErrorMessage }),
+          onRetry: () => projectThreadsActions.current.refreshWork(),
+          onSelectThread: (threadId) => projectThreadsActions.current.selectWorkThread(threadId),
+          threads: workProjectThreads,
+        },
+      }),
+    [
+      activeMode,
+      chatStatus,
+      chatErrorMessage,
+      markedChatNavigation,
+      codeStatus,
+      codeErrorMessage,
+      codeProjectThreads,
+      workStatus,
+      workErrorMessage,
+      workProjectThreads,
+    ],
+  );
 
   async function openSelectedProject(project: ProjectSummary) {
     closeThreadSearch();

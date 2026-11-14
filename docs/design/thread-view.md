@@ -186,7 +186,15 @@ arrive below. A Code fork's own messages come first; below them the row goes on
 into the messages it was forked from, at the fork point, and up the thread it
 came from, so a fork reads as one conversation. Coming back to a thread puts
 the reader back on the row they left when its loaded messages still start where
-they did, and at the end otherwise.
+they did, and at the end otherwise. While a reader is scrolled away from the
+end of a following transcript, a secondary **Jump to latest** button floats at
+the foot of the transcript; it returns to the end, resumes following, and goes
+away once the reader is back at the end.
+
+Find (⌘F, Ctrl+F) opens for the thread in the active pane, including while
+focus is still on the sidebar row that just chose it; the code editor and the
+terminal keep their own Find. Closing the find bar returns focus to what had it
+when Find opened, or to the transcript when that is gone.
 
 A jump to a Chat message that is not loaded, such as a search hit, shows the
 run of messages that ends with it in place of the newest ones, with the Load

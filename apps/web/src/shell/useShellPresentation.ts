@@ -136,6 +136,21 @@ export function useHostReportedSidebarVibrancy(hostBridge: OctantHostBridge | un
   return active;
 }
 
+/**
+ * Whether the host window is in macOS full screen. A full-screen window has no
+ * titlebar or traffic lights, so the hidden-inset strip the renderer reserves
+ * for them would be dead space there. False on hosts that never report it.
+ */
+export function useHostFullScreen(hostBridge: OctantHostBridge | undefined): boolean {
+  const [fullScreen, setFullScreen] = useState(false);
+  useEffect(() => {
+    setFullScreen(false);
+    if (hostBridge?.onFullScreenChange === undefined) return;
+    return hostBridge.onFullScreenChange(setFullScreen);
+  }, [hostBridge]);
+  return fullScreen;
+}
+
 export function useSidebarVibrancySupported(hostBridge: OctantHostBridge | undefined): boolean {
   const [supported, setSupported] = useState(false);
   useEffect(() => {

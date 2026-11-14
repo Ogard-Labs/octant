@@ -51,10 +51,16 @@ function fakeView() {
   };
 }
 
+const geometryListeners = new Set<() => void>();
+
 function shellWindow() {
   const window: ExtensionPopupShellWindow = {
     isDestroyed: () => false,
     contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+    onMoveOrResize: (listener) => {
+      geometryListeners.add(listener);
+      return () => geometryListeners.delete(listener);
+    },
   };
   return window;
 }
@@ -149,6 +155,34 @@ describe("extension popup host", () => {
       { type: "keyDown", key: "Escape" },
     );
     expect(second.view.webContents.close).toHaveBeenCalled();
+  });
+
+  it("closes when focus leaves the popup or its window moves or resizes", async () => {
+    const blurred = fakeView();
+    const moved = fakeView();
+    const views = [blurred, moved];
+    const host = createExtensionPopupHost({
+      store: { extensionPage: () => "chrome-extension://abc/popup.html" },
+      createView: () => (views.shift() as ReturnType<typeof fakeView>).view,
+    });
+    const input = {
+      windowId: "w1",
+      window: shellWindow(),
+      profile: { kind: "personal" } as const,
+      extensionId,
+      kind: "popup" as const,
+      bounds: { x: 0, y: 0, width: 300, height: 300 },
+    };
+
+    await host.open(input);
+    blurred.listeners.get("blur")?.();
+    expect(blurred.view.webContents.close).toHaveBeenCalled();
+    expect(geometryListeners.size).toBe(0);
+
+    await host.open(input);
+    for (const listener of [...geometryListeners]) listener();
+    expect(moved.view.webContents.close).toHaveBeenCalled();
+    expect(geometryListeners.size).toBe(0);
   });
 
   it("closes the page and reports it did not open when it fails to load", async () => {
