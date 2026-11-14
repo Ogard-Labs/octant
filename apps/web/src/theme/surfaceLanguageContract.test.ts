@@ -80,7 +80,7 @@ describe("surface language", () => {
     const title = surface.match(/\.oct-page-title \{[^}]*\}/)?.[0] ?? "";
     expect(title).toContain("font-size: var(--oct-text-2xl);");
     expect(title).toContain("font-weight: var(--oct-weight-strong);");
-    expect(title).toContain("letter-spacing: var(--oct-tracking-tight);");
+    expect(title).toContain("letter-spacing: var(--oct-tracking-sf-24);");
     expect(read("surface/SurfaceHeader.tsx")).toContain('className="oct-page-title"');
     expect(read("shell/SettingsView.tsx")).toContain('<h1 className="oct-page-title"');
   });
@@ -98,7 +98,7 @@ describe("surface language", () => {
     const name = role("oct-nav-name");
     expect(name).toContain("font-size: var(--oct-text-detail);");
     expect(name).toContain("font-weight: var(--oct-weight-regular);");
-    expect(name).toContain("letter-spacing: 0;");
+    expect(name).toContain("letter-spacing: var(--oct-tracking-sf-13);");
     // A group label: a quiet 12px caption, not a Section label.
     const group = role("oct-nav-group");
     expect(group).toContain("font-size: var(--oct-text-xs);");

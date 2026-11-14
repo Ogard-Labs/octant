@@ -1100,7 +1100,7 @@ describe("the public-block visual language", () => {
 
     expect(groupRole).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
     expect(groupRole).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
-    expect(groupRole).toMatch(/letter-spacing:\s*0/);
+    expect(groupRole).toMatch(/letter-spacing:\s*var\(--oct-tracking-sf-12\)/);
     expect(sectionLabel).not.toMatch(/font-size|font-weight|letter-spacing/);
     expect(readFileSync(join(webRoot, "shell/SettingsNavigation.tsx"), "utf8")).toContain(
       "oct-nav-group setnav-section",

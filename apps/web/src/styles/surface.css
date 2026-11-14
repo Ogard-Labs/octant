@@ -60,7 +60,7 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-2xl);
   font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-tight);
+  letter-spacing: var(--oct-tracking-sf-24);
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -74,8 +74,8 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-snug);
-  line-height: var(--oct-leading-snug);
+  letter-spacing: var(--oct-tracking-sf-14);
+  line-height: var(--oct-line-chrome);
   text-transform: none;
 }
 
@@ -88,8 +88,8 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-regular);
-  letter-spacing: 0;
-  line-height: var(--oct-leading-label);
+  letter-spacing: var(--oct-tracking-sf-13);
+  line-height: var(--oct-line-chrome);
 }
 
 /* A group's caption in navigation: quiet text over its rows, in sentence
@@ -100,8 +100,8 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
-  letter-spacing: 0;
-  line-height: var(--oct-leading-snug);
+  letter-spacing: var(--oct-tracking-sf-12);
+  line-height: var(--oct-line-chrome-sm);
   text-transform: none;
 }
 
@@ -127,14 +127,16 @@
 .oct-menu-option {
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-label);
+  letter-spacing: var(--oct-tracking-sf-13);
+  line-height: var(--oct-line-chrome);
 }
 
 .oct-row-label {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
-  line-height: var(--oct-leading-label);
+  letter-spacing: var(--oct-tracking-sf-14);
+  line-height: var(--oct-line-chrome);
 }
 
 .oct-row-detail {
@@ -146,6 +148,7 @@
 .oct-meta {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-sf-12);
   line-height: var(--oct-leading-meta);
 }
 

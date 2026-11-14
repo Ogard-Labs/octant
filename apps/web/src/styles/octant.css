@@ -172,6 +172,28 @@
   --oct-tracking-wider: 0.14em;
   --oct-tracking-widest: 0.3em;
 
+  /* The platform face's own tracking. A native Mac app gets SF's size-specific
+     tracking from the text system; a web view draws the same face with none.
+     Apple's published SF Pro table, in points at the size, as em: +0.06 at 11,
+     0 at 12, -0.08 at 13, -0.15 at 14, -0.2 at 15, -0.31 at 16, -0.43 at 17,
+     -0.45 at 20, +0.07 at 24 and up. The body takes the 13px value and a
+     smaller or larger role names its own, because letter-spacing inherits as a
+     length, not as em. */
+  --oct-tracking-sf-11: 0.0055em;
+  --oct-tracking-sf-12: 0em;
+  --oct-tracking-sf-13: -0.006em;
+  --oct-tracking-sf-14: -0.011em;
+  --oct-tracking-sf-15: -0.013em;
+  --oct-tracking-sf-16: -0.019em;
+  --oct-tracking-sf-17: -0.025em;
+  --oct-tracking-sf-20: -0.022em;
+  --oct-tracking-sf-24: 0.003em;
+  /* A line of chrome (a row, a menu option, a button) is as tall as a native
+     one: 16px at 13px, a 1.23 leading, and 1.2 at 12px. Reading text keeps its
+     airier leading. Whole pixels, so a row's text lands on the pixel grid. */
+  --oct-line-chrome: round(calc(1.23 * 1em), 1px);
+  --oct-line-chrome-sm: round(calc(1.2 * 1em), 1px);
+
   /* ── space and shape ── */
   --oct-space-1: 4px;
   --oct-space-2: 8px;
@@ -472,6 +494,7 @@ body {
   font-family: var(--oct-font-body);
   font-size: var(--oct-text-base);
   line-height: var(--oct-leading-body);
+  letter-spacing: var(--oct-tracking-sf-13);
   text-rendering: optimizeLegibility;
   /* No antialiased smoothing: on macOS it thins light text on a dark ground,
      which read as washed out next to native apps. */
@@ -615,6 +638,17 @@ html {
 
 :where(a[href]) {
   cursor: pointer;
+}
+
+/* A control's line is the native chrome line, not the reading line. */
+:where(button, [role="button"], [role="menuitem"], [role="option"], [role="tab"]) {
+  line-height: var(--oct-line-chrome);
+}
+
+/* Code sets its own measure: the body's tracking would shift a terminal's
+   cells and an editor's columns. */
+:where(code, pre, kbd, samp, .xterm, .monaco-editor) {
+  letter-spacing: normal;
 }
 
 :where(img, svg, a) {
