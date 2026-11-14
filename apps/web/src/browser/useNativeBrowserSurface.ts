@@ -27,6 +27,55 @@ export function boundsInsideViewport(
   return { x, y, width: right - x, height: bottom - y };
 }
 
+/**
+ * Where a divider is being dragged. A native page is a window-level view that
+ * takes the pointer from the renderer wherever it lies under it, so a page
+ * whose edge lags the divider by a frame would swallow the drag. While a
+ * divider is held, the page keeps a band clear of the pointer on its own side
+ * of it: it follows the divider live, stays visible, and the drag never stalls.
+ */
+export interface NativeSurfaceResizeGuard {
+  readonly axis: "x" | "y";
+  /** The pointer's window coordinate along the axis. */
+  readonly at: number;
+}
+
+export const NATIVE_SURFACE_RESIZE_GUARD_PX = 40;
+
+let resizeGuard: NativeSurfaceResizeGuard | undefined;
+
+/** Pulls a rectangle's near edge back from a held divider; the rest is untouched. */
+export function rectClearOfResizeGuard(
+  rect: {
+    readonly left: number;
+    readonly top: number;
+    readonly right: number;
+    readonly bottom: number;
+  },
+  guard: NativeSurfaceResizeGuard | undefined,
+) {
+  if (guard === undefined) return rect;
+  const [start, end] = guard.axis === "x" ? [rect.left, rect.right] : [rect.top, rect.bottom];
+  const clear = NATIVE_SURFACE_RESIZE_GUARD_PX;
+  // The page sits on the side of the pointer its centre is on.
+  const next =
+    (start + end) / 2 >= guard.at
+      ? [Math.max(start, guard.at + clear), end]
+      : [start, Math.min(end, guard.at - clear)];
+  const [from, to] = next as [number, number];
+  if (to - from < 1) return rect;
+  // Named edges, not a spread: a DOMRect keeps them on its prototype.
+  return guard.axis === "x"
+    ? { left: from, top: rect.top, right: to, bottom: rect.bottom }
+    : { left: rect.left, top: from, right: rect.right, bottom: to };
+}
+
+export function setNativeSurfaceResizeGuard(next: NativeSurfaceResizeGuard | undefined): void {
+  if (resizeGuard?.axis === next?.axis && resizeGuard?.at === next?.at) return;
+  resizeGuard = next;
+  signalNativeSurfaceLayoutChange();
+}
+
 const layoutListeners = new Set<() => void>();
 let layoutSignalFrame: number | undefined;
 
@@ -141,7 +190,7 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
       contextId,
       threadId,
       bounds: boundsInsideViewport(
-        element.getBoundingClientRect(),
+        rectClearOfResizeGuard(element.getBoundingClientRect(), resizeGuard),
         window.innerWidth,
         window.innerHeight,
       ),
@@ -150,7 +199,30 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
     const shouldDetach = () =>
       element.getClientRects().length === 0 ||
       document.querySelector(input.overlaySelector) !== null;
-    const sync = async () => {
+    // One pass at a time, and one more when something asked during it. Passes
+    // used to overlap: a detach still in flight when the overlay went away let
+    // an attach overtake it, and the host then removed the page the renderer
+    // believed it had shown, leaving a toolbar over an empty tile for good.
+    let running = false;
+    let again = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const sync = async (): Promise<void> => {
+      if (disposed) return;
+      if (running) {
+        again = true;
+        return;
+      }
+      running = true;
+      try {
+        do {
+          again = false;
+          await pass();
+        } while (again && !disposed);
+      } finally {
+        running = false;
+      }
+    };
+    const pass = async () => {
       if (disposed) return;
       if (shouldDetach()) {
         if (attached) {
@@ -170,7 +242,15 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
           attached = true;
           setState(attachedState);
         } else {
-          await update(request());
+          try {
+            await update(request());
+          } catch {
+            // The host refused these bounds (a rectangle caught mid-layout, a
+            // beat outside the window). The page is still where it was, so it
+            // stays attached and the next pass sends the settled rectangle.
+            retryTimer = setTimeout(() => void sync(), 100);
+            return;
+          }
         }
         if (!disposed) setFailed(false);
       } catch {
@@ -199,6 +279,7 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
     void sync();
     return () => {
       disposed = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
       layoutListeners.delete(onLayoutChange);
       resize.disconnect();
       visibility.disconnect();

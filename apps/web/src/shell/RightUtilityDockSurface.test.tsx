@@ -12,6 +12,7 @@ import {
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
+import { RENDERER_OVERLAY_SELECTOR } from "../browser/BrowserWorkspace";
 import { RightUtilityDockSurface, type DockTileControls } from "./RightUtilityDockSurface";
 import { DockToolButtons } from "./DockToolButtons";
 import { buildDockToolButtons } from "./dockToolButtonsModel";
@@ -26,6 +27,7 @@ import {
   withoutTileLayout,
   openUtilityTabBesideState,
   openUtilityTabState,
+  placeUtilityTile,
   resizeUtilityTileColumn,
   resizeUtilityTileColumns,
   selectUtilityTabState,
@@ -393,6 +395,8 @@ describe("tool tiles in the right sidebar", () => {
             onMinimise: (id) => setState((current) => minimiseUtilityTool(current, id)),
             onMove: (id, direction) =>
               setState((current) => moveUtilityTile(current, id, direction)),
+            onPlace: (id, target, edge) =>
+              setState((current) => placeUtilityTile(current, id, target, edge)),
             onResizeColumn: (index, shares) =>
               setState((current) => resizeUtilityTileColumn(current, index, shares)),
             onResizeColumns: (shares) =>
@@ -586,6 +590,59 @@ describe("tool tiles in the right sidebar", () => {
     ).toBeGreaterThan(before);
   });
 
+  it("resets a divider to an even split of its pair on a double click", async () => {
+    const user = userEvent.setup();
+    render(<TiledDock initial={tiledState()} />);
+    const name = "Resize Files and iOS Simulator";
+    const value = () =>
+      Number(screen.getByRole("separator", { name }).getAttribute("aria-valuenow"));
+    screen.getByRole("separator", { name }).focus();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(value()).not.toBe(50);
+    await user.dblClick(screen.getByRole("separator", { name }));
+    expect(value()).toBe(50);
+  });
+
+  it("moves a tile when its bar is dragged onto another tile's edge, and shows the edge while over it", async () => {
+    render(<TiledDock initial={tiledState()} />);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 100, height: 100 }),
+    );
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+    const files = screen.getByRole("region", { name: "Files" });
+    fireEvent.dragStart(files.querySelector(".dock-tile__lead") as Element, { dataTransfer });
+    const zone = document.querySelector('[data-dock-place-zone="ios-simulator"]') as HTMLElement;
+    expect(document.querySelector('[data-dock-place-zone="files"]')).toBeNull();
+    // jsdom has no DragEvent, so the pointer position is put on the event by hand.
+    const at = (type: "dragOver" | "drop") => {
+      const event = createEvent[type](zone);
+      Object.defineProperties(event, { clientX: { value: 95 }, clientY: { value: 50 } });
+      fireEvent(zone, event);
+    };
+    at("dragOver");
+    expect(zone.querySelector("[data-drop-edge='right']")).not.toBeNull();
+    at("drop");
+    // Files is now the right-hand column; the divider is named for its new order.
+    expect(
+      await screen.findByRole("separator", { name: "Resize iOS Simulator and Files" }),
+    ).toBeInTheDocument();
+    expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+  });
+
+  it("offers the same placement from a tile's Arrange menu for the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<TiledDock initial={tiledState()} />);
+    await user.click(
+      within(screen.getByRole("region", { name: "Files" })).getByRole("button", {
+        name: "Arrange Files",
+      }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "Move right of iOS Simulator" }));
+    expect(
+      await screen.findByRole("separator", { name: "Resize iOS Simulator and Files" }),
+    ).toBeInTheDocument();
+  });
+
   it("offers Show below and Close in a hidden tool's context menu", async () => {
     render(<TiledDock initial={opened("files", "environment")} />);
     expect(await menuOf("Files")).toEqual(["Show below", "Close Files"]);
@@ -604,8 +661,22 @@ describe("tool tiles in the right sidebar", () => {
       await user.keyboard("{Escape}");
       return found;
     };
-    expect(await items("Files")).toEqual(["Move right", "Show alone", "Hide from view"]);
-    expect(await items("iOS Simulator")).toEqual(["Move left", "Show alone", "Hide from view"]);
+    expect(await items("Files")).toEqual([
+      "Move right",
+      "Move right of iOS Simulator",
+      "Move above iOS Simulator",
+      "Move below iOS Simulator",
+      "Show alone",
+      "Hide from view",
+    ]);
+    expect(await items("iOS Simulator")).toEqual([
+      "Move left",
+      "Move left of Files",
+      "Move above Files",
+      "Move below Files",
+      "Show alone",
+      "Hide from view",
+    ]);
   });
 
   it("offers the same arranging, and Close, from a shown tool's button", async () => {
@@ -841,11 +912,13 @@ describe("tool tiles in the right sidebar", () => {
       render(<TiledDock initial={tiledState()} />);
       const divider = screen.getByRole("separator", { name: "Resize Files and iOS Simulator" });
       pointer("pointerDown", divider, 500);
-      expect(document.querySelector(".dock-tiles__drag-shield")).not.toBeNull();
+      expect(document.querySelector(".dock-tiles__resize-shield")).not.toBeNull();
+      // A held divider keeps the native Browser page in the window.
+      expect(document.querySelector(RENDERER_OVERLAY_SELECTOR)).toBeNull();
       pointer("pointerMove", divider, 700);
       expect(Number(divider.getAttribute("aria-valuenow"))).toBeGreaterThan(50);
       pointer("pointerCancel", divider, 700);
-      expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+      expect(document.querySelector(".dock-tiles__resize-shield")).toBeNull();
       expect(
         screen
           .getByRole("separator", { name: "Resize Files and iOS Simulator" })
@@ -863,10 +936,10 @@ describe("tool tiles in the right sidebar", () => {
       screen.getByRole("separator", { name: "Resize Files and iOS Simulator" }),
       500,
     );
-    expect(document.querySelector(".dock-tiles__drag-shield")).not.toBeNull();
+    expect(document.querySelector(".dock-tiles__resize-shield")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close Files" }));
     rerender(<TiledDock initial={tiledState()} />);
-    expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+    expect(document.querySelector(".dock-tiles__resize-shield")).toBeNull();
   });
 
   it("reports the range a separator can really reach and goes to its ends with Home and End", async () => {
@@ -1033,7 +1106,7 @@ describe("tool tiles in the right sidebar", () => {
       pointer("pointerMove", divider, 700);
       expect(Number(divider.getAttribute("aria-valuenow"))).toBeGreaterThan(50);
       fireEvent.keyDown(window, { key: "Escape" });
-      expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+      expect(document.querySelector(".dock-tiles__resize-shield")).toBeNull();
       pointer("pointerUp", divider, 700);
       expect(screen.getByRole("separator", { name })).toHaveAttribute("aria-valuenow", "50");
     } finally {

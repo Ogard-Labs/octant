@@ -20,7 +20,9 @@ import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTo
 import {
   MINIMISABLE_DOCK_SURFACES,
   moveUtilityTile,
+  placeUtilityTile,
   type DockTileLayout,
+  type DockTileEdge,
   type DockTileMove,
   type ThreadUtilityDockState,
 } from "./rightUtilityDockSelection";
@@ -55,6 +57,8 @@ export interface DockTileControls {
   /** Takes a Browser or Terminal tool out of view as a card on the shelf. */
   readonly onMinimise: (tabId: string) => void;
   readonly onMove: (tabId: string, direction: DockTileMove) => void;
+  /** Takes a shown tile to an edge of another shown tile. */
+  readonly onPlace: (tabId: string, targetTabId: string, edge: DockTileEdge) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
   readonly onResizeColumns: (shares: ReadonlyArray<number>) => void;
@@ -454,6 +458,18 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               tiles?.onMinimise(tabId);
             }}
             onMoveTile={(tabId, direction) => tiles?.onMove(tabId, direction)}
+            canPlaceTile={(tabId, targetTabId, edge) => {
+              // A drop that would leave the tiles where they are is no placement.
+              const order = (state: ThreadUtilityDockState) =>
+                JSON.stringify(
+                  state.layout?.columns.map((column) => column.tiles.map((tile) => tile.tabId)),
+                );
+              return (
+                order(placeUtilityTile(placementState, tabId, targetTabId, edge)) !==
+                order(placementState)
+              );
+            }}
+            onPlaceTile={(tabId, targetTabId, edge) => tiles?.onPlace(tabId, targetTabId, edge)}
             onResizeColumn={(index, shares) => tiles?.onResizeColumn(index, shares)}
             onResizeColumns={(shares) => tiles?.onResizeColumns(shares)}
             onShowTileAlone={(tabId) => tiles?.onShowAlone(tabId)}

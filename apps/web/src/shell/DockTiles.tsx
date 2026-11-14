@@ -10,7 +10,10 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { signalNativeSurfaceLayoutChange } from "../browser/useNativeBrowserSurface";
+import {
+  setNativeSurfaceResizeGuard,
+  signalNativeSurfaceLayoutChange,
+} from "../browser/useNativeBrowserSurface";
 import { DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
 import { DockBarContext, useDockBarSlot } from "./dockBarControls";
 import { IconButton } from "./IconButton";
@@ -25,6 +28,7 @@ import {
 } from "../ui/base/OctantMenu";
 import {
   MIN_DOCK_TILE_SHARE,
+  type DockTileEdge,
   type DockTileLayout,
   type DockTileMove,
 } from "./rightUtilityDockSelection";
@@ -76,6 +80,10 @@ export interface DockTilesProps {
   /** Closes the tool, as its button's Close does. */
   readonly onCloseTile: (tabId: string) => void;
   readonly onMoveTile: (tabId: string, direction: DockTileMove) => void;
+  /** Takes a tile to an edge of another tile, from a drag or from the menu. */
+  readonly onPlaceTile: (tabId: string, targetTabId: string, edge: DockTileEdge) => void;
+  /** Whether that placement is allowed; a drop zone shows no indicator where it is not. */
+  readonly canPlaceTile?: (tabId: string, targetTabId: string, edge: DockTileEdge) => boolean;
   readonly onShowTileAlone: (tabId: string) => void;
   readonly onResizeColumns: (shares: ReadonlyArray<number>) => void;
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
@@ -223,6 +231,31 @@ function arrange(
 
 const percent = (fraction: number) => `${fraction * 100}%`;
 
+const EDGE_PHRASE: Readonly<Record<DockTileEdge, string>> = {
+  left: "Left of",
+  right: "Right of",
+  top: "Above",
+  bottom: "Below",
+};
+
+/** The edge of a rectangle the pointer is nearest to. */
+function edgeAt(
+  rect: {
+    readonly left: number;
+    readonly top: number;
+    readonly width: number;
+    readonly height: number;
+  },
+  point: { readonly clientX: number; readonly clientY: number },
+): DockTileEdge {
+  const x = rect.width > 0 ? (point.clientX - rect.left) / rect.width : 0.5;
+  const y = rect.height > 0 ? (point.clientY - rect.top) / rect.height : 0.5;
+  const nearest = Math.min(x, 1 - x, y, 1 - y);
+  if (nearest === x) return "left";
+  if (nearest === 1 - x) return "right";
+  return nearest === y ? "top" : "bottom";
+}
+
 /**
  * The width of a divider's hit area, centred on the edge between two tiles.
  * Each edge a tile shares with a neighbour is pulled in by half a gap
@@ -257,6 +290,9 @@ export function DockTiles(props: DockTilesProps) {
   const area = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Preview>();
   const [dragging, setDragging] = useState(false);
+  // The tile whose bar is being dragged, and the edge it is over.
+  const [moving, setMoving] = useState<string>();
+  const [over, setOver] = useState<{ readonly tabId: string; readonly edge: DockTileEdge }>();
   const [stacked, setStacked] = useState(false);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const columnCount = props.layout.columns.length;
@@ -294,7 +330,11 @@ export function DockTiles(props: DockTilesProps) {
   useEffect(() => {
     setDragging(false);
     setPreview(undefined);
+    setMoving(undefined);
+    setOver(undefined);
   }, [shape]);
+  const allowed = (tabId: string, targetTabId: string, edge: DockTileEdge) =>
+    props.canPlaceTile?.(tabId, targetTabId, edge) ?? true;
 
   const placed = arrange(props.layout, preview, stacked, size);
   const labelOf = (tabId: string | undefined) =>
@@ -338,6 +378,26 @@ export function DockTiles(props: DockTilesProps) {
                 ? {}
                 : { onMinimise: () => props.onMinimiseTile?.(tabId) })}
               onMove={(direction) => props.onMoveTile(tabId, direction)}
+              onDragStart={() => setMoving(tabId)}
+              onDragEnd={() => {
+                setMoving(undefined);
+                setOver(undefined);
+              }}
+              places={placed.tiles.flatMap(({ tabId: otherId }) =>
+                otherId === tabId
+                  ? []
+                  : (["left", "right", "top", "bottom"] as const).flatMap((edge) =>
+                      allowed(tabId, otherId, edge)
+                        ? [
+                            {
+                              edge,
+                              label: `${EDGE_PHRASE[edge]} ${labelOf(otherId)}`,
+                              place: () => props.onPlaceTile(tabId, otherId, edge),
+                            },
+                          ]
+                        : [],
+                    ),
+              )}
               onShowAlone={() => props.onShowTileAlone(tabId)}
               panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
               single={tileCount === 1}
@@ -400,7 +460,62 @@ export function DockTiles(props: DockTilesProps) {
             it, so a divider dragged across the Browser tile stopped following
             the pointer. This shield is in the renderer's overlay selector, which
             takes the native page out of the window for the length of the drag. */}
-        {dragging ? <div aria-hidden="true" className="dock-tiles__drag-shield" /> : null}
+        {dragging ? <div aria-hidden="true" className="dock-tiles__resize-shield" /> : null}
+        {moving === undefined ? null : (
+          // A drag over a native page never reaches the document, so this
+          // shield (in the overlay selector) takes the page out of the window
+          // for the length of the drag, and each tile takes the drop itself.
+          <div aria-hidden="true" className="dock-tiles__drag-shield">
+            {placed.tiles.map(({ tabId, box }) => {
+              if (tabId === moving) return null;
+              const across = along(box.left, box.width);
+              const down = along(box.top, box.height);
+              const edge = over?.tabId === tabId ? over.edge : undefined;
+              return (
+                <div
+                  className="dock-tiles__place-zone"
+                  data-dock-place-zone={tabId}
+                  key={tabId}
+                  onDragLeave={() =>
+                    setOver((current) => (current?.tabId === tabId ? undefined : current))
+                  }
+                  onDragOver={(event) => {
+                    const next = edgeAt(event.currentTarget.getBoundingClientRect(), event);
+                    if (!allowed(moving, tabId, next)) {
+                      setOver(undefined);
+                      return;
+                    }
+                    event.preventDefault();
+                    setOver((current) =>
+                      current?.tabId === tabId && current.edge === next
+                        ? current
+                        : { tabId, edge: next },
+                    );
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const next = edgeAt(event.currentTarget.getBoundingClientRect(), event);
+                    setMoving(undefined);
+                    setOver(undefined);
+                    if (allowed(moving, tabId, next)) props.onPlaceTile(moving, tabId, next);
+                  }}
+                  style={{
+                    left: across.start,
+                    top: down.start,
+                    width: across.size,
+                    height: down.size,
+                  }}
+                >
+                  {edge === undefined ? null : (
+                    <div className="workspace-drop-overlay dock-tiles__place" data-drop-edge={edge}>
+                      <span>{EDGE_PHRASE[edge]}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -415,6 +530,14 @@ function Tile(props: {
   readonly onHide: () => void;
   readonly onMinimise?: () => void;
   readonly onMove: (direction: DockTileMove) => void;
+  readonly onDragStart: () => void;
+  readonly onDragEnd: () => void;
+  /** Every placement among the other tiles the menu may offer. */
+  readonly places: ReadonlyArray<{
+    readonly edge: DockTileEdge;
+    readonly label: string;
+    readonly place: () => void;
+  }>;
   readonly onShowAlone: () => void;
   readonly panelRef: Ref<HTMLElement> | undefined;
   readonly single: boolean;
@@ -482,7 +605,19 @@ function Tile(props: {
           data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
           ref={bar}
         >
-          <div className="dock-tile__lead">{content.barLeading}</div>
+          <div
+            className="dock-tile__lead"
+            draggable
+            onDragEnd={props.onDragEnd}
+            onDragStart={(event) => {
+              // Some engines refuse to start a drag that carries no data.
+              event.dataTransfer.setData("text/plain", content.label);
+              event.dataTransfer.effectAllowed = "move";
+              props.onDragStart();
+            }}
+          >
+            {content.barLeading}
+          </div>
           <DockBarRow fold={folded} items={barItems ?? []} toolLabel={content.label} />
           <>
             <OctantMenuRoot>
@@ -513,6 +648,20 @@ function Tile(props: {
                           <span>{label}</span>
                         </OctantMenuItem>
                       ) : null,
+                    )}
+                    {props.places.length === 0 ? null : (
+                      <>
+                        <OctantMenuSeparator />
+                        {props.places.map((place) => (
+                          <OctantMenuItem
+                            className="workspace-disclosure__action window-no-drag"
+                            key={`${place.edge}:${place.label}`}
+                            onClick={place.place}
+                          >
+                            <span>{`Move ${place.label.charAt(0).toLowerCase()}${place.label.slice(1)}`}</span>
+                          </OctantMenuItem>
+                        ))}
+                      </>
                     )}
                     <OctantMenuSeparator />
                     <OctantMenuItem
@@ -613,6 +762,7 @@ function TileDivider(props: {
       // The pointer was already released.
     }
     latest.current.onDraggingChange(false);
+    setNativeSurfaceResizeGuard(undefined);
     latest.current.onCancel();
   });
   useEffect(
@@ -621,6 +771,7 @@ function TileDivider(props: {
       if (drag.current === undefined) return;
       drag.current = undefined;
       latest.current.onDraggingChange(false);
+      setNativeSurfaceResizeGuard(undefined);
       latest.current.onCancel();
     },
     [],
@@ -660,6 +811,10 @@ function TileDivider(props: {
     window.addEventListener("keydown", escape.current);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     props.onDraggingChange(true);
+    setNativeSurfaceResizeGuard({
+      axis: vertical ? "x" : "y",
+      at: vertical ? event.clientX : event.clientY,
+    });
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -671,6 +826,10 @@ function TileDivider(props: {
     const delta = ((vertical ? event.clientX : event.clientY) - current.start) / current.size;
     const next = resized(current.first + delta, current.size);
     current.last = next;
+    setNativeSurfaceResizeGuard({
+      axis: vertical ? "x" : "y",
+      at: vertical ? event.clientX : event.clientY,
+    });
     props.onPreview(next);
   }
 
@@ -680,6 +839,7 @@ function TileDivider(props: {
     drag.current = undefined;
     window.removeEventListener("keydown", escape.current);
     props.onDraggingChange(false);
+    setNativeSurfaceResizeGuard(undefined);
     if (commit && current.last !== undefined) props.onCommit(current.last);
     else props.onCancel();
   }
@@ -723,6 +883,11 @@ function TileDivider(props: {
       aria-valuetext={`${Math.round(first * 100)} percent`}
       className="dock-tiles__divider"
       data-orientation={props.orientation}
+      onDoubleClick={() => {
+        // Back to an even split of the pair, the one size that needs no memory.
+        const next = resized(pair / 2, props.sizeOf());
+        if (next[props.index] !== first) props.onCommit(next);
+      }}
       onKeyDown={onKeyDown}
       onLostPointerCapture={(event) => finish(event, false)}
       onPointerCancel={(event) => finish(event, false)}

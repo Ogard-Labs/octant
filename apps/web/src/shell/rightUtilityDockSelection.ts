@@ -602,6 +602,77 @@ export function moveUtilityTile(
   return rebuilt(columns);
 }
 
+export type DockTileEdge = "left" | "right" | "top" | "bottom";
+
+/**
+ * Takes a shown tile to an edge of another shown tile: above or below puts it
+ * in the target's column, left or right puts it in the column on that side
+ * (a new one while there is room for one), at the target's row. Only the two
+ * columns that lose or gain a tile change; every other share stays. A drop on
+ * itself, or one the caps (two columns of three tiles) refuse, returns the
+ * same state. The tool stays mounted: only its tile's place changes.
+ */
+export function placeUtilityTile(
+  state: ThreadUtilityDockState,
+  tabId: string,
+  targetTabId: string,
+  edge: DockTileEdge,
+): ThreadUtilityDockState {
+  const layout = state.layout;
+  if (layout === undefined || tabId === targetTabId) return state;
+  const shown = layoutTabIds(layout);
+  if (!shown.includes(tabId) || !shown.includes(targetTabId)) return state;
+  const columns = withoutTile(layout, tabId).columns.filter((column) => column.tiles.length > 0);
+  const targetColumn = columns.findIndex((column) =>
+    column.tiles.some((tile) => tile.tabId === targetTabId),
+  );
+  const target = columns[targetColumn];
+  if (target === undefined) return state;
+  const targetRow = target.tiles.findIndex((tile) => tile.tabId === targetTabId);
+  const joinedColumn = (column: DockTileColumn, row: number): DockTileColumn | undefined => {
+    const count = column.tiles.length;
+    if (count >= MAX_DOCK_TILES_PER_COLUMN) return undefined;
+    const scaled = column.tiles.map((tile) => ({
+      ...tile,
+      share: (tile.share * count) / (count + 1),
+    }));
+    const at = Math.min(Math.max(row, 0), count);
+    return {
+      ...column,
+      tiles: [...scaled.slice(0, at), { tabId, share: 1 / (count + 1) }, ...scaled.slice(at)],
+    };
+  };
+  let next: ReadonlyArray<DockTileColumn> | undefined;
+  if (edge === "top" || edge === "bottom") {
+    const joined = joinedColumn(target, edge === "top" ? targetRow : targetRow + 1);
+    next =
+      joined === undefined
+        ? undefined
+        : columns.map((column, index) => (index === targetColumn ? joined : column));
+  } else {
+    const sideIndex = targetColumn + (edge === "left" ? -1 : 1);
+    const side = columns[sideIndex];
+    if (side !== undefined) {
+      const joined = joinedColumn(side, targetRow);
+      next =
+        joined === undefined
+          ? undefined
+          : columns.map((column, index) => (index === sideIndex ? joined : column));
+    } else if (columns.length < MAX_DOCK_TILE_COLUMNS) {
+      // An even split, as `place()` makes: the kept columns keep their ratio.
+      const count = columns.length;
+      const added: DockTileColumn = { share: 1 / (count + 1), tiles: [{ tabId, share: 1 }] };
+      const kept = columns.map((column) => ({
+        ...column,
+        share: (column.share * count) / (count + 1),
+      }));
+      next = edge === "left" ? [added, ...kept] : [...kept, added];
+    }
+  }
+  if (next === undefined) return state;
+  return settle(state.tabs, { columns: next }, tabId, carried(state));
+}
+
 /** Sets the columns' fractions of the width, in column order. */
 export function resizeUtilityTileColumns(
   state: ThreadUtilityDockState,

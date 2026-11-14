@@ -16,6 +16,7 @@ import {
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
+  placeUtilityTile,
   shownTileColumns,
   readBottomPanelToolPresentation,
   readUtilityDockOpen,
@@ -778,6 +779,47 @@ describe("dock tool tiles", () => {
     ]);
     expect(moveUtilityTile(sided, "plan", "right")).toBe(sided);
     expect(moveUtilityTile(sided, "files", "up")).toBe(sided);
+  });
+
+  it("drops a tile on another tile's edge, changing only the columns that lose or gain a tile", () => {
+    const sided = twoColumnsForMoves();
+    expect(columnsOf(sided)).toEqual([["canvas"], ["files", "plan"]]);
+    expect(columnsOf(placeUtilityTile(sided, "plan", "canvas", "bottom"))).toEqual([
+      ["canvas", "plan"],
+      ["files"],
+    ]);
+    const moved = placeUtilityTile(sided, "plan", "files", "top");
+    expect(columnsOf(moved)).toEqual([["canvas"], ["plan", "files"]]);
+    // Neither column's width share changes.
+    expect(moved.layout?.columns.map((column) => column.share)).toEqual(
+      sided.layout?.columns.map((column) => column.share),
+    );
+    sharesAddUp(moved);
+    expect(moved.active).toBe("plan");
+    // Left of the right column's tile is the left column.
+    expect(columnsOf(placeUtilityTile(sided, "files", "plan", "left"))).toEqual([
+      ["files", "canvas"],
+      ["plan"],
+    ]);
+    // A drop on itself changes nothing.
+    expect(placeUtilityTile(sided, "plan", "plan", "left")).toBe(sided);
+  });
+
+  it("makes a second column from a drop on a side edge and refuses what the caps refuse", () => {
+    const stacked = showUtilityTabBelow(opened("files", "canvas"), "files");
+    const beside = placeUtilityTile(stacked, "files", "canvas", "right");
+    expect(columnsOf(beside)).toEqual([["canvas"], ["files"]]);
+    expect(beside.layout?.columns.map((column) => column.share)).toEqual([0.5, 0.5]);
+    expect(columnsOf(placeUtilityTile(stacked, "files", "canvas", "left"))).toEqual([
+      ["files"],
+      ["canvas"],
+    ]);
+    let full = selectUtilityTabState(opened("files", "canvas", "plan", "terminal"), "files");
+    full = showUtilityTabBelow(full, "canvas");
+    full = showUtilityTabBelow(full, "plan");
+    full = showUtilityTabBeside(full, "terminal");
+    expect(columnsOf(full)).toEqual([["files", "canvas", "plan"], ["terminal"]]);
+    expect(placeUtilityTile(full, "terminal", "files", "top")).toBe(full);
   });
 
   it("collapses to one column when the only tile of a column moves across", () => {

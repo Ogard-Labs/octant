@@ -970,8 +970,9 @@ local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, 32px: the tool's name (the Browser's bar is its page row),
 then the tool's own controls (navigation as words, actions as icons, status as
 text; they fold into a named view menu and then a More menu before the name is
-cut), with an Arrange menu (Move left, right, up and down where the caps allow, Show
-alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
+cut), with an Arrange menu (Move left, right, up and down where the caps allow, Move
+left of, right of, above or below each other tile where the caps allow it and it changes
+something, Show alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
 trailing edge; a tool that is open but not shown is marked on its button in the title band's
 tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
 Stacked, a page showed four bars and named the tool
@@ -979,9 +980,22 @@ three times. Every tile is a flat pane that shares its edges with its neighbours
 with the stage: no gap, no corner of its own and no shadow, one 1px line between
 two panes ([DESIGN.md](../../DESIGN.md#depth-and-material) owns the material),
 and the framed panel's outline along the top and right, which clips the tiles to
-its rounded corners. The divider's hit area is 8px wide,
-centred on that line; it is empty at rest, shows the strong border while hovered
-and the meta ink while grabbed, and keeps no accent line after a click. At 960px and below the dock is a
+its rounded corners. Every split between tiles, vertical or horizontal, has a divider whose hit area is 8px wide,
+centred on that line, as the sidebar's is; it is empty at rest, shows the strong border while hovered
+and the meta ink while grabbed, and keeps no accent line after a click. A drag resizes
+the pair with minimum sizes, Escape abandons it, a double click returns the pair to an even
+split, and a focused divider takes the arrow keys (Shift for a larger step, Home and End for the
+ends of its range) and reports its share as `aria-valuenow`; the sizes are part of the
+window-local layout. Only the pair the person is dragging changes. A tile moves by its bar:
+dragging the bar over another tile marks the half of that tile (left, right, above, below)
+the drop would take, with one indicator and no other tile moving, and the Arrange menu does the
+same for the keyboard. A drop that would leave the tiles as they are, or that the caps refuse,
+shows no indicator. A native Browser page stays in the window while a divider is held: it follows
+the divider live, held 40px clear of the pointer on its own side so it never takes the drag, and
+it is placed at the final bounds when the divider is let go. Only dragging a tile or a tool button
+over the dock takes the page out of the window, because a native view cannot receive a drop.
+The page's bounds are sent one at a time, so a page taken out and put back is never removed after
+it was shown again. At 960px and below the dock is a
 sheet over the page (a floating container with its own 16px corner) that holds
 one tool, so its tile is the same flat pane with no neighbour: a tile is flat
 at every width, and no width gives one a corner of its own, a shadow or a gap. Columns stand side by side only when the tile area can give each 280px and

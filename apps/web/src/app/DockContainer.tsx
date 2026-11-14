@@ -81,6 +81,7 @@ export interface DockContainerProps {
     | "runDockToolMenu"
     | "toggleDockTool"
     | "moveDockTile"
+    | "placeDockTile"
     | "openDockTabBeside"
     | "loadCodeBoard"
     | "mergeProjectPullRequest"
@@ -797,6 +798,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           onHideTile: actions.hideDockTile,
           onMinimise: actions.minimiseDockTool,
           onMove: actions.moveDockTile,
+          onPlace: actions.placeDockTile,
           onResizeColumn: actions.resizeDockTileColumn,
           onResizeColumns: actions.resizeDockTileColumns,
           onShowAlone: actions.showDockTabAlone,

@@ -413,6 +413,7 @@ import {
   offeredBrowserStaysMinimised,
   restoreUtilityTool,
   moveUtilityTile,
+  placeUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -429,6 +430,7 @@ import {
   threadUtilityDockState,
   threadUtilityDockKey,
   withoutTileLayout,
+  type DockTileEdge,
   type DockTileMove,
   type ThreadUtilityDockKey,
   type ThreadUtilityDockState,
@@ -4362,6 +4364,9 @@ function LaunchedShell(
     changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
   }
   function resizeDockTileColumns(shares: ReadonlyArray<number>) {
+  function placeDockTile(tabId: string, targetTabId: string, edge: DockTileEdge) {
+    changeDockTiles((state) => placeUtilityTile(state, tabId, targetTabId, edge));
+  }
     changeDockTiles((state) => resizeUtilityTileColumns(state, shares));
   }
   function resizeDockTileColumn(columnIndex: number, shares: ReadonlyArray<number>) {
@@ -5385,6 +5390,7 @@ function LaunchedShell(
       minimiseDockTool,
       moveDockTile,
       openDockTabBeside,
+      placeDockTile,
       resizeDockTileColumn,
       resizeDockTileColumns,
       showDockTabAlone,

@@ -85,6 +85,7 @@ function Dock(props: { readonly layout: DockTileLayout; readonly onRefresh?: () 
       onFocusTile={() => {}}
       onHideTile={() => {}}
       onMoveTile={() => {}}
+      onPlaceTile={() => {}}
       onResizeColumn={() => {}}
       onResizeColumns={() => {}}
       onShowTileAlone={() => {}}
@@ -408,6 +409,7 @@ describe("a bar that holds status text and a tool's name", () => {
       onFocusTile={() => {}}
       onHideTile={() => {}}
       onMoveTile={() => {}}
+      onPlaceTile={() => {}}
       onResizeColumn={() => {}}
       onResizeColumns={() => {}}
       onShowTileAlone={() => {}}
@@ -523,6 +525,7 @@ describe("a tile that changes between tiled and alone", () => {
         onFocusTile={() => {}}
         onHideTile={() => {}}
         onMoveTile={() => {}}
+        onPlaceTile={() => {}}
         onResizeColumn={() => {}}
         onResizeColumns={() => {}}
         onShowTileAlone={() => {}}
@@ -596,6 +599,7 @@ function dockOf(tool: ReactNode, layout: DockTileLayout = two) {
       onFocusTile={() => {}}
       onHideTile={() => {}}
       onMoveTile={() => {}}
+      onPlaceTile={() => {}}
       onResizeColumn={() => {}}
       onResizeColumns={() => {}}
       onShowTileAlone={() => {}}
