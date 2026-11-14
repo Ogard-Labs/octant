@@ -142,6 +142,8 @@ export class BrowserToolApprovalService {
     /** The agent asks the person to sign in here; see the contract. */
     readonly signIn?: { readonly reason?: string };
     readonly script?: { readonly source: string };
+    /** One call of a tool the page declares; see the contract. */
+    readonly pageTool?: { readonly name: string; readonly arguments: string };
     readonly signal?: AbortSignal;
   }): Promise<BrowserToolApprovalOutcome> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
@@ -201,6 +203,7 @@ export class BrowserToolApprovalService {
                 : { reason: input.signIn.reason.trim().slice(0, 300) },
           }),
       ...(input.script === undefined ? {} : { script: input.script }),
+      ...(input.pageTool === undefined ? {} : { pageTool: input.pageTool }),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
@@ -284,7 +287,8 @@ export class BrowserToolApprovalService {
       pending.view.upload === undefined &&
       pending.view.download === undefined &&
       pending.view.signIn === undefined &&
-      pending.view.script === undefined
+      pending.view.script === undefined &&
+      pending.view.pageTool === undefined
     ) {
       // "Allow all sites in this profile" remembers the profile under the
       // any-site entry; a Private page has no profile, so there it remembers

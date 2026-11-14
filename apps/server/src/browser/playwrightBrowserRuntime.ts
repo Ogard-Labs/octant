@@ -22,6 +22,9 @@ import {
   originAllowed,
   parseBrowserKeyChord,
   readBrowserPage,
+  readBrowserPageTools,
+  BROWSER_PAGE_TOOLS_LIST_REQUEST,
+  type BrowserPageToolsResult,
   redactedBrowserUrl,
   browserPageCounters,
   MAX_BROWSER_AUDIT_ELEMENTS,
@@ -641,6 +644,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const at = (target: string | undefined, message: string) =>
       targetDocument(page, required(target, message), allowedOrigins);
     let recording: BrowserRuntimeRecording | undefined;
+    let pageToolCall: BrowserPageToolsResult | undefined;
     switch (request.kind) {
       case "navigate":
         try {
@@ -711,6 +715,21 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       case "observe-diagnostics":
         return readDiagnostics(required(owned, "Browser context is unavailable."), request);
       case "audit":
+        break;
+      case "page-tools": {
+        // A read like an audit: the page's declared forms, nothing filled.
+        const title = await page.title();
+        return {
+          ...(page.url() === "about:blank" ? {} : { url: bounded(page.url(), 4096) }),
+          ...(title.trim() === "" ? {} : { title: bounded(title, 1024) }),
+          pageTools: await page.evaluate(readBrowserPageTools, BROWSER_PAGE_TOOLS_LIST_REQUEST),
+        };
+      }
+      case "page-tool-call":
+        pageToolCall = await page.evaluate(readBrowserPageTools, {
+          mode: "call",
+          call: required(request.pageTool, "A page tool call names the tool it calls."),
+        });
         break;
       case "wait":
         if (request.waitFor !== undefined) {
@@ -854,6 +873,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       request.kind === "extract-text" ? request.target : undefined,
     );
     if (recording !== undefined) return { ...observed, recording };
+    if (pageToolCall !== undefined) return { ...observed, pageToolCall };
     if (request.kind !== "resize") return observed;
     const emulation = await measureEmulation(page);
     return emulation === undefined ? observed : { ...observed, emulation };
@@ -1836,6 +1856,7 @@ const SETTLING_ACTIONS: ReadonlySet<BrowserRuntimeAction["kind"]> = new Set([
   "drag",
   "upload",
   "resize",
+  "page-tool-call",
 ]);
 
 /**

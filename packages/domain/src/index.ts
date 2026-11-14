@@ -6,6 +6,7 @@ export * from "./browserElementFeedback";
 export * from "./browserDownloadPolicy";
 export * from "./browserPageSnapshot";
 export * from "./browserPageAudit";
+export * from "./browserPageTools";
 export * from "./browserCapturePolicy";
 export * from "./browserProofPolicy";
 export * from "./browserRecording";

@@ -58,7 +58,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 6         | 3       | 3            | 0                   |
+| [Browser](#browser)                                                                   | 7         | 3       | 4            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 4       | 2            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **252**   | **152** | **96**       | **4**               |
+| **All areas**                                                                         | **253**   | **152** | **97**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2942,6 +2942,18 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 - Named account profiles have host-assigned identities, native local labels and separate persistent stores. A local person explicitly selects one; task defaults never grant site, Project or credential authority. Approval names come from the native registry, and origin grants/extensions remain isolated per identity. Unknown identities, paired/unattended callers and a missing native owner refuse. Stores and the name registry are not exported or synced; Private, Project and Personal retain their behavior.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
+
+### Page-declared tools
+
+The Browser agent tool reads the tools a page declares for agents and calls them on that page (maintainer decision, 2026-11-14).
+
+- Octant reads the declarative WebMCP form, a `<form>` carrying `toolname` and `tooldescription`; the imperative registry is not read, because neither Browser enables it.
+- A declaration is outside content: listing one marks the thread under the `browser-page` source, it is bounded and framed as evidence, never instructions, and it adds nothing to the thread's tools by itself.
+- A call fills that page's form and submits it only when the page declared `toolautosubmit`, through the same Browser runtime, site approval and credential-field rule as other Browser actions; a form with a credential field is never listed or called.
+- Below Full access each call asks the person, naming the site, the tool and its arguments, and the answer is never remembered. At Full access a call runs without asking unless [The Full access rule](#the-full-access-rule)'s existing pay, buy or send-as-the-person entry covers it; no exception is added.
+- Built on the server and the headless Browser, with a real-Chromium test; the desktop Browser's path is wired but not yet run in the app.
+
+Status: Partly built. Since: 2026-11-14. Detail: [Browser for agents: Page-declared tools](browser-agent-tool.md#page-declared-tools).
 
 ## Provider runtimes
 
