@@ -174,6 +174,20 @@ describe("sandbox launch policy", () => {
     ).toMatchObject({ status: "refused", code: "sandbox-policy-conflict" });
   });
 
+  it("does not let a folder grant widen a read-only launch posture", () => {
+    const { input, selection } = fixture();
+    expect(
+      compileSandboxLaunchPolicy(
+        { ...input, writeBoundRoot: false, sandboxPolicy: selection },
+        "linux",
+      ),
+    ).toMatchObject({
+      status: "refused",
+      code: "sandbox-policy-conflict",
+      rules: ["filesystem.readOnlyPosture"],
+    });
+  });
+
   it("refuses caller-supplied materialized roots without a policy admission", () => {
     const { input } = fixture();
     expect(

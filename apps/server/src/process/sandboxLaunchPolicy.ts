@@ -94,6 +94,13 @@ export function compileSandboxLaunchPolicy(
       if (!stat.isDirectory() || canonical === "/") throw new Error("Not a grantable directory");
       return { path: canonical, device: stat.dev, inode: stat.ino };
     };
+    if (launch.writeBoundRoot === false && selection.policy.filesystem.readWriteRoots.length > 0) {
+      return {
+        status: "refused",
+        code: "sandbox-policy-conflict",
+        rules: ["filesystem.readOnlyPosture"],
+      };
+    }
     const readOnly = selection.policy.filesystem.readOnlyRoots.map(directory);
     const readWrite = selection.policy.filesystem.readWriteRoots.map(directory);
     const boundRoots = [launch.boundRoot, ...(launch.extraBoundRoots ?? [])].map(directory);
