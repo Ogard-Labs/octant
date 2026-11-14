@@ -114,13 +114,9 @@ describe("the Pull requests card", () => {
     ).toBeInTheDocument();
     expect(within(card).getByRole("heading", { name: "Yours" })).toBeInTheDocument();
     expect(within(card).getByRole("button", { name: /Please review/ })).toHaveTextContent(
-      "running",
+      "Running",
     );
-    expect(within(card).getByRole("button", { name: /Please review/ })).toHaveTextContent(
-      "in review",
-    );
-    expect(within(card).getByRole("button", { name: /My change/ })).toHaveTextContent("draft");
-    expect(within(card).getByRole("button", { name: /My change/ })).toHaveTextContent("none");
+    expect(within(card).getByRole("button", { name: /My change/ })).toHaveTextContent("Draft");
     await userEvent.click(within(card).getByRole("button", { name: /Please review/ }));
     expect(onOpenRow).toHaveBeenCalledWith(
       expect.objectContaining({ number: 4, reference: "octant#4" }),

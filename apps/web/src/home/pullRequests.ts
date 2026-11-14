@@ -103,6 +103,28 @@ export function pullRequestReviewState(
   return "in review";
 }
 
+export interface PullRequestCardStatus {
+  readonly word: string;
+  readonly tone: "positive" | "warning" | "negative" | "neutral";
+}
+
+/**
+ * The one word a row ends with, taken from the checks and the review together:
+ * a draft says so, a failure outranks everything, and a quiet row reads as
+ * what is true of it.
+ */
+export function pullRequestCardStatus(
+  row: Pick<PullRequestCardRow, "ci" | "review">,
+): PullRequestCardStatus {
+  if (row.review === "draft") return { word: "Draft", tone: "neutral" };
+  if (row.ci === "failed") return { word: "Failing", tone: "negative" };
+  if (row.review === "changes requested") return { word: "Changes requested", tone: "negative" };
+  if (row.ci === "running") return { word: "Running", tone: "warning" };
+  if (row.review === "approved") return { word: "Approved", tone: "positive" };
+  if (row.ci === "passed") return { word: "Passed", tone: "positive" };
+  return { word: "In review", tone: "neutral" };
+}
+
 function sameLogin(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
 }

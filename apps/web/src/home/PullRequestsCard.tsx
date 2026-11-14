@@ -7,6 +7,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
 import {
   buildPullRequestCard,
+  pullRequestCardStatus,
   PULL_REQUESTS_CARD_ID,
   pullRequestSnapshotReach,
   type PullRequestCardRow,
@@ -166,6 +167,16 @@ function PullRequestRows(props: {
   );
 }
 
+function PullRequestStatus(props: { readonly row: PullRequestCardRow }) {
+  const status = pullRequestCardStatus(props.row);
+  return (
+    <span className="oct-meta pull-requests-card__status" data-tone={status.tone}>
+      <span aria-hidden="true" className="pull-requests-card__dot" />
+      {status.word}
+    </span>
+  );
+}
+
 function PullRequestGroup(props: {
   readonly label: string;
   readonly rows: ReadonlyArray<PullRequestCardRow>;
@@ -190,12 +201,7 @@ function PullRequestGroup(props: {
                   <span className="oct-meta oct-meta--mono pull-requests-card__reference">
                     {row.reference}
                   </span>
-                  <span className="oct-meta pull-requests-card__ci" data-ci={row.ci}>
-                    {row.ci}
-                  </span>
-                  <span className="oct-meta pull-requests-card__review" data-review={row.review}>
-                    {row.review}
-                  </span>
+                  <PullRequestStatus row={row} />
                 </span>
               </span>
             </OctantButton>
