@@ -255,8 +255,12 @@ html[data-octant-theme-mode="light"] .turn-user .bubble {
   background: var(--octant-well);
 }
 
+/* A tray, a chosen segment and a hover are washes of the theme's own ink over
+   whatever they sit on (4%, 8%, 4%), never the theme's tinted control
+   colour: on a tinted preset that colour carried a hue the surfaces round it
+   did not, and read as a different background. */
 .modeswitch__tray > .mode[aria-current="page"] {
-  background: var(--octant-control);
+  background: var(--oct-fill-2);
 }
 
 /* A chip is a raised control; the suggestion chip (a button variant) stays quiet

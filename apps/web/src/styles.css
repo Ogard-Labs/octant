@@ -251,7 +251,8 @@ html[data-octant-theme-mode="light"] {
      behind a white menu cannot be dimmed out of the way. */
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 78%, transparent);
   --octant-float-blur: blur(40px) saturate(180%) contrast(0.5) brightness(1.5);
-  --octant-well: rgb(16 24 40 / 5%);
+  /* The theme's own ink, so a tinted preset's tray is not a bluish grey. */
+  --octant-well: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
   --octant-shadow-overlay: 0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%);
   --octant-shadow-pop: 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);

@@ -125,7 +125,7 @@ resolved values are for the default theme.
 | Float            | `--octant-float`                                        | floating 91% toward the ink (oklab); floating in light                                          | `#333333`       | `#fdfdfc`       |
 | Float controls   | `--octant-float-control`, `-hover`, `-pressed`, `-line` | float 94 / 89 / 84 / 88% toward the ink; the control roles in light                             |                 |                 |
 | Settings group   | `--oct-settings-card-fill`                              | ink 2% over the page                                                                            |                 |                 |
-| Well             | `--octant-well`                                         | black 34% (dark), `rgb(16 24 40 / 5%)` (light)                                                  |                 |                 |
+| Well             | `--octant-well`                                         | black 34% (dark), the theme's ink at 5% (light)                                                  |                 |                 |
 
 The frame ground is darker than the pane in dark and a step greyer in light,
 so the rail and band read as the window and the panel as the work. Inside the
@@ -1268,7 +1268,12 @@ the pointer `--oct-wash-hover`, no border.
 enclosed track. A tray segment is 24px inside 2px of padding, so every tray is
 28px. Pane tabs are in [Workspace: Content tabs](docs/design/workspace.md#content-tabs).
 Feature CSS may size these but never restore a local track, underline or
-persistent active border.
+persistent active border. A tray, a chosen segment and a ghost or outline
+button's hover, expanded and pressed states are washes of the theme's own ink
+over whatever they sit on (`--oct-fill-4` 4% for a tray and a hover,
+`--oct-fill-2` 8% for a chosen segment and a press), never the control colour: a
+tinted preset's control colour carries a hue its black or graphite surfaces do
+not, and read as a different background beside them.
 
 ### Home with the drawn ground
 

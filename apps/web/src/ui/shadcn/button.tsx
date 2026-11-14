@@ -32,11 +32,11 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 active:bg-destructive/25",
         outline:
-          "border-border bg-[var(--octant-outline-rest,var(--background))] hover:bg-muted active:bg-(--octant-control-pressed) hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground [html[data-octant-increased-contrast=true]_&]:border-(--octant-border-strong)",
+          "border-border bg-[var(--octant-outline-rest,var(--background))] hover:bg-(--oct-fill-4) active:bg-(--oct-fill-2) hover:text-foreground focus-visible:bg-(--oct-fill-4) focus-visible:text-foreground aria-expanded:bg-(--oct-fill-4) aria-expanded:text-foreground [html[data-octant-increased-contrast=true]_&]:border-(--octant-border-strong)",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] active:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_10%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
-          "hover:bg-muted active:bg-(--octant-control-pressed) hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
+          "hover:bg-(--oct-fill-4) active:bg-(--oct-fill-2) hover:text-foreground focus-visible:bg-(--oct-fill-4) focus-visible:text-foreground aria-expanded:bg-(--oct-fill-4) aria-expanded:text-foreground",
         link: "h-auto p-0 text-foreground underline-offset-4 hover:underline",
         // A card-shaped button (a count tile, a rail entry, a live card) whose
         // feature stylesheet owns the paint. It keeps the button's behaviour,
