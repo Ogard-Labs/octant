@@ -7,13 +7,15 @@ import {
   type Todo,
   type TodoCommand,
   type TodoProjectLink,
+  type TodoThreadLink,
 } from "@octant/contracts/todos";
+import type { OctantMode } from "@octant/contracts";
 import { Check, Ellipsis, Folder, Hash } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { WorkListMenuTrigger } from "../surface/WorkList";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -31,6 +33,12 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { TodoQuickAdd } from "./TodoQuickAdd";
 import {
+  newestTodoThread,
+  todoThreadKey,
+  type TodoStartTarget,
+  type TodoThreadState,
+} from "./todoThreadModel";
+import {
   DEFAULT_TODO_FILTER,
   NO_PROJECT,
   countTodos,
@@ -47,11 +55,28 @@ import {
 } from "./todoListModel";
 import type { TodoChangeOutcome, TodoList } from "./useTodoList";
 
+/** A thread started from a to-do whose link the list host has not recorded. */
+export interface TodoUnlinkedStart {
+  readonly threadId: string;
+  readonly mode: OctantMode;
+}
+
+/** Start and the thread state on each row; absent where this window cannot start threads. */
+export interface TodoStartProps {
+  readonly threadStates: ReadonlyMap<string, TodoThreadState>;
+  readonly onStart: (todo: Todo, target: TodoStartTarget) => void;
+  readonly onOpenThread: (link: TodoThreadLink, title: string) => void;
+  /** By to-do id. */
+  readonly unlinked: ReadonlyMap<string, TodoUnlinkedStart>;
+  readonly onLink: (todoId: string) => void;
+}
+
 export interface TodosPageProps {
   readonly list: TodoList;
   /** This host's active Projects; an archived or deleted one reads "Project removed". */
   readonly projects: ReadonlyArray<TodoProjectSource>;
   readonly onClose: () => void;
+  readonly start?: TodoStartProps;
 }
 
 const STATE_FILTERS: ReadonlyArray<{ readonly id: TodoStateFilter; readonly label: string }> = [
@@ -210,6 +235,7 @@ export function TodosView(props: TodosPageProps) {
                   setSelected(selected === String(todo.id) ? undefined : String(todo.id))
                 }
                 onSend={send}
+                {...(props.start === undefined ? {} : { start: props.start })}
                 projects={props.projects}
                 selected={selected === String(todo.id)}
                 todo={todo}
@@ -349,6 +375,7 @@ interface TodoRowProps {
   readonly onDragStart: () => void;
   readonly onDragEnd: () => void;
   readonly onDrop: () => void;
+  readonly start?: TodoStartProps;
 }
 
 /** A link to a Project on this host that is no longer active reads as removed. */
@@ -440,7 +467,9 @@ function TodoRow(props: TodoRowProps) {
           todo.state !== "dropped" ? null : (
             <span className="todo-row__meta">
               {todo.state === "dropped" ? <span className="oct-meta">Dropped</span> : null}
-              {isStarted(todo) ? <span className="oct-meta">Started</span> : null}
+              {isStarted(todo) && props.start === undefined ? (
+                <span className="oct-meta">Started</span>
+              ) : null}
               {todo.projects.map((link) => (
                 <span className="todo-chip" key={projectKey(link)}>
                   <Folder aria-hidden="true" size={12} />
@@ -457,6 +486,14 @@ function TodoRow(props: TodoRowProps) {
           )}
         </OctantButton>
         <span className="todo-row__actions">
+          {props.start === undefined || todo.state !== "open" ? null : (
+            <TodoStartControl
+              hostId={props.hostId}
+              onStart={(target) => props.start?.onStart(todo, target)}
+              projects={props.projects}
+              todo={todo}
+            />
+          )}
           <OctantMenu
             items={menuItems}
             onValueChange={(value) => {
@@ -482,6 +519,9 @@ function TodoRow(props: TodoRowProps) {
           />
         </span>
       </div>
+      {props.start === undefined ? null : (
+        <TodoThreadLine onSend={props.onSend} start={props.start} todo={todo} />
+      )}
       {props.selected ? (
         <TodoEditor
           choices={props.choices}
@@ -691,5 +731,139 @@ function TodoEditor(props: {
         </OctantButton>
       </div>
     </form>
+  );
+}
+
+/**
+ * Start opens the ordinary new-thread draft; nothing starts until the person
+ * sends. With one of this host's Projects it goes there; with several the
+ * person picks one; with none, Chat or any Project.
+ */
+function TodoStartControl(props: {
+  readonly todo: Todo;
+  readonly hostId: StableHostId;
+  readonly projects: ReadonlyArray<TodoProjectSource>;
+  readonly onStart: (target: TodoStartTarget) => void;
+}) {
+  const linked = props.projects.filter((project) =>
+    props.todo.projects.some(
+      (link) =>
+        String(link.hostId) === String(props.hostId) &&
+        String(link.projectId) === String(project.id),
+    ),
+  );
+  const targets: ReadonlyArray<TodoStartTarget> =
+    linked.length > 0
+      ? linked.map((project) => ({
+          kind: "project",
+          projectId: String(project.id),
+          name: project.name,
+        }))
+      : [
+          { kind: "chat" },
+          ...props.projects.map(
+            (project): TodoStartTarget => ({
+              kind: "project",
+              projectId: String(project.id),
+              name: project.name,
+            }),
+          ),
+        ];
+  const only = targets.length === 1 ? targets[0] : undefined;
+  if (only !== undefined) {
+    return (
+      <OctantButton
+        aria-label={`Start ${props.todo.title}`}
+        onClick={() => props.onStart(only)}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        Start
+      </OctantButton>
+    );
+  }
+  const valueOf = (target: TodoStartTarget) =>
+    target.kind === "chat" ? "chat" : `project:${target.projectId}`;
+  return (
+    <OctantMenu
+      items={targets.map((target) => ({
+        label: target.kind === "chat" ? "Chat" : target.name,
+        value: valueOf(target),
+      }))}
+      onValueChange={(value) => {
+        const target = targets.find((entry) => valueOf(entry) === value);
+        if (target !== undefined) props.onStart(target);
+      }}
+      selectionMode="action"
+      trigger={<span>Start</span>}
+      triggerClassName={octantButtonClassName({ variant: "ghost", size: "sm" })}
+      triggerLabel={`Start ${props.todo.title}`}
+      value=""
+    />
+  );
+}
+
+/**
+ * The newest thread started from the to-do, as the window's own rows show it.
+ * A thread the list host did not record says so, with Link to try again; the
+ * thread itself is unaffected.
+ */
+function TodoThreadLine(props: {
+  readonly todo: Todo;
+  readonly start: TodoStartProps;
+  readonly onSend: (command: TodoCommand) => Promise<TodoChangeOutcome>;
+}) {
+  const { todo, start } = props;
+  const unlinked = start.unlinked.get(String(todo.id));
+  const link = newestTodoThread(todo);
+  const state = link === undefined ? undefined : start.threadStates.get(todoThreadKey(link));
+  if (unlinked === undefined && link === undefined) return null;
+  return (
+    <div className="todo-row__thread">
+      {link === undefined ? null : state === undefined ? (
+        <span className="oct-meta">Started</span>
+      ) : (
+        <OctantButton
+          aria-label={`${state.label}: open ${state.title}`}
+          className="todo-thread"
+          data-phase={state.phase}
+          onClick={() => start.onOpenThread(link, state.title)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {state.label}
+          <span className="oct-meta todo-thread__title">{state.title}</span>
+        </OctantButton>
+      )}
+      {state?.phase === "done" && todo.state === "open" ? (
+        <OctantButton
+          onClick={() =>
+            void props.onSend(
+              decodeTodoCommand({ kind: "set-todo-state", todoId: todo.id, state: "done" }),
+            )
+          }
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Tick off
+        </OctantButton>
+      ) : null}
+      {unlinked === undefined ? null : (
+        <span className="todo-row__unlinked">
+          <span className="oct-row-detail">Thread started, not linked</span>
+          <OctantButton
+            onClick={() => start.onLink(String(todo.id))}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Link
+          </OctantButton>
+        </span>
+      )}
+    </div>
   );
 }
