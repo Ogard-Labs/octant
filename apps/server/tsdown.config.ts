@@ -12,6 +12,9 @@ export default defineConfig({
       /^@modelcontextprotocol\//,
       // KaTeX typesets exported math; it is bundled for the same reason.
       /^katex(?:\/|$)/,
+      // MCP input schemas are compiled on demand. Keep Ajv in a lazy bundled
+      // chunk so packaged runtimes do not need a separately shipped module.
+      /^ajv(?:\/|$)/,
     ],
     onlyBundle: false,
   },

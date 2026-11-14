@@ -789,7 +789,108 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.drainAll();
   });
 
-  it("omits MCP tools whose nested input schema exceeds provider bounds", async () => {
+  it("does not publish a stdio session that exits while tool schemas are prepared", async () => {
+    let exitListener: (() => void) | undefined;
+    const manager = new AgentPluginMcpSessionManager({
+      store: {
+        contentRoot: () => "/tmp/plugin",
+        pluginDataRoot: () => "/tmp/plugin-data",
+        readVerifiedConfiguration: async () =>
+          JSON.stringify({
+            $schema: AGENT_PLUGINS_MCP_SCHEMA,
+            mcpServers: { local: { type: "stdio", command: "./server" } },
+          }),
+      },
+      stdioSupervisor: {
+        startInteractive: async () => {
+          const stdin = new PassThrough();
+          const stdout = new PassThrough();
+          let pending = "";
+          stdin.setEncoding("utf8");
+          stdin.on("data", (chunk) => {
+            pending += String(chunk);
+            for (
+              let newline = pending.indexOf("\n");
+              newline >= 0;
+              newline = pending.indexOf("\n")
+            ) {
+              const line = pending.slice(0, newline);
+              pending = pending.slice(newline + 1);
+              const message = JSON.parse(line) as { id?: number; method?: string };
+              if (message.id === undefined) continue;
+              stdout.write(
+                `${JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: message.id,
+                  result:
+                    message.method === "initialize"
+                      ? {
+                          protocolVersion: "2025-03-26",
+                          capabilities: {},
+                          serverInfo: { name: "closing", version: "1.0.0" },
+                        }
+                      : message.method === "tools/list"
+                        ? {
+                            tools: [
+                              {
+                                name: "lookup",
+                                inputSchema: {
+                                  $schema: "https://json-schema.org/draft/2019-09/schema",
+                                  type: "object",
+                                },
+                              },
+                            ],
+                          }
+                        : {},
+                })}\n`,
+              );
+              if (message.method === "tools/list") setTimeout(() => exitListener?.(), 0);
+            }
+          });
+          return {
+            receipt: { state: "ready" },
+            process: {
+              pid: 9004,
+              ready: Promise.resolve(),
+              wait: new Promise(() => undefined),
+              stop: async () => undefined,
+              cancel: async () => undefined,
+              stdin,
+              stdout,
+              once: (_event: "exit", listener: () => void) => {
+                exitListener = listener;
+              },
+            },
+          } as never;
+        },
+      },
+    });
+
+    await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(manager.sessions()).toHaveLength(0);
+    expect(manager.toolDefinitions()).toHaveLength(0);
+    expect(manager.failedComponents()).toEqual([
+      expect.objectContaining({
+        componentId: "mcp-local",
+        reason: expect.stringMatching(/closed before initialization|transport closed/i),
+      }),
+    ]);
+    await manager.drainAll();
+  });
+
+  it("omits MCP tools whose names repeat or whose input schemas are invalid or unsafe", async () => {
+    const branchingDefinitions: Record<string, unknown> = { leaf: { type: "null" } };
+    let branchingReference = "#/$defs/leaf";
+    for (let index = 0; index < 10; index += 1) {
+      const name = `branch-${index}`;
+      branchingDefinitions[name] = {
+        anyOf: [{ $ref: branchingReference }, { $ref: branchingReference }],
+      };
+      branchingReference = `#/$defs/${name}`;
+    }
+    const quadraticUniqueItems = Array.from({ length: 128 }, () => ({ uniqueItems: true }));
     const manager = new AgentPluginMcpSessionManager({
       store: {
         contentRoot: () => "/tmp/plugin",
@@ -826,8 +927,177 @@ describe("Agent Plugin MCP session manager", () => {
                       ? {
                           tools: [
                             {
-                              name: "invalid",
+                              name: "oversized",
                               inputSchema: { values: Array.from({ length: 257 }, () => null) },
+                            },
+                            { name: "invalid", inputSchema: { type: "not-a-schema-type" } },
+                            { name: "missing" },
+                            { name: "boolean", inputSchema: false },
+                            {
+                              name: "asynchronous",
+                              inputSchema: {
+                                $async: true,
+                                type: "object",
+                                required: ["target"],
+                              },
+                            },
+                            {
+                              name: "quadratic-unique-items",
+                              inputSchema: {
+                                type: "object",
+                                properties: {
+                                  xs: { type: "array", allOf: quadraticUniqueItems },
+                                },
+                              },
+                            },
+                            {
+                              name: "regex-pattern",
+                              inputSchema: {
+                                type: "object",
+                                properties: {
+                                  value: { type: "string", pattern: "^(a+)+$" },
+                                },
+                              },
+                            },
+                            {
+                              name: "regex-properties",
+                              inputSchema: {
+                                type: "object",
+                                patternProperties: { "^(a+)+$": { type: "string" } },
+                              },
+                            },
+                            {
+                              name: "regex-ref",
+                              inputSchema: {
+                                type: "object",
+                                properties: { value: { $ref: "#/hidden/regex" } },
+                                hidden: {
+                                  regex: { type: "string", pattern: "^(a+)+$" },
+                                },
+                              },
+                            },
+                            {
+                              name: "regex-percent-encoded-pointer",
+                              inputSchema: {
+                                type: "object",
+                                properties: { value: { $ref: "#/hidden%2Fcheck" } },
+                                hidden: { check: { type: "string" } },
+                                "hidden/check": { type: "string", pattern: "^(a+)+$" },
+                              },
+                            },
+                            {
+                              name: "recursive-branching-ref",
+                              inputSchema: {
+                                type: "object",
+                                properties: {
+                                  next: { anyOf: [{ $ref: "#" }, { $ref: "#" }] },
+                                },
+                                required: ["next"],
+                              },
+                            },
+                            {
+                              name: "nested-schema-id",
+                              inputSchema: {
+                                type: "object",
+                                hidden: { check: { type: "string" } },
+                                properties: {
+                                  value: {
+                                    $id: "nested",
+                                    type: "object",
+                                    hidden: {
+                                      check: { type: "string", pattern: "^(a+)+$" },
+                                    },
+                                    properties: { next: { $ref: "#/hidden/check" } },
+                                  },
+                                },
+                              },
+                            },
+                            {
+                              name: "pointer-ancestor-schema-id",
+                              inputSchema: {
+                                type: "object",
+                                properties: { value: { $ref: "#/hidden/check" } },
+                                hidden: {
+                                  $id: "nested",
+                                  check: {
+                                    type: "object",
+                                    properties: { next: { $ref: "#/hidden/regex" } },
+                                  },
+                                  regex: { type: "string" },
+                                  hidden: {
+                                    regex: { type: "string", pattern: "^(a+)+$" },
+                                  },
+                                },
+                              },
+                            },
+                            {
+                              name: "expanding-reference-graph",
+                              inputSchema: {
+                                $ref: branchingReference,
+                                $defs: branchingDefinitions,
+                              },
+                            },
+                            {
+                              name: "literal-pattern-field",
+                              inputSchema: {
+                                type: "object",
+                                properties: { pattern: { type: "string" } },
+                              },
+                            },
+                            {
+                              name: "nonrecursive-ref",
+                              inputSchema: {
+                                type: "object",
+                                properties: { value: { $ref: "#/$defs/value" } },
+                                $defs: { value: { type: "string" } },
+                              },
+                            },
+                            {
+                              name: "draft-seven",
+                              inputSchema: {
+                                $schema: "http://json-schema.org/draft-07/schema#",
+                                type: "object",
+                                properties: {
+                                  pair: {
+                                    type: "array",
+                                    items: [{ type: "string" }, { type: "number" }],
+                                    additionalItems: false,
+                                  },
+                                },
+                              },
+                            },
+                            {
+                              name: "draft-seven-recursive-tuple",
+                              inputSchema: {
+                                $schema: "http://json-schema.org/draft-07/schema#",
+                                type: "array",
+                                items: [{ anyOf: [{ $ref: "#" }, { $ref: "#" }] }],
+                              },
+                            },
+                            {
+                              name: "draft-2019",
+                              inputSchema: {
+                                $schema: "https://json-schema.org/draft/2019-09/schema",
+                                type: "object",
+                                properties: { value: { type: "string" } },
+                              },
+                            },
+                            {
+                              name: "draft-2020",
+                              inputSchema: {
+                                $schema: "https://json-schema.org/draft/2020-12/schema",
+                                type: "object",
+                                properties: { value: { type: "number" } },
+                              },
+                            },
+                            { name: "duplicate", inputSchema: { type: "object" } },
+                            {
+                              name: "duplicate",
+                              inputSchema: {
+                                type: "object",
+                                properties: { required: { type: "string" } },
+                                required: ["required"],
+                              },
                             },
                           ],
                         }
@@ -853,9 +1123,66 @@ describe("Agent Plugin MCP session manager", () => {
       },
     });
 
-    await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
+    const effective = effectiveMcpSnapshot("mcp-local", "local");
+    await manager.reconcile(effective);
 
-    expect(manager.toolDefinitions()).toEqual([]);
+    const definitions = manager.toolDefinitions();
+    expect(definitions.map((definition) => definition.inputSchema)).toEqual([
+      {
+        type: "object",
+        properties: { pattern: { type: "string" } },
+      },
+      {
+        type: "object",
+        properties: { value: { $ref: "#/$defs/value" } },
+        $defs: { value: { type: "string" } },
+      },
+      {
+        $schema: "http://json-schema.org/draft-07/schema#",
+        type: "object",
+        properties: {
+          pair: {
+            type: "array",
+            items: [{ type: "string" }, { type: "number" }],
+            additionalItems: false,
+          },
+        },
+      },
+      {
+        $schema: "https://json-schema.org/draft/2019-09/schema",
+        type: "object",
+        properties: { value: { type: "string" } },
+      },
+      {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: { value: { type: "number" } },
+      },
+    ]);
+    const draftSeven = definitions.find(
+      (definition) => definition.inputSchema.$schema === "http://json-schema.org/draft-07/schema#",
+    );
+    expect(draftSeven).toBeDefined();
+    await expect(
+      manager.createToolExecutionPort().execute({
+        thread: { id: effective.scope.threadId } as never,
+        name: draftSeven!.name,
+        inputJson: '{"pair":["one",2,true]}',
+      }),
+    ).resolves.toEqual({
+      result: { error: "extension-tool-input-invalid" },
+      isError: true,
+    });
+    await expect(
+      manager.createToolExecutionPort().execute({
+        thread: { id: effective.scope.threadId } as never,
+        name: draftSeven!.name,
+        inputJson: '{"pair":["one",2]}',
+      }),
+    ).resolves.toEqual({
+      result: { error: "extension-tool-approval-required" },
+      isError: true,
+    });
     await manager.drainAll();
   });
 
@@ -1851,7 +2178,19 @@ describe("Agent Plugin MCP session manager", () => {
         id: body.id,
         result:
           body.method === "tools/list"
-            ? { tools: [{ name: "mutate", inputSchema: { type: "object" } }] }
+            ? {
+                tools: [
+                  {
+                    name: "mutate",
+                    inputSchema: {
+                      type: "object",
+                      properties: { target: { type: "string" } },
+                      required: ["target"],
+                      additionalProperties: false,
+                    },
+                  },
+                ],
+              }
             : body.method === "tools/call"
               ? { content: [{ type: "text", text: "mutated" }] }
               : {
@@ -1894,6 +2233,27 @@ describe("Agent Plugin MCP session manager", () => {
     });
     expect(authorizeToolCall).not.toHaveBeenCalled();
 
+    const invalidJson = await manager.createToolExecutionPort().execute({
+      thread: { id: effective.scope.threadId } as never,
+      name: definition!.name,
+      inputJson: '{"target":',
+    });
+    expect(invalidJson).toEqual({
+      result: { error: "extension-tool-input-invalid" },
+      isError: true,
+    });
+    const invalidSchema = await manager.createToolExecutionPort().execute({
+      thread: { id: effective.scope.threadId } as never,
+      name: definition!.name,
+      inputJson: '{"target":42}',
+    });
+    expect(invalidSchema).toEqual({
+      result: { error: "extension-tool-input-invalid" },
+      isError: true,
+    });
+    expect(authorizeToolCall).not.toHaveBeenCalled();
+    expect(toolCalls).toBe(0);
+
     const result = await manager.createToolExecutionPort().execute({
       windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
@@ -1917,7 +2277,12 @@ describe("Agent Plugin MCP session manager", () => {
       digest: `sha256:${"c".repeat(64)}`,
       definitionDigest: extensionToolDefinitionDigest({
         name: "mutate",
-        inputSchema: { type: "object" },
+        inputSchema: {
+          type: "object",
+          properties: { target: { type: "string" } },
+          required: ["target"],
+          additionalProperties: false,
+        },
       }),
       reach: "network",
       providerToolName: definition!.name,

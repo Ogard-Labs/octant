@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, relative } from "node:path";
+import type { AnySchema, ValidateFunction } from "ajv";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import type {
   ExtensionEffectiveSnapshot,
@@ -52,10 +53,16 @@ interface McpSessionAuthentication {
   readonly rejected: () => Promise<void>;
 }
 
+interface PreparedMcpTool {
+  readonly listed: McpToolDefinition;
+  readonly providerDefinition: ProviderToolDefinition;
+  readonly validateInput: ValidateFunction<unknown>;
+}
+
 export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
   readonly serverName: string;
   readonly session: AgentPluginMcpSession;
-  readonly tools: ReadonlyArray<McpToolDefinition>;
+  readonly tools: ReadonlyArray<PreparedMcpTool>;
   readonly reach: ExtensionToolReach;
   readonly askEveryCall: ReadonlyArray<string>;
   readonly authenticationGeneration: number;
@@ -394,6 +401,19 @@ export class AgentPluginMcpSessionManager {
         ) {
           return { result: { error: "extension-tool-authority-mismatch" }, isError: true };
         }
+        const tool = record.tools.find((candidate) => candidate.listed.name === indexed.toolName);
+        if (tool === undefined) {
+          return { result: { error: "extension-tool-unavailable" }, isError: true };
+        }
+        let args: unknown;
+        try {
+          args = inputJson.trim() === "" ? {} : JSON.parse(inputJson);
+        } catch {
+          return { result: { error: "extension-tool-input-invalid" }, isError: true };
+        }
+        if (!tool.validateInput(args)) {
+          return { result: { error: "extension-tool-input-invalid" }, isError: true };
+        }
         const definitionDigest = record.toolDefinitionDigests.get(indexed.toolName);
         const approved =
           this.#authorizeToolCall === undefined || definitionDigest === undefined
@@ -456,7 +476,6 @@ export class AgentPluginMcpSessionManager {
         }, this.#toolCallTimeoutMs);
         timeout.unref?.();
         try {
-          const args = inputJson.trim() === "" ? {} : JSON.parse(inputJson);
           const result = await record.session.callTool(indexed.toolName, args, controller.signal);
           if (!this.#currentRecord(indexed.sessionKey, record))
             return {
@@ -891,7 +910,13 @@ export class AgentPluginMcpSessionManager {
     } finally {
       clearTimeout(timeout);
     }
-    connectedSession = session;
+    const duplicateToolNames = duplicatedMcpToolNames(session.tools);
+    const tools: PreparedMcpTool[] = [];
+    for (const tool of session.tools) {
+      if (duplicateToolNames.has(tool.name)) continue;
+      const prepared = await prepareMcpTool(target, tool);
+      if (prepared !== undefined) tools.push(prepared);
+    }
     const record: AgentPluginMcpSessionRecord = {
       extensionId: target.extensionId,
       packageId: target.packageId,
@@ -902,7 +927,7 @@ export class AgentPluginMcpSessionManager {
       scope: target.scope,
       serverName: launch.name,
       session,
-      tools: session.tools,
+      tools,
       // A stdio server only ever starts through `supervisedStdioProcessPort`,
       // which denies it the network, or lets it reach only its catalog entry's
       // hosts through the host's proxy, and confines its writes to plugin data.
@@ -916,7 +941,7 @@ export class AgentPluginMcpSessionManager {
       authenticationGeneration,
       ...(authentication === undefined ? {} : { authentication }),
       toolDefinitionDigests: new Map(
-        session.tools.map((tool) => [tool.name, extensionToolDefinitionDigest(tool)]),
+        tools.map((tool) => [tool.listed.name, extensionToolDefinitionDigest(tool.listed)]),
       ),
     };
     const key = sessionKey(target);
@@ -936,6 +961,7 @@ export class AgentPluginMcpSessionManager {
       return;
     }
     this.#sessions.set(key, record);
+    connectedSession = session;
     this.#lastConnected.set(authenticationKey(target), {
       target,
       at: this.#now().toISOString(),
@@ -1035,9 +1061,9 @@ export class AgentPluginMcpSessionManager {
     this.#toolIndex.clear();
     for (const [key, record] of this.#sessions) {
       for (const tool of record.tools) {
-        this.#toolIndex.set(toolQualifiedName(record, tool.name), {
+        this.#toolIndex.set(tool.providerDefinition.name, {
           sessionKey: key,
-          toolName: tool.name,
+          toolName: tool.listed.name,
         });
       }
     }
@@ -1046,27 +1072,275 @@ export class AgentPluginMcpSessionManager {
   #definitions(
     records: ReadonlyArray<AgentPluginMcpSessionRecord>,
   ): ReadonlyArray<ProviderToolDefinition> {
-    return records.flatMap((record) =>
-      record.tools.flatMap((tool) => {
-        try {
-          return [
-            decodeProviderToolDefinition({
-              name: toolQualifiedName(record, tool.name),
-              ...boundedToolDescription(tool.description),
-              inputSchema:
-                tool.inputSchema !== undefined &&
-                typeof tool.inputSchema === "object" &&
-                tool.inputSchema !== null &&
-                !Array.isArray(tool.inputSchema)
-                  ? tool.inputSchema
-                  : {},
-            }),
-          ];
-        } catch {
-          return [];
+    return records.flatMap((record) => record.tools.map((tool) => tool.providerDefinition));
+  }
+}
+
+function duplicatedMcpToolNames(tools: ReadonlyArray<McpToolDefinition>): ReadonlySet<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const tool of tools) {
+    if (seen.has(tool.name)) duplicates.add(tool.name);
+    else seen.add(tool.name);
+  }
+  return duplicates;
+}
+
+const MAX_MCP_SCHEMA_EVALUATION_NODES = 1_024;
+
+/**
+ * MCP schemas are server-controlled and Ajv evaluates them synchronously on
+ * the control-plane event loop. Reject asynchronous, regex-bearing, or
+ * quadratic uniqueness schemas, nested reference resources, reference cycles,
+ * and graphs that can expand into excessive synchronous work.
+ */
+function mcpInputSchemaIsUnsafeToValidate(schema: unknown): boolean {
+  const visited = new Set<unknown>();
+  const visit = (candidate: unknown): boolean => {
+    if (Array.isArray(candidate)) return candidate.some(visit);
+    if (candidate === null || typeof candidate !== "object") return false;
+    if (visited.has(candidate)) return false;
+    visited.add(candidate);
+    const record = candidate as Readonly<Record<string, unknown>>;
+    if (
+      Object.prototype.hasOwnProperty.call(record, "pattern") ||
+      Object.prototype.hasOwnProperty.call(record, "patternProperties") ||
+      record.uniqueItems === true
+    ) {
+      return true;
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(record, "$async") ||
+      Object.prototype.hasOwnProperty.call(record, "$dynamicRef") ||
+      Object.prototype.hasOwnProperty.call(record, "$recursiveRef") ||
+      (candidate !== schema && Object.prototype.hasOwnProperty.call(record, "$id"))
+    ) {
+      return true;
+    }
+    if (typeof record.$ref === "string") {
+      const referenced = localJsonPointerTarget(schema, record.$ref);
+      // Ajv can resolve more reference forms than this bounded inspector. Omit
+      // those tools instead of compiling a schema whose safety is unknown.
+      if (referenced === undefined || visit(referenced)) return true;
+    }
+    for (const keyword of [
+      "additionalItems",
+      "additionalProperties",
+      "contains",
+      "contentSchema",
+      "else",
+      "if",
+      "items",
+      "not",
+      "propertyNames",
+      "then",
+      "unevaluatedItems",
+      "unevaluatedProperties",
+    ] as const) {
+      if (visit(record[keyword])) return true;
+    }
+    for (const keyword of ["allOf", "anyOf", "oneOf", "prefixItems"] as const) {
+      const nested = record[keyword];
+      if (Array.isArray(nested) && nested.some(visit)) return true;
+    }
+    for (const keyword of [
+      "$defs",
+      "definitions",
+      "dependencies",
+      "dependentSchemas",
+      "properties",
+    ] as const) {
+      const nested = record[keyword];
+      if (
+        nested !== null &&
+        typeof nested === "object" &&
+        !Array.isArray(nested) &&
+        Object.values(nested).some(visit)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return visit(schema) || mcpInputSchemaEvaluationIsUnsafe(schema);
+}
+
+/**
+ * Bound the maximum schema graph Ajv may synchronously explore for one input
+ * node. This deliberately expands repeated local references instead of
+ * deduplicating them: two branches that point at the same schema are two units
+ * of validation work. An active reference is a cycle whose work can grow with
+ * attacker-controlled input depth, so it is never admitted.
+ */
+function mcpInputSchemaEvaluationIsUnsafe(schema: unknown): boolean {
+  let remainingNodes = MAX_MCP_SCHEMA_EVALUATION_NODES;
+  const active = new Set<unknown>();
+  const visit = (candidate: unknown): boolean => {
+    if (Array.isArray(candidate)) return candidate.some(visit);
+    if (candidate === null || typeof candidate !== "object") return false;
+    if (active.has(candidate) || --remainingNodes < 0) return true;
+    active.add(candidate);
+    try {
+      const record = candidate as Readonly<Record<string, unknown>>;
+      if (
+        Object.prototype.hasOwnProperty.call(record, "$dynamicRef") ||
+        Object.prototype.hasOwnProperty.call(record, "$recursiveRef")
+      ) {
+        return true;
+      }
+      if (typeof record.$ref === "string") {
+        const referenced = localJsonPointerTarget(schema, record.$ref);
+        if (referenced === undefined || visit(referenced)) return true;
+      }
+      for (const keyword of [
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+      ] as const) {
+        if (visit(record[keyword])) return true;
+      }
+      for (const keyword of ["allOf", "anyOf", "oneOf", "prefixItems"] as const) {
+        const nested = record[keyword];
+        if (Array.isArray(nested) && nested.some(visit)) return true;
+      }
+      for (const keyword of ["dependencies", "dependentSchemas", "properties"] as const) {
+        const nested = record[keyword];
+        if (
+          nested !== null &&
+          typeof nested === "object" &&
+          !Array.isArray(nested) &&
+          Object.values(nested).some(visit)
+        ) {
+          return true;
         }
-      }),
-    );
+      }
+      return false;
+    } finally {
+      active.delete(candidate);
+    }
+  };
+  return visit(schema);
+}
+
+function localJsonPointerTarget(root: unknown, reference: string): unknown {
+  if (reference === "#") return root;
+  if (!reference.startsWith("#/")) return undefined;
+  let target = root;
+  for (const encodedToken of reference.slice(2).split("/")) {
+    if (target === null || typeof target !== "object") return undefined;
+    let decodedToken: string;
+    try {
+      decodedToken = decodeURIComponent(encodedToken);
+    } catch {
+      return undefined;
+    }
+    const token = decodedToken.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (!Object.prototype.hasOwnProperty.call(target, token)) return undefined;
+    target = (target as Readonly<Record<string, unknown>>)[token];
+    if (
+      target !== root &&
+      target !== null &&
+      typeof target === "object" &&
+      !Array.isArray(target) &&
+      Object.prototype.hasOwnProperty.call(target, "$id")
+    ) {
+      // Ajv changes the reference base at every nested resource. Resolving the
+      // final target against the document root would then inspect a different
+      // schema from the one Ajv compiles, so fail closed on the whole path.
+      return undefined;
+    }
+  }
+  return target;
+}
+
+type McpInputSchemaDialect = "draft-07" | "2019-09" | "2020-12";
+
+let ajvDraft7Module: Promise<typeof import("ajv")> | undefined;
+let ajv2019Module: Promise<typeof import("ajv/dist/2019.js")> | undefined;
+let ajv2020Module: Promise<typeof import("ajv/dist/2020.js")> | undefined;
+
+function loadAjvDraft7() {
+  return (ajvDraft7Module ??= import("ajv"));
+}
+
+function loadAjv2019() {
+  return (ajv2019Module ??= import("ajv/dist/2019.js"));
+}
+
+function loadAjv2020() {
+  return (ajv2020Module ??= import("ajv/dist/2020.js"));
+}
+
+function mcpInputSchemaDialect(
+  schema: Readonly<Record<string, unknown>>,
+): McpInputSchemaDialect | undefined {
+  if (schema.$schema === undefined) return "2020-12";
+  if (typeof schema.$schema !== "string") return undefined;
+  const dialect = schema.$schema.endsWith("#") ? schema.$schema.slice(0, -1) : schema.$schema;
+  if (dialect === "http://json-schema.org/draft-07/schema") return "draft-07";
+  if (dialect === "https://json-schema.org/draft/2019-09/schema") return "2019-09";
+  if (dialect === "https://json-schema.org/draft/2020-12/schema") return "2020-12";
+  return undefined;
+}
+
+async function compileMcpInputSchema(
+  schema: Readonly<Record<string, unknown>>,
+): Promise<ValidateFunction<unknown> | undefined> {
+  const dialect = mcpInputSchemaDialect(schema);
+  if (dialect === undefined) return undefined;
+  const options = {
+    allErrors: false,
+    strict: false,
+    validateFormats: false,
+    validateSchema: true,
+  } as const;
+  let validateInput: ValidateFunction<unknown>;
+  if (dialect === "draft-07") {
+    const { default: AjvDraft7 } = await loadAjvDraft7();
+    validateInput = new AjvDraft7(options).compile<unknown>(schema as AnySchema);
+  } else if (dialect === "2019-09") {
+    const { default: Ajv2019 } = await loadAjv2019();
+    validateInput = new Ajv2019(options).compile<unknown>(schema as AnySchema);
+  } else {
+    const { default: Ajv2020 } = await loadAjv2020();
+    validateInput = new Ajv2020(options).compile<unknown>(schema as AnySchema);
+  }
+  return "$async" in validateInput ? undefined : validateInput;
+}
+
+async function prepareMcpTool(
+  record: Pick<AgentPluginMcpSessionRecord, "extensionId" | "packageId" | "componentId" | "scope">,
+  tool: McpToolDefinition,
+): Promise<PreparedMcpTool | undefined> {
+  try {
+    if (
+      tool.inputSchema === undefined ||
+      typeof tool.inputSchema !== "object" ||
+      tool.inputSchema === null ||
+      Array.isArray(tool.inputSchema)
+    ) {
+      return undefined;
+    }
+    const providerDefinition = decodeProviderToolDefinition({
+      name: toolQualifiedName(record, tool.name),
+      ...boundedToolDescription(tool.description),
+      inputSchema: tool.inputSchema,
+    });
+    if (mcpInputSchemaIsUnsafeToValidate(providerDefinition.inputSchema)) return undefined;
+    const validateInput = await compileMcpInputSchema(providerDefinition.inputSchema);
+    if (validateInput === undefined) return undefined;
+    return { listed: tool, providerDefinition, validateInput };
+  } catch {
+    return undefined;
   }
 }
 
