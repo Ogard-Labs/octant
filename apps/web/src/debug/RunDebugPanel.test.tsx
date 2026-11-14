@@ -841,9 +841,7 @@ describe("Run and debug panel", () => {
       // The tree is one Tab stop; arrows move focus row by row.
       expect(scope).toHaveAttribute("tabindex", "0");
       scope.focus();
-      console.log("ACTIVE1", document.activeElement?.getAttribute("data-row-key"));
       await user.keyboard("{ArrowDown}");
-      console.log("ACTIVE2", document.activeElement?.outerHTML.slice(0, 200));
       expect(within(tree).getByRole("treeitem", { name: /count/ })).toHaveFocus();
       await user.keyboard("{ArrowDown}{ArrowRight}");
       const settings = within(tree).getByRole("treeitem", { name: /settings/ });
@@ -857,9 +855,11 @@ describe("Run and debug panel", () => {
       await user.keyboard("{End}");
       const last = await within(tree).findByRole("treeitem", { name: /item197/ });
       await waitFor(() => expect(last).toHaveFocus());
-      expect(within(tree).queryByRole("treeitem", { name: /^count/ })).toBeNull();
+      expect(within(tree).getAllByRole("treeitem").length).toBeLessThan(100);
       await user.keyboard("{ArrowLeft}");
-      await waitFor(() => expect(within(tree).getByRole("treeitem", { name: "Locals" })).toHaveFocus());
+      await waitFor(() =>
+        expect(within(tree).getByRole("treeitem", { name: "Locals" })).toHaveFocus(),
+      );
     } finally {
       if (offsetHeight === undefined) Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
       else Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);

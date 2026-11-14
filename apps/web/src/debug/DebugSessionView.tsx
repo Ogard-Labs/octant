@@ -49,7 +49,6 @@ import {
 import { useFocusWhenShown } from "./useFocusWhenShown";
 import { visibleVariableRows, type VariableTreeRow } from "./variableTree";
 
-
 export interface DebugSessionViewProps {
   readonly client: CodeDebugClient;
   readonly threadId: CodeThreadId;
@@ -487,10 +486,10 @@ function Variables(props: {
   const headingId = useId();
   const [closed, setClosed] = useState<ReadonlySet<number>>(new Set());
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
-  // The row that takes Tab into the tree (roving tabindex), and whether a key
-  // press just moved focus there and the row has to take it once mounted.
+  // The row that takes Tab into the tree (roving tabindex), and the row a key
+  // press moved focus to, which takes it once it is mounted.
   const [activeKey, setActiveKey] = useState<string | undefined>(undefined);
-  const pendingFocus = useRef(false);
+  const pendingFocus = useRef<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<HTMLUListElement>(null);
   const rows = visibleVariableRows(props.view, closed, opened);
@@ -515,9 +514,8 @@ function Variables(props: {
   });
 
   useEffect(() => {
-    console.log("EFFECT", pendingFocus.current, active?.key);
-    if (!pendingFocus.current || active === undefined) return;
-    pendingFocus.current = false;
+    if (pendingFocus.current === undefined || pendingFocus.current !== active?.key) return;
+    pendingFocus.current = undefined;
     const rowElements = treeRef.current?.querySelectorAll<HTMLElement>("[data-row-key]") ?? [];
     for (const row of rowElements) if (row.dataset.rowKey === active.key) row.focus();
   });
@@ -543,13 +541,15 @@ function Variables(props: {
   };
   const moveTo = (row: VariableTreeRow | undefined) => {
     if (row === undefined) return;
-    pendingFocus.current = true;
+    pendingFocus.current = row.key;
     setActiveKey(row.key);
     if (virtualized) virtualizer.scrollToIndex(rows.indexOf(row));
   };
-  const onKeyDown = (event: KeyboardEvent<HTMLElement>, row: VariableTreeRow) => {
+  const onKeyDown = (
+    event: KeyboardEvent<HTMLElement>,
+    row: Exclude<VariableTreeRow, { readonly kind: "more" }>,
+  ) => {
     const at = items.indexOf(row);
-    console.log("KEY", event.key, at, items.length);
     const canToggle = row.kind === "scope" || (row.kind === "variable" && row.expandable);
     switch (event.key) {
       case "ArrowDown":
@@ -585,9 +585,7 @@ function Variables(props: {
   const renderRow = (row: VariableTreeRow, style?: CSSProperties, index?: number) => {
     const depth = { "--run-debug-depth": String(row.level - 1) } as CSSProperties;
     const measured =
-      index === undefined
-        ? {}
-        : { "data-index": index, ref: virtualizer.measureElement };
+      index === undefined ? {} : { "data-index": index, ref: virtualizer.measureElement };
     if (row.kind === "more") {
       return (
         <li

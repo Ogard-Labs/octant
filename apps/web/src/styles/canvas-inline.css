@@ -831,7 +831,6 @@
    system ink, and the faint tile and row fills give way to plain borders. */
 
 @media (forced-colors: active) {
-
   .canvas-block__metric,
   .canvas-ref,
   .canvas-ref__icon,
