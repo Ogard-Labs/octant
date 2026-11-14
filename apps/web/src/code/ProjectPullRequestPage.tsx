@@ -659,7 +659,9 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
               </Block>
             </OctantTabsPanel>
 
-            <OctantTabsPanel className="pr-detail__panel" value="timeline">
+            {/* Kept mounted while hidden: it holds the comment and review drafts,
+                and leaving the tab unmounted them and lost what the person typed. */}
+            <OctantTabsPanel className="pr-detail__panel" keepMounted value="timeline">
               {detail.reviews.length === 0 && detail.comments.length === 0 ? (
                 <p className="pr-detail__quiet" role="status">
                   No reviews or comments yet.

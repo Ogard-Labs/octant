@@ -126,6 +126,16 @@ describe("the pull-request reading pane", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeVisible();
   });
 
+  it("keeps a half-written comment when the person looks at another tab and comes back", async () => {
+    const user = userEvent.setup();
+    renderPage({ loadActionContext: actionContext });
+    await user.click(await screen.findByRole("tab", { name: "Timeline" }));
+    await user.type(await screen.findByRole("textbox", { name: "Comment" }), "Half a thought");
+    await user.click(screen.getByRole("tab", { name: "Summary" }));
+    await user.click(screen.getByRole("tab", { name: "Timeline" }));
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Half a thought");
+  });
+
   it("asks before merging and merges the reviewed head with the chosen method", async () => {
     const user = userEvent.setup();
     const onMerge = vi.fn(async (method: "merge" | "squash" | "rebase") => ({
