@@ -210,8 +210,8 @@ nearly opaque where surfaces nest.
 
 | Level  | Coat (`--octant-window-surface`)                                                   | Dark | Light |
 | ------ | ---------------------------------------------------------------------------------- | ---- | ----- |
-| Subtle | workspace colour at the level's alpha (`--octant-workspace-translucent-subtle`)    | 78%  | 92%   |
-| Strong | `--octant-workspace-translucent-strong`                                            | 62%  | 80%   |
+| Subtle | workspace colour at the level's alpha (`--octant-workspace-translucent-subtle`)    | 66%  | 84%   |
+| Strong | `--octant-workspace-translucent-strong`                                            | 50%  | 70%   |
 | Tint   | the person's Tint (0 to 90) replaces the level's alpha, clamped to the floor below |      |       |
 
 **Contrast floor.** The coat must hold text over whatever the desktop shows. The
@@ -225,10 +225,14 @@ own tint. Computed from the role colours:
 | Secondary, 4.5:1      | 77%             | 72%              |
 | Muted, 4.5:1          | 90%             | 92%              |
 
-- The coat never goes under the primary floor: the Tint is clamped at paint
-  time to 62% in dark and 50% in light. The
-  saved value is kept, so lowering the floor later needs no migration.
-- Where the coat is under the secondary floor (dark Strong, or a low Tint), the
+- The coat is clamped at paint time to 45% in both modes. That is under the
+  bare-desktop primary floor above on purpose: at 62% the dark coat matched a
+  dark desktop's grey and the glass read as a solid fill. The bound is the
+  native material's own tint under the coat, which already darkens (or, in
+  light, lightens) what is behind; primary text is checked at 4.5:1 over the
+  material as it actually draws, in the packaged app on a white and a black
+  desktop. The saved value is kept, so moving the floor needs no migration.
+- Where the coat is under the secondary floor (every dark level, light Strong, or a low Tint), the
   muted role inside the shell takes the secondary ink, so meta text stays
   readable at the cost of one step of hierarchy.
 - Secondary and muted text are held at 4.5:1 over the native material as it

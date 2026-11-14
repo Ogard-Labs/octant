@@ -26,10 +26,10 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-focus")).toBe("#1f6f96");
     expect(root.style.getPropertyValue("--octant-palette-green")).toBe("#41761c");
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe(
-      "color-mix(in srgb, #fafaf9 92%, transparent)",
+      "color-mix(in srgb, #fafaf9 84%, transparent)",
     );
     expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe(
-      "color-mix(in srgb, #ffffff 92%, transparent)",
+      "color-mix(in srgb, #ffffff 84%, transparent)",
     );
 
     result.unmount();
@@ -83,10 +83,10 @@ describe("ThemeSettingsProvider", () => {
       </ThemeSettingsProvider>,
     );
     const root = document.documentElement;
-    // The light floor is 50; the saved 20 is untouched, only the paint is clamped.
+    // The light floor is 45; the saved 20 is untouched, only the paint is clamped.
     for (const level of ["", "-subtle", "-strong"]) {
       expect(root.style.getPropertyValue(`--octant-workspace-translucent${level}`)).toBe(
-        "color-mix(in srgb, #ffffff 50%, transparent)",
+        "color-mix(in srgb, #ffffff 45%, transparent)",
       );
     }
     expect(root.dataset.octantGlassThin).toBe("subtle strong");
@@ -95,19 +95,20 @@ describe("ThemeSettingsProvider", () => {
         <div>Theme content</div>
       </ThemeSettingsProvider>,
     );
-    // Dark Strong (62) is under the secondary floor; dark Subtle (78) is not.
-    expect(root.dataset.octantGlassThin).toBe("strong");
+    // Both dark levels (66 and 50) are under the secondary floor of 77.
+    expect(root.dataset.octantGlassThin).toBe("subtle strong");
     result.rerender(
       <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light" }}>
         <div>Theme content</div>
       </ThemeSettingsProvider>,
     );
-    expect(root.dataset.octantGlassThin).toBeUndefined();
+    // Light Strong (70) is under the secondary floor of 72; light Subtle (84) is not.
+    expect(root.dataset.octantGlassThin).toBe("strong");
     result.unmount();
     expect(root.dataset.octantGlassThin).toBeUndefined();
   });
 
-  it("paints the dark window coat at 78% for Subtle and 62% for Strong, and a saved low Tint at the floor", () => {
+  it("paints the dark window coat at 66% for Subtle and 50% for Strong, and a saved low Tint at the floor", () => {
     const root = document.documentElement;
     const result = render(
       <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
@@ -116,16 +117,16 @@ describe("ThemeSettingsProvider", () => {
     );
     const coat = (level: "subtle" | "strong") =>
       root.style.getPropertyValue(`--octant-workspace-translucent-${level}`);
-    expect(coat("subtle")).toMatch(/ 78%, transparent\)$/);
-    expect(coat("strong")).toMatch(/ 62%, transparent\)$/);
+    expect(coat("subtle")).toMatch(/ 66%, transparent\)$/);
+    expect(coat("strong")).toMatch(/ 50%, transparent\)$/);
     result.rerender(
       <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark", glassTint: 8 }}>
         <div>Theme content</div>
       </ThemeSettingsProvider>,
     );
-    // A Tint replaces both levels and is clamped at the dark floor of 62%.
-    expect(coat("subtle")).toMatch(/ 62%, transparent\)$/);
-    expect(coat("strong")).toMatch(/ 62%, transparent\)$/);
+    // A Tint replaces both levels and is clamped at the dark floor of 45%.
+    expect(coat("subtle")).toMatch(/ 45%, transparent\)$/);
+    expect(coat("strong")).toMatch(/ 45%, transparent\)$/);
     result.unmount();
   });
 

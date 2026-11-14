@@ -430,16 +430,18 @@ export type ThemeSettings = typeof ThemeSettings.Type;
  * theme mode: one coat of the workspace colour, in percent.
  */
 export const GLASS_TINT_DEFAULTS = {
-  light: { subtle: 92, strong: 80 },
-  dark: { subtle: 78, strong: 62 },
+  light: { subtle: 84, strong: 70 },
+  dark: { subtle: 66, strong: 50 },
 } as const;
 
 /**
- * The thinnest coat painted, by theme mode, whatever Tint is saved: primary text
- * keeps 4.5:1 over a white desktop behind a dark coat and a black one behind a
- * light coat. The saved value is untouched; only the paint is clamped.
+ * The thinnest coat painted, by theme mode, whatever Tint is saved. At the
+ * former 62% dark coat the window's grey matched a dark desktop and the glass
+ * read as a solid fill, so the floor now counts on the native material's own
+ * tint under the coat instead of a bare white or black desktop. The saved value
+ * is untouched; only the paint is clamped.
  */
-export const GLASS_TINT_FLOOR = { light: 50, dark: 62 } as const;
+export const GLASS_TINT_FLOOR = { light: 45, dark: 45 } as const;
 
 /**
  * Below these coats the secondary and muted inks fall under 4.5:1 over the worst
