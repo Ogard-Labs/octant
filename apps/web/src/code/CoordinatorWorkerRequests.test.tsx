@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { codeDecision, pendingIds } from "../palette/pendingRequests.test-fixtures";
 import { ThreadConnectionLostContext } from "../transcript/ThreadConnectionNotice";
 import {
+  CoordinatorWorkerAskRows,
   CoordinatorWorkerRequests,
   type CoordinatorWorker,
   type CoordinatorWorkerRequestSource,
@@ -193,5 +194,44 @@ describe("a coordinator's composer listing its workers' requests", () => {
     );
     await waitFor(() => expect(client.list).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("a coordinator's thread view showing its workers' requests as rows", () => {
+  it("names the worker in a row, answers through the worker's own command, and reads the outcome once settled", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    const client = reader(
+      [unrelatedApproval, workerApproval, secondWorkerQuestion],
+      [secondWorkerQuestion],
+    );
+    render(
+      <CoordinatorWorkerAskRows
+        source={source(client, answerClients)}
+        workers={workers}
+        onOpenWorker={vi.fn()}
+      />,
+    );
+    const rows = await screen.findByRole("region", { name: "Workers' requests" });
+    const approvalRow = within(rows).getByRole("group", {
+      name: "Fix the parser is waiting for you",
+    });
+    expect(within(approvalRow).getByText("Run: bun run test (approval-1)")).toBeInTheDocument();
+    expect(
+      within(rows).getByRole("group", { name: "Write the docs is waiting for you" }),
+    ).toBeInTheDocument();
+    expect(within(rows).queryByText(/approval-9/)).toBeNull();
+
+    await user.click(within(approvalRow).getByRole("button", { name: "Approve" }));
+    expect(answerClients.codeClient.executeOperation).toHaveBeenCalledExactlyOnceWith({
+      kind: "answer-provider-approval",
+      operationId: expect.any(String),
+      threadId: "worker-1",
+      checkoutId: "checkout-1",
+      approvalId: "approval-1",
+      decision: "approved",
+    });
+    expect(await within(approvalRow).findByRole("status")).toHaveTextContent("Approved here");
+    expect(within(approvalRow).queryByRole("button", { name: "Approve" })).toBeNull();
   });
 });
