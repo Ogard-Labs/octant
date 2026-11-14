@@ -314,9 +314,9 @@ the body.
 size from the text system; a web view gets neither unless it asks. The body
 takes the 13px tracking (`--oct-tracking-sf-13`, -0.006em) and `font-optical-sizing:
 auto`; a role at another size names its own token (`--oct-tracking-sf-11` to
-`-24`, the platform face's own tracking: Apple's published SF Pro table, +0.06pt
-at 11, 0 at 12, -0.08 at 13, -0.15 at 14, -0.2 at 15, -0.31 at 16, -0.43 at 17,
--0.45 at 20 and +0.07 at 24 and up, as em), because letter-spacing inherits as a
+`-26`, the platform face's own tracking from the platform's published macOS
+table, in thousandths of an em: +6 at 11, 0 at 12, -6 at 13, -11 at 14, -16 at
+15, -20 at 16, -26 at 17, -23 at 20, +3 at 24, +8 at 26), because letter-spacing inherits as a
 length. Code, the terminal and the editor keep normal tracking. A line of chrome
 (a sidebar row, a menu option, a button, a label) is as tall as a native one,
 16px at 13px (`--oct-line-chrome`, 1.23) and 14px at 12px (`-sm`, 1.2), in whole

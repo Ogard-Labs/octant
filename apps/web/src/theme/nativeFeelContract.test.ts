@@ -50,7 +50,7 @@ describe("native feel", () => {
     expect(rule(surface, ".oct-menu-option")).toContain("var(--oct-tracking-sf-13)");
     expect(rule(surface, ".oct-row-label")).toContain("var(--oct-tracking-sf-14)");
     expect(rule(surface, ".oct-meta")).toContain("var(--oct-tracking-sf-12)");
-    expect(rule(surface, ".oct-page-title")).toContain("var(--oct-tracking-sf-24)");
+    expect(rule(surface, ".oct-page-title")).toContain("var(--oct-tracking-sf-26)");
   });
 
   it("keeps code and the terminal off the body's tracking so their columns stay whole", () => {

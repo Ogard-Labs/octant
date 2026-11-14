@@ -210,7 +210,7 @@
   --oct-role-page-title-family: var(--oct-font-display);
   --oct-role-page-title-leading: 1.15;
   --oct-role-page-title-size: var(--oct-text-2xl);
-  --oct-role-page-title-tracking: var(--oct-tracking-sf-24);
+  --oct-role-page-title-tracking: var(--oct-tracking-sf-26);
   --oct-role-page-title-weight: var(--oct-weight-strong);
   --oct-role-row-detail-leading: var(--oct-leading-detail);
   --oct-role-row-detail-size: var(--oct-text-detail);
@@ -353,7 +353,7 @@
   --oct-line-chrome: round(calc(1.23 * 1em), 1px);
   --oct-tracking-sf-12: 0em;
   --oct-tracking-sf-14: -0.011em;
-  --oct-tracking-sf-24: 0.003em;
+  --oct-tracking-sf-26: 0.008em;
 }
 
 :root[data-theme="light"] {

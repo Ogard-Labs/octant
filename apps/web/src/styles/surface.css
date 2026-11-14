@@ -60,7 +60,7 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-2xl);
   font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-sf-24);
+  letter-spacing: var(--oct-tracking-sf-26);
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -80,7 +80,7 @@ describe("surface language", () => {
     const title = surface.match(/\.oct-page-title \{[^}]*\}/)?.[0] ?? "";
     expect(title).toContain("font-size: var(--oct-text-2xl);");
     expect(title).toContain("font-weight: var(--oct-weight-strong);");
-    expect(title).toContain("letter-spacing: var(--oct-tracking-sf-24);");
+    expect(title).toContain("letter-spacing: var(--oct-tracking-sf-26);");
     expect(read("surface/SurfaceHeader.tsx")).toContain('className="oct-page-title"');
     expect(read("shell/SettingsView.tsx")).toContain('<h1 className="oct-page-title"');
   });
