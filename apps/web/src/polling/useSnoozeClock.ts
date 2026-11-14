@@ -50,6 +50,14 @@ export function msUntilSnoozeClockChanges(wakeTimes: ReadonlyArray<number>, now:
 export function useSnoozeClock(snoozeUntil: ReadonlyArray<string>): Date {
   const [now, setNow] = useState(() => new Date());
   const key = snoozeUntil.join("|");
+  // A snooze added, changed or already past when navigation delivers it is
+  // read against the clock now, not against the last scheduled tick, which can
+  // be up to an hour old.
+  const [readFor, setReadFor] = useState(key);
+  if (readFor !== key) {
+    setReadFor(key);
+    setNow(new Date());
+  }
   const wakeTimes = useMemo(
     () => (key === "" ? [] : key.split("|").map((until) => Date.parse(until))),
     [key],

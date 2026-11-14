@@ -413,7 +413,38 @@ function verifiedTailAggregateCount(
     `)
     .get();
   if (unanchoredHead !== undefined) return undefined;
-  return numberValue(connection.prepare("SELECT count(*) AS value FROM aggregate_heads").get());
+  // The tail walk only visits aggregates with rows above the watermark, and
+  // the watermark's triggers watch the journal, not aggregate_heads. A head
+  // that went missing, or fell back to an older row, for an aggregate whose
+  // rows are all verified would otherwise pass. Both reads below use the
+  // journal's unique (type, id, version) index and decode no rows.
+  const staleHead = connection
+    .prepare(`
+      SELECT 1 FROM aggregate_heads AS head
+      WHERE EXISTS (
+        SELECT 1 FROM event_journal AS event
+        WHERE event.aggregate_type = head.aggregate_type
+          AND event.aggregate_id = head.aggregate_id
+          AND event.aggregate_version > head.aggregate_version
+      )
+      LIMIT 1
+    `)
+    .get();
+  if (staleHead !== undefined) return undefined;
+  const headCount = numberValue(
+    connection.prepare("SELECT count(*) AS value FROM aggregate_heads").get(),
+  );
+  // Every head names an existing row of its own aggregate (checked above) and
+  // heads are unique per aggregate, so equal counts mean no aggregate lacks one.
+  const aggregateCount = numberValue(
+    connection
+      .prepare(
+        "SELECT count(*) AS value FROM (SELECT DISTINCT aggregate_type, aggregate_id FROM event_journal)",
+      )
+      .get(),
+  );
+  if (aggregateCount !== headCount) return undefined;
+  return headCount;
 }
 
 /**

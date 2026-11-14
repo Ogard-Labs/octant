@@ -170,7 +170,9 @@ function RowSpacer({ height }: { readonly height: number }) {
       aria-hidden="true"
       data-board-spacer=""
       role="presentation"
-      style={{ gridColumn: "1 / -1", height, padding: 0, margin: 0 }}
+      // Status columns are height-limited flex columns; a shrinkable spacer
+      // collapsed there and the scroll range stopped matching the offsets.
+      style={{ flexShrink: 0, gridColumn: "1 / -1", height, padding: 0, margin: 0 }}
     />
   );
 }

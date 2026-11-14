@@ -285,6 +285,23 @@ describe("database recovery", () => {
     connection.close();
   });
 
+  it("still finds a stale or missing head for an aggregate whose rows are all below the watermark", () => {
+    const connection = openConnection();
+    const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
+    const journal = createJournal(connection, projections);
+    appendTwo(journal);
+
+    connection.prepare("UPDATE aggregate_heads SET last_sequence = 1, aggregate_version = 1").run();
+    expect(databaseStatus({ connection, journal, projections, verifiedThrough: 2 })).toMatchObject({
+      state: "invalid",
+    });
+    connection.prepare("DELETE FROM aggregate_heads").run();
+    expect(databaseStatus({ connection, journal, projections, verifiedThrough: 2 })).toMatchObject({
+      state: "invalid",
+    });
+    connection.close();
+  });
+
   it("reports quarantined and lagging states without claiming a store is current", () => {
     const connection = openConnection();
     const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
