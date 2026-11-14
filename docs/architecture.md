@@ -6432,7 +6432,12 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     default, `false` is the person's off, and a `true` left by the earlier
     default reads as on. No configuration change or new account carries it. Any other provider's
     account, and any other ACP agent, is refused, by the policy and by the
-    journal's own decoder.
+    journal's own decoder. Before this default, turning the switch off left
+    no stored value, so on upgrade every account reads as running as itself,
+    including an account the person had turned off; the person turns it off
+    again if they want (maintainer decision, 2026-11-14). An older build
+    cannot decode `nativeSetup: false`, so downgrading past this change is
+    not supported.
   - **Project.** A Work or Code Project's **Trusted providers** lists the key
     providers it trusts (`nativeProviders` on the Project, set by
     `change-project-native-providers` from a local window or a device the host's own person paired, and journaled as
