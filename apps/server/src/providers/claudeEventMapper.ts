@@ -1716,6 +1716,9 @@ export function mapClaudeMessage(
         : [{ kind: "ignored" }];
     case "status":
       return [{ kind: "ignored" }];
+    // The driver records the list on the provider's observation.
+    case "commands-changed":
+      return [{ kind: "ignored" }];
     case "compaction":
       // A compacted session keeps a summary and, at most, the messages the
       // boundary lists as preserved (`compact_metadata.preserved_messages` on

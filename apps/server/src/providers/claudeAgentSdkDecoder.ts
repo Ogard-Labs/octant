@@ -6,6 +6,7 @@ import type {
   ProviderFailure,
 } from "@octant/contracts";
 import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "@octant/contracts";
+import { advertisedSlashCommands } from "./providerSlashCommands";
 
 import type {
   ClaudeAccountState,
@@ -782,6 +783,7 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
     compactAnnounced: initialized.commands.some(
       (command: unknown) => object(command)?.name === "compact",
     ),
+    commands: advertisedSlashCommands(initialized.commands),
   };
 }
 
@@ -1714,6 +1716,20 @@ export function decodeMessage(
     };
   }
   if (isHarmlessInformational(message)) return { kind: "ignored" };
+  // The runtime pushes its whole command list when skills are found mid-
+  // session (SDK 0.3.211 `commands_changed`); it replaces the cached list.
+  if (
+    message.type === "system" &&
+    message.subtype === "commands_changed" &&
+    typeof message.session_id === "string" &&
+    Array.isArray(message.commands)
+  ) {
+    return {
+      kind: "commands-changed",
+      sessionId: message.session_id,
+      commands: advertisedSlashCommands(message.commands),
+    };
+  }
   // A system subtype this decoder does not know says so in a sentence of its
   // own. The subtype itself is runtime-supplied text and stays out of a
   // failure the driver journals; a known subtype with refused fields stays

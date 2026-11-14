@@ -26,6 +26,7 @@ import {
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderSlashCommand,
   type ThreadPublishedSnapshot,
   type UtcTimestamp,
   type ProviderApprovalCall,
@@ -1802,6 +1803,8 @@ function observation(
     readonly models?: readonly ProviderModel[];
     /** The runtime announced `compact` when the probe opened it. */
     readonly compactAnnounced?: boolean;
+    /** The runtime's own slash commands, as it announced them when the probe opened it. */
+    readonly commands?: ReadonlyArray<ProviderSlashCommand>;
     /** The probe's launch carried the host's own non-essential traffic switch. */
     readonly hostTrafficDisabled?: boolean;
     readonly credentialStatus?: "stored" | "missing" | "unavailable";
@@ -1831,6 +1834,9 @@ function observation(
     detectedVersion: input.version,
     ...(input.credentialStatus === undefined ? {} : { credentialStatus: input.credentialStatus }),
     models: input.models ?? [],
+    ...(input.readiness !== "ready" || input.commands === undefined || input.commands.length === 0
+      ? {}
+      : { commands: input.commands }),
     capabilities:
       input.readiness === "ready"
         ? {
@@ -1928,7 +1934,11 @@ function probeSdk(
   environmentFactory: ClaudeEnvironmentFactory,
   environmentOptions: ClaudeEnvironmentScopeOptions,
 ): Effect.Effect<
-  { readonly models: readonly ProviderModel[]; readonly compactAnnounced: boolean },
+  {
+    readonly models: readonly ProviderModel[];
+    readonly compactAnnounced: boolean;
+    readonly commands: ReadonlyArray<ProviderSlashCommand>;
+  },
   ProviderFailure,
   Scope.Scope
 > {
@@ -1973,7 +1983,11 @@ function probeSdk(
     if (models.length === 0) {
       return yield* Effect.fail(failure("protocol", "Claude returned no usable models."));
     }
-    return { models, compactAnnounced: query.initialization.compactAnnounced };
+    return {
+      models,
+      compactAnnounced: query.initialization.compactAnnounced,
+      commands: query.initialization.commands ?? [],
+    };
   });
 }
 
@@ -2099,6 +2113,7 @@ function makeProbe(
           version,
           models: sdkResult.models,
           compactAnnounced: sdkResult.compactAnnounced,
+          commands: sdkResult.commands,
           hostTrafficDisabled,
           ...(options.authentication === "api-key" ? { credentialStatus: "stored" as const } : {}),
         },
@@ -2699,6 +2714,9 @@ function makeConnection(
             ...(message.postTokens === undefined ? {} : { tokensAfter: message.postTokens }),
           };
         }
+      }
+      if (message.kind === "commands-changed") {
+        options.runtimeRegistry.setObservedCommands(options.instanceId, message.commands);
       }
       if (message.kind === "session-state") {
         state.reportsSessionState = true;
@@ -3772,6 +3790,12 @@ function makeConnection(
         };
         callbackState = state;
         sessions.set(input.sessionId, state);
+        // A Work or Code session opens in its Project, so its list holds the
+        // Project's own commands and skills that the probe's folder lacks.
+        const announced = query.initialization.commands;
+        if (mode !== "chat" && announced !== undefined && announced.length > 0) {
+          options.runtimeRegistry.setObservedCommands(options.instanceId, announced);
+        }
         options.runtimeRegistry.setActiveSessionCount(
           options.instanceId,
           options.runtimeRegistry.activeSessionCount(options.instanceId) + 1,

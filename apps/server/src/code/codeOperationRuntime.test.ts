@@ -9075,6 +9075,34 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it("refuses a provider's own slash command in Plan before it reaches the runtime", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      providerCommands: () => [{ name: "review" }],
+    });
+    fixture.setThread(
+      decodeCodeThread({ ...onProvider(providerInstance, "model-a"), executionPolicy: "plan" }),
+    );
+    try {
+      const prompt = storedEvidence(86, "/review src");
+      fixture.evidenceValues.set(prompt.contentId, "/review src");
+      const started = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(84),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt,
+      });
+      expect(JSON.stringify(started)).toContain("Plan runs none: Plan stays read-only");
+      expect(drivers.connection(providerInstance).send).not.toHaveBeenCalled();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("continues the runtime's own session copied at the last kept turn's anchor after a rewind", async () => {
     const drivers = twoHarnesses();
     const forkSession = vi.fn((_input: ProviderSessionForkRequest) =>
@@ -10846,6 +10874,7 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["recordExternalContentIngestion"];
   forkProviderSession?: Parameters<typeof createCodeOperationRuntime>[0]["forkProviderSession"];
+  providerCommands?: Parameters<typeof createCodeOperationRuntime>[0]["providerCommands"];
 }) {
   const directory =
     options.restartOf?.directory ?? mkdtempSync(join(tmpdir(), "octant-code-runtime-"));
@@ -11186,6 +11215,9 @@ function runtimeFixture(options: {
     ...(options.forkProviderSession === undefined
       ? {}
       : { forkProviderSession: options.forkProviderSession }),
+    ...(options.providerCommands === undefined
+      ? {}
+      : { providerCommands: options.providerCommands }),
     nativeTurnAnchor: (anchorThreadId, anchorOperationId) =>
       conversationReader.nativeTurnAnchor(anchorThreadId, decodeCodeOperationId(anchorOperationId)),
     credentialResolver: options.credentialResolver ?? { resolve: async () => options.credential },

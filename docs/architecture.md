@@ -4265,8 +4265,27 @@ picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
 untrusted item is absent), plus the thread's files in Work and Code. Choosing a
 row makes a structured selection chip that the host re-resolves at send; it
-never installs, trusts, enables, or elevates anything. `/` lists commands only,
-and `$skill` stays a typed alias. Side Chat is a Chat-mode sidecar about
+never installs, trusts, enables, or elevates anything. `/` lists Octant's
+commands and, beside them, the thread's provider's own slash commands,
+labelled as the provider's (maintainer principle, 2026-11-14: a workflow
+that works in the provider's own app works in Octant); `$skill` stays a
+typed alias. A runtime reports its commands on the provider's observation
+(`commands`): Claude Code's initialization list and its `commands_changed`
+push, and an ACP agent's `available_commands_update`, read at the probe and
+replaced whenever a session reports a change. Choosing one writes `/name `
+into the draft, and the message goes to the runtime as its prompt, as the
+provider's own app sends it; it runs as a command when it leads the
+runtime's message, which holds whenever the turn carries no other context
+or Claude's prompt hook carries it. The host refuses a turn whose prompt
+opens with a listed command in Plan, which stays read-only, and in Chat,
+which keeps no folder and no shell, with the existing turn refusal; those
+composers still list the commands and say why they cannot run. An ACP agent
+with a reviewed command inventory (Kimi Code) keeps its probe check and runs
+only a listed command on that inventory. Codex lists none: its app-server
+(rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
+and its slash commands are its terminal client's own. OpenCode lists none
+yet: running one needs its command route, which has not been read at a
+supported release. Side Chat is a Chat-mode sidecar about
 exactly one source thread: ordinary Chat with no inherited Work or Code
 authority and no agent path that messages, approves, steers, or appends to the
 source. A person may explicitly choose a finished reply’s **Use in source draft**
@@ -14697,8 +14716,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   person chose Claude artifacts, below: its launches go without
   `DISABLE_TELEMETRY` and so send the runtime's usage telemetry. A channel with no switch of its own is closed by the
   launch shape instead: `/share`, like any slash command, runs only when the
-  person types it, as in the runtime's own terminal (the model cannot invoke
-  one, and Octant sends none but `/compact`); a plugin's background `command`
+  person sends it from a Work or Code composer outside Plan, as in the
+  runtime's own terminal (the model cannot invoke one, and Octant itself
+  sends none but `/compact`); a plugin's background `command`
   runs only where the person's own setup loads it: with that setup off the
   query is opened with no setting sources, plugins, skills, agents, or MCP
   servers, so no plugin is loaded (with it on, under

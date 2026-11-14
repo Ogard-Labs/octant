@@ -12,6 +12,7 @@ import type {
   ProviderExecutionPolicy,
   ProviderFailure,
   ProviderNativeSetup,
+  ProviderSlashCommand,
   ProviderToolDefinition,
   ThreadPublishedSnapshot,
 } from "@octant/contracts";
@@ -250,6 +251,11 @@ export interface ClaudeInitialization {
    */
   readonly compactAnnounced: boolean;
   /**
+   * The runtime's own slash commands and skills as it announced them, which
+   * a composer lists as the provider's. Absent when it announced none.
+   */
+  readonly commands?: ReadonlyArray<ProviderSlashCommand>;
+  /**
    * Where the runtime compacts the session by itself, in tokens, when it said
    * compaction is on. Absent when it said nothing usable.
    */
@@ -383,6 +389,12 @@ export type ClaudeDecodedMessage =
       readonly kind: "stream-event";
       readonly sessionId: string;
       readonly event: ClaudeStreamEvent;
+    }
+  | {
+      /** The runtime's whole command list after a mid-session change. */
+      readonly kind: "commands-changed";
+      readonly sessionId: string;
+      readonly commands: ReadonlyArray<ProviderSlashCommand>;
     }
   | {
       readonly kind: "tool-results";

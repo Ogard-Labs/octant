@@ -2068,6 +2068,20 @@ export const ProviderModelToolCheck = Schema.Struct({
 }).annotations(strict);
 export type ProviderModelToolCheck = typeof ProviderModelToolCheck.Type;
 
+/**
+ * One of the provider's own slash commands, as its runtime listed it: Claude
+ * Code's commands and skills, an ACP agent's `available_commands_update`,
+ * OpenCode's commands. Choosing it in a composer sends `/name` to the
+ * runtime as the prompt.
+ */
+export const ProviderSlashCommand = Schema.Struct({
+  name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9:_.-]*$/u), Schema.maxLength(128)),
+  description: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  argumentHint: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+}).annotations(strict);
+export type ProviderSlashCommand = typeof ProviderSlashCommand.Type;
+export const MAX_PROVIDER_SLASH_COMMANDS = 256;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -2083,6 +2097,14 @@ export const ProviderObservedState = Schema.Struct({
   directoryBinding: Schema.optional(ProviderObservedDirectoryBinding),
   models: Schema.Array(ProviderModel),
   capabilities: ProviderCapabilities,
+  /**
+   * The provider's own slash commands its runtime last listed, by the probe
+   * or by a session that reported a change. Absent when it lists none or
+   * cannot say.
+   */
+  commands: Schema.optional(
+    Schema.Array(ProviderSlashCommand).pipe(Schema.maxItems(MAX_PROVIDER_SLASH_COMMANDS)),
+  ),
   // Models a person explicitly verified for tool support through the
   // verify-model-tools command, on any endpoint profile (OpenAI-compatible,
   // Anthropic-compatible, Azure AI Foundry). The sender gates tool requests

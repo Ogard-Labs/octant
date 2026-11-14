@@ -2502,7 +2502,7 @@ describe("ACP provider driver profile quirks", () => {
     });
   });
 
-  it("runs Kimi Code's own slash commands in Code and refuses them in Plan before they reach it", async () => {
+  it("runs Kimi Code's own reviewed slash commands in Code and refuses them in Plan before they reach it", async () => {
     const { driver, client } = fixture(kimi);
     await Effect.runPromise(
       Effect.scoped(
@@ -2528,6 +2528,16 @@ describe("ACP provider driver profile quirks", () => {
         Effect.gen(function* () {
           const connection = yield* code.driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          // A command Kimi Code did not list and Octant did not review stays refused.
+          const unreviewed = yield* Effect.flip(
+            connection.send({ sessionId, prompt: "/skill:embedded", attachments: [], tools: [] }),
+          );
+          expect(unreviewed).toEqual({
+            category: "unauthorized",
+            message:
+              "Kimi Code runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.",
+          });
+          expect(code.client.prompt).not.toHaveBeenCalled();
           yield* connection.send({ sessionId, prompt: "/compact", attachments: [], tools: [] });
           expect(code.client.prompt).toHaveBeenCalled();
           yield* connection.stop(sessionId);

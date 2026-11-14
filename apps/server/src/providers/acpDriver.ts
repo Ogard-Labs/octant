@@ -1,6 +1,8 @@
 import { compactAcpConversation } from "./acpCompaction";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
+import { providerCommandOf } from "@octant/domain";
+import { advertisedSlashCommands } from "./providerSlashCommands";
 import {
   CorrelationId,
   UtcTimestamp,
@@ -19,6 +21,7 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderSlashCommand,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderApprovalCall,
@@ -597,6 +600,15 @@ function commandInventory(notification: AcpServerNotification): ReadonlyArray<st
   return names;
 }
 
+/** The commands an `available_commands_update` lists, with what the menu shows for each. */
+function advertisedCommandsOf(
+  notification: AcpServerNotification,
+): ReadonlyArray<ProviderSlashCommand> | undefined {
+  const update = notification.params.update;
+  if (update.sessionUpdate !== "available_commands_update") return undefined;
+  return advertisedSlashCommands(update.availableCommands);
+}
+
 function isReviewedCommandInventory(
   reviewed: ReadonlyArray<string>,
   commands: ReadonlyArray<string>,
@@ -788,6 +800,13 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       }
       return Effect.gen(function* () {
         const { connection, client } = yield* managedHomeClient;
+        // The agent lists its commands after `session/new`; the probe's
+        // client closes with its scope, and the listener with it.
+        let advertised: ReadonlyArray<ProviderSlashCommand> = [];
+        client.onNotification((notification) => {
+          const commands = advertisedCommandsOf(notification);
+          if (commands !== undefined) advertised = commands;
+        });
         if (profile.authenticateOnProbe) {
           yield* request(() => client.authenticate(), {
             stage: "authentication",
@@ -850,8 +869,9 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           options.authentication === "api-key" ? "stored" : undefined,
           profile.discoverModelOptions === true ? optionsByModel : undefined,
         );
-        options.runtimeRegistry.setObservedState(observed);
-        return observed;
+        const listed = advertised.length === 0 ? observed : { ...observed, commands: advertised };
+        options.runtimeRegistry.setObservedState(listed);
+        return listed;
       });
     },
     acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
@@ -1094,6 +1114,10 @@ function makeConnection(
       if (notification.params.sessionId === state.sourceSessionId && commands !== undefined) {
         state.runtime.commands.clear();
         for (const command of commands) state.runtime.commands.add(command);
+        options.runtimeRegistry.setObservedCommands(
+          options.instanceId,
+          advertisedCommandsOf(notification) ?? [],
+        );
         return;
       }
       if (
@@ -1589,6 +1613,10 @@ function makeConnection(
               commandSessionId ??= notification.params.sessionId;
               if (commandSessionId !== notification.params.sessionId) commandsMismatch = true;
               startupCommands = commands;
+              options.runtimeRegistry.setObservedCommands(
+                options.instanceId,
+                advertisedCommandsOf(notification) ?? [],
+              );
             });
             const appManagedTools = negotiatedAppManagedTools(
               connection.initialized,
@@ -2071,15 +2099,32 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
+                // An agent with a reviewed inventory runs no slash command in
+                // Plan or Chat, since a command can write; elsewhere it runs
+                // only a command on that inventory, and one its session
+                // listed once it has listed any, so an unreviewed command
+                // cannot run.
+                const reviewed = profile.reviewedCommands;
+                const opensWithSlash = prompt.trimStart().startsWith("/");
+                const readOnly = mode === "chat" || state.executionPolicy === "plan";
+                const listed = [...state.runtime.commands];
+                const command = providerCommandOf(
+                  input.prompt,
+                  (reviewed ?? [])
+                    .filter((commandName) => listed.length === 0 || listed.includes(commandName))
+                    .map((commandName) => ({ name: commandName })),
+                );
                 if (
-                  profile.reviewedCommands !== undefined &&
-                  (mode === "chat" || state.executionPolicy === "plan") &&
-                  prompt.trimStart().startsWith("/")
+                  reviewed !== undefined &&
+                  opensWithSlash &&
+                  (readOnly || command === undefined)
                 ) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      `${name} slash commands do not run in Plan or Chat. Rephrase the request without a leading slash.`,
+                      readOnly
+                        ? `${name} slash commands do not run in Plan or Chat. Rephrase the request without a leading slash.`
+                        : `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }
