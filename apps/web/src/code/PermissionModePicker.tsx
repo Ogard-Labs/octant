@@ -237,7 +237,14 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
           ) : null}
         </OctantMenuTrigger>
         <OctantMenuPortal>
-          <OctantMenuPositioner side="top">
+          {/* Above the button, 8px clear of it, and never over it: a menu that
+              cannot fit above shifts sideways rather than cover its trigger. */}
+          <OctantMenuPositioner
+            align="start"
+            collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
+            side="top"
+            sideOffset={8}
+          >
             <OctantMenuPopup>
               <OctantMenuRadioGroup
                 value={props.value}
