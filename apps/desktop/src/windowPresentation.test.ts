@@ -6,6 +6,7 @@ import {
   MACOS_TRAFFIC_LIGHT_BUTTON_HEIGHT,
   createWindowPresentationController,
   describeGlassGate,
+  glassSafeAtStart,
   resolveGlassRefusal,
   nativeTitlebarContainerHeight,
   observeThermalPerformance,
@@ -240,6 +241,13 @@ describe("observeThermalPerformance", () => {
 
     stop();
     expect(powerMonitor.off).toHaveBeenCalledWith("thermal-state-change", listener);
+  });
+
+  it("starts a cool Mac's window without a thermal refusal, and a hot one with it", () => {
+    const at = (state: "nominal" | "serious") => ({ getCurrentThermalState: () => state });
+    expect(glassSafeAtStart("darwin", at("nominal"))).toBe(true);
+    expect(glassSafeAtStart("darwin", at("serious"))).toBe(false);
+    expect(glassSafeAtStart("linux", at("nominal"))).toBe(false);
   });
 });
 

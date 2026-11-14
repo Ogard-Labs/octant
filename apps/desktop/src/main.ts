@@ -341,6 +341,7 @@ import {
 import {
   INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
   createWindowPresentationController,
+  glassSafeAtStart,
   observeThermalPerformance,
   resolveWindowPresentation,
   type GlassRefusal,
@@ -2436,7 +2437,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
     sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
     sidebarVibrancyMode: "off",
     compositionSupported: process.platform === "darwin",
-    performanceSafe: false,
+    performanceSafe: glassSafeAtStart(process.platform, powerMonitor),
     prefersReducedTransparency: nativeTheme.prefersReducedTransparency,
     highContrast: nativeTheme.shouldUseHighContrastColors,
   });
@@ -2594,7 +2595,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
         sidebarVibrancyMode: "off",
         compositionSupported: process.platform === "darwin",
-        performanceSafe: false,
+        performanceSafe: glassSafeAtStart(process.platform, powerMonitor),
         report: writeDiagnostic,
       });
       preparedController = controller;
@@ -2732,7 +2733,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
     sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
     sidebarVibrancyMode: "off",
     compositionSupported: process.platform === "darwin",
-    performanceSafe: false,
+    performanceSafe: glassSafeAtStart(process.platform, powerMonitor),
     prefersReducedTransparency: nativeTheme.prefersReducedTransparency,
     highContrast: nativeTheme.shouldUseHighContrastColors,
   });
@@ -2897,7 +2898,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
           sidebarVibrancyMode: "off",
           compositionSupported: process.platform === "darwin",
-          performanceSafe: false,
+          performanceSafe: glassSafeAtStart(process.platform, powerMonitor),
           report: writeDiagnostic,
         });
         preparationCleanup.trackPresentationController(controller);

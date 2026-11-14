@@ -253,6 +253,18 @@ export function thermalStateAllowsGlass(state: ThermalState): boolean {
   return state === "nominal" || state === "fair";
 }
 
+/**
+ * What the gate starts from, before the thermal observer runs. Starting from
+ * `false` made every launch log "refused: thermal-pressure" on a cool Mac, and
+ * the first line is the one a person reads.
+ */
+export function glassSafeAtStart(
+  platform: NodeJS.Platform,
+  powerMonitor: Pick<PowerMonitorPort, "getCurrentThermalState">,
+): boolean {
+  return platform === "darwin" && thermalStateAllowsGlass(powerMonitor.getCurrentThermalState());
+}
+
 export function observeThermalPerformance(options: ObserveThermalPerformanceOptions): () => void {
   if (options.platform !== "darwin") {
     options.updatePerformanceSafe(false);
