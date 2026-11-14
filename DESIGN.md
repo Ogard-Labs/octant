@@ -1111,7 +1111,11 @@ float follows [Translucency](#translucency).
   and a 4px rise over `--oct-motion-base`, none under reduced motion. Those two
   hug their content (icon, message, second part, action) at the left edge, no
   wider than 480px: a longer message wraps onto a second line, and several
-  notices stack, each as wide as its own content.
+  notices stack, each as wide as its own content. The one exception is the plan
+  usage warning above the composer: it is amber while the account is close to its
+  limit and red once it has reached it, as an 8% wash of the tone over an 84%
+  float and a tone edge at 36%, and it has a dismiss button. A dismissed warning
+  stays away until its reset time passes or the account reaches its limit.
 - **States.** On glass the fill is the dense 96% float; increased contrast and
   reduced transparency make it opaque.
 - **Accessibility.** Warning and danger are `alert`; the others `status`.

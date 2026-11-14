@@ -180,6 +180,27 @@ describe("ComposerModelPicker", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("marks a reached limit red and keeps a dismissed warning away when the composer comes back", async () => {
+    const warningFor = () => (
+      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
+        <ComposerUsageWarning
+          groups={groups()}
+          onSelect={vi.fn()}
+          selectedProviderInstanceId={String(providerA)}
+        />
+      </PlanUsageProvider>
+    );
+    const first = render(warningFor());
+    const warning = await screen.findByRole("alert");
+    expect(warning).toHaveAttribute("data-tone", "danger");
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    first.unmount();
+    render(warningFor());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("selects advertised lead and sidekick pairings and remembers speed beside effort", async () => {
     const configured = fusionGroups();
     const onSelect = vi.fn();
