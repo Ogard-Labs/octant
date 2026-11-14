@@ -4271,21 +4271,24 @@ labelled as the provider's (maintainer principle, 2026-11-14: a workflow
 that works in the provider's own app works in Octant); `$skill` stays a
 typed alias. A runtime reports its commands on the provider's observation
 (`commands`): Claude Code's initialization list and its `commands_changed`
-push, and an ACP agent's `available_commands_update`, read at the probe and
-replaced whenever a session reports a change. Choosing one writes `/name `
+push, an ACP agent's `available_commands_update`, and OpenCode 2's
+`GET /api/command`, read at the probe and replaced whenever a session reports
+a change (OpenCode's when a Work or Code session starts or resumes). Choosing one writes `/name `
 into the draft, and the message goes to the runtime as its prompt, as the
 provider's own app sends it; it runs as a command when it leads the
 runtime's message, which holds whenever the turn carries no other context
-or Claude's prompt hook carries it. The host refuses a turn whose prompt
+or Claude's prompt hook carries it. OpenCode 2 runs a listed command through
+its own command route rather than as text, with the turn's context admitted
+first as input that starts no run (detail in
+[Provider runtimes](design/provider-runtimes.md)). The host refuses a turn whose prompt
 opens with a listed command in Plan, which stays read-only, and in Chat,
 which keeps no folder and no shell, with the existing turn refusal; those
 composers still list the commands and say why they cannot run. An ACP agent
 with a reviewed command inventory (Kimi Code) keeps its probe check and runs
 only a listed command on that inventory. Codex lists none: its app-server
 (rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
-and its slash commands are its terminal client's own. OpenCode lists none
-yet: running one needs its command route, which has not been read at a
-supported release. Side Chat is a Chat-mode sidecar about
+and its slash commands are its terminal client's own. OpenCode 1.x lists
+none: its command route answers only once the whole run has ended. Side Chat is a Chat-mode sidecar about
 exactly one source thread: ordinary Chat with no inherited Work or Code
 authority and no agent path that messages, approves, steers, or appends to the
 source. A person may explicitly choose a finished reply’s **Use in source draft**

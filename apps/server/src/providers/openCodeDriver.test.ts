@@ -1762,6 +1762,78 @@ describe("OpenCode driver", () => {
     expect(probe.models.length).toBeGreaterThan(0);
   });
 
+  it("lists OpenCode 2's own commands on the probe", async () => {
+    const commands = [{ name: "review", description: "review changes" }];
+    const fixture = betaDriver({ commands });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(probe.commands).toEqual(commands);
+  });
+
+  it("runs a chosen OpenCode 2 command through its command route in Code", async () => {
+    const fixture = betaDriver({ commands: [{ name: "review" }] });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState(probe);
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.tap(() =>
+                connection.send({
+                  sessionId,
+                  prompt: "/review main",
+                  attachments: [],
+                  tools: [],
+                  context: [{ kind: "instructions", text: "Octant instructions" }],
+                }),
+              ),
+              Effect.tap(() =>
+                connection.send({
+                  sessionId,
+                  prompt: "/tmp is a path",
+                  attachments: [],
+                  tools: [],
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("session.command:review:main:context");
+    // Text that only starts with a slash names no listed command.
+    expect(fixture.calls.filter((call) => call === "session.promptAsync")).toHaveLength(1);
+  });
+
+  it("refuses a listed OpenCode command in Plan before it reaches the runtime", async () => {
+    const fixture = betaDriver({ commands: [{ name: "review" }] });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState(probe);
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({ sessionId, modelId, executionPolicy: "plan" })
+                .pipe(
+                  Effect.flatMap(() =>
+                    Effect.exit(
+                      connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+                    ),
+                  ),
+                ),
+            ),
+          ),
+      ),
+    );
+    expect(String(result)).toContain("Plan runs none");
+    expect(fixture.calls.some((call) => call.startsWith("session.command:"))).toBe(false);
+    expect(fixture.calls).not.toContain("session.promptAsync");
+  });
+
   it("offers a 2.x turn in every mode once the jail serves a Git work tree", async () => {
     for (const [mode, policy] of [
       ["chat", "approval-gated"],
@@ -3519,6 +3591,7 @@ function betaDriver(
     readonly permissionPersistence?: "project-default";
     readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
+    readonly commands?: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
   } = {},
 ) {
   const launchScratch = launchScratchDirectory();
@@ -3581,6 +3654,8 @@ function driverFixture(
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
     /** The version a 2.x client reports: its process's, never a health route's. */
     readonly healthVersion?: string;
+    /** OpenCode's own commands, as a runtime with the command routes lists them. */
+    readonly commands?: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
   } = {},
 ) {
   const calls: string[] = [];
@@ -3706,6 +3781,17 @@ function driverFixture(
       calls.push(`session.delete:${id}`);
       if (options.sessionDelete === "refused") throw new Error("session delete -> 500");
     },
+    ...(options.commands === undefined
+      ? {}
+      : {
+          commands: async () => {
+            calls.push("command.list");
+            return options.commands ?? [];
+          },
+          command: async ({ name, arguments: text, context }) => {
+            calls.push(`session.command:${name}:${text}:${context === undefined ? "" : "context"}`);
+          },
+        }),
   };
   return {
     calls,

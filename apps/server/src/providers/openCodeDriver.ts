@@ -1,4 +1,6 @@
-import { providerRunsAsItself } from "@octant/domain";
+import { providerCommandOf, providerCommandRefusal, providerRunsAsItself } from "@octant/domain";
+import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
+import { advertisedSlashCommands } from "./providerSlashCommands";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
 import {
   openCodeOwnRulesAllow,
@@ -21,6 +23,7 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderSlashCommand,
   type ProviderToolDefinition,
   type ProviderTurnInput,
   type UtcTimestamp,
@@ -34,6 +37,7 @@ import type {
   ProviderSessionCompaction,
 } from "@octant/provider-sdk/driver";
 import {
+  renderProviderContextSections,
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
   validateChatTurnInput,
@@ -58,6 +62,7 @@ import {
   type OpenCodeManagedToolsBridge,
 } from "./openCodeManagedTools";
 import {
+  openCodeServesCommandRoutes,
   openCodeServesNativeRoutes,
   openCodeServesQuestionForms,
   type OpenCodeProcessPort,
@@ -109,6 +114,27 @@ export interface OpenCodeClientPort {
    * events. Only a runtime whose route was read offers it.
    */
   readonly compact?: ((sessionId: string) => Promise<void>) | undefined;
+  /**
+   * OpenCode's own commands for this client's directory. Only a runtime whose
+   * command routes were read offers it.
+   */
+  readonly commands?: (() => Promise<ReadonlyArray<ProviderSlashCommand>>) | undefined;
+  /**
+   * Runs one of OpenCode's own commands as the session's next turn, after
+   * admitting the turn's Octant context as input that starts no run. Offered
+   * with `commands`.
+   */
+  readonly command?:
+    | ((input: {
+        readonly sessionId: string;
+        readonly providerId: string;
+        readonly modelId: string;
+        readonly name: string;
+        readonly arguments: string;
+        readonly context?: string;
+        readonly attachments?: ProviderTurnInput["attachments"];
+      }) => Promise<void>)
+    | undefined;
   readonly replyPermission: (
     sessionId: string,
     requestId: string,
@@ -668,6 +694,22 @@ async function readBetaCatalogue(client: ReturnType<typeof createOpencodeClient>
   return adaptBetaOpenCodeCatalogue(providers, models);
 }
 
+/**
+ * The commands a client lists, or none when its runtime offers no command
+ * route or the listing fails: the list only labels a menu and grants nothing.
+ */
+async function listedCommands(
+  client: OpenCodeClientPort,
+): Promise<ReadonlyArray<ProviderSlashCommand>> {
+  if (client.commands === undefined) return [];
+  return client.commands().catch(() => []);
+}
+
+/** A command's arguments: the prompt after its leading `/name`. */
+function commandArguments(prompt: string): string {
+  return prompt.replace(/^\s*\/[^\s/]+/u, "").trim();
+}
+
 function missingHealthRoute(error: unknown): boolean {
   if (typeof error !== "object" || error === null || !("cause" in error)) return false;
   const cause = error.cause;
@@ -972,6 +1014,87 @@ async function addBetaMcpServer(
   }
 }
 
+/** The most a command list may weigh; a larger answer is refused and lists none. */
+const MAX_COMMAND_LIST_BYTES = 256 * 1_024;
+
+/**
+ * OpenCode's own commands at the Project root. 2.x answers `GET /api/command`
+ * with `{location, data: [{name, description?}]}`; the answer is read as
+ * untrusted, so an entry Octant cannot send as `/name` is dropped.
+ */
+async function listBetaCommands(
+  server: OpenCodeServerConnection,
+  projectRoot: string,
+): Promise<ReadonlyArray<ProviderSlashCommand>> {
+  const url = new URL("/api/command", server.url);
+  url.searchParams.set("location[directory]", projectRoot);
+  const response = await fetch(url.toString(), {
+    headers: betaMcpHeaders(server, projectRoot),
+    signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new OpenCodeRouteError(
+      `OpenCode 2 command listing failed with status ${response.status}.`,
+      response.status,
+    );
+  }
+  const body = await readBoundedResponseBody(
+    response,
+    MAX_COMMAND_LIST_BYTES,
+    "OpenCode 2 listed more commands than Octant reads.",
+  );
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(body));
+  return advertisedSlashCommands(asRecord(parsed)?.data);
+}
+
+/**
+ * Runs a command through `POST /api/session/{id}/command`, whose body is
+ * `{name, text, files?}` and whose answer is 204 once the command's input is
+ * admitted. The turn's Octant context goes first as a prompt with
+ * `resume: false`, which OpenCode admits without starting a run, so the
+ * command's own text stays only its arguments.
+ */
+async function runBetaCommand(
+  server: OpenCodeServerConnection,
+  projectRoot: string,
+  input: {
+    readonly sessionId: string;
+    readonly name: string;
+    readonly arguments: string;
+    readonly context?: string;
+    readonly attachments?: ProviderTurnInput["attachments"];
+  },
+): Promise<void> {
+  const headers = { ...betaMcpHeaders(server, projectRoot), "content-type": "application/json" };
+  const route = (path: "prompt" | "command") =>
+    new URL(`/api/session/${encodeURIComponent(input.sessionId)}/${path}`, server.url).toString();
+  if (input.context !== undefined) {
+    const admitted = await fetch(route("prompt"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ text: input.context, resume: false }),
+      signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+    });
+    if (!admitted.ok) {
+      throw new Error(`OpenCode 2 prompt failed with status ${admitted.status}.`);
+    }
+  }
+  const files = openCodeBetaPromptFiles(input.attachments ?? []);
+  const response = await fetch(route("command"), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      name: input.name,
+      text: input.arguments,
+      ...(files.length === 0 ? {} : { files }),
+    }),
+    signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`OpenCode 2 command failed with status ${response.status}.`);
+  }
+}
+
 function betaMcpStatus(body: unknown, name: string): string | undefined {
   const servers = asRecord(body)?.data;
   if (!Array.isArray(servers)) return undefined;
@@ -1189,6 +1312,18 @@ export function makeOfficialOpenCodeClient(
           }
         }
       : undefined,
+    ...(beta && openCodeServesCommandRoutes(server.version)
+      ? {
+          commands: () => listBetaCommands(server, projectRoot),
+          command: async ({ sessionId, providerId, modelId, ...command }) => {
+            await client.v2.session.switchModel(
+              { sessionID: sessionId, model: { providerID: providerId, id: modelId } },
+              betaMutationOptions(),
+            );
+            await runBetaCommand(server, projectRoot, { sessionId, ...command });
+          },
+        }
+      : {}),
     replyPermission: async (sessionId, requestId, reply) => {
       if (beta) {
         // The pinned SDK 1.18.0 sends `{reply}`, which 2.0.22 answers 400;
@@ -1391,8 +1526,10 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                   capabilities: BETA_LISTING_ONLY_CAPABILITIES,
                 });
               }
+              const commands = yield* Effect.promise(() => listedCommands(client));
               return {
                 ...normalized,
+                ...(commands.length === 0 ? {} : { commands }),
                 capabilities: openCodeBetaCapabilities(
                   normalized.capabilities,
                   health.version,
@@ -1574,6 +1711,22 @@ function makeConnection(
     let sessionSetupInFlight = false;
     let closing = false;
     let client: OpenCodeClientPort | undefined;
+    /**
+     * A Work or Code session opens at its Project root, so its list replaces
+     * the probe's. Chat runs no command, so its sessions keep the probe's.
+     */
+    const observeSessionCommands = (): Effect.Effect<void> => {
+      const list = client?.commands;
+      if (mode === "chat" || list === undefined) return Effect.void;
+      return Effect.promise(() =>
+        list().then(
+          (commands) => {
+            options.runtimeRegistry.setObservedCommands(options.instanceId, commands);
+          },
+          () => undefined,
+        ),
+      );
+    };
     let runtimeScope: Scope.CloseableScope | undefined;
     let processMonitor: { readonly exited: Promise<void>; readonly cancel: () => void } | undefined;
     let runtimePolicy: ProviderExecutionPolicy | undefined;
@@ -2364,6 +2517,7 @@ function makeConnection(
                 },
               });
             }),
+            Effect.tap(observeSessionCommands),
             Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
             Effect.ensuring(
               Effect.sync(() => {
@@ -2516,6 +2670,7 @@ function makeConnection(
                     resumeCursor: input.resumeCursor,
                   });
                 }),
+                Effect.tap(observeSessionCommands),
                 Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
                 Effect.ensuring(
                   Effect.sync(() => {
@@ -2567,6 +2722,25 @@ function makeConnection(
               model,
             );
             if (rejected !== undefined) return Effect.fail(rejected);
+            // A prompt that opens with one of OpenCode's listed commands runs
+            // through its command route, as OpenCode's own client sends it;
+            // as plain text the model would only read the slash. The host
+            // refused it in Chat and Plan before this; the driver holds the
+            // same line for any caller that did not.
+            const runCommand = runtimeClient.command;
+            const command =
+              runCommand === undefined
+                ? undefined
+                : providerCommandOf(input.prompt, observed?.commands);
+            const commandRefusal = providerCommandRefusal({
+              prompt: input.prompt,
+              commands: command === undefined ? undefined : observed?.commands,
+              mode,
+              executionPolicy: state.executionPolicy,
+            });
+            if (commandRefusal !== undefined) {
+              return Effect.fail(fail("unauthorized", commandRefusal));
+            }
             return Effect.try({
               try: () => splitModelId(state.modelId),
               catch: providerFailure,
@@ -2578,6 +2752,23 @@ function makeConnection(
                       const managedTools = state.managedTools;
                       state.usageTotals = undefined;
                       state.turnSent = true;
+                      if (command !== undefined && runCommand !== undefined) {
+                        const context =
+                          input.context === undefined || input.context.length === 0
+                            ? undefined
+                            : renderProviderContextSections(input.context);
+                        return yield* request(() =>
+                          runCommand({
+                            sessionId: source,
+                            providerId: modelSelection.providerId,
+                            modelId: modelSelection.modelId,
+                            name: command,
+                            arguments: commandArguments(input.prompt),
+                            ...(context === undefined ? {} : { context }),
+                            attachments: input.attachments,
+                          }),
+                        );
+                      }
                       return yield* request(() =>
                         runtimeClient.prompt({
                           sessionId: source,

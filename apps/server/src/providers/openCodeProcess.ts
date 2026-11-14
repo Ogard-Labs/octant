@@ -751,6 +751,19 @@ export function openCodeServesQuestionForms(version: string | undefined): boolea
   return openCode2VersionAtLeast(version, OPEN_CODE_2_QUESTION_FORMS_SINCE);
 }
 
+/**
+ * The first 2.x release whose server was read for OpenCode's own commands:
+ * `GET /api/command` lists them and `POST /api/session/{id}/command` runs one
+ * (read again at 2.2.0). 1.x is left out: its command route answers only once
+ * the whole run has ended, so a turn could not start from it.
+ */
+const OPEN_CODE_2_COMMAND_ROUTES_SINCE = [2, 0, 22] as const;
+
+/** Whether this runtime version string names a 2.x release read for the command routes. */
+export function openCodeServesCommandRoutes(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_COMMAND_ROUTES_SINCE);
+}
+
 /** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
 export function supportsOpenCodeIsolation(version: string): boolean {
   // 2.0.x has no `--pure`; the private profile and guards alone kept the

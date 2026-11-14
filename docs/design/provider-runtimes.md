@@ -1161,6 +1161,31 @@ shapes, never from a model run, so no before-and-after figure is reported.
 A session carried on to another of the instance's models needs no further
 work: every prompt names the thread's model (`modelSwitch`).
 
+OpenCode's own slash commands are listed and run from 2.0.22, the first
+release whose server was read for them (read again at 2.2.0). `GET
+/api/command` (with `location[directory]` set to the Project root) answers
+`{location, data}`, each entry `{name, description?}`: the built-in `init` and
+`review`, commands from the launch's configuration, and each MCP prompt as
+`server:prompt`. The probe lists them into the observation's `commands`, and a
+Work or Code session replaces that list when it starts or resumes, as Claude
+Code's and an ACP agent's are ([Architecture: the composer's `@` and
+`/`](../architecture.md#person-memory)). The answer is untrusted: a body over
+256 KiB lists none, and an entry whose name Octant cannot send as `/name` is
+dropped. A turn whose prompt opens with a listed name goes to `POST
+/api/session/{id}/command` with `{name, text, files?}`, the text being what
+follows the name, after the model switch every prompt makes; the turn's Octant
+context goes first as a prompt with `resume: false`, which OpenCode admits
+without starting a run, so the command's own text stays only its arguments.
+The route answers 204 once the command's input is admitted, and the run
+reports through the same events as a prompt. The host refuses such a turn in
+Plan and in Chat, and the driver refuses it again. A command may run a shell
+before the model sees it: a configured command's template expands
+`` !`…` `` through OpenCode's shell, which asks no approval, inside the
+launch's own confinement; only Work and Code outside Plan run one, as
+OpenCode's own client does. 1.x lists none: its `POST /session/{id}/command`
+answers only once the whole run has ended (1.18.21), so no turn can start
+from it, and it has no asynchronous form.
+
 Every OpenCode prompt names its model, so a resumed session runs on the
 thread's model, the one its cursor's binding records. The session record is
 only a fallback: 1.x does not report a model on it, and the adapter once sent

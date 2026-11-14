@@ -591,4 +591,134 @@ describe("official OpenCode client routing", () => {
     expect(promptRequest?.headers.get("authorization")).toBe("Basic redacted");
     expect(promptRequest?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
+
+  it("lists OpenCode 2's own commands at the Project root and drops an entry it cannot send", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        // The `GET /api/command` answer as 2.2.0 shapes it: the location,
+        // then `Command.Info` entries (`name`, optional `description`).
+        return new Response(
+          JSON.stringify({
+            location: { directory: "/tmp/project" },
+            data: [
+              { name: "init", description: "guided AGENTS.md setup" },
+              {
+                name: "review",
+                description: "review changes [commit|branch|pr], defaults to uncommitted",
+              },
+              { name: "docs:summarize" },
+              { name: "two words", description: "not sendable as /name" },
+              { description: "no name" },
+              "init",
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.2.0",
+        url: new URL("http://127.0.0.1:41732/"),
+      },
+      "/tmp/project",
+    );
+    await expect(client.commands?.()).resolves.toEqual([
+      { name: "init", description: "guided AGENTS.md setup" },
+      { name: "review", description: "review changes [commit|branch|pr], defaults to uncommitted" },
+      { name: "docs:summarize" },
+    ]);
+    const url = new URL(requests[0]?.url ?? "");
+    expect(url.pathname).toBe("/api/command");
+    expect(url.searchParams.get("location[directory]")).toBe("/tmp/project");
+    expect(requests[0]?.headers.get("authorization")).toBe("Basic redacted");
+  });
+
+  it("refuses a command list larger than Octant reads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ data: [{ name: "init", description: "x".repeat(300_000) }] }),
+            {
+              headers: { "content-type": "application/json" },
+            },
+          ),
+      ),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.2.0",
+        url: new URL("http://127.0.0.1:41733/"),
+      },
+      "/tmp/project",
+    );
+    await expect(client.commands?.()).rejects.toThrow("more commands than Octant reads");
+  });
+
+  it("runs a chosen OpenCode 2 command through its command route after admitting the turn's context", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        requests.push(request.clone());
+        return new URL(request.url).pathname.endsWith("/command")
+          ? new Response(null, { status: 204 })
+          : new Response(JSON.stringify({ data: {} }), {
+              headers: { "content-type": "application/json" },
+            });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.2.0",
+        url: new URL("http://127.0.0.1:41734/"),
+      },
+      "/tmp/project",
+    );
+    await client.command?.({
+      sessionId: "ses_1",
+      providerId: "openai",
+      modelId: "gpt-5",
+      name: "review",
+      arguments: "main",
+      context: "<octant-context>standing</octant-context>",
+    });
+    const sent = requests.filter((request) => request.method === "POST");
+    expect(sent.map((request) => new URL(request.url).pathname)).toEqual([
+      "/api/session/ses_1/model",
+      "/api/session/ses_1/prompt",
+      "/api/session/ses_1/command",
+    ]);
+    expect(await sent[1]?.json()).toEqual({
+      text: "<octant-context>standing</octant-context>",
+      resume: false,
+    });
+    expect(await sent[2]?.json()).toEqual({ name: "review", text: "main" });
+    expect(sent[2]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
+  });
+
+  it("offers no command route on a 1.x runtime, whose route answers only after the run ends", () => {
+    const client = makeOfficialOpenCodeClient(
+      { authorization: "Basic redacted", pid: 1, url: new URL("http://127.0.0.1:41735/") },
+      "/tmp/project",
+    );
+    expect(client.commands).toBeUndefined();
+    expect(client.command).toBeUndefined();
+  });
 });
