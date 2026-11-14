@@ -14,7 +14,7 @@ import {
   MobileInboxFailure,
   type MobileInboxHostFailure,
   type MobileInboxRow,
-  searchMobileChatTranscripts,
+  searchMobileTranscripts,
   type MobileTranscriptHit,
 } from "@octant/client-runtime";
 import { MOBILE_COPY } from "../copy";
@@ -33,7 +33,7 @@ export type AgentListView = "all" | "attention" | "working" | "review";
 
 export interface AgentsListScreenProps {
   readonly onBack: () => void;
-  /** Opens a thread; a message search hit also names the Chat turn to scroll to. */
+  /** Opens a thread; a message search hit also names the turn to scroll to. */
   readonly onOpenThread: (row: MobileInboxRow, focusTurnId?: string) => void;
   readonly view: AgentListView;
   readonly onSelectView: (view: AgentListView) => void;
@@ -72,8 +72,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   const [query, setQuery] = useState("");
   const [messageHits, setMessageHits] = useState<ReadonlyArray<MobileTranscriptHit>>([]);
   // Titles filter in place; message text is the host's search, asked once the
-  // person pauses typing, across every paired computer. Work and Code have no
-  // message search on the host, so only Chat messages are matched.
+  // person pauses typing, across every paired computer and every mode.
   useEffect(() => {
     const trimmed = query.trim();
     if (!searchOpen || trimmed.length < 2) {
@@ -84,7 +83,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     const timer = setTimeout(() => {
       void Promise.all(
         transports.map((transport) =>
-          searchMobileChatTranscripts(transport, trimmed, controller.signal),
+          searchMobileTranscripts(transport, trimmed, controller.signal),
         ),
       ).then((results) => {
         if (controller.signal.aborted) return;
@@ -432,17 +431,20 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
             {messageHits.map((hit, index) => (
               <ListRow
                 detail={formatScreenshotSafeLabel(hit.snippet)}
-                icon="chatbubble-ellipses-outline"
-                key={`${hit.hostId}:${hit.threadId}:${hit.turnId}`}
+                icon={modeIcon(hit.mode)}
+                key={`${hit.hostId}:${hit.mode}:${hit.threadId}:${hit.turnId}`}
                 label={formatScreenshotSafeLabel(hit.title)}
                 last={index === messageHits.length - 1}
                 onPress={() =>
                   props.onOpenThread(
                     rows.find(
-                      (row) => row.hostId === hit.hostId && row.threadId === hit.threadId,
+                      (row) =>
+                        row.hostId === hit.hostId &&
+                        row.mode === hit.mode &&
+                        row.threadId === hit.threadId,
                     ) ?? {
                       hostId: hit.hostId,
-                      mode: "chat",
+                      mode: hit.mode,
                       threadId: hit.threadId,
                       title: hit.title,
                       status: "active",
@@ -451,7 +453,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
                     hit.turnId,
                   )
                 }
-                testID={`mobile-agents-message-hit-${hit.threadId}`}
+                testID={`mobile-agents-message-hit-${hit.mode}-${hit.threadId}`}
               />
             ))}
           </ListSection>

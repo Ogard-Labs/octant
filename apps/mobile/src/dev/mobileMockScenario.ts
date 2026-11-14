@@ -595,6 +595,12 @@ function mockJsonResponse(value: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(value), { ...init, headers });
 }
 
+/** A bounded clip around the first match, as the host's message search returns. */
+function mockSnippet(body: string, needle: string): string {
+  const at = body.toLowerCase().indexOf(needle);
+  return body.slice(at < 40 ? 0 : at - 40, at + 100);
+}
+
 /** Sample feeds have no frames; keep only their owning view's abortable wait. */
 function waitForAbort(signal: AbortSignal | undefined): Promise<Response> {
   return new Promise((_resolve, reject) => {
@@ -641,6 +647,48 @@ function createMockTransport(input: {
     head: { kind: "branch", name: "feature/issue-812-mobile-polish-mock", oid: "a".repeat(40) },
     observedAt: NOW,
   } as const;
+  // The checklist thread has one finished turn, so message search finds Work
+  // text in the preview as it finds Chat and Code text.
+  if (workThreads.some((thread) => String(thread.id) === WORK_THREAD_ID)) {
+    const prompt = "List what the travel launch still needs.";
+    const response = "Visa letters, the venue deposit, and the press kit are still open.";
+    workTurns.set(WORK_THREAD_ID, [
+      {
+        requestId: "84000000-0000-4000-8000-000000000001",
+        threadId: WORK_THREAD_ID,
+        turnId: "84000000-0000-4000-8000-000000000002",
+        projectId: PROJECT_ID,
+        authority: {
+          hostId: input.hostId,
+          projectId: PROJECT_ID,
+          bindingRevisionId: BINDING_ID,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: PROVIDER_ID,
+          modelId: MODEL_ID,
+        },
+        status: "completed",
+        prompt,
+        response,
+        transcript: [
+          { role: "user", text: prompt },
+          { role: "assistant", text: response },
+        ],
+        capabilities: {
+          workspace: "project-backed",
+          confinement: "project-root-confined",
+          shell: "denied",
+          git: "denied",
+          worktree: "denied",
+          pullRequest: "denied",
+          code: "denied",
+        },
+        version: 2,
+        acceptedAt: EARLIER,
+        updatedAt: NOW,
+      },
+    ]);
+  }
   // The review thread has one finished turn, so its Context & usage pane
   // shows the window its provider reported.
   if (codeThreads.some((thread) => String(thread.id) === CODE_THREAD_ID)) {
@@ -1088,6 +1136,59 @@ function createMockTransport(input: {
               ];
             });
         });
+        return mockJsonResponse({ query: needle, hits, truncated: false });
+      }
+      if (request.method === "GET" && request.path === "/api/work/transcript-search") {
+        // One hit per turn whose prompt or reply holds the text, as the host answers.
+        const needle = new URLSearchParams(request.query ?? "").get("q")?.toLowerCase() ?? "";
+        const hits = workThreads.flatMap((thread) =>
+          (workTurns.get(String(thread.id)) ?? []).flatMap((turn) => {
+            const body = [turn.prompt, turn.response]
+              .filter((text): text is string => typeof text === "string")
+              .find((text) => needle.length > 0 && text.toLowerCase().includes(needle));
+            return body === undefined
+              ? []
+              : [
+                  {
+                    threadId: thread.id,
+                    turnId: turn.turnId,
+                    title: thread.title,
+                    lifecycle: thread.lifecycle === "archived" ? "archived" : "active",
+                    projectId: thread.projectId,
+                    snippet: mockSnippet(body, needle),
+                  },
+                ];
+          }),
+        );
+        return mockJsonResponse({ query: needle, hits, truncated: false });
+      }
+      if (request.method === "GET" && request.path === "/api/code/transcript-search") {
+        // One hit per provider turn, named by its operation, reading the evidence text.
+        const needle = new URLSearchParams(request.query ?? "").get("q")?.toLowerCase() ?? "";
+        const textOf = (reference: unknown) =>
+          typeof reference === "object" && reference !== null && "contentId" in reference
+            ? codeEvidence.get(String(reference.contentId))?.text
+            : undefined;
+        const hits = codeThreads.flatMap((thread) =>
+          (codeTurns.get(String(thread.id)) ?? []).flatMap((turn) => {
+            const reply = Array.isArray(turn.assistant) ? turn.assistant.map(textOf).join("") : "";
+            const body = [textOf(turn.prompt), reply]
+              .filter((text): text is string => typeof text === "string")
+              .find((text) => needle.length > 0 && text.toLowerCase().includes(needle));
+            return body === undefined
+              ? []
+              : [
+                  {
+                    threadId: thread.id,
+                    operationId: turn.operationId,
+                    title: thread.title,
+                    lifecycle: thread.lifecycle === "archived" ? "archived" : "active",
+                    projectId: thread.projectId,
+                    snippet: mockSnippet(body, needle),
+                  },
+                ];
+          }),
+        );
         return mockJsonResponse({ query: needle, hits, truncated: false });
       }
       if (request.method === "POST" && request.path === "/api/chat/commands") {

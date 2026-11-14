@@ -36,8 +36,10 @@ export interface ThreadTranscriptProps {
   /** The thread's Reply detail level, the host's per-thread choice or its default. */
   readonly replyDetail: ReplyDetailLevel;
   /**
-   * A Chat turn to bring into view, from a message search hit: the transcript
-   * reports where that turn's message sits so the screen can scroll to it.
+   * A turn to bring into view, from a message search hit: the transcript
+   * reports where that turn sits so the screen can scroll to it. The id is the
+   * one each mode keys its turns by: a Chat or Work turn id, or the operation
+   * of a Code provider turn.
    */
   readonly focus?: { readonly turnId: string; readonly onFound: (y: number) => void };
 }
@@ -148,16 +150,36 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
     reported.current = true;
     props.focus?.onFound(sectionY.current + messageY.current);
   };
+  const onSectionLayout = (event: { nativeEvent: { layout: { y: number } } }) => {
+    sectionY.current = event.nativeEvent.layout.y;
+    reportFocus();
+  };
+  // Work and Code render one View per turn, so the focused turn's View reports
+  // where it sits, as the focused Chat message does.
+  const focusTurnLayout = (turnId: string) =>
+    turnId === props.focus?.turnId
+      ? {
+          onLayout: (event: { nativeEvent: { layout: { y: number } } }) => {
+            messageY.current = event.nativeEvent.layout.y;
+            reportFocus();
+          },
+          testID: "mobile-thread-focused-turn",
+        }
+      : {};
 
   return (
     <>
       {workTurns !== undefined ? (
-        <View style={styles.transcript} testID="mobile-work-transcript">
+        <View onLayout={onSectionLayout} style={styles.transcript} testID="mobile-work-transcript">
           {workTurns.length === 0 ? (
             <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
           ) : (
             workTurns.map((turn, index) => (
-              <View key={String(turn.turnId)} style={styles.transcript}>
+              <View
+                key={String(turn.turnId)}
+                style={styles.transcript}
+                {...focusTurnLayout(String(turn.turnId))}
+              >
                 <MessageBubble
                   replyDetail={props.replyDetail}
                   body={turn.prompt}
@@ -200,7 +222,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         </View>
       ) : null}
       {codeTurns !== undefined ? (
-        <View style={styles.transcript} testID="mobile-code-transcript">
+        <View onLayout={onSectionLayout} style={styles.transcript} testID="mobile-code-transcript">
           {codeConversation?.hasEarlier === true ? (
             <Text style={styles.metaText}>{MOBILE_COPY.codeEarlierTurns}</Text>
           ) : null}
@@ -208,7 +230,11 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
             <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
           ) : (
             codeTurns.map((turn, turnIndex) => (
-              <View key={turn.operationId} style={styles.transcript}>
+              <View
+                key={turn.operationId}
+                style={styles.transcript}
+                {...focusTurnLayout(String(turn.operationId))}
+              >
                 {turn.prompt.length === 0 ? null : (
                   <MessageBubble
                     replyDetail={props.replyDetail}
@@ -256,10 +282,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
       ) : null}
       {view !== undefined ? (
         <View
-          onLayout={(event) => {
-            sectionY.current = event.nativeEvent.layout.y;
-            reportFocus();
-          }}
+          onLayout={onSectionLayout}
           style={styles.transcript}
           testID="mobile-thread-transcript"
         >
