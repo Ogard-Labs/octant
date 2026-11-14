@@ -31,10 +31,10 @@
 
 /* Raised opaque card for in-flow containers. */
 .octant-card {
-  background: var(--octant-surface-raised);
+  background: var(--octant-card);
   border: 0;
   border-radius: var(--oct-radius-md);
-  outline: 1px solid var(--oct-border);
+  outline: 1px solid var(--oct-hairline);
   outline-offset: -1px;
 }
 
@@ -228,8 +228,15 @@ html[data-octant-increased-contrast="true"]
 .provider-question-card {
   border: 0;
   background: var(--octant-card);
-  outline: 1px solid var(--oct-border);
+  outline: 1px solid var(--oct-hairline);
   outline-offset: -1px;
+}
+
+/* A person's message is a fill alone, as a quiet bubble; the cards around it
+   keep the hairline. Forced colours and increased contrast draw their own
+   borders below. */
+.turn-user .bubble {
+  outline: 0;
 }
 
 /* Level 3, a well: a place cut into the surface (a segmented switch's track,

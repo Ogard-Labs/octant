@@ -183,7 +183,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
     defaultLight: "#666666",
-    defaultDark: "#949494",
+    defaultDark: "#9b9b9b",
   },
   {
     // Primary actions put this ink on the accent in each mode.

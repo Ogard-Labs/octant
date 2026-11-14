@@ -520,7 +520,7 @@ function InboxCard(props: {
 }) {
   const headingId = useId();
   return (
-    <OctantCard aria-labelledby={headingId} className="inbox-card">
+    <OctantCard aria-labelledby={headingId} className="inbox-card outline-0">
       <div className="inbox-card__head">
         <h2 className="oct-section-label" id={headingId}>
           {props.label}

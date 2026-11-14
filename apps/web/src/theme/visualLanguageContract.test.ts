@@ -368,7 +368,7 @@ describe("the public-block visual language", () => {
     // The line is a share of the ink, so it shows on a near-black preset and
     // on a glass tint alike, and the strong border under increased contrast.
     expect(shell).toMatch(
-      /\.shell\.shell-frame \{ --octant-pane-line: color-mix\(in srgb, var\(--octant-text-primary\) \d+%, transparent\)/,
+      /\.shell\.shell-frame \{ --octant-pane-line: var\(--oct-hairline\)/,
     );
     expect(panel('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
       /--octant-pane-line:\s*var\(--octant-border-strong\)/,
@@ -575,7 +575,7 @@ describe("the public-block visual language", () => {
     );
     // Over a ground or under Window glass the card is the glass the box is.
     expect(css).toMatch(
-      /:is\(\.shell--app-backdrop, \.shell--material-translucent\)\s*\.callout\.composer-notice\s*\{[^}]*backdrop-filter/,
+      /\.shell--app-backdrop:not\(\.shell--material-translucent\)\s*\.callout\.composer-notice\s*\{[^}]*backdrop-filter/,
     );
     // Nothing the box held for a notice survives: no feedback strip in it.
     expect(css).not.toMatch(/\.thread-composer__feedback/);
@@ -694,6 +694,9 @@ describe("the public-block visual language", () => {
       ".artifact-library__search-input",
       ".artifact-tags__input",
       ".browser-workspace__omnibox input",
+      // Static cards that draw a fill and no edge; nothing in them takes focus
+      // for the card itself.
+      ".turn-user .bubble",
     ]);
     const resets: string[] = [];
     for (const file of cssFiles(webRoot)) {
@@ -731,7 +734,7 @@ describe("the public-block visual language", () => {
     // message was a full-width sticky slab, Chat's bubble carried a hairline
     // shadow over its border, Code drew message and status classes of its
     // own, and each mode's composer row sized its controls differently.
-    expect(system).toMatch(/\.turn-user \.bubble \{[^}]*box-shadow:\s*none/);
+    expect(system).not.toMatch(/\.turn-user \.bubble \{[^}]*border:/);
     expect(system).toMatch(/\.turn-user \{[^}]*justify-items:\s*end/);
     expect(system).not.toMatch(/\.turn-user \{[^}]*position:\s*sticky/);
     // The conversation supplies the reading background even over a pattern;

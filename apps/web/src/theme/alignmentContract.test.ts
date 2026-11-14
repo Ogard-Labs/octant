@@ -106,7 +106,7 @@ describe("the shell's edges and gaps", () => {
     );
     const body = card.slice(0, card.indexOf("}"));
     expect(body).toMatch(/border:\s*0;/);
-    expect(body).toMatch(/outline:\s*1px solid var\(--oct-border\);/);
+    expect(body).toMatch(/outline:\s*1px solid var\(--oct-hairline\);/);
     expect(body).toMatch(/outline-offset:\s*-1px;/);
   });
 

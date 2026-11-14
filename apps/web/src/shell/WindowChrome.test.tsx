@@ -634,8 +634,9 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__popup")).toContain(
       "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
     );
-    // A dialog's corner is the system's dialog token (--oct-radius-xl: 20px).
-    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-xl)");
+    // The dialog's paint (fill, corner, shadow) is the shared float rule in
+    // components.css; sizing is all this rule keeps.
+    expect(cssRule(".octant-dialog__popup")).not.toContain("border-radius");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
     // The wash behind a modal is the system scrim token rather than a literal.
@@ -682,9 +683,9 @@ describe("WindowChrome", () => {
 
   it("keeps the opaque utility dock and accessibility fallbacks", () => {
     // --oct-bg is the bridge's alias for the opaque --octant-workspace ground,
-    // so the dock and dialog stay workspace-opaque under every theme.
+    // so the dock stays workspace-opaque under every theme.
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
-    expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
+    expect(cssRule(".octant-dialog__popup")).not.toContain("background");
     // The Environment's boundary is its header card now, not the checkout block:
     // a wash of the ink over the dock, with no ring (increased contrast adds one).
     expect(cssRule(".thread-environment-dock__header")).toContain(

@@ -67,6 +67,8 @@
   --oct-fill-2: color-mix(in oklab, var(--octant-text-primary) 8%, transparent);
   --oct-fill-3: color-mix(in oklab, var(--octant-text-primary) 6%, transparent);
   --oct-fill-4: color-mix(in oklab, var(--octant-text-primary) 4%, transparent);
+  --oct-wash-hover: color-mix(in oklab, var(--octant-text-primary) 3%, transparent);
+  --oct-wash-selected: color-mix(in oklab, var(--octant-text-primary) 4%, transparent);
   --oct-hairline: color-mix(in oklab, var(--octant-text-primary) 10%, transparent);
   --oct-hairline-strong: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
 

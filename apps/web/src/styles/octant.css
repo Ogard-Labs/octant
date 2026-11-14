@@ -27,7 +27,7 @@
   --oct-fg: light-dark(#141414, #f5f5f7);
   --oct-fg-2: color-mix(in oklab, var(--oct-fg) 90%, transparent);
   --oct-muted: light-dark(#45454a, #bcbcc2);
-  --oct-meta: light-dark(#666666, #949494);
+  --oct-meta: light-dark(#666666, #9b9b9b);
   --oct-border: light-dark(#e0e0de, #303030);
   --oct-border-soft: color-mix(in oklab, var(--oct-fg) 7%, transparent);
   /* the chosen row: an opaque ground a step past hover, because active
@@ -2721,10 +2721,7 @@ input.switch:checked::after {
   max-width: min(80%, 620px);
   justify-self: end;
   padding: var(--oct-space-3) var(--oct-space-4);
-  border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface-warm);
-  box-shadow: none;
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-transcript-font-size);
@@ -2962,13 +2959,13 @@ input.switch:checked::after {
   list-style: none;
   cursor: default;
   color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
 }
 .toolrow > summary::-webkit-details-marker {
   display: none;
 }
 .toolrow > summary:hover {
-  background: var(--oct-fg-soft);
+  background: var(--oct-wash-hover);
   color: var(--oct-fg-2);
 }
 .toolrow > summary .icon {
@@ -6872,8 +6869,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .code-home__card {
   background: var(--octant-card);
   box-shadow: none;
-  outline: 1px solid var(--oct-border);
-  outline-offset: -1px;
+  outline: 0;
 }
 
 /* Input surfaces over the application ground on an opaque window keep the glass

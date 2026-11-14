@@ -22,7 +22,7 @@ describe("OctantEmpty", () => {
     const state = screen.getByRole("status");
     expect(state).toHaveAttribute("data-slot", "empty");
     expect(state).toHaveClass("rounded-xl");
-    expect(state).toHaveClass("outline-border");
+    expect(state).toHaveClass("outline-(--oct-hairline)");
   });
 
   it("draws a message's mark in neutral ink, whatever went wrong", () => {

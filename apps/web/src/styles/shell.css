@@ -474,12 +474,12 @@ html[data-octant-native-host="true"]
 
 .sidebar-rail__button:hover .sidebar-rail__face,
 .sidebar-rail__button:focus-visible .sidebar-rail__face {
-  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 3%, transparent);
+  --sidebar-rail-fill: var(--oct-wash-hover);
   color: var(--oct-fg);
 }
 
 .sidebar-rail__button[aria-current="page"] .sidebar-rail__face {
-  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 4%, transparent);
+  --sidebar-rail-fill: var(--oct-wash-selected);
   color: var(--oct-fg);
 }
 
@@ -553,7 +553,7 @@ html[data-octant-native-host="true"]
 
 .window-chrome__leading--browser {
   position: relative;
-  z-index: 8;
+  z-index: 7;
   /* The band's end inset (8px) at both ends: the trailing controls keep 8px
      from the right edge, so the leading ones keep 8px from the left. */
   padding: 2px 4px 2px var(--oct-space-2);
@@ -777,7 +777,7 @@ html[data-octant-native-host="true"]
 
 .window-chrome__disclosure {
   position: absolute;
-  z-index: 10;
+  z-index: var(--oct-z-popup);
   top: calc(100% + 7px);
   right: 0;
   display: grid;
@@ -1371,7 +1371,7 @@ html[data-octant-native-host="true"]
 
 .sidebar-navigation__thread:hover {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
+  background: var(--oct-wash-hover);
 }
 
 /* The open thread reads louder than a hovered one: the pointer gets the soft
@@ -1385,7 +1385,7 @@ html[data-octant-native-host="true"]
    a green slab, louder than anything else in the list. */
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
-  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
+  background: var(--oct-wash-selected);
 }
 
 /* A window can show several threads at once, and exactly one marked row
@@ -2118,7 +2118,7 @@ html[data-octant-native-host="true"]
      and under Window glass it is lost on the tint. A share of the ink shows
      on any fill, in dark, in light and on glass. */
   .shell.shell-frame {
-    --octant-pane-line: color-mix(in srgb, var(--octant-text-primary) 10%, transparent);
+    --octant-pane-line: var(--oct-hairline);
     isolation: isolate;
   }
 
@@ -2781,7 +2781,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
    is the shared popover recipe (fill, overlay shadow, 12px radius). */
 .composer-folder-selector__menu {
   position: absolute;
-  z-index: 40;
+  z-index: var(--oct-z-popup);
   inset-block-end: calc(100% + 6px);
   inset-inline-start: 0;
   display: flex;

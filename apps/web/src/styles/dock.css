@@ -1420,10 +1420,6 @@
   min-height: 0;
   overflow: auto;
   color: var(--oct-fg);
-  background: var(--oct-bg);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-xl);
-  box-shadow: var(--octant-shadow-overlay);
   outline: 0;
   pointer-events: auto;
 }
@@ -1459,10 +1455,6 @@
   padding: 0;
   overflow: hidden;
   color: var(--oct-fg);
-  background: var(--octant-float);
-  border: 1px solid var(--octant-bevel);
-  border-radius: var(--oct-radius-xl);
-  box-shadow: var(--octant-shadow-pop);
   outline: 0;
   pointer-events: auto;
 }

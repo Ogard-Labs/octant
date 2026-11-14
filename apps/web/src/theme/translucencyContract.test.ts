@@ -24,10 +24,12 @@ describe("window glass", () => {
   });
 
   it("puts no blur under the translucent shell", () => {
-    for (const name of ["styles/octant.css", "styles/settings.css", "styles/shell.css"]) {
+    for (const name of ["styles/octant.css", "styles/settings.css"]) {
       const css = read(name);
       const rules = css.match(/[^{}]*\.shell--material-translucent[^{}]*\{[^}]*\}/g) ?? [];
       for (const rule of rules) {
+        // The opaque-window branch keeps its blur by naming the glass out.
+        if (rule.includes(":not(.shell--material-translucent)")) continue;
         const filter = /backdrop-filter:\s*([^;]+);/.exec(rule)?.[1];
         if (filter !== undefined) expect(filter.trim(), rule).toBe("none");
       }

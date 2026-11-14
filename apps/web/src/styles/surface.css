@@ -262,6 +262,13 @@
   line-height: 1.15;
 }
 
+/* The detail is a subtitle: the 13px detail role in the secondary ink, on the
+   title's baseline. */
+.surface-header--display .surface-header__detail {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
+}
+
 .surface-header__detail {
   overflow: hidden;
   min-width: 0;

@@ -49,7 +49,7 @@ describe("shared control paint ownership", () => {
       .replace(/\s+/g, " ")
       .match(/\.settings-view \.settings-card-section--open > :is\([^)]*\) \{([^}]*)\}/)?.[1];
     expect(card).not.toMatch(/box-shadow/);
-    expect(card).toMatch(/outline:\s*1px solid var\(--oct-border\)/);
+    expect(card).toMatch(/outline:\s*1px solid var\(--oct-hairline\)/);
     expect(card).not.toMatch(/rgb\(/);
   });
 

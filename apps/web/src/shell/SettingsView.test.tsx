@@ -1022,7 +1022,7 @@ describe("SettingsView", () => {
     });
     navigateTo("Appearance");
     const tint = screen.getByRole("slider", { name: "Glass tint" });
-    expect(tint).toHaveValue("58");
+    expect(tint).toHaveValue("78");
     fireEvent.change(tint, { target: { value: "12" } });
     expect(applyPatch).toHaveBeenLastCalledWith({ glassTint: 12 });
   });
@@ -1172,7 +1172,7 @@ describe("SettingsView", () => {
     // Settings reads the window's own surfaces, which turn opaque on the shell
     // under reduced transparency; the narrow drawer's blur goes with them.
     expect(styles).toMatch(
-      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-window-surface\);[^}]*backdrop-filter:/s,
+      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-float-glass\);[^}]*backdrop-filter:\s*none;/s,
     );
     expect(styles).toMatch(
       /@media \(prefers-reduced-transparency: reduce\)\s*\{\s*\.shell--material-translucent \.settings-view__sidebar\s*\{\s*backdrop-filter:\s*none;/,

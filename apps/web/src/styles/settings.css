@@ -3071,7 +3071,7 @@ html[data-octant-increased-contrast="true"]
      put the rows' 16px inset at 17px from the card's edge. */
   border: 0;
   border-radius: var(--oct-radius-md);
-  outline: 1px solid var(--oct-border);
+  outline: 1px solid var(--oct-hairline);
   outline-offset: -1px;
 }
 

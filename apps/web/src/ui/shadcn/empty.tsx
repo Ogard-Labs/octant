@@ -6,7 +6,7 @@ export function Empty({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
       className={cn(
-        "grid w-full max-w-[480px] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-2 rounded-xl bg-card p-4 text-left text-card-foreground outline outline-1 -outline-offset-1 outline-border",
+        "grid w-full max-w-[480px] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-2 rounded-xl bg-card p-4 text-left text-card-foreground outline outline-1 -outline-offset-1 outline-(--oct-hairline)",
         className,
       )}
       data-slot="empty"
