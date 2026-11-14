@@ -21,6 +21,7 @@ import { attemptReplyText, resolvedContent } from "./chatReply";
 import type { PickerGroup } from "@octant/domain";
 import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
+import { TurnActions } from "../transcript/TurnActions";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import {
@@ -924,9 +925,6 @@ const AttemptBlock = memo(function AttemptBlock(props: {
       >
         <TurnHeader
           at={props.attempt.updatedAt}
-          copyValue={responseBody}
-          onFork={props.attempt.outcome === "completed" ? props.onFork : undefined}
-          forkDisabled={props.forkDisabled}
           outcome={props.attempt.outcome}
           {...(props.attempt.pendingQuestion === undefined
             ? {}
@@ -935,11 +933,6 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           {...(props.providerGroups === undefined
             ? {}
             : { provider: providerModelLabel(props.providerGroups, props.attempt) })}
-          {...(canRegenerate && props.onRetryAttempt !== undefined
-            ? {
-                onRegenerate: () => props.onRetryAttempt?.(props.attempt.turnId, props.attempt.id),
-              }
-            : {})}
           {...(() => {
             const workedFor = turnWorkedFor(
               props.attempt.outcome,
@@ -1089,6 +1082,19 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             response
           </OctantButton>
         ) : null}
+        <TurnActions
+          at={props.attempt.updatedAt}
+          copyValue={responseBody}
+          forkDisabled={props.forkDisabled}
+          latest={props.tailAttempt}
+          onFork={props.onFork}
+          outcome={props.attempt.outcome}
+          {...(canRegenerate && props.onRetryAttempt !== undefined
+            ? {
+                onRegenerate: () => props.onRetryAttempt?.(props.attempt.turnId, props.attempt.id),
+              }
+            : {})}
+        />
       </article>
     </>
   );

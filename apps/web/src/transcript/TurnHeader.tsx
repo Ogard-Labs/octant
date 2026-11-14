@@ -35,13 +35,8 @@ export interface TurnHeaderProps {
   readonly label?: string;
   /** "Worked for 6s"; only a finished turn has one. */
   readonly workedFor?: string;
-  /** When the turn last changed, ISO 8601. */
+  /** When the turn last changed, ISO 8601; the header's hover details carry it. */
   readonly at?: string;
-  readonly copyValue?: string | undefined;
-  /** Runs the attempt again; offered only when the host exposes the command. */
-  readonly onRegenerate?: (() => void) | undefined;
-  readonly onFork?: (() => void) | undefined;
-  readonly forkDisabled?: boolean | undefined;
   /** Why the turn failed, stopped, or waits, in the sanitized words the host gives. */
   readonly reason?: string;
 }
@@ -114,20 +109,6 @@ export function TurnHeader(props: TurnHeaderProps) {
         )}
         {props.workedFor === undefined ? null : (
           <span className="oct-activity-line turn-header__worked-for">{props.workedFor}</span>
-        )}
-        {props.at === undefined &&
-        props.onFork === undefined &&
-        props.copyValue === undefined &&
-        props.onRegenerate === undefined ? null : (
-          <span className="turn-header__time">
-            <TurnTime
-              at={props.at}
-              copyValue={props.copyValue}
-              onFork={props.onFork}
-              forkDisabled={props.forkDisabled}
-              {...(props.onRegenerate === undefined ? {} : { onRegenerate: props.onRegenerate })}
-            />
-          </span>
         )}
       </header>
       {/* Static text on purpose: the transcript window remounts historical rows

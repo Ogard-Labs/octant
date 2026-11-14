@@ -175,6 +175,7 @@ import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
+import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
   TurnTime,
@@ -338,7 +339,6 @@ function withNewestWorkTurns(
 function WorkTurnHeader(props: {
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
-  readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** Puts the stopped turn's prompt back in the composer to send again. */
@@ -357,7 +357,6 @@ function WorkTurnHeader(props: {
     <>
       <TurnHeader
         at={props.turn.updatedAt}
-        copyValue={props.copyValue}
         outcome={outcome}
         provider={providerModelLabel(props.providerGroups, props.turn.authority)}
         {...(workedFor === undefined ? {} : { workedFor })}
@@ -1095,6 +1094,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (rewindFrom !== undefined && props.turnClient?.rewindThread !== undefined)
       actions.push({ label: "Rewind to here…", value: "rewind" });
     return { actions, forkPoint, rewindFrom };
+  }
+
+  /** The action row that ends a turn's reply, the same one Chat and Code draw. */
+  function workTurnActions(turn: WorkTurnState, copyValue: string | undefined) {
+    const canFork = turnActionsFor("assistant", turn).actions.some(
+      (action) => action.value === "fork",
+    );
+    return (
+      <TurnActions
+        at={turn.updatedAt}
+        copyValue={copyValue}
+        forkDisabled={forking}
+        latest={String(turn.turnId) === String(turns.at(-1)?.turnId)}
+        onFork={canFork ? () => onTurnAction("fork", "assistant", turn) : undefined}
+        outcome={turnHeaderOutcome(turn)}
+      />
+    );
   }
 
   function onTurnAction(value: string, role: "user" | "assistant", turn: WorkTurnState) {
@@ -2516,7 +2532,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           <WorkTurnHeader
                             serverUrl={props.serverUrl}
                             windowCapability={props.windowCapability}
-                            copyValue={row.entry.text}
                             onRestorePrompt={composerDraft.setDraft}
                             onCancelResume={cancelUsageResume}
                             onScheduleResume={scheduleUsageResume}
@@ -2550,6 +2565,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       {row.entry.text === "" ? null : (
                         <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
                       )}
+                      {row.turn.transcript.findLast((entry) => entry.role === "assistant") ===
+                      row.entry
+                        ? workTurnActions(row.turn, row.entry.text)
+                        : null}
                     </TurnActionMenu>
                   </article>
                 );
@@ -2588,6 +2607,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? {}
                         : { canvasClient: props.canvasClient })}
                     />
+                    {workTurnActions(row.turn, undefined)}
                   </div>
                 );
               }

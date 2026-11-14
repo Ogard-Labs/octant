@@ -13,6 +13,22 @@ word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
 
+## Reply actions
+
+A finished reply (completed, failed, interrupted or cancelled) ends with one
+action row, `TurnActions` in `apps/web/src/transcript/`, the same in Chat, Work
+and Code: Copy, Fork from here (where the thread can fork), Read aloud (only
+where speech is available), Regenerate (where the host supports it), and the
+time at the right of the buttons, a clock time today and the date and time
+older, with the full date in its title. The buttons are 14px ghost icons in
+the meta ink on a 28px row. The row always holds its height, so showing it
+moves nothing: the thread's last reply keeps it visible at rest, an older reply
+shows it on hover or keyboard focus, and touch and increased contrast always
+show it. A reply still working has no row. A failed or interrupted reply shows
+its time (its last update, or its start when none is journaled yet). Fork also
+stays in a turn's "…" menu. The turn header above the reply keeps only the
+status, how long it took, and the provider and time in its hover details.
+
 ## Transcript
 
 The rest of the thread view is one set of recipes in `octant.css` and the

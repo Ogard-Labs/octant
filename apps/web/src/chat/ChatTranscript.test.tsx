@@ -1494,7 +1494,7 @@ describe("ChatTranscript", () => {
           view={viewFixture()}
         />,
       );
-      const fork = screen.queryByRole("button", { name: "Fork from here" }) !== null;
+      const fork = screen.queryAllByRole("button", { name: "Fork from here" }).length > 0;
       await userEvent.click(screen.getByRole("button", { name: "More actions" }));
       await screen.findByRole("menuitem", { name: "Forget" });
       const offered = {

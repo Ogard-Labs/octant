@@ -130,6 +130,7 @@ import {
   forkMergeBackDisclosure,
   forkMergeBackOutcomeMessage,
 } from "./providerSwitchHandoff";
+import { TurnActions } from "../transcript/TurnActions";
 import {
   TurnHeader,
   TurnTime,
@@ -1996,15 +1997,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ) : (
                           <>
                             <TurnHeader
-                              copyValue={message.text}
-                              onFork={
-                                message.operationId !== undefined &&
-                                message.status === "completed" &&
-                                props.onOpenCodeThread !== undefined
-                                  ? () => void forkFrom(message)
-                                  : undefined
-                              }
-                              forkDisabled={forking}
                               outcome={turnHeaderOutcome(message.status)}
                               {...(workedFor === undefined ? {} : { workedFor })}
                               provider={
@@ -2206,6 +2198,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             restoring={restoring}
                           />
                         ) : null}
+                        {delivered || message.role !== "assistant" ? null : (
+                          <TurnActions
+                            // A reply that failed live has no journaled update
+                            // time yet; the turn's start is the time it has.
+                            at={message.at ?? message.startedAt}
+                            copyValue={message.text}
+                            forkDisabled={forking}
+                            latest={message === lastReply}
+                            onFork={
+                              message.operationId !== undefined &&
+                              message.status === "completed" &&
+                              props.onOpenCodeThread !== undefined
+                                ? () => void forkFrom(message)
+                                : undefined
+                            }
+                            outcome={turnHeaderOutcome(message.status)}
+                          />
+                        )}
                       </TurnActionMenu>
                     </article>
                     {message.role === "assistant" && message.operationId !== undefined ? (

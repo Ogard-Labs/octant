@@ -2358,14 +2358,39 @@ html[data-octant-increased-contrast="true"] .turn-message-meta {
   pointer-events: auto;
 }
 
-/* Keyboard focus may reveal actions, but the response clock follows the pointer. */
-.turn-agent .turn-time {
-  visibility: hidden;
-}
-.turn-agent:hover .turn-time {
-  visibility: visible;
+/* The action row that ends a finished agent reply. It always holds its 28px so
+   showing it moves nothing: the thread's last reply keeps it visible, older
+   replies show it on hover or focus, and touch and increased contrast always
+   show it. */
+.turn-actions {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-meta);
+  opacity: 0;
+  pointer-events: none;
 }
 
+.turn-actions[data-latest="true"],
+.turn-agent:hover .turn-actions,
+.turn-agent:focus-within .turn-actions,
+.turn-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .turn-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+html[data-octant-increased-contrast="true"] .turn-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
 /* The number stepper is a primitive, so its rules load with the app rather
    than with the lazily loaded Settings sheet: opened from a sidebar dialog
    before Settings, its buttons fell back to block layout and stacked above and
