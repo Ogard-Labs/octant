@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts";
 import type { ThreadNotesClient } from "@octant/client-runtime/thread-notes-client";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import "./thread-notes.css";
@@ -97,7 +98,7 @@ function RecapRow(props: { readonly services: ThreadNotesServices; readonly thre
     >
       <summary>Recap</summary>
       {loading && recap === undefined ? <p>Reading the thread…</p> : null}
-      {message === undefined ? null : <p role="alert">{message}</p>}
+      {message === undefined ? null : <OctantAlert tone="danger">{message}</OctantAlert>}
       {recap === undefined ? null : <RecapFacts recap={recap} />}
       {recap === undefined ? null : (
         <div className="thread-notes__actions">
@@ -300,7 +301,7 @@ function NotesRow(props: {
         rows={2}
         value={draft}
       />
-      {message === undefined ? null : <p role="alert">{message}</p>}
+      {message === undefined ? null : <OctantAlert tone="danger">{message}</OctantAlert>}
       <div className="thread-notes__actions">
         <OctantButton
           disabled={busy || trimmed.length === 0}
