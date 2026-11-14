@@ -178,6 +178,18 @@ it is current while that start screen shows. The `home` keybinding
 screen's composer scope, so its unsent text comes back with it. Before Home,
 the start screen had no way back once a person left it.
 
+**New thread** also leads the sidebar's list as a row (28px, the control radius,
+a 16px icon, the label and the `new-thread` key cap at its right in the meta ink),
+beside the band's compose button; both run the same action. The command palette
+(`command-palette`, Mod+K by default, named in the sidebar Search button's
+tooltip) lists, besides threads, the pages the rail and sidebar open (Home,
+Inbox, Agents, Artifacts, Projects, and in Work and Code Board and Automations),
+every Settings page that needs no native capability, New thread, Show or hide
+the sidebar, and the dock tools the thread can open. In the Activity feed the
+newest group is open, so a feed whose only group is Earlier is never a blank
+column. Group headings in the sidebar are 12px in the meta ink with a 14px
+chevron and the count as a right-aligned number.
+
 Projects opens its searchable directory in the main workspace. Selecting a Project
 replaces that directory with the Project overview; Projects in primary navigation
 returns to the directory. Neither view adds a second sidebar. Other destinations
@@ -2892,8 +2904,11 @@ request from the person.
 ### Guided tour
 
 A short tour points at the real controls, once, on the first start. A card
-stands beside the control with a 2px ring in the accent around it, and nothing
-else on the page is dimmed. The card is a floating surface (the shared recipe in
+stands beside the control with a 2px ring in the accent around it (with a soft
+glow of the accent outside it, the spotlight), and nothing else on the page is
+dimmed. The card has one 1px hairline and the 16px floating corner, and a 20px
+title; its picture band is about two fifths of its height, a faint dotted grid
+under a soft glow of the accent. The card is a floating surface (the shared recipe in
 `components.css`, 336px wide) at `--oct-z-floating`: over the page, under a
 notice or a menu. It holds a picture of the feature, a label ("2 of 5 · Projects"
 in the accent text colour), a title, one or two short lines, progress dots, a

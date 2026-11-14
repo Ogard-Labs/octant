@@ -1313,9 +1313,24 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 
 /* Square glyph buttons. The recipe's text padding made each 32px wide, and
    at a narrow sidebar width the row no longer fit beside the views. */
+.project-nav__list-switch {
+  display: inline-flex;
+  gap: var(--oct-space-1);
+  padding: 0;
+}
+
 .project-nav__list-switch > button {
-  aspect-ratio: 1;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding-inline: 0;
+}
+
+/* Every control in the toolbar row is a 28px hit area on the 4px grid, with
+   4px between neighbours, so the filter and the view switches read as one set. */
+.project-nav__toolbar button {
+  min-height: 28px;
 }
 
 /* The row's glyph buttons rest in the secondary ink, never the muted meta ink
@@ -5073,4 +5088,21 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
+}
+
+/* The New thread row at the head of the list: 28px, 8px radius, with its key
+   at the right in the meta ink. */
+.sidebar-item.sidebar-item--new-thread {
+  height: 28px;
+  min-height: 28px;
+  border-radius: var(--oct-radius-sm);
+}
+
+.sidebar-item__key {
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: 0;
 }

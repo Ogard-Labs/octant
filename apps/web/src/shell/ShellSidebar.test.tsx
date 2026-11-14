@@ -10,6 +10,13 @@ import { ShellSidebar } from "./ShellSidebar";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 
+/** The band's compose button; the list also carries a New thread row with the same name. */
+function bandButton(name: string): HTMLElement {
+  const band = document.querySelector<HTMLElement>(".sidebar__chrome");
+  if (band === null) throw new Error("the sidebar band is missing");
+  return within(band).getByRole("button", { name });
+}
+
 describe("ShellSidebar", () => {
   it("names Nightly quietly beside its application name below the native controls", () => {
     const { container } = render(
@@ -180,9 +187,8 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New task", "Board"]) {
-      await user.click(screen.getByRole("button", { name: label }));
-    }
+    await user.click(bandButton("New task"));
+    await user.click(screen.getByRole("button", { name: "Board" }));
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-work-thread"]).toHaveBeenCalledOnce();
@@ -214,7 +220,8 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New task", "Board", "Pull requests"]) {
+    await user.click(bandButton("New task"));
+    for (const label of ["Board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
@@ -506,7 +513,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "New chat" })).toBeVisible();
+    expect(bandButton("New chat")).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("Chat request is unauthorized.");
   });
 
@@ -565,13 +572,13 @@ describe("ShellSidebar", () => {
 
     const chrome = container.querySelector(".sidebar__chrome");
     const search = screen.getByRole("button", { name: "Search" });
-    const create = screen.getByRole("button", { name: "New chat" });
+    const create = bandButton("New chat");
     expect(chrome).toContainElement(search);
     expect(chrome).toContainElement(create);
     expect(search).toHaveClass("shell-icon-button");
     expect(search.querySelector("svg")).toHaveAttribute("width", "16");
-    // The header button replaces the row; the same destination is not offered twice.
-    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(1);
+    // The list leads with a New chat row beside the band's button, with the same action.
+    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(2);
     fireEvent.click(create);
     expect(newChat).toHaveBeenCalledOnce();
     const listSwitch = screen.getByRole("group", { name: "Thread list" });
@@ -919,7 +926,7 @@ describe("ShellSidebar", () => {
     );
 
     const more = screen.getByRole("button", { name: "More destinations" });
-    const newTask = screen.getByRole("button", { name: "New task" });
+    const newTask = bandButton("New task");
     // More is the last destination row: after the rows, before the Project tree.
     expect(newTask.compareDocumentPosition(more)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 

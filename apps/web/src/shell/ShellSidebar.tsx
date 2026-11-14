@@ -172,6 +172,7 @@ const NEW_THREAD_DESTINATIONS = new Set(["new-chat", "new-code-thread", "new-wor
 
 export function ShellSidebar(props: ShellSidebarProps) {
   const newThreadShortcut = useActionShortcut("new-thread");
+  const paletteShortcut = useActionShortcut("command-palette");
   const hostFirstPartyPluginsEffective = useFirstPartyPluginsEffective();
   const modes = enabledModes(props.settings);
   const searchAlwaysShown = props.settings.sidebarSearchPresentation === "field";
@@ -498,22 +499,28 @@ export function ShellSidebar(props: ShellSidebarProps) {
                     )}
                     {filter === undefined || searchAlwaysShown ? (
                       filter === undefined ? (
+                        <OctantTooltip label="Search" shortcut={paletteShortcut}>
+                          <IconButton
+                            data-navigation-id="search"
+                            icon={Search}
+                            label="Search"
+                            onClick={props.onOpenSearch}
+                            title=""
+                          />
+                        </OctantTooltip>
+                      ) : null
+                    ) : (
+                      <OctantTooltip label="Search" shortcut={paletteShortcut}>
                         <IconButton
+                          aria-expanded={searchOpen}
                           data-navigation-id="search"
                           icon={Search}
                           label="Search"
-                          onClick={props.onOpenSearch}
+                          onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+                          ref={searchToggle}
+                          title=""
                         />
-                      ) : null
-                    ) : (
-                      <IconButton
-                        aria-expanded={searchOpen}
-                        data-navigation-id="search"
-                        icon={Search}
-                        label="Search"
-                        onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-                        ref={searchToggle}
-                      />
+                      </OctantTooltip>
                     )}
                     {newThread === undefined || newThreadLabel === undefined ? null : (
                       <OctantTooltip label={newThreadLabel} shortcut={newThreadShortcut}>
@@ -591,6 +598,15 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 ? {}
                 : { counts: { inbox: props.inboxCount } })}
               input={navigationInput}
+              {...(newThread === undefined || newThreadLabel === undefined
+                ? {}
+                : {
+                    newThread: {
+                      label: newThreadLabel,
+                      ...(newThreadShortcut === undefined ? {} : { shortcut: newThreadShortcut }),
+                      onSelect: () => newThread(),
+                    },
+                  })}
               {...(moreActions.length === 0 || besideRail !== null
                 ? {}
                 : {

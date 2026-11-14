@@ -482,6 +482,8 @@ export function ThreadRowInfoPopup(props: {
   return (
     <OctantPreviewCard
       align="start"
+      besideSidebar
+      delay={400}
       content={
         <ThreadRowInfoCard
           actions={props.actions}

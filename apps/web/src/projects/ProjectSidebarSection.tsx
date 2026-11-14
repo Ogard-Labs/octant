@@ -1472,7 +1472,11 @@ function ActivityThreadList(props: {
   // recent groups' neighbours off the bottom of a feed meant for what happened
   // lately. It starts folded; the thread the workspace is showing stays visible
   // while it is, as it does in a folded Project list.
-  const [earlierOpen, setEarlierOpen] = useState(false);
+  // When "Earlier" is also the newest group there is nothing recent to look
+  // at, and a fold left shut would leave the column empty behind one heading,
+  // so it starts open then.
+  const [earlierToggled, setEarlierToggled] = useState<boolean | null>(null);
+  const earlierOpen = earlierToggled ?? props.groups[0]?.id === EARLIER_ACTIVITY_GROUP_ID;
   // A fold must never hide a search result. Folded, a query that matched only
   // an older thread left an "Earlier" heading with a count and nothing under
   // it: neither the match nor the line that says nothing matched.
@@ -1529,14 +1533,14 @@ function ActivityThreadList(props: {
                   aria-expanded={shown}
                   className="activity-nav__fold"
                   onClick={() =>
-                    statusFold ? toggleStatusGroup(group.id) : setEarlierOpen((open) => !open)
+                    statusFold ? toggleStatusGroup(group.id) : setEarlierToggled(!earlierOpen)
                   }
                   type="button"
                   variant="link"
                 >
                   <span>{group.label}</span>
+                  <ChevronRight aria-hidden="true" size={14} />
                   <span className="activity-nav__fold-count">{group.threads.length}</span>
-                  <ChevronRight aria-hidden="true" size={12} />
                 </OctantButton>
               </h2>
             ) : (

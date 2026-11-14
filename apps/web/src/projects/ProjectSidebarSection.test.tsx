@@ -2838,6 +2838,26 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
   });
 
+  it("opens Earlier when it is the only group, so the feed is never an empty column", async () => {
+    const user = userEvent.setup();
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
+    render(
+      <ProjectSidebarSection
+        {...sidebarProps()}
+        threads={[
+          { ...codeThread, threadId: "thread-old", title: "Old spike", updatedAt: monthAgo },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+
+    expect(screen.getByRole("button", { name: /^Earlier/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
+  });
+
   it("never hides a search result behind the Earlier fold", async () => {
     const user = userEvent.setup();
     const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();

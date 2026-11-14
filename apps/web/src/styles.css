@@ -960,7 +960,7 @@ strong {
 }
 
 .activity-nav__group > .sidebar-section {
-  color: var(--octant-text-secondary);
+  color: var(--oct-meta);
 }
 
 /* A status group's heading stands 8px clear of the rows above it. */
@@ -982,6 +982,7 @@ strong {
      it. */
   height: auto;
   min-height: 0;
+  width: 100%;
   gap: var(--oct-space-1);
   /* The recipe keeps a 1px transparent border for its outlined variants; the
      margin takes that pixel back so the word starts where the labels do. */
@@ -993,10 +994,15 @@ strong {
 /* The button paints its own ink, so the heading's secondary ink is set on the
    word. */
 .activity-nav__fold > span:first-child {
-  color: var(--oct-fg-2);
+  color: var(--oct-meta);
+}
+
+.activity-nav__fold > svg {
+  color: var(--oct-meta);
 }
 
 .activity-nav__fold-count {
+  margin-inline-start: auto;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
