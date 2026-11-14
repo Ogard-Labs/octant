@@ -1205,13 +1205,15 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 .chat-rich-text th,
 .chat-rich-text td {
   padding: var(--oct-space-2) var(--oct-space-3);
-  border: 1px solid var(--oct-border);
+  /* Rows are told apart by one hairline under each, not a box round every
+     cell: a full grid drew a heavy mesh over a reply. */
+  border: 0;
+  border-bottom: 1px solid var(--oct-hairline);
   text-align: start;
   vertical-align: top;
 }
 .chat-rich-text th {
-  background: var(--oct-surface);
-  color: var(--oct-fg);
+  color: var(--oct-fg-2);
   font-weight: var(--oct-weight-medium);
 }
 .chat-rich-text li > ul,

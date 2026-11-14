@@ -250,27 +250,13 @@
   gap: 0 var(--oct-space-2);
 }
 
-/* A display header opens a page as a place: the title keeps its own size and
-   the one line of state sits on its baseline, in the meta ink. */
-.surface-header--display > .surface-header__copy > h1 {
-  flex: none;
-  /* A step under the large title and at the strong weight: at 28px and the
-     title weight the one word outweighed everything on the page under it. */
-  font-size: var(--oct-text-2xl);
-  font-weight: var(--oct-weight-strong);
-  letter-spacing: var(--oct-tracking-tight);
-  line-height: 1.15;
-}
-
-/* The detail is a subtitle: the 13px detail role in the secondary ink, on the
-   title's baseline. */
-.surface-header--display .surface-header__detail {
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-detail);
-}
-
+/* Every destination page opens on one header: the page title at its small
+   role, and the one line of state on its baseline as a subtitle in the
+   secondary ink at the detail role. Inbox and Projects read alike. */
 .surface-header__detail {
   overflow: hidden;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
   min-width: 0;
   margin: 0;
   text-overflow: ellipsis;

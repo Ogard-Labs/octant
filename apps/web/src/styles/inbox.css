@@ -45,6 +45,14 @@
   }
 }
 
+/* A Needs you card with nothing in it is one quiet line, and the sources take
+   the page's full width under it instead of leaving the wide column empty. */
+@container inbox-cards (min-width: 720px) {
+  .inbox-page__cards[data-needs-you="empty"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .inbox-card {
   min-width: 0;
   gap: var(--oct-space-2);

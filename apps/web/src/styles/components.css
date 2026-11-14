@@ -239,6 +239,12 @@ html[data-octant-increased-contrast="true"]
   outline: 0;
 }
 
+/* In light the card is the page's own white, so the bubble had no edge and no
+   fill and the message floated as bare text: it takes a step of ink instead. */
+html[data-octant-theme-mode="light"] .turn-user .bubble {
+  background: color-mix(in srgb, var(--octant-text-primary) 4%, var(--octant-workspace));
+}
+
 /* Level 3, a well: a place cut into the surface (a segmented switch's track,
    a capsule of history buttons, a command block), darker than what it is in,
    with an inner top shadow and a light line under its bottom edge. What sits

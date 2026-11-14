@@ -116,16 +116,16 @@ menu shows under reduced transparency. `#9b9b9b` is the first grey that clears
 **Derived surfaces.** These are mixed in the stylesheets, never persisted. The
 resolved values are for the default theme.
 
-| Surface          | Token                                                   | Definition                                                          | Dark            | Light           |
-| ---------------- | ------------------------------------------------------- | ------------------------------------------------------------------- | --------------- | --------------- |
-| Frame ground     | `--octant-ground-opaque`                                | sidebar (dark); sidebar 93% toward the ink (light)                  | `#101010`       | about `#eaeae9` |
-| Pane             | `--octant-panel-opaque`                                 | workspace 98% (dark) / 99.5% (light) toward the ink                 | about `#1e1e1e` | about `#fefefe` |
-| Sidebar in panel | `--octant-sidebar-fill`                                 | pane 90% toward ground, at 97% opacity                              | about `#1d1d1d` | about `#fcfcfc` |
-| Card             | `--octant-card`                                         | workspace 95.5% toward the ink (oklab); workspace in light          | `#222222`       | `#ffffff`       |
-| Float            | `--octant-float`                                        | floating 91% toward the ink (oklab); floating in light              | `#333333`       | `#fdfdfc`       |
-| Float controls   | `--octant-float-control`, `-hover`, `-pressed`, `-line` | float 94 / 89 / 84 / 88% toward the ink; the control roles in light |                 |                 |
-| Settings group   | `--oct-settings-card-fill`                              | ink 2% over the page                                                |                 |                 |
-| Well             | `--octant-well`                                         | black 34% (dark), `rgb(16 24 40 / 5%)` (light)                      |                 |                 |
+| Surface          | Token                                                   | Definition                                                                                      | Dark            | Light           |
+| ---------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------- | --------------- |
+| Frame ground     | `--octant-ground-opaque`                                | sidebar (dark); sidebar 93% toward the ink (light)                                              | `#101010`       | about `#eaeae9` |
+| Pane             | `--octant-panel-opaque`                                 | workspace 98% (dark) / 99.5% (light) toward the ink                                             | about `#1e1e1e` | about `#fefefe` |
+| Sidebar in panel | `--octant-sidebar-fill`                                 | pane 90% toward ground, at 82% opacity (100% under reduced transparency and increased contrast) | about `#1d1d1d` | about `#fcfcfc` |
+| Card             | `--octant-card`                                         | workspace 95.5% toward the ink (oklab); workspace in light                                      | `#222222`       | `#ffffff`       |
+| Float            | `--octant-float`                                        | floating 91% toward the ink (oklab); floating in light                                          | `#333333`       | `#fdfdfc`       |
+| Float controls   | `--octant-float-control`, `-hover`, `-pressed`, `-line` | float 94 / 89 / 84 / 88% toward the ink; the control roles in light                             |                 |                 |
+| Settings group   | `--oct-settings-card-fill`                              | ink 2% over the page                                                                            |                 |                 |
+| Well             | `--octant-well`                                         | black 34% (dark), `rgb(16 24 40 / 5%)` (light)                                                  |                 |                 |
 
 The frame ground is darker than the pane in dark and a step greyer in light,
 so the rail and band read as the window and the panel as the work. Inside the
@@ -300,25 +300,24 @@ bold) hold everywhere; every size at the default interface size is a whole pixel
 (`calc(N * --oct-text-step)` with the step 1), and letter-spacing is normal on
 the body.
 
-| Role               | Size            | Weight | Leading | Ink         | Recipe and where                                                                 |
-| ------------------ | --------------- | ------ | ------- | ----------- | -------------------------------------------------------------------------------- |
-| Hero               | 26 (20 phone)   | 400    | 30px    | primary     | `oct-title--hero`: the welcome question only                                     |
-| Title              | 28              | 700    | 1.15    | primary     | `oct-title`: a page about one thing (a Project, a thread under review)           |
-| Display page title | 26              | 600    | 1.15    | primary     | `.surface-header--display h1`: Inbox and other destination pages that open a day |
-| Page title         | 14              | 600    | 1.35    | primary     | `oct-page-title`: a destination or Settings page toolbar                         |
-| Dialog title       | 17              | 600    | 1.35    | primary     | `.octant-dialog__title`; a part of a dialog 15 / 600                             |
-| Reply heading      | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####`, 24px above, 12px below                                   |
-| Section label      | 14              | 600    | 1.3     | secondary   | `oct-section-label`                                                              |
-| Row label          | 14              | 500    | 1.35    | primary     | `oct-row-label`                                                                  |
-| Navigation name    | 13              | 400    | 1.35    | primary     | `oct-nav-name`                                                                   |
-| Navigation group   | 12              | 400    | 1.3     | muted       | `oct-nav-group`                                                                  |
-| Menu option        | 13              | 500    | 1.35    | primary     | `oct-menu-option`                                                                |
-| Body               | 13              | 400    | 1.5     | primary     | `body`                                                                           |
-| Reply text         | transcript size | 400    | 1.6     | primary     | Appearance's transcript size; lists indent 16px                                  |
-| Activity line      | 13              | 400    | 1.4     | muted       | `oct-activity-line`                                                              |
-| Detail             | 13              | 400    | 1.45    | secondary   | `oct-row-detail`                                                                 |
-| Meta               | 12              | 400    | 1.4     | muted       | `oct-meta`                                                                       |
-| Identifier         | 12              | 400    | 1.4     | muted, mono | `oct-meta--mono`                                                                 |
+| Role             | Size            | Weight | Leading | Ink         | Recipe and where                                                                                                          |
+| ---------------- | --------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Hero             | 26 (20 phone)   | 400    | 30px    | primary     | `oct-title--hero`: the welcome question only                                                                              |
+| Title            | 28              | 700    | 1.15    | primary     | `oct-title`: a page about one thing (a Project, a thread under review)                                                    |
+| Page title       | 14              | 600    | 1.35    | primary     | `oct-page-title`: every destination and Settings page toolbar; its one line of state sits on the baseline, 13px secondary |
+| Dialog title     | 17              | 600    | 1.35    | primary     | `.octant-dialog__title`; a part of a dialog 15 / 600                                                                      |
+| Reply heading    | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####`, 24px above, 12px below                                                                            |
+| Section label    | 14              | 600    | 1.3     | secondary   | `oct-section-label`                                                                                                       |
+| Row label        | 14              | 500    | 1.35    | primary     | `oct-row-label`                                                                                                           |
+| Navigation name  | 13              | 400    | 1.35    | primary     | `oct-nav-name`                                                                                                            |
+| Navigation group | 12              | 400    | 1.3     | muted       | `oct-nav-group`                                                                                                           |
+| Menu option      | 13              | 500    | 1.35    | primary     | `oct-menu-option`                                                                                                         |
+| Body             | 13              | 400    | 1.5     | primary     | `body`                                                                                                                    |
+| Reply text       | transcript size | 400    | 1.6     | primary     | Appearance's transcript size; lists indent 16px                                                                           |
+| Activity line    | 13              | 400    | 1.4     | muted       | `oct-activity-line`                                                                                                       |
+| Detail           | 13              | 400    | 1.45    | secondary   | `oct-row-detail`                                                                                                          |
+| Meta             | 12              | 400    | 1.4     | muted       | `oct-meta`                                                                                                                |
+| Identifier       | 12              | 400    | 1.4     | muted, mono | `oct-meta--mono`                                                                                                          |
 
 - **Size tokens** (`octant.css`, each times `--oct-text-step`): `--oct-text-xs`
   12, `--oct-text-detail` 13 (`surface.css`), `--oct-text-sm` 14,
@@ -625,8 +624,10 @@ dock and the bottom panel) sit in one panel:
   outline and is clipped away.
 - The stage clips to the outline's inside (`clip-path: inset(calc(44px + 1px)
 1px 1px …)` with the inner radius), so no pane paints over a rounded corner.
-- Opaque, the sidebar paints `--octant-sidebar-fill` rounded to the inner
-  corner on its left; the panes paint `--octant-pane-fill`. With glass on, both
+- Opaque, the sidebar paints `--octant-sidebar-fill` (its colour at 82%, so the
+  application ground shows through softly; no blur, which the desktop app does
+  not draw; reduced transparency and increased contrast keep it whole) rounded
+  to the inner corner on its left; the panes paint `--octant-pane-fill`. With glass on, both
   are clear on the coat.
 - The application ground lies on the thread's pane under the content, clipped
   to the panel.
@@ -1015,6 +1016,7 @@ float follows [Translucency](#translucency).
   padding, `--oct-radius-lg`, the float and `--octant-shadow-overlay`. 8px from
   the trigger, after 350ms, at `--oct-z-popup`.
 - **States.** Closes on a press of its trigger without fading over what opened.
+- **Rail.** A rail button's tooltip is a compact one-word chip (13px, 4px by 8px padding) that opens to the right of the rail, centred on the button; it lies over the sidebar and covers as little of it as it must.
 - **Accessibility.** `role="tooltip"`; opens on keyboard focus. Never the only
   place an essential word appears.
 
@@ -1285,14 +1287,14 @@ application ground; every other page covers it with the reading veil.
   colour at 80%) and only the start screens stay open on the ground.
 - **The grounds.**
 
-  | Ground                | What it draws                                                                                                                                                                                                                                                                  | Home readability                                                                                                            |
-  | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-  | ASCII field (default) | `A-Z a-z 0-9` in a 10px monospace face on 7 by 13px cells, primary ink at most 15%, only in drifting patches (smoothstep 0.52 to 0.82); three patterns every 20 seconds with a 4-second cross-fade; a click sends a ring, now and then a heart, through it                     | Dims its own middle to 45%, full strength 30% of the size out; no ellipse mask                                              |
-  | Pixel ground          | Square cells through the 4×4 ordered dither in the ink (at most half opaque in dark, two-fifths in light) with the accent as one glow. Scenes: Ridges, Burst, Drift, and a person's photo printed in the same two tones; Still, or Wave for a slow drift and a ring on a click | A quiet band behind the question and the composer at a fifth of its strength, full a third of the page out; no ellipse mask |
-  | Dithered picture      | A first-party picture or the person's photo, `effect: dither` (or pixelate), cell 2 to 16px, 2 to 16 tones                                                                                                                                                                     | The 560 by 240px ellipse behind the question and the foot fade (62 to 94% of the height; 56 to 90% in light)                |
-  | Flowing colour        | Soft colour from four accent stops, half resolution, 30 fps, a static grain                                                                                                                                                                                                    | Ellipse and foot fade; light stops clear AA against primary text                                                            |
-  | Picture               | A first-party picture (the three Gradient pictures carry a light and a dark print) or a photo, shown plain                                                                                                                                                                     | Ellipse and foot fade                                                                                                       |
-  | Plain page            | Nothing                                                                                                                                                                                                                                                                        |                                                                                                                             |
+  | Ground                | What it draws                                                                                                                                                                                                                                                                  | Home readability                                                                                                                                                                            |
+  | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | ASCII field (default) | `A-Z a-z 0-9` in a 10px monospace face on 7 by 13px cells, primary ink at most 15%, only in drifting patches (smoothstep 0.52 to 0.82); three patterns every 20 seconds with a 4-second cross-fade; a click sends a ring, now and then a heart, through it                     | Dims itself to a third behind the start screen's content column (its full width and height) and under the sidebar when it runs there, full strength 140px past their edges; no ellipse mask |
+  | Pixel ground          | Square cells through the 4×4 ordered dither in the ink (at most half opaque in dark, two-fifths in light) with the accent as one glow. Scenes: Ridges, Burst, Drift, and a person's photo printed in the same two tones; Still, or Wave for a slow drift and a ring on a click | The same column rule: a third of its strength behind the content column and the sidebar (Ridges keeps half behind content), back to full 140px past them                                    |
+  | Dithered picture      | A first-party picture or the person's photo, `effect: dither` (or pixelate), cell 2 to 16px, 2 to 16 tones                                                                                                                                                                     | The 560 by 240px ellipse behind the question and the foot fade (62 to 94% of the height; 56 to 90% in light)                                                                                |
+  | Flowing colour        | Soft colour from four accent stops, half resolution, 30 fps, a static grain                                                                                                                                                                                                    | Ellipse and foot fade; light stops clear AA against primary text                                                                                                                            |
+  | Picture               | A first-party picture (the three Gradient pictures carry a light and a dark print) or a photo, shown plain                                                                                                                                                                     | Ellipse and foot fade                                                                                                                                                                       |
+  | Plain page            | Nothing                                                                                                                                                                                                                                                                        |                                                                                                                                                                                             |
 
 - **Rules for every ground.** It is drawn on a canvas behind the content, with no
   pointer events except a wave a moving print sends from a click on empty

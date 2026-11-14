@@ -235,7 +235,6 @@ export function InboxView(props: InboxViewProps) {
     <Surface ariaLabel="Inbox" className="inbox-page">
       <SurfaceHeader
         detail={inboxStateSentence(counts.all, counts.urgent, today.getTime())}
-        display
         onBack={props.onClose}
         title="Inbox"
         {...(externalSectionsPresent
@@ -255,7 +254,7 @@ export function InboxView(props: InboxViewProps) {
             }
           : {})}
       />
-      <div className="inbox-page__cards">
+      <div className="inbox-page__cards" data-needs-you={groups.length === 0 ? "empty" : "waiting"}>
         <InboxCard
           actions={
             <OctantToggleGroup<InboxFilter>

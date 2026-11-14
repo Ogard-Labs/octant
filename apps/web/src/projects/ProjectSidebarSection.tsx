@@ -1438,13 +1438,13 @@ function ThreadListViewSwitch(props: {
       value={[props.arrangement]}
     >
       <OctantToggleGroupItem aria-label="Status" title="Status" value="status">
-        <ListChecks aria-hidden="true" size={14} />
+        <ListChecks aria-hidden="true" size={16} />
       </OctantToggleGroupItem>
       <OctantToggleGroupItem aria-label="Project tree" title="Project tree" value="projects">
-        <FolderTree aria-hidden="true" size={14} />
+        <FolderTree aria-hidden="true" size={16} />
       </OctantToggleGroupItem>
       <OctantToggleGroupItem aria-label="Activity feed" title="Activity feed" value="activity">
-        <History aria-hidden="true" size={14} />
+        <History aria-hidden="true" size={16} />
       </OctantToggleGroupItem>
     </OctantToggleGroup>
   );
@@ -1952,7 +1952,7 @@ function ProjectViewFilterMenu(props: {
           className="code-project-views__filter window-no-drag"
           title={triggerLabel}
         >
-          <ListFilter aria-hidden="true" size={14} />
+          <ListFilter aria-hidden="true" size={16} />
         </OctantMenuTrigger>
         <OctantMenuPortal>
           <OctantMenuPositioner
