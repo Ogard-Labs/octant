@@ -532,8 +532,8 @@ names a withheld tool:
 | `Artifact`                                | Unless the session offers Claude artifacts                                                                                                                                                                              |
 
 Octant's gate keeps its own rules for the tools it names: reads run unasked
-inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits held
-to the Project and the secret guard below Full access, and `Bash`, `Monitor`, `TaskOutput`,
+inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits judged
+against the Project's folders and the secret guard below Full access (a path outside those folders asks; see below), and `Bash`, `Monitor`, `TaskOutput`,
 and `TaskStop` take the shell's approval rules; a `Monitor` command, like a
 `Bash` one, is named in its prompt and marks the thread when it reaches a
 server. Session-internal tools that read
@@ -635,9 +635,20 @@ reviewer decides, Full access runs without asking. Plan withholds all three.
 At Full access the file gate allows any path, outside the Project's folders
 and the secret guard's list included, as Claude Code does on its own
 (maintainer decision, 2026-11-14); an edit outside the checkout is journaled
-as its tool step with no file change or diff. Guarded, Accept edits,
-Reviewed, and Plan keep the Project's folders and every secret-path refusal.
-Redaction of logs, the journal, and exports applies at every level.
+as its tool step with no file change or diff. Below it, a file tool call
+(`Read`, `Edit`, `Write`, `NotebookEdit`, `Glob`, `Grep`, or any tool that
+names a path) whose target is outside the Project's folders asks through the
+gate at Guarded and Accept edits and goes to the reviewer at Reviewed, as
+Claude Code asks on its own (maintainer decision, 2026-11-14): a read there
+never runs unasked and Accept edits never waives an edit there. Every
+secret-path refusal stays below Full access, so a protected file outside the
+Project is refused, not asked. Plan refuses an outside path, since Plan cannot
+approve anything; a Full access thread that kept its sandbox keeps the
+Project's folders; and an Artifact publish stays held to the Project. A shell
+command's folder is still checked against the Project's folders, and the
+command sandbox keeps its own folders, so below Full access a sandboxed shell
+command cannot reach an outside folder. Redaction of logs, the journal, and
+exports applies at every level.
 
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a

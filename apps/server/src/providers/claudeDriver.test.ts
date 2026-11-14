@@ -10,7 +10,7 @@ import {
   type ProviderNativeSetup,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
-import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
 import {
   renderProviderContextSections,
   renderProviderTurnPrompt,
@@ -878,7 +878,7 @@ describe("Claude execution policy", () => {
             "outside-notebook",
           ),
         ).resolves.toMatchObject({
-          behavior: executionPolicy === "full-access" ? "allow" : "deny",
+          behavior: executionPolicy === "full-access" ? "allow" : "ask",
         });
         // A worktree switch and in-process code take the shell's rules.
         await expect(tool("EnterWorktree", { name: "x" }, "worktree")).resolves.toEqual({
@@ -1257,8 +1257,9 @@ describe("Claude execution policy", () => {
       await expect(read(`${extraFolder}/today.md`, "extra")).resolves.toEqual({
         behavior: "allow",
       });
-      await expect(read("/tmp/octant-claude-elsewhere/a.md", "sibling")).resolves.toMatchObject({
-        behavior: "deny",
+      // A folder beside it is outside the Project's folders, so it asks.
+      await expect(read("/tmp/octant-claude-elsewhere/a.md", "sibling")).resolves.toEqual({
+        behavior: "ask",
       });
     } finally {
       await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -1933,7 +1934,7 @@ describe("Claude execution policy", () => {
         toolUseId: "edit-outside",
         signal,
       }),
-    ).resolves.toMatchObject({ behavior: "deny" });
+    ).resolves.toEqual({ behavior: "ask" });
     await gatedConnection.close();
   });
 
@@ -2071,6 +2072,84 @@ describe("Claude execution policy", () => {
     );
     await expect(callback).resolves.toMatchObject({ behavior: "deny" });
     await acquired.close();
+  });
+
+  it("asks before a file outside the Project below Full access, runs it at Full access, and refuses it in Plan", async () => {
+    const outside = { file_path: "/tmp/octant-claude-outside/notes.md" };
+    const protectedOutside = { file_path: join(homedir(), ".ssh", "id_ed25519") };
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "full-access",
+      "plan",
+    ] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const signal = new AbortController().signal;
+        const pre = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        const read = await pre("Read", outside, "outside-read");
+        if (executionPolicy === "full-access") {
+          expect(read).toEqual({ behavior: "allow" });
+          continue;
+        }
+        if (executionPolicy === "plan") {
+          expect(read).toMatchObject({ behavior: "deny" });
+          continue;
+        }
+        expect(read).toEqual({ behavior: "ask" });
+        const approvalEvent = Effect.runPromise(
+          Stream.runHead(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter((event) => event.kind === "approval-request"),
+            ),
+          ),
+        );
+        // A protected file outside the Project is still refused, not asked.
+        await expect(pre("Read", protectedOutside, "outside-secret")).resolves.toMatchObject({
+          behavior: "deny",
+        });
+        // A shell command's folder stays the command sandbox's to hold.
+        await expect(
+          pre("Bash", { command: "ls", cwd: "/tmp/octant-claude-outside" }, "outside-shell"),
+        ).resolves.toMatchObject({ behavior: "deny" });
+        // The read raises a card rather than running unasked, as a read inside
+        // the Project would, at Accept edits too.
+        const callback = open.canUseTool({
+          toolName: "Read",
+          input: outside,
+          toolUseId: "outside-read",
+          signal,
+        });
+        const first = await Promise.race([
+          approvalEvent.then((event) => ({ kind: "approval" as const, event })),
+          callback.then(() => ({ kind: "decision" as const })),
+        ]);
+        expect(first.kind).toBe("approval");
+        const raised = first.kind === "approval" ? Option.getOrUndefined(first.event) : undefined;
+        if (raised?.kind !== "approval-request") throw new Error("Expected an approval card");
+        await Effect.runPromise(
+          acquired.connection.answerApproval({
+            sessionId,
+            requestId: raised.requestId,
+            approved: true,
+          }),
+        );
+        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+      } finally {
+        await acquired.close();
+      }
+    }
   });
 
   it.each([

@@ -13594,8 +13594,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     the same plain message. Claude Code's own file tools are Claude's, not
     Octant's: at Full access its gate allows any path, outside the Project's
     folders and protected files included, as Claude Code does on its own
-    (maintainer decision, 2026-11-14), and below Full access it keeps both
-    refusals.
+    (maintainer decision, 2026-11-14). Below Full access it keeps every
+    secret-path refusal, and a path outside the Project's folders asks
+    through the gate (Reviewed's reviewer decides it) rather than being
+    refused; Plan refuses it (maintainer decision, 2026-11-14;
+    [detail](design/provider-runtimes.md#full-built-in-tool-set)).
     [Octant Shield](#octant-shield)'s Watcher flags a call that names a
     protected path and the Octant Harness's secret-then-network commands are
     tagged, both journaled and never blocking (the

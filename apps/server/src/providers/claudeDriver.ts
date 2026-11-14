@@ -996,6 +996,8 @@ interface ClaudePreToolGrant {
   readonly toolName: string;
   readonly inputDigest: string;
   readonly expiresAt: number;
+  /** The call names a path outside the Project's folders, so it always asks. */
+  readonly outsideProject?: true;
 }
 
 interface ClaudePendingApprovalState extends ClaudePendingApproval {
@@ -2702,10 +2704,12 @@ function makeConnection(
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             // Auto-accept edits covers exactly the file writes the gate above
             // already proved to be inside the Project. Shell, network, and
-            // every other tool still ask.
-            (input.executionPolicy === "auto-accept-edits" &&
+            // every other tool still ask, and so does a read or an edit
+            // outside the Project's folders.
+            (grant.outsideProject !== true &&
+              input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
-            CLAUDE_READ_TOOLS.has(request.toolName) ||
+            (grant.outsideProject !== true && CLAUDE_READ_TOOLS.has(request.toolName)) ||
             CLAUDE_SESSION_TOOLS.has(request.toolName) ||
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
           ) {
@@ -2964,7 +2968,7 @@ function makeConnection(
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           };
-          const askThroughGrant = (): ClaudePreToolDecision => {
+          const askThroughGrant = (outsideProject = false): ClaudePreToolDecision => {
             if (
               !activeState.preToolRequests.has(request.toolUseId) &&
               activeState.preToolRequests.size >= MAX_PRE_TOOL_GRANTS
@@ -2980,6 +2984,7 @@ function makeConnection(
               toolName: request.toolName,
               inputDigest: digest,
               expiresAt: factories.authorityNow() + PRE_TOOL_GRANT_TTL_MS,
+              ...(outsideProject ? { outsideProject: true as const } : {}),
             });
             return { behavior: "ask" };
           };
@@ -3042,7 +3047,22 @@ function makeConnection(
             return deny("Claude tool request is outside the Project.");
           }
           if (!sessionHolds(activeState, candidate)) {
-            return deny("Claude tool request is outside the Project.");
+            // A file tool naming a folder outside the Project's folders asks
+            // below Full access, as Claude Code does on its own (maintainer
+            // decision, 2026-11-14); the secret guard above has already
+            // refused a protected path. Plan cannot approve anything, a shell
+            // command's folder is held by the command sandbox, a publish stays
+            // held to the Project, and a sandboxed Full access keeps the
+            // Project's folders, so each of those is still refused.
+            if (
+              input.executionPolicy === "plan" ||
+              sandboxedFullAccess ||
+              CLAUDE_SHELL_TOOLS.has(request.toolName) ||
+              request.toolName === CLAUDE_ARTIFACT_TOOL
+            ) {
+              return deny("Claude tool request is outside the Project.");
+            }
+            return askThroughGrant(true);
           }
           return decide();
         };
