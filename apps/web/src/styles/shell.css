@@ -4217,15 +4217,23 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 /* The prompts are one compact row of chips, the same as Work's starters (both
    are StartSuggestionChip, so the chip itself is not styled here): the
    label says what it is, and the prompt it fills in rides as the chip's
-   tooltip and description. Five full cards had pushed Running now below the
-   fold. */
+   tooltip and description. */
 .code-home__suggestions {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  /* One line, at most four chips: a row that wraps reads as a second list. A
+     narrow window scrolls it sideways instead of stacking it. */
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  justify-content: safe center;
   gap: var(--oct-space-2);
   width: 100%;
   margin: var(--oct-space-4) auto 0;
+}
+
+.code-home__suggestions > * {
+  flex: 0 0 auto;
 }
 
 .draft-thread__intent-cards > button {

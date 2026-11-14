@@ -13,7 +13,7 @@ import {
   connectionLabel,
   type ComputersCardHost,
 } from "./computers";
-import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
+import type { HomeCardContent, HomeGridCardDefinition } from "./homeCards";
 import { useActiveAgentRuns } from "./useActiveAgentRuns";
 
 export const COMPUTERS_CARD_ID = "computers";
@@ -59,7 +59,7 @@ export interface ComputersCardSource {
  * devboxes, and servers. A row names the connection in words, and shows
  * load only when this window may read that host.
  */
-export function createComputersCard(source: ComputersCardSource): HomeCardDefinition {
+export function createComputersCard(source: ComputersCardSource): HomeGridCardDefinition {
   return {
     id: COMPUTERS_CARD_ID,
     title: "Computers",

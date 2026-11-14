@@ -2678,7 +2678,7 @@ Status: Designed, not built. Since: 2026-11-14. Detail: [Thread view: Thread rec
 
 ### Start-screen cards
 
-Every start screen shows one question and its composer. Code Home adds one card area, and cards add no authority.
+Every start screen shows one question and its composer. Code Home adds one calm list in place of a wall of cards (Needs you, In progress, Your pull requests, Continue, Open issues): each item once, at most five rows per section with See all, no card behind a row, a quiet line with a next step when empty. Rows and cards add no authority.
 
 - The composer paints first. Cards mount after the first commit, read only what the window's own authority returns, and are never mounted when off or unavailable.
 - Answers, Open, Stop and Start a fix go through the commands the open thread already uses. An option is words sent as the next turn; Start a fix only opens a draft.
@@ -2687,7 +2687,7 @@ Every start screen shows one question and its composer. Code Home adds one card 
 - Radius is four numbers and a round exception: a control's outline (a button of any size or variant, a field, a tab, a menu row, a chip including the start screen's suggestion chips, a capsule that only groups controls) is `--oct-radius-sm`, 8px; a container (a card, the framed panel) is `--oct-radius-md`, 12px; a floating surface (a menu, popover, select list, hover card, tooltip card, palette, toast, notice card, the tour's card) is `--oct-radius-lg`, 16px; a dialog and a sheet are `--oct-radius-xl`, 20px. The composer's box is a full pill at one line and takes 16px once it grows, and its attach, microphone, send and stop are round 28px buttons, the one place a control is a circle; only what is inherently round (a switch, an avatar, a dot, a count, a meter, a slider thumb, a notice's icon dot) takes the pill token. A part inside a control takes the control radius less the padding between them, never below 2px, and a control inside the composer's pill sits its inset in from the corner. The recipes' `rounded-md` and `rounded-lg` resolve to the control token and `rounded-xl` to the container token, so no recipe class is rewritten. A contract test fails when a control rule reaches for the pill token outside that list (maintainer request, 2026-11-14; supersedes the 4px control of 2026-11-12).
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
-Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards) and [Start screen: Card registry](start-screen.md#card-registry).
+Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards), [Start screen: The list](start-screen.md#the-list) and [Card registry](start-screen.md#card-registry).
 
 ### Needs you across surfaces
 

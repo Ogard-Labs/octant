@@ -1,5 +1,5 @@
 import type { HomeCardCustomization } from "@octant/contracts/shell";
-import { ChevronDown, ChevronUp, GripVertical, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, ChevronUp, Ellipsis, GripVertical } from "lucide-react";
 import { useId, useState } from "react";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -44,14 +44,10 @@ export function HomeCustomize(props: HomeCustomizeProps) {
       onOpenChange={setOpen}
       open={open}
       titledBy={headingId}
-      trigger={
-        <>
-          <SlidersHorizontal aria-hidden="true" size={14} />
-          Customize
-        </>
-      }
+      trigger={<Ellipsis aria-hidden="true" size={16} />}
       triggerLabel="Customize"
-      triggerVariant="ghost"
+      triggerTooltip="Customize"
+      triggerVariant="ghost-icon"
     >
       <h2 className="oct-section-label home-customize__heading" id={headingId}>
         Cards on this screen

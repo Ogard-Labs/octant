@@ -28,11 +28,15 @@ import { providerFamilyForThread } from "../providers/providerFamily";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import {
   decodeGithubIssueContextRequest,
+  type CodeThreadId,
+  type GithubAssignedWorkItem,
+  type LinearIssueRow,
   type TerminalSessionImportRequest,
   type TerminalSessionSummary,
 } from "@octant/contracts";
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
 import type { OctantMode } from "@octant/contracts/modes";
+import type { ContinueCards } from "../code/useContinueCards";
 import {
   decodeProjectId,
   type ProjectAvailability,
@@ -92,7 +96,6 @@ import {
   type KeyboardEvent,
 } from "react";
 import { joinDefaultFolderDisplayPath } from "../settings/defaultFolderDisplay";
-import { CodeHome, type CodeHomeProps } from "../code/CodeHome";
 import {
   CodeComposerAdapter,
   type CodeComposerSuggestion,
@@ -112,7 +115,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
+import type { RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerStartTray } from "../composer/ComposerStartTray";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -122,6 +125,13 @@ import { HostSelector } from "./HostSelector";
 import { HomeStart } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { HomeDashboard } from "../home/HomeDashboard";
+import type { HomeListContributor, HomeListRead } from "../home/homeCards";
+import {
+  recentThreadRows,
+  useAssignedWorkRows,
+  useContinueRows,
+  useOpenIssueRows,
+} from "../home/useStartListRows";
 import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
 import {
@@ -291,17 +301,24 @@ export interface DraftThreadWorkspaceProps {
    */
   readonly pendingPrompt?: string;
   readonly onPendingPromptConsumed?: () => void;
-  readonly codeHome?: Pick<
-    CodeHomeProps,
-    | "loadAssignedLinearIssues"
-    | "loadOpenLinearIssues"
-    | "continueCards"
-    | "projectNames"
-    | "providerLabels"
-    | "onOpenThread"
-    | "onOpenInbox"
-    | "onOpenIssues"
-  > & {
+  readonly codeHome?: {
+    readonly loadAssignedLinearIssues?: () => Promise<{
+      readonly rows: ReadonlyArray<LinearIssueRow>;
+    }>;
+    /** Open Linear issues nobody is assigned; they join Open issues in the list. */
+    readonly loadOpenLinearIssues?: () => Promise<{
+      readonly rows: ReadonlyArray<LinearIssueRow>;
+    }>;
+    /** The threads to continue, read above the draft so a new task does not restart the read. */
+    readonly continueCards?: ContinueCards;
+    readonly projectNames?: ReadonlyMap<string, string>;
+    readonly providerLabels?: ReadonlyMap<string, string>;
+    readonly onOpenThread?: (target: {
+      readonly threadId: CodeThreadId;
+      readonly projectId: ProjectId;
+    }) => void;
+    readonly onOpenInbox?: () => void;
+    readonly onOpenIssues?: () => void;
     /**
      * An issue the Issues surface handed over: it fills the prompt and the
      * create-from context once, then the owner clears it.
@@ -311,8 +328,13 @@ export interface DraftThreadWorkspaceProps {
   };
 }
 
+const NO_HOME_CARDS: ReadonlyArray<HomeCardDefinition> = [];
+const NO_HOME_CARD_CHOICE: HomeCardCustomization = { order: [], visibility: [] };
+function ignoreCardChoice(): void {}
+
 /**
- * Ready-made first prompts for a Code thread. Each is a complete instruction
+ * Ready-made first prompts for a Code thread. Four, because they stand on one
+ * line under the composer. Each is a complete instruction
  * the agent can act on in any repository, so choosing one is a real start
  * rather than a label to finish.
  */
@@ -340,12 +362,6 @@ const CODE_SUGGESTIONS: ReadonlyArray<CodeComposerSuggestion> = [
     label: "Review my changes",
     prompt:
       "Review the uncommitted changes on this branch for bugs, missing tests, and unclear code, and list what to fix.",
-  },
-  {
-    id: "update-dependencies",
-    label: "Update dependencies",
-    prompt:
-      "Find outdated dependencies, update the ones that are safe, run the checks, and summarise anything that needs a decision.",
   },
 ];
 
@@ -727,18 +743,122 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }
 
   const home = props.startPresentation === "home";
-  const homeStartNode =
-    !home || props.homeStart?.cards === undefined ? undefined : (
-      <HomeStart
-        dashboard={
-          <HomeDashboard
-            cards={props.homeStart.cards}
-            customization={props.homeStart.cardCustomization}
-            onCustomizationChange={props.homeStart.onCardCustomizationChange}
-          />
-        }
-      />
+  const githubHomeClient =
+    props.mode === "code" && props.githubClient !== undefined && props.githubPluginEnabled !== false
+      ? props.githubClient
+      : undefined;
+  const linearHome =
+    props.mode === "code" && props.linearPluginEnabled === true
+      ? props.codeHome?.loadAssignedLinearIssues
+      : undefined;
+  const linearFresh =
+    props.mode === "code" && props.linearPluginEnabled === true
+      ? props.codeHome?.loadOpenLinearIssues
+      : undefined;
+  const pickGithubWork = (item: GithubAssignedWorkItem) => {
+    const reference = `${item.owner}/${item.name}#${String(item.number)}`;
+    // Only an issue can be attached to the new thread, so picking a
+    // pull request has to take the previous issue back off: leaving it
+    // sent a "Review pull request …" draft away carrying an unrelated
+    // issue as its context.
+    setCreateFromSelection(
+      item.category === "issue"
+        ? {
+            kind: "github",
+            request: { owner: item.owner, name: item.name, number: item.number },
+            label: reference,
+          }
+        : undefined,
     );
+    fillPromptRequest(
+      item.category === "issue"
+        ? `Work on ${reference}: ${item.title}`
+        : `Review pull request ${reference}: ${item.title}`,
+    );
+  };
+  const pickLinearWork = (row: LinearIssueRow) => {
+    setCreateFromSelection({
+      kind: "linear",
+      request: { id: row.id },
+      label: row.identifier,
+    });
+    fillPromptRequest(`Work on ${row.identifier}: ${row.title}`);
+  };
+  // What only this screen knows joins the start list: Code's assigned work and
+  // threads to continue, or Chat's and Work's latest threads.
+  const homeListExtras: ReadonlyArray<HomeListContributor> | undefined = !home
+    ? undefined
+    : props.mode === "code"
+      ? [
+          ...(githubHomeClient === undefined && linearHome === undefined
+            ? []
+            : [
+                {
+                  id: "assigned-work",
+                  useRows: () =>
+                    useAssignedWorkRows({
+                      githubClient: githubHomeClient,
+                      loadAssignedLinearIssues: linearHome,
+                      onPickGithub: pickGithubWork,
+                      onPickLinear: pickLinearWork,
+                      onOpenInbox: props.codeHome?.onOpenInbox,
+                    }),
+                },
+              ]),
+          ...(githubHomeClient === undefined && linearFresh === undefined
+            ? []
+            : [
+                {
+                  id: "open-issues",
+                  useRows: () =>
+                    useOpenIssueRows({
+                      githubClient: githubHomeClient,
+                      loadOpenLinearIssues: linearFresh,
+                      onPickIssue: adoptIssue,
+                      onPickLinear: pickLinearWork,
+                      onOpenIssues: props.codeHome?.onOpenIssues,
+                    }),
+                },
+              ]),
+          props.codeHome?.continueCards === undefined
+            ? {
+                id: "continue",
+                useRows: (): HomeListRead => ({
+                  status: "ready",
+                  rows: recentThreadRows(props.recentThreads ?? []),
+                }),
+              }
+            : {
+                id: "continue",
+                useRows: () =>
+                  useContinueRows({
+                    continueCards: props.codeHome?.continueCards,
+                    projectNames: props.codeHome?.projectNames,
+                    onOpenThread: props.codeHome?.onOpenThread,
+                  }),
+              },
+        ]
+      : [
+          {
+            id: "continue",
+            useRows: (): HomeListRead => ({
+              status: "ready",
+              rows: recentThreadRows(props.recentThreads ?? []),
+            }),
+          },
+        ];
+  const homeStartNode = !home ? undefined : (
+    <HomeStart
+      dashboard={
+        <HomeDashboard
+          cards={props.homeStart?.cards ?? NO_HOME_CARDS}
+          customization={props.homeStart?.cardCustomization ?? NO_HOME_CARD_CHOICE}
+          extraRows={homeListExtras}
+          onCustomizationChange={props.homeStart?.onCardCustomizationChange ?? ignoreCardChoice}
+        />
+      }
+    />
+  );
 
   const folderControl =
     props.mode === "chat" || props.mode === "code" || props.mode === "work" ? (
@@ -814,82 +934,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   );
 
   if (props.mode === "code") {
-    const githubHomeClient =
-      props.githubClient !== undefined && props.githubPluginEnabled !== false
-        ? props.githubClient
-        : undefined;
-    const linearHome =
-      props.linearPluginEnabled === true ? props.codeHome?.loadAssignedLinearIssues : undefined;
-    const linearFresh =
-      props.linearPluginEnabled === true ? props.codeHome?.loadOpenLinearIssues : undefined;
-    const beneath = !home ? undefined : githubHomeClient === undefined &&
-      linearHome === undefined &&
-      props.codeHome === undefined ? (
-      (props.recentThreads?.length ?? 0) === 0 ? undefined : (
-        <div className="code-home">
-          <RecentThreadList threads={props.recentThreads ?? []} />
-        </div>
-      )
-    ) : (
-      <CodeHome
-        {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
-        {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
-        {...(linearFresh === undefined ? {} : { loadOpenLinearIssues: linearFresh })}
-        {...(props.codeHome?.continueCards === undefined
-          ? {}
-          : { continueCards: props.codeHome.continueCards })}
-        {...(props.codeHome?.projectNames === undefined
-          ? {}
-          : { projectNames: props.codeHome.projectNames })}
-        {...(props.codeHome?.providerLabels === undefined
-          ? {}
-          : { providerLabels: props.codeHome.providerLabels })}
-        {...(props.codeHome?.onOpenThread === undefined
-          ? {}
-          : { onOpenThread: props.codeHome.onOpenThread })}
-        {...(props.codeHome?.onOpenInbox === undefined
-          ? {}
-          : { onOpenInbox: props.codeHome.onOpenInbox })}
-        {...(props.codeHome?.onOpenIssues === undefined
-          ? {}
-          : { onOpenIssues: props.codeHome.onOpenIssues })}
-        onPickGithub={(item) => {
-          const reference = `${item.owner}/${item.name}#${String(item.number)}`;
-          // Only an issue can be attached to the new thread, so picking a
-          // pull request has to take the previous issue back off: leaving it
-          // sent a "Review pull request …" draft away carrying an unrelated
-          // issue as its context.
-          setCreateFromSelection(
-            item.category === "issue"
-              ? {
-                  kind: "github",
-                  request: { owner: item.owner, name: item.name, number: item.number },
-                  label: reference,
-                }
-              : undefined,
-          );
-          fillPromptRequest(
-            item.category === "issue"
-              ? `Work on ${reference}: ${item.title}`
-              : `Review pull request ${reference}: ${item.title}`,
-          );
-        }}
-        onPickIssue={adoptIssue}
-        onPickLinear={(row) => {
-          setCreateFromSelection({
-            kind: "linear",
-            request: { id: row.id },
-            label: row.identifier,
-          });
-          fillPromptRequest(`Work on ${row.identifier}: ${row.title}`);
-        }}
-      />
-    );
     const composer = (
       <CodeComposerAdapter
         {...(home ? { suggestions: CODE_SUGGESTIONS } : {})}
         {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
-        {...(beneath === undefined ? {} : { beneath })}
         {...(promptRequest === undefined ? {} : { promptRequest })}
         {...hostSelectorBinding}
         {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
@@ -1428,8 +1476,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ))}
           </div>
         ) : null}
-
-        {home ? <RecentThreadList threads={props.recentThreads ?? []} /> : null}
       </div>
     </section>
   );

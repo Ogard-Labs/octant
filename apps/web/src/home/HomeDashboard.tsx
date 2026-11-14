@@ -2,7 +2,13 @@ import type { HomeCardCustomization } from "@octant/contracts/shell";
 import { useEffect, useMemo, useState } from "react";
 import { HomeCard } from "./HomeCard";
 import { HomeCustomize } from "./HomeCustomize";
-import { arrangeHomeCards, type HomeCardDefinition } from "./homeCards";
+import { HomeList } from "./HomeList";
+import {
+  arrangeHomeCards,
+  isGridCard,
+  type HomeCardDefinition,
+  type HomeListContributor,
+} from "./homeCards";
 import "./home.css";
 
 export interface HomeDashboardProps {
@@ -10,6 +16,12 @@ export interface HomeDashboardProps {
   readonly cards: ReadonlyArray<HomeCardDefinition>;
   readonly customization: HomeCardCustomization;
   readonly onCustomizationChange: (next: HomeCardCustomization) => void;
+  /**
+   * Rows this screen adds to the list that are not cards of the registry (what is
+   * assigned to the person, the threads to continue). They are always on and
+   * Customize does not list them.
+   */
+  readonly extraRows?: ReadonlyArray<HomeListContributor> | undefined;
 }
 
 /**
@@ -31,10 +43,12 @@ function useAfterFirstPaint(): boolean {
 }
 
 /**
- * The card area under the start-screen composer: a Customize control on the
- * right, then the cards the person has on, in the order they chose, in a grid
- * (two columns, one on a phone). The frame knows nothing about any card; it
- * arranges the definitions it is given and lets each one read its own data.
+ * The area under the start-screen composer. Cards that give rows (Needs you,
+ * Working now, Running services, Pull requests) are not drawn as cards: their
+ * rows go into one calm list, with a "…" menu for Customize at the right end of
+ * its first header. Any other card keeps its place in a grid below the list.
+ * The frame knows nothing about any card; it arranges the definitions it is
+ * given and lets each one read its own data.
  */
 export function HomeDashboard(props: HomeDashboardProps) {
   const painted = useAfterFirstPaint();
@@ -42,22 +56,43 @@ export function HomeDashboard(props: HomeDashboardProps) {
     () => arrangeHomeCards(props.cards, props.customization),
     [props.cards, props.customization],
   );
-  if (!painted || placements.length === 0) return null;
-  const visible = placements.filter((placement) => placement.visible);
+  const extraRows = props.extraRows;
+  const contributors = useMemo(
+    (): ReadonlyArray<HomeListContributor> => [
+      ...placements.flatMap((placement) =>
+        placement.visible && placement.definition.useListRows !== undefined
+          ? [{ id: placement.definition.id, useRows: placement.definition.useListRows }]
+          : [],
+      ),
+      ...(extraRows ?? []),
+    ],
+    [placements, extraRows],
+  );
+  if (!painted || (placements.length === 0 && contributors.length === 0)) return null;
+  const grid = placements.flatMap((placement) =>
+    placement.visible && isGridCard(placement.definition) ? [placement.definition] : [],
+  );
+  const customize =
+    placements.length === 0 ? null : (
+      <HomeCustomize
+        customization={props.customization}
+        definitions={props.cards}
+        onChange={props.onCustomizationChange}
+        placements={placements}
+      />
+    );
+  const listed = contributors.length > 0;
   return (
     <section aria-label="Home cards" className="home-dashboard">
-      <div className="home-dashboard__bar">
-        <HomeCustomize
-          customization={props.customization}
-          definitions={props.cards}
-          onChange={props.onCustomizationChange}
-          placements={placements}
-        />
-      </div>
-      {visible.length === 0 ? null : (
+      {listed ? (
+        <HomeList contributors={contributors} menu={customize} />
+      ) : (
+        <div className="home-dashboard__bar">{customize}</div>
+      )}
+      {grid.length === 0 ? null : (
         <div className="home-dashboard__grid">
-          {visible.map((placement) => (
-            <HomeCard definition={placement.definition} key={placement.definition.id} />
+          {grid.map((definition) => (
+            <HomeCard definition={definition} key={definition.id} />
           ))}
         </div>
       )}

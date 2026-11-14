@@ -4169,7 +4169,7 @@ describe("App", () => {
       />,
     );
 
-    const shown = await screen.findByRole("region", { name: "Continue" });
+    const shown = await screen.findByRole("region", { name: "Continue" }, { timeout: 4000 });
     expect(within(shown).getByText("Ai slop callouts")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "New task" }));

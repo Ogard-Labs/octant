@@ -88,36 +88,32 @@ function source(overrides: Partial<PullRequestsCardSource> = {}): PullRequestsCa
 }
 
 function renderCard(overrides: Partial<PullRequestsCardSource> = {}) {
-  render(
+  return render(
     <HomeDashboard
       cards={[createPullRequestsCard(source(overrides))]}
       customization={{ order: [], visibility: [] }}
       onCustomizationChange={vi.fn()}
     />,
   );
-  return screen.findByRole("region", { name: "Pull requests" });
 }
 
 describe("the Pull requests card", () => {
-  it("lists a review asked of you and one you opened, in words", async () => {
+  it("lists a review asked of you under Needs you and one you opened under Your pull requests", async () => {
     const onOpenRow = vi.fn();
-    render(
-      <HomeDashboard
-        cards={[createPullRequestsCard(source({ onOpenRow }))]}
-        customization={{ order: [], visibility: [] }}
-        onCustomizationChange={vi.fn()}
-      />,
+    renderCard({ onOpenRow });
+    const waiting = await screen.findByRole("region", { name: "Needs you" });
+    const review = within(waiting).getByRole("button", { name: /Please review/ });
+    // Someone else wrote it, so the line names them; the person's own never does.
+    expect(review).toHaveTextContent("octant · #4 · other · 3h");
+    expect(review).toHaveTextContent("Running");
+    const own = within(screen.getByRole("region", { name: "Your pull requests" })).getByRole(
+      "button",
+      { name: /My change/ },
     );
-    const card = await screen.findByRole("region", { name: "Pull requests" });
-    expect(
-      await within(card).findByRole("heading", { name: "Waiting on your review" }),
-    ).toBeInTheDocument();
-    expect(within(card).getByRole("heading", { name: "Yours" })).toBeInTheDocument();
-    expect(within(card).getByRole("button", { name: /Please review/ })).toHaveTextContent(
-      "Running",
-    );
-    expect(within(card).getByRole("button", { name: /My change/ })).toHaveTextContent("Draft");
-    await userEvent.click(within(card).getByRole("button", { name: /Please review/ }));
+    expect(own).toHaveTextContent("octant · #9 · 4h");
+    expect(own).not.toHaveTextContent("ada");
+    expect(within(own).getByRole("img", { name: "Draft" })).toBeInTheDocument();
+    await userEvent.click(review);
     expect(onOpenRow).toHaveBeenCalledWith(
       expect.objectContaining({ number: 4, reference: "octant#4" }),
     );
@@ -132,45 +128,41 @@ describe("the Pull requests card", () => {
         onCustomizationChange={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("region", { name: "Pull requests" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull();
     expect(load).not.toHaveBeenCalled();
   });
 
   it("says nothing is waiting once a refresh found nothing for you", async () => {
-    const card = await renderCard({
-      load: vi.fn(async () => view({ rows: [] })),
-    });
-    expect(await within(card).findByText("Nothing is waiting on you.")).toBeInTheDocument();
+    renderCard({ load: vi.fn(async () => view({ rows: [] })) });
+    expect(
+      await screen.findByText("Nothing waiting on you. Start a thread above."),
+    ).toBeInTheDocument();
   });
 
   it("says it could not read pull requests when the read fails, not that nothing is waiting", async () => {
-    const card = await renderCard({
+    renderCard({
       load: vi.fn(async () => {
         throw new Error("refused");
       }),
     });
-    expect(
-      await within(card).findByText("Octant could not read pull requests."),
-    ).toBeInTheDocument();
-    expect(within(card).queryByText("Nothing is waiting on you.")).toBeNull();
+    expect(await screen.findByText("Octant could not read pull requests.")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing waiting/)).toBeNull();
   });
 
   it("says pull requests have not been checked when the snapshot was never refreshed, and offers Pull requests", async () => {
     const onOpenAll = vi.fn();
-    const card = await renderCard({
+    renderCard({
       load: vi.fn(async () => view({ rows: [], freshness: { status: "empty" } })),
       onOpenAll,
     });
-    expect(
-      await within(card).findByText("Pull requests have not been checked yet."),
-    ).toBeInTheDocument();
-    expect(within(card).queryByText("Nothing is waiting on you.")).toBeNull();
-    await userEvent.click(within(card).getByRole("button", { name: "Open Pull requests" }));
+    expect(await screen.findByText("Pull requests have not been checked yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing waiting/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Open Pull requests" }));
     expect(onOpenAll).toHaveBeenCalledTimes(1);
   });
 
   it("does not say nothing is waiting while a connected Project was never checked", async () => {
-    const card = await renderCard({
+    renderCard({
       load: vi.fn(async () =>
         view({
           projects: [
@@ -200,15 +192,13 @@ describe("the Pull requests card", () => {
         }),
       ),
     });
-    expect(
-      await within(card).findByText("Some Projects have not been checked yet."),
-    ).toBeInTheDocument();
-    expect(within(card).queryByText("Nothing is waiting on you.")).toBeNull();
-    expect(within(card).getByRole("button", { name: "Open Pull requests" })).toBeInTheDocument();
+    expect(await screen.findByText("Some Projects have not been checked yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing waiting/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Open Pull requests" })).toBeInTheDocument();
   });
 
   it("says how long ago it last looked when the latest refresh failed", async () => {
-    const card = await renderCard({
+    renderCard({
       load: vi.fn(async () =>
         view({
           rows: [],
@@ -221,13 +211,13 @@ describe("the Pull requests card", () => {
       ),
     });
     expect(
-      await within(card).findByText("Nothing was waiting on you when checked 3h ago."),
+      await screen.findByText("Nothing was waiting on you when checked 3h ago."),
     ).toBeInTheDocument();
-    expect(within(card).queryByText("Nothing is waiting on you.")).toBeNull();
+    expect(screen.queryByText(/Nothing waiting/)).toBeNull();
   });
 
   it("dates the rows it lists when the latest refresh failed", async () => {
-    const card = await renderCard({
+    renderCard({
       load: vi.fn(async () =>
         view({
           freshness: {
@@ -238,7 +228,7 @@ describe("the Pull requests card", () => {
         }),
       ),
     });
-    expect(await within(card).findByRole("button", { name: /Please review/ })).toBeInTheDocument();
-    expect(within(card).getByText("Last checked 3h ago.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Please review/ })).toBeInTheDocument();
+    expect(screen.getByText("Pull requests last checked 3h ago.")).toBeInTheDocument();
   });
 });

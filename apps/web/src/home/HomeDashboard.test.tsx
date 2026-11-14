@@ -5,9 +5,17 @@ import { Activity, GitPullRequest } from "lucide-react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";
-import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
+import type {
+  HomeCardContent,
+  HomeCardDefinition,
+  HomeGridCardDefinition,
+  HomeListCardDefinition,
+  HomeListContributor,
+  HomeListRead,
+} from "./homeCards";
+import type { HomeListRow } from "./homeListModel";
 
-function card(id: string, overrides: Partial<HomeCardDefinition> = {}): HomeCardDefinition {
+function card(id: string, overrides: Partial<HomeGridCardDefinition> = {}): HomeGridCardDefinition {
   return {
     id,
     title: id,
@@ -257,5 +265,97 @@ describe("Customize", () => {
     expect(onChange).toHaveBeenLastCalledWith({ order: [], visibility: [] });
     await waitFor(() => expect(cardTitles()).toEqual(["one", "two"]));
     expect(screen.getByRole("button", { name: "Reset to default" })).toBeDisabled();
+  });
+});
+
+function listCard(id: string, useListRows: () => HomeListRead): HomeListCardDefinition {
+  return { id, title: id, icon: Activity, defaultOn: true, available: true, useListRows };
+}
+
+function listRow(id: string, section: HomeListRow["section"], title = id): HomeListRow {
+  return {
+    id,
+    section,
+    glyph: "thread",
+    tone: "neutral",
+    label: "Thread",
+    title,
+    meta: ["octant", "5m"],
+    onOpen: vi.fn(),
+  };
+}
+
+describe("the start-screen list", () => {
+  it("draws only the sections that have rows, in reading order, with a count", async () => {
+    render(
+      <Harness
+        cards={[
+          listCard("mine", () => ({
+            status: "ready",
+            rows: [
+              listRow("t1", "continue"),
+              listRow("t2", "continue"),
+              listRow("n1", "needs-you"),
+            ],
+          })),
+        ]}
+      />,
+    );
+    const needs = await screen.findByRole("region", { name: "Needs you" });
+    expect(within(needs).getByText("1")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "In progress" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Your pull requests" })).toBeNull();
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(["Needs you", "Continue"]);
+  });
+
+  it("says one quiet line with a next step when every section is empty", async () => {
+    render(<Harness cards={[listCard("mine", () => ({ status: "ready", rows: [] }))]} />);
+    expect(
+      await screen.findByText("Nothing waiting on you. Start a thread above."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+  });
+
+  it("keeps Customize in a menu at the end of the first header and the cards it turns off out of the list", async () => {
+    const user = userEvent.setup();
+    const read = vi.fn(
+      (): HomeListRead => ({ status: "ready", rows: [listRow("n1", "needs-you")] }),
+    );
+    render(<Harness cards={[listCard("mine", read)]} />);
+    const needs = await screen.findByRole("region", { name: "Needs you" });
+    expect(within(needs).getByRole("button", { name: "Customize" })).toBeInTheDocument();
+    expect(screen.queryByText("Customize")).toBeNull();
+
+    await user.click(within(needs).getByRole("button", { name: "Customize" }));
+    await user.click(await screen.findByRole("switch", { name: "Show mine" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull());
+  });
+
+  it("shows nothing until every source has answered, so late rows never push earlier ones down", async () => {
+    let answer: (read: HomeListRead) => void = () => undefined;
+    const late: HomeListContributor = {
+      id: "late",
+      useRows: () => {
+        const [read, setRead] = useState<HomeListRead>({ status: "loading" });
+        answer = setRead;
+        return read;
+      },
+    };
+    render(
+      <HomeDashboard
+        cards={[listCard("early", () => ({ status: "ready", rows: [listRow("n1", "needs-you")] }))]}
+        customization={{ order: [], visibility: [] }}
+        extraRows={[late]}
+        onCustomizationChange={vi.fn()}
+      />,
+    );
+    await screen.findByRole("region", { name: "Home cards" });
+    expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull();
+    expect(document.querySelector(".home-list")).toHaveAttribute("aria-busy", "true");
+
+    act(() => answer({ status: "ready", rows: [listRow("n0", "needs-you")] }));
+    const needs = await screen.findByRole("region", { name: "Needs you" });
+    expect(within(needs).getAllByRole("listitem")).toHaveLength(2);
   });
 });

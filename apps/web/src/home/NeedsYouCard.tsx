@@ -1,12 +1,11 @@
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import { BellRing } from "lucide-react";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
-import { OctantButton } from "../ui/base/OctantButton";
-import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
+import type { HomeListCardDefinition, HomeListRead } from "./homeCards";
+import { threadListId } from "./homeListModel";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
 import {
   canAnswerWaitingAsk,
-  NEEDS_YOU_ROW_LIMIT,
   pendingRequestKey,
   waitingAskKey,
 } from "../pendingRequests/pendingRequests";
@@ -47,84 +46,81 @@ export interface NeedsYouCardSource extends PendingRequestRowsSource {
  * paired device reading under its own scope), and gone from the grid while
  * nothing waits.
  */
-export function createNeedsYouCard(source: NeedsYouCardSource): HomeCardDefinition {
+export function createNeedsYouCard(source: NeedsYouCardSource): HomeListCardDefinition {
   return {
     id: NEEDS_YOU_CARD_ID,
     title: "Needs you",
     icon: BellRing,
     defaultOn: true,
     available: source.pendingRequestClient !== undefined,
-    hideWhenEmpty: true,
-    emptyLabel: "Nothing is waiting for you.",
-    useContent: () => useNeedsYouContent(source),
+    useListRows: () => useNeedsYouListRows(source),
   };
 }
 
-function useNeedsYouContent(source: NeedsYouCardSource): HomeCardContent {
+/**
+ * The same requests and asks as rows of the start screen's list. Each keeps
+ * its own row, with the answer where it is listed, and stands for its thread,
+ * so Continue and In progress do not name that thread a second time. Before
+ * the first read the list says nothing rather than "Looking…".
+ */
+function useNeedsYouListRows(source: NeedsYouCardSource): HomeListRead {
   const { now, onOpenThread, onOpenInbox } = source;
   const { rows, answer, defer, asks, answerAsk } = usePendingRequestRows(source);
-
-  // Before the first read the card says nothing rather than "Looking…": it
-  // leaves the grid when nothing waits, so a loading line would flash on
-  // every start screen and then disappear.
-  if (rows === undefined) return { status: "ready", count: 0, body: null };
-  const shown = rows.slice(0, NEEDS_YOU_ROW_LIMIT);
-  // Asks take the rows the requests leave, so the card keeps its one limit.
-  const shownAsks = asks.slice(0, NEEDS_YOU_ROW_LIMIT - shown.length);
-  const hidden = rows.length + asks.length - shown.length - shownAsks.length;
+  if (rows === undefined) return { status: "loading" };
   return {
     status: "ready",
-    count: rows.length + asks.length,
-    body: (
-      <>
-        <ul className="needs-you__list">
-          {shown.map(({ request, unlisted }) => (
-            <li key={pendingRequestKey(request)}>
-              <PendingRequestRow
-                coordinatorTitle={source.coordinatorTitles?.get(String(request.threadId))}
-                onDefer={defer}
-                now={now}
-                onAnswer={answer}
-                onOpenThread={onOpenThread}
-                projectName={
-                  request.projectId === undefined
-                    ? undefined
-                    : source.projectNames.get(String(request.projectId))
-                }
-                provider={source.threadProviders.get(String(request.threadId))}
-                request={request}
-                settled={unlisted}
-              />
-            </li>
-          ))}
-          {shownAsks.map((ask) => (
-            <li key={waitingAskKey(ask)}>
-              <WaitingAskRow
-                ask={ask}
-                now={now}
-                onAnswer={canAnswerWaitingAsk(source.askClients, ask) ? answerAsk : undefined}
-                onOpenThread={(opened) => source.onOpenAsk?.(opened)}
-                projectName={
-                  ask.projectId === undefined
-                    ? undefined
-                    : source.projectNames.get(String(ask.projectId))
-                }
-              />
-            </li>
-          ))}
-        </ul>
-        {hidden <= 0 ? null : (
-          <OctantButton
-            className="needs-you__more window-no-drag"
-            onClick={onOpenInbox}
-            size="sm"
-            type="button"
-            variant="link"
-          >
-            {`+${String(hidden)} more`}
-          </OctantButton>
-        )}
-      </>
-    ),
+    seeAll: { "needs-you": { label: "See all", onSelect: onOpenInbox } },
+    rows: [
+      ...rows.map(({ request, unlisted }) => ({
+        id: `request:${pendingRequestKey(request)}`,
+        aliases: [threadListId(String(request.threadId))],
+        section: "needs-you" as const,
+        glyph: "ask" as const,
+        tone: "warning" as const,
+        label: "Waiting for you",
+        title: "",
+        meta: [],
+        custom: (
+          <PendingRequestRow
+            coordinatorTitle={source.coordinatorTitles?.get(String(request.threadId))}
+            now={now}
+            onAnswer={answer}
+            onDefer={defer}
+            onOpenThread={onOpenThread}
+            projectName={
+              request.projectId === undefined
+                ? undefined
+                : source.projectNames.get(String(request.projectId))
+            }
+            provider={source.threadProviders.get(String(request.threadId))}
+            request={request}
+            settled={unlisted}
+          />
+        ),
+      })),
+      ...asks.map((ask) => ({
+        id: waitingAskKey(ask),
+        aliases: [threadListId(String(ask.threadId))],
+        section: "needs-you" as const,
+        glyph: "ask" as const,
+        tone: "warning" as const,
+        label: "Waiting for you",
+        title: "",
+        meta: [],
+        custom: (
+          <WaitingAskRow
+            ask={ask}
+            now={now}
+            onAnswer={canAnswerWaitingAsk(source.askClients, ask) ? answerAsk : undefined}
+            onOpenThread={(opened) => source.onOpenAsk?.(opened)}
+            projectName={
+              ask.projectId === undefined
+                ? undefined
+                : source.projectNames.get(String(ask.projectId))
+            }
+          />
+        ),
+      })),
+    ],
   };
 }

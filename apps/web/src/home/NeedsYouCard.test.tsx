@@ -606,7 +606,7 @@ describe("the Needs you card", () => {
     expect(client.list).toHaveBeenCalledTimes(2);
   });
 
-  it("shows five rows, counts them all, and opens the Inbox from +N more", async () => {
+  it("shows five rows, counts them all, and opens the Inbox from See all", async () => {
     const user = userEvent.setup();
     const onOpenInbox = vi.fn();
     const many = [1, 2, 3, 4, 5, 6, 7].map(
@@ -625,7 +625,7 @@ describe("the Needs you card", () => {
     expect(within(card).getAllByRole("listitem")).toHaveLength(5);
     expect(within(card).getByText("7")).toBeInTheDocument();
     expect(within(card).queryByText("Task 6")).toBeNull();
-    await user.click(within(card).getByRole("button", { name: "+2 more" }));
+    await user.click(within(card).getByRole("button", { name: "See all in Needs you" }));
     expect(onOpenInbox).toHaveBeenCalledTimes(1);
   });
 
@@ -860,8 +860,9 @@ describe("the Needs you card", () => {
     expect(within(row).getByRole("button", { name: "Open thread" })).toBeInTheDocument();
   });
 
-  it("is on by default and drops out of the grid when empty", () => {
+  it("is on by default and gives its rows to the list, not a card", () => {
     const card = createNeedsYouCard(source());
-    expect(card).toMatchObject({ id: "needs-you", defaultOn: true, hideWhenEmpty: true });
+    expect(card).toMatchObject({ id: "needs-you", defaultOn: true });
+    expect(card.useListRows).toBeTypeOf("function");
   });
 });

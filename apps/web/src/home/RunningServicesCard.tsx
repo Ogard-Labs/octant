@@ -6,9 +6,8 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
+import type { HomeListCardDefinition, HomeListRead } from "./homeCards";
 import {
-  capRunningServices,
   NOT_OWNED_LABEL,
   REMOTE_OPEN_LIMITS,
   remoteOpenOffer,
@@ -53,102 +52,106 @@ export interface RunningServicesCardSource {
  * the window has a client for the host, and refreshes only while it is mounted
  * and the document is visible.
  */
-export function createRunningServicesCard(source: RunningServicesCardSource): HomeCardDefinition {
+export function createRunningServicesCard(
+  source: RunningServicesCardSource,
+): HomeListCardDefinition {
   return {
     id: RUNNING_SERVICES_CARD_ID,
     title: "Running services",
     icon: Server,
     defaultOn: true,
     available: source.client !== undefined,
-    emptyLabel: "No servers are running in your Code Projects.",
-    useContent: () => useRunningServicesContent(source),
+    useListRows: () => useRunningServicesListRows(source),
   };
 }
 
-function useRunningServicesContent(source: RunningServicesCardSource): HomeCardContent {
+/**
+ * Each listening server as a row of In progress, after the threads. It keeps the
+ * row the card drew, with Open and Stop (confirmed where Octant does not own the
+ * server), because those actions have no other home on the start screen. A host
+ * that could not look says nothing here.
+ */
+function useRunningServicesListRows(source: RunningServicesCardSource): HomeListRead {
   const controller = useRunningServices({ client: source.client });
   if (controller.status === "loading") return { status: "loading" };
   if (controller.status === "unavailable") {
+    // Said, not left quiet: a list with no servers in it would read as "nothing is running".
     return {
       status: "ready",
-      count: 0,
-      body: null,
-      emptyLabel: controller.unavailableMessage ?? "Octant could not check for running services.",
+      rows: [],
+      caveat: {
+        text: controller.unavailableMessage ?? "Octant could not check for running services.",
+      },
     };
   }
   return {
     status: "ready",
-    count: controller.services.length,
-    body: <RunningServiceRows controller={controller} source={source} />,
+    // The host's last refusal of an Open or Stop, in its own words.
+    ...(controller.failure === undefined ? {} : { caveat: { text: controller.failure.message } }),
+    rows: controller.services.map((service) => ({
+      id: `service:${String(service.listenerId)}`,
+      section: "in-progress" as const,
+      glyph: "service" as const,
+      tone: "running" as const,
+      label: runningServiceHealthLabel(service.health),
+      title: runningServiceName(service),
+      meta: [],
+      custom: <RunningServiceListItem controller={controller} service={service} source={source} />,
+    })),
   };
 }
 
-function RunningServiceRows(props: {
+function RunningServiceListItem(props: {
   readonly controller: RunningServicesController;
+  readonly service: RunningService;
   readonly source: RunningServicesCardSource;
 }) {
-  const { controller, source } = props;
-  const [confirming, setConfirming] = useState<RunningService>();
-  const { shown, hidden } = capRunningServices(controller.services);
+  const { controller, service, source } = props;
+  const [confirming, setConfirming] = useState(false);
   const { host, openLive } = source;
   return (
     <>
-      {controller.failure === undefined ? null : (
-        <OctantAlert className="running-services__alert" tone="danger">
-          {controller.failure.message}
-        </OctantAlert>
-      )}
-      <ul className="running-services__list">
-        {shown.map((service) => (
-          <li key={String(service.listenerId)}>
-            <RunningServiceRow
-              busy={controller.busyListenerId === service.listenerId}
-              onOpen={async () => {
-                const target = await controller.open(service);
-                if (target !== undefined) await source.onOpenTarget(service, target);
-              }}
-              onStop={() =>
-                service.stop.status === "available" && service.stop.confirmationRequired
-                  ? setConfirming(service)
-                  : void controller.stop(service, false)
-              }
-              openable={source.canOpen(service)}
-              {...(openLive === undefined || host === undefined
-                ? {}
-                : {
-                    remote: {
-                      offer: remoteOpenOffer(service, host),
-                      openLive: (mode: RemoteOpenMode) => openLive(service, mode),
-                    },
-                  })}
-              service={service}
-              {...(source.host === undefined ? {} : { host: source.host })}
-            />
-          </li>
-        ))}
-      </ul>
-      {hidden <= 0 ? null : (
-        <p className="oct-meta running-services__more">{`+${String(hidden)} more listening`}</p>
-      )}
+      <RunningServiceRow
+        busy={controller.busyListenerId === service.listenerId}
+        onOpen={async () => {
+          const target = await controller.open(service);
+          if (target !== undefined) await source.onOpenTarget(service, target);
+        }}
+        onStop={() =>
+          service.stop.status === "available" && service.stop.confirmationRequired
+            ? setConfirming(true)
+            : void controller.stop(service, false)
+        }
+        openable={source.canOpen(service)}
+        {...(openLive === undefined || host === undefined
+          ? {}
+          : {
+              remote: {
+                offer: remoteOpenOffer(service, host),
+                openLive: (mode: RemoteOpenMode) => openLive(service, mode),
+              },
+            })}
+        service={service}
+        {...(host === undefined ? {} : { host })}
+      />
       <OctantDialogPresence>
-        {confirming === undefined ? null : (
+        {confirming ? (
           <OctantConfirmDialog
             cancelLabel="Keep it running"
             confirmLabel="Stop this server"
             destructive
-            onCancel={() => setConfirming(undefined)}
+            onCancel={() => setConfirming(false)}
             onConfirm={() => {
-              const service = confirming;
-              setConfirming(undefined);
+              setConfirming(false);
               void controller.stop(service, true);
             }}
             title="Confirm stop"
           >
-            Stop {confirming.processName} on port {String(confirming.port)}
-            {confirming.workingDirectory === undefined ? "" : ` in ${confirming.workingDirectory}`}?
+            Stop {service.processName} on port {String(service.port)}
+            {service.workingDirectory === undefined ? "" : ` in ${service.workingDirectory}`}?
             Octant does not own this server and cannot tell who started it.
           </OctantConfirmDialog>
-        )}
+        ) : null}
       </OctantDialogPresence>
     </>
   );

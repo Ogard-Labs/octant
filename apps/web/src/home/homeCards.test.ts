@@ -5,10 +5,10 @@ import {
   isDefaultHomeCardCustomization,
   moveHomeCard,
   setHomeCardVisible,
-  type HomeCardDefinition,
+  type HomeGridCardDefinition,
 } from "./homeCards";
 
-function card(id: string, overrides: Partial<HomeCardDefinition> = {}): HomeCardDefinition {
+function card(id: string, overrides: Partial<HomeGridCardDefinition> = {}): HomeGridCardDefinition {
   return {
     id,
     title: id,

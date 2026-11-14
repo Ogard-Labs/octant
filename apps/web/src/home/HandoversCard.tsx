@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { ThreadMoveClient } from "../environment/threadMove/threadMoveClient";
-import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
+import type { HomeCardContent, HomeGridCardDefinition } from "./homeCards";
 
 export const HANDOVERS_CARD_ID = "handovers";
 
@@ -28,7 +28,7 @@ export interface HandoversCardSource {
  * person's act; it opens a Code thread on the branch. Canonical:
  * docs/design/hub-and-spokes.md "Handover".
  */
-export function createHandoversCard(source: HandoversCardSource): HomeCardDefinition {
+export function createHandoversCard(source: HandoversCardSource): HomeGridCardDefinition {
   return {
     id: HANDOVERS_CARD_ID,
     title: "Handovers",

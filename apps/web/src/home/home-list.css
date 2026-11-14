@@ -1,0 +1,184 @@
+/* The start screen's one calm list: sections separated by space, rows with no
+   card behind them (a wash on hover only), on the composer's own measure. Row
+   recipe is the Pull requests list's: a 16px state glyph, the title at the
+   detail step, one meta line at the small step. */
+
+.home-list {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-6);
+}
+
+/* Held while sources answer, so what comes after it never moves. */
+.home-list--reserved {
+  min-height: 160px;
+  align-content: start;
+  justify-items: end;
+}
+
+.home-list__section {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+}
+
+.home-list__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: var(--oct-space-8);
+  padding-inline: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.home-list__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-list__count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-list__menu {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  width: var(--oct-space-8);
+  margin-inline-end: calc(var(--oct-space-2) * -1);
+}
+
+.home-list__rows {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-list__row.home-list__row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "glyph title trailing"
+    "glyph meta meta";
+  align-items: start;
+  justify-content: stretch;
+  justify-items: start;
+  width: 100%;
+  height: auto;
+  min-height: 48px;
+  gap: 2px var(--oct-space-3);
+  padding: var(--oct-space-2);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  white-space: normal;
+  cursor: default;
+}
+
+button.home-list__row:hover {
+  background: var(--oct-wash-hover);
+}
+
+.home-list__glyph {
+  display: inline-flex;
+  grid-area: glyph;
+  align-items: center;
+  /* Centred on the title line, so the glyph sits where the eye starts. */
+  height: calc(var(--oct-text-detail) * 1.3);
+  color: var(--oct-meta);
+}
+
+.home-list__glyph[data-tone="positive"] {
+  color: var(--oct-success-fg);
+}
+
+.home-list__glyph[data-tone="warning"] {
+  color: var(--oct-warn-fg);
+}
+
+.home-list__glyph[data-tone="negative"] {
+  color: var(--oct-danger-fg);
+}
+
+.home-list__glyph[data-tone="running"] {
+  color: var(--oct-accent-fg);
+}
+
+.home-list__row-title {
+  grid-area: title;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-list__trailing {
+  grid-area: trailing;
+  justify-self: end;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+  white-space: nowrap;
+}
+
+.home-list__trailing[data-tone="negative"] {
+  color: var(--oct-danger-fg);
+}
+
+.home-list__trailing[data-tone="warning"] {
+  color: var(--oct-warn-fg);
+}
+
+.home-list__meta {
+  grid-area: meta;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-list__see-all.home-list__see-all {
+  justify-self: start;
+  margin-inline: var(--oct-space-2);
+}
+
+.home-list__note,
+.home-list__empty {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  margin: 0;
+  padding-inline: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.home-list__empty > .home-list__menu {
+  margin-inline-start: auto;
+}

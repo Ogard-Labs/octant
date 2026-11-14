@@ -2,12 +2,11 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeProjectPullRequestView } from "@octant/contracts";
 import { GitPullRequest } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
-import { OctantButton } from "../ui/base/OctantButton";
-import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
+import { relativeTimeLabel } from "../lib/relativeTime";
+import type { HomeListCardDefinition, HomeListRead } from "./homeCards";
+import { pullRequestListRow } from "./homeListRows";
 import {
   buildPullRequestCard,
-  pullRequestCardStatus,
   PULL_REQUESTS_CARD_ID,
   pullRequestSnapshotReach,
   type PullRequestCardRow,
@@ -36,26 +35,26 @@ export interface PullRequestsCardSource {
  * Project's opt-in refresh cadence, is what moves that list. It says nothing
  * is waiting only when a refresh has reached every connected Project.
  */
-export function createPullRequestsCard(source: PullRequestsCardSource): HomeCardDefinition {
+export function createPullRequestsCard(source: PullRequestsCardSource): HomeListCardDefinition {
   return {
     id: PULL_REQUESTS_CARD_ID,
     title: "Pull requests",
     icon: GitPullRequest,
     defaultOn: true,
     available: source.available,
-    emptyLabel: "Nothing is waiting on you.",
-    useContent: () => usePullRequestsContent(source),
+    useListRows: () => usePullRequestsListRows(source),
   };
 }
 
-type PullRequestRead =
-  | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly view: CodeProjectPullRequestView }
-  | { readonly status: "unavailable" };
-
-function usePullRequestsContent(source: PullRequestsCardSource): HomeCardContent {
+/**
+ * The card's two groups as rows of the start screen's list: the pull requests
+ * waiting on the person's review under Needs you, their own under Your pull
+ * requests. It still says when it has not looked at every Project, because a
+ * quiet list would otherwise read as "nothing is waiting".
+ */
+function usePullRequestsListRows(source: PullRequestsCardSource): HomeListRead {
   const read = usePullRequestRead(source.load);
-  const { now, onOpenAll, viewerLogin } = source;
+  const { now, onOpenAll, onOpenRow, viewerLogin } = source;
   const model = useMemo(
     () =>
       read.status === "ready"
@@ -67,56 +66,54 @@ function usePullRequestsContent(source: PullRequestsCardSource): HomeCardContent
   if (read.status === "unavailable" || model === undefined) {
     return {
       status: "ready",
-      count: 0,
-      body: null,
-      emptyLabel: "Octant could not read pull requests.",
+      rows: [],
+      caveat: { text: "Octant could not read pull requests." },
     };
   }
-  const { freshness } = read.view;
+  const reach = pullRequestSnapshotReach(read.view);
   // A failed refresh keeps the last snapshot, so its rows and its silence are
   // only as current as the last refresh that succeeded.
+  const { freshness } = read.view;
   const checkedAt = freshness.status === "stale" ? freshness.lastSuccessfulRefreshAt : undefined;
-  if (model.total === 0) {
-    const reach = pullRequestSnapshotReach(read.view);
-    if (reach !== "checked") {
-      return {
-        status: "ready",
-        count: 0,
-        body: null,
-        emptyLabel:
-          reach === "unchecked"
-            ? "Pull requests have not been checked yet."
-            : "Some Projects have not been checked yet.",
-        emptyAction: { label: "Open Pull requests", onSelect: onOpenAll },
-      };
-    }
-    return checkedAt === undefined
-      ? { status: "ready", count: 0, body: null }
-      : {
-          status: "ready",
-          count: 0,
-          body: null,
-          emptyLabel: `Nothing was waiting on you when checked ${relativeTimeLabel(checkedAt, now)}.`,
-        };
-  }
+  const caveat =
+    reach !== "checked"
+      ? {
+          text:
+            reach === "unchecked"
+              ? "Pull requests have not been checked yet."
+              : "Some Projects have not been checked yet.",
+          action: { label: "Open Pull requests", onSelect: onOpenAll },
+        }
+      : checkedAt === undefined
+        ? undefined
+        : {
+            text:
+              model.total === 0
+                ? `Nothing was waiting on you when checked ${relativeTimeLabel(checkedAt, now)}.`
+                : `Pull requests last checked ${relativeTimeLabel(checkedAt, now)}.`,
+          };
   return {
     status: "ready",
-    count: model.total,
-    body: (
-      <>
-        <PullRequestRows model={model} onOpenAll={onOpenAll} onOpenRow={source.onOpenRow} />
-        {checkedAt === undefined ? null : (
-          <p
-            className="oct-meta pull-requests-card__checked"
-            title={absoluteTimeFormatter.format(new Date(checkedAt))}
-          >
-            {`Last checked ${relativeTimeLabel(checkedAt, now)}.`}
-          </p>
-        )}
-      </>
-    ),
+    seeAll: {
+      "needs-you": { label: "See all", onSelect: onOpenAll },
+      "your-pull-requests": { label: "See all", onSelect: onOpenAll },
+    },
+    ...(caveat === undefined ? {} : { caveat }),
+    rows: [
+      ...model.everyWaiting.map((row) =>
+        pullRequestListRow(row, "needs-you", now, () => onOpenRow(row)),
+      ),
+      ...model.everyYours.map((row) =>
+        pullRequestListRow(row, "your-pull-requests", now, () => onOpenRow(row)),
+      ),
+    ],
   };
 }
+
+type PullRequestRead =
+  | { readonly status: "loading" }
+  | { readonly status: "ready"; readonly view: CodeProjectPullRequestView }
+  | { readonly status: "unavailable" };
 
 /** One cached read when the card mounts. A later identity change reads again; nothing else does. */
 function usePullRequestRead(load: PullRequestsCardSource["load"]): PullRequestRead {
@@ -137,77 +134,4 @@ function usePullRequestRead(load: PullRequestsCardSource["load"]): PullRequestRe
     };
   }, [load]);
   return read;
-}
-
-function PullRequestRows(props: {
-  readonly model: ReturnType<typeof buildPullRequestCard>;
-  readonly onOpenRow: (row: PullRequestCardRow) => void;
-  readonly onOpenAll: () => void;
-}) {
-  return (
-    <>
-      <PullRequestGroup
-        label="Waiting on your review"
-        onOpenRow={props.onOpenRow}
-        rows={props.model.waiting}
-      />
-      <PullRequestGroup label="Yours" onOpenRow={props.onOpenRow} rows={props.model.yours} />
-      {props.model.hidden <= 0 ? null : (
-        <OctantButton
-          className="pull-requests-card__more window-no-drag"
-          onClick={props.onOpenAll}
-          size="sm"
-          type="button"
-          variant="link"
-        >
-          {`+${String(props.model.hidden)} more`}
-        </OctantButton>
-      )}
-    </>
-  );
-}
-
-function PullRequestStatus(props: { readonly row: PullRequestCardRow }) {
-  const status = pullRequestCardStatus(props.row);
-  return (
-    <span className="oct-meta pull-requests-card__status" data-tone={status.tone}>
-      <span aria-hidden="true" className="pull-requests-card__dot" />
-      {status.word}
-    </span>
-  );
-}
-
-function PullRequestGroup(props: {
-  readonly label: string;
-  readonly rows: ReadonlyArray<PullRequestCardRow>;
-  readonly onOpenRow: (row: PullRequestCardRow) => void;
-}) {
-  if (props.rows.length === 0) return null;
-  return (
-    <section className="pull-requests-card__group">
-      <h3 className="oct-meta pull-requests-card__heading">{props.label}</h3>
-      <ul className="pull-requests-card__list">
-        {props.rows.map((row) => (
-          <li key={row.key}>
-            <OctantButton
-              className="pull-requests-card__row window-no-drag"
-              onClick={() => props.onOpenRow(row)}
-              type="button"
-              variant="bare"
-            >
-              <span className="pull-requests-card__face">
-                <span className="oct-row-label pull-requests-card__title">{row.title}</span>
-                <span className="pull-requests-card__facts">
-                  <span className="oct-meta oct-meta--mono pull-requests-card__reference">
-                    {row.reference}
-                  </span>
-                  <PullRequestStatus row={row} />
-                </span>
-              </span>
-            </OctantButton>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
 }

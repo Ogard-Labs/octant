@@ -479,7 +479,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByText("Latency telemetry")).toBeVisible();
+    expect(await screen.findByText("Latency telemetry")).toBeVisible();
     expect(screen.getByText("2 hours ago")).toBeVisible();
 
     await user.click(screen.getByText("Latency telemetry"));

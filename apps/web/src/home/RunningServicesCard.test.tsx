@@ -93,13 +93,13 @@ describe("the Running services card", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "Home cards" })).toBeNull());
   });
 
-  it("says no server is running in the Code Projects in one quiet line", async () => {
+  it("draws no section while no server is running", async () => {
     const { client } = fakeClient(() => listed([]));
     renderCard(createRunningServicesCard(source(client)));
-    const card = await screen.findByRole("region", { name: "Running services" });
     expect(
-      await within(card).findByText("No servers are running in your Code Projects."),
+      await screen.findByText("Nothing waiting on you. Start a thread above."),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "In progress" })).toBeNull();
   });
 
   it("lists a server with its port, Project, branch, runtime, and health", async () => {
@@ -113,13 +113,12 @@ describe("the Running services card", () => {
       ]),
     );
     renderCard(createRunningServicesCard(source(client)));
-    const card = await screen.findByRole("region", { name: "Running services" });
+    const card = await screen.findByRole("region", { name: "In progress" });
 
     expect(await within(card).findByText("vite")).toBeInTheDocument();
     expect(within(card).getByText(":5173")).toBeInTheDocument();
     expect(within(card).getByText("Octant · fix/login")).toBeInTheDocument();
     expect(within(card).getByText(/Not responding · node/)).toBeInTheDocument();
-    expect(within(card).getByText("1")).toBeInTheDocument();
   });
 
   it("labels a server Octant does not own as not owned, claims nothing about who started it, and names a host that is not this computer", async () => {
@@ -132,23 +131,22 @@ describe("the Running services card", () => {
       ]),
     );
     renderCard(createRunningServicesCard(source(client, { host: "Studio" })));
-    const card = await screen.findByRole("region", { name: "Running services" });
+    const card = await screen.findByRole("region", { name: "In progress" });
     expect(await within(card).findByText(/Not owned by Octant/)).toBeInTheDocument();
     expect(within(card).queryByText(/Left over from Octant/)).toBeNull();
     expect(within(card).getByText(/Studio/)).toBeInTheDocument();
   });
 
-  it("shows five rows and counts the rest", async () => {
+  it("shows five rows", async () => {
     const many = Array.from({ length: RUNNING_SERVICES_ROW_LIMIT + 3 }, (_, index) =>
       service(index + 1),
     );
     const { client } = fakeClient(() => listed(many));
     renderCard(createRunningServicesCard(source(client)));
-    const card = await screen.findByRole("region", { name: "Running services" });
+    const card = await screen.findByRole("region", { name: "In progress" });
 
-    expect(await within(card).findByText("+3 more listening")).toBeInTheDocument();
+    expect(await within(card).findByText("8")).toBeInTheDocument();
     expect(within(card).getAllByRole("button", { name: /^Open / })).toHaveLength(5);
-    expect(within(card).getByText("8")).toBeInTheDocument();
   });
 
   it("opens the page the host prepared and says so when it cannot place it", async () => {
@@ -318,7 +316,7 @@ describe("the Running services card", () => {
     await user.click(await screen.findByRole("button", { name: "Stop vite on port 5171" }));
 
     expect(
-      await screen.findByText("No servers are running in your Code Projects."),
+      await screen.findByText("Nothing waiting on you. Start a thread above."),
     ).toBeInTheDocument();
     const stop = commands.find((command) => command.kind === "stop-running-service");
     expect(stop).toBeDefined();
@@ -407,7 +405,7 @@ describe("the Running services card", () => {
     renderCard(createRunningServicesCard(source(client)));
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Stop vite on port 5171" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("nothing was signalled");
+    expect(await screen.findByText(/nothing was signalled/)).toBeInTheDocument();
     expect(screen.getByText("vite")).toBeInTheDocument();
   });
 
@@ -426,7 +424,7 @@ describe("the Running services card", () => {
     );
     renderCard(createRunningServicesCard(source(client)));
     expect(await screen.findByText(/could not check this computer/)).toBeInTheDocument();
-    expect(screen.queryByText("No servers are running in your Code Projects.")).toBeNull();
+    expect(screen.queryByText(/Nothing waiting/)).toBeNull();
   });
 
   it("keeps the last listing when a later refresh is refused", async () => {

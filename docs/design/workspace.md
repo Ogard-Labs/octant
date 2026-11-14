@@ -805,14 +805,26 @@ file. Save remains the explicit disk write.
 Every start screen shows one question and its composer. **New task**, in
 every mode, stops there, with the composer docked at the foot of the page.
 **Code Home**, where Code lands with nothing chosen, adds Code's prompt
-suggestions, one card area, and Code's agent home under the composer. No
-start screen has tabs or action tiles. These are the rules; each card's rows,
+suggestions (at most four, on one line) and one calm list under the composer;
+Chat's and Work's home add the list too. No start screen has tabs or action
+tiles. These are the rules; each card's rows,
 wording, and reads are specified in [Start screen](start-screen.md).
 
 - **Paint order.** The composer paints first. The card area mounts on the frame
   after the first commit and each card begins its reads only then, so a start
   screen never waits on a card. A card that is off or unavailable is never
   mounted and reads nothing.
+- **One list.** Needs you, In progress, Your pull requests, Continue, and on
+  Code Open issues, in that order, each drawn only while it has rows and
+  separated by space, not boxes; rows have no card behind them. Each item shows
+  once (Needs you wins), at most five rows per section with a **See all** link to
+  the full page, and one quiet line with a next step when everything is empty.
+  The list draws once every source has answered, so nothing moves when a late
+  one lands. Cards that give it rows: Needs you, Working now, Running services
+  and Pull requests. Other cards (CI failures, Handovers, Computers) stay glass
+  cards in a grid under it. Customize is a **…** menu in the first section's
+  header. The ground behind the column keeps a fifth of its strength. See
+  [Start screen: The list](start-screen.md#the-list).
 - **Cards, in default order.** Needs you, Working now, Running services, Pull
   requests, CI failures, and Computers, each on by default, on Code Home only.
 - **Unavailable is hidden.** A card this window cannot read is hidden and left
@@ -831,11 +843,10 @@ wording, and reads are specified in [Start screen](start-screen.md).
   has not checked yet. Running services says it could not check rather than that
   nothing runs. Any other empty card shows one quiet line, never fake rows. A
   lone card spans the row.
-- **Row limits.** Needs you and Working now show at most five rows, then **+N
-  more** (Needs you opens the Inbox, Working now the Running view); Running
-  services five, then **+N more
-  listening**; Pull requests six, then **+N more** (Pull requests); CI failures
-  five, most recently failed first; Computers four, then **+N more**.
+- **Row limits.** Each list section shows at most five rows, then **See all**
+  (Needs you opens the Inbox, In progress the Running view, Your pull requests
+  the Pull requests page, Open issues the Issues page); CI failures five, most
+  recently failed first; Computers four, then **+N more**.
 - **Reads.** A card reads only what the window's own authority returns. Needs
   you and Working now read on mount and on change signals and add no timer;
   signals that arrive during a read become one more read once it lands. Pull

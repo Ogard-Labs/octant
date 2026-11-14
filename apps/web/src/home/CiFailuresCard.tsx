@@ -12,7 +12,7 @@ import {
   type CiFailureCardRow,
   type CodeProjectCurrentBranch,
 } from "./ciFailures";
-import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
+import type { HomeCardContent, HomeGridCardDefinition } from "./homeCards";
 
 export interface CiFailuresCardSource {
   readonly routines?: AutomationClient;
@@ -40,7 +40,7 @@ export interface CiFailuresCardSource {
  * of Code Projects. Hidden unless the same read the Pull requests card uses
  * is allowed, and hidden when it has nothing to show.
  */
-export function createCiFailuresCard(source: CiFailuresCardSource): HomeCardDefinition {
+export function createCiFailuresCard(source: CiFailuresCardSource): HomeGridCardDefinition {
   return {
     id: CI_FAILURES_CARD_ID,
     title: "CI failures",

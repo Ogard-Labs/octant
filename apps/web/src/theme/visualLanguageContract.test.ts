@@ -1657,6 +1657,7 @@ describe("the public-block visual language", () => {
       // The treatment is the two standard properties in styles.css; a feature
       // may hide a scrollbar in a named place and may never recolour or widen one.
       const hidden = [
+        ".code-home__suggestions",
         ".code-project-views__inline",
         ".dock-browser-pages",
         ".phone-scroll",
