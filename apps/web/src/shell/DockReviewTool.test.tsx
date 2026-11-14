@@ -431,3 +431,38 @@ it("refuses receipt navigation whose recorded checkout is no longer current", ()
   expect(screen.getByText(/earlier checkout binding/)).toBeVisible();
   expect(props.client.executeOperation).not.toHaveBeenCalled();
 });
+
+it("sends notes on two changed lines as one follow-up message naming both anchors", async () => {
+  const user = userEvent.setup();
+  const onSendLineNotes = vi.fn(async (_message: string) => ({ status: "sent" as const }));
+  render(
+    <DockReviewTool
+      {...bound()}
+      requestedCodeReviewFile={{
+        checkoutId: ids.checkout as never,
+        path: "src/index.ts",
+        receiptOperationId: ids.operation as never,
+      }}
+      onSendLineNotes={onSendLineNotes}
+    />,
+  );
+
+  await user.click(
+    await screen.findByRole("button", { name: "Comment on src/index.ts modified line 12" }),
+  );
+  const notes = screen.getByRole("region", { name: "Line notes" });
+  await user.type(within(notes).getByLabelText("Note"), "Why 42?");
+  await user.click(within(notes).getByRole("button", { name: "Add note" }));
+  await user.click(screen.getByRole("button", { name: "Comment on README.md modified line 1" }));
+  await user.type(within(notes).getByLabelText("Note"), "Say what Octant is.");
+  await user.click(within(notes).getByRole("button", { name: "Add note" }));
+  await user.click(within(notes).getByRole("button", { name: "Send 2 notes" }));
+
+  expect(onSendLineNotes).toHaveBeenCalledTimes(1);
+  const message = onSendLineNotes.mock.calls[0]?.[0] ?? "";
+  expect(message).toContain("1. src/index.ts, new line 12\n   > const answer = 42;\n   Why 42?");
+  expect(message).toContain("2. README.md, new line 1\n   > Octant\n   Say what Octant is.");
+  await waitFor(() =>
+    expect(within(notes).queryByRole("button", { name: /^Send/ })).not.toBeInTheDocument(),
+  );
+});

@@ -811,6 +811,7 @@ A turn records an observation of what changed while it ran, never an attribution
 - A Work turn watches its bound folder from before the provider starts until the turn settles and records relative paths only, reading no file. An unnameable or refused path marks the record truncated, and a host that cannot watch records nothing. _Here only._
 - A Code turn compares the checkout tree-to-tree at start and settle and journals at most 32 paths with lines added and removed and a binary flag. Renames are both paths. _Here only._
 - A Code turn with no starting capture (Plan, unreadable checkout) or no change records nothing, and recording never fails or delays the turn. _Here only._
+- From a Code turn's change view the person may leave notes on changed lines, keep them pending, and send them together as one ordinary follow-up message in that thread (maintainer decision, 2026-11-14). [Workspace](workspace.md#tool-lifecycles) owns the detail.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 

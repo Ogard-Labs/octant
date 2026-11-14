@@ -1774,6 +1774,50 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("keeps the composer's own draft when a message sent from outside it is refused", async () => {
+    const executeOperation = vi.fn(async (command: { readonly operationId: string }) => ({
+      kind: "operation-failed",
+      operationId: command.operationId,
+      failure: { category: "unauthorized", message: "Refused." },
+    }));
+    const client = fakeClient({ executeOperation: executeOperation as never });
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("half-written reply"));
+
+    let sent = true;
+    await act(async () => {
+      sent = await result.current.sendFollowUp(
+        "Notes on the changed lines:",
+        [],
+        [],
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [],
+        undefined,
+        [],
+        false,
+        undefined,
+        true,
+      );
+    });
+    expect(sent).toBe(false);
+    expect(executeOperation).toHaveBeenCalledOnce();
+    expect(result.current.pendingDraft).toBe("half-written reply");
+    unmount();
+  });
+
   it.each(["waiting", "failed", "interrupted"] as const)(
     "settles a %s turn and keeps only actionable approvals",
     async (state) => {

@@ -2743,6 +2743,12 @@ export function useCodeController(options: CodeControllerOptions) {
       reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>,
       toolCatalogHandoff = false,
       contextInputPolicy?: ConversationInputPolicy,
+      /**
+       * True for a message composed outside the composer, such as a turn's
+       * line notes: the composer's own draft is neither read, cleared nor
+       * overwritten, so its unsent text survives this send either way.
+       */
+      outsideComposer = false,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -2758,7 +2764,7 @@ export function useCodeController(options: CodeControllerOptions) {
       const draftRevisionAtDispatch =
         expectedDraftRevision ?? composerDraftRef.current.revisionFor(sendingThreadId);
       const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
-      if (previousDraft?.reviewFindingReferencesInvalid) {
+      if (!outsideComposer && previousDraft?.reviewFindingReferencesInvalid) {
         setTurnStatus("failed");
         setTurnError(
           "The saved review reference is unavailable. Reopen Review or explicitly clear this draft before sending.",
@@ -2767,11 +2773,12 @@ export function useCodeController(options: CodeControllerOptions) {
       }
       const reviewReferences =
         reviewFindingReferences ??
-        (previousDraft?.text.trim() === trimmed
+        (!outsideComposer && previousDraft?.text.trim() === trimmed
           ? (previousDraft.reviewFindingReferences ?? [])
           : []);
       let internalClearRan = false;
       const restoreFailedPrompt = () => {
+        if (outsideComposer) return;
         const currentRevision = composerDraftRef.current.revisionFor(sendingThreadId);
         if (
           currentRevision !== draftRevisionAtDispatch &&
@@ -2863,6 +2870,7 @@ export function useCodeController(options: CodeControllerOptions) {
         // after this dispatch.
         if (
           delayed !== true &&
+          !outsideComposer &&
           composerDraftRef.current.revisionFor(sendingThreadId) === draftRevisionAtDispatch
         ) {
           composerDraftRef.current.clearFor(sendingThreadId);
