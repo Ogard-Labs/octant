@@ -596,6 +596,11 @@ describe("the public-block visual language", () => {
     expect(controls).toMatch(/height:\s*var\(--oct-composer-cell\)/);
     expect(controls).toMatch(/border-radius:\s*var\(--oct-radius-pill\)/);
     expect(css).toMatch(/--oct-composer-cell:\s*28px/);
+    // On a dark page the box keeps the standard 10% hairline, not the 5% one
+    // that all but vanishes against the pane.
+    expect(css).toMatch(
+      /:root\[data-octant-theme-mode="dark"\] \.thread-composer__surface\s*\{[^}]*outline-color:\s*var\(--oct-hairline\)/,
+    );
     const send =
       /\.composer-field__actions button\[data-variant="default"\]\s*\{([^}]*)\}/.exec(css)?.[1] ??
       "";

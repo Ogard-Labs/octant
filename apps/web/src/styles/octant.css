@@ -5173,6 +5173,12 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
 .thread-composer__surface[data-shape="pill"] {
   border-radius: var(--oct-radius-pill);
 }
+
+/* On a dark page the 5% hairline all but vanishes against the pane, so the box
+   keeps the standard hairline (ink at 10%): faint, but there. */
+:root[data-octant-theme-mode="dark"] .thread-composer__surface {
+  outline-color: var(--oct-hairline);
+}
 /* Grown past one line, the prompt takes the box's full width on top and the
    controls stand in one row along the bottom: attach at the leading edge, the
    microphone and send at the trailing edge. */
