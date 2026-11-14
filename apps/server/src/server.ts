@@ -279,6 +279,7 @@ export function startOctantServer(
       personMemoryAccess,
       personMemoryRoutes,
       protectedFilesRoutes,
+      sandboxRestrictionsRoutes,
       processAuthorityNow,
       processAuthorityTime,
       routineProposalService,
@@ -288,6 +289,7 @@ export function startOctantServer(
       unsubscribeThreadArchivals,
       windowAuthorityStore,
     } = wireAuthority({
+      workThreadProjection,
       browserAuthority,
       options,
       persistence,
@@ -1823,6 +1825,7 @@ export function startOctantServer(
       projectRoutes,
       personMemoryRoutes,
       protectedFilesRoutes,
+      sandboxRestrictionsRoutes,
       providerOAuthRoutes,
       providerRoutes,
       providerUsageLimitsRoutes,

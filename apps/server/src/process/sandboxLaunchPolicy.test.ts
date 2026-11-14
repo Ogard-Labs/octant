@@ -21,7 +21,7 @@ function fixture() {
       schemaVersion: 1,
       revision: 1,
       filesystem: {
-        readOnlyRoots: [join(base, "shared")],
+        readOnlyRoots: [],
         readWriteRoots: [join(base, "cache")],
         protectedPaths: [],
       },
@@ -30,6 +30,7 @@ function fixture() {
       hostServices: "existing-policy",
     },
     context: {
+      root: join(base, "project"),
       hostId: "host",
       projectId: "20000000-0000-4000-8000-000000000001",
       checkoutId: "checkout",
@@ -138,7 +139,7 @@ describe("sandbox launch policy", () => {
       ).toMatchObject({
         status: "refused",
         code: "sandbox-policy-unsupported",
-        rules: ["filesystem.protectedPaths", "credentials.isolated", "hostServices.blocked"],
+        rules: ["filesystem.protectedPaths", "credentials.isolated"],
       });
     }
     expect(
@@ -168,7 +169,17 @@ describe("sandbox launch policy", () => {
     }
     expect(
       compileSandboxLaunchPolicy(
-        { ...input, additionalWriteRoots: [base], sandboxPolicy: selection },
+        {
+          ...input,
+          additionalWriteRoots: [base],
+          sandboxPolicy: {
+            ...selection,
+            policy: {
+              ...selection.policy,
+              filesystem: { ...selection.policy.filesystem, readOnlyRoots: [join(base, "shared")] },
+            },
+          },
+        },
         "linux",
       ),
     ).toMatchObject({ status: "refused", code: "sandbox-policy-conflict" });
@@ -223,5 +234,23 @@ describe("sandbox launch policy", () => {
       status: "refused",
       code: "sandbox-policy-malformed",
     });
+  });
+  it("refuses an administration root as a writable Project or folder grant", () => {
+    const { input, selection } = fixture();
+    expect(
+      compileSandboxLaunchPolicy(
+        {
+          ...input,
+          sandboxPolicy: {
+            ...selection,
+            policy: {
+              ...selection.policy,
+              filesystem: { ...selection.policy.filesystem, readWriteRoots: ["/etc"] },
+            },
+          },
+        },
+        "linux",
+      ),
+    ).toMatchObject({ status: "refused", rules: ["filesystem.hostAdministration"] });
   });
 });

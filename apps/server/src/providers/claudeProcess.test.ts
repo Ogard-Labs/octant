@@ -449,6 +449,9 @@ describe("ClaudeProcessPort spawn", () => {
     if (pid === undefined) throw new Error("Expected the owned Claude process ID.");
     const exited = waitForExit(child);
 
+    await expect
+      .poll(() => records(target.root).some((entry) => entry.kind === "stderr-ready"))
+      .toBe(true);
     child.kill("SIGTERM");
     await exited;
     await expectMissing(pid);

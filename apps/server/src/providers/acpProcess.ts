@@ -1,3 +1,5 @@
+import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   accessSync,
@@ -76,6 +78,7 @@ export interface AcpConfinementInput {
    * Absent, Full access launches unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
@@ -128,6 +131,7 @@ export interface AcpProcessStartInput {
    * Absent, Full access launches unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
@@ -415,6 +419,7 @@ function hostExtensionDenyPaths(
 function acpWallPolicy(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
 }): ProviderExecutionPolicy {
   return input.executionPolicy === "full-access" && input.fullAccessSandbox === true
     ? "auto-accept-edits"
@@ -553,6 +558,8 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               executable: input.binaryPath,
               args,
               boundRoot: root,
+              sandboxProviderChannel: true,
+              ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
               // Chat runs in the managed home and has no Project folders.
               ...(input.mode === "chat" || input.extraFolders === undefined
                 ? {}
@@ -1053,6 +1060,7 @@ function acquireConnection(
   clientCapabilities: AcpClientCapabilities | undefined,
   ownCleanup: (cleanup: () => Promise<void>) => void,
   onProcessStarted?: ProviderProcessStartedListener,
+  sandboxPolicy?: SandboxPolicySelection,
 ): Effect.Effect<ManagedConnection, ProviderFailure> {
   const name = profile.displayName;
   return Effect.async<ManagedConnection, ProviderFailure>((resume) => {
@@ -1062,6 +1070,7 @@ function acquireConnection(
       env: launch.environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    trackSandboxChild(sandboxPolicy, child);
     const boundedStderr = makeBoundedProviderStderr(options.stderrBytes);
     child.stderr.on("data", boundedStderr.append);
     const terminateGroup = makeTerminator(name, child, options.shutdownTimeoutMs);
@@ -1269,6 +1278,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           wall === "full-access"
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                ...(input.sandboxPolicy === undefined
+                  ? {}
+                  : { sandboxPolicy: input.sandboxPolicy }),
                 runtime: "acp",
                 profileId: profile.kind,
                 root: input.root,
@@ -1279,10 +1291,15 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
         const servers =
           input.purpose === "probe"
             ? undefined
-            : yield* acquireProviderServerAccess(options.serverAccess, {
-                root: input.root,
-                executionPolicy: wall,
-              });
+            : yield* acquireProviderServerAccess(
+                input.sandboxPolicy?.policy.hostServices === "blocked"
+                  ? undefined
+                  : options.serverAccess,
+                {
+                  root: input.root,
+                  executionPolicy: wall,
+                },
+              );
         const launch = yield* confinement.prepare({
           profile,
           binaryPath: input.binaryPath,
@@ -1292,6 +1309,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+          ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
@@ -1316,6 +1334,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
               terminate = cleanup;
             },
             input.onProcessStarted,
+            input.sandboxPolicy,
           ),
           () =>
             terminate === undefined ? Effect.void : cleanupEffect(profile.displayName, terminate),

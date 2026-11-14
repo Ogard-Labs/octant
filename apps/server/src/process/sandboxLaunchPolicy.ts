@@ -1,3 +1,9 @@
+import { join } from "node:path";
+import {
+  sandboxAuthorityDirectory,
+  sandboxNetworkLimitsOn,
+  sandboxNetworkSnapshot,
+} from "./sandboxRuntimePolicy";
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import {
@@ -16,7 +22,7 @@ const POSIX_LAUNCH_CAPABILITIES: SandboxPolicyCapabilities = {
   networkDeny: true,
   unrestrictedNetwork: true,
   isolatedCredentials: false,
-  blockedHostServices: false,
+  blockedHostServices: true,
 };
 export interface SandboxLaunchPolicyReceipt {
   readonly policyDigest: string;
@@ -67,7 +73,11 @@ export function compileSandboxLaunchPolicy(
   platform: NodeJS.Platform,
 ): Compilation {
   const { sandboxPolicy: rawSelection, ...launch } = input;
-  if (input.policyReadOnlyRoots !== undefined || input.policyFolderRoots !== undefined) {
+  if (
+    input.policyReadOnlyRoots !== undefined ||
+    input.policyFolderRoots !== undefined ||
+    input.policyBlockHostServices !== undefined
+  ) {
     return {
       status: "refused",
       code: "sandbox-policy-malformed",
@@ -103,12 +113,101 @@ export function compileSandboxLaunchPolicy(
     }
     const readOnly = selection.policy.filesystem.readOnlyRoots.map(directory);
     const readWrite = selection.policy.filesystem.readWriteRoots.map(directory);
+    const authorityDirectory = sandboxAuthorityDirectory();
+    if (authorityDirectory !== undefined) {
+      const authorityRoot = realpathSync(authorityDirectory);
+      const namedRoots = [
+        launch.boundRoot,
+        ...(launch.extraBoundRoots ?? []),
+        ...readOnly.map((root) => root.path),
+        ...readWrite.map((root) => root.path),
+      ];
+      if (
+        namedRoots.some((root) => {
+          const canonical = realpathSync(root);
+          return (
+            canonical === authorityRoot ||
+            authorityRoot.startsWith(`${canonical}/`) ||
+            overlaps(canonical, join(authorityRoot, "sandbox-filters"))
+          );
+        })
+      )
+        return {
+          status: "refused",
+          code: "sandbox-policy-conflict",
+          rules: ["filesystem.authorityStorage"],
+        };
+    }
+    const admittedRoots = [
+      selection.context.root,
+      ...(selection.context.extraRoots ?? []),
+      ...readWrite.map((root) => root.path),
+    ];
+    const requestedRoot = realpathSync(launch.boundRoot);
+    if (
+      !admittedRoots.some((root) => requestedRoot === root || requestedRoot.startsWith(`${root}/`))
+    )
+      return {
+        status: "refused",
+        code: "sandbox-policy-conflict",
+        rules: ["filesystem.rootMapping"],
+      };
+    for (const expected of selection.context.rootIdentities ?? []) {
+      const current = directory(expected.path);
+      if (
+        current.path !== expected.path ||
+        `${current.device}:${current.inode}` !== expected.identity
+      )
+        return {
+          status: "refused",
+          code: "sandbox-policy-unavailable",
+          rules: ["filesystem.bindingChanged"],
+        };
+    }
     const boundRoots = [launch.boundRoot, ...(launch.extraBoundRoots ?? [])].map(directory);
     const writable = [
       ...(launch.writeBoundRoot === false ? [] : boundRoots),
       directory(launch.temporaryDirectory),
       ...(launch.additionalWriteRoots ?? []).map(directory),
     ];
+    const administrationRoots =
+      platform === "linux"
+        ? [
+            "/etc",
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/lib",
+            "/lib64",
+            "/boot",
+            "/proc",
+            "/sys",
+            "/dev",
+            "/var/lib",
+            "/var/spool",
+          ]
+        : [
+            "/System",
+            "/Library",
+            "/Applications",
+            "/private/etc",
+            "/private/var/db",
+            "/usr",
+            "/bin",
+            "/sbin",
+          ];
+    if (
+      [...writable, ...readWrite].some((grant) =>
+        administrationRoots.some(
+          (root) => grant.path === root || root.startsWith(`${grant.path}/`),
+        ),
+      )
+    )
+      return {
+        status: "refused",
+        code: "sandbox-policy-conflict",
+        rules: ["filesystem.hostAdministration"],
+      };
     const readRoots = (launch.readRoots ?? []).map((path) => {
       const canonical = realpathSync(path);
       const stat = statSync(canonical);
@@ -127,23 +226,82 @@ export function compileSandboxLaunchPolicy(
         rules: ["filesystem.readOnlyRoots"],
       };
     }
-    if (launch.allowFileReadStar === true || (launch.extraRules?.length ?? 0) > 0) {
-      // Caller-authored Seatbelt rules may reopen a policy denial or grant an
-      // alias; this initial compiler deliberately admits only explicit roots.
+    if (
+      platform === "linux" &&
+      readOnly.some((read) =>
+        [...writable, ...readWrite].some((write) => read.device === write.device),
+      )
+    ) {
+      return {
+        status: "refused",
+        code: "sandbox-policy-unsupported",
+        rules: ["filesystem.readOnlyAliases"],
+      };
+    }
+    if (selection.policy.hostServices === "blocked" && launch.allowSimulatorControl === true) {
       return {
         status: "refused",
         code: "sandbox-policy-conflict",
-        rules: ["filesystem.explicitRoots"],
+        rules: ["hostServices.simulator"],
       };
     }
+    if (
+      selection.policy.network === "deny" &&
+      launch.sandboxProviderChannel === true &&
+      typeof launch.networkEgress !== "object"
+    ) {
+      return {
+        status: "refused",
+        code: "sandbox-policy-unsupported",
+        rules: ["network.providerChannel"],
+      };
+    }
+    if (
+      selection.policy.network === "existing-policy" &&
+      launch.networkEgress === "allow" &&
+      ((sandboxNetworkSnapshot(selection)?.limitsOn ?? sandboxNetworkLimitsOn()) ||
+        selection.policy.hostServices === "blocked")
+    )
+      return {
+        status: "refused",
+        code: "sandbox-policy-unsupported",
+        rules: ["network.unmediatedRoute"],
+      };
+    if (
+      selection.policy.network === "unrestricted" &&
+      selection.policy.hostServices === "blocked" &&
+      launch.networkEgress !== "none" &&
+      typeof launch.networkEgress !== "object"
+    )
+      return {
+        status: "refused",
+        code: "sandbox-policy-unsupported",
+        rules: ["network.hostServiceMediation"],
+      };
+    if (
+      selection.policy.network === "deny" &&
+      (selection.policy.approvedDestinations?.length ?? 0) > 0 &&
+      launch.networkEgress !== "none" &&
+      typeof launch.networkEgress !== "object"
+    )
+      return {
+        status: "refused",
+        code: "sandbox-policy-unsupported",
+        rules: ["network.exceptionMediation"],
+      };
     const networkEgress =
-      selection.policy.network === "deny"
+      selection.policy.network === "deny" &&
+      (selection.policy.approvedDestinations?.length ?? 0) === 0 &&
+      launch.sandboxProviderChannel !== true
         ? "none"
-        : selection.policy.network === "unrestricted"
+        : selection.policy.network === "unrestricted" &&
+            selection.policy.hostServices !== "blocked" &&
+            launch.networkEgress !== "none"
           ? "allow"
           : launch.networkEgress;
     if (
       selection.policy.network !== "existing-policy" &&
+      launch.sandboxProviderChannel !== true &&
       (launch.inboundRelay !== undefined ||
         (launch.loopbackRelayPorts?.length ?? 0) > 0 ||
         (launch.serverRelays?.length ?? 0) > 0)
@@ -157,6 +315,7 @@ export function compileSandboxLaunchPolicy(
         ...(launch.additionalWriteRoots ?? []),
         ...readWrite.map((root) => root.path),
       ],
+      policyBlockHostServices: selection.policy.hostServices === "blocked",
       policyReadOnlyRoots: readOnly.map((root) => root.path),
       policyFolderRoots: [...readOnly, ...readWrite].map((root) => root.path),
       networkEgress,

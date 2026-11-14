@@ -1,3 +1,4 @@
+import { trackSandboxChild, sandboxToolPolicy } from "../process/sandboxRuntimePolicy";
 import { isUtf8 } from "node:buffer";
 import { execFile as nodeExecFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -143,7 +144,7 @@ const liveDependencies: GitObservationDependencies = {
   realpath,
   execFile: (file, args, environment, signal) =>
     new Promise((resolve) => {
-      nodeExecFile(
+      const child = nodeExecFile(
         file,
         [...args],
         {
@@ -161,6 +162,7 @@ const liveDependencies: GitObservationDependencies = {
           });
         },
       );
+      trackSandboxChild(sandboxToolPolicy(), child);
     }),
 };
 
@@ -719,6 +721,7 @@ export class GitObservationPort {
         launch.args,
         {
           ...createGitCommandEnvironment(process.env),
+          ...launch.environment,
           ...(quarantine === undefined ? {} : { GIT_OBJECT_DIRECTORY: quarantine }),
         },
         controller.signal,

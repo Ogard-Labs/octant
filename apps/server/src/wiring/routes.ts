@@ -156,7 +156,13 @@ export type RoutesDependencies = {
     | "workThreadRoutes"
   > &
   Pick<ReplicaWiring, "replicaSyncStatusRoutes" | "syncedArtifactRoutes"> &
-  Pick<AuthorityWiring, "personMemoryRoutes" | "protectedFilesRoutes" | "windowAuthorityStore">;
+  Pick<
+    AuthorityWiring,
+    | "personMemoryRoutes"
+    | "protectedFilesRoutes"
+    | "sandboxRestrictionsRoutes"
+    | "windowAuthorityStore"
+  >;
 
 export function wireRoutes(deps: RoutesDependencies) {
   const {
@@ -228,6 +234,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     projectRoutes,
     personMemoryRoutes,
     protectedFilesRoutes,
+    sandboxRestrictionsRoutes,
     providerOAuthRoutes,
     providerRoutes,
     providerUsageLimitsRoutes,
@@ -358,6 +365,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await fileMentionRoutes(request)) ??
     (await spendCeilingRoutes(request)) ??
     (await protectedFilesRoutes(request)) ??
+    (await sandboxRestrictionsRoutes(request)) ??
     (await archivedWorktreeRoutes(request)) ??
     (await diskCleanupRoutes(request)) ??
     (await personMemoryRoutes(request)) ??

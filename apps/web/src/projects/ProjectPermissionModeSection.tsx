@@ -1,3 +1,4 @@
+import { OctantButton } from "../ui/base/OctantButton";
 import type { PermissionMode } from "@octant/contracts/providers";
 import type { ProjectSummary } from "@octant/contracts/projects";
 import { useState } from "react";
@@ -35,6 +36,7 @@ export interface ProjectPermissionModeSectionProps {
     fullAccessSandbox?: boolean | "settings",
   ) => Promise<boolean>;
   readonly disabled?: boolean;
+  readonly onOpenSandboxRestrictions?: () => void;
 }
 
 /**
@@ -95,6 +97,15 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
               : "off"
         }
       />
+      {props.onOpenSandboxRestrictions === undefined ? null : (
+        <OctantButton
+          variant="ghost"
+          disabled={props.disabled}
+          onClick={props.onOpenSandboxRestrictions}
+        >
+          Sandbox restrictions…
+        </OctantButton>
+      )}
       {warning.dialog}
     </>
   );

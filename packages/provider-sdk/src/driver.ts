@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type {
   ProviderApprovalCall,
   ContextCompactionRefusalReason,
@@ -39,6 +40,8 @@ export interface ProviderProbeInput {
 }
 
 export interface ProviderAcquireInput {
+  /** Immutable host-admitted sandbox authority; included in every process reuse key. */
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
   /**
    * The folder the runtime works in, a folder on this host.

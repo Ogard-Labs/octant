@@ -13239,45 +13239,82 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a
       maintainer check.
-  - **Configurable sandbox policy (foundation; enrollment not built).**
-    Autonomy and the selected sandbox boundary are separate: a permitted
-    action keeps its existing approval behavior, including no prompts at
-    sandboxed Full access. A future trusted host planner resolves a complete
-    policy from session, Project, Settings, then legacy behavior, in that
-    order. Repository content and agent tools are not policy authorities.
-    Existing settings and journals are unchanged; no policy is selected by
-    default.
+  - **Configurable sandbox policy (opt-in maintainer preview).**
+    Autonomy and the selected boundary are separate. Full access keeps its
+    no-prompt behavior for permitted work; Auto retains its existing approvals.
+    No existing setting or journal is migrated into an additional policy.
+    Repository files, model approvals and agent calls cannot grant exceptions.
 
-    Built: a strict versioned `SandboxPolicy` contract, resolution provenance,
-    capability admission and an optional shared-confinement launch compiler.
-    Unknown fields, unsupported versions/rules, unavailable folders and
-    overlapping read-only/writable roots refuse before a command starts.
-    The process compiler can add explicit read-only and read/write directory
-    mounts and select existing egress, deny, or unrestricted network. It
-    rejects caller-authored profile rules and broad-read compatibility
-    launches rather than silently weakening a selection. Folder grants do
-    not become provider sign-in exemptions. Built-in protected-file rules
-    remain in force. Protected project paths, isolated credentials and
-    blocked host services are unsupported selections and refuse on both
-    POSIX backends; Windows refuses every selection.
+    The host journals complete versioned Settings and Project policies outside
+    runtime-writable roots. Session exceptions remain in memory and expire on
+    thread archival or host restart. Resolution is session, Project, Settings
+    for the mode, then legacy behavior. Grants bind to native machine identity,
+    canonical Project root/inode, extra roots, binding revision and Git config,
+    including linked worktrees. Replaced folders and changed bindings need a
+    new trusted save. Grants cannot expose the host's private policy store.
 
-    Each selected launch returns a policy digest and a process-authority
-    reuse key covering revision, host/Project/checkout/session/provider,
-    root identities, effective launch rules, backend identity and OS version.
-    These receipts are preparatory: provider caches do not yet compare them.
-    No running process or turn is updated by the compiler.
+    Each turn admits an immutable policy and network-rule snapshot before
+    provider acquisition. Changes apply next turn. Helpers intersect grants
+    with their parent, cannot move outside its writable roots and stop with it.
+    Fresh session identity binds provider leases and language/debug caches;
+    differently scoped or unrestricted processes cannot be reused. Compiler
+    receipts include revision, backend/OS, provider and canonical root identity.
+    Cleanup immediately revokes tool authority, closes scoped proxies and
+    terminates owned processes. Uncertain cleanup is recorded and blocks new
+    admission until the owned runtime stops rather than asserting expiry.
 
-    Not built: authoritative persistence, binding and expiry of grants,
-    admission across every provider and direct-tool route, cached-process
-    receipt checks, descendant revocation, restrictions settings, effective
-    summaries, grouped denials and remembered exceptions. Do not enroll
-    sessions or advertise these protections before that integration exists.
-    Native launch probes cover scoped writes, read-only mounts, outside-host
-    canaries, child processes and direct network denial; they do not prove
-    protection against hard-link aliases, concurrent host path replacement,
-    or complete credential and host-service isolation. macOS and packaged
-    provider evidence must be obtained on their actual runtimes. Existing
-    Safe networks, Auto behavior and Full access defaults remain unchanged.
+    Settings › Permissions › Sandbox restrictions, the access picker and the
+    Project default-mode section open the same scoped panel. It shows source,
+    effective protection, full folder paths, read/write scope, network choices
+    and limitations. One grouped inline composer card explains a denial and
+    the exact folder or host/port impact before **Allow for this session**,
+    **Remember for this Project**, or **Keep blocked**. Remembering one exception
+    never copies unrelated session overrides into the Project. The host-person
+    settings route enforces strict commands and optimistic versions; agent and
+    hub-introduced sessions cannot grant. A bounded private audit omits raw
+    paths, commands, file contents and credentials.
+
+    Direct file tools enforce the grants with handle-bound reads and writes,
+    including a write check for edits and aliases. The shared launch compiler
+    covers shells, package lifecycle scripts, Git, tests, terminals and native
+    provider descendants. Unsupported host tools (MCP/extension processes,
+    external apps, computer use, hooks and Apple tools without a policy-carrying
+    route) refuse before effects. Remote connectors remain separate authorities.
+
+    Network choices reuse Safe networks, block general network with a separate
+    provider/control channel, or explicitly allow public internet. Narrow
+    exceptions name an exact destination and port. The existing proxy enforces
+    DNS resolution, redirects, private destinations, IPv4/IPv6, tokens and
+    expiry. Host HTTP tools check the same snapshot at every hop and use pinned
+    DNS transports. Blocked host services deny ambient Unix sockets and private
+    endpoints; exact runtime control bridges are separate host-owned channels.
+    Unrestricted internet still uses a proxy when needed to block host services.
+    Broker loss never opens direct networking. Protected-file rules remain;
+    provider sign-in uses its existing scoped channel, not a folder exemption.
+
+    | Backend/route                                      | Enrollment and enforced boundary                                                                                                                                                                 |
+    | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+    | Linux Bubblewrap                                   | Opt-in preview: PID/network namespaces, capability isolation, writable roots, separate-filesystem read-only grants, enforced proxy, Unix-socket/io_uring restrictions and descendant revocation. |
+    | Codex, Pi, ACP, Claude and Octant Harness on Linux | Carry selection through existing provider/shell and direct-tool paths; unsupported routes refuse. Real-provider/packaged claims require their native matrix evidence.                            |
+    | OpenCode on Linux                                  | Refused before launch: host HTTP control transport requires a confined bridge.                                                                                                                   |
+    | macOS                                              | Compiler/native file probes exist; new enrollment refuses until detached-descendant revocation is proven. Existing Keep the sandbox is unchanged.                                                |
+    | Windows                                            | New enrollment/launches refuse; no new Windows confinement.                                                                                                                                      |
+
+    Linux refuses read-only roots on the same filesystem as any writable root:
+    a read-only mount cannot protect a writable hard-link alias. Overlapping
+    grants also refuse. Host-service filters are content-addressed, checked before
+    reuse and stored beside the host authority outside user-grantable folders.
+    Protected Project paths and expanded credential/service
+    grants remain unavailable until their backend has access-time alias and
+    late-created-path proof. A watcher or enumeration is not that protection.
+
+    Enrollment requires `OCTANT_SANDBOX_RESTRICTIONS_PREVIEW=1` on a supported
+    host. Disabling preview prevents new enrollment but keeps saved restrictions
+    enforced, or refuses their launch if the backend is unavailable. Rollback
+    never converts a selected boundary into unrestricted execution. Native
+    probes cover canaries, read-only mounts, real offline install/edit/test/Git,
+    brokered versus direct networking, Unix sockets and detached-child cleanup.
+    Release claims must retain the exact OS/provider evidence and limitations.
 
   - **Full access is full access for secret files too** (maintainer
     decision, 2026-10-31: "softer guard — full access is full access").

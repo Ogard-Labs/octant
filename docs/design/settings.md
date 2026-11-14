@@ -278,6 +278,26 @@ a text field and an **Add** button; a refused path is said in the section's
 feedback line. A paired device edits the section as a local window does
 (maintainer decision, 2026-11-12; not built yet: today a paired device sees the
 section as set on the host machine).
+**Sandbox restrictions** in Settings › Permissions retains the existing access
+levels and Keep the sandbox preference. Its picker entry opens that session;
+the Project default-mode section opens that Project. The panel offers Code and
+Work Settings, Project and session scopes, provenance and an effective summary.
+A saved additional policy keeps the sandbox on. Full folder paths show Read only
+or Read and write; private caches and toolchain reads remain separate. Core
+rows explain outside writes, administration, personal-file protection and host
+services. Network offers Safe networks, block-all with a separate provider
+channel, and explicit public internet. Unsupported requirements and preview
+availability are stated before enrollment, with details in Advanced.
+
+Changes say **Applies next turn**. A version refusal preserves the draft;
+scope changes retain unsaved drafts and Reload explicitly discards the current
+one. Live denial refreshes do not replace drafts. One grouped composer card
+shows the exact folder/read-write or destination/port impact before **Allow for
+this session**, **Remember for this Project**, or **Keep blocked**. The panel
+lists remaining groups. Agents cannot submit their own exception. Session
+grants expire at thread end or host restart. Backend/provider gates and rollout
+live in the [security specification](../architecture.md#security-and-authority).
+
 **Worktrees** in Settings › Code, above Open in applications, lists the managed
 worktrees archived threads still keep, largest first: the thread's title, then
 a line of Project, branch in mono, and size ("more than" when the count stopped

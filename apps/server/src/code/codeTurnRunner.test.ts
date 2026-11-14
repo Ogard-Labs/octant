@@ -1,3 +1,5 @@
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import {
   decodeCodeCheckoutId,
   decodeCodeRepositoryId,
@@ -2142,6 +2144,74 @@ describe("CodeTurnRunner", () => {
 
     expect(outcomes.at(-1)).toBe("completed");
     expect(observed.map((next) => next.providerKind)).toEqual(["completed"]);
+  });
+
+  it("applies a trusted boundary at Full access without changing autonomy or requesting approval", async () => {
+    const current = thread({ executionPolicy: "full-access", fullAccessSandbox: false });
+    const selection = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 3,
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        network: "deny",
+        credentials: "existing-policy",
+        hostServices: "blocked",
+      },
+      context: {
+        root: "/private/worktrees/exact",
+        hostId: "host",
+        projectId: current.projectId,
+        threadId: current.id,
+        checkoutId: "checkout",
+        sessionId: "policy-session",
+        provider: "codex",
+      },
+    });
+    const end = vi.fn();
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      active: () => selection,
+      storageDirectory: () => undefined,
+      deny: () => undefined,
+      registerCleanup: () => () => undefined,
+      beginTurn: () => ({
+        status: "admitted",
+        turn: {
+          selection,
+          summary: "Full autonomy within your sandbox limits.",
+          current: () => true,
+          end,
+        },
+      }),
+    });
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.make(event({ kind: "completed" }))),
+    });
+    const acquire = vi.fn(() => Effect.succeed(connection));
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({ thread: current, providerDriverKind: "codex", provider: { acquire } }),
+          ),
+        ),
+      );
+      expect(acquire).toHaveBeenCalledWith(expect.objectContaining({ sandboxPolicy: selection }));
+      expect(connection.start).toHaveBeenCalledWith(
+        expect.objectContaining({ executionPolicy: "full-access", fullAccessSandbox: true }),
+      );
+      expect(connection.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: expect.arrayContaining([
+            { kind: "instructions", text: "Full autonomy within your sandbox limits." },
+          ]),
+        }),
+      );
+      expect(connection.answerApproval).not.toHaveBeenCalled();
+      expect(end).toHaveBeenCalledOnce();
+    } finally {
+      configureSandboxRestrictionsAuthority(undefined);
+    }
   });
 
   it("refuses to start a sandboxed Full access turn on a runtime that cannot keep the sandbox", async () => {

@@ -1,3 +1,11 @@
+import {
+  recordSandboxLaunch,
+  sandboxSelectionIsCurrent,
+  sandboxNetworkSnapshot,
+  sandboxToolPolicy,
+  sandboxToolNetwork,
+  sandboxNetworkLimitsOn,
+} from "./sandboxRuntimePolicy";
 /**
  * Shared confinement builder for Octant-spawned tool and provider subprocesses.
  *
@@ -64,6 +72,8 @@ export class ProcessConfinementError extends Error {
 }
 
 export interface SeatbeltProfileInput {
+  readonly sandboxProviderChannel?: boolean;
+  readonly policyBlockHostServices?: boolean;
   readonly policyReadOnlyRoots?: ReadonlyArray<string>;
   /** Folder grants never become provider sign-in exemptions. */
   readonly policyFolderRoots?: ReadonlyArray<string>;
@@ -161,6 +171,7 @@ export interface WrapCommandInSandboxExecInput {
 }
 
 export interface ConfinedProcessLaunch {
+  readonly environment?: Readonly<Record<string, string>>;
   readonly policyReceipt?: SandboxLaunchPolicyReceipt;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -170,6 +181,8 @@ export interface ProcessConfinementPrepareInput {
   /** Host-planner selection only; no repository or model-controlled policy source. */
   readonly sandboxPolicy?: SandboxPolicySelection;
   /** Materialized by the policy compiler; denied writes follow every grant. */
+  readonly sandboxProviderChannel?: boolean;
+  readonly policyBlockHostServices?: boolean;
   readonly policyReadOnlyRoots?: ReadonlyArray<string>;
   /** Folder grants never become provider sign-in exemptions. */
   readonly policyFolderRoots?: ReadonlyArray<string>;
@@ -937,6 +950,9 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...secretGuardPersonRules(guardEntries),
     ...SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
     ...(input.policyReadOnlyRoots ?? []).map((path) => seatbeltDenyRule("file-write*", path)),
+    ...(input.policyBlockHostServices === true
+      ? ["(deny network-outbound (remote unix-socket))"]
+      : []),
   ];
   return lines.join("\n");
 }
@@ -1025,7 +1041,32 @@ export function makeProcessConfinementLive(
     options.sandboxPath ?? (platform === "darwin" ? DEFAULT_SANDBOX_PATH : DEFAULT_BWRAP_PATH);
   return {
     prepare: (input) => {
-      const compilation = compileSandboxLaunchPolicy(input, platform);
+      const selectedPolicy = input.sandboxPolicy ?? sandboxToolPolicy();
+      if (selectedPolicy !== undefined && !sandboxSelectionIsCurrent(selectedPolicy))
+        throw new ProcessConfinementError(
+          "invalid-configuration",
+          "This sandbox policy expired or its folder binding changed before launch. Start a new turn after reviewing the restrictions.",
+        );
+      const toolNetwork = sandboxToolNetwork(selectedPolicy);
+      const policyInput =
+        selectedPolicy === undefined
+          ? input
+          : {
+              ...input,
+              sandboxPolicy: selectedPolicy,
+              networkEgress:
+                ((selectedPolicy.policy.approvedDestinations?.length ?? 0) > 0 ||
+                  (selectedPolicy.policy.network === "existing-policy" &&
+                    ((sandboxNetworkSnapshot(selectedPolicy)?.limitsOn ??
+                      sandboxNetworkLimitsOn()) ||
+                      selectedPolicy.policy.hostServices === "blocked")) ||
+                  (selectedPolicy.policy.network === "unrestricted" &&
+                    selectedPolicy.policy.hostServices === "blocked")) &&
+                input.networkEgress === "allow"
+                  ? (toolNetwork?.networkEgress ?? input.networkEgress)
+                  : input.networkEgress,
+            };
+      const compilation = compileSandboxLaunchPolicy(policyInput, platform);
       if (compilation.status === "refused") {
         throw new ProcessConfinementError(
           compilation.code === "sandbox-policy-unsupported"
@@ -1039,10 +1080,32 @@ export function makeProcessConfinementLive(
       const prepared = compilation.input;
       const withReceipt = (launch: ConfinedProcessLaunch): ConfinedProcessLaunch => {
         if (compilation.status !== "admitted") return launch;
-        const backendPath = realpathSync(launch.command);
+        const backendPath = realpathSync(sandboxPath);
         const backend = statSync(backendPath);
+        if (selectedPolicy !== undefined) {
+          const paths = (values: ReadonlyArray<string>) =>
+            [...new Set(values.map((path) => resolve(path)))]
+              .filter((path) => path !== "/")
+              .slice(0, 64);
+          recordSandboxLaunch(selectedPolicy, {
+            provider: selectedPolicy.context.provider,
+            backend: `${platform === "linux" ? "Bubblewrap" : "Seatbelt"} · ${release()}`,
+            reads: paths([
+              ...(platform === "linux"
+                ? ["/bin", "/sbin", "/usr", "/lib", "/lib64", "/etc", "/opt", "/sys"]
+                : []),
+              ...(prepared.readRoots ?? []),
+            ]),
+            writes: paths([prepared.temporaryDirectory, ...(prepared.additionalWriteRoots ?? [])]),
+            authentication: paths([
+              ...(prepared.ownAccountPaths ?? []),
+              ...(prepared.privateHomeAllowPaths ?? []),
+            ]),
+          });
+        }
         return {
           ...launch,
+          ...(toolNetwork === undefined ? {} : { environment: toolNetwork.environment }),
           policyReceipt: Object.freeze({
             ...compilation.receipt,
             reuseKey: createHash("sha256")
@@ -1122,6 +1185,9 @@ function prepareSeatbeltLaunch(
   ]);
   const profile = buildDenyDefaultSeatbeltProfile({
     boundRoot: input.boundRoot,
+    ...(input.policyBlockHostServices === undefined
+      ? {}
+      : { policyBlockHostServices: input.policyBlockHostServices }),
     ...(input.policyReadOnlyRoots === undefined
       ? {}
       : { policyReadOnlyRoots: input.policyReadOnlyRoots }),

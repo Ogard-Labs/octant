@@ -1,3 +1,5 @@
+import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
@@ -86,6 +88,7 @@ export interface PiConfinementPort {
      * Accept edits has. Absent, Full access launches unwrapped.
      */
     readonly fullAccessSandbox?: boolean;
+    readonly sandboxPolicy?: SandboxPolicySelection;
     readonly environment: NodeJS.ProcessEnv;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
@@ -118,6 +121,7 @@ export interface PiProcessPort {
      * Accept edits has. Absent, Full access launches unwrapped.
      */
     readonly fullAccessSandbox?: boolean;
+    readonly sandboxPolicy?: SandboxPolicySelection;
     /** The Pi provider the thread's model runs on; only its credentials reach the process. */
     readonly modelProvider?: string;
     readonly onProcessStarted?: ProviderProcessStartedListener;
@@ -356,6 +360,7 @@ export function piProcessEnvironment(
 function piWallPolicy(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
 }): ProviderExecutionPolicy {
   return input.executionPolicy === "full-access" && input.fullAccessSandbox === true
     ? "auto-accept-edits"
@@ -697,6 +702,8 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               executable: input.binaryPath,
               args,
               boundRoot: root,
+              sandboxProviderChannel: true,
+              ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
               ...(input.mode === "chat" || input.extraFolders === undefined
                 ? {}
                 : { extraBoundRoots: input.extraFolders }),
@@ -847,16 +854,24 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             wall === "full-access"
               ? undefined
               : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                  ...(input.sandboxPolicy === undefined
+                    ? {}
+                    : { sandboxPolicy: input.sandboxPolicy }),
                   runtime: "pi",
                   root: input.root,
                   executionPolicy: wall,
                   loopbackPorts: loopbackPortOf(input.toolBridge),
                   environment: baseEnvironment,
                 });
-          const servers = yield* acquireProviderServerAccess(options.serverAccess, {
-            root: input.root,
-            executionPolicy: wall,
-          });
+          const servers = yield* acquireProviderServerAccess(
+            input.sandboxPolicy?.policy.hostServices === "blocked"
+              ? undefined
+              : options.serverAccess,
+            {
+              root: input.root,
+              executionPolicy: wall,
+            },
+          );
           const launch = yield* confinement.prepare({
             ...input,
             environment: baseEnvironment,
@@ -891,6 +906,7 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
               }),
             catch: () => failure("unavailable", "Pi process could not be started."),
           });
+          trackSandboxChild(input.sandboxPolicy, child);
           if (child.pid === undefined || child.stdin === null || child.stdout === null) {
             yield* Effect.promise(() => terminate(child, shutdownTimeoutMs));
             return yield* Effect.fail(failure("unavailable", "Pi process could not be started."));

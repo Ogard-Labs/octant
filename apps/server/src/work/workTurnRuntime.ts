@@ -1,3 +1,4 @@
+import { beginSandboxTurn } from "../process/sandboxRuntimePolicy";
 import {
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   MAX_PROVIDER_ATTACHMENTS,
@@ -409,7 +410,27 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           message: FULL_ACCESS_SANDBOX_UNSUPPORTED,
         });
       }
+      const sandboxAdmission = beginSandboxTurn({
+        threadId: String(input.command.threadId),
+        projectId: String(input.command.authority.projectId),
+        mode: "work",
+        root: input.projectRoot,
+        provider: input.driver.kind,
+      });
+      if (sandboxAdmission.status === "refused")
+        return yield* Effect.fail<ProviderFailure>({
+          category: "unsupported",
+          message: sandboxAdmission.message,
+        });
+      const sandboxTurn = sandboxAdmission.turn;
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await sandboxTurn.end();
+        }),
+      );
+      const sandboxPolicy = sandboxTurn.selection;
       const connection = yield* input.driver.acquire({
+        ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
         ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
@@ -440,7 +461,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         // still checks the root before it allows an edit, and one without a
         // reviewer of its own keeps asking at Auto.
         ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
-        ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(input.fullAccessSandbox === true || sandboxPolicy !== undefined
+          ? { fullAccessSandbox: true }
+          : {}),
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
@@ -626,7 +649,11 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "tool-request") {
                   if (answeredToolRequestIds.has(event.requestId)) return;
                   answeredToolRequestIds.add(event.requestId);
-                  const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
+                  const toolSet = recordedToolSet(
+                    input.toolEffects,
+                    input.appManagedTools,
+                    String(input.command.threadId),
+                  );
                   const offered = toolSet?.definitions.some(
                     (definition) => definition.name === event.toolName,
                   );
@@ -769,6 +796,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               message: "Work turn admission is no longer current.",
             });
           const context: ReadonlyArray<ProviderContextBlock> = [
+            ...(sandboxTurn.summary === ""
+              ? []
+              : [{ kind: "instructions" as const, text: sandboxTurn.summary }]),
             ...(input.context ?? []),
             ...(feedback?.context === undefined
               ? []

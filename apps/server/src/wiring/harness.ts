@@ -1,3 +1,6 @@
+import { configureSandboxNetworkSnapshot } from "../process/sandboxRuntimePolicy";
+import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
+import { activeSandboxPolicy, configureSandboxToolNetwork } from "../process/sandboxRuntimePolicy";
 import { RemoteSetupChecks } from "../serverProjects/remoteSetupChecks";
 import { createRemoteSetupCheckRoutes } from "../serverProjects/remoteSetupCheckRoutes";
 import { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
@@ -407,11 +410,51 @@ export function wireHarness(deps: HarnessDependencies) {
   }
   const decodeEgressAggregateId = Schema.decodeUnknownSync(AggregateId);
   const decodeEgressLaunchId = Schema.decodeUnknownSync(ToolEgressLaunchId);
+  configureSandboxNetworkSnapshot((threadId, selection) => ({
+    places: structuredClone(safeNetworkStore.placesFor(String(selection.context.projectId))),
+    limitsOn: safeNetworkStore.limitsOn(),
+    rules: structuredClone(
+      toolEgressRules.sandboxRules({
+        launchId: decodeEgressLaunchId(randomUUID()),
+        threadId: decodeEgressAggregateId(threadId),
+        projectId: decodeEgressAggregateId(String(selection.context.projectId)),
+      }),
+    ),
+  }));
+  configureSandboxToolNetwork(
+    async (threadId, policy) => {
+      if (harnessEgressEndpoint === undefined)
+        throw new Error("This host cannot mediate the selected network policy.");
+      const started = await toolEgressRules.startLaunch({
+        launch: {
+          launchId: decodeEgressLaunchId(randomUUID()),
+          threadId: decodeEgressAggregateId(threadId),
+          projectId: decodeEgressAggregateId(String(policy.context.projectId)),
+        },
+        endpoint: harnessEgressEndpoint,
+      });
+      if (started.status === "refused")
+        throw new Error("The sandbox network broker is unavailable. No command was started.");
+      return {
+        permitsHostRequest: (host, port) => started.launch.proxy.permitsHostRequest(host, port),
+        networkEgress: { kind: "proxied", endpoint: started.launch.proxy.endpoint },
+        environment: proxiedLaunchEnvironment(
+          started.launch.proxy.endpoint,
+          started.launch.proxy.token,
+        ),
+        close: async () => {
+          await started.launch.finish();
+        },
+      };
+    },
+    () => safeNetworkStore.limitsOn(),
+  );
   const harnessProxiedShell =
     harnessEgressEndpoint === undefined
       ? undefined
       : (scope: HarnessEgressScope) =>
           createNativeHarnessShell({
+            sandboxPolicy: () => activeSandboxPolicy(scope.threadId),
             process: harnessProcessPort,
             scriptDirectory: harnessScriptDirectory,
             sshAgentSocket,

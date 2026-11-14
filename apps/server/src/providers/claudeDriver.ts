@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
@@ -691,6 +692,7 @@ type ClaudeEnvironmentFactory = (
 ) => Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope>;
 
 export interface ClaudeDriverOptions {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
@@ -1528,7 +1530,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], workRequest }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], workRequest, sandboxPolicy }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -1545,7 +1547,10 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         );
       }
       return makeConnection(
-        withProjectFolders(options, projectRoot, extraFolders),
+        {
+          ...withProjectFolders(options, projectRoot, extraFolders),
+          ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
+        },
         environmentFactory,
         projectRoot,
         extraFolders,
@@ -2039,14 +2044,18 @@ function makeConnection(
         // runs at Auto under the same reviewer as its command sandbox.
         const ownNetwork = await runSetupEffect(
           acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+            ...(options.sandboxPolicy === undefined
+              ? {}
+              : { sandboxPolicy: options.sandboxPolicy }),
             runtime: "claude",
             root: projectRoot,
             executionPolicy: networkPolicy,
             environment: environment.environment,
             autoReview: input.autoApprove === true,
-            // Only Plan runs the process in Octant's own capsule; outside it
-            // the process reads the proxy variables on the host's loopback.
-            ...(CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
+            // A selected policy also wraps the process, so its proxy must
+            // use the backend's confined transport instead of host loopback.
+            ...(CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy) ||
+            options.sandboxPolicy !== undefined
               ? {}
               : { listener: "loopback" as const }),
             sessionId: String(input.sessionId),
@@ -2055,10 +2064,15 @@ function makeConnection(
           signal,
         );
         const servers = await runSetupEffect(
-          acquireProviderServerAccess(options.serverAccess, {
-            root: projectRoot,
-            executionPolicy: input.executionPolicy,
-          }).pipe(Effect.provideService(Scope.Scope, scope)),
+          acquireProviderServerAccess(
+            options.sandboxPolicy?.policy.hostServices === "blocked"
+              ? undefined
+              : options.serverAccess,
+            {
+              root: projectRoot,
+              executionPolicy: input.executionPolicy,
+            },
+          ).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
         const runtimeVersion = await runSetupEffect(
@@ -2135,6 +2149,9 @@ function makeConnection(
         const sandboxNetwork = claudeRunsSandbox(input.executionPolicy, sandboxedFullAccess)
           ? await runSetupEffect(
               acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                ...(options.sandboxPolicy === undefined
+                  ? {}
+                  : { sandboxPolicy: options.sandboxPolicy }),
                 runtime: "claude-sandbox",
                 root: projectRoot,
                 executionPolicy: networkPolicy,
@@ -2557,6 +2574,9 @@ function makeConnection(
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
               ...(sandboxedFullAccess ? { fullAccessSandbox: true } : {}),
+              ...(options.sandboxPolicy === undefined
+                ? {}
+                : { sandboxPolicy: options.sandboxPolicy }),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),

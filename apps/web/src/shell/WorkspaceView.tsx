@@ -1,3 +1,5 @@
+import type { SandboxRestrictionsScope } from "@octant/contracts/sandbox-policy";
+import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import { WorkspaceViewStateContext, useWorkspaceViewStore } from "./workspaceViewState";
@@ -193,6 +195,7 @@ export interface WorkspaceViewProps {
   /** The host's paired iPhones and iPads, shown in the Apple workbench. */
   readonly agentRunClient?: AgentRunClient;
   /** Reads and clears an open local thread's outside-content mark, over its composer. */
+  readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly contextClient?: ContextClient;
   readonly nativeHarnessClient?: NativeHarnessClient;
   /** Opens the Agents tool; with a run id, on that subagent's page. */
@@ -619,6 +622,7 @@ export interface WorkspaceViewProps {
   readonly onOpenProviderSettings?: () => void;
   readonly onOpenReviewerSettings?: () => void;
   readonly onOpenProtectedFilesSettings?: () => void;
+  readonly onOpenSandboxRestrictionsSettings?: (scope: SandboxRestrictionsScope) => void;
   /** Opens Settings at Image generation, where a thread's Create image action points. */
   readonly onOpenImageSettings?: () => void;
   readonly onOpenSettings?: () => void;
@@ -1073,6 +1077,9 @@ function taskAccessFor(
   try {
     return {
       client: thread.client,
+      ...(props.sandboxRestrictionsClient === undefined
+        ? {}
+        : { sandboxRestrictionsClient: props.sandboxRestrictionsClient }),
       subject: decodeContextSubjectRef({
         aggregateType: `${thread.mode}-thread`,
         aggregateId: thread.threadId,
@@ -1083,6 +1090,15 @@ function taskAccessFor(
       ...(props.onOpenReviewerSettings === undefined
         ? {}
         : { onOpenAccess: props.onOpenReviewerSettings }),
+      ...(props.onOpenSandboxRestrictionsSettings === undefined
+        ? {}
+        : {
+            onOpenSandboxRestrictions: () =>
+              props.onOpenSandboxRestrictionsSettings?.({
+                kind: "session",
+                threadId: thread.threadId,
+              }),
+          }),
       ...(props.onOpenProtectedFilesSettings === undefined
         ? {}
         : { onOpenProtectedFiles: props.onOpenProtectedFilesSettings }),
@@ -2278,6 +2294,15 @@ function renderNonCodeTab(
     const availability = props.availabilityByProject.get(project.id);
     return (
       <ProjectOverview
+        {...(props.onOpenSandboxRestrictionsSettings === undefined
+          ? {}
+          : {
+              onOpenSandboxRestrictions: () =>
+                props.onOpenSandboxRestrictionsSettings?.({
+                  kind: "project",
+                  projectId: project.id,
+                }),
+            })}
         {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
         memoryProjects={props.projects}
         {...(props.spendCeilingClient === undefined

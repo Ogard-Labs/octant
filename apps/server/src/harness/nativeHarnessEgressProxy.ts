@@ -115,6 +115,7 @@ export type ToolEgressProxyEndpoint =
   | { readonly kind: "unix-socket"; readonly path: string };
 
 export interface ToolEgressProxyOptions {
+  readonly blockAmbientPrivateAddresses?: boolean;
   readonly launch: ToolEgressLaunch;
   /** Read for every decision. A read that throws counts as tainted. */
   readonly taint: () => { readonly threadTainted: boolean; readonly parentTainted: boolean };
@@ -915,6 +916,7 @@ export class ToolEgressProxy {
     port: number,
     by: RuntimeEgressAllowedBy | undefined,
   ): boolean {
+    if (this.#options.blockAmbientPrivateAddresses === true && by !== "launch") return false;
     const runtime = this.#runtimeDecider();
     try {
       if (runtime !== undefined) {
@@ -970,6 +972,16 @@ export class ToolEgressProxy {
       this.#pending -= 1;
     }
     return this.#decide(host, port);
+  }
+
+  /** The same frozen policy for host-owned, DNS-pinned HTTP transports. */
+  permitsHostRequest(host: string, port: number): boolean {
+    return (
+      this.#accepting &&
+      !this.#closed &&
+      !this.#auditUnavailable &&
+      this.#decide(host, port).kind === "allow"
+    );
   }
 
   #decide(host: string, port: number): ProxyDecision {

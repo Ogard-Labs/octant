@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { providerOwnMemoryLaunches } from "@octant/domain";
@@ -432,6 +433,7 @@ export interface CodexClientPort {
 }
 
 export interface CodexDriverOptions {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly process: CodexProcessPort;
@@ -1100,7 +1102,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], sandboxPolicy }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -1144,6 +1146,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
           }`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
+          ...(sandboxPolicy === undefined ? [] : [sandboxPolicy]),
         ]);
       const leaseFor = (
         executionPolicy: ProviderExecutionPolicy,
@@ -1156,6 +1159,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             clientFactory,
             {
               kind: "thread",
+              ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
               root: projectRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
               mode: threadMode,
@@ -1255,7 +1259,10 @@ function acquireRuntime(
   lease?: string,
 ) {
   return options.runtimeRegistry.acquireRuntime<CodexLeasedRuntime>(options.instanceId, {
-    idleMs: options.idleLeaseMs ?? 30_000,
+    idleMs:
+      authority.kind === "thread" && authority.sandboxPolicy !== undefined
+        ? 0
+        : (options.idleLeaseMs ?? 30_000),
     ...(lease === undefined ? {} : { lease }),
     start: async () => {
       const scope = await Effect.runPromise(Scope.make());

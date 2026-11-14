@@ -1,3 +1,5 @@
+import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcess } from "node:child_process";
 import { isAtLeastRelease } from "./releaseVersion";
 import {
@@ -81,6 +83,7 @@ export type CodexLaunchAuthority =
        * deny-default profile and proxied egress instead of running unwrapped.
        */
       readonly fullAccessSandbox?: boolean;
+      readonly sandboxPolicy?: SandboxPolicySelection;
       /**
        * The person let Codex run its own subagents. Their requests reach the
        * parent's approval path on their own thread ids, at every level.
@@ -680,6 +683,7 @@ const CODEX_SEATBELT_SERVICE_RULES = [
 ] as const;
 
 interface CodexLaunch {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd: string | undefined;
@@ -794,6 +798,10 @@ export function prepareCodexLaunch(input: {
       executable: input.binaryPath,
       args: input.args,
       boundRoot: root,
+      sandboxProviderChannel: true,
+      ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+        ? { sandboxPolicy: authority.sandboxPolicy }
+        : {}),
       extraBoundRoots: extraFolders,
       temporaryDirectory,
       networkEgress,
@@ -828,7 +836,15 @@ export function prepareCodexLaunch(input: {
     });
     return {
       status: "prepared",
-      launch: { ...launch, cwd: root, environment, release },
+      launch: {
+        ...launch,
+        cwd: root,
+        environment,
+        release,
+        ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+          ? { sandboxPolicy: authority.sandboxPolicy }
+          : {}),
+      },
     };
   } catch (error) {
     release();
@@ -875,6 +891,7 @@ function acquireCodexAppServer(
       env: launch.environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    trackSandboxChild(launch.sandboxPolicy, child);
     const terminateGroup = makeProcessTerminator(child, options.shutdownTimeoutMs);
     const rpc = makeCodexRpcClient({
       stdin: child.stdin,
@@ -1075,6 +1092,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               runtimePolicy === "full-access" && !keepsSandbox
                 ? undefined
                 : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                    ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+                      ? { sandboxPolicy: authority.sandboxPolicy }
+                      : {}),
                     runtime: "codex",
                     root: authority.kind === "thread" ? authority.root : "",
                     executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
@@ -1082,13 +1102,19 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                   });
             const servers =
               authority.kind === "thread"
-                ? yield* acquireProviderServerAccess(options.serverAccess, {
-                    root: authority.root,
-                    // Inside Octant's profile the person's own SSH setup is
-                    // out of reach, so a sandboxed launch gets the server
-                    // folder the guarded levels get.
-                    executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
-                  })
+                ? yield* acquireProviderServerAccess(
+                    authority.kind === "thread" &&
+                      authority.sandboxPolicy?.policy.hostServices === "blocked"
+                      ? undefined
+                      : options.serverAccess,
+                    {
+                      root: authority.root,
+                      // Inside Octant's profile the person's own SSH setup is
+                      // out of reach, so a sandboxed launch gets the server
+                      // folder the guarded levels get.
+                      executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
+                    },
+                  )
                 : undefined;
             const prepared = prepareCodexLaunch({
               binaryPath,

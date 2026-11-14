@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SandboxPolicy } from "@octant/contracts/sandbox-policy";
-import { admitSandboxPolicy, resolveSandboxPolicy } from "./sandboxPolicy";
+import {
+  admitSandboxPolicy,
+  resolveSandboxPolicy,
+  intersectSandboxPolicies,
+} from "./sandboxPolicy";
 
 const policy: SandboxPolicy = {
   schemaVersion: 1,
@@ -68,5 +72,26 @@ describe("sandbox policy selection and admission", () => {
         { ...capabilities, unrestrictedNetwork: false },
       ),
     ).toMatchObject({ status: "refused", rules: ["network.unrestricted"] });
+  });
+  it("retains only the narrower helper folder and network grants", () => {
+    const parent: SandboxPolicy = {
+      ...policy,
+      network: "deny",
+      hostServices: "blocked",
+      filesystem: { ...policy.filesystem, readOnlyRoots: ["/library"], readWriteRoots: ["/cache"] },
+    };
+    const child: SandboxPolicy = {
+      ...policy,
+      network: "unrestricted",
+      filesystem: {
+        ...policy.filesystem,
+        readWriteRoots: ["/library", "/cache/build", "/outside"],
+      },
+    };
+    expect(intersectSandboxPolicies(parent, child)).toMatchObject({
+      network: "deny",
+      hostServices: "blocked",
+      filesystem: { readOnlyRoots: ["/library"], readWriteRoots: ["/cache/build"] },
+    });
   });
 });

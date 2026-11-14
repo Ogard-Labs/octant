@@ -1,3 +1,4 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import {
   listSessions as listClaudeSessions,
   query as queryClaude,
@@ -119,6 +120,7 @@ export interface ClaudeOpenQueryInput {
   readonly effort?: ClaudeEffortLevel;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /**
    * Whether the harness may answer approval prompts via its native `auto`
    * permission mode. The driver only sends `auto` when this is true and the
@@ -678,7 +680,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly agents: Readonly<Record<string, never>>;
   readonly plugins: readonly [];
   readonly includePartialMessages: true;
-  readonly sandbox?: ClaudeSandboxSettings;
+  readonly sandbox?: ClaudeSandboxSettings | { readonly enabled: false };
   readonly spawnClaudeCodeProcess: SpawnClaudeCodeProcess;
   readonly canUseTool: (
     toolName: string,
@@ -965,19 +967,21 @@ function liveBridge(): ClaudeAgentSdkBridge {
         plugins: [...invocation.options.plugins],
         ...(sandbox === undefined
           ? {}
-          : {
-              sandbox: {
-                ...sandbox,
-                filesystem: {
-                  denyRead: [...sandbox.filesystem.denyRead],
-                  allowRead: [...sandbox.filesystem.allowRead],
-                  allowWrite: [...sandbox.filesystem.allowWrite],
+          : sandbox.enabled === false
+            ? { sandbox: { enabled: false } }
+            : {
+                sandbox: {
+                  ...sandbox,
+                  filesystem: {
+                    denyRead: [...sandbox.filesystem.denyRead],
+                    allowRead: [...sandbox.filesystem.allowRead],
+                    allowWrite: [...sandbox.filesystem.allowWrite],
+                  },
+                  ...(sandbox.network === undefined
+                    ? {}
+                    : { network: { httpProxyPort: sandbox.network.httpProxyPort } }),
                 },
-                ...(sandbox.network === undefined
-                  ? {}
-                  : { network: { httpProxyPort: sandbox.network.httpProxyPort } }),
-              },
-            }),
+              }),
         hooks: {
           PreToolUse: [{ hooks: [...invocation.options.hooks.PreToolUse[0].hooks] }],
           UserPromptSubmit: [{ hooks: [...invocation.options.hooks.UserPromptSubmit[0].hooks] }],
@@ -1119,6 +1123,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           );
           const bindSpawn = options.spawnClaudeCodeProcess({
             projectRoot: input.projectRoot,
+            ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
             ...(input.additionalDirectories === undefined
               ? {}
               : { extraFolders: input.additionalDirectories }),
@@ -1339,21 +1344,23 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               agents: {},
               plugins: [],
               includePartialMessages: true,
-              ...(input.sandbox === undefined
-                ? {}
-                : {
-                    sandbox: {
-                      ...input.sandbox,
-                      filesystem: {
-                        denyRead: [...input.sandbox.filesystem.denyRead] as ["/"],
-                        allowRead: [...input.sandbox.filesystem.allowRead] as [string],
-                        allowWrite: [...input.sandbox.filesystem.allowWrite] as [string],
+              ...(input.sandboxPolicy !== undefined
+                ? { sandbox: { enabled: false as const } }
+                : input.sandbox === undefined
+                  ? {}
+                  : {
+                      sandbox: {
+                        ...input.sandbox,
+                        filesystem: {
+                          denyRead: [...input.sandbox.filesystem.denyRead] as ["/"],
+                          allowRead: [...input.sandbox.filesystem.allowRead] as [string],
+                          allowWrite: [...input.sandbox.filesystem.allowWrite] as [string],
+                        },
+                        ...(input.sandbox.network === undefined
+                          ? {}
+                          : { network: { httpProxyPort: input.sandbox.network.httpProxyPort } }),
                       },
-                      ...(input.sandbox.network === undefined
-                        ? {}
-                        : { network: { httpProxyPort: input.sandbox.network.httpProxyPort } }),
-                    },
-                  }),
+                    }),
               // The SDK composes the launch and its `SpawnOptions` carry no
               // bound root or posture, so this query's own are bound to the
               // callback here.

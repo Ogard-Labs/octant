@@ -113,6 +113,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     folderBrowseClient,
     hostControlClient,
     protectedFilesClient,
+    sandboxRestrictionsClient,
     archivedWorktreesClient,
     diskCleanupClient,
     personMemoryClient,
@@ -280,6 +281,26 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
         ? {}
         : { browserAutomationClient: props.browserAutomationClient })}
       protectedFilesClient={protectedFilesClient}
+      sandboxRestrictionsClient={sandboxRestrictionsClient}
+      sandboxScopes={[
+        ...(codeThreads ?? []).map((thread) => ({
+          id: String(thread.id),
+          label: `Session · ${thread.title}`,
+          scope: { kind: "session" as const, threadId: String(thread.id) },
+        })),
+        ...(workThreads ?? []).map((thread) => ({
+          id: String(thread.id),
+          label: `Session · ${thread.title}`,
+          scope: { kind: "session" as const, threadId: String(thread.id) },
+        })),
+        ...allProjects
+          .filter((project) => project.type !== "chat")
+          .map((project) => ({
+            id: String(project.id),
+            label: `Project · ${project.name}`,
+            scope: { kind: "project" as const, projectId: project.id },
+          })),
+      ]}
       archivedWorktreesClient={archivedWorktreesClient}
       diskCleanupClient={diskCleanupClient}
       personMemoryClient={personMemoryClient}

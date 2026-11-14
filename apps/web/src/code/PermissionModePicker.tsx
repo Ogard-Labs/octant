@@ -14,11 +14,13 @@ import {
   ShieldQuestionMark,
   type LucideIcon,
 } from "lucide-react";
-import { useId } from "react";
+import { useId, useContext, useEffect, useState } from "react";
+import { TaskAccessContext } from "./TaskAccessContext";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
 import {
   OctantMenuCheckboxItem,
+  OctantMenuItem,
   OctantMenuGroup,
   OctantMenuGroupLabel,
   OctantMenuPopup,
@@ -141,18 +143,44 @@ const SANDBOX_UNSUPPORTED_DETAIL =
  */
 export function PermissionModePicker(props: PermissionModePickerProps) {
   const idPrefix = useId();
+  const taskAccess = useContext(TaskAccessContext);
+  const [policySelected, setPolicySelected] = useState(false);
+  const sandboxClient = taskAccess?.sandboxRestrictionsClient;
+  const sandboxThreadId = taskAccess?.subject.aggregateId;
+  useEffect(() => {
+    setPolicySelected(false);
+    if (sandboxClient === undefined || sandboxThreadId === undefined) return;
+    const controller = new AbortController();
+    const refresh = () => {
+      void sandboxClient
+        .settings({ kind: "session", threadId: sandboxThreadId }, controller.signal)
+        .then((snapshot) => {
+          if (!controller.signal.aborted) setPolicySelected(snapshot.policy !== undefined);
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 3000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [sandboxClient, sandboxThreadId]);
   const autoSupported =
     props.autoReview === undefined ? props.autoSupported : props.autoReview.status === "reviewer";
   const unsupportedReason =
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
-  const sandboxed = props.value === "full-access" && props.fullAccessSandbox === true;
+  const sandboxed =
+    props.value === "full-access" && (props.fullAccessSandbox === true || policySelected);
   const triggerLabel = autoFallsBack
     ? "Ask first"
     : sandboxed
       ? "Full access · Sandboxed"
-      : PERMISSION_MODE_LABEL[props.value];
+      : policySelected && props.value === "auto"
+        ? "Auto · Sandboxed"
+        : PERMISSION_MODE_LABEL[props.value];
   const detailOf = (id: PermissionMode) =>
     id === "auto"
       ? autoDetail(props.autoReview)
@@ -265,6 +293,11 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                   </OctantMenuCheckboxItem>
                 </OctantMenuGroup>
               ) : null}
+              {taskAccess?.onOpenSandboxRestrictions === undefined ? null : (
+                <OctantMenuItem onClick={taskAccess.onOpenSandboxRestrictions}>
+                  Sandbox restrictions…
+                </OctantMenuItem>
+              )}
               {props.profileName === undefined ? null : (
                 <OctantMenuGroup>
                   <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>

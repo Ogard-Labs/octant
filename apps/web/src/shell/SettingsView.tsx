@@ -1,3 +1,6 @@
+import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
+import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
+import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
 import { HostResourceSettings } from "../settings/HostResourceSettings";
 import {
   useCallback,
@@ -284,6 +287,11 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
+  readonly sandboxInitialScope?:
+    | import("@octant/contracts/sandbox-policy").SandboxRestrictionsScope
+    | undefined;
+  readonly sandboxScopes?: ReadonlyArray<SandboxSettingsScope>;
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
   readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
@@ -886,7 +894,7 @@ export function SettingsView(props: SettingsViewProps) {
                       onCatalogEntryChange={setCatalogEntry}
                       harnessEndpointOpen={subPage !== undefined}
                       pluginSettingsEntryPoints={pluginSettingsEntryPoints}
-                      props={savingProps}
+                      props={{ ...savingProps, sandboxInitialScope: route.sandboxScope }}
                     />
                   </SecretStoresClientContext.Provider>
                 </SettingsPageScope.Provider>
@@ -1540,6 +1548,12 @@ function ActiveSectionContent({
     case "access":
       return (
         <div className="settings-section-stack" id="settings-permissions">
+          <SandboxRestrictionsSettings
+            client={props.sandboxRestrictionsClient}
+            scopes={props.sandboxScopes}
+            initialScope={props.sandboxInitialScope}
+            focusedSetting={focusedSetting}
+          />
           <ProtectedFilesSettings
             client={props.protectedFilesClient}
             focusedSetting={focusedSetting}

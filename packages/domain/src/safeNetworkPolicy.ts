@@ -1,3 +1,4 @@
+import { isPublicNetworkAddress } from "./networkAddressPolicy";
 import type {
   AggregateId,
   SafeNetworkPlace,
@@ -266,7 +267,13 @@ export interface RuntimeEgressRequest {
 }
 
 /** What let a request through; the address check after resolution depends on it. */
-export type RuntimeEgressAllowedBy = "provider" | "launch" | "place" | "project-rule" | "reviewer";
+export type RuntimeEgressAllowedBy =
+  | "unrestricted"
+  | "provider"
+  | "launch"
+  | "place"
+  | "project-rule"
+  | "reviewer";
 
 export type RuntimeEgressDecision =
   | {
@@ -398,4 +405,23 @@ function ruleHostMatches(ruleHost: string, host: string): boolean {
   if (canonicalToolEgressRuleHost(ruleHost) !== ruleHost) return false;
   if (ruleHost.startsWith("*.")) return host.endsWith(ruleHost.slice(1));
   return ruleHost === host;
+}
+
+/** Public destinations remain separate from ambient local host authority. */
+export function decideSandboxPublicEgress(destination: {
+  readonly host: string;
+  readonly port: number;
+}): RuntimeEgressDecision {
+  if (!Number.isInteger(destination.port) || destination.port < 1 || destination.port > 65535)
+    return { kind: "refuse", reason: "invalid-port" };
+  const literal = parseNetworkAddress(destination.host);
+  if (literal !== undefined) {
+    if (!isPublicNetworkAddress(destination.host)) return { kind: "refuse", reason: "ip-literal" };
+    return { kind: "allow", host: destination.host, port: destination.port, by: "unrestricted" };
+  }
+  const canonical = canonicalToolEgressHost(destination.host);
+  if (canonical.kind === "refused") return { kind: "refuse", reason: canonical.reason };
+  if (canonical.host === "localhost" || canonical.host.endsWith(".localhost"))
+    return { kind: "refuse", reason: "ip-literal" };
+  return { kind: "allow", host: canonical.host, port: destination.port, by: "unrestricted" };
 }

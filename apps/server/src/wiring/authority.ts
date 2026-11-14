@@ -1,3 +1,6 @@
+import { decodeWorkThreadId } from "@octant/contracts";
+import { decodeCodeThreadId } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts";
 import { notifyWindowRevocations } from "../windowRevocations";
 import { randomUUID } from "node:crypto";
 import { defaultShellSettings } from "@octant/domain";
@@ -44,6 +47,9 @@ import {
 import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { createPersonMemoryRouteHandler } from "../personMemory/personMemoryRoutes";
 import { PersonMemoryStore } from "../personMemory/personMemoryStore";
+import { SandboxRestrictionsService } from "../sandboxRestrictionsService";
+import { createSandboxRestrictionsRoutes } from "../sandboxRestrictionsRoutes";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import { ProtectedFilesService } from "../protectedFilesService";
 import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
@@ -81,7 +87,7 @@ export function codeParentActiveTurnFrom(
 }
 
 export type AuthorityDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<FoundationsWiring, "browserAuthority">;
+  Pick<FoundationsWiring, "browserAuthority" | "workThreadProjection">;
 
 export function wireAuthority(deps: AuthorityDependencies) {
   const { browserAuthority, options, persistence } = deps;
@@ -121,6 +127,21 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => decodeUtcTimestamp(new Date().toISOString()),
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
+  const sandboxRestrictions = new SandboxRestrictionsService({
+    enrollmentEnabled: process.env.OCTANT_SANDBOX_RESTRICTIONS_PREVIEW === "1",
+    journal: persistence.journal,
+    hostId: String(LOCAL_HOST_ID),
+    dataDirectory: persistence.dataDirectory,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    project: (id) => persistence.readProject(decodeProjectId(id)),
+    thread: (id) => {
+      const code = persistence.readCodeThread(decodeCodeThreadId(id));
+      if (code !== undefined) return { projectId: String(code.projectId), mode: "code" };
+      const work = deps.workThreadProjection.read(decodeWorkThreadId(id));
+      return work === undefined ? undefined : { projectId: String(work.projectId), mode: "work" };
+    },
+  });
+  configureSandboxRestrictionsAuthority(sandboxRestrictions);
   // Person memory is hydrated before any turn runs, so the first turn after
   // a start already carries what the person was remembered by.
   const personMemory = new PersonMemoryStore({
@@ -239,6 +260,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const onThreadArchived = (withdraw: (threadId: string) => void): void => {
     threadArchivals.push(withdraw);
   };
+  onThreadArchived((threadId) => sandboxRestrictions.revokeSession(threadId));
   const unsubscribeThreadArchivals = persistence.journal.subscribeCommitted((append) => {
     for (const threadId of threadsArchivedBy(append)) {
       for (const withdraw of threadArchivals) {
@@ -347,6 +369,10 @@ export function wireAuthority(deps: AuthorityDependencies) {
     store: personMemory,
     windowAuthorityStore,
   });
+  const sandboxRestrictionsRoutes = createSandboxRestrictionsRoutes({
+    service: sandboxRestrictions,
+    windowAuthorityStore,
+  });
   const protectedFilesRoutes = createProtectedFilesRouteHandler({
     service: protectedFiles,
     windowAuthorityStore,
@@ -413,6 +439,8 @@ export function wireAuthority(deps: AuthorityDependencies) {
     personMemoryAccess,
     personMemoryRoutes,
     protectedFilesRoutes,
+    sandboxRestrictions,
+    sandboxRestrictionsRoutes,
     simulatorInputGrants,
     unsubscribeMachineChanges,
     unsubscribeThreadArchivals,

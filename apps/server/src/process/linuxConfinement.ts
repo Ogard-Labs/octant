@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { sandboxAuthorityDirectory } from "./sandboxRuntimePolicy";
 import {
   accessSync,
   chmodSync,
@@ -5,6 +7,8 @@ import {
   existsSync,
   lstatSync,
   mkdtempSync,
+  mkdirSync,
+  readFileSync,
   readdirSync,
   readlinkSync,
   realpathSync,
@@ -298,7 +302,10 @@ export function buildBubblewrapLaunch(
   // can neither see nor trace the forwarder. The command keeps every
   // mount of this capsule, so it reads and writes exactly what it would here.
   const nestedForProcessDenial =
-    proxied !== undefined && (input.allowProcessFork === false || input.allowProcessExec === false);
+    proxied !== undefined &&
+    (input.allowProcessFork === false ||
+      input.allowProcessExec === false ||
+      input.policyBlockHostServices === true);
   const relay = input.inboundRelay;
   if (
     relay !== undefined &&
@@ -660,6 +667,28 @@ export function buildBubblewrapLaunch(
     bindAdditionalDenyPath(path, "read");
   }
 
+  let hostServiceFilter: string | undefined;
+  if (input.policyBlockHostServices === true) {
+    const privateSource = emptyDenySource();
+    const privateBase =
+      sandboxAuthorityDirectory() ??
+      (privateSource === undefined ? undefined : dirname(privateSource));
+    if (privateBase === undefined)
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        "Host-service isolation could not prepare a private filter.",
+      );
+    hostServiceFilter = writeHostServiceFilter(
+      privateBase,
+      buildLinuxProcessDenySeccompFilter({
+        arch: linuxSeccompArch(options.processArch ?? process.arch),
+        denyFork: denyProcessFork,
+        denyExec: denyProcessExec,
+        denyHostSockets: true,
+      }),
+    );
+    if (proxied !== undefined) tryBindReadOnly(dirname(hostServiceFilter));
+  }
   const sorted = [...mounts.values()].sort(
     (left, right) => depth(left.target) - depth(right.target),
   );
@@ -709,12 +738,15 @@ export function buildBubblewrapLaunch(
         arch: linuxSeccompArch(options.processArch ?? process.arch),
         denyFork: denyProcessFork,
         denyExec: denyProcessExec,
+        ...(input.policyBlockHostServices === true ? { denyHostSockets: true } : {}),
       });
-      const seccompPath = writeProcessDenySeccompFilter(
-        input.temporaryDirectory,
-        filter,
-        `${denyProcessFork ? "-fork" : ""}${denyProcessExec ? "-exec" : ""}`,
-      );
+      const seccompPath =
+        hostServiceFilter ??
+        writeProcessDenySeccompFilter(
+          input.temporaryDirectory,
+          filter,
+          `${denyProcessFork ? "-fork" : ""}${denyProcessExec ? "-exec" : ""}`,
+        );
       args.push(
         "--child-seccomp",
         seccompPath,
@@ -746,17 +778,20 @@ export function buildBubblewrapLaunch(
   args.push(...target.args);
 
   if (nestedForProcessDenial) return { command: bwrapPath, args };
-  if (denyProcessFork || denyProcessExec) {
+  if (denyProcessFork || denyProcessExec || input.policyBlockHostServices === true) {
     const filter = buildLinuxProcessDenySeccompFilter({
       arch: linuxSeccompArch(options.processArch ?? process.arch),
       denyFork: denyProcessFork,
       denyExec: denyProcessExec,
+      ...(input.policyBlockHostServices === true ? { denyHostSockets: true } : {}),
     });
-    const seccompPath = writeProcessDenySeccompFilter(
-      input.temporaryDirectory,
-      filter,
-      `${denyProcessFork ? "-fork" : ""}${denyProcessExec ? "-exec" : ""}`,
-    );
+    const seccompPath =
+      hostServiceFilter ??
+      writeProcessDenySeccompFilter(
+        input.temporaryDirectory,
+        filter,
+        `${denyProcessFork ? "-fork" : ""}${denyProcessExec ? "-exec" : ""}`,
+      );
     return wrapLinuxLaunchWithSeccomp(bwrapPath, args, seccompPath);
   }
 
@@ -936,6 +971,25 @@ interface Mount {
   kind: "ro-bind" | "bind" | "tmpfs" | "tmpfs-rw";
   source: string;
   target: string;
+}
+
+function writeHostServiceFilter(privateBase: string, filter: Uint8Array): string {
+  const directory = join(privateBase, "sandbox-filters");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  assertNoSymlinkComponents(directory);
+  const digest = createHash("sha256").update(filter).digest("hex");
+  const path = join(directory, `${digest}.bpf`);
+  try {
+    writeFileSync(path, filter, { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  if (!readFileSync(path).equals(Buffer.from(filter)))
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "The host-service filter changed. Restore the host's private runtime storage before retrying.",
+    );
+  return path;
 }
 
 function writeProcessDenySeccompFilter(

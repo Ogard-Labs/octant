@@ -1,3 +1,5 @@
+import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
+import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
 import type { AgentGrantClient } from "@octant/client-runtime/agent-grant-client";
 import { lazy, Suspense } from "react";
 import type { WorkSettingsController } from "../work/useWorkSettings";
@@ -90,6 +92,8 @@ export interface ShellSettingsSurfaceProps {
     "manageExtensions" | "manageFlows" | "manageProfiles"
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
+  readonly sandboxScopes?: ReadonlyArray<SandboxSettingsScope>;
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
   readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
@@ -187,6 +191,10 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.browserAutomationClient === undefined
               ? {}
               : { browserAutomationClient: props.browserAutomationClient })}
+            {...(props.sandboxRestrictionsClient === undefined
+              ? {}
+              : { sandboxRestrictionsClient: props.sandboxRestrictionsClient })}
+            {...(props.sandboxScopes === undefined ? {} : { sandboxScopes: props.sandboxScopes })}
             {...(props.protectedFilesClient === undefined
               ? {}
               : { protectedFilesClient: props.protectedFilesClient })}

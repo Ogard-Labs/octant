@@ -80,6 +80,7 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     providers: KeyProviderDriverKinds,
   ) => Promise<boolean>;
+  readonly onOpenSandboxRestrictions?: () => void;
   /** Sets the mode this Code Project's new threads start in; absent follows Settings. */
   readonly onPermissionModeChange?: (
     projectId: ProjectId,
@@ -593,6 +594,9 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 summary="The mode this Project's new threads start in"
               >
                 <ProjectPermissionModeSection
+                  {...(props.onOpenSandboxRestrictions === undefined
+                    ? {}
+                    : { onOpenSandboxRestrictions: props.onOpenSandboxRestrictions })}
                   disabled={archived || connectionStale}
                   onChange={async (mode, fullAccessSandbox) =>
                     (await props.onPermissionModeChange?.(

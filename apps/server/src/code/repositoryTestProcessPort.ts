@@ -1,3 +1,5 @@
+import { registerSandboxCleanup, sandboxToolPolicy } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type { HostResourceBudget } from "../process/hostResourceBudget";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { constants } from "node:fs";
@@ -128,6 +130,7 @@ interface RepositoryTestProcessPortOptions {
  * nothing else.
  */
 export interface HarnessShellScriptInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly script: string;
   readonly beforeLaunch?: () => boolean;
   readonly cloudCliConfigurationDirectory?: string;
@@ -168,6 +171,7 @@ export interface HarnessShellScriptInput {
 }
 
 export interface RepositoryTestProcessInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly networkAccess?: "none";
   readonly executionPolicy?: ProviderExecutionPolicy;
   readonly checkoutRoot?: string;
@@ -463,6 +467,7 @@ export class RepositoryTestProcessPort {
         };
       }
       launchInput = {
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         ...(input.beforeLaunch === undefined ? {} : { beforeLaunch: input.beforeLaunch }),
         argv: [HARNESS_SHELL, script],
         cwd: input.cwd,
@@ -518,6 +523,7 @@ export class RepositoryTestProcessPort {
         )
           throw new Error("Server access is invalid.");
         launchInput = {
+          ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
           ...launchInput,
           additionalReadRoots: [
             ...(launchInput.additionalReadRoots ?? []),
@@ -642,7 +648,11 @@ export class RepositoryTestProcessPort {
       readonly owned?: { readonly resource: string; readonly configuration: string };
     },
   ): Promise<RepositoryTestProcessResult> {
-    let launch: { readonly command: string; readonly args: readonly string[] };
+    let launch: {
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly environment?: Readonly<Record<string, string>>;
+    };
     try {
       if (input.executionPolicy === "plan") return unavailable(false);
       let checkoutRoot = input.cwd;
@@ -711,6 +721,7 @@ export class RepositoryTestProcessPort {
         executable,
         args: validated.args,
         boundRoot: checkoutRoot,
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         temporaryDirectory: this.#temporaryDirectory,
         networkEgress:
           input.networkAccess === "none" ? "none" : (proxied?.networkEgress ?? this.#networkEgress),
@@ -765,7 +776,7 @@ export class RepositoryTestProcessPort {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.cwd,
         env: sanitizedEnvironment(
-          { ...input.environment, ...proxied?.environment },
+          { ...input.environment, ...proxied?.environment, ...launch.environment },
           this.#temporaryDirectory,
         ),
         shell: false,
@@ -791,6 +802,14 @@ export class RepositoryTestProcessPort {
       forward(chunk);
     });
     const closed = observeClose(child);
+    const removeSandboxOwner = registerSandboxCleanup(
+      input.sandboxPolicy ?? sandboxToolPolicy(),
+      async () => {
+        const stopped = await this.#terminate(child, closed);
+        if (stopped.uncertain) throw new Error("Sandbox command cleanup is incomplete.");
+      },
+    );
+    void closed.then(removeSandboxOwner, removeSandboxOwner);
     let notificationFailed = false;
     try {
       if (child.pid !== undefined) input.onStarted?.();

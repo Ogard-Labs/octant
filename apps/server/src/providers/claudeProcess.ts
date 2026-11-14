@@ -1,3 +1,5 @@
+import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
@@ -58,6 +60,7 @@ export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnCla
  * the query, which is the only place that knows them.
  */
 export interface ClaudeRuntimeConfinement {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly projectRoot: string;
   /** The Project's extra folders, which Plan reads as it reads the root. */
   readonly extraFolders?: ReadonlyArray<string>;
@@ -988,7 +991,10 @@ function confineClaudeLaunch(
   confinement: ClaudeRuntimeConfinement,
   options: ResolvedClaudeProcessOptions,
 ): { readonly spawnOptions: SpawnOptions; readonly release: () => void } {
-  if (!CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy)) {
+  if (
+    !CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy) &&
+    confinement.sandboxPolicy === undefined
+  ) {
     // Outside Plan the process is not wrapped: Claude's own sandbox holds
     // its commands, and macOS refuses a sandbox inside another, so the proxy
     // variables are what route the process. A client that ignores them keeps
@@ -1094,7 +1100,10 @@ function confineClaudeLaunch(
       : [];
     const configurationRules =
       globalConfiguration === undefined ? [] : [seatbeltAllowLiteralReadRule(globalConfiguration)];
-    const runsCommands = confinement.runsCommands === true && claudePlanRunsCommands();
+    const runsCommands =
+      confinement.executionPolicy === "plan" &&
+      confinement.runsCommands === true &&
+      claudePlanRunsCommands();
     const runtimePrograms = [
       ...new Set(
         [spawnOptions.env.PATH, process.env.PATH].flatMap((searchPath) =>
@@ -1139,6 +1148,9 @@ function confineClaudeLaunch(
       executable: spawnOptions.command,
       args: spawnOptions.args,
       boundRoot,
+      ...(confinement.sandboxPolicy === undefined
+        ? {}
+        : { sandboxPolicy: confinement.sandboxPolicy }),
       extraBoundRoots: extraFolders,
       temporaryDirectory,
       additionalWriteRoots: stateRoots.writeRoots,
@@ -1168,9 +1180,12 @@ function confineClaudeLaunch(
       // macOS the shell and read-only programs `planCommandRules` names.
       // `/bin/sh` stays refused, so a session hook is still refused with
       // `EPERM: operation not permitted, posix_spawn '/bin/sh'`.
-      writeBoundRoot: false,
-      allowProcessExec: false,
-      allowProcessFork: readsSignInFromKeychain || runsCommands,
+      writeBoundRoot:
+        confinement.sandboxPolicy !== undefined && confinement.executionPolicy !== "plan",
+      allowProcessExec:
+        confinement.sandboxPolicy !== undefined && confinement.executionPolicy !== "plan",
+      allowProcessFork:
+        confinement.sandboxPolicy !== undefined || readsSignInFromKeychain || runsCommands,
       allowFileReadStar: true,
       ...(extraRules.length === 0 ? {} : { extraRules }),
     });
@@ -1206,6 +1221,7 @@ function spawnOwnedClaudeProcess(
   spawnOptions: SpawnOptions,
   options: ResolvedClaudeProcessOptions,
   release: () => void = () => undefined,
+  sandboxPolicy?: SandboxPolicySelection,
 ): SpawnedProcess {
   const invalid = validateBinaryPath(spawnOptions.command);
   if (invalid !== undefined) throw new Error(invalid.message);
@@ -1224,6 +1240,7 @@ function spawnOwnedClaudeProcess(
     env: spawnOptions.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
+  trackSandboxChild(sandboxPolicy, child);
   const events = new EventEmitter();
   const terminate = makeProcessTerminator(child, options.shutdownTimeoutMs);
   let cleanupComplete = false;
@@ -1369,7 +1386,12 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
     spawn: (confinement) => (spawnOptions) => {
       const confined = confineClaudeLaunch(spawnOptions, confinement, resolved);
       try {
-        return spawnOwnedClaudeProcess(confined.spawnOptions, resolved, confined.release);
+        return spawnOwnedClaudeProcess(
+          confined.spawnOptions,
+          resolved,
+          confined.release,
+          confinement?.sandboxPolicy,
+        );
       } catch (error) {
         confined.release();
         throw error;

@@ -92,6 +92,7 @@
     "./spend-ceiling-client": "./src/spendCeilingClient.ts",
     "./agent-grant-client": "./src/agentGrantClient.ts",
     "./person-memory-client": "./src/personMemoryClient.ts",
+    "./sandbox-restrictions-client": "./src/sandboxRestrictionsClient.ts",
     "./protected-files-client": "./src/protectedFilesClient.ts",
     "./archived-worktrees-client": "./src/archivedWorktreesClient.ts",
     "./disk-cleanup-client": "./src/diskCleanupClient.ts",

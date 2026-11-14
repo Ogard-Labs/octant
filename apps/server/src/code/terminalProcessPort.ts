@@ -1,3 +1,4 @@
+import { registerSandboxCleanup, sandboxToolPolicy } from "../process/sandboxRuntimePolicy";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
@@ -371,7 +372,11 @@ export class TerminalProcessPort {
         mode: 0o600,
       });
     }
-    let launch: { readonly command: string; readonly args: readonly string[] };
+    let launch: {
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly environment?: Readonly<Record<string, string>>;
+    };
     try {
       const shellDirectory = dirname(input.shell);
       launch = this.#dependencies.confinement.prepare({
@@ -434,6 +439,7 @@ export class TerminalProcessPort {
       env: {
         ...baseEnv,
         ...input.environment,
+        ...launch.environment,
         ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
       },
       cols: input.columns,
@@ -480,6 +486,11 @@ export class TerminalProcessPort {
       void this.#removeReceiptWhenReleased(pty, receiptReady, () => receipt);
     });
     let closeOperation: Promise<void> | undefined;
+    const removeSandboxOwner = registerSandboxCleanup(
+      sandboxToolPolicy(),
+      () => (closeOperation ??= this.#close(pty)),
+    );
+    pty.onExit(removeSandboxOwner);
     return {
       write: (data) => {
         if (Buffer.byteLength(data, "utf8") > MAX_TERMINAL_INPUT_BYTES) {

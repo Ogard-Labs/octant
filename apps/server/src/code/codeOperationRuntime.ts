@@ -311,6 +311,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
       confinement.prepare({
         executable: input.executable,
         args: input.args,
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         boundRoot: input.boundRoot,
         ...(input.extraBoundRoots === undefined ? {} : { extraBoundRoots: input.extraBoundRoots }),
         temporaryDirectory: input.temporaryDirectory,

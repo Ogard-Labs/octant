@@ -62,4 +62,29 @@ describe("sandbox policy contract", () => {
       }),
     ).toThrow();
   });
+  it("accepts only exact public destination names and valid ports for narrow exceptions", () => {
+    for (const host of [
+      "*.example.com",
+      "localhost",
+      "127.0.0.1",
+      "bad name",
+      "example.com/path",
+    ]) {
+      expect(() =>
+        decodeSandboxPolicy({ ...policy, approvedDestinations: [{ host, port: 443 }] }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeSandboxPolicy({
+        ...policy,
+        approvedDestinations: [{ host: "packages.example.com", port: 0 }],
+      }),
+    ).toThrow();
+    expect(
+      decodeSandboxPolicy({
+        ...policy,
+        approvedDestinations: [{ host: "packages.example.com", port: 443 }],
+      }).approvedDestinations,
+    ).toHaveLength(1);
+  });
 });

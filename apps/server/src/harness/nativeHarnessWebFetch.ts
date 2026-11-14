@@ -1,3 +1,4 @@
+import { authorizeSandboxHostRequest } from "../process/sandboxRuntimePolicy";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -57,6 +58,7 @@ export async function fetchPublicUrl(
     if (current.username.length > 0 || current.password.length > 0) {
       throw new PublicFetchRefused("credentials-in-url");
     }
+    authorizeSandboxHostRequest(current);
     const address = await resolveAddress(current.hostname);
     if (isPrivateAddress(address)) throw new PublicFetchRefused("private-destination");
     const controller = new AbortController();
@@ -110,6 +112,7 @@ export function createPinnedFetch(
   const isPrivate = dependencies.isPrivate ?? isPrivateAddress;
   return (url, init) =>
     new Promise<Response>((resolve, reject) => {
+      authorizeSandboxHostRequest(url);
       const secure = url.protocol === "https:";
       const lookup = (
         hostname: string,

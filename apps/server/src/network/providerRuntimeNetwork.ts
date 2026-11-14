@@ -1,4 +1,10 @@
 import {
+  recordSandboxNetworkDenial,
+  sandboxNetworkSnapshot,
+} from "../process/sandboxRuntimePolicy";
+import { decideSandboxPublicEgress } from "@octant/domain/safe-network-policy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import {
   AggregateId,
   AggregateVersion,
   CorrelationId,
@@ -83,6 +89,7 @@ const TRUSTABLE_REFUSALS: ReadonlySet<ToolEgressRefusalReason> = new Set([
 ]);
 
 export interface ProviderRuntimeNetworkStartInput {
+  readonly sandboxPolicy?: SandboxPolicySelection;
   readonly runtime: RuntimeNetworkRuntime;
   readonly profileId?: AcpProviderKind;
   /** The folder the runtime works in; the Project that owns it supplies the rules and places. */
@@ -279,15 +286,22 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
   }
 
   async start(input: ProviderRuntimeNetworkStartInput): Promise<ProviderRuntimeNetworkStart> {
+    if (input.sandboxPolicy?.context.threadId !== undefined)
+      input = { ...input, threadId: input.sandboxPolicy.context.threadId };
+    const snapshot = sandboxNetworkSnapshot(input.sandboxPolicy);
     // A launch reads the switch once, so a change applies from the next
     // launch and never moves a running runtime. Limits apply only where the
     // runtime is sandboxed: a Full access thread that keeps the sandbox asks
     // with the guarded posture its wall has, and open Full access stays open.
     if (
-      input.executionPolicy === "full-access" ||
+      (input.sandboxPolicy?.policy.network === "unrestricted" &&
+        input.sandboxPolicy.policy.hostServices !== "blocked") ||
+      (input.sandboxPolicy === undefined && input.executionPolicy === "full-access") ||
       !this.#options.enforced ||
       this.#options.openRuntimes?.has(input.runtime) === true ||
-      !this.#options.safeNetworks.limitsOn()
+      (input.sandboxPolicy?.policy.network !== "deny" &&
+        input.sandboxPolicy?.policy.hostServices !== "blocked" &&
+        !(snapshot?.limitsOn ?? this.#options.safeNetworks.limitsOn()))
     )
       return { status: "open" };
     const refused = {
@@ -310,7 +324,8 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
         runtime: input.runtime,
         ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
         ...(projectId === undefined ? {} : { projectId: decodeAggregateId(projectId) }),
-        executionPolicy: input.executionPolicy,
+        executionPolicy:
+          input.executionPolicy === "full-access" ? "auto-accept-edits" : input.executionPolicy,
       };
       // The proxy's own launch shape names a thread and a Project. A runtime
       // serves a folder rather than one thread, so both carry the launch's
@@ -328,8 +343,15 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
     });
     const loopbackPorts = input.loopbackPorts ?? [];
     const reviewerAllowed: Array<{ readonly host: string; readonly port: number }> = [];
+    const admittedProjectRules =
+      snapshot?.rules ?? (projectId === undefined ? [] : this.#options.projectRules(projectId));
+    const admittedPlaces = snapshot?.places ?? this.#options.safeNetworks.placesFor(projectId);
     const projectRules = (): ReadonlyArray<ToolEgressRule> =>
-      projectId === undefined ? [] : this.#options.projectRules(projectId);
+      input.sandboxPolicy !== undefined
+        ? admittedProjectRules
+        : projectId === undefined
+          ? []
+          : this.#options.projectRules(projectId);
     const runtimeRules = (): ReadonlyArray<RuntimeEgressProjectRule> =>
       projectRules().flatMap((rule) =>
         rule.scope.kind === "project" && String(rule.scope.projectId) === projectId
@@ -371,9 +393,17 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       version += 1;
       return { status: "appended" };
     };
-    const reviewer = input.autoReview === true ? this.#options.reviewer : undefined;
+    const publicNetwork =
+      input.sandboxPolicy?.policy.network === "unrestricted" ||
+      (input.sandboxPolicy?.policy.network === "existing-policy" &&
+        !(snapshot?.limitsOn ?? this.#options.safeNetworks.limitsOn()));
+    const reviewer =
+      input.sandboxPolicy === undefined && input.autoReview === true
+        ? this.#options.reviewer
+        : undefined;
     const namesThread = input.threadId !== undefined || input.sessionId !== undefined;
     const placesNow = (): ReadonlyArray<SafeNetworkPlace> => {
+      if (input.sandboxPolicy?.policy.network === "deny") return [];
       if (namesThread && this.#options.threadTainted !== undefined) {
         let marked: boolean;
         try {
@@ -386,10 +416,15 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
         }
         if (marked) return [];
       }
-      return this.#options.safeNetworks.placesFor(projectId);
+      return input.sandboxPolicy === undefined
+        ? this.#options.safeNetworks.placesFor(projectId)
+        : admittedPlaces;
     };
     const started = await startToolEgressProxy({
       launch: proxyLaunch,
+      ...(input.sandboxPolicy?.policy.hostServices === "blocked"
+        ? { blockAmbientPrivateAddresses: true }
+        : {}),
       taint: () => ({ threadTainted: false, parentTainted: false }),
       // Read only to wake an idle tunnel when the Project rule it rides expires.
       rules: projectRules,
@@ -408,16 +443,31 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       },
       decision: {
         kind: "provider-runtime",
-        decide: (destination) =>
-          decideProviderRuntimeEgress({
+        decide: (destination) => {
+          const limited = decideProviderRuntimeEgress({
             destination,
             providerDomains,
             launchLoopbackPorts: loopbackPorts,
             places: placesNow(),
-            projectRules: runtimeRules(),
+            projectRules: input.sandboxPolicy?.policy.network === "deny" ? [] : runtimeRules(),
             reviewerAllowed,
             now: this.#options.clock(),
-          }),
+          });
+          if (
+            input.sandboxPolicy?.policy.approvedDestinations?.some(
+              (allowed) => allowed.host === destination.host && allowed.port === destination.port,
+            )
+          )
+            return {
+              kind: "allow",
+              host: destination.host,
+              port: destination.port,
+              by: "project-rule",
+            };
+          return limited.kind === "allow" || !publicNetwork
+            ? limited
+            : decideSandboxPublicEgress(destination);
+        },
         privateAddressAllowed: ({ address, port, by }) =>
           runtimeEgressPrivateAddressAllowed({
             address,
@@ -463,7 +513,12 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
             entries: payload.entries,
           });
           if (appended.status === "appended") {
-            this.#noteRefusals(launch, payload.entries, this.#options.clock());
+            this.#noteRefusals(
+              launch,
+              payload.entries,
+              this.#options.clock(),
+              input.sandboxPolicy === undefined ? undefined : (input.threadId ?? input.sessionId),
+            );
           }
           return appended;
         },
@@ -478,7 +533,12 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
             truncated: payload.truncated,
           });
           if (appended.status === "appended") {
-            this.#noteRefusals(launch, payload.entries, this.#options.clock());
+            this.#noteRefusals(
+              launch,
+              payload.entries,
+              this.#options.clock(),
+              input.sandboxPolicy === undefined ? undefined : (input.threadId ?? input.sessionId),
+            );
           }
           for (const key of this.#counted.keys()) {
             if (key.startsWith(`${String(launch.launchId)} `)) this.#counted.delete(key);
@@ -523,6 +583,7 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
     launch: RuntimeNetworkLaunch,
     entries: ReadonlyArray<ToolEgressDecisionEntry>,
     at: string,
+    threadId?: string,
   ): void {
     const key = launch.projectId === undefined ? "" : String(launch.projectId);
     let tallies = this.#refusals.get(key);
@@ -538,6 +599,7 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       const growth = entry.requests - (this.#counted.get(countedKey) ?? 0);
       if (growth <= 0) continue;
       this.#counted.set(countedKey, entry.requests);
+      if (threadId !== undefined) recordSandboxNetworkDenial(threadId, entry.host, entry.port);
       const tally = tallies.get(id);
       if (tally === undefined) {
         tallies.set(id, {

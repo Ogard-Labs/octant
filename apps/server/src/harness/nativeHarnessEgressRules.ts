@@ -1,3 +1,11 @@
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { decideSandboxPublicEgress } from "@octant/domain/safe-network-policy";
+import {
+  activeSandboxPolicy,
+  sandboxNetworkLimitsOn,
+  recordSandboxNetworkDenial,
+  sandboxNetworkSnapshot,
+} from "../process/sandboxRuntimePolicy";
 import {
   AggregateId,
   AggregateVersion,
@@ -307,6 +315,41 @@ interface LiveLaunchState {
 
 type AppendEvent = { readonly eventName: string; readonly payload: unknown };
 
+function sandboxProxyPolicy(
+  selection: SandboxPolicySelection | undefined,
+): Pick<ToolEgressProxyOptions, "decision" | "blockAmbientPrivateAddresses"> {
+  if (selection === undefined) return {};
+  const base =
+    selection.policy.hostServices === "blocked" ? { blockAmbientPrivateAddresses: true } : {};
+  if (selection.policy.network === "deny")
+    return {
+      ...base,
+      decision: {
+        kind: "provider-runtime",
+        decide: (destination) =>
+          selection.policy.approvedDestinations?.some(
+            (allowed) => allowed.host === destination.host && allowed.port === destination.port,
+          )
+            ? { kind: "allow", host: destination.host, port: destination.port, by: "project-rule" }
+            : { kind: "refuse", reason: "no-rule", host: destination.host, port: destination.port },
+        privateAddressAllowed: () => false,
+      },
+    };
+  if (
+    selection.policy.network === "unrestricted" ||
+    !(sandboxNetworkSnapshot(selection)?.limitsOn ?? sandboxNetworkLimitsOn())
+  )
+    return {
+      ...base,
+      decision: {
+        kind: "provider-runtime",
+        decide: decideSandboxPublicEgress,
+        privateAddressAllowed: () => false,
+      },
+    };
+  return base;
+}
+
 export class ToolEgressRules {
   readonly #options: ToolEgressRulesOptions;
   readonly #hostActor: typeof EventActor.Type;
@@ -462,8 +505,20 @@ export class ToolEgressRules {
   ): Promise<ToolEgressLaunchStart> {
     const launch = input.launch;
     const proposals: LiveLaunchState["proposals"] = new Map();
+    const policy = activeSandboxPolicy(String(launch.threadId));
+    const admittedRules: ReadonlyArray<ToolEgressRule> = [
+      ...(sandboxNetworkSnapshot(policy)?.rules ?? this.#rulesFor(launch)),
+      ...(policy?.policy.approvedDestinations ?? []).map((destination) => ({
+        id: Schema.decodeUnknownSync(ToolEgressRuleId)(this.#options.uuid()),
+        host: destination.host,
+        port: destination.port,
+        scope: { kind: "call" as const, threadId: launch.threadId, launchId: launch.launchId },
+        expiresAt: "9999-12-31T23:59:59.999Z",
+      })),
+    ];
     const started = await startToolEgressProxy({
       ...input,
+      ...sandboxProxyPolicy(policy),
       taint: () => ({
         threadTainted: this.#tainted(String(launch.threadId)),
         parentTainted:
@@ -471,14 +526,17 @@ export class ToolEgressRules {
             ? false
             : this.#tainted(String(launch.parentThreadId)),
       }),
-      rules: () => this.#rulesFor(launch),
+      rules: () => (policy === undefined ? this.#rulesFor(launch) : admittedRules),
       clock: this.#options.clock,
       records: {
         launchStarted: async (payload) => this.#record(launch, "launchStarted", payload),
         decisionsRecorded: async (payload) => this.#record(launch, "decisionsRecorded", payload),
         launchSummarized: async (payload) => this.#record(launch, "launchSummarized", payload),
       },
-      onProposable: (refusal) => collectProposal(proposals, refusal),
+      onProposable: (refusal) => {
+        collectProposal(proposals, refusal);
+        recordSandboxNetworkDenial(String(launch.threadId), refusal.host, refusal.port);
+      },
       ...this.#placesAndReviewer(launch),
     });
     if (started.status === "refused") return started;
@@ -524,10 +582,18 @@ export class ToolEgressRules {
     launch: ToolEgressLaunch,
   ): Pick<ToolEgressProxyOptions, "places" | "escalate"> {
     const places = this.#options.places;
-    const reviewNetwork = this.#options.reviewNetwork;
+    const policy = activeSandboxPolicy(String(launch.threadId));
+    const admittedPlaces =
+      sandboxNetworkSnapshot(policy)?.places ?? places?.(String(launch.projectId));
+    const reviewNetwork = policy === undefined ? this.#options.reviewNetwork : undefined;
     const threadId = String(launch.parentThreadId ?? launch.threadId);
     return {
-      ...(places === undefined ? {} : { places: () => places(String(launch.projectId)) }),
+      ...(places === undefined
+        ? {}
+        : {
+            places: () =>
+              policy === undefined ? places(String(launch.projectId)) : (admittedPlaces ?? []),
+          }),
       ...(reviewNetwork === undefined
         ? {}
         : {
@@ -574,15 +640,30 @@ export class ToolEgressRules {
   ): Promise<ToolEgressLaunchStart> {
     const launch = input.launch;
     const proposals: LiveLaunchState["proposals"] = new Map();
+    const policy = activeSandboxPolicy(String(launch.threadId));
+    const admittedRules: ReadonlyArray<ToolEgressRule> = [
+      ...(sandboxNetworkSnapshot(policy)?.rules ?? this.#rulesFor(launch)),
+      ...(policy?.policy.approvedDestinations ?? []).map((destination) => ({
+        id: Schema.decodeUnknownSync(ToolEgressRuleId)(this.#options.uuid()),
+        host: destination.host,
+        port: destination.port,
+        scope: { kind: "call" as const, threadId: launch.threadId, launchId: launch.launchId },
+        expiresAt: "9999-12-31T23:59:59.999Z",
+      })),
+    ];
     const started = await startToolEgressProxy({
       ...input,
+      ...sandboxProxyPolicy(policy),
       taint: () => ({
         threadTainted: this.#tainted(String(launch.threadId)),
         parentTainted: false,
       }),
-      rules: () => this.#rulesFor(launch),
+      rules: () => (policy === undefined ? this.#rulesFor(launch) : admittedRules),
       clock: this.#options.clock,
-      onProposable: (refusal) => collectProposal(proposals, refusal),
+      onProposable: (refusal) => {
+        collectProposal(proposals, refusal);
+        recordSandboxNetworkDenial(String(launch.threadId), refusal.host, refusal.port);
+      },
     });
     if (started.status === "refused") return started;
     const state: LiveLaunchState = { proxy: started.proxy, launch, proposals };
@@ -612,6 +693,10 @@ export class ToolEgressRules {
    * afresh for every decision, like a thread launch's, and empty while the
    * Project's revocations cannot be read.
    */
+  sandboxRules(launch: ToolEgressLaunch): ReadonlyArray<ToolEgressRule> {
+    return [...this.#rulesFor(launch)];
+  }
+
   projectRules(projectId: string): ReadonlyArray<ToolEgressRule> {
     this.#sweepExpiredRules();
     if (this.#unreadableAggregates.has(aggregateKey(TOOL_EGRESS_PROJECT_AGGREGATE, projectId))) {

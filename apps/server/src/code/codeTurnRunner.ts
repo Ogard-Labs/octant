@@ -1,3 +1,4 @@
+import { beginSandboxTurn } from "../process/sandboxRuntimePolicy";
 import type { Questionnaire } from "@octant/contracts";
 import { isAbsolute } from "node:path";
 import {
@@ -413,6 +414,22 @@ export class CodeTurnRunner {
       ) {
         return yield* fail("failed", FULL_ACCESS_SANDBOX_UNSUPPORTED);
       }
+      const sandboxAdmission = beginSandboxTurn({
+        threadId: String(input.thread.id),
+        projectId: String(input.thread.projectId),
+        mode: "code",
+        root: input.checkoutRoot,
+        provider: input.providerDriverKind ?? "unknown",
+      });
+      if (sandboxAdmission.status === "refused")
+        return yield* fail("failed", sandboxAdmission.message);
+      const sandboxTurn = sandboxAdmission.turn;
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await sandboxTurn.end();
+        }),
+      );
+      const sandboxPolicy = sandboxTurn.selection;
       const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
       // An earlier turn's read that could not be marked is still in the
       // session this turn would resume.
@@ -423,6 +440,7 @@ export class CodeTurnRunner {
       const connection = yield* input.provider
         .acquire({
           instanceId: input.thread.providerInstanceId,
+          ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
           mode: "code",
           projectRoot: input.providerRoot ?? input.checkoutRoot,
           ...(input.extraFolders === undefined || input.extraFolders.length === 0
@@ -450,7 +468,9 @@ export class CodeTurnRunner {
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
-        ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(input.thread.fullAccessSandbox === true || sandboxPolicy !== undefined
+          ? { fullAccessSandbox: true }
+          : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
@@ -669,7 +689,11 @@ export class CodeTurnRunner {
                     }
                     if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
                     answeredToolRequestIds.add(sanitizedEvent.requestId);
-                    const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
+                    const toolSet = recordedToolSet(
+                      input.toolEffects,
+                      input.appManagedTools,
+                      String(input.thread.id),
+                    );
                     const allowed = toolSet?.definitions.some(
                       (definition) => definition.name === sanitizedEvent.toolName,
                     );
@@ -789,7 +813,12 @@ export class CodeTurnRunner {
             .send({
               sessionId: input.sessionId,
               prompt: input.prompt,
-              ...(input.context === undefined ? {} : { context: input.context }),
+              context: [
+                ...(sandboxTurn.summary === ""
+                  ? []
+                  : [{ kind: "instructions" as const, text: sandboxTurn.summary }]),
+                ...(input.context ?? []),
+              ],
               attachments: input.attachments ?? [],
               tools: [...(input.appManagedTools?.definitions ?? [])],
             })

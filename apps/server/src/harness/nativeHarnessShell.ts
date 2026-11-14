@@ -1,3 +1,5 @@
+import { sandboxToolPolicy } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PreparedGoogleCliCredentials } from "../secretStores/googleCliCommandCredentials";
@@ -19,6 +21,7 @@ export interface SandboxedProcessPort {
 }
 
 export interface NativeHarnessShellOptions {
+  readonly sandboxPolicy?: () => SandboxPolicySelection | undefined;
   readonly process: SandboxedProcessPort;
   /**
    * Variables every command gets, laid over the rest. A shell given neither the
@@ -100,7 +103,14 @@ export function createNativeHarnessShell(
   const egress = options.egress;
   return {
     run: async (input): Promise<NativeHarnessShellRun> => {
-      if (egress === undefined) return runScript(options, input, undefined);
+      const policy = options.sandboxPolicy?.() ?? sandboxToolPolicy();
+      if (
+        egress === undefined ||
+        (policy?.policy.network === "deny" &&
+          (policy?.policy.approvedDestinations?.length ?? 0) === 0) ||
+        (policy?.policy.network === "unrestricted" && policy?.policy.hostServices !== "blocked")
+      )
+        return runScript(options, input, undefined);
       const started = await egress.startLaunch(
         {
           launchId: egress.launchId(),
@@ -135,16 +145,22 @@ async function runScript(
   input: Parameters<NativeHarnessShellPort["run"]>[0],
   egressProxy: HarnessShellScriptInput["egressProxy"],
 ): Promise<NativeHarnessShellRun> {
+  const sandboxPolicy = options.sandboxPolicy?.() ?? sandboxToolPolicy();
   const directory = await mkdtemp(join(options.scriptDirectory, "octant-harness-"));
   const script = join(directory, "command.sh");
   // Opened in the command's own script folder, which it reads and cannot write.
   const servers: HarnessServerAccess | undefined =
     egressProxy === undefined
       ? undefined
-      : await options.serverAccess?.(input.command, directory).catch(() => undefined);
+      : sandboxPolicy?.policy.hostServices === "blocked"
+        ? undefined
+        : await options.serverAccess?.(input.command, directory).catch(() => undefined);
   let google: PreparedGoogleCliCredentials | undefined;
   try {
-    google = await options.googleCliCredentials?.(directory, input.signal);
+    google =
+      sandboxPolicy === undefined
+        ? await options.googleCliCredentials?.(directory, input.signal)
+        : undefined;
     if (google?.status === "refused")
       return { status: "unavailable", output: google.message, truncated: false };
     const credentials = google;
@@ -152,6 +168,7 @@ async function runScript(
     const result = await options.process.executeShellScript(
       {
         script,
+        ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
         cwd: input.cwd,
         ...(input.extraRoots === undefined ? {} : { extraRoots: input.extraRoots }),
         ...(credentials?.configurationDirectory === undefined
@@ -164,9 +181,13 @@ async function runScript(
                 (input.beforeLaunch?.() ?? true) && (credentials?.beforeLaunch() ?? true),
             }),
         environment: {
-          ...(await options.cloudCliEnvironment?.().catch(() => ({}))),
+          ...(sandboxPolicy === undefined
+            ? await options.cloudCliEnvironment?.().catch(() => ({}))
+            : {}),
           ...credentials?.environment,
-          ...commandEnvironment(options.sshAgentSocket?.()),
+          ...commandEnvironment(
+            sandboxPolicy === undefined ? options.sshAgentSocket?.() : undefined,
+          ),
           ...options.environment,
         },
         timeoutMs: input.timeoutMs,

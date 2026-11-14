@@ -70,3 +70,52 @@ export function admitSandboxPolicy(
     ? { status: "admitted" }
     : { status: "refused", code: "sandbox-policy-unsupported", rules };
 }
+
+/** A helper may retain or lose grants, never acquire a grant absent from its parent. */
+export function intersectSandboxPolicies(
+  parent: SandboxPolicy,
+  child: SandboxPolicy,
+): SandboxPolicy {
+  const inside = (root: string, candidate: string) =>
+    root === candidate || candidate.startsWith(`${root}/`);
+  const intersection = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) => [
+    ...new Set(
+      left.flatMap((a) => right.flatMap((b) => (inside(a, b) ? [b] : inside(b, a) ? [a] : []))),
+    ),
+  ];
+  const readWriteRoots = intersection(
+    parent.filesystem.readWriteRoots,
+    child.filesystem.readWriteRoots,
+  );
+  const readOnlyRoots = intersection(
+    [...parent.filesystem.readOnlyRoots, ...parent.filesystem.readWriteRoots],
+    [...child.filesystem.readOnlyRoots, ...child.filesystem.readWriteRoots],
+  ).filter((root) => !readWriteRoots.some((write) => inside(write, root)));
+  const approvedDestinations = (child.approvedDestinations ?? []).filter(
+    (destination) =>
+      parent.network === "unrestricted" ||
+      parent.approvedDestinations?.some(
+        (allowed) => allowed.host === destination.host && allowed.port === destination.port,
+      ),
+  );
+  const rank = { deny: 0, "existing-policy": 1, unrestricted: 2 };
+  return {
+    schemaVersion: 1,
+    approvedDestinations,
+    revision: Math.max(parent.revision, child.revision),
+    filesystem: {
+      readOnlyRoots,
+      readWriteRoots,
+      protectedPaths: [...parent.filesystem.protectedPaths, ...child.filesystem.protectedPaths],
+    },
+    network: rank[parent.network] < rank[child.network] ? parent.network : child.network,
+    credentials:
+      parent.credentials === "isolated" || child.credentials === "isolated"
+        ? "isolated"
+        : "existing-policy",
+    hostServices:
+      parent.hostServices === "blocked" || child.hostServices === "blocked"
+        ? "blocked"
+        : "existing-policy",
+  };
+}

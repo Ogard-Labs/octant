@@ -1,3 +1,5 @@
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
@@ -2876,6 +2878,63 @@ describe("native harness tool egress grants and learn mode", () => {
       principal: person,
       grants: [{ host: name, port: 443, scope: eightHours }],
     });
+
+  it("keeps a block-all policy's exact exception ceiling for both tools and program capsules", async () => {
+    const host = egressHost();
+    grantThreadRule(host, "pypi.example.com");
+    const selected = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 1,
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        network: "deny",
+        approvedDestinations: [{ host: "registry.example.com", port: 443 }],
+        credentials: "existing-policy",
+        hostServices: "blocked",
+      },
+      context: {
+        root: "/project",
+        hostId: "host",
+        projectId: String(egressProject),
+        checkoutId: "checkout",
+        sessionId: "session",
+        provider: "codex",
+      },
+    });
+    configureSandboxRestrictionsAuthority({
+      validateSelection: () => true,
+      active: () => selected,
+      storageDirectory: () => undefined,
+      deny: () => undefined,
+      registerCleanup: () => () => undefined,
+      beginTurn: () => ({ status: "refused", message: "unused" }),
+    });
+    try {
+      for (const program of [false, true]) {
+        const started = await (program
+          ? host.rules.startProgramLaunch({
+              launch: launchFor(),
+              endpoint: { kind: "loopback" },
+              records: {
+                launchStarted: async () => ({ status: "appended" }),
+                decisionsRecorded: async () => ({ status: "appended" }),
+                launchSummarized: async () => ({ status: "appended" }),
+              },
+            })
+          : host.rules.startLaunch({ launch: launchFor(), endpoint: { kind: "loopback" } }));
+        if (started.status !== "listening") throw new Error("Proxy unavailable");
+        try {
+          expect(started.launch.proxy.permitsHostRequest("registry.example.com", 443)).toBe(true);
+          expect(started.launch.proxy.permitsHostRequest("registry.example.com", 80)).toBe(false);
+          expect(started.launch.proxy.permitsHostRequest("pypi.example.com", 443)).toBe(false);
+        } finally {
+          await started.launch.finish();
+        }
+      }
+    } finally {
+      configureSandboxRestrictionsAuthority(undefined);
+    }
+  });
 
   describe("the reviewer and safe networks", () => {
     it("turns a reviewer's allowance into a call rule for that launch alone", async () => {

@@ -1,3 +1,5 @@
+import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
+import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import {
   chmodSync,
@@ -90,6 +92,7 @@ export interface OpenCodeProcessStartInput {
    * unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
   /** Exact loopback ports owned by this connection's app-managed tool bridges. */
   readonly loopbackPorts?: ReadonlyArray<number>;
   /**
@@ -1023,6 +1026,14 @@ function prepareOpenCodeLaunch(
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
   const executionPolicy = openCodeWallPolicy(input);
+  if (input.sandboxPolicy !== undefined && platform === "linux")
+    return Effect.fail(
+      failure(
+        "incompatible",
+        "OpenCode on Linux cannot yet confine its host control transport under this policy. Choose a supported provider; the runtime was not started.",
+      ),
+    );
+
   // OpenCode 2 removed the legacy `--pure` serve flag. Keep the runtime
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
@@ -1131,6 +1142,8 @@ function prepareOpenCodeLaunch(
         executable: input.binaryPath,
         args,
         boundRoot: root,
+        sandboxProviderChannel: true,
+        ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         ...(mode === "chat" || input.extraFolders === undefined
           ? {}
           : { extraBoundRoots: input.extraFolders }),
@@ -1411,6 +1424,7 @@ function acquireOpenCodeServer(
         resume(Effect.fail(failure("unavailable", "OpenCode server could not be started.")));
         return cleanupDefect(async () => undefined);
       }
+      trackSandboxChild(input.sandboxPolicy, child);
       const childExited = new Promise<void>((resolveExit) =>
         child.once("exit", () => resolveExit()),
       );
@@ -1653,20 +1667,27 @@ export function makeOpenCodeProcessLive(
             failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
         });
         const executionPolicy = openCodeWallPolicy(input);
+
         const network =
           executionPolicy === "full-access"
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                ...(input.sandboxPolicy === undefined
+                  ? {}
+                  : { sandboxPolicy: input.sandboxPolicy }),
                 runtime: "opencode",
                 root: input.cwd,
                 executionPolicy,
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment: options.inheritedEnvironment ?? process.env,
               });
-        const servers = yield* acquireProviderServerAccess(options.serverAccess, {
-          root: input.cwd,
-          executionPolicy,
-        });
+        const servers = yield* acquireProviderServerAccess(
+          input.sandboxPolicy?.policy.hostServices === "blocked" ? undefined : options.serverAccess,
+          {
+            root: input.cwd,
+            executionPolicy,
+          },
+        );
         const { network: _ignored, servers: _ignoredServers, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;
         return yield* Effect.acquireReleaseInterruptible(
