@@ -872,7 +872,7 @@ export const ShellSettings = Schema.Struct({
     default: () => "small" as const,
   }),
   transcriptWidth: Schema.optionalWith(TranscriptWidth, {
-    default: () => "narrow" as const,
+    default: () => "medium" as const,
   }),
   /**
    * How the plan-usage bars above the composer are drawn. A store persisted

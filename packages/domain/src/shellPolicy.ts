@@ -193,7 +193,7 @@ export function defaultShellSettings(): ShellSettings {
     providerToolCallPauseLimitMinutes: DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "small",
-    transcriptWidth: "narrow",
+    transcriptWidth: "medium",
     usageBars: "smooth",
     replyDetail: "low",
     threadReplyDetail: [],

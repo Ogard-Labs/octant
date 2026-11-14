@@ -162,7 +162,7 @@ describe("shell settings policy", () => {
       modeSwitcherPresentation: "buttons",
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "small",
-      transcriptWidth: "narrow",
+      transcriptWidth: "medium",
       usageBars: "smooth",
       replyDetail: "low",
       threadReplyDetail: [],

@@ -383,7 +383,7 @@ half pixel.
   `-code` 1.7; the whole-pixel lines `--oct-line-label`, `-detail`, `-meta`,
   `-snug`, `-tight` for rows whose height is the sum of their lines.
 - **Transcript**: Small 13px, Medium 14px, Large 16px; Narrow 680px, Medium
-  800px, Wide 1040px; a fresh install reads Small and Narrow. The column is
+  800px, Wide 1040px; a fresh install reads Small and Medium (about 85 characters a line at 1440). The column is
   `width: min(100% - 40px, measure)`. Welcome composers share a 768px maximum.
   Canvas documents use `--oct-canvas-measure` (62ch).
 - A title is never the size and weight of the text it heads. A fact in a list
@@ -1241,7 +1241,7 @@ narrowest pane's width.
 - **Inside**: attach, the frameless prompt, then the microphone and send at the
   trailing edge. They are round 28px buttons (`--oct-composer-cell`), 8px
   (`--oct-composer-inset`) from the box's edge, the one place a control is a
-  circle, because the box is a pill. Attach is a quiet fill (ink 6%) with a hover
+  circle, because the box is a pill. Their glyphs are 16px at the shared 1.5 stroke. Attach is a quiet fill (ink 6%) with a hover
   step (11%). The microphone is a ghost with a round hover fill (8%). Send is the
   ink as its fill (`--octant-text-primary`) with the page colour as its arrow, at
   20% opacity while there is nothing to send, and it grows to 106% on hover (not

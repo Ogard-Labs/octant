@@ -60,7 +60,7 @@ const settings = {
   modeSwitcherPresentation: "dropdown",
   projectViewSwitcherPresentation: "dropdown",
   transcriptTextSize: "medium",
-  transcriptWidth: "narrow",
+  transcriptWidth: "medium",
   usageBars: "smooth",
   replyDetail: "low",
   threadReplyDetail: [],
