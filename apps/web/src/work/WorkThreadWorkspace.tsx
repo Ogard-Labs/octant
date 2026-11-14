@@ -97,6 +97,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
@@ -2914,6 +2915,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             : {
                 info: (
                   <ThreadInfo
+                    notes={{
+                      threadId: String(thread.id),
+                      onInsert: (note) => {
+                        const next = draftWithNote(prompt, note);
+                        composerDraft.setDraft(next, next.length);
+                      },
+                    }}
                     place={{ label: placeName, content: placeControl, tooltip: placeTooltip }}
                   >
                     <ThreadGuardrailLevel

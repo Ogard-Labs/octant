@@ -56,6 +56,10 @@ export interface AutomationCodeEvidencePort {
   readonly put: (text: string) => CodeEvidenceReference;
 }
 
+export type AutomationSourceBranch =
+  | { readonly kind: "branch"; readonly name: string }
+  | { readonly kind: "unavailable"; readonly message: string };
+
 export interface CreateAutomationCodeDispatchPortOptions {
   readonly codeService: AutomationCodeRouteService;
   readonly operations: AutomationCodeOperationService;
@@ -68,7 +72,14 @@ export interface CreateAutomationCodeDispatchPortOptions {
    * delivery branch is derived deterministically from the occurrence.
    */
   readonly sourceBranch?: string;
-  readonly sourceBranchForRun?: (run: AutomationRun) => string | undefined;
+  /**
+   * The branch a run's managed worktree starts from, or why there is none.
+   * A server Project's is read on its server, so it may wait on the
+   * connection, and a server that cannot be reached is why.
+   */
+  readonly sourceBranchForRun?: (
+    run: AutomationRun,
+  ) => AutomationSourceBranch | Promise<AutomationSourceBranch>;
   readonly startFromOrigin?: boolean;
   readonly remoteName?: string;
   /**
@@ -127,16 +138,13 @@ async function createManagedThread(
     };
   }
   const now = options.clock();
-  const sourceBranch =
+  const source: AutomationSourceBranch =
     options.sourceBranchForRun === undefined
-      ? (options.sourceBranch ?? "development")
-      : options.sourceBranchForRun(input.run);
-  if (sourceBranch === undefined)
-    return {
-      kind: "failed",
-      reason: "unavailable",
-      message: "The bound Project checkout has no available source branch.",
-    };
+      ? { kind: "branch", name: options.sourceBranch ?? "development" }
+      : await options.sourceBranchForRun(input.run);
+  if (source.kind === "unavailable")
+    return { kind: "failed", reason: "unavailable", message: source.message };
+  const sourceBranch = source.name;
   const deliveryTarget = decodeCodeDeliveryTarget({
     branchIntent: automationDeliveryBranch(String(input.run.occurrenceKey)),
     remoteName: options.remoteName ?? "origin",
