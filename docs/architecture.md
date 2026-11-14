@@ -5231,8 +5231,12 @@ flowchart LR
   Chat or Code turn that streams past it keeps everything already journaled,
   journals `[Output truncated by Octant.]` as its last text, interrupts the
   provider, and ends (Chat: interrupted with `output-budget-exceeded`; Code:
-  failed, as at its event budget). A Work reply is held to 64 KiB with the
-  same marker, counted as it arrives and frozen once truncated. An append that
+  failed, as at its event budget). A Work reply is held to the same 32 MiB
+  (`MAX_WORK_TURN_RESPONSE_BYTES`; 64 KiB until the maintainer decision of
+  2026-11-14) with the same marker, counted as it arrives and frozen once
+  truncated. Work journals the reply once, with the settled
+  `work.turn-updated@1`, and a settled turn too heavy for one stream frame
+  is read from the transcript snapshot (`snapshot-required`). An append that
   fails on a full disk (`SQLITE_FULL`) commits nothing and carries
   `reason: "disk-full"`, and every service that reports a failed write says
   the disk is full and to free space, rather than that persistence is

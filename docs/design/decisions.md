@@ -1173,7 +1173,7 @@ The event journal is the authoritative record, and projections are rebuildable a
 - The store runs in WAL mode with normal sync: every commit survives a process crash, and an OS crash or power loss may lose the commits since the last checkpoint, never leaving a torn one (maintainer decision, 2026-11-14; full sync stalled the control plane on every append). Streamed deltas of a Chat reply and of a Code turn batch into one commit per short burst. Projecting a streamed Chat delta writes one row of its own, not the whole attempt and turn, so its cost does not grow with the reply; reads and the next whole attempt fold those rows in.
 - Purgeable bulk content such as terminal transcripts and test output lives outside the journal and is referenced from it. _Here only._
 - A projection whose state is only in memory replays from the start of the journal at every host start.
-- A turn's streamed text and reasoning are bounded at 32 MiB: past it the turn keeps what was journaled, ends with a truncation marker, and stops. A write that fails on a full disk commits nothing and tells the person the disk is full.
+- A turn's streamed text and reasoning are bounded at 32 MiB: past it the turn keeps what was journaled, ends with a truncation marker, and stops. A Work reply keeps the same 32 MiB (maintainer decision, 2026-11-14; it was 64 KiB), journaled once when the turn settles. A write that fails on a full disk commits nothing and tells the person the disk is full.
 
 Status: Built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
