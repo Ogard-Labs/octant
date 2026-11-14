@@ -113,6 +113,7 @@ export type RoutesDependencies = {
     | "scaffoldRoutes"
     | "threadCheckpointRoutes"
     | "threadMentionRoutes"
+    | "threadNotesRoutes"
     | "workspacePresetRoutes"
   > &
   Pick<
@@ -251,6 +252,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     threadExportRoutes,
     threadHandOffRoutes,
     threadMentionRoutes,
+    threadNotesRoutes,
     threadMessageQueueRoutes,
     usageDashboardRoutes,
     usageRoutes,
@@ -359,6 +361,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await desktopPaneRoutes(request)) ??
     (await remoteServerGrantLocalRoutes(request)) ??
     (await threadMentionRoutes(request)) ??
+    (await threadNotesRoutes(request)) ??
     (await fileMentionRoutes(request)) ??
     (await spendCeilingRoutes(request)) ??
     (await protectedFilesRoutes(request)) ??
