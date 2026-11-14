@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderInstanceId } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
+import {
+  PermissionModePicker,
+  runningTurnKeepsNarrowerMode,
+  threadKeepsFullAccessSandbox,
+} from "./PermissionModePicker";
 
 afterEach(cleanup);
 
@@ -150,5 +154,37 @@ describe("the sandbox at Full access in the mode picker", () => {
     expect(keeps("local")).toBe(true);
     expect(keeps("claude")).toBe(true);
     expect(keeps("missing")).toBe(false);
+  });
+});
+
+describe("a wider mode picked while a turn runs", () => {
+  it("says in the mode's tooltip that it applies from the next message, only while a narrower turn runs", () => {
+    const keeps = (
+      turnRunning: boolean,
+      turnPolicy: "approval-gated" | "full-access" | undefined,
+    ) => runningTurnKeepsNarrowerMode({ turnRunning, turnPolicy, threadPolicy: "full-access" });
+    expect(keeps(true, "approval-gated")).toBe(true);
+    expect(keeps(true, "full-access")).toBe(false);
+    expect(keeps(false, "approval-gated")).toBe(false);
+    expect(keeps(true, undefined)).toBe(false);
+    expect(
+      runningTurnKeepsNarrowerMode({
+        turnRunning: true,
+        turnPolicy: "full-access",
+        threadPolicy: "plan",
+      }),
+    ).toBe(false);
+
+    render(
+      <PermissionModePicker
+        appliesFromNextMessage
+        autoSupported
+        onChange={() => undefined}
+        value="full-access"
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Mode: Full access" });
+    expect(trigger.getAttribute("title")).toMatch(/Full access applies from your next message\.$/);
+    expect(trigger).toHaveAccessibleDescription(/Full access applies from your next message\.$/);
   });
 });

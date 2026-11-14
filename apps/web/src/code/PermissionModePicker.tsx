@@ -1,10 +1,10 @@
-import type { PermissionMode } from "@octant/contracts/providers";
+import type { PermissionMode, ProviderExecutionPolicy } from "@octant/contracts/providers";
 import {
   AUTO_UNSUPPORTED_REASON,
   fullAccessSandboxSupported,
 } from "@octant/domain/guardrail-policy";
 import type { ProviderInstanceId } from "@octant/contracts/providers";
-import type { PickerGroup } from "@octant/domain";
+import { clampTurnAccessPosture, type PickerGroup } from "@octant/domain";
 import type { AutoReview } from "./autoReview";
 import {
   ListChecks,
@@ -94,6 +94,23 @@ const PERMISSION_MODE_ICON: Readonly<Record<PermissionMode, LucideIcon>> = {
   "full-access": ShieldAlert,
 };
 
+/**
+ * Whether a running turn keeps a narrower posture than the thread now holds.
+ * A narrower pick applies to the running turn at once; a wider one waits for
+ * the next turn, which is what the mode's tooltip then says.
+ */
+export function runningTurnKeepsNarrowerMode(input: {
+  readonly turnRunning: boolean;
+  readonly turnPolicy: ProviderExecutionPolicy | undefined;
+  readonly threadPolicy: ProviderExecutionPolicy;
+}): boolean {
+  if (!input.turnRunning || input.turnPolicy === undefined) return false;
+  return (
+    clampTurnAccessPosture({ requested: input.turnPolicy, thread: input.threadPolicy }) !==
+    input.threadPolicy
+  );
+}
+
 export interface PermissionModePickerProps {
   readonly value: PermissionMode;
   readonly onChange: (mode: PermissionMode) => void;
@@ -129,6 +146,12 @@ export interface PermissionModePickerProps {
    * cannot, the choice stays listed but disabled, with the reason.
    */
   readonly fullAccessSandboxSupported?: boolean;
+  /**
+   * Whether a running turn still holds a narrower mode than the one shown. A
+   * wider mode takes effect from the next turn, so the tooltip says so rather
+   * than leave a running turn's asks reading as a broken Full access.
+   */
+  readonly appliesFromNextMessage?: boolean;
 }
 
 const SANDBOX_DETAIL = "No prompts, but writes stay in the folder and secret files stay closed.";
@@ -157,11 +180,21 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     id === "auto"
       ? autoDetail(props.autoReview)
       : PERMISSION_MODE_OPTIONS.find((option) => option.id === id)?.detail;
-  const triggerDetail = autoFallsBack
+  const modeDetail = autoFallsBack
     ? unsupportedReason
     : sandboxed
       ? SANDBOX_DETAIL
       : detailOf(props.value);
+  const nextMessageNote =
+    props.appliesFromNextMessage === true
+      ? `${triggerLabel} applies from your next message.`
+      : undefined;
+  const triggerDetail =
+    nextMessageNote === undefined
+      ? modeDetail
+      : modeDetail === undefined
+        ? nextMessageNote
+        : `${modeDetail} ${nextMessageNote}`;
   const sandboxSupported = props.fullAccessSandboxSupported !== false;
   const shownMode: PermissionMode = autoFallsBack ? "ask-first" : props.value;
   const ModeIcon = PERMISSION_MODE_ICON[shownMode];

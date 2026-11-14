@@ -13604,6 +13604,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
   decided against the one the thread holds now. Re-presenting the same
   approval rather than minting a new one keeps one identity per provider
   call and needs no new answer route.
+  A running Code turn keeps the grant persistence it started with, as it
+  keeps a narrower mode (a wider mode applies from the next message, which
+  the mode control's tooltip says while such a turn runs). A persistence
+  change alone therefore does not ask again: the allow is delivered for that
+  one call (`scope: "once"`), so nothing is remembered beyond what either
+  setting allows. Plan still refuses an allow. Every answer the host refuses
+  names its reason in words, among them a request that no longer waits (it
+  was answered, withdrawn, or its turn ended), Plan, and a provider session
+  that is gone; a delivered answer is journaled as `approval-answered` on the
+  turn that asked, so a re-read of the turn no longer offers it. Rationale:
+  a person who switched to Full access mid-turn could never approve that
+  turn's remaining asks, and each Approve failed with no reason given.
   A native-harness "always" grant follows the same rule: it records the
   posture it was granted under and answers a later ask in its class only
   while the thread still holds that posture. After a permissions change the

@@ -164,7 +164,11 @@ import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
-import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
+import {
+  PermissionModePicker,
+  runningTurnKeepsNarrowerMode,
+  threadKeepsFullAccessSandbox,
+} from "./PermissionModePicker";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import type { CodeFileListingClient } from "@octant/client-runtime";
@@ -2698,6 +2702,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     thread.providerInstanceId,
                   )}
                   onFullAccessSandboxChange={(sandboxed) => void changeFullAccessSandbox(sandboxed)}
+                  appliesFromNextMessage={runningTurnKeepsNarrowerMode({
+                    turnRunning:
+                      props.controller.turnStatus === "running" ||
+                      props.controller.turnStatus === "waiting",
+                    turnPolicy: messages.findLast((message) => message.role === "user")
+                      ?.executionPolicy,
+                    threadPolicy: thread.executionPolicy,
+                  })}
                 />
               </>
             ),

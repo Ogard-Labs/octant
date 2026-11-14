@@ -141,7 +141,9 @@ import {
 } from "../siblingThreads/siblingThreadTools";
 import type { CodePlannerToolPort } from "./codePlannerTools";
 import {
+  APPROVAL_NOT_WAITING_MESSAGE,
   APPROVAL_POSTURE_CHANGED_MESSAGE,
+  APPROVAL_REFUSED_IN_PLAN_MESSAGE,
   defaultWindowWorkspace,
   contextKeyForProject,
 } from "@octant/domain";
@@ -4591,6 +4593,114 @@ describe("CodeOperationRuntime", () => {
       { kind: "approval-answered", approvalId: denied, decision: "denied" },
     ]);
     expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
+    fixture.close();
+  });
+
+  it("delivers an allow for this one call after the thread's grant persistence changed mid-turn, and names every refusal", async () => {
+    type AskedApprovalId = Extract<
+      OperationFrame["event"],
+      { kind: "approval-requested" }
+    >["approvalId"];
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    const startOperation = operationId(24);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const ask = async (requestId: string, index: number) => {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId,
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
+      let approvalId: AskedApprovalId | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 60);
+        approvalId = frames
+          .map((frame) => frame.event)
+          .filter((event) => event.kind === "approval-requested")[index]?.approvalId;
+        expect(approvalId).toBeDefined();
+      });
+      if (approvalId === undefined) throw new Error("Expected a provider approval");
+      return approvalId;
+    };
+    const answer = (
+      approvalId: AskedApprovalId,
+      decision: "approved" | "denied",
+      operation: number,
+    ) =>
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision,
+      });
+
+    // Asked while the turn runs gated with grants for this session; the person
+    // then switches the thread to Full access remembered for the Project.
+    const first = await ask("provider-approval-before-persistence", 0);
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+      }),
+    );
+    await expect(answer(first, "approved", 25)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    // The running turn keeps the persistence it started with, so this allow
+    // covers the one call and nothing is remembered under either setting.
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-before-persistence",
+      approved: true,
+      scope: "once",
+    });
+
+    // An answer to an ask that no longer waits says so instead of a bare failure.
+    const stale = await answer(first, "approved", 26);
+    expect(stale).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+    expect(stale).toHaveProperty("failure.message", APPROVAL_NOT_WAITING_MESSAGE);
+
+    // Narrowed to Plan: the allow is asked again, then refused in words.
+    const second = await ask("provider-approval-before-plan-refusal", 1);
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        executionPolicy: "plan",
+        permissionPersistence: "project-default",
+      }),
+    );
+    await expect(answer(second, "approved", 27)).resolves.toMatchObject({
+      failure: { message: APPROVAL_POSTURE_CHANGED_MESSAGE },
+    });
+    await expect(answer(second, "approved", 28)).resolves.toMatchObject({
+      state: "failed",
+      failure: { message: APPROVAL_REFUSED_IN_PLAN_MESSAGE },
+    });
+    expect(connection.answerApproval).toHaveBeenCalledTimes(1);
     fixture.close();
   });
 
