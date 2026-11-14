@@ -275,11 +275,13 @@ under the fill).
   with no blur: at 66% the pixel ground's ridges ran across Settings' rows and
   swatches. The ground stays one layer under the sidebar, the stage, the sheet
   and its scrim, never over any of them. While one is open the layers that hold content (the rail, the
-  sidebar, the title band, the workspace and its docks) fade to opacity 0 over
-  the scrim's own motion (instantly under reduced motion) and the modal keeps
-  its float fill (66% dark, 78% light, no blur; 96% where a ground is drawn), so
-  the glass coat shows softly through it and no thread text, row, card or
-  composer does. Only opacity
+  sidebar, the title band, the workspace and its docks) blur past reading
+  (16px) and dim to 60% over the scrim's own motion (instantly under reduced
+  motion), and the modal keeps its float fill (66% dark, 78% light, no blur;
+  96% where a ground is drawn), so a person changing the appearance in Settings
+  watches the window change while no thread text, row, card or composer can be
+  read through it. Fading the layers out entirely hid exactly what Settings is
+  a sheet for. Only paint
   changes: the content stays in place and inert, focus returns to its trigger,
   and it comes back exactly as it was on close. A menu or popover is not modal
   and keeps the dense float; a toast and a notice do too.
@@ -432,7 +434,7 @@ token.
 | 24     | button `sm`, `icon-sm`; `--oct-tray-segment-h`; `--oct-toast-control-h`                              | A row action, a chip, a tab, a tray segment, a tile bar control, a toast's dismiss      |
 | 28     | button `default`, `icon`; `--oct-rail-button-h`; `--oct-menu-row-h`; `--oct-settings-control-height` | A button, field, select, combobox, tray, title band control, menu row, Settings control |
 | 32     | button `lg`; `--oct-nav-row-h`                                                                       | A large button, a navigation row, a rail face, a tile bar                               |
-| 38     | `--oct-title-rail-h`                                                                                 | The title band and the icon rail's width                                                |
+| 44     | `--oct-title-rail-h`                                                                                 | The title band and the icon rail's width                                                |
 | 44     | `--oct-nav-head-h`, `--oct-menu-row-two-h`                                                           | The account row, a two-line row, a touch target, the one-row composer                   |
 
 Recipe heights are rem rounded to a whole 2px (`h-[round(2.154rem,2px)]` is 28
@@ -650,13 +652,24 @@ coat), painted once on the shell. Neither has a fill or line of its own.
 - **Desktop title bar**: Electron's native frame with `titleBarStyle:
 hiddenInset` and no custom `trafficLightPosition` (it would grow the native
   overlay and eat clicks; if a packaged run shows the lights off the band's
-  centreline, the position to try is x 16, y 12, whose 38px overlay is the
+  centreline, the position to try is x 16, y 15, whose 44px overlay is the
   band's height). The traffic lights sit in the band; the renderer
   keeps `--octant-native-traffic-light-leading-width` (74px) clear before Show
   sidebar, Back and Forward, and one blank drag strip
   (`--octant-native-hidden-inset-titlebar-height`, 24px) reaches the top edge.
-  Interactive children carry `window-no-drag`. Test title-bar controls in the
-  packaged app.
+  Interactive children carry `window-no-drag`. Every empty pixel of the band
+  drags the window, above the open dock too: only a control opts out, and a
+  container is never `window-no-drag` around a drag region, because a dock
+  marked so as a whole left the band's right-hand side undraggable. Test
+  title-bar controls in the packaged app.
+- **Changes in the band**: with a Code thread open the band's trailing cluster
+  starts with its checkout's uncommitted line changes, "+added −removed" in the
+  success and danger inks at the meta size with tabular numbers, as a button
+  that opens the dock's changes view. It is hidden without a fresh checkout
+  reading, shows "+0 −0" as is, and grows leftward from a 56px minimum so the
+  buttons after it never move.
+- **New thread**: Mod+N by default and bindable; every New thread button shows
+  the chord as a quiet key cap in its tooltip.
 
 **The framed panel.** Under the band the sidebar and the stage (the thread, its
 dock and the bottom panel) sit in one panel:
