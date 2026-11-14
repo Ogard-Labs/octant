@@ -112,14 +112,13 @@ const LIVE_REGION_RECIPE_FILES = new Set([
   `${WEB_SOURCE}/ui/base/OctantToast.tsx`,
   `${WEB_SOURCE}/ui/base/OctantApprovalCard.tsx`,
   `${WEB_SOURCE}/ui/shadcn/field.tsx`,
-  `${WEB_SOURCE}/shell/ShellState.tsx`,
+  `${WEB_SOURCE}/ui/base/OctantEmpty.tsx`,
 ]);
 const LIVE_REGION_RECIPE_TAGS = new Set([
   "OctantAlert",
   "OctantToast",
   "OctantDialog",
   "OctantConfirmDialog",
-  "ShellState",
   "FieldError",
   "OctantEmptyRoot",
   "OctantEmpty",

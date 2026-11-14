@@ -17,6 +17,7 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/prov
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { SideChatSidecar } from "@octant/contracts";
 import { memo, useMemo } from "react";
+import { useMinuteTick } from "../polling/useMinuteTick";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { createChatReadCursorStore } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -178,7 +179,6 @@ export interface DockContainerProps {
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
   readonly navigation: ShellNavigationModel;
-  readonly now: number;
   readonly overviewThread?: DockOverviewThread;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly projectPullRequestReviewOpen: boolean;
@@ -249,7 +249,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockToolsAwaitingThread,
     isNarrow,
     navigation,
-    now,
     overviewThread,
     projectNames,
     projectPullRequestReviewOpen,
@@ -263,6 +262,9 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     windowCapability,
     writtenDocumentsByThread,
   } = props;
+  // Relative-time labels tick here, so the minute re-renders this subtree
+  // rather than the whole shell.
+  const now = useMinuteTick().getTime();
   const {
     agentRunClient,
     agentRunSettingsClient,

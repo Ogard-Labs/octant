@@ -19,8 +19,10 @@ export function openBunSqlite(
     database.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
-      -- Streamed replies batch their deltas into one journal commit per burst, so FULL fsyncs a bounded ~10 times a second instead of once per token; the authoritative journal stays durable to the last committed burst.
-      PRAGMA synchronous = FULL;
+      -- NORMAL in WAL mode keeps every commit across a process crash and syncs only at checkpoints, so an OS crash or power loss may drop commits since the last checkpoint (see docs/architecture.md#persistence). FULL fsynced each append and stalled the control plane on macOS.
+      PRAGMA synchronous = NORMAL;
+      PRAGMA journal_size_limit = 67108864;
+      PRAGMA mmap_size = 268435456;
       PRAGMA busy_timeout = 5000;
     `);
   } catch (error) {

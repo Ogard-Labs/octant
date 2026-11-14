@@ -1,9 +1,9 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { unavailable } from "./moduleState";
 import { ReviewWorkspace } from "../gitHistory/ReviewWorkspace";
 import { decodeCodeThreadId } from "@octant/contracts";
 import { Suspense } from "react";
-import { ShellState } from "../shell/ShellState";
 import type { CodeLineNotesSendResult } from "../code/CodeLineNotes";
 import type { CodeController } from "../code/useCodeController";
 
@@ -91,7 +91,7 @@ export default function ReviewModule(props: Props) {
       ? "Send when the current turn finishes. Your notes are kept."
       : undefined;
   return (
-    <Suspense fallback={<ShellState state="loading" title="Loading review" />}>
+    <Suspense fallback={<OctantEmpty state="loading" title="Loading review" />}>
       <ReviewWorkspace
         {...(props.requestedCodeReviewFile === undefined
           ? {}

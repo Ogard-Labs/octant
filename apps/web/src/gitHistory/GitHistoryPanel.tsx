@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { GitHistoryReader } from "@octant/plugin-api/git-history";
@@ -6,7 +7,6 @@ import type { GitHistoryPage, GitHistoryQuery } from "@octant/contracts/git-hist
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { ShellState } from "../shell/ShellState";
 import { CommitDetail } from "./CommitDetail";
 import { layoutCommitGraph } from "./commitGraph";
 import "./git-history.css";
@@ -224,7 +224,9 @@ function BoundHistory(props: GitHistoryPanelProps) {
             </OctantButton>
           </OctantAlert>
         )}
-        {page === undefined && busy ? <ShellState state="loading" title="Loading history" /> : null}
+        {page === undefined && busy ? (
+          <OctantEmpty state="loading" title="Loading history" />
+        ) : null}
         {page !== undefined && commits.length === 0 ? (
           <p className="git-history__notice">
             {search !== ""

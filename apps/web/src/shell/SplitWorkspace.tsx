@@ -20,6 +20,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { OctantMenuIconSlot } from "../ui/base/OctantMenuIconSlot";
 import { OctantSlider } from "../ui/base/OctantSlider";
+import { ResizeDragShield } from "./ShellResizeHandle";
 import {
   OctantContextMenuContent,
   OctantContextMenuGroup,
@@ -242,15 +243,18 @@ function WorkspaceSplitResize(props: {
       }
     | undefined
   >(undefined);
+  const [resizing, setResizing] = useState(false);
 
   useEffect(() => {
     function handleWindowKeyDown(event: KeyboardEvent): void {
       if (event.key !== "Escape") return;
       if (activePointer.current === undefined) return;
       event.preventDefault();
+      setResizing(false);
       cancelSplitResize(activePointer, latestProps.current);
     }
     function handleWindowBlur(): void {
+      setResizing(false);
       cancelSplitResize(activePointer, latestProps.current);
     }
     window.addEventListener("keydown", handleWindowKeyDown);
@@ -279,6 +283,7 @@ function WorkspaceSplitResize(props: {
   }
 
   function cancel(): void {
+    setResizing(false);
     cancelSplitResize(activePointer, props);
   }
 
@@ -287,6 +292,7 @@ function WorkspaceSplitResize(props: {
     if (pointer === undefined || pointer.pointerId !== event.pointerId) return;
     pointerRatio(event);
     activePointer.current = undefined;
+    setResizing(false);
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -316,6 +322,7 @@ function WorkspaceSplitResize(props: {
           moved: false,
         };
         event.currentTarget.setPointerCapture?.(event.pointerId);
+        setResizing(true);
       }}
       onPointerMove={pointerRatio}
       onPointerUp={finish}
@@ -332,6 +339,9 @@ function WorkspaceSplitResize(props: {
         step={0.05}
         value={props.ratio}
       />
+      {resizing ? (
+        <ResizeDragShield axis={props.orientation === "horizontal" ? "column" : "row"} />
+      ) : null}
     </label>
   );
 }
@@ -708,6 +718,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                         data-selected={selectedTabIds.has(String(entry.id)) ? "true" : undefined}
                         key={entry.id}
                         onContextMenu={() => setMenuTabId(String(entry.id))}
+                        role="presentation"
                       >
                         <OctantTabsTab
                           className="content-tab__select rounded-lg border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
@@ -770,7 +781,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                       </div>
                     ))}
                     {localViews.map((view) => (
-                      <div className="workspace-content-tabs__entry content-tab" key={view.key}>
+                      <div
+                        className="workspace-content-tabs__entry content-tab"
+                        key={view.key}
+                        role="presentation"
+                      >
                         <OctantTabsTab
                           className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
                           value={view.key}

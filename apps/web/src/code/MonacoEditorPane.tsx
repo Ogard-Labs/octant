@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { CodeSelectionReview, selectionPrompt } from "./CodeSelectionReview";
 import type { MonacoTextSelection } from "./MonacoEditorAdapter";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
@@ -892,10 +893,10 @@ function AvailableEditor(
         ))}
       </nav>
       {language.diagnostics === undefined ? null : (
-        <details className="code-editor-pane__references">
-          <summary>
-            Problems ({language.diagnostics.filter((item) => item.path === path).length})
-          </summary>
+        <OctantCollapsible
+          className="code-editor-pane__references"
+          summary={`Problems (${String(language.diagnostics.filter((item) => item.path === path).length)})`}
+        >
           {language.diagnostics.filter((item) => item.path === path).length === 0 ? (
             <p>No problems reported for this file</p>
           ) : (
@@ -915,7 +916,7 @@ function AvailableEditor(
                 ))}
             </ul>
           )}
-        </details>
+        </OctantCollapsible>
       )}
       {breakpointNotice === undefined ? null : <p role="status">{breakpointNotice}</p>}
 
