@@ -1,6 +1,6 @@
 import type { ThemeSettings } from "@octant/contracts/theme";
 import { applySemanticOverrides, type DroppedOverride } from "./fallback";
-import { resolveThemePresetTokens } from "./presets";
+import { resolveThemePresetTokens, type ThemePreset } from "./presets";
 import { THEME_TOKEN_ROLES } from "./tokens";
 import { resolveTypographyProjection } from "./typography";
 
@@ -12,6 +12,8 @@ export interface ThemeExportOptions {
   readonly prefix?: string;
   readonly name?: string;
   readonly includeTypography?: boolean;
+  /** Presets effective plugins contribute, so a contributed theme exports as drawn. */
+  readonly contributedPresets?: ReadonlyArray<ThemePreset>;
 }
 
 export interface ThemeExport {
@@ -60,8 +62,9 @@ export function exportThemeTokens(
       "A token prefix must be lowercase letters, digits, and dashes, starting with a letter.",
     );
   }
-  const light = resolveForMode(settings, "light");
-  const dark = resolveForMode(settings, "dark");
+  const contributed = options.contributedPresets ?? [];
+  const light = resolveForMode(settings, "light", contributed);
+  const dark = resolveForMode(settings, "dark", contributed);
   const droppedOverrides = [...light.droppedOverrides, ...dark.droppedOverrides];
   const typography =
     options.includeTypography === true
@@ -98,13 +101,14 @@ export function exportThemeTokens(
 function resolveForMode(
   settings: ThemeSettings,
   mode: "light" | "dark",
+  contributed: ReadonlyArray<ThemePreset>,
 ): {
   readonly tokens: Readonly<Record<string, string>>;
   readonly droppedOverrides: ReadonlyArray<DroppedOverride>;
 } {
   const presetId = mode === "light" ? settings.lightPresetId : settings.darkPresetId;
   return applySemanticOverrides(
-    resolveThemePresetTokens(presetId, mode),
+    resolveThemePresetTokens(presetId, mode, contributed),
     settings.semanticOverrides,
     mode,
   );

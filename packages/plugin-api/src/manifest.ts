@@ -37,6 +37,8 @@ export {
   ExtensionSource,
   ExtensionSourceKind,
   ExtensionSourceReference,
+  ExtensionThemeDeclaration,
+  ExtensionThemeMode,
   decodeExtensionComponentId,
   decodeExtensionComponentQualifiedId,
   decodeExtensionContentDigest,
