@@ -38,6 +38,7 @@ export function createNativeCodeApprovalViewHost(
       },
       setBounds: (bounds) => view.setBounds(bounds),
       setVisible: (visible) => view.setVisible(visible),
+      focus: () => contents.focus(),
     };
     nativeViews.set(port, view);
     return port;

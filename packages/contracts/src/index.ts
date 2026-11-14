@@ -127,6 +127,7 @@ export * from "./settings";
 export * from "./shield";
 export * from "./shieldServers";
 export * from "./serverProjects";
+export * from "./cloudMachines";
 export * from "./acpAgentProfiles";
 export * from "./providers";
 export * from "./hostOAuth";

@@ -241,11 +241,14 @@ function sanitizeLayout(value: unknown, mode: "chat" | "work" | "code"): unknown
     };
   }
   if (value.kind === "pane") {
+    // A pane of another Project than its layout's lead keeps that Project's
+    // context; dropping it would leave the pane's thread refused after reload.
     return {
       kind: "pane",
       nodeId: value.nodeId,
       paneId: value.paneId,
       surface: sanitizeSurface(value.surface, mode),
+      ...(isRecord(value.context) ? { context: sanitizeContextKey(value.context, mode) } : {}),
     };
   }
   if (value.kind !== "group" || !Array.isArray(value.tabs)) return value;

@@ -1,5 +1,5 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { Component, type ReactNode } from "react";
-import { ShellState } from "./ShellState";
 
 export interface SettingsSurfaceErrorBoundaryProps {
   readonly children: ReactNode;
@@ -24,11 +24,11 @@ export class SettingsSurfaceErrorBoundary extends Component<
     if (!this.state.failed) return this.props.children;
     return (
       <main className="shell-boundary">
-        <ShellState
+        <OctantEmpty
           action={{ label: "Reload Octant", onClick: this.props.onReload }}
           eyebrow="Settings"
           message="Reload Octant to retry loading the Settings surface."
-          presentation="page"
+          layout="page"
           role="alert"
           state="warning"
           title="Settings unavailable"

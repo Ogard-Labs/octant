@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import {
   createContext,
   useCallback,
@@ -364,10 +365,9 @@ function SideTaskCard(props: { readonly task: SideTask; readonly running: boolea
         </OctantIconButton>
       </div>
       <p className="side-task__reason">{task.offer.reason}</p>
-      <details className="side-task__prompt">
-        <summary>Prompt</summary>
+      <OctantCollapsible className="side-task__prompt" summary="Prompt">
         <p>{task.offer.prompt}</p>
-      </details>
+      </OctantCollapsible>
       <p className="side-task__question">Start this in {destination}, or do it here?</p>
       <div
         aria-label="What the new thread starts with"

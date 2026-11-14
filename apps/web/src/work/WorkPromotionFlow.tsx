@@ -1,9 +1,10 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { WorkPromotionProposal, ProjectId } from "@octant/contracts";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { useState } from "react";
 import type { WorkPromotionController } from "./useWorkPromotionController";
-import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
+import { SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -99,7 +100,8 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
             <label className="work-promotion__field">
               <span className="oct-row-detail">Selected Work artifact</span>
               {noArtifacts ? (
-                <SurfaceEmpty
+                <OctantEmpty
+                  layout="line"
                   detail="Create a starter note below, then propose."
                   title="No Work artifact to hand over yet"
                   tone="lane"
@@ -119,7 +121,7 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
             <label className="work-promotion__field">
               <span className="oct-row-detail">Target Code Project</span>
               {noTargets ? (
-                <SurfaceEmpty title="No active Code Project to target" tone="lane" />
+                <OctantEmpty layout="line" title="No active Code Project to target" tone="lane" />
               ) : (
                 <OctantSelectField
                   aria-label="Target Code Project"
@@ -147,7 +149,7 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
       </SurfaceSection>
       <SurfaceSection className="work-promotion__pending" label="Waiting for your decision">
         {props.controller.pendingProposals.length === 0 ? (
-          <SurfaceEmpty title={`Nothing waiting in ${props.originProjectName}`} />
+          <OctantEmpty layout="line" title={`Nothing waiting in ${props.originProjectName}`} />
         ) : (
           <ul className="surface-list">
             {props.controller.pendingProposals.map((proposal) => (

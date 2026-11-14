@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { useEffect, useId, useRef, useState } from "react";
 import { Check, Eye, EyeOff, LockKeyhole } from "lucide-react";
 import type {
@@ -177,13 +178,16 @@ export function CredentialRequestCard(props: {
         )}
       </div>
       <div className="credential-request-card__footer">
-        <details className="credential-request-card__details">
-          <summary id={`${id}-privacy`}>Not saved or added to chat</summary>
+        <OctantCollapsible
+          className="credential-request-card__details"
+          summary="Not saved or added to chat"
+          summaryProps={{ id: `${id}-privacy` }}
+        >
           <p>
             Sent only to {props.card.consumer} for this request, then discarded. No files, shell
             access, or saved sign-in. This request expires after 10 minutes.
           </p>
-        </details>
+        </OctantCollapsible>
         <div className="credential-request-card__actions">
           <OctantButton
             type="button"

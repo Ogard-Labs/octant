@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { useBrowserAccountProfiles } from "../browser/useBrowserAccountProfiles";
 import { browserProfileFromChoice, storedBrowserProfile } from "@octant/domain";
 import type { ProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
@@ -121,13 +122,13 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
         });
     void read();
     // Only a headless page needs its picture refreshed; a native view is live.
-    const timer =
+    const stopRefresh =
       active && !native
-        ? globalThis.setInterval(() => void read(), PICTURE_INTERVAL_MS)
+        ? scheduleVisibleInterval(() => void read(), PICTURE_INTERVAL_MS)
         : undefined;
     return () => {
       controller.abort();
-      if (timer !== undefined) globalThis.clearInterval(timer);
+      stopRefresh?.();
     };
   }, [active, adopt, client, native, projectId, props.dock.collapsed]);
 

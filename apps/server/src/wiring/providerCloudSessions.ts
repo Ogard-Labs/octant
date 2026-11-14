@@ -95,7 +95,7 @@ export function wireProviderCloudSessions(
         return undefined;
       const projectId = stored.projectId;
       const current = () =>
-        input.codeProjectAccess.standingAuthority(() => {
+        input.codeProjectAccess.standingAuthority(projectId, () => {
           if (
             signal?.aborted === true ||
             !local(windowId) ||

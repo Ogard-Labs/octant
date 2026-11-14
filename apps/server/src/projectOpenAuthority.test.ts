@@ -6,6 +6,11 @@ const projectId = decodeProjectId("a2000000-0000-4000-8000-000000000001");
 const otherProjectId = decodeProjectId("a2000000-0000-4000-8000-000000000002");
 const noCodeProject = () => false;
 
+const admitsOnly =
+  (shown: string | null) =>
+  (id: string): boolean =>
+    String(id) === String(shown);
+
 describe("windowCanOpenProject", () => {
   it("opens a Chat Project only for a window whose Chat context is that Project", () => {
     const project = { id: projectId, type: "chat", lifecycle: "active" } as const;
@@ -13,28 +18,28 @@ describe("windowCanOpenProject", () => {
     expect(
       windowCanOpenProject({
         project,
-        chatContext: { mode: "chat", projectId },
+        chatAdmits: admitsOnly(projectId),
         canAccessCodeProject: noCodeProject,
       }),
     ).toBe(true);
     expect(
       windowCanOpenProject({
         project,
-        chatContext: { mode: "chat", projectId: otherProjectId },
+        chatAdmits: admitsOnly(otherProjectId),
         canAccessCodeProject: noCodeProject,
       }),
     ).toBe(false);
     expect(
       windowCanOpenProject({
         project,
-        chatContext: { mode: "chat", projectId: null },
+        chatAdmits: admitsOnly(null),
         canAccessCodeProject: noCodeProject,
       }),
     ).toBe(false);
     expect(
       windowCanOpenProject({
         project,
-        chatContext: undefined,
+        chatAdmits: undefined,
         canAccessCodeProject: noCodeProject,
       }),
       "a paired device holds no Chat context",
@@ -45,14 +50,14 @@ describe("windowCanOpenProject", () => {
     expect(
       windowCanOpenProject({
         project: { id: projectId, type: "work", lifecycle: "active" },
-        chatContext: undefined,
+        chatAdmits: undefined,
         canAccessCodeProject: noCodeProject,
       }),
     ).toBe(true);
     expect(
       windowCanOpenProject({
         project: { id: projectId, type: "work", lifecycle: "archived" },
-        chatContext: undefined,
+        chatAdmits: undefined,
         canAccessCodeProject: noCodeProject,
       }),
     ).toBe(false);
@@ -65,7 +70,7 @@ describe("windowCanOpenProject", () => {
     expect(
       windowCanOpenProject({
         project,
-        chatContext: { mode: "chat", projectId },
+        chatAdmits: admitsOnly(projectId),
         canAccessCodeProject: (id) => {
           asked.push(String(id));
           return false;
@@ -74,7 +79,7 @@ describe("windowCanOpenProject", () => {
       "a Chat context naming the same id does not open a Code Project",
     ).toBe(false);
     expect(
-      windowCanOpenProject({ project, chatContext: undefined, canAccessCodeProject: () => true }),
+      windowCanOpenProject({ project, chatAdmits: undefined, canAccessCodeProject: () => true }),
     ).toBe(true);
     expect(asked).toEqual([String(projectId)]);
   });
@@ -83,7 +88,7 @@ describe("windowCanOpenProject", () => {
     expect(
       windowCanOpenProject({
         project: undefined,
-        chatContext: { mode: "chat", projectId },
+        chatAdmits: admitsOnly(projectId),
         canAccessCodeProject: () => true,
       }),
     ).toBe(false);

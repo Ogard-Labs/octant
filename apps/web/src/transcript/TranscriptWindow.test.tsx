@@ -301,6 +301,44 @@ describe("TranscriptWindow", () => {
     expect(screen.queryByRole("textbox", { name: "Find in thread" })).not.toBeInTheDocument();
   });
 
+  it("returns focus to where the person was when Find closes", async () => {
+    renderWindow(rows(10));
+    const row = screen.getByRole("button", { name: "Row 3" });
+    row.focus();
+    fireEvent.keyDown(row, { key: "f", metaKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(row).toHaveFocus();
+  });
+
+  it("opens Find for the open thread while focus is still on the sidebar row that chose it", async () => {
+    renderWindow(rows(10));
+    const sidebar = document.createElement("div");
+    sidebar.className = "sidebar-navigation";
+    const threadRow = document.createElement("button");
+    sidebar.append(threadRow);
+    document.body.append(sidebar);
+    try {
+      threadRow.focus();
+      fireEvent.keyDown(threadRow, { key: "f", metaKey: true });
+      expect(await screen.findByRole("textbox", { name: "Find in thread" })).toHaveFocus();
+    } finally {
+      sidebar.remove();
+    }
+  });
+
+  it("offers Jump to latest once a following transcript is scrolled away from its end", async () => {
+    renderWindow(rows(1000), { align: "end" });
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
+    scroller().scrollTop = 0;
+    fireEvent.scroll(scroller());
+    const jump = await screen.findByRole("button", { name: "Jump to latest" });
+    fireEvent.click(jump);
+    expect(scroller().scrollTop).toBe(scroller().scrollHeight - scroller().clientHeight);
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
+  });
+
   it("finishes indexing while streamed rows continue to refresh", async () => {
     function StreamingThread() {
       const [items, setItems] = useState(() => rows(1000));
@@ -595,6 +633,31 @@ describe("TranscriptWindow", () => {
       expect(screen.getByRole("button", { name: "Row 50" })).toBeVisible();
     });
     expect(first).toBeInTheDocument();
+  });
+
+  it("keeps the focused row mounted, not the row at its old index, after history is prepended", async () => {
+    const later = rows(1000);
+    const { rerender } = renderWindow(later);
+    screen.getByRole("button", { name: "Row 0" }).focus();
+    const earlier = Array.from({ length: 50 }, (_, index) => ({
+      id: `early-${String(index)}`,
+      label: `Early ${String(index)}`,
+    }));
+    rerender(
+      <TranscriptWindow
+        itemKey={(item) => item.id}
+        items={[...earlier, ...later]}
+        listLabel="Transcript"
+        renderItem={(item) => <button type="button">{item.label}</button>}
+        restoreKey="thread-a"
+      />,
+    );
+    scroller().scrollTop = 8000;
+    fireEvent.scroll(scroller());
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Early 0" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Row 0" })).toBeInTheDocument();
   });
 
   it("does not announce recycled history through the live region", async () => {

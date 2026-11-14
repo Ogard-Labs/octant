@@ -69,6 +69,7 @@ export const NIGHTLY_CORE_CHANNELS = {
     "requestCodeOperationApproval",
     "updateCodeOperationApprovalAnchor",
     "cancelCodeOperationApproval",
+    "setRendererOverlayOpen",
     "approvalSurfacePalette",
   ],
   "open-external": [

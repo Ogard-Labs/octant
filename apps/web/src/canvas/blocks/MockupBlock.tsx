@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 import type { CSSProperties } from "react";
 import { MessageSquare } from "lucide-react";
 import {
@@ -232,8 +233,7 @@ export function MockupBlock({
           ))}
         </ol>
       )}
-      <details className="canvas-mockup__outline">
-        <summary>Outline</summary>
+      <OctantCollapsible className="canvas-mockup__outline" summary="Outline">
         {frames.map((frame) => (
           <div key={frame.key} className="canvas-mockup__outline-frame">
             {frame.label === undefined ? null : (
@@ -242,7 +242,7 @@ export function MockupBlock({
             <MockupOutline branches={frame.roots} callouts={callouts} />
           </div>
         ))}
-      </details>
+      </OctantCollapsible>
     </div>
   );
 }

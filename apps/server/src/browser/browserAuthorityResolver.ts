@@ -1,3 +1,4 @@
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { createHash } from "node:crypto";
 import {
   ToolHostId,
@@ -123,10 +124,10 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
     if (context.mode !== mode || String(context.host) !== String(this.#options.workspaceHostId)) {
       return false;
     }
-    // The persisted mode Project is the window boundary. A thread may keep
-    // running after the user selects another thread in the same Project; pane
-    // selection is presentation state, not a new authority grant.
-    return String(context.projectId) === String(authority.projectId ?? null);
+    // The Projects the window shows are its boundary: its lead and its panes'
+    // own. A thread may keep running after the user selects another pane;
+    // pane selection is presentation state, not a new authority grant.
+    return windowAdmitsProject(workspace, mode, authority.projectId ?? null);
   }
 }
 
