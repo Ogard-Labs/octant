@@ -2715,6 +2715,79 @@ describe("ACP provider driver profile quirks", () => {
     expect(plan.events.some((event) => event.kind === "approval-request")).toBe(false);
   });
 
+  it("journals another ACP agent's unseen subagent run once, saying Octant cannot see its calls, and marks outside content", async () => {
+    const { driver, client } = fixture(acpProviderProfiles.goose);
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            nativeSetup: {
+              subagents: true,
+              webTools: true,
+              skills: true,
+              toolServers: true,
+              hooks: true,
+              projectCode: false,
+            },
+          });
+          const seen: ProviderRuntimeEvent[] = [];
+          yield* Effect.forkScoped(
+            Stream.runForEach(yield* connection.subscribe, (event) =>
+              Effect.sync(() => {
+                if (
+                  event.kind === "approval-request" ||
+                  event.kind === "child-agent-activity" ||
+                  event.kind === "outside-content-read"
+                ) {
+                  seen.push(event);
+                }
+              }),
+            ),
+          );
+          yield* Effect.sleep("1 millis");
+          // Two requests from the same unseen call are one subagent run.
+          for (const id of ["subagent-permission-1", "subagent-permission-2"]) {
+            client.request({
+              kind: "request",
+              id,
+              method: "session/request_permission",
+              params: {
+                sessionId: "agent-session-1",
+                toolCall: { toolCallId: "child-call-3" },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "reject", name: "Reject", kind: "reject_once" },
+                ],
+              },
+            });
+            yield* Effect.sleep("5 millis");
+          }
+          return seen;
+        }),
+      ),
+    );
+    expect(events.map((event) => event.kind)).toEqual([
+      "child-agent-activity",
+      "outside-content-read",
+      "approval-request",
+      "approval-request",
+    ]);
+    expect(events[0]).toMatchObject({
+      childAgentId: "child-call-3",
+      status: "running",
+      summary:
+        "Goose is running a subagent. Octant cannot see its tool calls or when it ends, only the approvals it asks for.",
+    });
+    expect(events[1]).toMatchObject({ toolCallId: "child-call-3", source: "hosted-tool" });
+    // Each event takes its own place in the session's sequence.
+    const sequences = events.map((event) => event.sequence);
+    expect(new Set(sequences).size).toBe(sequences.length);
+  });
+
   it("answers a gated session form exactly once and cancels only its pending native callback", async () => {
     const { driver, client } = fixture(
       { ...vibe, elicitationVersions: ["3.0.3"] },

@@ -1210,6 +1210,9 @@ function makeConnection(
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
       }
+      // An unseen subagent's run is journaled before the approval it asks for.
+      if (mapped.kind === "approval")
+        for (const preceding of mapped.preceding ?? []) offer(preceding);
       // Plan is read-only, so nothing it asks for is anyone's to approve. Work
       // and Code share the shell at the thread's level, so an `execute`
       // request reaches the person in Work as it does in Code.

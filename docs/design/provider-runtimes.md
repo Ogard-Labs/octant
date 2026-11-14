@@ -1107,10 +1107,16 @@ session whose subagents run it is shown through the ordinary approval path as
 "A <agent> subagent asks to run a tool. <agent> doesn't say which." with Allow
 and Deny under the thread's level, instead of failing the turn; in Plan and
 Chat it still fails the turn. No agent but Mistral Vibe names a child session,
-so their subagents are not shown as child runs and `nativeChildAgents` stays
-unavailable for every ACP agent. Not built yet: a journal record and an
-outside-content mark for a subagent run Octant cannot see; the approval card
-is today the only trace of one.
+so their subagents are not shown from the call that started them and
+`nativeChildAgents` stays unavailable for every ACP agent. Instead, the first
+such request for a call Octant never saw journals a child run keyed by that
+call, before its approval card: it says "<agent> is running a subagent.
+Octant cannot see its tool calls or when it ends, only the approvals it asks
+for.", as a Mistral Vibe custom-agent run says what Octant cannot see, and it
+marks the thread as having read outside content under `hosted-tool`, since
+the subagent may have done so unseen (maintainer decision, 2026-11-14). A
+later request naming the same call adds only its card. The run stays shown
+as running, because nothing reports its end.
 
 Kimi Code's own slash commands run in Work and Code outside Plan, as in its
 own app (maintainer decision, 2026-11-14); the probe still pins the reviewed
