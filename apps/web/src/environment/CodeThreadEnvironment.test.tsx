@@ -464,7 +464,7 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
   });
 
-  it("names the checkout, its branch, and its folder once, above the changes", async () => {
+  it("names the checkout in the header and says in the checkout card which worktree the thread is in", async () => {
     render(
       <CodeThreadEnvironment
         environmentOpen
@@ -477,10 +477,11 @@ describe("CodeThreadEnvironment", () => {
     );
     await openEnvironment();
     const header = screen.getByRole("region", { name: "Environment details" });
-    expect(within(header).getByText("feature/issue-204")).toBeVisible();
+    expect(within(header).getAllByText("feature/issue-204")).toHaveLength(2);
     expect(within(header).getByText("~/Dev/Repos/octant/.worktrees/issue-204")).toBeVisible();
-    expect(screen.getAllByText("feature/issue-204")).toHaveLength(1);
-    expect(screen.getByTitle(readyObservation().worktreeRoot)).toHaveTextContent("issue-204");
+    expect(screen.getByTitle(readyObservation().worktreeRoot)).toHaveTextContent(
+      "Worktreefeature/issue-204·…/.worktrees/issue-204",
+    );
   });
 
   it("reports an unavailable identity when no project is bound to the tab", () => {

@@ -32,10 +32,12 @@ describe("EnvironmentGitGroup", () => {
     expect(screen.getByText("Uncommitted changes")).toBeVisible();
     const worktree = screen.getByTitle(readyObservation.worktreeRoot);
     expect(worktree).toHaveTextContent("Worktree");
-    expect(worktree).toHaveTextContent("issue-52-reference-faithful-shell");
-    // The header names the repository and branch; the card does not repeat them.
+    // The worktree is named plainly with its branch and where it lives.
+    expect(worktree).toHaveTextContent(
+      "Worktreefeature/issue-52-reference-faithful-shell·…/.agent-worktrees/issue-52-reference-faithful-shell",
+    );
+    // The header names the repository; the card does not repeat it.
     expect(screen.queryByText("Octant")).not.toBeInTheDocument();
-    expect(screen.queryByText("feature/issue-52-reference-faithful-shell")).not.toBeInTheDocument();
   });
 
   it("does not mention a worktree when the thread works in the checkout itself", () => {

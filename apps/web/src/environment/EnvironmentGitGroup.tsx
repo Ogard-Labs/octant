@@ -109,9 +109,11 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
         <p className="environment-git-group__fact" title={observation.worktreeRoot}>
           <Files aria-hidden="true" size={12} />
           <span>Worktree</span>
-          <span className="environment-git-group__mono">
-            {pathBasename(observation.worktreeRoot)}
-          </span>
+          {observation.branch.kind === "named" ? (
+            <span className="environment-git-group__mono">{observation.branch.name}</span>
+          ) : null}
+          <span aria-hidden="true">·</span>
+          <span className="environment-git-group__mono">{shortPath(observation.worktreeRoot)}</span>
         </p>
       ) : null}
     </div>
@@ -140,8 +142,10 @@ function ChangeCount(props: {
   );
 }
 
-function pathBasename(path: string): string {
-  return path.split("/").filter(Boolean).at(-1) ?? path;
+/** The last two folders of a path behind an ellipsis; the full path is the line's title. */
+function shortPath(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length <= 2 ? path : `…/${parts.slice(-2).join("/")}`;
 }
 
 function WayOut(props: {
