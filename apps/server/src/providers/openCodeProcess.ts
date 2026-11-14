@@ -669,6 +669,23 @@ export function openCodeServesNativeRoutes(version: string | undefined): boolean
   return openCode2VersionAtLeast(version, OPEN_CODE_2_NATIVE_ROUTES_SINCE);
 }
 
+/**
+ * The 2.x session posture as the probed release can serve it. A release
+ * before the question forms were read keeps OpenCode's `question` permission
+ * denied: the model is told no and carries on, where an allowed question would
+ * publish a form Octant cannot map and fail the turn. Only Octant writes this
+ * rule, since the person's own rules for `question` are dropped.
+ */
+export function betaPermissionsForRelease(
+  rules: ReadonlyArray<PermissionV2Rule>,
+  version: string | undefined,
+): ReadonlyArray<PermissionV2Rule> {
+  if (openCodeServesQuestionForms(version)) return rules;
+  return rules.map((rule) =>
+    rule.action === "question" ? { ...rule, effect: "deny" as const } : rule,
+  );
+}
+
 /** Whether this runtime version string names a 2.x release read for its question forms. */
 export function openCodeServesQuestionForms(version: string | undefined): boolean {
   return openCode2VersionAtLeast(version, OPEN_CODE_2_QUESTION_FORMS_SINCE);
@@ -1693,6 +1710,14 @@ export function makeOpenCodeProcessLive(
           acquireOpenCodeServer(
             {
               ...requested,
+              ...(requested.betaPermissions === undefined
+                ? {}
+                : {
+                    betaPermissions: betaPermissionsForRelease(
+                      requested.betaPermissions,
+                      probe.version,
+                    ),
+                  }),
               ...(network === undefined ? {} : { network }),
               ...(servers === undefined ? {} : { servers }),
             },

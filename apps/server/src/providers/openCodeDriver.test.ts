@@ -22,6 +22,7 @@ import {
   adaptBetaOpenCodeEvent,
   betaAgentPermissionRules,
   betaPermissionEffect,
+  betaSessionPermissionRules,
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
   openCodePromptParts,
@@ -31,7 +32,11 @@ import {
 import type { OpenCodeEvent } from "./openCodeEventMapper";
 import type { OpenCodeOwnSetup } from "./openCodeOwnSetup";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
-import type { OpenCodeProcessPort, OpenCodeProcessStartInput } from "./openCodeProcess";
+import {
+  betaPermissionsForRelease,
+  type OpenCodeProcessPort,
+  type OpenCodeProcessStartInput,
+} from "./openCodeProcess";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000101");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000102");
@@ -2947,6 +2952,96 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(rules, "question")).toBe("allow");
     expect(evaluateV2Permission(rules, "other-server_tool")).toBe("deny");
     expect(evaluateV2Permission(rules, `${bridge}_octant_browser`)).toBe("allow");
+  });
+
+  it.each([
+    ["opencode v2.0.21", "deny"],
+    ["opencode v2.0.22", "allow"],
+    ["opencode v2.2.0", "allow"],
+  ] as const)(
+    "lets %s's question tool ask only from the first release whose question forms were read (%s)",
+    (version, effect) => {
+      for (const policy of ["plan", "approval-gated", "full-access"] as const) {
+        const rules = betaPermissionsForRelease(
+          betaSessionPermissionRules(policy, "code"),
+          version,
+        );
+        expect(evaluateV2Permission([...rules], "question")).toBe(effect);
+        // Nothing but the question rule follows the release.
+        expect(evaluateV2Permission([...rules], "edit")).toBe(
+          evaluateV2Permission([...betaSessionPermissionRules(policy, "code")], "edit"),
+        );
+      }
+    },
+  );
+
+  it("fails a turn on a release before 2.0.22 when a question form arrives anyway, and asks nobody", async () => {
+    const fixture = driverFixture({
+      process: {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.succeed({
+              isolatedConfiguration: true as const,
+              authorization: "Basic redacted",
+              pid: process.pid,
+              runtime: "beta" as const,
+              version: "opencode v2.0.21",
+              temporaryDirectory: launchScratchDirectory(),
+              url: new URL("http://127.0.0.1:1/"),
+            }),
+            () => Effect.void,
+          ),
+      },
+      events: [
+        {
+          type: "form.created",
+          properties: {
+            form: {
+              id: "frm_old",
+              sessionID: "provider-session",
+              title: "Questions",
+              metadata: { kind: "question" },
+              fields: [
+                {
+                  key: "q0",
+                  title: "Continue",
+                  description: "Continue?",
+                  type: "string",
+                  options: [{ value: "Yes", label: "Yes", description: "Continue" }],
+                },
+              ],
+            },
+          },
+        } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(events.some((event) => event.kind === "user-input-request")).toBe(false);
+    expect(
+      events.some((event) => event.kind === "failed" && event.failure.category === "unsupported"),
+    ).toBe(true);
   });
 
   it("launches with OpenCode's own skills only for a session that carries the person's setup", async () => {

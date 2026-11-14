@@ -706,9 +706,11 @@ routes; its `question` tool publishes a `form.created` form marked
 (the question as the description, its header as the title, its choices as
 options), and takes the answer at
 `POST /api/session/{id}/form/{form}/reply` as `{ answer: { q0: ... } }`
-(read from the v2.0.22 and v2.0.27 source). The written posture allows
-`question` at every level, Plan included, since a question changes nothing;
-the capability is reported `supported` from 2.0.22. A question asking for
+(read from the v2.0.22 and v2.0.27 source). From 2.0.22 the written posture
+allows `question` at every level, Plan included, since a question changes
+nothing, and the capability is reported `supported`. An earlier 2.x release
+keeps `question` denied, as before, so the model is told no and carries on
+instead of the turn failing on a form Octant cannot map. A question asking for
 several answers (a multiselect field) fails the turn as an unsupported
 format, as on 1.x, and any other form (a sign-in, a server's own request)
 still fails the turn rather than hang on an unanswerable form. Resume,
