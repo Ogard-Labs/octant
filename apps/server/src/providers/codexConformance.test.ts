@@ -125,13 +125,14 @@ describe("Codex provider conformance", () => {
         "diff",
         "task-progress",
         "task-list",
+        "user-input-request",
         "approval-request",
         "interrupted",
       ],
       expectedFailureCategories: {
         staleResume: "stale-resume",
         unknownApproval: "protocol",
-        unknownUserInput: "unsupported",
+        unknownUserInput: "protocol",
       },
       isReleased: () => released,
     });
@@ -553,6 +554,24 @@ function runtimeMessages(threadId: string): ReadonlyArray<CodexServerMessage> {
       explanation: null,
       plan: [{ step: "Verify", status: "inProgress" }],
     }),
+    {
+      kind: "request",
+      id: "provider-question-1",
+      method: "item/tool/requestUserInput",
+      params: {
+        threadId,
+        turnId: "turn-1",
+        itemId: "question-item-1",
+        questions: [
+          {
+            id: "continue",
+            header: "Continue",
+            question: "Continue?",
+            options: [{ label: "Yes", description: "Continue" }],
+          },
+        ],
+      },
+    },
     {
       kind: "request",
       id: "provider-request-1",

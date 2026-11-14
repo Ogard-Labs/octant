@@ -642,16 +642,36 @@ function versionNumbers(version: string): readonly [number, number, number] | un
  */
 const OPEN_CODE_2_NATIVE_ROUTES_SINCE = [2, 2, 0] as const;
 
-/** Whether this runtime version string names a 2.x release read for the routes above. */
-export function openCodeServesNativeRoutes(version: string | undefined): boolean {
+/**
+ * The first 2.x release whose question tool was read: it asks through a
+ * `form.created` form with one field per question (`q0`, `q1`, ...) and takes
+ * the answer at `POST /api/session/{id}/form/{form}/reply` (opencode v2.0.22
+ * and v2.0.27 source, read 2026-11-14).
+ */
+const OPEN_CODE_2_QUESTION_FORMS_SINCE = [2, 0, 22] as const;
+
+function openCode2VersionAtLeast(
+  version: string | undefined,
+  floor: readonly [number, number, number],
+): boolean {
   const match = /^opencode2? v(\d+)\.(\d+)\.(\d+)/.exec(version ?? "");
   if (match === null) return false;
   const numbers = [Number(match[1]), Number(match[2]), Number(match[3])];
-  for (const [index, floor] of OPEN_CODE_2_NATIVE_ROUTES_SINCE.entries()) {
+  for (const [index, minimum] of floor.entries()) {
     const value = numbers[index] ?? 0;
-    if (value !== floor) return value > floor;
+    if (value !== minimum) return value > minimum;
   }
   return true;
+}
+
+/** Whether this runtime version string names a 2.x release read for the routes above. */
+export function openCodeServesNativeRoutes(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_NATIVE_ROUTES_SINCE);
+}
+
+/** Whether this runtime version string names a 2.x release read for its question forms. */
+export function openCodeServesQuestionForms(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_QUESTION_FORMS_SINCE);
 }
 
 /** Isolation guards are attested only for the runtime version verified by the hostile fixture. */

@@ -1649,8 +1649,9 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("reports 2.x resume, interruption, tool activity, and approvals, and questions as unsupported", async () => {
+  it("reports 2.x resume, interruption, tool activity, approvals, and questions from the first release read for its question forms", async () => {
     const fixture = driverFixture({
+      healthVersion: "opencode v2.0.22",
       process: {
         start: () =>
           Effect.acquireRelease(
@@ -1675,7 +1676,7 @@ describe("OpenCode driver", () => {
       interruption: "supported",
       toolActivity: "supported",
       approvals: "supported",
-      userQuestions: "unsupported",
+      userQuestions: "supported",
       fileChanges: "unsupported",
     });
   });
@@ -2505,8 +2506,9 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
   });
 
-  it("fails a 2.x turn closed when 2.0.22 asks a question through a form", async () => {
-    // The shape 2.0.22's question tool publishes: the session sits inside the form.
+  it("asks a 2.x question form through the questionnaire and answers OpenCode at the form", async () => {
+    // The shape 2.0.22's question tool publishes: the session sits inside the
+    // form, and each question is a field keyed by its position.
     const fixture = betaDriver({
       events: [
         {
@@ -2520,9 +2522,14 @@ describe("OpenCode driver", () => {
               fields: [
                 {
                   key: "q0",
-                  title: "Continue?",
+                  title: "Continue",
+                  description: "Continue with the migration?",
                   type: "string",
-                  options: [{ value: "Yes" }, { value: "No" }],
+                  options: [
+                    { value: "Yes", label: "Yes", description: "Run it now" },
+                    { value: "No", label: "No", description: "Stop here" },
+                  ],
+                  custom: true,
                 },
               ],
             },
@@ -2530,7 +2537,7 @@ describe("OpenCode driver", () => {
         } as unknown as Event,
       ],
     });
-    const output = await Effect.runPromise(
+    const { events, answer } = await Effect.runPromise(
       Effect.scoped(
         fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
           Effect.flatMap((connection) =>
@@ -2540,28 +2547,38 @@ describe("OpenCode driver", () => {
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
-                      ["completed", "failed", "interrupted"].includes(event.kind),
+                      ["user-input-request", "completed", "failed"].includes(event.kind),
                     ),
                   ),
                 ),
               );
-              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-              return yield* Fiber.join(collector);
+              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+              const events = Array.from(yield* Fiber.join(collector));
+              const question = events.find((event) => event.kind === "user-input-request");
+              if (question?.kind !== "user-input-request") return { events, answer: undefined };
+              const answer = yield* Effect.exit(
+                connection.answerUserInput({
+                  sessionId,
+                  requestId: question.requestId,
+                  answer: "Yes",
+                }),
+              );
+              return { events, answer };
             }),
           ),
         ),
       ),
     );
-    const events = Array.from(output);
-    expect(events.some((event) => event.kind === "user-input-request")).toBe(false);
-    expect(
-      events.some(
-        (event) =>
-          event.kind === "failed" &&
-          event.failure.category === "unsupported" &&
-          event.failure.message.includes("questions"),
-      ),
-    ).toBe(true);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+    expect(events.find((event) => event.kind === "user-input-request")).toMatchObject({
+      prompt: "Continue with the migration?",
+      options: [
+        { label: "Yes", description: "Run it now" },
+        { label: "No", description: "Stop here" },
+      ],
+    });
+    expect(answer?._tag).toBe("Success");
+    expect(fixture.calls).toContain("question.reply:Yes");
   });
 
   it("ends a 2.x turn OpenCode's shutdown cut off as held for recovery, and sends nothing again", async () => {
@@ -2927,7 +2944,7 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(rules, "shell")).toBe("ask");
     expect(evaluateV2Permission(rules, "external_directory")).toBe("deny");
     expect(evaluateV2Permission(rules, "skill")).toBe("deny");
-    expect(evaluateV2Permission(rules, "question")).toBe("deny");
+    expect(evaluateV2Permission(rules, "question")).toBe("allow");
     expect(evaluateV2Permission(rules, "other-server_tool")).toBe("deny");
     expect(evaluateV2Permission(rules, `${bridge}_octant_browser`)).toBe("allow");
   });
@@ -3148,6 +3165,8 @@ function driverFixture(
     /** Streamed after an approval reply is sent and before that reply resolves. */
     readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
+    /** The version a 2.x client reports: its process's, never a health route's. */
+    readonly healthVersion?: string;
   } = {},
 ) {
   const calls: string[] = [];
@@ -3182,7 +3201,7 @@ function driverFixture(
   const sessionRoots: string[] = [];
   const promptModels: string[] = [];
   const client: OpenCodeClientPort = {
-    health: async () => ({ healthy: true, version: "1.18.0" }),
+    health: async () => ({ healthy: true, version: options.healthVersion ?? "1.18.0" }),
     providers: async () => providerList(),
     subscribe: async (signal) => {
       calls.push("event.subscribe");

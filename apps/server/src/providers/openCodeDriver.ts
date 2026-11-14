@@ -59,6 +59,7 @@ import {
 } from "./openCodeManagedTools";
 import {
   openCodeServesNativeRoutes,
+  openCodeServesQuestionForms,
   type OpenCodeProcessPort,
   type OpenCodeServerConnection,
 } from "./openCodeProcess";
@@ -365,8 +366,10 @@ function openCodeChatCapabilities(
 
 /**
  * 2.x reports the operations this slice maps. Approvals are mapped through
- * the 2.x permission event and reply route. Questions stay unsupported:
- * 2.0.22 serves no question routes and asks through forms instead. A reported
+ * the 2.x permission event and reply route. 2.0.22 serves no question routes
+ * and asks through forms instead; its question forms reach the person as the
+ * questionnaire 1.x questions use, from the first release read for them
+ * (`openCodeServesQuestionForms`). A reported
  * file change is held to the grants the person gave (`failClosedBetaEvent`),
  * so file changes are claimed from the first release read for the event.
  */
@@ -385,7 +388,7 @@ function openCodeBetaCapabilities(
     interruption: "supported",
     toolActivity: "supported",
     approvals: "supported",
-    userQuestions: "unsupported",
+    userQuestions: openCodeServesQuestionForms(version) ? "supported" : "unsupported",
     fileChanges: native ? "supported" : "unsupported",
     sessionCompaction: { chat: compaction, work: compaction, code: compaction },
     appManagedTools: reported.appManagedTools,
@@ -1185,10 +1188,34 @@ export function makeOfficialOpenCodeClient(
       }
       await client.permission.reply({ requestID: requestId, reply }, { throwOnError: true });
     },
-    replyQuestion: async (_sessionId, requestId, answers) => {
-      // 2.0.22 serves no question routes; it asks through forms, which are
-      // not mapped, so its questions are reported unsupported.
-      if (beta) throw fail("unsupported", "OpenCode 2 questions are not mapped.");
+    replyQuestion: async (sessionId, requestId, answers) => {
+      if (beta) {
+        // 2.0.22 serves no question routes; its question tool asks through a
+        // form whose field for the nth question is `q<n>` (see
+        // `openCodeQuestionForm`), answered at the form's reply route.
+        const response = await fetch(
+          new URL(
+            `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(requestId)}/reply`,
+            server.url,
+          ).toString(),
+          {
+            method: "POST",
+            headers: {
+              authorization: server.authorization,
+              "content-type": "application/json",
+              "x-opencode-directory": encodeURIComponent(projectRoot),
+            },
+            body: JSON.stringify({
+              answer: Object.fromEntries(answers.map((answer, index) => [`q${index}`, answer])),
+            }),
+            signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`OpenCode 2 question reply failed with status ${response.status}.`);
+        }
+        return;
+      }
       await client.question.reply(
         { requestID: requestId, answers: answers.map((answer) => [answer]) },
         { throwOnError: true },
@@ -1590,6 +1617,7 @@ function makeConnection(
             mode,
             projectRoot,
             extraFolders,
+            questionForms: openCodeServesQuestionForms(runtimeVersion),
             remembersInOpenCode: opencodeRemembersApproval(
               state,
               runtimeKind,
@@ -2672,61 +2700,61 @@ function makeConnection(
                     });
           }),
         ),
+      // A 2.x question is pending only once its form was mapped, so the
+      // pending check below refuses an answer to any other form.
       answerUserInput: (input) =>
-        runtimeKind === "beta"
-          ? Effect.fail(fail("unsupported", "OpenCode 2 questions are not mapped."))
-          : usableStateFor(input.sessionId).pipe(
-              Effect.flatMap(([source, state]) => {
-                const activeClient = client;
-                if (activeClient === undefined) {
-                  return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
-                }
-                return state.terminal
-                  ? Effect.fail(fail("protocol", "Provider session is already terminal."))
-                  : !state.questions.has(input.requestId)
-                    ? Effect.fail(fail("protocol", "Provider question request is not pending."))
-                    : Effect.suspend(() => {
-                        const question = state.questions.get(input.requestId);
-                        if (question === undefined)
-                          return Effect.fail(
-                            fail("protocol", "Provider question request is not pending."),
-                          );
-                        const answers =
-                          state.questionAnswers.get(question.providerRequestId) ??
-                          new Map<number, string>();
-                        if (answers.has(question.index))
-                          return Effect.fail(
-                            fail("protocol", "Provider question was already answered."),
-                          );
-                        answers.set(question.index, input.answer);
-                        state.questionAnswers.set(question.providerRequestId, answers);
-                        if (answers.size < question.count) return Effect.void;
-                        const ordered = Array.from(
-                          { length: question.count },
-                          (_, index) => answers.get(index + 1) ?? "",
-                        );
-                        const reply = request(() =>
-                          activeClient.replyQuestion(
-                            state.requestSources.get(question.providerRequestId) ?? source,
-                            question.providerRequestId,
-                            ordered,
-                          ),
-                        ).pipe(
-                          Effect.tap(() =>
-                            Effect.sync(() => {
-                              for (const [id, pending] of state.questions) {
-                                if (pending.providerRequestId === question.providerRequestId)
-                                  state.questions.delete(id);
-                              }
-                              state.questionAnswers.delete(question.providerRequestId);
-                            }),
-                          ),
-                          Effect.tapError(() => Effect.sync(() => answers.delete(question.index))),
-                        );
-                        return reply;
-                      });
-              }),
-            ),
+        usableStateFor(input.sessionId).pipe(
+          Effect.flatMap(([source, state]) => {
+            const activeClient = client;
+            if (activeClient === undefined) {
+              return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
+            }
+            return state.terminal
+              ? Effect.fail(fail("protocol", "Provider session is already terminal."))
+              : !state.questions.has(input.requestId)
+                ? Effect.fail(fail("protocol", "Provider question request is not pending."))
+                : Effect.suspend(() => {
+                    const question = state.questions.get(input.requestId);
+                    if (question === undefined)
+                      return Effect.fail(
+                        fail("protocol", "Provider question request is not pending."),
+                      );
+                    const answers =
+                      state.questionAnswers.get(question.providerRequestId) ??
+                      new Map<number, string>();
+                    if (answers.has(question.index))
+                      return Effect.fail(
+                        fail("protocol", "Provider question was already answered."),
+                      );
+                    answers.set(question.index, input.answer);
+                    state.questionAnswers.set(question.providerRequestId, answers);
+                    if (answers.size < question.count) return Effect.void;
+                    const ordered = Array.from(
+                      { length: question.count },
+                      (_, index) => answers.get(index + 1) ?? "",
+                    );
+                    const reply = request(() =>
+                      activeClient.replyQuestion(
+                        state.requestSources.get(question.providerRequestId) ?? source,
+                        question.providerRequestId,
+                        ordered,
+                      ),
+                    ).pipe(
+                      Effect.tap(() =>
+                        Effect.sync(() => {
+                          for (const [id, pending] of state.questions) {
+                            if (pending.providerRequestId === question.providerRequestId)
+                              state.questions.delete(id);
+                          }
+                          state.questionAnswers.delete(question.providerRequestId);
+                        }),
+                      ),
+                      Effect.tapError(() => Effect.sync(() => answers.delete(question.index))),
+                    );
+                    return reply;
+                  });
+          }),
+        ),
       answerTool: (input) =>
         usableStateFor(input.sessionId).pipe(
           Effect.flatMap(([, state]) => {
@@ -2834,8 +2862,11 @@ function failClosedBetaEvent(
   state: SessionState,
   mode: "chat" | "work" | "code",
   projectRoot: string,
+  fromQuestionForm: boolean,
 ): ProviderRuntimeEvent {
-  if (event.kind === "user-input-request") {
+  // 2.0.22 answers questions only through a form's reply route, so a question
+  // that came any other way could never be answered.
+  if (event.kind === "user-input-request" && !fromQuestionForm) {
     return {
       kind: "failed",
       instanceId: event.instanceId,
@@ -2892,15 +2923,25 @@ function mapAndOffer(
     readonly mode: "chat" | "work" | "code";
     readonly projectRoot: string;
     readonly extraFolders: ReadonlyArray<string>;
+    /** Whether this release's question forms were read (`openCodeServesQuestionForms`). */
+    readonly questionForms: boolean;
     /** An approval here is answered `always`, a grant kept in OpenCode's own store. */
     readonly remembersInOpenCode: boolean;
     readonly reply: (requestId: string, reply: "once" | "reject") => void;
   },
 ): void {
   if (state.terminal) return;
-  // 2.0.22 asks its questions through forms, which are not mapped; a turn
-  // waiting on an unanswerable form would hang, so it fails instead.
-  if (beta !== undefined && String(event.type) === "form.created") {
+  // 2.0.22 asks its questions through forms. A question form becomes the
+  // questionnaire 1.x questions use; any other form (a sign-in, a server's
+  // own request) is not mapped, and a turn waiting on an unanswerable form
+  // would hang, so it fails instead.
+  const questionForm =
+    beta !== undefined && String(event.type) === "form.created"
+      ? beta.questionForms
+        ? openCodeQuestionForm(event.properties)
+        : undefined
+      : undefined;
+  if (beta !== undefined && String(event.type) === "form.created" && questionForm === undefined) {
     offer(unmappedBetaFailure(state, instanceId, clock, "OpenCode 2 questions are not mapped."));
     retire(state);
     return;
@@ -3008,7 +3049,7 @@ function mapAndOffer(
         correlationId: state.correlationId,
         occurredAt: clock() as UtcTimestamp,
       },
-      event,
+      questionForm ?? event,
     );
   } catch (error) {
     if (!beta) throw error;
@@ -3050,7 +3091,13 @@ function mapAndOffer(
       };
     }
     if (beta !== undefined)
-      normalized = failClosedBetaEvent(normalized, state, beta.mode, beta.projectRoot);
+      normalized = failClosedBetaEvent(
+        normalized,
+        state,
+        beta.mode,
+        beta.projectRoot,
+        questionForm !== undefined,
+      );
     // OpenCode settles usage once per model step. Consumers keep the latest
     // report as the logical turn's figure, so make each report cumulative
     // across the prompt's tool loop while keeping the same provider session.
@@ -3384,9 +3431,10 @@ function extraFolderPatterns(extraFolders: ReadonlyArray<string>): ReadonlyArray
 
 /**
  * The whole 2.x ruleset a process serves, in the same order as the 1.x
- * session ruleset: the posture, then every namespaced tool, skill, and
- * question denied, then only this connection's app-managed tool bridge
- * allowed. These come after the posture's catch-all so they still apply.
+ * session ruleset: the posture, then every namespaced tool and skill denied,
+ * OpenCode's question tool allowed, then only this connection's app-managed
+ * tool bridge allowed. These come after the posture's catch-all so they
+ * still apply.
  */
 export function betaSessionPermissionRules(
   policy: ProviderExecutionPolicy,
@@ -3401,9 +3449,12 @@ export function betaSessionPermissionRules(
     ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),
     ...(own.toolServers ? [] : [{ action: "*_*", resource: "*", effect: "deny" } as const]),
     ...(ownSkills ? [] : [{ action: "skill", resource: "*", effect: "deny" } as const]),
-    // 2.0.22's question tool asks for this permission and then publishes a
-    // form, which Octant does not map; its default agent allows it.
-    { action: "question", resource: "*", effect: "deny" },
+    // The question tool asks for this permission and then publishes a form,
+    // which reaches the person as the thread's questionnaire. A question
+    // changes nothing, so every posture allows it, Plan included, as
+    // OpenCode's own default agent does; without this the posture's
+    // catch-all would ask for permission to ask.
+    { action: "question", resource: "*", effect: "allow" },
   ];
   if (managedToolServerName !== undefined) {
     rules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });
@@ -3529,6 +3580,77 @@ export function providerFailure(error: unknown): ProviderFailure {
 
 const OPENCODE_PROCESS_LOST_MESSAGE =
   "The OpenCode process stopped while this turn was running. Check what it did, then resume.";
+
+type OpenCodeQuestionEvent = Extract<OpenCodeEvent, { readonly type: "question.v2.asked" }>;
+
+/**
+ * The questions a 2.x `form.created` carries, in the shape OpenCode's own
+ * question event has, or undefined for any other form. OpenCode 2.0.22's
+ * question tool asks through a form marked `metadata.kind: "question"` with
+ * one field per question, keyed `q0`, `q1`, ... in order: the question as
+ * the field's description, its header as the title, its choices as options,
+ * and a multiselect field for a question that takes several answers (opencode
+ * `packages/core/src/tool/plugin/question.ts` at v2.0.22 and v2.0.27). A form
+ * that departs from that shape is not a question Octant can answer.
+ */
+export function openCodeQuestionForm(properties: unknown): OpenCodeQuestionEvent | undefined {
+  if (typeof properties !== "object" || properties === null) return undefined;
+  const form = (properties as { readonly form?: unknown }).form;
+  if (typeof form !== "object" || form === null) return undefined;
+  const { id, sessionID, metadata, fields } = form as {
+    readonly id?: unknown;
+    readonly sessionID?: unknown;
+    readonly metadata?: { readonly kind?: unknown } | null;
+    readonly fields?: unknown;
+  };
+  if (
+    typeof id !== "string" ||
+    id.length === 0 ||
+    typeof sessionID !== "string" ||
+    sessionID.length === 0 ||
+    metadata?.kind !== "question" ||
+    !Array.isArray(fields) ||
+    fields.length === 0
+  ) {
+    return undefined;
+  }
+  const questions: OpenCodeQuestionEvent["properties"]["questions"] = [];
+  for (const [index, value] of fields.entries()) {
+    if (typeof value !== "object" || value === null) return undefined;
+    const field = value as {
+      readonly key?: unknown;
+      readonly type?: unknown;
+      readonly title?: unknown;
+      readonly description?: unknown;
+      readonly options?: unknown;
+    };
+    if (
+      field.key !== `q${index}` ||
+      (field.type !== "string" && field.type !== "multiselect") ||
+      typeof field.description !== "string" ||
+      !Array.isArray(field.options)
+    ) {
+      return undefined;
+    }
+    const options: Array<{ label: string; description: string }> = [];
+    for (const option of field.options as ReadonlyArray<unknown>) {
+      if (typeof option !== "object" || option === null) return undefined;
+      const { label, description } = option as {
+        readonly label?: unknown;
+        readonly description?: unknown;
+      };
+      if (typeof label !== "string") return undefined;
+      options.push({ label, description: typeof description === "string" ? description : "" });
+    }
+    questions.push({
+      question: field.description,
+      header: typeof field.title === "string" ? field.title : "",
+      options,
+      ...(field.type === "multiselect" ? { multiple: true } : {}),
+    });
+  }
+  return { id, type: "question.v2.asked", properties: { id, sessionID, questions } };
+}
 
 export function sourceSessionId(event: OpenCodeEvent): string | undefined {
   const properties = event.properties as {

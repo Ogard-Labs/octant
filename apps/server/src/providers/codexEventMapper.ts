@@ -22,6 +22,7 @@ import {
   type UnmodeledThreadItem,
 } from "./codexProtocol";
 import { outsideContentTarget } from "./outsideContentRead";
+import { proposedPlanText } from "./proposedPlan";
 import { rateLimitWindowId } from "./rateLimitWindowIdentity";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
@@ -90,6 +91,38 @@ export interface CodexPendingTool {
   readonly event: ProviderRuntimeEvent;
 }
 
+/**
+ * One `request_user_input` set waiting on the person. Each question is its
+ * own questionnaire request, in order; Codex is answered once, by question
+ * id, when every one of them is answered.
+ */
+export interface CodexPendingQuestion {
+  readonly providerRequestId: CodexRpcId;
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly questionIds: ReadonlyArray<string>;
+  readonly requestIds: ReadonlyArray<string>;
+  readonly events: ReadonlyArray<ProviderRuntimeEvent>;
+}
+
+/** What Codex reads when Octant answers a question set without the person. */
+export type CodexUserInputResult = {
+  readonly answers: Readonly<Record<string, { readonly answers: ReadonlyArray<string> }>>;
+};
+
+/**
+ * Codex's answer when it asks for a secret. A password or key typed into the
+ * questionnaire would sit in the thread's journal and Codex's own history, so
+ * the set is answered with this instead, and the model is pointed at the
+ * channels that keep secrets out of the conversation.
+ */
+export const CODEX_SECRET_QUESTION_REFUSAL =
+  "Octant does not collect secrets, passwords, or keys in chat. Ask the person to put it in a credential or environment setting outside the conversation, then continue without it.";
+
+/** A question whose answer is a secret by Codex's own mark or by what it asks for. */
+const SECRET_QUESTION =
+  /\b(?:password|passphrase|passcode|api[\s_-]?key|access[\s_-]?token|secret[\s_-]?key|private[\s_-]?key|bearer[\s_-]?token)s?\b/iu;
+
 interface CodexAgentMessageState {
   lifecycle: "active" | "terminal";
   text: string;
@@ -129,6 +162,12 @@ export type CodexMappedMessage =
   | { readonly kind: "event"; readonly event: ProviderRuntimeEvent }
   | { readonly kind: "approval"; readonly approval: CodexPendingApproval }
   | { readonly kind: "tool"; readonly tool: CodexPendingTool }
+  | { readonly kind: "question"; readonly question: CodexPendingQuestion }
+  | {
+      readonly kind: "question-refused";
+      readonly providerRequestId: CodexRpcId;
+      readonly result: CodexUserInputResult;
+    }
   | { readonly kind: "ignored" }
   | { readonly kind: "protocol-failure"; readonly failure: ProviderFailure };
 
@@ -257,6 +296,27 @@ function mapAgentMessageCompletion(
   const separator = suffix.length === 0 ? "" : agentMessageSeparator(context, item.id);
   context.agentMessages.set(item.id, { lifecycle: "terminal", text: item.text });
   return streamedEvents(context, "text-delta", `${separator}${suffix}`);
+}
+
+/**
+ * The plan Codex's Plan collaboration mode proposes in a `<proposed_plan>`
+ * block, which Codex reports as a plan item (`ProposedPlanSegment` in codex-rs
+ * `core/src/session/turn.rs` at `rust-v0.169.0`). It becomes the reply's own
+ * paragraph under the proposed-plan heading; its deltas are not shown, so the
+ * plan reads once, whole.
+ */
+function mapProposedPlan(
+  context: CodexEventContext,
+  item: Extract<ThreadItem, { readonly type: "plan" }>,
+): ReadonlyArray<CodexMappedMessage> {
+  if (context.agentMessages.get(item.id)?.lifecycle === "terminal") {
+    return protocolFailure("Provider completed a plan more than once.");
+  }
+  const text = proposedPlanText(item.text);
+  if (text === undefined) return [{ kind: "ignored" }];
+  const separator = agentMessageSeparator(context, item.id);
+  context.agentMessages.set(item.id, { lifecycle: "terminal", text });
+  return streamedEvents(context, "text-delta", `${separator}${text}`);
 }
 
 function correlationFailure(): ReadonlyArray<CodexMappedMessage> {
@@ -663,8 +723,11 @@ function mapLifecycle(
             }),
           ]
         : [{ kind: "ignored" }];
-    case "userMessage":
     case "plan":
+      return message.method === "item/completed"
+        ? mapProposedPlan(context, item)
+        : [{ kind: "ignored" }];
+    case "userMessage":
     case "reasoning":
       return [{ kind: "ignored" }];
     case "agentMessage":
@@ -676,8 +739,100 @@ function mapLifecycle(
 
 type CodexApprovalRequest = Exclude<
   Extract<CodexServerMessage, { readonly kind: "request" }>,
-  { readonly method: "item/tool/call" }
+  { readonly method: "item/tool/call" | "item/tool/requestUserInput" }
 >;
+
+/**
+ * Codex's question set as the thread's questionnaire: one request per
+ * question, each with its choices. Codex adds a free answer to every question
+ * itself (`isOther`), so a typed answer is passed through as written.
+ */
+function userInputRequest(
+  context: CodexEventContext,
+  message: RequestFor<"item/tool/requestUserInput">,
+): ReadonlyArray<CodexMappedMessage> {
+  if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
+    return correlationFailure();
+  }
+  if (context.requestIds.has(message.id)) {
+    return protocolFailure("Provider repeated a question request ID.");
+  }
+  const { questions } = message.params;
+  if (
+    questions.length === 0 ||
+    new Set(questions.map((question) => question.id)).size !== questions.length
+  ) {
+    return protocolFailure("Provider question set was malformed.");
+  }
+  if (
+    questions.some(
+      (question) =>
+        question.isSecret === true ||
+        SECRET_QUESTION.test(question.question) ||
+        SECRET_QUESTION.test(question.header),
+    )
+  ) {
+    context.requestIds.set(message.id, context.makeRequestId());
+    return [
+      {
+        kind: "question-refused",
+        providerRequestId: message.id,
+        result: {
+          answers: Object.fromEntries(
+            questions.map((question) => [
+              question.id,
+              { answers: [CODEX_SECRET_QUESTION_REFUSAL] },
+            ]),
+          ),
+        },
+      },
+    ];
+  }
+  const prompts = questions.flatMap((question) => {
+    const prompt = normalized(question.question, SUMMARY_MAX_CHARACTERS);
+    if (prompt === undefined) return [];
+    const options = (question.options ?? []).flatMap((option) => {
+      const label = normalized(option.label, LABEL_MAX_CHARACTERS);
+      if (label === undefined) return [];
+      const description = normalized(option.description, SUMMARY_MAX_CHARACTERS);
+      return [{ label, ...(description === undefined ? {} : { description }) }];
+    });
+    return [{ prompt, options }];
+  });
+  if (prompts.length !== questions.length || prompts.some((prompt) => prompt.options.length > 20)) {
+    return protocolFailure("Provider question set was malformed.");
+  }
+  const count = prompts.length;
+  const asked = prompts.map(({ prompt, options }, index) => {
+    const requestId = context.makeRequestId();
+    return {
+      requestId,
+      event: mappedEvent(context, {
+        kind: "user-input-request",
+        requestId,
+        prompt,
+        options,
+        ...(count > 1 ? { questionIndex: index + 1, questionCount: count } : {}),
+      }),
+    };
+  });
+  const first = asked[0];
+  if (first === undefined) return protocolFailure("Provider question set was malformed.");
+  context.requestIds.set(message.id, first.requestId);
+  return [
+    {
+      kind: "question",
+      question: {
+        providerRequestId: message.id,
+        threadId: message.params.threadId,
+        turnId: message.params.turnId,
+        questionIds: questions.map((question) => question.id),
+        requestIds: asked.map(({ requestId }) => requestId),
+        events: asked.map(({ event }) => event),
+      },
+    },
+  ];
+}
 
 function approval(
   context: CodexEventContext,
@@ -921,7 +1076,6 @@ function mapNotification(
       }
       return mapAgentMessageDelta(context, message.params.itemId, message.params.delta);
     }
-    case "item/plan/delta":
     case "item/reasoning/summaryTextDelta":
     case "item/reasoning/textDelta": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
@@ -931,6 +1085,8 @@ function mapNotification(
     }
     // A long command or MCP call shows nothing while it runs; the runner's
     // idle clock would read that as a dead session. The output stays out.
+    // A proposed plan's deltas likewise: its completed item is the reply.
+    case "item/plan/delta":
     case "item/commandExecution/outputDelta":
     case "item/mcpToolCall/progress":
     case "item/fileChange/patchUpdated": {
@@ -1184,6 +1340,11 @@ export function mapCodexSubagentRequest(
   if (context.terminal) {
     return protocolFailure("Provider emitted runtime activity after the terminal event.");
   }
+  // Codex offers its question form to the root thread only, so a subagent
+  // asking is a request no released Codex sends.
+  if (message.method === "item/tool/requestUserInput") {
+    return protocolFailure("Provider subagent asked a question.");
+  }
   return message.method === "item/tool/call"
     ? dynamicTool(context, message, "subagent")
     : approval(context, message, "subagent");
@@ -1209,6 +1370,9 @@ export function mapCodexMessage(
       return mapNotification(context, message);
     case "request":
       if (message.method === "item/tool/call") return dynamicTool(context, message);
+      if (message.method === "item/tool/requestUserInput") {
+        return userInputRequest(context, message);
+      }
       return approval(context, message);
     case "unknown-notification":
       return isActiveRuntimeMethod(message.method)
