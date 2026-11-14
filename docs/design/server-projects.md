@@ -637,6 +637,26 @@ Project's connection, under the same levels, approvals, and journal.
   dash, zsh, fish 3.6, tcsh, and csh as login shells. Linux hosts are likewise
   untested; the connection uses only `ssh` options both platforms share.
 
+## Machines in the person's cloud account
+
+Designed, not built (maintainer decision, 2026-11-14). Octant may create a
+machine in the person's own cloud account and bind it as a server Project, as
+a [delivery target the person owns](../architecture.md#modes-chat-work-and-code).
+
+- The cloud credential is a reference held by the credential broker; Octant
+  never stores or journals its value, and the machine's SSH key is made for
+  it and registered as a server like any other.
+- Creating, suspending, resuming, and deleting the machine are the person's
+  acts at a local window or a device the host's own person paired, each
+  journaled; an agent or routine may not create or delete one. A suspended
+  machine's Project stays listed and refuses turns with a named reason until
+  the person resumes it.
+- The person's account pays for the machine; Octant shows the provider's
+  reported state and never claims a cost it did not read.
+- Octant operates no hosted machines of its own; an Octant-operated hosted
+  service stays out of scope
+  ([Current Release Boundary](../architecture.md#current-release-boundary)).
+
 ## Person-operated dev-server previews
 
 A local person can open **Dev server preview** under a bound Project in Settings
