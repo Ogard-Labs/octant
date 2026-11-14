@@ -383,12 +383,10 @@ const COMPACTION_SETTLED_EVENT_NAMES = new Set<string>([
 
 /**
  * How long streamed deltas share one journal append, so the authoritative
- * journal commits — and fsyncs, under `synchronous = FULL` — once per burst
- * instead of once per token: a 775-delta reply used to commit 775 times, and
- * one fsync per delta was the cost that pushed the store to NORMAL. A burst
- * is also flushed by every full attempt persist, so no delta outlives the
- * turn that streamed it; a crash loses at most this window's unflushed
- * deltas, never an fsynced one.
+ * journal commits once per burst instead of once per token: a 775-delta
+ * reply used to commit 775 times. A burst is also flushed by every full
+ * attempt persist, so no delta outlives the turn that streamed it; a process
+ * crash loses at most this window's unflushed deltas, never a committed one.
  */
 const STREAMED_DELTA_BATCH_WINDOW_MS = 100;
 

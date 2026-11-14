@@ -17,6 +17,7 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { parseUnifiedDiff } from "./unifiedDiff";
 import { UnifiedDiffList } from "./UnifiedDiffList";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 type Comparison = Extract<CodeOperationResult, { readonly kind: "git-hunks" }>;
 type Command = Parameters<CodeClient["executeOperation"]>[0];
@@ -233,8 +234,7 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
   };
   const files = shown === undefined ? [] : parseUnifiedDiff(shown.text);
   return (
-    <details className="code-diff-pane__hunk-selection">
-      <summary>Select Git hunks</summary>
+    <OctantCollapsible className="code-diff-pane__hunk-selection" summary="Select Git hunks">
       <p>
         Compare the index and working tree separately. Selection uses the exact unified patch,
         including whitespace.
@@ -366,6 +366,6 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
           </OctantDialogPresence>
         </>
       )}
-    </details>
+    </OctantCollapsible>
   );
 }

@@ -1674,7 +1674,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const codeThreadMetadataService = new CodeThreadMetadataService({
       git: { observe: () => ({ status: "unavailable" }) },
       history: {
-        read: (threadId) => codeBoardEventStore.historyForThread(threadId),
+        read: (threadId) => codeBoardEventStore.summaryForThread(threadId),
       },
     });
     // Persistent Code follow-up. Follow-up is a durable user

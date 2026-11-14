@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import {
   ProjectMemoryProposalPrompt,
@@ -65,7 +66,6 @@ import {
   applyComposerCaret,
   COMPOSER_STAGED_DROPPED_NOTE,
 } from "../composer/composerThreadDraftStore";
-import { ShellState } from "../shell/ShellState";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
@@ -729,7 +729,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
-        <ShellState
+        <OctantEmpty
           action={{ label: "Retry Code", onClick: props.controller.retry }}
           eyebrow="Code workspace"
           message={props.controller.errorMessage ?? "The local Code service is unavailable."}
@@ -745,7 +745,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const unavailable = props.controller.errorCategory;
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
-        <ShellState
+        <OctantEmpty
           {...(unavailable === undefined
             ? {}
             : { action: { label: "Retry Code", onClick: props.controller.retry } })}
@@ -1659,7 +1659,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           >
             <div className="code-thread-workspace__transcript thread-column">
               {props.controller.conversationHistory === "loading" ? (
-                <ShellState
+                <OctantEmpty
                   message="Loading the existing thread transcript from this host."
                   state="loading"
                   title="Loading conversation"

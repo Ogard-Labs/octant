@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import {
   decodeCodeOperationCommand,
@@ -12,7 +13,6 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
-import { ShellState } from "../shell/ShellState";
 import { CodeDiffPane } from "./CodeDiffPane";
 import {
   CodeLineNotes,
@@ -23,6 +23,7 @@ import { CodeLocalReview, readLocalReview, type CodeReviewLineSelection } from "
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { useCodeDiffIgnoreWhitespace } from "./codeDiffWhitespacePreference";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 interface Props {
   readonly client: CodeClient;
@@ -179,30 +180,31 @@ function BoundTurnReview(props: Props) {
   useEffect(() => {
     const controller = new AbortController();
     let reading = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let stop: (() => void) | undefined;
     const poll = async () => {
       if (reading || controller.signal.aborted) return;
       reading = true;
       try {
         const preview = await inspect(false, controller.signal);
-        if (preview?.settled === true && timer !== undefined) clearInterval(timer);
+        if (preview?.settled === true) stop?.();
       } catch {
         if (!controller.signal.aborted) {
           setNotice(
             "Live capture updates are unavailable. The displayed version was kept. Reconnect to retry.",
           );
-          if (timer !== undefined) clearInterval(timer);
+          stop?.();
         }
       } finally {
         reading = false;
       }
     };
     void poll();
-    // Metadata only. Passive reads never trigger Git capture.
-    timer = setInterval(() => void poll(), 2_000);
+    // Metadata only. Passive reads never trigger Git capture. A hidden window
+    // holds no timer and reads once when it is shown again.
+    stop = scheduleVisibleInterval(() => void poll(), 2_000);
     return () => {
       controller.abort();
-      if (timer !== undefined) clearInterval(timer);
+      stop?.();
     };
   }, [inspect, updates]);
 
@@ -310,7 +312,7 @@ function BoundTurnReview(props: Props) {
         )}
       </section>
       {display === undefined ? (
-        <ShellState
+        <OctantEmpty
           state={loading ? "loading" : "warning"}
           title="Captured comparison unavailable"
         />

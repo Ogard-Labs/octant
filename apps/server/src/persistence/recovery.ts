@@ -80,6 +80,13 @@ export interface RecoveryInput {
   readonly journal: Journal;
   readonly compatibility?: JournalCompatibility;
   readonly projections: ProjectionRegistry;
+  /**
+   * The journal sequence an earlier start of this same build already verified
+   * (the startup watermark). Rows at or below it skip the structural walk and
+   * SQLite's integrity check; rows above it are always checked, and anything
+   * suspicious falls back to the full inspection. Omitted or 0 inspects all.
+   */
+  readonly verifiedThrough?: number;
 }
 
 export interface RebuildInput extends RecoveryInput {
@@ -157,7 +164,16 @@ function inspectDatabase(input: RecoveryInput): {
       .prepare("SELECT coalesce(max(global_sequence), 0) AS value FROM event_journal")
       .get(),
   );
-  const integrityOk = input.connection.pragma("integrity_check", { simple: true }) === "ok";
+  const verifiedThrough = input.verifiedThrough ?? 0;
+  const verifiedAggregateCount =
+    verifiedThrough > 0 ? verifiedTailAggregateCount(input.connection, verifiedThrough) : undefined;
+  // A clean start of an already-verified build skips SQLite's integrity check:
+  // on a 32,000-row journal it and the full row walk below held startup for
+  // 0.9 to 1.7 s on every boot. The first start of every build, a fresh
+  // diagnostic, and any start whose unverified tail looks wrong run both.
+  const integrityOk =
+    verifiedAggregateCount !== undefined ||
+    input.connection.pragma("integrity_check", { simple: true }) === "ok";
   const issues: Array<DatabaseVerificationIssue> = [];
   if (!integrityOk) issues.push({ kind: "sqlite-integrity-check" });
   const compatibility = input.compatibility ?? input.journal.inspectCompatibility();
@@ -165,13 +181,16 @@ function inspectDatabase(input: RecoveryInput): {
     issues.push({ kind: "journal-incompatible", reason: compatibility.issue.reason });
   }
 
-  const events = input.connection
-    .prepare(`
+  const events =
+    verifiedAggregateCount !== undefined
+      ? []
+      : (input.connection
+          .prepare(`
       SELECT aggregate_type, aggregate_id, aggregate_version, global_sequence
       FROM event_journal
       ORDER BY aggregate_type, aggregate_id, global_sequence
     `)
-    .all() as ReadonlyArray<AggregateEventRow>;
+          .all() as ReadonlyArray<AggregateEventRow>);
   const journalHeads = new Map<
     string,
     {
@@ -208,13 +227,16 @@ function inspectDatabase(input: RecoveryInput): {
     }
   }
 
-  const storedHeads = input.connection
-    .prepare(`
+  const storedHeads =
+    verifiedAggregateCount !== undefined
+      ? []
+      : (input.connection
+          .prepare(`
       SELECT aggregate_type, aggregate_id, aggregate_version, last_sequence
       FROM aggregate_heads
       ORDER BY aggregate_type, aggregate_id
     `)
-    .all() as ReadonlyArray<AggregateHeadRow>;
+          .all() as ReadonlyArray<AggregateHeadRow>);
   const storedHeadsByKey = new Map(
     storedHeads.map((head) => [aggregateKeyFor(head.aggregate_type, head.aggregate_id), head]),
   );
@@ -298,7 +320,7 @@ function inspectDatabase(input: RecoveryInput): {
     status: {
       migrationVersion,
       journalHead,
-      aggregateCount: journalHeads.size,
+      aggregateCount: verifiedAggregateCount ?? journalHeads.size,
       projections,
       quarantineCount,
       integrity: integrityOk ? "ok" : "failed",
@@ -312,6 +334,117 @@ function inspectDatabase(input: RecoveryInput): {
     },
     issues,
   };
+}
+
+/**
+ * Checks the journal rows above an earlier verified watermark the way the full
+ * walk checks every row: each aggregate continues without a version gap from
+ * its last verified row, and its stored head names its newest row. Every
+ * stored head must also name a journal row that exists. Returns the aggregate
+ * count when all of that holds, or undefined so the caller runs the full
+ * inspection, which classifies whatever is wrong. Rows at or below the
+ * watermark were walked by an earlier start of this build, and any rewrite or
+ * delete of a journal row clears the watermark.
+ */
+function verifiedTailAggregateCount(
+  connection: SqliteConnection,
+  verifiedThrough: number,
+): number | undefined {
+  const tail = connection
+    .prepare(`
+      SELECT aggregate_type, aggregate_id, aggregate_version, global_sequence
+      FROM event_journal
+      WHERE global_sequence > ?
+      ORDER BY aggregate_type, aggregate_id, global_sequence
+    `)
+    .all(verifiedThrough) as ReadonlyArray<AggregateEventRow>;
+  const lastVerifiedVersion = connection.prepare(`
+    SELECT aggregate_version FROM event_journal
+    WHERE aggregate_type = ? AND aggregate_id = ? AND global_sequence <= ?
+    ORDER BY global_sequence DESC LIMIT 1
+  `);
+  const storedHead = connection.prepare(`
+    SELECT aggregate_version, last_sequence FROM aggregate_heads
+    WHERE aggregate_type = ? AND aggregate_id = ?
+  `);
+  for (let index = 0; index < tail.length;) {
+    const first = tail[index];
+    if (first === undefined) break;
+    const prior = lastVerifiedVersion.get(
+      first.aggregate_type,
+      first.aggregate_id,
+      verifiedThrough,
+    ) as { readonly aggregate_version: number } | undefined;
+    let expectedVersion = (prior?.aggregate_version ?? 0) + 1;
+    let newest = first;
+    for (; index < tail.length; index += 1) {
+      const event = tail[index];
+      if (
+        event === undefined ||
+        event.aggregate_type !== first.aggregate_type ||
+        event.aggregate_id !== first.aggregate_id
+      )
+        break;
+      if (event.aggregate_version !== expectedVersion) return undefined;
+      expectedVersion += 1;
+      newest = event;
+    }
+    const head = storedHead.get(first.aggregate_type, first.aggregate_id) as
+      | { readonly aggregate_version: number; readonly last_sequence: number }
+      | undefined;
+    if (
+      head === undefined ||
+      head.aggregate_version !== newest.aggregate_version ||
+      head.last_sequence !== newest.global_sequence
+    )
+      return undefined;
+  }
+  const unanchoredHead = connection
+    .prepare(`
+      SELECT 1 FROM aggregate_heads AS head
+      WHERE NOT EXISTS (
+        SELECT 1 FROM event_journal AS event
+        WHERE event.aggregate_type = head.aggregate_type
+          AND event.aggregate_id = head.aggregate_id
+          AND event.global_sequence = head.last_sequence
+          AND event.aggregate_version = head.aggregate_version
+      )
+      LIMIT 1
+    `)
+    .get();
+  if (unanchoredHead !== undefined) return undefined;
+  // The tail walk only visits aggregates with rows above the watermark, and
+  // the watermark's triggers watch the journal, not aggregate_heads. A head
+  // that went missing, or fell back to an older row, for an aggregate whose
+  // rows are all verified would otherwise pass. Both reads below use the
+  // journal's unique (type, id, version) index and decode no rows.
+  const staleHead = connection
+    .prepare(`
+      SELECT 1 FROM aggregate_heads AS head
+      WHERE EXISTS (
+        SELECT 1 FROM event_journal AS event
+        WHERE event.aggregate_type = head.aggregate_type
+          AND event.aggregate_id = head.aggregate_id
+          AND event.aggregate_version > head.aggregate_version
+      )
+      LIMIT 1
+    `)
+    .get();
+  if (staleHead !== undefined) return undefined;
+  const headCount = numberValue(
+    connection.prepare("SELECT count(*) AS value FROM aggregate_heads").get(),
+  );
+  // Every head names an existing row of its own aggregate (checked above) and
+  // heads are unique per aggregate, so equal counts mean no aggregate lacks one.
+  const aggregateCount = numberValue(
+    connection
+      .prepare(
+        "SELECT count(*) AS value FROM (SELECT DISTINCT aggregate_type, aggregate_id FROM event_journal)",
+      )
+      .get(),
+  );
+  if (aggregateCount !== headCount) return undefined;
+  return headCount;
 }
 
 /**

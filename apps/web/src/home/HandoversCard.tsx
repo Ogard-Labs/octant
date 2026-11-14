@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ReceivedHandoverView } from "@octant/contracts";
 import { GitBranchPlus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -55,10 +56,10 @@ function useHandoversContent(source: HandoversCardSource): HomeCardContent {
   }, [client]);
   useEffect(() => {
     load();
-    const timer = setInterval(load, HANDOVERS_REFRESH_MS);
+    const stopRefresh = scheduleVisibleInterval(load, HANDOVERS_REFRESH_MS);
     window.addEventListener("focus", load);
     return () => {
-      clearInterval(timer);
+      stopRefresh();
       window.removeEventListener("focus", load);
     };
   }, [load]);

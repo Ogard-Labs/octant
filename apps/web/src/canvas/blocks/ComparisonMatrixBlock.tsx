@@ -10,6 +10,7 @@ import {
 } from "@octant/domain/canvas-comparison-matrix";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 
 type MatrixOrder = "written" | "score";
 
@@ -312,8 +313,7 @@ function MatrixData({
 }) {
   const hasTotals = layout.scoredCriteria.length > 0;
   return (
-    <details className="canvas-block__matrix-data">
-      <summary>View matrix data</summary>
+    <OctantCollapsible className="canvas-block__matrix-data" summary="View matrix data">
       <div
         aria-label="Comparison matrix data"
         className="canvas-block__matrix-data-table"
@@ -353,7 +353,7 @@ function MatrixData({
           </tbody>
         </table>
       </div>
-    </details>
+    </OctantCollapsible>
   );
 }
 

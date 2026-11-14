@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   createProductFeedbackClient,
   ProductFeedbackClientFailure,
@@ -287,8 +288,8 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
   }, [perform, load]);
   useEffect(() => {
     void perform(load, false);
-    const timer = setInterval(() => void perform(load, false), 5_000);
-    return () => clearInterval(timer);
+    const stopRefresh = scheduleVisibleInterval(() => void perform(load, false), 5_000);
+    return () => stopRefresh();
   }, [owner, perform, load]);
 
   const pauseRefresh = useCallback(

@@ -1200,7 +1200,7 @@ shows no button.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+Z` is Redo, which a page's text field keeps as the renderer's do. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the

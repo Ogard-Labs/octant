@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   buildPairingCode,
   classifyRemoteListenerAddress,
@@ -393,10 +394,10 @@ export function RemoteAccessSettingsSection({
     if (mintedCode === undefined) return;
     const refresh = () => void refreshListener();
     window.addEventListener("focus", refresh);
-    const timer = setInterval(refresh, PAIRING_CODE_STATUS_REFRESH_MS);
+    const stopRefresh = scheduleVisibleInterval(refresh, PAIRING_CODE_STATUS_REFRESH_MS);
     return () => {
       window.removeEventListener("focus", refresh);
-      clearInterval(timer);
+      stopRefresh();
     };
   }, [mintedCode, refreshListener]);
 

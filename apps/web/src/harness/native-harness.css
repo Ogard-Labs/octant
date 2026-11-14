@@ -169,9 +169,9 @@
   min-width: 0;
   margin-bottom: 0.75rem;
   padding: 0.75rem;
-  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--oct-fg) 12%, transparent);
   border-radius: var(--oct-radius-md);
-  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+  background: color-mix(in srgb, var(--oct-surface) 92%, var(--oct-fg) 8%);
 }
 
 /* The agent's own approval, or a Work agent's own question, above a thread's
@@ -234,7 +234,7 @@
   padding: 0 0.5rem;
   border-radius: var(--oct-radius-sm);
   font-size: var(--text-sm);
-  background: color-mix(in srgb, CanvasText 10%, transparent);
+  background: color-mix(in srgb, var(--oct-fg) 10%, transparent);
 }
 
 .native-harness-card__status--running {
@@ -292,9 +292,9 @@
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--oct-fg) 18%, transparent);
   border-radius: var(--oct-radius-md);
-  background: color-mix(in srgb, CanvasText 5%, transparent);
+  background: color-mix(in srgb, var(--oct-fg) 5%, transparent);
 }
 
 .native-harness-question__prompt {
@@ -309,7 +309,7 @@
 }
 
 .native-harness-steering__status {
-  color: color-mix(in srgb, CanvasText 55%, transparent);
+  color: var(--oct-muted);
 }
 
 /* Network access: the hosts a Code thread's commands may reach, and the hosts
