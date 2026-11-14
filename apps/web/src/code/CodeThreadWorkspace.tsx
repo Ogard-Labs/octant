@@ -45,6 +45,7 @@ import {
 } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -2359,7 +2360,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
           info={
-            <ThreadInfo>
+            <ThreadInfo
+              notes={{
+                threadId: String(thread.id),
+                onInsert: (note) => {
+                  const next = draftWithNote(draft, note);
+                  draftRevisionRef.current += 1;
+                  setDraft(next);
+                  props.controller.setPendingDraft?.(next, next.length);
+                },
+              }}
+            >
               <ThreadGuardrailLevel
                 factsVersion={thread.version}
                 factsActivity={`${providerTurnOperationId ?? ""}:${props.controller.turnStatus}`}

@@ -560,3 +560,40 @@ ordinary notice content cannot issue an approval receipt.
 A panel a turn's menu opens inline (a checkpoint's name, the question before
 files are restored) takes focus once the menu has closed, the safe answer
 first, and hands focus back to that turn's More actions control when it ends.
+
+## Thread recap and notes
+
+A thread's Thread info panel has two rows after its others: **Recap** and
+**Notes** (maintainer decision, 2026-11-14), in Chat, Work and Code alike.
+
+The recap is read on request: opening the row asks the host, which reads the
+thread's newest transcript window through the owning mode's own reader under
+the same open authority as a mention or Side Chat (40 messages), and returns
+what was asked first and last, the latest reply, whether the person's last
+message still waits for one, how many asks and replies it read, and the time of
+the last message it read, so a recap opened before newer turns says how far it
+reaches. When older messages fell outside the window it says it read the newest
+only, and "Asked first" becomes "Earliest ask read". **Refresh** reads it again.
+It quotes the thread and adds nothing, is not stored, and changes nothing.
+
+Rationale: the recap is assembled by the host, not written by the thread's
+model. A model-written recap would either be a turn in the thread, which puts
+a request the person did not make into the transcript and the next turn's
+context, or a turn outside it, which has no path today that bills, accounts
+and refuses the way a thread turn does. A recap that only quotes the transcript
+costs nothing, sends nothing to any provider, and cannot claim more than the
+thread said. Files changed and open approvals stay in their own surfaces (the
+turn's changes, the Inbox) rather than a second copy here.
+
+Notes are the person's own text, each up to 4,000 characters and up to 100 a
+thread, kept on the host as journal events on the thread (`thread.note-added`,
+`thread.note-edited`, `thread.note-deleted`) and rebuilt from them at start.
+The person adds, edits and deletes them in the row. A note is never sent to the
+agent by itself: **Insert in message** puts its text after the composer's
+draft, and it goes only if the person sends that message. Only a person's
+actor writes a note: the host refuses one from a thread's agent or from the
+host itself, and a device paired for someone other than the host's person
+keeps no notes. Every note event names its thread, so purging the thread
+erases its notes with it; a deleted note leaves the panel at once and its
+journaled text goes with the thread. Neither a recap nor a note changes the
+thread's authority, level or Done.

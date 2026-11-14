@@ -54,7 +54,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 16        | 11      | 5            | 0                   |
+| [Workspace](#workspace)                                                               | 17        | 12      | 5            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **252**   | **152** | **96**       | **4**               |
+| **All areas**                                                                         | **253**   | **153** | **96**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2601,6 +2601,16 @@ Octant stops a local server only when it can prove the server belongs to a live 
 - Editor provenance labels alone never grant stop authority.
 
 Status: Built. Since: —. Detail: [Workspace: Local-server ownership](workspace.md#local-server-ownership).
+
+### Thread recaps and notes
+
+A thread has a person-visible recap of what it asked, did and left open, and the person may keep notes of their own on it (maintainer decision, 2026-11-14).
+
+- The recap is read on request by the host from the thread's newest transcript window, under the thread's open authority. It quotes the thread, names the last message it read and says when older ones fell outside, and is written by no model, so it goes to no provider.
+- Notes are the person's text, journaled on the thread and rebuilt from the journal; the host refuses a note from an agent or from itself. A note reaches the agent only when the person inserts it into a message they send, and purging the thread erases its notes.
+- Neither changes the thread's authority, level or Done.
+
+Status: Built. Since: 2026-11-14. Detail: [Thread view: Thread recap and notes](thread-view.md#thread-recap-and-notes).
 
 ## Start screen
 

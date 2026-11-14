@@ -107,7 +107,8 @@ the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
-host), and **Continue elsewhere**. A choice made once for the thread lives
+host), **Continue elsewhere**, and the thread's **Recap** and the person's
+**Notes** ([Thread view](thread-view.md#thread-recap-and-notes)). A choice made once for the thread lives
 here, not in the composer's row: the row holds what a person changes
 from one message to the next (the model, the approval mode) and had grown to
 eleven controls, several of them bare glyphs. Nothing else about
