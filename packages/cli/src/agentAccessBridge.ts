@@ -17,6 +17,7 @@ export interface AgentMcpBridgePorts {
   /** Protocol frames only. */
   readonly stdout: { readonly write: (chunk: string) => unknown };
   readonly stderr: { readonly write: (chunk: string) => unknown };
+  /** Absent, the connection file's listener origin, held to its pin. */
   readonly fetch?: AgentListenerFetch;
   readonly now?: () => number;
 }
@@ -26,7 +27,9 @@ export interface AgentMcpBridgePorts {
  * another machine starts. It answers nothing itself: every message goes to
  * the host's agent-access endpoint, signed with the key this machine made when
  * it joined, over a connection held to the listener's certificate pin. The
- * host decides everything; this command holds no policy.
+ * host decides everything; this command holds no policy. With `--local`, an
+ * MCP client on the host's own computer sends the same signed messages to the
+ * host's loopback server instead (see `agentLoopbackFetch`).
  */
 export async function runAgentMcpBridge(ports: AgentMcpBridgePorts): Promise<number> {
   const listener =

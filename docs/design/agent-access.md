@@ -5,10 +5,10 @@ person's own network.
 Size: Full: a new remote principal, a credential, a listener surface, a
 server-hosted MCP endpoint, Settings, and a CLI enrollment step.
 Owner: maintainer · Started: 2026-11-11
-Build status: all five slices are built: grants, the endpoint, the bridge,
-direct keys, and visibility (Settings › Remote access › Agent access, "Started
+Build status: all six slices are built: grants, the endpoint, the bridge,
+direct keys, visibility (Settings › Remote access › Agent access, "Started
 by" on threads and in Needs you, push labels, and the paired-device view and
-revoke), with each turn an agent sent named for it. The built rules are in
+revoke), with each turn an agent sent named for it, and local MCP clients. The built rules are in
 [Architecture: Security and authority](../architecture.md#security-and-authority)
 and [Decisions and requirements](decisions.md).
 
@@ -91,13 +91,16 @@ listener, pairing, or other grants; agent-to-agent work between hosts (that is
    ([Hub and spokes](hub-and-spokes.md), H14), which the person turns on after
    the certificate-transparency note. Direct access is off per grant until the
    person chooses it, because a bearer key can be replayed by whoever holds it.
-3. **Local MCP clients (designed, not built; maintainer decision,
-   2026-11-14).** An MCP client on the host's own machine (an editor's
-   assistant, another local tool) may use Octant as an MCP server under an
-   agent grant too, enrolled and confirmed exactly as a bridge is and held to
-   the same grant scope, outside-content mark and approvals in Needs you. It
-   connects to the agent endpoint over loopback with the bridge's signed
-   requests; loopback grants it nothing a grant does not. The existing
+3. **Local MCP clients (AA-12; maintainer decision, 2026-11-14).** An MCP
+   client on the host's own computer (an editor's assistant, another local
+   tool) uses Octant as an MCP server under an agent grant too. It joins
+   exactly as a bridge does, with `octant agent-access join`, and the person
+   confirms its key; it is then held to the same grant scope, outside-content
+   mark and approvals in Needs you. Its command is
+   `octant agent mcp --connection <file> --local`: the same stdio bridge, which
+   sends the same signed requests to the host's loopback server instead of the
+   listener origin, reading only where that server listens and never the
+   bridge secret. Loopback grants it nothing the grant does not. The existing
    `octant agent mcp` with no connection file stays the local CLI path under
    the bridge secret, which never answers an approval or starts at Full access.
 
@@ -185,6 +188,19 @@ checks:
    device holds what a local window holds, the agent-access guard keeps its
    own closed list and does not widen with it.
 
+The loopback server serves the same `POST /api/agent-access/mcp`, and only it,
+to a local MCP client (AA-12): the same credential check, grant check and
+remote check, with the source class `loopback`, which only a request to the
+loopback server carries. The claim stays on the private listener, so a key is
+enrolled the same way wherever it is used. The listener must be on for either
+path, because connection codes and the host identity each proof signs come
+from it; with remote access off, every agent request is refused.
+
+**Rationale.** Serving the endpoint on loopback reuses the bridge's key, proof
+and grant, so a local client needs no second credential kind. Letting a local
+client use the bridge secret instead would give it a local window's authority,
+which is the opposite of a grant.
+
 The tool definitions and argument schemas move to
 `@octant/contracts/agent-access`, so the host endpoint and the local
 `octant agent mcp` describe the same tools; each keeps its own runtime.
@@ -226,7 +242,8 @@ lists only rows on threads in scope. `list_threads` lists only threads in scope.
 ### Visibility
 
 - Settings › Remote access › Agent access lists each grant: name, scope,
-  connection kinds, enrolled key fingerprints, last use with source class,
+  connection kinds, enrolled key fingerprints, last use with where it came
+  from (this computer, the LAN, or Tailscale),
   threads started, and turns today. Change and Revoke are there; a paired
   device sees the list and can revoke (`GET /api/agent-grants`,
   `POST /api/agent-grants/revoke`, action `agent-access.revoke`, journaled as
@@ -293,6 +310,7 @@ id is the grant's scope id.
 | The agent widens its own authority         | Grants are created and widened only by the person (a local window, the loopback CLI, or a device the host's own person paired; not built yet: today a local window or the loopback CLI only); no administrative route is on the agent's surface; identity in the payload is refused. | None known.                                                                                                                                               |
 | Host impersonation                         | Bridge pins the listener certificate from the connection code; direct mode relies on the Tailscale certificate.                                                                                                                                                                      | Direct mode trusts the tailnet name's public certificate.                                                                                                 |
 | Guessing keys or tickets                   | 256-bit keys; five-minute single-use tickets with five failures; per-source budgets like pairing; one `unauthorized` for every failure.                                                                                                                                              | None known.                                                                                                                                               |
+| A local process uses the loopback endpoint | It needs a key the person confirmed for a grant and a fresh signed proof, as a bridge does; the claim is served only on the listener; loopback adds nothing to the grant.                                                                                                            | Any local process that can read the connection file acts within its grant; the file is written owner-only.                                                |
 | Approval flooding                          | Running turns and turns per day are capped per grant; each pending request names the agent, and revoking it stops new ones.                                                                                                                                                          | The person still sees the requests already raised.                                                                                                        |
 
 ## 6. Decisions
@@ -310,6 +328,7 @@ id is the grant's scope id.
 | AA-9  | Revocation voids credentials at once and ends sessions and in-flight requests; running turns continue unless the person also stops them.                                                                                                                                                        | Approved |
 | AA-10 | Spend limits per grant: running turns at once, turns per day, requests per minute.                                                                                                                                                                                                              | Approved |
 | AA-11 | Reach stays on the person's own network; hosted bots on the public internet are not supported.                                                                                                                                                                                                  | Approved |
+| AA-12 | An MCP client on the host's own computer uses an agent grant, joined and confirmed as a bridge is, over the loopback server with the bridge's signed requests (maintainer decision, 2026-11-14).                                                                                                | Approved |
 
 ### AA-11: reach from the public internet (decided: option 1)
 
@@ -347,6 +366,8 @@ maintainer decision and its own threat review.
 4. **Direct:** bearer keys, rotate, and the Tailscale-certificate requirement.
 5. **Visibility:** "Started by" on threads and in Needs you, the paired-device
    view and revoke, push labels.
+6. **Local MCP clients:** the agent endpoint on the loopback server and
+   `octant agent mcp --connection <file> --local`.
    Option 2 of AA-11 is not planned.
 
 ## 8. Verification (per slice)
