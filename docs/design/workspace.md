@@ -107,7 +107,8 @@ the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
-host), and **Continue elsewhere**. A choice made once for the thread lives
+host), **Continue elsewhere**, and the thread's **Recap** and the person's
+**Notes** ([Thread view](thread-view.md#thread-recap-and-notes)). A choice made once for the thread lives
 here, not in the composer's row: the row holds what a person changes
 from one message to the next (the model, the approval mode) and had grown to
 eleven controls, several of them bare glyphs. Nothing else about
@@ -428,7 +429,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   naming its worker, with an Open worker action. The rows come from the
   window's pending-requests read filtered to the coordinator's workers in the
   window's thread list, one request at a time with a choice between them; a
-  finished turn's decision is not listed there.
+  finished turn's decision is not listed there. The same requests also show as
+  rows at the end of the coordinator's transcript, one per request, answered in
+  place
+  ([Coordinator threads: Questions and approvals](coordinator-threads.md#questions-and-approvals)).
 - **Proposals.** A coordinator's pending proposals show as cards above its
   composer (title, intent, **Review and approve**, **Decline**), beside the
   routine and memory proposal prompts, sharing the Project planner section's
