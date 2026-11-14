@@ -927,8 +927,9 @@ assistive technology ("Open pull request", "Open issue"). The meta line reads
 `#number · owner/repository`, then "Review requested" for a review request,
 then the age. The unseen dot sits in a fixed slot at the row's trailing edge, so
 reading an item changes a colour and moves nothing. The assigned-work read
-lists open items only and sends no draft flag, so draft, merged and closed
-glyphs wait on the server sending that state.
+lists open items only. A draft pull request carries the search result's draft
+flag (optional, so an older host still decodes) and wears the draft glyph in
+grey, named "Draft pull request"; merged and closed cannot occur.
 
 ### List pages and empty states
 

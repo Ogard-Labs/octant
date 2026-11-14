@@ -157,6 +157,10 @@ describe("assigned work rows", () => {
     expect(assignedWorkState({ ...item, category: "review-request" }).label).toBe(
       "Open pull request",
     );
+    expect(assignedWorkState({ ...item, draft: true })).toEqual({
+      label: "Draft pull request",
+      tone: "draft",
+    });
     expect(assignedWorkState({ ...item, category: "issue" })).toEqual({
       label: "Open issue",
       tone: "open",

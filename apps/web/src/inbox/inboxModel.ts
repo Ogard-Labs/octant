@@ -85,19 +85,17 @@ export function buildInboxAttentionItems(
 
 /**
  * The state glyph a row of assigned work wears, in the tones the pull request
- * and issue lists use. The assigned-work read lists open items only and
- * carries no draft flag, so an open pull request and an open issue are the
- * states a row can honestly claim; a merged, closed or draft state would need
- * the server to send it.
+ * and issue lists use. The read lists open items only, so an open issue, an
+ * open pull request and a draft pull request are the states a row can claim.
  */
 export function assignedWorkState(item: GithubAssignedWorkItem): {
   readonly label: string;
-  readonly tone: "open";
+  readonly tone: "open" | "draft";
 } {
-  return {
-    label: item.category === "issue" ? "Open issue" : "Open pull request",
-    tone: "open",
-  };
+  if (item.category === "issue") return { label: "Open issue", tone: "open" };
+  return item.draft === true
+    ? { label: "Draft pull request", tone: "draft" }
+    : { label: "Open pull request", tone: "open" };
 }
 
 /** The meta line under a row: number, repository, a review request, then age. */

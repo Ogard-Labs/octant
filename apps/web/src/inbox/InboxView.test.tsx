@@ -447,6 +447,14 @@ describe("InboxView", () => {
                 title: "Fix inbox",
                 url: "https://github.com/octant/octant/issues/7",
               },
+              {
+                ...base,
+                category: "pull-request" as const,
+                draft: true,
+                number: 11,
+                title: "Sketch the list",
+                url: "https://github.com/octant/octant/pull/11",
+              },
             ],
             freshness: { status: "fresh" as const },
           },
@@ -456,6 +464,8 @@ describe("InboxView", () => {
       />,
     );
 
+    const draft = await screen.findByRole("link", { name: /Draft pull request.*Sketch the list/ });
+    expect(within(draft).getByRole("img")).toHaveAttribute("data-state", "draft");
     const pull = await screen.findByRole("link", { name: /Open pull request.*Colour the list/ });
     const issue = screen.getByRole("link", { name: /Open issue.*Fix inbox/ });
     for (const link of [pull, issue]) {

@@ -2,7 +2,14 @@ import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
-import { CircleDot, Folder, GitPullRequest, ListTodo, RefreshCw } from "../ui/icons";
+import {
+  CircleDot,
+  Folder,
+  GitPullRequest,
+  GitPullRequestDraft,
+  ListTodo,
+  RefreshCw,
+} from "../ui/icons";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
@@ -394,7 +401,12 @@ export function InboxView(props: InboxViewProps) {
                     {github.page.items.map((item) => {
                       const key = assignedWorkSeenKey(item);
                       const state = assignedWorkState(item);
-                      const Icon = item.category === "issue" ? CircleDot : GitPullRequest;
+                      const Icon =
+                        item.category === "issue"
+                          ? CircleDot
+                          : state.tone === "draft"
+                            ? GitPullRequestDraft
+                            : GitPullRequest;
                       return (
                         <li
                           className="surface-row inbox-row"
