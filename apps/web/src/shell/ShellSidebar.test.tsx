@@ -1143,6 +1143,8 @@ describe("ShellSidebar", () => {
     // The menu-only destinations have left the account menu, so the collapsed
     // rail still reaches them through More, named on keyboard focus too.
     const more = within(rail).getByRole("button", { name: "More destinations" });
+    // A key that moves focus, not a click's or a sheet's return of it, earns the tooltip.
+    fireEvent.keyDown(document.body, { key: "Tab" });
     more.focus();
     expect(await screen.findByRole("tooltip")).toHaveTextContent("More");
   });

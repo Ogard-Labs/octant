@@ -1052,9 +1052,12 @@ float follows [Translucency](#translucency).
   280px, 8 by 12px padding, `--oct-radius-sm`, 14px. Card: at most 320px, 12px
   padding, `--oct-radius-lg`, the float and `--octant-shadow-overlay`. 8px from
   the trigger, after 350ms, at `--oct-z-popup`.
-- **States.** Closes on a press of its trigger without fading over what opened.
+- **States.** Opens on hover after 350ms and on keyboard focus-visible (a key
+  that moves focus: Tab, an arrow, Home, End), never on focus a click caused or
+  a sheet or menu handed back to its trigger. Closes on pointer leave, on a
+  press of its trigger (without fading over what opened) and on Escape.
 - **Rail.** A rail button's tooltip is a compact one-word chip (13px, 4px by 8px padding) that opens to the right of the rail, centred on the button; it lies over the sidebar and covers as little of it as it must.
-- **Accessibility.** `role="tooltip"`; opens on keyboard focus. Never the only
+- **Accessibility.** `role="tooltip"`; opens on keyboard focus-visible. Never the only
   place an essential word appears.
 
 ### OctantAlert
