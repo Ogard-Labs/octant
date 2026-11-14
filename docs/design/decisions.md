@@ -54,7 +54,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 18        | 12      | 5            | 1                   |
+| [Workspace](#workspace)                                                               | 17        | 12      | 5            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **260**   | **155** | **96**       | **9**               |
+| **All areas**                                                                         | **259**   | **155** | **96**       | **8**               |
 
 ## Principles and hard lines
 
@@ -818,6 +818,7 @@ A turn records an observation of what changed while it ran, never an attribution
 - A Work turn watches its bound folder from before the provider starts until the turn settles and records relative paths only, reading no file. An unnameable or refused path marks the record truncated, and a host that cannot watch records nothing. _Here only._
 - A Code turn compares the checkout tree-to-tree at start and settle and journals at most 32 paths with lines added and removed and a binary flag. Renames are both paths. _Here only._
 - A Code turn with no starting capture (Plan, unreadable checkout) or no change records nothing, and recording never fails or delays the turn. _Here only._
+- From a Code turn's change view the person may leave notes on changed lines, keep them pending, and send them together as one ordinary follow-up message in that thread (maintainer decision, 2026-11-14). [Workspace](workspace.md#tool-lifecycles) owns the detail.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -2640,15 +2641,6 @@ Octant stops a local server only when it can prove the server belongs to a live 
 - Editor provenance labels alone never grant stop authority.
 
 Status: Built. Since: —. Detail: [Workspace: Local-server ownership](workspace.md#local-server-ownership).
-
-### Line notes on a turn's changes
-
-The person may leave notes on lines of a turn's recorded change and send them together as one follow-up turn in the same thread (maintainer decision, 2026-11-14).
-
-- Notes stay pending and editable until the person sends them; a note never approves, resolves or reverts anything.
-- Each note names its file, side and line from the turn's record; anchors never move silently, and a line the record cannot show says why it takes no note.
-
-Status: Designed, not built. Since: 2026-11-14. Detail: [Thread view: Line notes on a turn's changes](thread-view.md#line-notes-on-a-turns-changes).
 
 ### Thread recaps and notes
 
