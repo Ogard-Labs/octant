@@ -205,6 +205,32 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("keeps a polled thread summary current from only the rows appended since the last read", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    for (let cursor = 0; cursor < 5; cursor += 1) {
+      store.append({ threadId, operationId, expectedCursor: cursor, event: stateEvent("running") });
+    }
+    expect(store.summaryForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{ cursor: 5 }],
+    });
+    const replay = vi.spyOn(fixture.journal, "replayAggregateTypeForThread");
+
+    expect(store.summaryForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{ cursor: 5 }],
+    });
+    expect(replay).not.toHaveBeenCalled();
+    store.append({ threadId, operationId, expectedCursor: 5, event: stateEvent("completed") });
+    expect(store.summaryForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{ cursor: 6, event: { state: "completed" } }],
+    });
+    expect(replay.mock.calls.map(([cursor]) => cursor.afterSequence)).toEqual([5]);
+    fixture.connection.close();
+  });
+
   it("keeps one remembered history per journal, however many stores read it", () => {
     const fixture = openJournal();
     const board = createStore(fixture.journal);

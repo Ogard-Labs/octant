@@ -107,7 +107,8 @@ the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
-host), and **Continue elsewhere**. A choice made once for the thread lives
+host), **Continue elsewhere**, and the thread's **Recap** and the person's
+**Notes** ([Thread view](thread-view.md#thread-recap-and-notes)). A choice made once for the thread lives
 here, not in the composer's row: the row holds what a person changes
 from one message to the next (the model, the approval mode) and had grown to
 eleven controls, several of them bare glyphs. Nothing else about
@@ -428,7 +429,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   naming its worker, with an Open worker action. The rows come from the
   window's pending-requests read filtered to the coordinator's workers in the
   window's thread list, one request at a time with a choice between them; a
-  finished turn's decision is not listed there.
+  finished turn's decision is not listed there. The same requests also show as
+  rows at the end of the coordinator's transcript, one per request, answered in
+  place
+  ([Coordinator threads: Questions and approvals](coordinator-threads.md#questions-and-approvals)).
 - **Proposals.** A coordinator's pending proposals show as cards above its
   composer (title, intent, **Review and approve**, **Decline**), beside the
   routine and memory proposal prompts, sharing the Project planner section's
@@ -1033,6 +1037,26 @@ Editing prose preserves its references. Clearing a damaged reference requires
 clearing the imported draft or preparing a truthful replacement, not silently
 retaining the excerpt as trusted plain prose.
 
+Line notes are the lighter way to answer a turn from its change view
+(maintainer decision, 2026-11-14). In Review opened from a turn's changed-file
+row, the line-number button on either side of the diff also opens a note
+anchored to that file, side (new or old) and line; the note may extend through
+a later line on the same side. Notes stay pending in that view, where the
+person edits or removes each one. They are this window's unsent drafts: they
+journal nothing and close with the view. **Send notes** sends them together as
+one ordinary follow-up message in the owning thread through the normal send
+path, so mode, access level, Plan and every host check apply unchanged. The
+message lists each note with its file, side and line or lines, the first
+line's text quoted and cut to 120 characters, then the note. Send waits while
+the thread runs a turn or a pending note is being edited. Notes count as sent
+once the host accepts the message, whatever its turn then does, so a turn that
+waits, stops or fails never invites sending them twice; only a refusal keeps
+them. A line note
+carries no finding reference: its message is plain person text, the same as
+typing the quoted line into the composer, so the outside-content record that a
+correction draft's references take does not apply. Local findings and their
+correction draft stay the path for review that is tracked and resolved.
+
 After a correction, Refresh reads the new comparison and latest recorded checks.
 Checks that lack a comparison binding are labeled as such. An agent reply never
 resolves a finding: the person inspects the resulting changes and explicitly
@@ -1194,7 +1218,7 @@ shows no button.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+Z` is Redo, which a page's text field keeps as the renderer's do. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the

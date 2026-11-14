@@ -23,7 +23,11 @@ import type {
  * the files exist.
  */
 
-export type SecretGuardPlatform = "darwin" | "linux";
+/**
+ * `win32` entries are home-relative like the others, spelled with `/`; a
+ * Windows path is compared in the form `windowsGuardPath` gives it.
+ */
+export type SecretGuardPlatform = "darwin" | "linux" | "win32";
 
 /** Where an entry's path is rooted. */
 export type ProtectedFilesBase = "home" | "data" | "runtime";
@@ -102,6 +106,7 @@ const PROFILE_LOGIN_STORE_NAME =
 
 function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFilesRule> {
   const darwin = platform === "darwin";
+  const win32 = platform === "win32";
   return [
     {
       id: "ssh-private-keys",
@@ -123,10 +128,12 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
         home(".aws/credentials"),
         home(".aws/sso/cache"),
         home(".aws/cli/cache"),
-        home(".config/gcloud/credentials.db"),
-        home(".config/gcloud/access_tokens.db"),
-        home(".config/gcloud/application_default_credentials.json"),
-        home(".config/gcloud/legacy_credentials"),
+        ...[
+          "credentials.db",
+          "access_tokens.db",
+          "application_default_credentials.json",
+          "legacy_credentials",
+        ].map((name) => home(`${win32 ? "AppData/Roaming/gcloud" : ".config/gcloud"}/${name}`)),
         home(".azure/msal_token_cache.json"),
         home(".azure/msal_token_cache.bin"),
         home(".azure/accessTokens.json"),
@@ -165,14 +172,20 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
       label: "Git and network credential files",
       channel: "git-credential-helper",
       ownAccountExempt: false,
-      entries: [home(".git-credentials"), home(".config/git/credentials"), home(".netrc")],
+      entries: [
+        home(".git-credentials"),
+        home(".config/git/credentials"),
+        home(".netrc"),
+        // Git for Windows and curl read `_netrc` in the home folder there.
+        ...(win32 ? [home("_netrc")] : []),
+      ],
     },
     {
       id: "forge-cli-sign-in",
       label: "Forge command-line sign-in",
       channel: "git-credential-helper",
       ownAccountExempt: false,
-      entries: [home(".config/gh/hosts.yml")],
+      entries: [home(win32 ? "AppData/Roaming/GitHub CLI/hosts.yml" : ".config/gh/hosts.yml")],
     },
     {
       id: "keychains-and-vaults",
@@ -195,7 +208,20 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
               "Library/Containers/com.bitwarden.desktop/Data/Library/Application Support/Bitwarden",
             ),
           ]
-        : [home(".local/share/keyrings"), home(".config/1Password"), home(".config/Bitwarden")],
+        : win32
+          ? [
+              // Credential Manager and DPAPI answer through their system
+              // services, not by the caller opening these folders, so `git
+              // credential-manager` and a runtime's own sign-in keep working.
+              home("AppData/Roaming/Microsoft/Credentials"),
+              home("AppData/Local/Microsoft/Credentials"),
+              home("AppData/Roaming/Microsoft/Protect"),
+              home("AppData/Roaming/Microsoft/Vault"),
+              home("AppData/Local/Microsoft/Vault"),
+              home("AppData/Local/1Password"),
+              home("AppData/Roaming/Bitwarden"),
+            ]
+          : [home(".local/share/keyrings"), home(".config/1Password"), home(".config/Bitwarden")],
     },
     {
       id: "browser-cookies-and-logins",
@@ -219,12 +245,22 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
             ),
             home("Library/Application Support/discord/Local Storage"),
           ]
-        : [
-            names(".config", PROFILE_STORE_NAME, 5),
-            names(".mozilla/firefox", PROFILE_LOGIN_STORE_NAME, 2),
-            home(".config/Slack/Local Storage"),
-            home(".config/discord/Local Storage"),
-          ],
+        : win32
+          ? [
+              // `AppData/Local/Google/Chrome/User Data/Default/Network/Cookies`
+              // is six levels down, one more than the macOS spelling.
+              names("AppData/Local", PROFILE_STORE_NAME, 6),
+              names("AppData/Roaming", PROFILE_STORE_NAME, 6),
+              names("AppData/Roaming/Mozilla/Firefox/Profiles", PROFILE_LOGIN_STORE_NAME, 2),
+              home("AppData/Roaming/Slack/Local Storage"),
+              home("AppData/Roaming/discord/Local Storage"),
+            ]
+          : [
+              names(".config", PROFILE_STORE_NAME, 5),
+              names(".mozilla/firefox", PROFILE_LOGIN_STORE_NAME, 2),
+              home(".config/Slack/Local Storage"),
+              home(".config/discord/Local Storage"),
+            ],
     },
     {
       id: "octant-credentials",
@@ -253,6 +289,12 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
         home(".pi/agent/auth.json"),
         home(".config/github-copilot/hosts.json"),
         home(".config/github-copilot/apps.json"),
+        ...(win32
+          ? [
+              home("AppData/Local/github-copilot/hosts.json"),
+              home("AppData/Local/github-copilot/apps.json"),
+            ]
+          : []),
         // Octant's managed account homes, one per provider account. A runtime
         // is launched with its own one re-allowed.
         { kind: "path", base: "data", path: "providers" },
@@ -290,6 +332,11 @@ export type ResolvedProtectedEntry = {
   readonly label: string;
   readonly channel: ProtectedFilesChannel;
   readonly ownAccountExempt: boolean;
+  /**
+   * A Windows entry: its location is in `windowsGuardPath` form, and a path
+   * is matched whatever its letter case, as Windows opens it.
+   */
+  readonly foldCase?: true;
 } & (
   | { readonly kind: "path"; readonly path: string }
   | {
@@ -308,24 +355,35 @@ export function resolveProtectedFiles(
 ): ReadonlyArray<ResolvedProtectedEntry> {
   const removed = new Set(choice.removed);
   const resolved: ResolvedProtectedEntry[] = [];
+  const win32 = locations.platform === "win32";
+  // A Windows base that is not drive-absolute resolves no entry here; the
+  // host refuses outright when it cannot spell the home folder this way.
+  const located = (base: string | undefined, relative: string): string | undefined => {
+    if (base === undefined) return undefined;
+    if (!win32) return joinPosix(base, relative);
+    const guardBase = windowsGuardPath(base);
+    return guardBase === undefined ? undefined : joinPosix(guardBase, relative).toLowerCase();
+  };
   for (const rule of builtInRules(locations.platform)) {
     if (removed.has(rule.id)) continue;
     for (const entry of rule.entries) {
       const base = baseDirectory(locations, entry.base);
-      if (base === undefined) continue;
+      const location = located(base, entry.kind === "path" ? entry.path : entry.directory);
+      if (location === undefined) continue;
       const meta = {
         ruleId: rule.id,
         label: rule.label,
         channel: rule.channel,
         ownAccountExempt: rule.ownAccountExempt,
+        ...(win32 ? { foldCase: true as const } : {}),
       };
       if (entry.kind === "path") {
-        resolved.push({ ...meta, kind: "path", path: joinPosix(base, entry.path) });
+        resolved.push({ ...meta, kind: "path", path: location });
       } else {
         resolved.push({
           ...meta,
           kind: "names",
-          directory: joinPosix(base, entry.directory),
+          directory: location,
           name: entry.name,
           depth: entry.depth,
           ...(entry.except === undefined ? {} : { except: entry.except }),
@@ -334,13 +392,20 @@ export function resolveProtectedFiles(
     }
   }
   for (const added of choice.added) {
-    const path = expandProtectedPath(added, locations.home);
+    // An absolute added path is a POSIX path, which names no file on Windows;
+    // there only a `~/` path resolves.
+    const path = win32
+      ? added.trim().startsWith("~/")
+        ? located(locations.home, normalizePosix(added.trim().slice(1)).slice(1))
+        : undefined
+      : expandProtectedPath(added, locations.home);
     if (path === undefined) continue;
     resolved.push({
       ruleId: "added",
       label: "Added by you",
       channel: "none",
       ownAccountExempt: false,
+      ...(win32 ? { foldCase: true as const } : {}),
       kind: "path",
       path,
     });
@@ -383,10 +448,14 @@ export function protectedEntryFor(
 ): ResolvedProtectedEntry | undefined {
   const forms = paths.map(normalizePosix);
   const own = ownAccountPaths.map(normalizePosix);
+  const windowsForms = paths.map(windowsComparable);
+  const windowsOwn = ownAccountPaths.map(windowsComparable);
   for (const entry of entries) {
-    for (const form of forms) {
+    const foldCase = entry.foldCase === true;
+    for (const form of foldCase ? windowsForms : forms) {
       if (!entryCovers(entry, form)) continue;
-      if (entry.ownAccountExempt && own.some((owned) => isSameOrInside(form, owned))) continue;
+      const owns = foldCase ? windowsOwn : own;
+      if (entry.ownAccountExempt && owns.some((owned) => isSameOrInside(form, owned))) continue;
       return entry;
     }
   }
@@ -400,12 +469,45 @@ function entryCovers(entry: ResolvedProtectedEntry, path: string): boolean {
   const segments = relative.split("/");
   if (segments.length > entry.depth) return false;
   const name = segments[segments.length - 1] ?? "";
-  if (entry.except !== undefined && wholeName(entry.except).test(name)) return false;
-  return wholeName(entry.name).test(name);
+  const foldCase = entry.foldCase === true;
+  if (entry.except !== undefined && wholeName(entry.except, foldCase).test(name)) return false;
+  return wholeName(entry.name, foldCase).test(name);
 }
 
-function wholeName(pattern: string): RegExp {
-  return new RegExp(`^(?:${pattern})$`, "u");
+function wholeName(pattern: string, foldCase = false): RegExp {
+  return new RegExp(`^(?:${pattern})$`, foldCase ? "iu" : "u");
+}
+
+/** A path in the form a Windows entry is compared with. */
+function windowsComparable(path: string): string {
+  return windowsGuardPath(path) ?? normalizePosix(path).toLowerCase();
+}
+
+/**
+ * The secret guard's spelling of a Windows drive-absolute path, or undefined
+ * for any other form. `C:\Users\Ada\.ssh\id_rsa` reads
+ * `/c:/users/ada/.ssh/id_rsa`: slashes one way, letters folded (NTFS opens
+ * names case-insensitively), `..` resolved without leaving the drive, and each
+ * name stripped the way Windows strips it before opening, so `id_rsa.`,
+ * `id_rsa ` and the stream `id_rsa::$DATA` all name `id_rsa`. A share, device
+ * (`\\?\`) or drive-relative path is not spelled; the host refuses such a
+ * path rather than judge it.
+ */
+export function windowsGuardPath(path: string): string | undefined {
+  if (!/^[A-Za-z]:[\\/]/u.test(path)) return undefined;
+  const rest = path.slice(3).split(/[\\/]/u).map(windowsName).join("/");
+  return `/${path.slice(0, 2)}${normalizePosix(rest)}`.replace(/\/$/u, "").toLowerCase();
+}
+
+function windowsName(segment: string): string {
+  if (segment === "." || segment === "..") return segment;
+  const colon = segment.indexOf(":");
+  const name = colon === -1 ? segment : segment.slice(0, colon);
+  // One backward pass: a trailing-run regular expression backtracks
+  // quadratically on long runs of dots and spaces that end in a letter.
+  let end = name.length;
+  while (end > 0 && (name.charCodeAt(end - 1) === 46 || name.charCodeAt(end - 1) === 32)) end -= 1;
+  return name.slice(0, end);
 }
 
 /** The person-facing form of an entry: home-relative where it is. */
@@ -413,10 +515,9 @@ export function protectedEntryDisplay(
   entry: ResolvedProtectedEntry,
   homeDirectory: string,
 ): string {
+  const home = entry.foldCase === true ? windowsComparable(homeDirectory) : homeDirectory;
   const shown = (path: string) =>
-    isSameOrInside(path, homeDirectory) && path !== homeDirectory
-      ? `~/${path.slice(homeDirectory.length + 1)}`
-      : path;
+    isSameOrInside(path, home) && path !== home ? `~/${path.slice(home.length + 1)}` : path;
   if (entry.kind === "path") return shown(entry.path);
   return `${shown(entry.directory)}/${describeNamePattern(entry.name)}`;
 }

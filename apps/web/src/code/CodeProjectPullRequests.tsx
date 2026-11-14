@@ -1,3 +1,5 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   CodeProjectPullRequestBackgroundRefreshState,
   CodeProjectPullRequestConnection,
@@ -23,13 +25,12 @@ import {
   X,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { ShellState } from "../shell/ShellState";
 import {
   defaultBoardStorage,
   readStoredValue,
   writeStoredValue,
 } from "../threadBoard/threadBoardState";
-import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -388,7 +389,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       )}
 
       {workspace.status === "loading" ? (
-        <ShellState
+        <OctantEmpty
           eyebrow="Pull requests"
           message="Open and draft pull requests will list here."
           state="loading"
@@ -404,20 +405,23 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         ) : null
       ) : !hasProjects ? (
         dock ? (
-          <SurfaceEmpty
+          <OctantEmpty
+            layout="line"
             detail="Only a Code Project with a github.com origin lists pull requests."
             icon={<GitPullRequest size={20} />}
             title="No pull-request source for this Project"
           />
         ) : (
-          <SurfaceEmpty
+          <OctantEmpty
+            layout="line"
             detail="Add a Code Project to see pull requests here."
             icon={<GitPullRequest size={20} />}
             title="No Code Projects yet"
           />
         )
       ) : !onGitHub ? (
-        <SurfaceEmpty
+        <OctantEmpty
+          layout="line"
           action={
             <OctantButton
               disabled={busy}
@@ -473,7 +477,8 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 </p>
               ))}
           {visibleRows.length === 0 && normalizedSearch !== "" ? (
-            <SurfaceEmpty
+            <OctantEmpty
+              layout="line"
               action={
                 <OctantButton
                   onClick={() => setSearch("")}
@@ -488,7 +493,8 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             />
           ) : null}
           {visibleRows.length === 0 && normalizedSearch === "" && filterCount > 0 ? (
-            <SurfaceEmpty
+            <OctantEmpty
+              layout="line"
               action={
                 <OctantButton
                   onClick={() => chooseFilters(NO_PULL_REQUEST_FILTERS)}
@@ -578,14 +584,17 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             </p>
           )}
           {dock || unconnectedProjects.length === 0 ? null : (
-            <details className="code-project-pull-requests__notice" role="note">
-              <summary>
-                {unconnectedProjects.length === 1
+            <OctantCollapsible
+              className="code-project-pull-requests__notice"
+              role="note"
+              summary={
+                unconnectedProjects.length === 1
                   ? "1 Project is not on GitHub"
-                  : `${String(unconnectedProjects.length)} Projects are not on GitHub`}
-              </summary>
+                  : `${String(unconnectedProjects.length)} Projects are not on GitHub`
+              }
+            >
               <span>{unconnectedProjects.map((project) => project.projectName).join(", ")}</span>
-            </details>
+            </OctantCollapsible>
           )}
         </>
       )}
@@ -677,7 +686,7 @@ function FilterMenu(props: {
         <ListFilter aria-hidden="true" size={16} />
       </WorkListMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+        <OctantMenuPositioner align="end" className="outline-none window-no-drag">
           <OctantMenuPopup aria-label="Filter pull requests" className="min-w-[14rem]">
             <FilterGroup<PullRequestStateFilter>
               label="State"
@@ -858,7 +867,7 @@ function RepositorySettingsMenu(props: {
         <Settings2 aria-hidden="true" size={16} />
       </WorkListMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+        <OctantMenuPositioner align="end" className="outline-none window-no-drag">
           <OctantMenuPopup aria-label="Repository settings" className="min-w-[14rem]">
             {props.projects.map((project, index) => (
               <div key={String(project.projectId)}>
@@ -918,7 +927,7 @@ function RepositoryGroup(props: {
               <MoreHorizontal aria-hidden="true" size={14} />
             </WorkListMenuTrigger>
             <OctantMenuPortal>
-              <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+              <OctantMenuPositioner align="end" className="outline-none window-no-drag">
                 <OctantMenuPopup aria-label={`${props.title} settings`} className="min-w-[14rem]">
                   <OctantMenuGroup>
                     <OctantMenuGroupLabel>{props.title}</OctantMenuGroupLabel>

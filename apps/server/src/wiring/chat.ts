@@ -68,6 +68,8 @@ import {
   type SideChatFileSource,
 } from "../chat/sideChatSourceTools";
 import { createThreadMentionRouteHandler } from "../threadMentionRoutes";
+import { ThreadNoteStore, ThreadNotesService } from "../threadNotes/threadNotes";
+import { createThreadNotesRouteHandler } from "../threadNotes/threadNotesRoutes";
 import { threadToolCallRecorders } from "../threadToolCallRecorder";
 import {
   createExtensionChatResolver,
@@ -756,6 +758,31 @@ export function wireChat(deps: ChatDependencies) {
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    // A thread's notes and recap reach exactly the threads a mention resolves
+    // for this window, read through each mode's own transcript reader.
+    const threadNotesRoutes = createThreadNotesRouteHandler({
+      service: new ThreadNotesService({
+        store: new ThreadNoteStore({
+          journal: persistence.journal,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
+        canOpen: async (windowId, threadId) =>
+          (await threadMentionService.openableThread(windowId, threadId)) !== undefined,
+        readRecapSource: async (windowId, threadId) => {
+          const read = await threadMentionService.resolveSideChatSource(windowId, threadId);
+          if (read.kind === "unreadable") return read;
+          return {
+            kind: "readable",
+            mode: read.source.mode,
+            title: read.source.title,
+            transcript: read.source.transcript,
+            truncated: read.source.truncated,
+          };
+        },
+      }),
+      windowAuthorityStore,
+    });
     // At start every running attempt is one the previous host was giving when
     // it stopped; the host continues those once it is up (wiring/continuation.ts).
     const { cutOff: chatAttemptsCutOffByRestart } = yield* Effect.promise(() =>
@@ -933,6 +960,7 @@ export function wireChat(deps: ChatDependencies) {
       threadCheckpointRoutes,
       threadMentionRoutes,
       threadMentionService,
+      threadNotesRoutes,
       workspacePresetRoutes,
     };
   });

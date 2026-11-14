@@ -360,6 +360,29 @@ describe("remote route policy", () => {
     expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(4);
   });
 
+  it("forwards a thread's notes and recap for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const post = await fixture.route(
+      request("/api/thread-notes/commands", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+    const read = await fixture.route(request("/api/thread-notes/commands"));
+    await read.arrayBuffer();
+
+    expect(post.status).toBe(200);
+    expect(read.status).toBe(405);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledOnce();
+    // A restricted device session is held to the catalogue, which names no
+    // action here, so the product dispatch refuses it before the route.
+    expect(
+      classifyProductAction(new Request(`${origin}/api/thread-notes/commands`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
   it("rejects authority confusion and forwarded identity before dispatch", async () => {
     const fixture = handler();
 

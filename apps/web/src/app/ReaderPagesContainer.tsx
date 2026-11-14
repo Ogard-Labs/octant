@@ -5,6 +5,7 @@ import { decodeCodeThreadId, type CodeThread } from "@octant/contracts/code";
 import { decodeUtcTimestamp, decodeWorkThreadId, type WorkThread } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { memo, useMemo } from "react";
+import { useMinuteTick } from "../polling/useMinuteTick";
 import { buildAutomationEditorCatalog } from "../automation/automationEditorCatalog";
 import {
   isChildPendingRequest,
@@ -125,7 +126,6 @@ export interface ReaderPagesContainerProps {
   >;
   /** The sum of every mode's navigation revision: when a turn starts or ends. */
   readonly navigationRevision: number;
-  readonly now: number;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly projects: ProjectController["projects"];
   readonly projectsListOpen: boolean;
@@ -190,7 +190,6 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     loadAssignedGithubWork,
     loadAssignedLinearIssues,
     navigationRevision,
-    now,
     projectNames,
     projects,
     projectsListOpen,
@@ -209,6 +208,9 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     workThreads,
     workspace,
   } = props;
+  // Relative-time labels tick here, so the minute re-renders this subtree
+  // rather than the whole shell.
+  const now = useMinuteTick().getTime();
   const { openProjectCreate, openSelectedProject } = actions;
   const {
     agentMessageClient,

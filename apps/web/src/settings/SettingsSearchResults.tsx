@@ -88,8 +88,12 @@ export function SettingsSearchResults({
         setActiveIndex(results.length === 0 ? -1 : results.length - 1);
         break;
       case "Escape":
+        if (onEscape === undefined) break;
+        // Escape clears the search; it must not also reach the Settings sheet,
+        // which closes on Escape.
         event.preventDefault();
-        onEscape?.();
+        event.stopPropagation();
+        onEscape();
         break;
     }
   };

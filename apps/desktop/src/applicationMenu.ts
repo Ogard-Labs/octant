@@ -18,7 +18,7 @@ export function developerToolsAllowed(build: {
 export interface ApplicationMenuOptions {
   readonly appName: string;
   readonly onOpenSettings: () => void;
-  /** Prepare to Shut Down…: moves this computer's threads to another before it goes off. */
+  /** Prepare to shut down…: moves this computer's threads to another before it goes off. */
   readonly onPrepareToShutDown?: () => void;
   /** `viaShortcut` is true when the ⌘Q accelerator, not a pointer click, chose Quit. */
   readonly onQuit: (request: { readonly viaShortcut: boolean }) => void;
@@ -54,7 +54,7 @@ export function buildApplicationMenuTemplate(
         { type: "separator" },
         ...(options.onPrepareToShutDown === undefined
           ? []
-          : [{ click: options.onPrepareToShutDown, label: "Prepare to Shut Down…" }]),
+          : [{ click: options.onPrepareToShutDown, label: "Prepare to shut down…" }]),
         // An explicit item (not the `quit` role) marks the quit as interactive
         // so the active-work confirmation can tell it apart from signal- or
         // event-driven termination that nobody can answer.
@@ -85,16 +85,29 @@ export function buildApplicationMenuTemplate(
 }
 
 /**
- * The Windows and Linux menu bar of a packaged stable release: the standard
- * File, Edit, View and Window menus without the macOS application menu and
- * without Reload or Toggle Developer Tools. Removing the menu outright would
- * also take away zoom, fullscreen and the Edit roles' clipboard shortcuts.
+ * The Windows and Linux menu bar: no application menu exists there, so File
+ * carries Settings…, Prepare to shut down…, and Quit, the last through the same
+ * interactive quit (and its active-work confirmation) as the macOS item. Edit,
+ * View and Window stay, because removing the menu would also take away zoom,
+ * fullscreen and the Edit roles' clipboard shortcuts.
  */
-export function buildStableMenuTemplate(): MenuItemConstructorOptions[] {
-  return buildApplicationMenuTemplate({
-    appName: "Octant",
-    onOpenSettings: () => {},
-    onQuit: () => {},
-    developerTools: false,
-  }).slice(1);
+export function buildWindowsLinuxMenuTemplate(
+  options: ApplicationMenuOptions,
+): MenuItemConstructorOptions[] {
+  const [appMenu, , ...rest] = buildApplicationMenuTemplate(options);
+  const appItems = Array.isArray(appMenu?.submenu) ? appMenu.submenu : [];
+  const carried = (label: string) => appItems.filter((item) => item.label === label);
+  return [
+    {
+      label: "File",
+      submenu: [
+        ...carried("Settings…"),
+        { type: "separator" },
+        ...carried("Prepare to shut down…"),
+        { role: "close" },
+        ...carried(`Quit ${options.appName}`),
+      ],
+    },
+    ...rest,
+  ];
 }

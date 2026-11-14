@@ -28,6 +28,7 @@ import {
   ProjectPullRequestActions,
   type ProjectPullRequestPersonAction,
 } from "./ProjectPullRequestActions";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 const PR_STATE_LABELS: Record<CodeProjectPullRequestDetailObserved["pullRequestState"], string> = {
   open: "Open",
@@ -394,12 +395,11 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         ) : (
           <>
             <Markdown body={detail.description} className="code-pr-review__prose" skipHtml />
-            <details className="code-pr-review__source">
-              <summary>Original description</summary>
+            <OctantCollapsible className="code-pr-review__source" summary="Original description">
               <div className="code-pr-review__diff">
                 <CodeBlock code={detail.description} language="markdown" />
               </div>
-            </details>
+            </OctantCollapsible>
           </>
         )}
       </section>

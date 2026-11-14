@@ -294,6 +294,10 @@ function harness() {
         status: "ok",
         frames: frames.filter((frame) => frame.threadId === threadId),
       }),
+      summaryForThread: (threadId) => ({
+        status: "ok",
+        frames: frames.filter((frame) => frame.threadId === threadId),
+      }),
       append,
       replay: (input) => {
         const result = frames.filter(

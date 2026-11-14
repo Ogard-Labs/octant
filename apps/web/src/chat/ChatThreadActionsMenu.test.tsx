@@ -120,3 +120,48 @@ describe("moving a No-project Chat thread into a Project from its actions menu",
     expect(screen.queryByRole("menuitemradio", { name: "Move to Project…" })).toBeNull();
   });
 });
+
+describe("moving a Chat thread to another account from its actions menu", () => {
+  const personal = "84000000-0000-4000-8000-0000000000b2" as never;
+  const accounts = [{ id: personal, name: "Personal" }];
+
+  it("moves the thread to the account the person picks and says the conversation goes as text", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn(async () => undefined);
+    render(<ChatThreadActionsMenu moveToAccount={{ accounts, onMove }} view={view} />);
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Move to account…" }));
+    expect(await screen.findByText(/handed over as text/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Personal" }));
+    expect(onMove).toHaveBeenCalledWith(personal);
+  });
+
+  it("shows the move disabled with its reason while the thread's model pool is on", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn(async () => undefined);
+    render(
+      <ChatThreadActionsMenu
+        moveToAccount={{ accounts, onMove, unavailableReason: "Turn off the model pool first." }}
+        view={view}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    const item = await screen.findByRole("menuitemradio", { name: /Move to account…/ });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveTextContent("Turn off the model pool first.");
+    await user.click(item);
+    expect(screen.queryByRole("dialog", { name: "Move to account" })).toBeNull();
+  });
+
+  it("keeps the dialog open with the host's refusal", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn(
+      async () => "Wait for the running answer to finish before moving this thread.",
+    );
+    render(<ChatThreadActionsMenu moveToAccount={{ accounts, onMove }} view={view} />);
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Move to account…" }));
+    await user.click(screen.getByRole("button", { name: "Personal" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Wait for the running answer");
+  });
+});

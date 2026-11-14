@@ -19,6 +19,7 @@ import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
 import type { DesignRunRuntime } from "./blocks/designRunningFrame";
 import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
+import "../styles/canvas.css";
 
 export interface CanvasDocumentProps {
   readonly definition: CanvasDefinition;

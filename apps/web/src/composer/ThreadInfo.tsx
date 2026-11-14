@@ -13,6 +13,7 @@ import {
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { ThreadStatsBlock } from "../threadStats/ThreadStats";
+import { ThreadNotesRows } from "../threadNotes/ThreadNotes";
 
 interface ThreadInfoPanel {
   /** Opens the panel, for a control elsewhere that leads to one of its rows. */
@@ -67,6 +68,14 @@ export function ThreadInfo(props: {
     readonly content: ReactNode;
     /** The tooltip: the full place when its words are cut to fit the row. */
     readonly tooltip?: string;
+  };
+  /**
+   * The thread whose recap and notes the panel shows, and how a note goes
+   * into this thread's composer. Absent where the panel has no host thread.
+   */
+  readonly notes?: {
+    readonly threadId: string;
+    readonly onInsert?: (text: string) => void;
   };
 }) {
   const [open, setOpen] = useState(false);
@@ -156,6 +165,9 @@ export function ThreadInfo(props: {
         >
           <ThreadStatsBlock />
           {props.children}
+          {props.notes === undefined ? null : (
+            <ThreadNotesRows onInsert={props.notes.onInsert} threadId={props.notes.threadId} />
+          )}
         </section>
       </div>
     </ThreadInfoContext.Provider>

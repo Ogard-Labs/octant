@@ -68,6 +68,15 @@ export interface AutomationRouteDependencies {
   readonly commands: Pick<AutomationCommandService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly projects: Pick<ProjectService, "bootstrap">;
+  /**
+   * The Code and Work Projects on the person's registered servers. They are a
+   * catalog of their own, so the local bootstrap never lists them, and a
+   * routine there is reached only by the host's own person, who reads that catalog.
+   */
+  readonly serverProjects?: () => ReadonlyArray<{
+    readonly id: string;
+    readonly mode: "code" | "work";
+  }>;
   /** The identity of the host that owns every Automation this server holds. */
   readonly hostId: string;
   /**
@@ -244,6 +253,13 @@ async function accessibleProjects(
   const accessible = new Map<string, "chat" | "work" | "code">();
   for (const project of bootstrap.active) {
     if (project.lifecycle === "active") accessible.set(String(project.id), project.type);
+  }
+  // The server catalog is read only by the host's own person, as its own
+  // route allows, so a restricted device reaches no routine there either.
+  if (principalActsAsHostPerson(context.principal)) {
+    for (const project of dependencies.serverProjects?.() ?? []) {
+      accessible.set(project.id, project.mode);
+    }
   }
   return accessible;
 }

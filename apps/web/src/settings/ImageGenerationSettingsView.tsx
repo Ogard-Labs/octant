@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   IMAGE_GENERATION_MAX_CUSTOM_SOURCES,
   type ImageGenerationCustomSource,
@@ -16,7 +17,6 @@ import { useState, type ReactNode } from "react";
 import type { ProviderController } from "../providers/useProviderController";
 import { ProviderCreateForm } from "../providers/ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "../providers/ProviderSettingsList";
-import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -78,7 +78,8 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
     >
       {!hasImageProvider && props.settings.customSources.length === 0 ? (
         <>
-          <SurfaceEmpty
+          <OctantEmpty
+            layout="line"
             action={
               props.onOpenModelEndpoints === undefined ? null : (
                 <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">

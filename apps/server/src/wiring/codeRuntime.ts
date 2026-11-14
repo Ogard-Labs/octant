@@ -510,6 +510,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     ): void => {
       codeToolContributors.push(contributor);
     };
+    // The few sets a server Project's turn is offered beside its server
+    // tools: each acts only on this host's records, never on a folder here.
+    const serverCodeToolContributors: Array<
+      NonNullable<CodeOperationRuntimeOptions["serverTurnTools"]>
+    > = [];
+    const contributeServerCodeTools = (
+      contributor: NonNullable<CodeOperationRuntimeOptions["serverTurnTools"]>,
+    ): void => {
+      serverCodeToolContributors.push(contributor);
+    };
     // A routine's turn has nobody at a window to answer the image card, so it
     // is offered the tool only where its Project keeps a choice.
     contributeCodeTools(({ windowId, thread, readThread, folders }) => {
@@ -1407,6 +1417,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             : combineAppManagedToolSets(
                 ...codeToolContributors.map((contribute) => contribute(input)),
               ),
+        serverTurnTools: (input) =>
+          serverCodeToolContributors.length === 0
+            ? undefined
+            : combineAppManagedToolSets(
+                ...serverCodeToolContributors.map((contribute) => contribute(input)),
+              ),
         // The facts come from the host's own records on every call. The
         // Code runtime, the decision reader, and the mention directory are
         // declared later in this startup; a turn runs only after they exist.
@@ -1661,7 +1677,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const codeThreadMetadataService = new CodeThreadMetadataService({
       git: { observe: () => ({ status: "unavailable" }) },
       history: {
-        read: (threadId) => codeBoardEventStore.historyForThread(threadId),
+        read: (threadId) => codeBoardEventStore.summaryForThread(threadId),
       },
     });
     // Persistent Code follow-up. Follow-up is a durable user
@@ -2102,6 +2118,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeService,
       codeTurnDecisions,
       contributeCodeTools,
+      contributeServerCodeTools,
       coordinatorService,
       coordinatorWakes,
       routeCodeService,

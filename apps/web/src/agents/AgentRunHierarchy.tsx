@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   decodeAgentRunId,
   type AgentRunCoordinatorGraph,
@@ -14,7 +15,6 @@ import {
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ShellState } from "../shell/ShellState";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   AgentHierarchyPanel,
@@ -356,11 +356,11 @@ export function AgentRunHierarchy(props: {
   const model = useMemo(() => buildAgentHierarchyModel({ entries }), [entries]);
 
   if (status === "loading") {
-    return <ShellState state="loading" title="Loading agents" />;
+    return <OctantEmpty state="loading" title="Loading agents" />;
   }
   if (status === "error" && entries.length + observations.length === 0) {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry Agents", onClick: () => void refresh() }}
         eyebrow="Agents"
         message={errorMessage ?? "The local AgentRun service is unavailable."}

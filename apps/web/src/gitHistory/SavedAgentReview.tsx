@@ -1,10 +1,11 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunResultPacket, AgentRunReviewResponse } from "@octant/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { agentResultWorkspaceLabel } from "../agents/AgentRunResults";
 import { parseUnifiedDiff } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
-import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface AgentResultReviewRequest {
@@ -84,8 +85,7 @@ export function SavedAgentReview(props: {
         <header className="git-history__commit-header">
           <h2>Generation {packet.generation} changes</h2>
           <p>{packet.modelId}</p>
-          <details className="git-history__message">
-            <summary>Attribution</summary>
+          <OctantCollapsible className="git-history__message" summary="Attribution">
             <div role="group" aria-label="Review attribution">
               <p>
                 Run: {packet.runId} · Parent: {packet.parentThreadId}
@@ -111,7 +111,7 @@ export function SavedAgentReview(props: {
                 </>
               )}
             </div>
-          </details>
+          </OctantCollapsible>
         </header>
         {unavailable ? (
           <p className="git-history__notice" role="status">
@@ -127,7 +127,7 @@ export function SavedAgentReview(props: {
             ) : null}
           </p>
         ) : snapshot === undefined ? (
-          <ShellState state="loading" title="Loading saved review" />
+          <OctantEmpty state="loading" title="Loading saved review" />
         ) : (
           <>
             {snapshot.truncated ? (

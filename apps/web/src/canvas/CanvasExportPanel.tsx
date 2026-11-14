@@ -27,6 +27,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { CanvasExportFolderState } from "./useCanvasExportFolder";
+import "../styles/canvas.css";
 
 export interface CanvasExportPanelProps {
   readonly offers: CanvasExportOfferList;

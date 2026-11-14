@@ -75,6 +75,10 @@ function fakeHost(
     readonly children?: boolean;
     /** Holds the program's stack reads until it settles. */
     readonly programStackGate?: Promise<void>;
+    /** Frames below the program's two, as a deep recursion reports. */
+    readonly deepStack?: number;
+    /** Extra leaf values in Locals, as a large array reports (the host sends at most 200). */
+    readonly wideScope?: number;
   } = {},
 ) {
   let approved = false;
@@ -152,6 +156,11 @@ function fakeHost(
               name: "node:internal",
               location: { kind: "outside-checkout", label: "elsewhere" },
             },
+            ...Array.from({ length: options.deepStack ?? 0 }, (_, index) => ({
+              id: 100 + index,
+              name: `recurse ${String(index)}`,
+              location: { kind: "outside-checkout" as const, label: "elsewhere" },
+            })),
           ],
           truncated: false,
         });
@@ -174,8 +183,14 @@ function fakeHost(
                     variablesReference: 0,
                   },
                   { name: "settings", value: "Object", truncated: false, variablesReference: 11 },
+                  ...Array.from({ length: options.wideScope ?? 0 }, (_value, index) => ({
+                    name: `item${String(index)}`,
+                    value: String(index),
+                    truncated: false,
+                    variablesReference: 0,
+                  })),
                 ],
-                truncated: false,
+                truncated: (options.wideScope ?? 0) > 0,
               }
             : {
                 status: "variables",
@@ -395,7 +410,7 @@ describe("Run and debug panel", () => {
     expect(await screen.findByText("42")).toBeVisible();
     expect(screen.getByText("fixture ready")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /settings/ }));
+    await user.click(screen.getByRole("treeitem", { name: /settings/ }));
     expect(await screen.findByText("8080")).toBeVisible();
 
     await user.type(
@@ -747,6 +762,108 @@ describe("Run and debug panel", () => {
     expect(within(processes).queryByRole("button", { name: /Subprocess 4242/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
     expect(screen.queryByText("You stopped the session.")).toBeNull();
+  });
+
+  it("mounts only part of a deep call stack and keeps the selected frame current and reachable", async () => {
+    const user = userEvent.setup();
+    const store = new CodeDebugWindowState();
+    const { client } = fakeHost({ deepStack: 150 });
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    // jsdom lays nothing out; the stack box and its rows report real heights.
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.classList.contains("run-debug__frames-scroll")) return 280;
+        return this.hasAttribute("data-index") ? 28 : (offsetHeight?.get?.call(this) ?? 0);
+      },
+    });
+    try {
+      render(
+        <RunDebugPanel
+          checkoutId={checkoutId}
+          client={client}
+          pollMs={fast}
+          store={store}
+          threadId={threadId}
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+      const stack = await screen.findByRole("region", { name: "Call stack" });
+      const selected = await within(stack).findByRole("button", { current: true });
+      expect(selected).toHaveTextContent("main");
+      expect(within(stack).getAllByRole("listitem").length).toBeLessThan(152);
+      expect(selected.closest("li")).toHaveAttribute("aria-setsize", "152");
+    } finally {
+      if (offsetHeight === undefined) Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+      else Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+    }
+  });
+
+  it("mounts only part of a large scope as a tree and keeps arrow-key focus on mounted rows", async () => {
+    const user = userEvent.setup();
+    const store = new CodeDebugWindowState();
+    const { client } = fakeHost({ wideScope: 198 });
+    vi.mocked(client.configurations).mockResolvedValue(listed(true));
+    // jsdom lays nothing out; the tree box and its rows report real heights.
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.classList.contains("run-debug__tree-scroll")) return 240;
+        return this.hasAttribute("data-index") ? 24 : (offsetHeight?.get?.call(this) ?? 0);
+      },
+    });
+    try {
+      render(
+        <RunDebugPanel
+          checkoutId={checkoutId}
+          client={client}
+          pollMs={fast}
+          store={store}
+          threadId={threadId}
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+      // Locals opens once its values arrive, which is what turns the tree virtual.
+      await screen.findByRole("treeitem", { name: /item0/ });
+      const tree = screen.getByRole("tree", { name: "Variables" });
+      const scope = within(tree).getByRole("treeitem", { name: "Locals" });
+      expect(scope).toHaveAttribute("aria-expanded", "true");
+      expect(scope).toHaveAttribute("aria-level", "1");
+      expect(within(tree).getAllByRole("treeitem").length).toBeLessThan(100);
+      const count = within(tree).getByRole("treeitem", { name: /count/ });
+      expect(count).toHaveAttribute("aria-level", "2");
+      expect(count).toHaveAttribute("aria-posinset", "1");
+      expect(count).toHaveAttribute("aria-setsize", "200");
+      expect(count).not.toHaveAttribute("aria-expanded");
+
+      // The tree is one Tab stop; arrows move focus row by row.
+      expect(scope).toHaveAttribute("tabindex", "0");
+      scope.focus();
+      await user.keyboard("{ArrowDown}");
+      expect(within(tree).getByRole("treeitem", { name: /count/ })).toHaveFocus();
+      await user.keyboard("{ArrowDown}{ArrowRight}");
+      const settings = within(tree).getByRole("treeitem", { name: /settings/ });
+      expect(settings).toHaveAttribute("aria-expanded", "true");
+      expect(await within(tree).findByRole("treeitem", { name: /port/ })).toHaveAttribute(
+        "aria-level",
+        "3",
+      );
+
+      // End reaches the last value, which mounts and takes focus.
+      await user.keyboard("{End}");
+      const last = await within(tree).findByRole("treeitem", { name: /item197/ });
+      await waitFor(() => expect(last).toHaveFocus());
+      expect(within(tree).getAllByRole("treeitem").length).toBeLessThan(100);
+      await user.keyboard("{ArrowLeft}");
+      await waitFor(() =>
+        expect(within(tree).getByRole("treeitem", { name: "Locals" })).toHaveFocus(),
+      );
+    } finally {
+      if (offsetHeight === undefined) Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+      else Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+    }
   });
 
   it("keeps a selected child's stop when the program's slower stack read answers after the switch", async () => {

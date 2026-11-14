@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { HUB_GRANT_ITEMS, type HubGrantItem } from "@octant/contracts";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
@@ -1191,10 +1192,10 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
       }
     };
     void read();
-    const timer = setInterval(() => void read(), PENDING_POLL_MS);
+    const stopRefresh = scheduleVisibleInterval(() => void read(), PENDING_POLL_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stopRefresh();
     };
   }, [hubOn, minted, pairing]);
 

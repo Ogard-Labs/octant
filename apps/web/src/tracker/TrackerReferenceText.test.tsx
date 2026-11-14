@@ -1,7 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { TrackerReferenceProvider } from "./TrackerReferenceContext";
+import {
+  TrackerReferenceProvider,
+  useTrackerReferenceResolutions,
+} from "./TrackerReferenceContext";
 import { TrackerReferenceComposerHints } from "./TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "./TrackerReferenceText";
 import type { TrackerReferenceResolvePorts } from "./trackerReferenceResolve";
@@ -130,5 +133,16 @@ describe("TrackerReferenceComposerHints", () => {
     await waitFor(() => {
       expect(screen.queryByRole("list", { name: "Resolved tracker references" })).toBeNull();
     });
+  });
+
+  it("hands readers the same empty resolution while text without tags keeps changing", async () => {
+    const { result, rerender } = renderHook(
+      ({ text }: { readonly text: string }) => useTrackerReferenceResolutions(text),
+      { initialProps: { text: "no tags here" } },
+    );
+    const first = result.current.byIdentity;
+    rerender({ text: "still no tags" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(result.current.byIdentity).toBe(first);
   });
 });

@@ -2648,6 +2648,31 @@ CREATE INDEX validation_evidence_authority_idx
         ON code_file_projection(content_id);
     `,
   },
+  {
+    version: 105,
+    name: "record_agent_access_loopback_use",
+    // An agent grant's key may now be used by an MCP client on this computer
+    // over loopback, so its last use may come from there. A store, not a
+    // projection: the bearer hashes are in no event, so the rows are copied.
+    sql: `
+      ALTER TABLE agent_access_credential_store RENAME TO agent_access_credential_before_loopback;
+      CREATE TABLE agent_access_credential_store (
+        grant_id TEXT PRIMARY KEY CHECK(length(grant_id) = 36),
+        salt TEXT CHECK(salt IS NULL OR length(salt) = 32),
+        hash TEXT CHECK(hash IS NULL OR length(hash) = 64),
+        last_used_at TEXT,
+        last_source_class TEXT CHECK(
+          last_source_class IS NULL OR
+          last_source_class IN ('loopback', 'lan-private', 'tailscale')
+        )
+      ) STRICT;
+      INSERT INTO agent_access_credential_store
+        (grant_id, salt, hash, last_used_at, last_source_class)
+        SELECT grant_id, salt, hash, last_used_at, last_source_class
+        FROM agent_access_credential_before_loopback;
+      DROP TABLE agent_access_credential_before_loopback;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

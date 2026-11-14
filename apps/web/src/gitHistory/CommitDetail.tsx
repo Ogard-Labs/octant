@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { lazy, Suspense, useEffect, useMemo, useState, useRef } from "react";
 import type { GitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
@@ -9,8 +10,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
-import { ShellState } from "../shell/ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 const MonacoDiffAdapter = lazy(() =>
   import("../code/MonacoDiffAdapter").then((module) => ({ default: module.MonacoDiffAdapter })),
@@ -86,7 +87,7 @@ export function CommitDetail(props: {
       )}
       {detail === undefined ? (
         message === undefined ? (
-          <ShellState state="loading" title="Loading commit" />
+          <OctantEmpty state="loading" title="Loading commit" />
         ) : null
       ) : (
         <>
@@ -99,14 +100,13 @@ export function CommitDetail(props: {
               </time>
             </p>
             {detail.message.trim() === detail.commit.subject ? null : (
-              <details className="git-history__message">
-                <summary>Commit message</summary>
+              <OctantCollapsible className="git-history__message" summary="Commit message">
                 <pre>
                   {detail.message.startsWith(detail.commit.subject)
                     ? detail.message.slice(detail.commit.subject.length).trimStart()
                     : detail.message}
                 </pre>
-              </details>
+              </OctantCollapsible>
             )}
             <p>
               {detail.files.toLocaleString("en")}{" "}
@@ -177,7 +177,7 @@ export function CommitDetail(props: {
                   {selected.binary ? (
                     <p>This file has no textual diff.</p>
                   ) : (
-                    <Suspense fallback={<ShellState state="loading" title="Loading comparison" />}>
+                    <Suspense fallback={<OctantEmpty state="loading" title="Loading comparison" />}>
                       <MonacoDiffAdapter
                         ariaLabel={`Diff for ${selected.path}`}
                         language="plaintext"
@@ -227,15 +227,20 @@ function CommitFileDiff(props: { readonly file: ParsedDiffFile; readonly initial
     }),
   };
   return (
-    <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>
-        {props.file.path}{" "}
-        <span>
-          {props.file.binary
-            ? "No textual diff"
-            : `+${props.file.additions} −${props.file.deletions}`}
-        </span>
-      </summary>
+    <OctantCollapsible
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      open={open}
+      summary={
+        <>
+          {props.file.path}{" "}
+          <span>
+            {props.file.binary
+              ? "No textual diff"
+              : `+${props.file.additions} −${props.file.deletions}`}
+          </span>
+        </>
+      }
+    >
       {open ? (
         <>
           <UnifiedDiffList files={[visible]} />
@@ -247,6 +252,6 @@ function CommitFileDiff(props: { readonly file: ParsedDiffFile; readonly initial
           ) : null}
         </>
       ) : null}
-    </details>
+    </OctantCollapsible>
   );
 }
