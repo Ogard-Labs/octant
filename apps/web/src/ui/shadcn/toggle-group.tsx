@@ -12,7 +12,10 @@ export function ToggleGroup<Value extends string>({
 }: ToggleGroupProps<Value>) {
   return (
     <ToggleGroupPrimitive<Value>
-      className={cn("inline-flex w-fit items-center rounded-lg bg-(--oct-fill-4) p-[2px]", className)}
+      className={cn(
+        "inline-flex w-fit items-center rounded-lg bg-(--oct-fill-4) p-[2px]",
+        className,
+      )}
       data-slot="toggle-group"
       {...props}
     />

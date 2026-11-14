@@ -139,7 +139,11 @@ describe("the built-in pixel scenes", () => {
     scene.frame(0);
     const sample: SceneSample = { ink: 0, glow: 0 };
     for (let row = Math.floor(rows * 0.36); row < Math.floor(rows * 0.5); row += 1) {
-      for (let column = Math.floor(columns * 0.4); column < Math.floor(columns * 0.6); column += 1) {
+      for (
+        let column = Math.floor(columns * 0.4);
+        column < Math.floor(columns * 0.6);
+        column += 1
+      ) {
         scene.read(column, row, sample);
         expect(sample.ink).toBeLessThan(0.01);
         expect(sample.glow).toBeLessThan(0.01);
