@@ -507,6 +507,7 @@ function AvailableDiff(
         >
           <UnifiedDiffList
             files={displayFiles}
+            getScrollElement={() => reviewStack.current}
             {...(props.diff.state === "available" && providerReadsAvailable
               ? { onReadProviderFile: readProviderFile }
               : {})}
