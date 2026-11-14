@@ -1375,7 +1375,7 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
-  test("lets background commands reach the gate and refuses a watch Octant cannot hold", async () => {
+  test("lets background commands reach the gate and refuses a watch or a remote workflow Octant cannot hold", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
     const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
     const tools = ["Read", "Grep", "Glob", "Bash"] as const;
@@ -1409,15 +1409,22 @@ describe("Claude Agent SDK port", () => {
           );
           expect(canUseTool).toHaveBeenCalledOnce();
 
-          for (const [index, [watch, reason]] of (
+          for (const [index, [toolName, watch, reason]] of (
             [
               [
+                "Monitor",
                 { ws: { url: "wss://example.test" } },
                 "Claude's Monitor may watch a command, not a WebSocket.",
               ],
               [
+                "Monitor",
                 { persistent: true },
                 "Claude's Monitor may not keep a watch for the whole session.",
+              ],
+              [
+                "Workflow",
+                { remote: true },
+                "Claude's Workflow runs on this host; a remote run is unavailable.",
               ],
             ] as const
           ).entries()) {
@@ -1425,7 +1432,7 @@ describe("Claude Agent SDK port", () => {
             const toolInput = { description: "watch", timeout_ms: 60_000, ...watch };
             expect(
               yield* Effect.promise(() =>
-                permission("Monitor", toolInput, {
+                permission(toolName, toolInput, {
                   signal,
                   toolUseID: toolUseId,
                   requestId: `request-watch-${index}`,
@@ -1439,7 +1446,7 @@ describe("Claude Agent SDK port", () => {
                     hook_event_name: "PreToolUse",
                     session_id: "session-1",
                     cwd: "/repo",
-                    tool_name: "Monitor",
+                    tool_name: toolName,
                     tool_input: toolInput,
                     tool_use_id: toolUseId,
                   },
@@ -3116,7 +3123,7 @@ describe("Claude Agent SDK port", () => {
 });
 
 describe("Claude's full built-in tool set", () => {
-  const withheldTools = ["EnterWorktree", "Workflow"];
+  const withheldTools = ["EnterWorktree", "REPL"];
 
   test("launches with Claude Code's own tool preset less the withheld tools and holds a built-in tool Octant never named", async () => {
     const harness = makeHarness([
@@ -3140,7 +3147,7 @@ describe("Claude's full built-in tool set", () => {
 
   test("refuses a runtime that holds a withheld tool", async () => {
     const harness = makeHarness([
-      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "Workflow"] },
+      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "REPL"] },
     ]);
     const failed = await failureOf(
       Effect.scoped(
@@ -3192,7 +3199,7 @@ describe("Claude's full built-in tool set", () => {
           expect(yield* call("FutureTool", "future")).toEqual({
             hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask" },
           });
-          expect(yield* call("Workflow", "workflow")).toMatchObject({
+          expect(yield* call("REPL", "repl")).toMatchObject({
             hookSpecificOutput: { permissionDecision: "deny" },
           });
           expect(preToolUse).toHaveBeenCalledOnce();
@@ -3502,6 +3509,99 @@ describe("Claude running as itself", () => {
       "task_notification",
     ]);
     expect(JSON.stringify(messages)).not.toContain("private subagent prompt");
+
+    const refused = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness(lifecycle).port.openQuery(openInput);
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "protocol" });
+  });
+
+  test("reads a workflow's task and where each of its agents stands only when subagents are on, keeping its script out", async () => {
+    const lifecycle = [
+      safeRuntimeInitialization,
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "workflow-1",
+        tool_use_id: "toolu-workflow",
+        description: "Review the change",
+        task_type: "local_workflow",
+        workflow_name: "review",
+        prompt: "export const meta = { name: 'private script' }",
+        uuid: "00000000-0000-4000-8000-0000000000c1",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "workflow-1",
+        tool_use_id: "toolu-workflow",
+        description: "Find: read the diff",
+        usage: { total_tokens: 900, tool_uses: 1, duration_ms: 400 },
+        workflow_progress: [
+          { type: "workflow_phase", index: 0, title: "Find" },
+          {
+            type: "workflow_agent",
+            index: 0,
+            label: "read the diff",
+            state: "progress",
+            lastToolName: "Read",
+            promptPreview: "private agent prompt",
+          },
+          { type: "workflow_agent", index: 1, label: "check the tests", state: "done" },
+        ],
+        uuid: "00000000-0000-4000-8000-0000000000c2",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "workflow-1",
+        tool_use_id: "toolu-workflow",
+        status: "completed",
+        output_file: "/tmp/workflow-output",
+        summary: 'Dynamic workflow "review" completed',
+        uuid: "00000000-0000-4000-8000-0000000000c3",
+        session_id: "session-1",
+      },
+    ];
+    const messages = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness(lifecycle).port.openQuery({
+            ...openInput,
+            tools: [...openInput.tools, "Agent"],
+            nativeSetup: ownSetup,
+          });
+          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+        }),
+      ),
+    );
+    expect(messages.slice(1)).toEqual([
+      expect.objectContaining({
+        kind: "task",
+        subtype: "task_started",
+        background: true,
+        workflow: { name: "review" },
+      }),
+      expect.objectContaining({
+        kind: "task",
+        subtype: "task_progress",
+        workflow: {
+          agents: [
+            { index: 0, label: "read the diff", state: "progress", lastToolName: "Read" },
+            { index: 1, label: "check the tests", state: "done" },
+          ],
+        },
+      }),
+      expect.objectContaining({ kind: "task", subtype: "task_notification" }),
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("private");
 
     const refused = await failureOf(
       Effect.scoped(

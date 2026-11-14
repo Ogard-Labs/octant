@@ -82,6 +82,7 @@ import {
   codeSiblingThreadState,
 } from "../siblingThreads/codeSiblingThreadSource";
 import { CoordinatorService } from "../coordinator/coordinatorService";
+import type { ThreadWakeupModePort } from "../wakeups/threadWakeupService";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
 import { coordinatorCandidateFacts } from "../coordinator/coordinatorWorkerFacts";
@@ -421,6 +422,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "providerRuntimeRegistry"
     | "selectCodeConversation"
     | "codeSessionConversation"
+    | "threadWakeups"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
@@ -430,6 +432,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const designSystemFiles = new DesignSystemFiles();
   const imageDescriber = deps.imageDescriber;
   const {
+    threadWakeups,
     conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageService,
@@ -1604,6 +1607,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
+        // A Code session hands its runtime's wake-ups to the host's schedule.
+        resolveThreadWakeups: (thread) =>
+          threadWakeups.service?.forSession("code", String(thread.id)),
         resolveProviderNativeSetup: (thread) =>
           sessionNativeSetup(persistence, {
             providerInstanceId: thread.providerInstanceId,
@@ -2034,6 +2040,59 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         coordinatorService.stop();
       }),
     );
+    // A wake-up's turn starts the way a message wake's does: an
+    // agent-initiated host turn under the routine host scope, at the
+    // thread's own posture, through the ordinary turn admission. A thread
+    // working or waiting on the person is busy, and the wake-up waits for it.
+    const codeThreadWakeupPort: ThreadWakeupModePort = {
+      threadOpen: (threadId) => {
+        try {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread !== undefined && thread.lifecycle !== "archived";
+        } catch {
+          return false;
+        }
+      },
+      startTurn: async (threadId, prompt) => {
+        const id = decodeCodeThreadId(threadId);
+        const thread = persistence.readCodeThread(id);
+        if (
+          thread === undefined ||
+          baseRouteCodeService.stageEvidence === undefined ||
+          baseRouteCodeService.executeOperation === undefined
+        ) {
+          return { status: "refused", message: "Code turns are unavailable on this host." };
+        }
+        const state = codeSiblingThreadState(thread, {
+          runtimeWorks: (candidate) => persistence.readCodeRuntimeWorks(candidate),
+          turnAwaitsPerson: (candidate) =>
+            codeOperationRuntime?.turnAwaitsPerson?.(String(candidate)) === true ||
+            threadAwaitsHarnessApproval(String(candidate)),
+          decisionPending: (candidate) => codeTurnDecisions.forThread(candidate) !== undefined,
+        }).state;
+        if (state !== "idle") return { status: "busy" };
+        const staged = await baseRouteCodeService.stageEvidence(ROUTINE_HOST_SCOPE_ID, id, prompt);
+        const operationId = randomUUID();
+        const result = await baseRouteCodeService.executeOperation(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-provider-turn",
+          operationId: decodeCodeOperationId(operationId),
+          threadId: id,
+          checkoutId: thread.checkoutId,
+          sessionId: decodeProviderSessionId(randomUUID()),
+          prompt: staged,
+        });
+        return result.kind === "provider-turn-state" &&
+          (result.state === "running" || result.state === "waiting" || result.state === "completed")
+          ? { status: "started", turnId: operationId }
+          : {
+              status: "refused",
+              message:
+                result.kind === "provider-turn-state" && result.failure !== undefined
+                  ? result.failure.message
+                  : "The turn was not admitted.",
+            };
+      },
+    };
     // A linked pull request's checks turning red is a user obligation, not an
     // agent event: every snapshot refresh feeds the durable follow-up marker on
     // the owning thread. Read-only toward GitHub; only an explicit completion
@@ -2312,6 +2371,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       contributeServerCodeTools,
       coordinatorService,
       coordinatorWakes,
+      codeThreadWakeupPort,
       routeCodeService,
       terminalProcessPort,
     };

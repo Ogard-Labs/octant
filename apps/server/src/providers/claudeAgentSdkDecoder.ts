@@ -20,6 +20,7 @@ import type {
   ClaudeSessionMetadata,
   ClaudeStreamEvent,
   ClaudeTaskUsage,
+  ClaudeWorkflowAgent,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
 import { claudeTaskToolOutput } from "./claudeTaskList";
@@ -1085,6 +1086,48 @@ const TASK_UPDATE_STATUSES = new Set([
   "paused",
 ]);
 
+const MAX_WORKFLOW_PROGRESS_ENTRIES = 512;
+const WORKFLOW_AGENT_STATES = new Set(["start", "progress", "done", "error"]);
+
+/**
+ * The agents a workflow's `task_progress` reports. The runtime sends its
+ * whole progress list each time: one `workflow_agent` entry per agent, kept
+ * up to date in place, beside phase and log entries Octant does not show.
+ * Only an agent's place, label, state, and last tool are read; its prompt
+ * and result previews stay the runtime's.
+ */
+function decodeWorkflowAgents(value: unknown): readonly ClaudeWorkflowAgent[] {
+  if (!Array.isArray(value) || value.length > MAX_WORKFLOW_PROGRESS_ENTRIES) {
+    throw protocol("Claude returned an unsupported runtime message.");
+  }
+  return value.flatMap((entry): ClaudeWorkflowAgent[] => {
+    const item = object(entry);
+    if (item === undefined || typeof item.type !== "string") {
+      throw protocol("Claude returned an unsupported runtime message.");
+    }
+    if (item.type !== "workflow_agent") return [];
+    if (
+      typeof item.index !== "number" ||
+      !Number.isSafeInteger(item.index) ||
+      item.index < 0 ||
+      typeof item.label !== "string" ||
+      typeof item.state !== "string" ||
+      !WORKFLOW_AGENT_STATES.has(item.state) ||
+      (item.lastToolName !== undefined && typeof item.lastToolName !== "string")
+    ) {
+      throw protocol("Claude returned an unsupported runtime message.");
+    }
+    return [
+      {
+        index: item.index,
+        label: item.label,
+        state: item.state as ClaudeWorkflowAgent["state"],
+        ...(typeof item.lastToolName === "string" ? { lastToolName: item.lastToolName } : {}),
+      },
+    ];
+  });
+}
+
 function decodeTaskUsage(value: unknown): ClaudeTaskUsage {
   const usage = object(value);
   const totalTokens = nonNegativeNumber(usage?.total_tokens);
@@ -1526,11 +1569,12 @@ export function decodeMessage(
     // A session with its own subagents on reports each one's lifecycle as a
     // task: `task_started` names the agent (`task_type: "local_agent"`,
     // `subagent_type`, its prompt) and later frames carry the subagent type.
-    // The prompt is the runtime's and is never kept. Workflows stay refused.
+    // The prompt is the runtime's and is never kept.
     const subagentTask = (value: Record<string, unknown>) =>
       input.nativeSetup?.subagents === true &&
       (value.subagent_type === undefined || typeof value.subagent_type === "string");
     let background = false;
+    let workflow: { name?: string; agents?: readonly ClaudeWorkflowAgent[] } | undefined;
     if (message.subtype === "task_started") {
       const ownSubagent =
         subagentTask(message) &&
@@ -1541,14 +1585,32 @@ export function decodeMessage(
       // tool keeps, are `local_bash` tasks (Claude Code 2.1.211). Each wakes
       // the model when it finishes or reports, which the driver holds inside
       // the turn that started it (maintainer decision, 2026-11-14).
-      background =
+      const command =
         message.task_type === "local_bash" &&
         message.subagent_type === undefined &&
         message.prompt === undefined &&
+        message.workflow_name === undefined &&
         (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
+      // A workflow runs in this process as a `local_workflow` task named by
+      // its script's `meta.name`, and wakes the model when it ends, as a
+      // background command does (maintainer decision, 2026-11-14). Its
+      // `prompt` is the script, which is the runtime's and is never kept. A
+      // run sent to a remote session (`remote_agent`) stays refused.
+      const ownWorkflow =
+        input.nativeSetup?.subagents === true &&
+        message.task_type === "local_workflow" &&
+        message.subagent_type === undefined &&
+        (message.workflow_name === undefined || typeof message.workflow_name === "string") &&
+        (message.prompt === undefined || typeof message.prompt === "string") &&
+        (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
+      background = command || ownWorkflow;
+      if (ownWorkflow) {
+        const name = optionalString(message.workflow_name)?.trim().slice(0, 256);
+        workflow = name === undefined || name.length === 0 ? {} : { name };
+      }
       if (
         typeof message.description !== "string" ||
-        message.workflow_name !== undefined ||
+        (message.workflow_name !== undefined && !ownWorkflow) ||
         (!ownSubagent &&
           !background &&
           (message.subagent_type !== undefined ||
@@ -1571,6 +1633,12 @@ export function decodeMessage(
       description = message.description;
       summary = optionalString(message.summary);
       usage = decodeTaskUsage(message.usage);
+      if (message.workflow_progress !== undefined) {
+        if (input.nativeSetup?.subagents !== true) {
+          throw protocol("Claude returned an unsupported runtime message.");
+        }
+        workflow = { agents: decodeWorkflowAgents(message.workflow_progress) };
+      }
     } else if (message.subtype === "task_notification") {
       if (
         typeof message.status !== "string" ||
@@ -1612,6 +1680,7 @@ export function decodeMessage(
       taskId: message.task_id,
       ...(typeof message.tool_use_id === "string" ? { toolUseId: message.tool_use_id } : {}),
       ...(background ? { background: true } : {}),
+      ...(workflow === undefined ? {} : { workflow }),
       ...(status === undefined ? {} : { status }),
       ...(description === undefined ? {} : { description }),
       ...(summary === undefined ? {} : { summary }),

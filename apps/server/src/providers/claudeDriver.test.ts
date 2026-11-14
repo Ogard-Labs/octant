@@ -15,6 +15,11 @@ import {
   renderProviderContextSections,
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
+import type {
+  ProviderWakeup,
+  ProviderWakeupRequest,
+  ProviderWakeupSchedule,
+} from "@octant/provider-sdk/driver";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -4254,6 +4259,12 @@ describe("Claude artifact delivery", () => {
       await expect(ask("Skill", { skill: "pdf" }, "skill-1")).resolves.toEqual({
         behavior: "allow",
       });
+      // A workflow rides the same switch, but its script runs as JavaScript
+      // in the runtime process, so starting one asks the person first.
+      expect(open.withheldTools).not.toContain("Workflow");
+      await expect(ask("Workflow", { script: "export const meta = {}" }, "wf-1")).resolves.toEqual({
+        behavior: "ask",
+      });
       // A web read asks at Guarded, as Claude Code itself does.
       await expect(ask("WebFetch", { url: "https://example.invalid" }, "fetch-1")).resolves.toEqual(
         {
@@ -7396,6 +7407,85 @@ describe("Claude background work", () => {
     await acquired.close();
   });
 
+  it("holds the person's turn while a workflow runs and shows its agents as child runs under the Workflow call", async () => {
+    const { acquired, query, seen, collected } = await startTurn();
+    await query.emit({
+      kind: "stream-event",
+      sessionId: sdk,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "toolu-workflow",
+          toolName: "Workflow",
+          input: { script: "export const meta = { name: 'review' }" },
+        },
+      },
+    });
+    await query.emit({
+      kind: "task",
+      sessionId: sdk,
+      subtype: "task_started",
+      taskId: "workflow-1",
+      toolUseId: "toolu-workflow",
+      background: true,
+      workflow: { name: "review" },
+      description: "Review the change",
+    });
+    await query.emit({
+      kind: "tool-results",
+      sessionId: sdk,
+      results: [{ toolUseId: "toolu-workflow", isError: false }],
+    });
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+
+    await query.emit({
+      kind: "task",
+      sessionId: sdk,
+      subtype: "task_progress",
+      taskId: "workflow-1",
+      toolUseId: "toolu-workflow",
+      description: "Review the change",
+      usage: { totalTokens: 10, toolUses: 1, durationMs: 5 },
+      workflow: { agents: [{ index: 0, label: "read the diff", state: "done" }] },
+    });
+    await query.emit({
+      kind: "task",
+      sessionId: sdk,
+      subtype: "task_notification",
+      taskId: "workflow-1",
+      toolUseId: "toolu-workflow",
+      status: "completed",
+      summary: "Dynamic workflow completed",
+    });
+    await query.emit(state("running"));
+    await query.emit(text("The review is done."));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await collected;
+
+    const children = seen.filter((event) => event.kind === "child-agent-activity");
+    const workflowCall = seen.find((event) => event.kind === "tool-start");
+    if (workflowCall?.kind !== "tool-start") throw new Error("Expected the Workflow call");
+    expect(children).toEqual([
+      expect.objectContaining({ childAgentId: workflowCall.toolCallId, status: "starting" }),
+      expect.objectContaining({
+        childAgentId: `${workflowCall.toolCallId}:agent-0`,
+        parentChildAgentId: workflowCall.toolCallId,
+        status: "completed",
+      }),
+      expect.objectContaining({ childAgentId: workflowCall.toolCallId, status: "completed" }),
+    ]);
+    expect(seen.filter((event) => event.kind === "completed")).toHaveLength(1);
+    expect(seen.find((event) => event.kind === "runtime-turn-started")).toMatchObject({
+      trigger: "background-task",
+    });
+    await acquired.close();
+  });
+
   it("stops the runtime's turns and its background work when the person stops the held turn", async () => {
     const { acquired, query, seen, collected } = await startTurn();
     await query.emit(backgroundStarted);
@@ -7439,5 +7529,184 @@ describe("Claude background work", () => {
     await collected;
     expect(seen.map((event) => event.kind)).toEqual(["usage", "completed"]);
     await acquired.close();
+  });
+});
+
+describe("Claude wake-ups", () => {
+  function schedule(): ProviderWakeupSchedule & {
+    readonly requests: ProviderWakeupRequest[];
+  } {
+    const requests: ProviderWakeupRequest[] = [];
+    const waiting: ProviderWakeup[] = [];
+    return {
+      requests,
+      schedule: async (request) => {
+        requests.push(request);
+        const wakeup: ProviderWakeup = {
+          id: `wakeup-${requests.length}`,
+          schedule:
+            request.kind === "delay"
+              ? { kind: "delay" }
+              : { kind: "cron", cron: request.cron, recurring: request.recurring },
+          prompt: request.prompt,
+          humanSchedule: "Once at 2026-11-14T12:05:00.000Z",
+          nextFireAt: "2026-11-14T12:05:00.000Z",
+          status: "pending",
+        };
+        waiting.push(wakeup);
+        return { status: "scheduled", wakeup, clampedDelaySeconds: 300, wasClamped: false };
+      },
+      list: async () => waiting,
+      cancel: async (id) =>
+        waiting.some((wakeup) => wakeup.id === id)
+          ? { status: "cancelled" }
+          : { status: "refused", reason: `No wake-up with id '${id}' waits in this thread.` },
+      cancelDelayed: async () => 0,
+    };
+  }
+
+  it("withholds the wake-up tools from a session the host keeps no schedule for", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    expect(f.opens[0]!.withheldTools).toEqual(
+      expect.arrayContaining(["ScheduleWakeup", "CronCreate", "CronList", "CronDelete"]),
+    );
+    await acquired.close();
+  });
+
+  it("asks before a wake-up below Full access and then answers it from the thread's schedule, not the runtime's", async () => {
+    const wakeups = schedule();
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        wakeups,
+      }),
+    );
+    const open = f.opens[0]!;
+    for (const tool of ["ScheduleWakeup", "CronCreate", "CronList", "CronDelete"]) {
+      expect(open.withheldTools).not.toContain(tool);
+    }
+    const signal = new AbortController().signal;
+    const input = {
+      delaySeconds: 300,
+      reason: "The build runs five minutes.",
+      prompt: "Check it.",
+    };
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "ScheduleWakeup",
+        input,
+        toolUseId: "wake-1",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+    expect(wakeups.requests).toEqual([]);
+    const decision = open.canUseTool({
+      toolName: "ScheduleWakeup",
+      input,
+      toolUseId: "wake-1",
+      signal,
+    });
+    await new Promise((done) => setTimeout(done, 20));
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    const answered = await decision;
+    // The runtime runs nothing: its scheduler never holds the wake-up.
+    expect(answered.behavior).toBe("deny");
+    expect(answered.behavior === "deny" ? answered.message : "").toContain(
+      `"scheduledFor":${Date.parse("2026-11-14T12:05:00.000Z")}`,
+    );
+    expect(wakeups.requests).toEqual([
+      {
+        kind: "delay",
+        providerToolName: "ScheduleWakeup",
+        delaySeconds: 300,
+        prompt: "Check it.",
+        reason: "The build runs five minutes.",
+      },
+    ]);
+
+    // Listing and deleting the thread's own wake-ups asks nobody.
+    const listed = await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName: "CronList",
+      input: {},
+      toolUseId: "list-1",
+      signal,
+    });
+    expect(listed.behavior === "deny" ? listed.message : "").toContain('"id":"wakeup-1"');
+    const deleted = await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName: "CronDelete",
+      input: { id: "wakeup-1" },
+      toolUseId: "delete-1",
+      signal,
+    });
+    expect(deleted.behavior === "deny" ? deleted.message : "").toContain(
+      "Cancelled wake-up wakeup-1",
+    );
+    await acquired.close();
+  });
+
+  it("answers a wake-up at Full access without asking, and never offers one in Plan", async () => {
+    const wakeups = schedule();
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "full-access", wakeups }),
+    );
+    const signal = new AbortController().signal;
+    const created = await f.opens[0]!.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName: "CronCreate",
+      input: { cron: "*/30 * * * *", prompt: "Look at the queue.", durable: true },
+      toolUseId: "cron-1",
+      signal,
+    });
+    expect(created.behavior === "deny" ? created.message : "").toContain('"recurring":true');
+    expect(wakeups.requests).toMatchObject([
+      { kind: "cron", cron: "*/30 * * * *", recurring: true, prompt: "Look at the queue." },
+    ]);
+    await acquired.close();
+
+    const planWakeups = schedule();
+    const plan = harness();
+    const planAcquired = await acquire(plan.driver, "code");
+    await Effect.runPromise(
+      planAcquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "plan",
+        wakeups: planWakeups,
+      }),
+    );
+    const planOpen = plan.opens[0]!;
+    expect(planOpen.withheldTools).toBeUndefined();
+    expect(planOpen.tools).not.toContain("ScheduleWakeup");
+    await expect(
+      planOpen.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "ScheduleWakeup",
+        input: { delaySeconds: 300, prompt: "Later." },
+        toolUseId: "plan-wake",
+        signal,
+      }),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    expect(planWakeups.requests).toEqual([]);
+    await planAcquired.close();
   });
 });

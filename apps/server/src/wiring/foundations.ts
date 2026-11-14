@@ -42,6 +42,7 @@ import {
   WorkTurnProjection,
 } from "../work/workTurnProjection";
 import type { ServerStart } from "./serverShape";
+import type { ThreadWakeupHolder } from "../wakeups/threadWakeupService";
 
 export type FoundationsDependencies = Pick<ServerStart, "latencyStats" | "options" | "persistence">;
 
@@ -251,7 +252,10 @@ export function wireFoundations(deps: FoundationsDependencies) {
     workThreadProjection,
     providerRuntimeRegistry,
   );
+  // Set by the continuation layer once both modes' turn paths exist.
+  const threadWakeups: ThreadWakeupHolder = { service: undefined };
   return {
+    threadWakeups,
     codeSessionConversation,
     conversationInputTransfer,
     browserAuthority,

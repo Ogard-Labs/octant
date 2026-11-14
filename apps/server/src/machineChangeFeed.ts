@@ -265,6 +265,8 @@ function topicsForEvent(event: {
   if (aggregateType === TODO_AGGREGATE_TYPE || aggregateType === TODO_LIST_HOST_AGGREGATE_TYPE) {
     return ["todos"];
   }
+  // A thread's wake-ups sit with its other scheduled follow-ups.
+  if (aggregateType === "thread-wakeup") return ["thread-follow-ups"];
   if (aggregateType === "project") {
     return ["projects", "chat-navigation", "work-navigation", "code-navigation"];
   }

@@ -1,0 +1,56 @@
+.thread-wakeups {
+  padding: 0.25rem 0.75rem;
+  font-size: var(--oct-text-xs);
+  color: var(--octant-text-secondary);
+}
+.thread-wakeups ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.thread-wakeups__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 28px;
+}
+.thread-wakeups__row[data-status="missed"] {
+  color: var(--octant-text-primary);
+}
+.thread-wakeups__icon {
+  flex: none;
+}
+/* On a narrow composer the prompt drops below the time instead of
+   running under the buttons. */
+.thread-wakeups__text {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+  column-gap: var(--oct-space-2);
+  align-items: baseline;
+}
+.thread-wakeups__when {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.thread-wakeups__prompt {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--octant-text-secondary);
+}
+.thread-wakeups__actions {
+  display: flex;
+  flex: none;
+  gap: 0.25rem;
+}
+.thread-wakeups__message {
+  margin: 0.25rem 0 0;
+}

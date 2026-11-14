@@ -106,6 +106,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionResume,
+  ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
@@ -860,6 +861,11 @@ export interface CodeOperationRuntimeOptions {
    * level. Absent keeps every native feature off.
    */
   readonly resolveProviderNativeSetup?: (thread: CodeThread) => ProviderNativeSetup | undefined;
+  /**
+   * The host's schedule for a thread's wake-ups, read at each session start;
+   * absent, or answering undefined, offers the runtime no wake-up tool.
+   */
+  readonly resolveThreadWakeups?: (thread: CodeThread) => ProviderWakeupSchedule | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   readonly resolveSideChatReturns?: CodeOperationServiceOptions["resolveSideChatReturns"];
@@ -5646,6 +5652,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       blocks.filter((block) => !heldKeys.has(`${block.kind}\u0000${block.text}`));
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
     const nativeSetup = this.#options.resolveProviderNativeSetup?.(active.thread);
+    const wakeups = this.#options.resolveThreadWakeups?.(active.thread);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
       turn: estimateSentContextParts({
@@ -5809,6 +5816,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
           ...(nativeSetup === undefined ? {} : { nativeSetup }),
+          ...(wakeups === undefined ? {} : { wakeups }),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {
