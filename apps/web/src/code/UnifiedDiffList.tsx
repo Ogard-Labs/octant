@@ -20,6 +20,8 @@ export interface UnifiedDiffListProps {
     path: string;
     side: "original" | "modified";
     line: number;
+    /** The selected line's own text, for a line note's quoted excerpt. */
+    text: string;
   }) => void;
   readonly requestedFile?: { readonly path: string };
 }
@@ -586,7 +588,7 @@ function renderBodyRow(input: {
             aria-label={`Comment on ${path} original line ${line.oldNumber}`}
             onClick={() => {
               if (oldNumber !== undefined)
-                onSelectLine({ path, side: "original", line: oldNumber });
+                onSelectLine({ path, side: "original", line: oldNumber, text: line.text });
             }}
           >
             {line.oldNumber}
@@ -605,7 +607,7 @@ function renderBodyRow(input: {
             aria-label={`Comment on ${path} modified line ${line.newNumber}`}
             onClick={() => {
               if (newNumber !== undefined)
-                onSelectLine({ path, side: "modified", line: newNumber });
+                onSelectLine({ path, side: "modified", line: newNumber, text: line.text });
             }}
           >
             {line.newNumber}
