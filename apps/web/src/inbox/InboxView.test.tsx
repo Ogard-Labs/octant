@@ -417,6 +417,54 @@ describe("InboxView", () => {
     }
   });
 
+  it("draws an assigned pull request and issue with the list's open glyph and a state name", async () => {
+    document.head.insertAdjacentHTML("beforeend", `<style>${stylesheet}</style>`);
+    const base = {
+      owner: "octant",
+      name: "octant",
+      author: "octocat",
+      updatedAt: "2026-08-28T10:00:00.000Z",
+    };
+
+    render(
+      <InboxView
+        attentionItems={[]}
+        loadAssignedGithubWork={vi.fn(async () => ({
+          kind: "assigned-work" as const,
+          page: {
+            items: [
+              {
+                ...base,
+                category: "pull-request" as const,
+                number: 9,
+                title: "Colour the list",
+                url: "https://github.com/octant/octant/pull/9",
+              },
+              {
+                ...base,
+                category: "issue" as const,
+                number: 7,
+                title: "Fix inbox",
+                url: "https://github.com/octant/octant/issues/7",
+              },
+            ],
+            freshness: { status: "fresh" as const },
+          },
+        }))}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    const pull = await screen.findByRole("link", { name: /Open pull request.*Colour the list/ });
+    const issue = screen.getByRole("link", { name: /Open issue.*Fix inbox/ });
+    for (const link of [pull, issue]) {
+      expect(within(link).getByRole("img")).toHaveAttribute("data-state", "open");
+      expect(link.querySelector(".work-list__state")).not.toBeNull();
+    }
+    expect(pull).toHaveTextContent("#9 · octant/octant");
+  });
+
   it("says when assigned Linear issues were truncated and offers to open Linear", async () => {
     document.head.insertAdjacentHTML("beforeend", `<style>${stylesheet}</style>`);
     const onOpenLinearIssues = vi.fn();

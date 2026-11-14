@@ -212,3 +212,42 @@
   padding: 0 var(--oct-space-3);
   font: inherit;
 }
+
+/* An assigned-work row reads like a pull request list row: the state glyph in
+   the list's own colours, the copy, then a fixed slot for the unseen dot, so
+   reading an item changes a colour and moves nothing. */
+.inbox-view__row--work {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oct-space-2);
+}
+
+.inbox-view__row--work .surface-row__copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.inbox-view__unseen {
+  display: flex;
+  width: 6px;
+  /* The title line's height, so the dot sits on its centre like the glyph. */
+  height: calc(var(--oct-text-sm) * 1.3);
+  flex: none;
+  align-items: center;
+}
+
+.inbox-view__unseen::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: none;
+}
+
+.inbox-view__row--work[data-unseen="true"] .inbox-view__unseen::after {
+  background: var(--oct-accent);
+}
+
+.inbox-view__row--work[data-unseen="true"] .oct-row-label::after {
+  content: none;
+}

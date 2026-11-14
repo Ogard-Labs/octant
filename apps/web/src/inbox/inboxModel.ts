@@ -9,6 +9,7 @@ import {
   pendingRequestKey,
   waitingAskKey,
 } from "../pendingRequests/pendingRequests";
+import { compactRelativeTimeLabel } from "../lib/relativeTime";
 import { visibleModeOf, type VisibleMode } from "../shell/workKind";
 
 /**
@@ -82,13 +83,32 @@ export function buildInboxAttentionItems(
   );
 }
 
-export const ASSIGNED_WORK_CATEGORY_LABELS: Readonly<
-  Record<GithubAssignedWorkItem["category"], string>
-> = {
-  issue: "Issue",
-  "pull-request": "Pull request",
-  "review-request": "Review requested",
-};
+/**
+ * The state glyph a row of assigned work wears, in the tones the pull request
+ * and issue lists use. The assigned-work read lists open items only and
+ * carries no draft flag, so an open pull request and an open issue are the
+ * states a row can honestly claim; a merged, closed or draft state would need
+ * the server to send it.
+ */
+export function assignedWorkState(item: GithubAssignedWorkItem): {
+  readonly label: string;
+  readonly tone: "open";
+} {
+  return {
+    label: item.category === "issue" ? "Open issue" : "Open pull request",
+    tone: "open",
+  };
+}
+
+/** The meta line under a row: number, repository, a review request, then age. */
+export function assignedWorkMeta(item: GithubAssignedWorkItem, now: number = Date.now()): string {
+  return [
+    `#${item.number}`,
+    `${item.owner}/${item.name}`,
+    ...(item.category === "review-request" ? ["Review requested"] : []),
+    compactRelativeTimeLabel(item.updatedAt, now),
+  ].join(" · ");
+}
 
 /**
  * Seen keys carry the update timestamp so an item that moves on GitHub lights

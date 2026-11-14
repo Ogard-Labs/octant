@@ -86,6 +86,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".code-project-thread__status-dot",
   '.pull-request-chip[data-checks="failing"]::before, .pull-request-chip[data-checks="pending"]::before',
   '.inbox-view__row[data-unseen="true"] .oct-row-label::after',
+  ".inbox-view__unseen::after",
   ".composer-model-picker__rail-accent",
   ".composer-model-picker__rail-status",
   ".composer-model-picker__level-stops > span",

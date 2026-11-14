@@ -921,6 +921,15 @@ wording, and reads are specified in [Start screen](start-screen.md).
   a thread; it answers nothing. See
   [Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
 
+**Inbox GitHub rows.** An assigned pull request or issue wears the state glyph
+and colour the pull request and issue lists use (open green), named for
+assistive technology ("Open pull request", "Open issue"). The meta line reads
+`#number · owner/repository`, then "Review requested" for a review request,
+then the age. The unseen dot sits in a fixed slot at the row's trailing edge, so
+reading an item changes a colour and moves nothing. The assigned-work read
+lists open items only and sends no draft flag, so draft, merged and closed
+glyphs wait on the server sending that state.
+
 ### List pages and empty states
 
 Running and Done today are sidebar lists and To review is a master-detail

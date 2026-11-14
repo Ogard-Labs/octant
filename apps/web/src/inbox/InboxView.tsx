@@ -27,7 +27,8 @@ import { useMinuteTick } from "../polling/useMinuteTick";
 import { InboxPlanUsageRows, useInboxPlanUsage } from "./InboxPlanUsage";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
-  ASSIGNED_WORK_CATEGORY_LABELS,
+  assignedWorkMeta,
+  assignedWorkState,
   INBOX_FILTERS,
   assignedWorkSeenKey,
   groupInboxByProject,
@@ -392,6 +393,7 @@ export function InboxView(props: InboxViewProps) {
                   <ul className="surface-list">
                     {github.page.items.map((item) => {
                       const key = assignedWorkSeenKey(item);
+                      const state = assignedWorkState(item);
                       const Icon = item.category === "issue" ? CircleDot : GitPullRequest;
                       return (
                         <li
@@ -399,7 +401,7 @@ export function InboxView(props: InboxViewProps) {
                           key={`${item.owner}/${item.name}#${item.number}`}
                         >
                           <a
-                            className="inbox-view__row"
+                            className="inbox-view__row inbox-view__row--work"
                             data-unseen={seenKeys.has(key) ? undefined : "true"}
                             href={item.url}
                             onClick={() => markSeen(key)}
@@ -407,16 +409,19 @@ export function InboxView(props: InboxViewProps) {
                             target="_blank"
                           >
                             {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
-                            <span className="surface-row__copy">
-                              <span className="oct-row-label">
-                                <Icon aria-hidden="true" className="icon" size={14} />
-                                {item.title}
-                              </span>
-                              <span className="oct-meta">
-                                {ASSIGNED_WORK_CATEGORY_LABELS[item.category]} · {item.owner}/
-                                {item.name}#{item.number}
-                              </span>
+                            <span
+                              aria-label={state.label}
+                              className="work-list__state"
+                              data-state={state.tone}
+                              role="img"
+                            >
+                              <Icon aria-hidden="true" size={16} />
                             </span>
+                            <span className="surface-row__copy">
+                              <span className="oct-row-label">{item.title}</span>
+                              <span className="oct-meta">{assignedWorkMeta(item)}</span>
+                            </span>
+                            <span aria-hidden="true" className="inbox-view__unseen" />
                           </a>
                         </li>
                       );
