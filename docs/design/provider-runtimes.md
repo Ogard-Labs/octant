@@ -701,6 +701,16 @@ secret-path refusals still apply to the file tools, and at Full access
 nothing changes: no command is sandboxed there, and a thread that kept its
 sandbox at Full access keeps `allowUnsandboxedCommands: false`.
 
+A call's working directory follows the session, as it does in Claude Code:
+after `cd apps/web` the hook names that folder, and the gate accepts any
+working directory inside the folders the session holds (the Project root,
+its extra folders, everything beneath them, and a worktree the session
+was let into), judging a shell command or
+a search with no folder of its own there. A working directory outside them
+is refused (maintainer decision, 2026-11-14). Rationale: the port used to
+refuse every hook whose working directory was not the Project root, so one
+`cd` into a subfolder refused every later call of the turn.
+
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
 grant are never forgotten, and the caps on pending approvals (4) and

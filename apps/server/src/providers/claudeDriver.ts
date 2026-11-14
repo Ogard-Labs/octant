@@ -595,7 +595,8 @@ function claudeConfinedTarget(
   workingDirectory: string,
 ): unknown {
   // A shell command and a search with no folder run in the session's working
-  // directory: the Project root, or a worktree Claude moved the session into.
+  // directory: the Project root, a folder below it a `cd` moved the session
+  // into, or a worktree Claude moved the session into.
   if (CLAUDE_SHELL_TOOLS.has(toolName)) return input.cwd ?? workingDirectory;
   if (toolName === "Glob" || toolName === "Grep") return input.path ?? workingDirectory;
   if (toolName === "NotebookEdit") return input.notebook_path;
@@ -3128,9 +3129,10 @@ function makeConnection(
             activeState.releasing ||
             activeState.released ||
             request.sessionId !== activeState.claudeSessionId ||
-            // The session's working directory: the Project root, or a
-            // worktree Claude moved it into that the session holds.
-            (request.projectRoot !== projectRoot && !sessionHolds(activeState, request.projectRoot))
+            // The session's working directory: the Project root, any folder
+            // of the Project's a `cd` moved the session into, or a worktree
+            // Claude moved it into that the session holds.
+            !sessionHolds(activeState, request.projectRoot)
           ) {
             return deny("Claude tool request is outside the Project.");
           }

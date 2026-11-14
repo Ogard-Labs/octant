@@ -1294,6 +1294,39 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const call = (workingDirectory: string, toolName: string, input: object, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot: workingDirectory,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    const subfolder = `${projectRoot}/apps/web`;
+    await expect(
+      call(subfolder, "Read", { file_path: `${subfolder}/index.ts` }, "read-after-cd"),
+    ).resolves.toEqual({ behavior: "allow" });
+    await expect(call(subfolder, "Grep", { pattern: "x" }, "grep-after-cd")).resolves.toEqual({
+      behavior: "allow",
+    });
+    await expect(
+      call(subfolder, "Bash", { command: "ls" }, "bash-after-cd"),
+    ).resolves.not.toMatchObject({ behavior: "deny" });
+    await expect(
+      call("/tmp/octant-claude-elsewhere", "Bash", { command: "ls" }, "bash-outside"),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    await acquired.close();
+  });
+
   it("runs the pre-tool gate before Full-access callbacks without fabricating approvals", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);

@@ -17,6 +17,7 @@ import type {
 import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
 import { Effect, Stream, type Scope } from "effect";
+import { isAbsolute } from "node:path";
 
 import {
   claudeOffersTool,
@@ -70,6 +71,10 @@ export interface ClaudeToolRequest {
 
 export interface ClaudePreToolRequest {
   readonly sessionId: string;
+  /**
+   * The session's working directory when the call was made: the Project
+   * root, or any folder a `cd` moved the session into.
+   */
   readonly projectRoot: string;
   readonly toolName: string;
   readonly input: unknown;
@@ -1447,7 +1452,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   typeof hookInput.cwd !== "string" ||
                   typeof hookInput.tool_name !== "string" ||
                   typeof hookInput.tool_use_id !== "string" ||
-                  hookInput.cwd !== input.projectRoot ||
+                  // The session's working directory moves with a `cd`, so it is
+                  // passed on as the call's folder and the driver judges it
+                  // against the folders the session holds: after `cd apps/web`
+                  // every later call used to be refused here.
+                  !isAbsolute(hookInput.cwd) ||
                   hookInput.session_id !== initializedSessionId ||
                   toolUseId === undefined ||
                   toolUseId !== hookInput.tool_use_id

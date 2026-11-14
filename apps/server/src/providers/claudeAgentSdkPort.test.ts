@@ -1380,6 +1380,51 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test("hands a call made after a cd into a subfolder to the driver with that folder", async () => {
+    const canUseTool = vi.fn(async () => ({ behavior: "deny" as const, message: "denied" }));
+    const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          yield* Stream.runHead(query.messages);
+          const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
+          if (preTool === undefined) {
+            throw new Error("Expected injected pre-tool hook.");
+          }
+          const signal = new AbortController().signal;
+          const hook = (cwd: string, toolUseId: string) =>
+            Effect.promise(() =>
+              preTool(
+                {
+                  hook_event_name: "PreToolUse",
+                  session_id: "session-1",
+                  cwd,
+                  tool_name: "Read",
+                  tool_input: { file_path: "/repo/apps/web/index.ts" },
+                  tool_use_id: toolUseId,
+                },
+                toolUseId,
+                { signal },
+              ),
+            );
+          expect(yield* hook("/repo/apps/web", "tool-1")).toMatchObject({
+            hookSpecificOutput: { permissionDecision: "allow" },
+          });
+          expect(preToolUse).toHaveBeenCalledWith(
+            expect.objectContaining({ projectRoot: "/repo/apps/web", toolUseId: "tool-1" }),
+          );
+          expect(yield* hook("apps/web", "tool-2")).toMatchObject({
+            hookSpecificOutput: { permissionDecision: "deny" },
+          });
+          expect(preToolUse).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+
   test("denies subagent-marked permission and pre-tool callbacks before delegation", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
     const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
