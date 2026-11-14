@@ -343,6 +343,7 @@ import {
   createWindowPresentationController,
   observeThermalPerformance,
   resolveWindowPresentation,
+  type GlassRefusal,
   type ResolvedSidebarMaterial,
   type WindowPresentationController,
 } from "./windowPresentation";
@@ -2423,6 +2424,13 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
   });
   const state = await nativeStateStore.load();
   stableWindowId = state.windowId;
+  // Glass once refused on a Mac driven over screen sharing with no reason said:
+  // the system's rich-animation hint reads false there, and it is not a Glass
+  // gate. Logged once so a packaged run shows what the host saw.
+  const animationSettings = systemPreferences.getAnimationSettings();
+  writeDiagnostic(
+    `[octant] system animation settings (not a Glass gate): shouldRenderRichAnimation=${animationSettings.shouldRenderRichAnimation} prefersReducedMotion=${animationSettings.prefersReducedMotion}`,
+  );
   const presentation = resolveWindowPresentation({
     platform: process.platform,
     sidebarMaterial: INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
@@ -2558,6 +2566,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       });
       let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
       let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
+      let resolvedGlassRefusal: GlassRefusal | null = presentation.glassRefusal;
       const controller = createWindowPresentationController({
         window: {
           setVibrancy: (value) => window.setVibrancy(value),
@@ -2573,6 +2582,12 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
               window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, vibrancy);
             }
           },
+          publishGlassRefusal: (refusal) => {
+            resolvedGlassRefusal = refusal;
+            if (!window.webContents.isDestroyed()) {
+              window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, refusal);
+            }
+          },
         },
         nativeTheme,
         platform: process.platform,
@@ -2580,6 +2595,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         sidebarVibrancyMode: "off",
         compositionSupported: process.platform === "darwin",
         performanceSafe: false,
+        report: writeDiagnostic,
       });
       preparedController = controller;
       preparationCleanup.trackPresentationController(controller);
@@ -2620,7 +2636,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
-        richEffectsAllowed: systemPreferences.getAnimationSettings().shouldRenderRichAnimation,
+        report: writeDiagnostic,
         updatePerformanceSafe: (performanceSafe) => controller.update({ performanceSafe }),
       });
       preparationCleanup.trackThermalObserver(stopThermalPerformance);
@@ -2633,6 +2649,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       window.webContents.on("did-finish-load", () => {
         window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
         window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
+        window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, resolvedGlassRefusal);
         while (pendingCodeDeepLinks.length > 0) {
           window.webContents.send(IPC_CHANNELS.codeDeepLink, pendingCodeDeepLinks.shift());
         }
@@ -2852,6 +2869,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         });
         let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
         let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
+        let resolvedGlassRefusal: GlassRefusal | null = presentation.glassRefusal;
         const controller = createWindowPresentationController({
           window: {
             setVibrancy: (value) => window.setVibrancy(value),
@@ -2867,6 +2885,12 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
                 window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, vibrancy);
               }
             },
+            publishGlassRefusal: (refusal) => {
+              resolvedGlassRefusal = refusal;
+              if (!window.webContents.isDestroyed()) {
+                window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, refusal);
+              }
+            },
           },
           nativeTheme,
           platform: process.platform,
@@ -2874,13 +2898,14 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           sidebarVibrancyMode: "off",
           compositionSupported: process.platform === "darwin",
           performanceSafe: false,
+          report: writeDiagnostic,
         });
         preparationCleanup.trackPresentationController(controller);
         preparationCleanup.trackThermalObserver(
           observeThermalPerformance({
             platform: process.platform,
             powerMonitor,
-            richEffectsAllowed: systemPreferences.getAnimationSettings().shouldRenderRichAnimation,
+            report: writeDiagnostic,
             updatePerformanceSafe: (performanceSafe) => controller.update({ performanceSafe }),
           }),
         );
@@ -2925,6 +2950,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         window.webContents.on("did-finish-load", () => {
           window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
           window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
+          window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, resolvedGlassRefusal);
         });
         window.webContents.on("render-process-gone", () => {
           codeOperationApprovalViews?.closeWindow(windowId);

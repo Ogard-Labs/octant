@@ -25,6 +25,7 @@ import {
 import { createBrowserProofSaver } from "./browserProofSaver";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
 import { validateExternalBrowserUrl } from "./externalBrowserUrl";
+import { writeDiagnostic } from "./diagnosticLog";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { centeredNativeWindowState } from "./nativeWindowState";
 import { detectOpenInApplications } from "./openInApplications";
@@ -36,6 +37,7 @@ import {
   INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
   observeThermalPerformance,
   resolveWindowPresentation,
+  type GlassRefusal,
   type ResolvedSidebarMaterial,
   type WindowPresentation,
   type WindowPresentationController,
@@ -79,7 +81,11 @@ interface ClientWindow {
   readonly windowId: string;
   readonly presentation: WindowPresentationController;
   /** What the renderer was last told, repeated when it loads again. */
-  readonly shown: { material: ResolvedSidebarMaterial; vibrancy: "sidebar" | null };
+  readonly shown: {
+    material: ResolvedSidebarMaterial;
+    vibrancy: "sidebar" | null;
+    glassRefusal: GlassRefusal | null;
+  };
   loaded: boolean;
 }
 
@@ -304,7 +310,11 @@ export function installNightlyClientSurfaces(options: {
       }),
     attach: (window, windowId) => {
       const id = window.webContents.id;
-      const shown: ClientWindow["shown"] = { material: "opaque", vibrancy: null };
+      const shown: ClientWindow["shown"] = {
+        material: "opaque",
+        vibrancy: null,
+        glassRefusal: null,
+      };
       const publish = (channel: string, value: unknown) => {
         if (!window.webContents.isDestroyed()) window.webContents.send(channel, value);
       };
@@ -321,14 +331,19 @@ export function installNightlyClientSurfaces(options: {
             shown.vibrancy = value;
             publish(DESKTOP_IPC_CHANNELS.resolvedSidebarVibrancy, value);
           },
+          publishGlassRefusal: (value) => {
+            shown.glassRefusal = value;
+            publish(DESKTOP_IPC_CHANNELS.resolvedGlassRefusal, value);
+          },
         },
+        report: writeDiagnostic,
       });
       const client: ClientWindow = { window, windowId, presentation, shown, loaded: false };
       clients.set(id, client);
       const stopThermal = observeThermalPerformance({
         platform,
         powerMonitor,
-        richEffectsAllowed: systemPreferences.getAnimationSettings().shouldRenderRichAnimation,
+        report: writeDiagnostic,
         updatePerformanceSafe: (performanceSafe) => presentation.update({ performanceSafe }),
       });
       window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
@@ -337,6 +352,7 @@ export function installNightlyClientSurfaces(options: {
       window.webContents.on("did-finish-load", () => {
         publish(DESKTOP_IPC_CHANNELS.resolvedMaterial, shown.material);
         publish(DESKTOP_IPC_CHANNELS.resolvedSidebarVibrancy, shown.vibrancy);
+        publish(DESKTOP_IPC_CHANNELS.resolvedGlassRefusal, shown.glassRefusal);
         client.loaded = true;
         codeLinks.flush((link) => publish(DESKTOP_IPC_CHANNELS.codeDeepLink, link));
       });

@@ -66,6 +66,7 @@ export interface SettingsContainerProps {
   /** `"sheet"` when Settings floats over the workspace instead of covering it. */
   readonly presentation?: "page" | "sheet";
   readonly sidebarVibrancySupported: boolean;
+  readonly glassOffNote: string;
   readonly themeController: ReturnType<typeof useThemeController>;
   readonly typography?: ThemeTypography;
   readonly workNavigation: ReturnType<typeof useWorkThreadNavigation>;
@@ -98,6 +99,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     providerController,
     settings,
     sidebarVibrancySupported,
+    glassOffNote,
     themeController,
     workNavigation,
     workSettings,
@@ -272,6 +274,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       providerController={providerController}
       search={controller.settingsSearch}
       settings={settings}
+      glassOffNote={glassOffNote}
       sidebarVibrancySupported={sidebarVibrancySupported}
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}

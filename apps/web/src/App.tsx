@@ -314,6 +314,8 @@ import {
   useAutomaticUpdateCheckSync,
   useQuitShortcutSecondPressSync,
   useReleaseRingSync,
+  glassOffNote,
+  useHostReportedGlassRefusal,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useSidebarDrawerViewport,
@@ -898,6 +900,7 @@ function LaunchedShell(
     props.hostBridge,
   );
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
+  const glassRefusal = useHostReportedGlassRefusal(props.hostBridge);
   useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
   useReleaseRingSync(props.hostBridge, controller.settings?.releaseRing);
   useQuitShortcutSecondPressSync(
@@ -7701,6 +7704,7 @@ function LaunchedShell(
       settings={loadedSettings}
       presentation={presentation}
       surface={surface}
+      glassOffNote={glassOffNote(glassRefusal, props.hostBridge !== undefined)}
       sidebarVibrancySupported={sidebarVibrancySupported}
       themeController={themeController}
       {...(props.typography === undefined ? {} : { typography: props.typography })}

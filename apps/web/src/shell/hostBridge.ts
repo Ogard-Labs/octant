@@ -62,6 +62,7 @@ import type {
   RemoteMintedPairingTicket,
   RemotePendingPairingRequest,
   RemotePairingTicketSourceClass,
+  GlassRefusalReason,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
 } from "@octant/contracts/desktop-bridge";
@@ -110,6 +111,7 @@ export type {
   RemoteMintedPairingTicket,
   RemotePendingPairingRequest,
   RemotePairingTicketSourceClass,
+  GlassRefusalReason,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
 } from "@octant/contracts/desktop-bridge";
@@ -691,6 +693,14 @@ export interface OctantHostBridge
    */
   readonly subscribeResolvedSidebarVibrancy?: (
     listener: (vibrancy: "sidebar" | null) => void,
+  ) => () => void;
+  /**
+   * Why the host will not draw Glass right now, or null when nothing stands in
+   * the way. Settings says so beside the Glass control. Absent on hosts that
+   * never report it.
+   */
+  readonly subscribeResolvedGlassRefusal?: (
+    listener: (refusal: GlassRefusalReason | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
   readonly subscribeOpenSettings?: (listener: () => void) => () => void;

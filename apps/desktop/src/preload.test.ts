@@ -848,6 +848,7 @@ describe("desktop preload bridge", () => {
       "subscribeProjectWindowCapability",
       "subscribeQuitShortcutHint",
       "subscribeRemoteServerPageSigning",
+      "subscribeResolvedGlassRefusal",
       "subscribeResolvedMaterial",
       "subscribeResolvedSidebarVibrancy",
       "subscribeStartNewAgent",
@@ -1314,6 +1315,32 @@ describe("desktop preload bridge", () => {
       IPC_CHANNELS.resolvedSidebarVibrancy,
       registered,
     );
+  });
+
+  it("passes on only a known reason for refusing Glass, or none", () => {
+    let registered: ((event: unknown, value: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        registered = listener;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(
+      ipc,
+      projectWindowCapability,
+    ).subscribeResolvedGlassRefusal(listener);
+
+    registered?.({}, "reduced-transparency");
+    registered?.({}, "the Mac is sad");
+    registered?.({}, { reason: "thermal-pressure" });
+    registered?.({}, undefined);
+    registered?.({}, null);
+
+    expect(listener.mock.calls).toEqual([["reduced-transparency"], [null]]);
+    unsubscribe();
+    expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.resolvedGlassRefusal, registered);
   });
 
   it("relays what the window's prototypes report on the channel the main process sends it on", () => {

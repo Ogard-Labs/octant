@@ -118,6 +118,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   hostCapabilities: "local",
   resolvedMaterial: "local",
   resolvedSidebarVibrancy: "local",
+  resolvedGlassRefusal: "local",
   sidebarMaterialPreference: "local",
   sidebarVibrancyMode: "local",
   privateListenerStatus: "octant-only",
@@ -173,6 +174,7 @@ export const NIGHTLY_CLIENT_PUSH_CHANNELS: ReadonlySet<string> = new Set([
   DESKTOP_IPC_CHANNELS.codeDeepLink,
   DESKTOP_IPC_CHANNELS.resolvedMaterial,
   DESKTOP_IPC_CHANNELS.resolvedSidebarVibrancy,
+  DESKTOP_IPC_CHANNELS.resolvedGlassRefusal,
 ]);
 
 /**

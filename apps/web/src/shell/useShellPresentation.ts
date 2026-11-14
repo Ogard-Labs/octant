@@ -3,7 +3,7 @@ import { SidebarBackgroundListResult, SidebarBackgroundMetadata } from "@octant/
 import { decodeHostAnswer } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
-import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
+import type { GlassRefusalReason, OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 
 export function useResolvedMaterial(
   preference: "opaque" | "system",
@@ -134,6 +134,44 @@ export function useHostReportedSidebarVibrancy(hostBridge: OctantHostBridge | un
     };
   }, [hostBridge]);
   return active;
+}
+
+/**
+ * Why the host will not draw Glass right now, or null when it has no objection
+ * (or has said nothing yet, which a host that never reports it keeps).
+ */
+export function useHostReportedGlassRefusal(
+  hostBridge: OctantHostBridge | undefined,
+): GlassRefusalReason | null {
+  const [refusal, setRefusal] = useState<GlassRefusalReason | null>(null);
+  useEffect(() => {
+    setRefusal(null);
+    if (hostBridge === undefined || hostBridge.subscribeResolvedGlassRefusal === undefined) return;
+    return hostBridge.subscribeResolvedGlassRefusal(setRefusal);
+  }, [hostBridge]);
+  return refusal;
+}
+
+/**
+ * The sentence Settings shows beside the Glass control while Glass is
+ * chosen but the window is opaque. It always names the reason.
+ */
+export function glassOffNote(refusal: GlassRefusalReason | null, hostPresent: boolean): string {
+  if (!hostPresent) {
+    return "Glass is off because this is a browser window; only the desktop app can show the frosted material.";
+  }
+  switch (refusal) {
+    case "unsupported-platform":
+      return "Glass is off because this system cannot draw it; Glass is a macOS material.";
+    case "reduced-transparency":
+      return "Glass is off because macOS Reduce transparency is on.";
+    case "increased-contrast":
+      return "Glass is off because macOS Increase contrast is on.";
+    case "thermal-pressure":
+      return "Glass is off because this Mac is under thermal pressure; it returns when the Mac cools.";
+    case null:
+      return "Glass is off because the desktop app has not applied it yet.";
+  }
 }
 
 export function useSidebarVibrancySupported(hostBridge: OctantHostBridge | undefined): boolean {

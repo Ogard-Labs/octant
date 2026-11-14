@@ -1,7 +1,9 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  glassOffNote,
   readBottomPanelPresentation,
+  useHostReportedGlassRefusal,
   readSidebarCollapsed,
   useBackgroundImageLibrary,
   useAutomaticUpdateCheckSync,
@@ -155,5 +157,41 @@ describe("capability-bearing background fetches", () => {
         headers: { "x-octant-window-capability": windowCapability },
       }),
     );
+  });
+});
+
+describe("saying why Glass is off", () => {
+  it("names the reason for every refusal the desktop app can give, and for a browser", () => {
+    expect(glassOffNote("reduced-transparency", true)).toBe(
+      "Glass is off because macOS Reduce transparency is on.",
+    );
+    expect(glassOffNote("increased-contrast", true)).toBe(
+      "Glass is off because macOS Increase contrast is on.",
+    );
+    expect(glassOffNote("thermal-pressure", true)).toMatch(/^Glass is off because this Mac is/);
+    expect(glassOffNote("unsupported-platform", true)).toMatch(/^Glass is off because this system/);
+    expect(glassOffNote(null, true)).toMatch(/^Glass is off because the desktop app has not/);
+    expect(glassOffNote("reduced-transparency", false)).toMatch(
+      /^Glass is off because this is a browser/,
+    );
+  });
+
+  it("follows the reason the desktop app reports and drops it when the refusal lifts", () => {
+    let report: ((refusal: "thermal-pressure" | null) => void) | undefined;
+    const unsubscribe = vi.fn();
+    const host = {
+      subscribeResolvedGlassRefusal: (listener: (refusal: "thermal-pressure" | null) => void) => {
+        report = listener;
+        return unsubscribe;
+      },
+    };
+    const { result, unmount } = renderHook(() => useHostReportedGlassRefusal(host as never));
+    expect(result.current).toBeNull();
+    act(() => report?.("thermal-pressure"));
+    expect(result.current).toBe("thermal-pressure");
+    act(() => report?.(null));
+    expect(result.current).toBeNull();
+    unmount();
+    expect(unsubscribe).toHaveBeenCalled();
   });
 });

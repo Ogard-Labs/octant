@@ -40,6 +40,7 @@ import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
 import { resolveEffectiveThemeMode } from "@octant/domain/theme-policy";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController, LocateBinaryOutcome } from "../providers/useDiscoveryController";
+import { glassOffNote } from "./useShellPresentation";
 import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
@@ -260,6 +261,8 @@ export interface SettingsViewProps {
   readonly search: string;
   readonly settings: ShellSettings;
   readonly sidebarVibrancySupported: boolean;
+  /** Why Glass is off while it is chosen: "Glass is off because …". */
+  readonly glassOffNote?: string;
   readonly hostBridge?: OctantHostBridge;
   /**
    * Implemented setting ids. Kept as a stable contract of what is implemented;
@@ -2896,7 +2899,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                 data-visible-when-material="opaque"
                 id="translucent-sidebar-effective-note"
               >
-                Translucency is unavailable, so Octant is using an opaque sidebar.
+                {props.glassOffNote ?? glassOffNote(null, false)}
               </p>
             ) : null}
           </SettingRow>

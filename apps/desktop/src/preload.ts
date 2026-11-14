@@ -77,6 +77,7 @@ import type {
   RemoteMintedPairingTicket,
   RemotePendingPairingRequest,
   RemotePairingTicketSourceClass,
+  GlassRefusalReason,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
   SidebarMaterialPreference,
@@ -130,6 +131,13 @@ export interface RemoteHostIdentityRotationResult {
   readonly fingerprint: string;
 }
 type MaterialListener = (event: unknown, material: unknown) => void;
+
+const GLASS_REFUSAL_REASONS: ReadonlyArray<GlassRefusalReason> = [
+  "unsupported-platform",
+  "reduced-transparency",
+  "increased-contrast",
+  "thermal-pressure",
+];
 type DeepLinkListener = (event: unknown, target: unknown) => void;
 
 const OWNER_UNLOCK_REFUSALS: ReadonlySet<string> = new Set([
@@ -411,6 +419,9 @@ export interface OctantHostBridge {
   ) => () => void;
   readonly subscribeResolvedSidebarVibrancy: (
     listener: (vibrancy: "sidebar" | null) => void,
+  ) => () => void;
+  readonly subscribeResolvedGlassRefusal: (
+    listener: (refusal: GlassRefusalReason | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
@@ -1139,6 +1150,17 @@ export function createHostBridge(
       };
       ipc.on(IPC_CHANNELS.resolvedSidebarVibrancy, receive);
       return () => ipc.removeListener(IPC_CHANNELS.resolvedSidebarVibrancy, receive);
+    },
+    subscribeResolvedGlassRefusal: (listener: (refusal: GlassRefusalReason | null) => void) => {
+      const receive: MaterialListener = (_event, refusal) => {
+        if (refusal === null) listener(null);
+        else {
+          const reason = GLASS_REFUSAL_REASONS.find((candidate) => candidate === refusal);
+          if (reason !== undefined) listener(reason);
+        }
+      };
+      ipc.on(IPC_CHANNELS.resolvedGlassRefusal, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.resolvedGlassRefusal, receive);
     },
     subscribeBrowserSurfaceState: (listener: (state: BrowserSurfaceState) => void) => {
       const receive: MaterialListener = (_event, value) => {

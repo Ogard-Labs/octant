@@ -82,6 +82,7 @@ export interface ShellSettingsSurfaceProps {
   readonly search: string;
   readonly settings: ShellSettings;
   readonly sidebarVibrancySupported: boolean;
+  readonly glassOffNote?: string;
   readonly themeController: ThemeController;
   readonly diagnosticsExportClient: DiagnosticsExportClient;
   readonly hostControlClient: HostControlClient;
@@ -177,6 +178,7 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             providerController={props.providerController}
             search={props.search}
             settings={props.settings}
+            {...(props.glassOffNote === undefined ? {} : { glassOffNote: props.glassOffNote })}
             sidebarVibrancySupported={props.sidebarVibrancySupported}
             themeController={props.themeController}
             {...(props.backgroundImageLibrary === undefined

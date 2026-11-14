@@ -1140,7 +1140,7 @@ describe("SettingsView", () => {
       within(screen.getByRole("group", { name: "Glass" })).getByRole("button", { name: "Subtle" }),
     ).toHaveAttribute("aria-pressed", "true");
     const note = screen.getByText(
-      "Translucency is unavailable, so Octant is using an opaque sidebar.",
+      "Glass is off because this is a browser window; only the desktop app can show the frosted material.",
     );
     expect(note).toHaveClass("settings-view__effective-note");
     expect(note).toHaveAttribute("data-visible-when-material", "opaque");
@@ -1157,9 +1157,7 @@ describe("SettingsView", () => {
         sidebarVibrancySupported={false}
       />,
     );
-    expect(
-      screen.queryByText("Translucency is unavailable, so Octant is using an opaque sidebar."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Glass is off because/)).not.toBeInTheDocument();
   });
   it("shows the effective fallback note for reduced transparency and unsupported backdrop", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
