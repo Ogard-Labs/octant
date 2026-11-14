@@ -1,5 +1,15 @@
-import type { WebSearchBackendEntry } from "@octant/contracts";
-import { SearxngClient, type SearxngFetch } from "../chat/research/searxngClient";
+import type {
+  WebSearchBackendEntry,
+  WebSearchBackendFailure,
+  WebSearchCallRouted,
+} from "@octant/contracts";
+import { WEB_SEARCH_BACKEND_OFFERS } from "@octant/domain";
+import {
+  SearxngClient,
+  SearxngSearchFailed,
+  type SearxngFetch,
+} from "../chat/research/searxngClient";
+import { searchVendor, VendorSearchFailed } from "./vendorBackends";
 
 export interface WebSearchResult {
   readonly title: string;
@@ -19,36 +29,144 @@ export interface WebSearchAnswer {
   readonly results: ReadonlyArray<WebSearchResult>;
 }
 
+/** No eligible backend answered: every one failed, or none may receive the query. */
 export class WebSearchUnavailable extends Error {
   constructor() {
-    super("No web search backend may receive this query.");
+    super("No web search backend answered this query.");
     this.name = "WebSearchUnavailable";
   }
 }
 
+export class WebSearchInterrupted extends Error {
+  constructor() {
+    super("The web search was interrupted.");
+    this.name = "WebSearchInterrupted";
+  }
+}
+
 /**
- * Search the eligible backends for one query. The list is the one the data
- * policy left, in the person's order; it is read by the caller for each call,
- * since a turn may outlive the settings it started with.
+ * One call's budget inside the turn's own cancellation, and each backend's
+ * share of it. Rationale: a per-backend timeout alone lets three slow backends
+ * hold a turn for most of a minute; 15 seconds is SearXNG's own timeout.
  */
-export async function searchWebSearchBackends(input: {
+export const WEB_SEARCH_CALL_BUDGET_MS = 20_000;
+export const WEB_SEARCH_BACKEND_TIMEOUT_MS = 15_000;
+
+export interface WebSearchRouting {
   readonly backends: ReadonlyArray<WebSearchBackendEntry>;
   readonly search: WebSearchInput;
+  /** The entry's API key from the credential broker, or undefined when none is stored. */
+  readonly resolveKey?: (entry: WebSearchBackendEntry) => Promise<string | undefined>;
+  /** Told where the query went, answered or not, so it can be journaled. */
+  readonly onRouted?: (routed: Omit<WebSearchCallRouted, "kind" | "routedAt">) => void;
   readonly fetch?: SearxngFetch;
-}): Promise<WebSearchAnswer> {
-  const first = input.backends[0];
-  if (first === undefined || first.address === undefined) throw new WebSearchUnavailable();
-  const found = await new SearxngClient({
-    baseUrl: first.address,
-    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
-  }).search(input.search);
-  return {
-    query: found.query,
-    backend: "searxng",
-    results: found.results.map((result) => ({
-      title: result.title,
-      url: result.url,
-      snippet: result.snippet,
-    })),
+  readonly budgetMs?: number;
+  readonly backendTimeoutMs?: number;
+  readonly now?: () => number;
+}
+
+type BackendOutcome =
+  | { readonly kind: "answered"; readonly results: ReadonlyArray<WebSearchResult> }
+  | { readonly kind: "failed"; readonly failure: WebSearchBackendFailure };
+
+function searxngFailure(error: SearxngSearchFailed): WebSearchBackendFailure {
+  if (error.category === "timeout") return "timeout";
+  if (error.category === "invalid-query") return "refused-query";
+  // SearXNG reports an unreachable instance, an HTTP error, and an unreadable
+  // body alike; none of them is an answer.
+  return error.category === "unavailable" ? "network" : "server-error";
+}
+
+async function searchOne(
+  entry: WebSearchBackendEntry,
+  routing: WebSearchRouting,
+  timeoutMs: number,
+): Promise<BackendOutcome> {
+  const offer = WEB_SEARCH_BACKEND_OFFERS[entry.kind];
+  let key: string | undefined;
+  if (offer.takesKey) {
+    key = await routing.resolveKey?.(entry).catch(() => undefined);
+    if (key === undefined) return { kind: "failed", failure: "needs-key" };
+  }
+  const lifecycle = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    lifecycle.abort();
+  }, timeoutMs);
+  const onCallerAbort = () => lifecycle.abort();
+  routing.search.signal?.addEventListener("abort", onCallerAbort, { once: true });
+  const search = {
+    query: routing.search.query,
+    limit: routing.search.limit,
+    signal: lifecycle.signal,
   };
+  try {
+    if (entry.kind === "searxng") {
+      if (entry.address === undefined) return { kind: "failed", failure: "server-error" };
+      const found = await new SearxngClient({
+        baseUrl: entry.address,
+        ...(routing.fetch === undefined ? {} : { fetch: routing.fetch }),
+      }).search(search);
+      return { kind: "answered", results: found.results };
+    }
+    const results = await searchVendor({
+      kind: entry.kind,
+      ...(entry.address === undefined ? {} : { address: entry.address }),
+      key: key ?? "",
+      search,
+      ...(routing.fetch === undefined ? {} : { fetch: routing.fetch }),
+    });
+    return { kind: "answered", results };
+  } catch (error) {
+    if (routing.search.signal?.aborted === true) throw new WebSearchInterrupted();
+    if (timedOut) return { kind: "failed", failure: "timeout" };
+    if (error instanceof VendorSearchFailed) return { kind: "failed", failure: error.failure };
+    if (error instanceof SearxngSearchFailed)
+      return { kind: "failed", failure: searxngFailure(error) };
+    return { kind: "failed", failure: "network" };
+  } finally {
+    clearTimeout(timer);
+    routing.search.signal?.removeEventListener("abort", onCallerAbort);
+  }
+}
+
+/**
+ * Search the eligible backends for one query, in the person's order. A query
+ * moves on only when a backend did not answer: a network error, a timeout, a
+ * rate limit, a server error, or a refused or missing key. An empty result is
+ * an answer and stops, so a query reaches no more vendors than it has to; so
+ * does a vendor's refusal of the query itself. Each backend gets the time left
+ * in the call's budget, at most its own timeout; one the budget does not reach
+ * is recorded as not tried.
+ */
+export async function searchWebSearchBackends(routing: WebSearchRouting): Promise<WebSearchAnswer> {
+  const now = routing.now ?? Date.now;
+  const deadline = now() + (routing.budgetMs ?? WEB_SEARCH_CALL_BUDGET_MS);
+  const backendTimeout = routing.backendTimeoutMs ?? WEB_SEARCH_BACKEND_TIMEOUT_MS;
+  const failed: Array<WebSearchCallRouted["failed"][number]> = [];
+  const report = (answeredBy?: WebSearchBackendEntry) =>
+    routing.onRouted?.({
+      ...(answeredBy === undefined
+        ? {}
+        : { answeredBy: { entryId: answeredBy.id, backend: answeredBy.kind } }),
+      failed,
+    });
+  let stopped = false;
+  for (const entry of routing.backends) {
+    const remaining = deadline - now();
+    if (stopped || remaining <= 0) {
+      failed.push({ entryId: entry.id, backend: entry.kind, failure: "not-tried" });
+      continue;
+    }
+    const outcome = await searchOne(entry, routing, Math.min(backendTimeout, remaining));
+    if (outcome.kind === "answered") {
+      report(entry);
+      return { query: routing.search.query, backend: "searxng", results: outcome.results };
+    }
+    failed.push({ entryId: entry.id, backend: entry.kind, failure: outcome.failure });
+    if (outcome.failure === "refused-query") stopped = true;
+  }
+  report();
+  throw new WebSearchUnavailable();
 }

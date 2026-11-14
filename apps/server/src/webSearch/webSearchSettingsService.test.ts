@@ -3,13 +3,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WebSearchSettings } from "@octant/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
-import { MIGRATED_SEARXNG_ENTRY_ID, WebSearchSettingsService } from "./webSearchSettingsService";
+import {
+  MIGRATED_SEARXNG_ENTRY_ID,
+  WebSearchSettingsService,
+  type WebSearchKeyStore,
+} from "./webSearchSettingsService";
 
 const directories: Array<string> = [];
 let tick = 0;
@@ -20,7 +24,10 @@ afterEach(() => {
   }
 });
 
-function openHarness(chatAddress: { value: string | undefined }) {
+function openHarness(
+  chatAddress: { value: string | undefined },
+  extra: { readonly keys?: WebSearchKeyStore; readonly fetch?: typeof fetch } = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), "octant-web-search-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -40,6 +47,8 @@ function openHarness(chatAddress: { value: string | undefined }) {
     clock,
     uuid: randomUUID,
     readChatSearxngBaseUrl: () => chatAddress.value,
+    ...(extra.keys === undefined ? {} : { keys: extra.keys }),
+    ...(extra.fetch === undefined ? {} : { fetch: extra.fetch }),
   });
   return { connection, journal, runtime, service, clock };
 }
@@ -58,10 +67,10 @@ const own: WebSearchSettings = {
   ],
 };
 
-describe("web search settings", () => {
-  it("reads Chat's SearXNG address as the first backend under Any until a list is saved", () => {
+describe("web search settings", async () => {
+  it("reads Chat's SearXNG address as the first backend under Any until a list is saved", async () => {
     const { service } = openHarness({ value: "https://search.example/" });
-    expect(service.view()).toEqual({
+    expect(await service.view()).toEqual({
       source: "migrated",
       settings: {
         policy: "any",
@@ -81,7 +90,7 @@ describe("web search settings", () => {
     expect(service.eligible()).toHaveLength(1);
   });
 
-  it("holds no backends and offers no search on a host with no SearXNG address", () => {
+  it("holds no backends and offers no search on a host with no SearXNG address", async () => {
     const { service } = openHarness({ value: undefined });
     expect(service.read()).toEqual({
       settings: { policy: "any", backends: [] },
@@ -91,10 +100,10 @@ describe("web search settings", () => {
     expect(service.readyWithChatAddress(undefined)).toBe(false);
   });
 
-  it("journals who changed the list, with the list before and after, and stops reading Chat's address", () => {
+  it("journals who changed the list, with the list before and after, and stops reading Chat's address", async () => {
     const chat = { value: "https://search.example/" as string | undefined };
     const { service, journal } = openHarness(chat);
-    const outcome = service.set({ settings: own }, "local-window");
+    const outcome = await service.set({ settings: own }, "local-window");
     expect(outcome).toMatchObject({ kind: "saved", view: { source: "saved" } });
 
     const events = journal.replayAggregateType({
@@ -126,10 +135,10 @@ describe("web search settings", () => {
     expect(service.readyWithChatAddress(undefined)).toBe(true);
   });
 
-  it("records nothing when the saved list is saved again unchanged", () => {
+  it("records nothing when the saved list is saved again unchanged", async () => {
     const { service, journal } = openHarness({ value: undefined });
-    service.set({ settings: own }, "local-window");
-    service.set({ settings: own }, "local-window");
+    await service.set({ settings: own }, "local-window");
+    await service.set({ settings: own }, "local-window");
     expect(
       journal.replayAggregateType({
         aggregateType: "web-search-settings",
@@ -139,19 +148,19 @@ describe("web search settings", () => {
     ).toHaveLength(1);
   });
 
-  it("offers no search when the policy leaves no backend eligible", () => {
+  it("offers no search when the policy leaves no backend eligible", async () => {
     const { service } = openHarness({ value: undefined });
-    service.set({ settings: { ...own, policy: "eu-and-zdr" } }, "local-window");
+    await service.set({ settings: { ...own, policy: "eu-and-zdr" } }, "local-window");
     expect(service.eligible()).toEqual([]);
-    expect(service.view().states).toEqual([
+    expect((await service.view()).states).toEqual([
       { id: own.backends[0]?.id, state: { kind: "not-eligible", reason: "zdr-not-stated" } },
     ]);
   });
 
-  it("refuses an address that is not HTTPS or loopback HTTP and a device another person introduced", () => {
+  it("refuses an address that is not HTTPS or loopback HTTP and a device another person introduced", async () => {
     const { service, journal } = openHarness({ value: undefined });
     expect(
-      service.set(
+      await service.set(
         {
           settings: {
             ...own,
@@ -161,7 +170,7 @@ describe("web search settings", () => {
         "local-window",
       ),
     ).toMatchObject({ kind: "refused", code: "invalid-address" });
-    expect(service.set({ settings: own }, "remote-device")).toMatchObject({
+    expect(await service.set({ settings: own }, "remote-device")).toMatchObject({
       kind: "refused",
       code: "unauthorized",
     });
@@ -174,15 +183,155 @@ describe("web search settings", () => {
     ).toEqual([]);
   });
 
-  it("replays to the same list when the projection is rebuilt from the journal", () => {
+  it("replays to the same list when the projection is rebuilt from the journal", async () => {
     const { service, journal, runtime, connection, clock } = openHarness({ value: undefined });
-    service.set({ settings: own }, "local-window");
-    service.set({ settings: { ...own, policy: "any" } }, "local-window");
+    await service.set({ settings: own }, "local-window");
+    await service.set({ settings: { ...own, policy: "any" } }, "local-window");
     connection.exec("DELETE FROM web_search_settings_projection;");
     expect(service.read().source).toBe("migrated");
     const projection = runtime.projections.get("web-search-settings");
     if (projection === undefined) throw new Error("web-search-settings must be registered");
     rebuildProjection({ connection, journal, projection, clock });
     expect(service.read()).toMatchObject({ source: "saved", settings: { policy: "any" } });
+  });
+});
+
+function memoryKeys() {
+  const stored = new Map<string, string>();
+  const keys: WebSearchKeyStore = {
+    has: async (ref) => stored.has(ref),
+    resolve: async (ref) => {
+      const value = stored.get(ref);
+      if (value === undefined) throw new Error("missing");
+      return value;
+    },
+    set: async (ref, value) => void stored.set(ref, value),
+    delete: async (ref) => void stored.delete(ref),
+  };
+  return { keys, stored };
+}
+
+const braveEntry = {
+  id: "00000000-0000-4000-8000-0000000000d1" as WebSearchSettings["backends"][number]["id"],
+  kind: "brave" as const,
+  enabled: true,
+  statesZdr: false,
+  statesEuProcessing: false,
+};
+
+describe("web search keys", () => {
+  it("keeps a vendor's key in the broker under a reference the host assigns, never in the settings", async () => {
+    const { keys, stored } = memoryKeys();
+    const { service, journal } = openHarness({ value: undefined }, { keys });
+    const forged = { ...braveEntry, credentialRef: "00000000-0000-4000-8000-0000000000ff" };
+    await service.set({ settings: { policy: "any", backends: [forged] } }, "local-window");
+    const saved = service.read().settings.backends[0];
+    expect(saved?.credentialRef).toBeDefined();
+    expect(saved?.credentialRef).not.toBe(forged.credentialRef);
+    expect((await service.view()).states[0]?.state).toEqual({ kind: "needs-key" });
+
+    expect(
+      await service.setKey({ entryId: braveEntry.id, key: "brave-secret" }, "local-window"),
+    ).toMatchObject({ kind: "saved", view: { states: [{ state: { kind: "ready" } }] } });
+    expect([...stored.values()]).toEqual(["brave-secret"]);
+    const events = journal.replayAggregateType({
+      aggregateType: "web-search-settings",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(JSON.stringify(events)).not.toContain("brave-secret");
+  });
+
+  it("refuses a key from a device another person introduced, for an unsaved entry, and for SearXNG", async () => {
+    const { keys, stored } = memoryKeys();
+    const { service } = openHarness({ value: "https://search.example/" }, { keys });
+    expect(
+      await service.setKey({ entryId: braveEntry.id, key: "k" }, "remote-device"),
+    ).toMatchObject({ kind: "refused", code: "unauthorized" });
+    expect(
+      await service.setKey({ entryId: braveEntry.id, key: "k" }, "local-window"),
+    ).toMatchObject({ kind: "refused", code: "unknown-entry" });
+    expect(
+      await service.setKey({ entryId: MIGRATED_SEARXNG_ENTRY_ID, key: "k" }, "local-window"),
+    ).toMatchObject({ kind: "refused", code: "key-not-taken" });
+    expect(stored.size).toBe(0);
+  });
+
+  it("deletes the stored key when the entry's address changes or the entry is removed", async () => {
+    const { keys, stored } = memoryKeys();
+    const { service } = openHarness({ value: undefined }, { keys });
+    const linkup = {
+      ...braveEntry,
+      kind: "linkup" as const,
+      address: "https://eu-a.linkup.example/",
+    };
+    await service.set({ settings: { policy: "any", backends: [linkup] } }, "local-window");
+    await service.setKey({ entryId: linkup.id, key: "first" }, "local-window");
+    const firstRef = service.read().settings.backends[0]?.credentialRef;
+
+    await service.set(
+      {
+        settings: {
+          policy: "any",
+          backends: [{ ...linkup, address: "https://eu-b.linkup.example/" }],
+        },
+      },
+      "local-window",
+    );
+    expect(stored.size).toBe(0);
+    expect(service.read().settings.backends[0]?.credentialRef).not.toBe(firstRef);
+
+    await service.setKey({ entryId: linkup.id, key: "second" }, "local-window");
+    expect(stored.size).toBe(1);
+    await service.set({ settings: { policy: "any", backends: [] } }, "local-window");
+    expect(stored.size).toBe(0);
+  });
+
+  it("journals the backend that answered and the one that refused its key, and reads that entry as Needs key", async () => {
+    const { keys } = memoryKeys();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith("https://api.search.brave.com/")) {
+        return new Response("{}", { status: 401 });
+      }
+      return Response.json({
+        results: [{ title: "Octant", url: "https://example.com/octant", content: "A workspace." }],
+      });
+    });
+    const { service, journal } = openHarness(
+      { value: undefined },
+      { keys, fetch: fetchMock as unknown as typeof fetch },
+    );
+    const searx = {
+      id: "00000000-0000-4000-8000-0000000000d2" as WebSearchSettings["backends"][number]["id"],
+      kind: "searxng" as const,
+      address: "https://search.example/",
+      enabled: true,
+      statesZdr: false,
+      statesEuProcessing: false,
+    };
+    await service.set(
+      { settings: { policy: "any", backends: [braveEntry, searx] } },
+      "local-window",
+    );
+    await service.setKey({ entryId: braveEntry.id, key: "revoked" }, "local-window");
+
+    const answer = await service.search({ query: "octant", limit: 5 });
+    expect(answer.results.map((result) => result.url)).toEqual(["https://example.com/octant"]);
+    const routed = journal.replayAggregateType({
+      aggregateType: "web-search-calls",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(routed.map((event) => event.payload)).toEqual([
+      {
+        kind: "web-search-call-routed",
+        answeredBy: { entryId: searx.id, backend: "searxng" },
+        failed: [{ entryId: braveEntry.id, backend: "brave", failure: "key-refused" }],
+        routedAt: expect.any(String),
+      },
+    ]);
+    expect(JSON.stringify(routed)).not.toContain('octant"');
+    expect((await service.view()).states[0]?.state).toEqual({ kind: "needs-key" });
   });
 });

@@ -4989,10 +4989,15 @@ unless the call asks for 1 to 10. It opens no page.
   `/api/host-control/web-search`. A pure policy in `packages/domain` returns
   the entries the policy leaves eligible, in the person's order; with none,
   `web-search` is not offered. A SearXNG address Chat settings held becomes
-  the first entry, under Any, until a list is saved. The only kind so far is
-  `searxng`, and a query goes to the first eligible entry; vendor backends,
-  fallback, and a provider's own search in the native harness under the policy
-  are designed, not built
+  the first entry, under Any, until a list is saved. Kinds are `searxng`,
+  `staan`, `mojeek`, `linkup`, `brave`, and `exa`; a vendor's key lives only
+  in the credential broker's `/v1/web-search-credentials/*` namespace, under a
+  reference the host assigns, and a new address deletes it. A query moves to
+  the next eligible entry only when one did not answer (network, timeout, rate
+  limit, server error, refused or missing key), inside a 20-second budget with
+  at most 15 seconds each; an empty result stops it. Each call journals where
+  the query went (`web-search.call-routed@1`). A provider's own search in the
+  native harness under the policy is designed, not built
   ([Web search backends and data policy](design/web-search-backends.md)).
 
 - **Where.** A Chat thread is offered it on every provider while its research

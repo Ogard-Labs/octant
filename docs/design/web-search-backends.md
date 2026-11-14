@@ -12,13 +12,16 @@ harness refuses on a tainted thread stay in
 
 Status: partly built. Built: the settings contract and its journaled
 `/api/host-control/web-search` route, the eligibility policy, the research
-route's "Octant web search" label, and the migration; `web-search` searches the first
-eligible backend, and the only kind so far is `searxng`. Not built: the vendor
-backends, their credential broker namespace and the fallback (slice 2),
-Settings › Web search (slice 3), and a provider's own search in the native
-harness (slice 4), which still refuses any built-in tool a provider starts in
-its stream as `unsupported`, so a harness endpoint reports
-`nativeWebResearch` as `unsupported`.
+route's "Octant web search" label, the migration, the credential broker namespace
+`/v1/web-search-credentials/*` with its `/api/host-control/web-search/key`
+route, the Staan, Mojeek, Linkup, Brave, and Exa backends, the fallback with
+its 20-second budget, and the journaled record of where each query went. Not
+built: Settings › Web search (slice 3) and a provider's own search in the
+native harness (slice 4), which still refuses any built-in tool a provider
+starts in its stream as `unsupported`, so a harness endpoint reports
+`nativeWebResearch` as `unsupported`. A per-entry processing region is not
+built: no kind in the table takes one through its API, and Linkup's EU-pinned
+host is the entry's address.
 
 ## Why
 
@@ -88,7 +91,11 @@ under an EU policy it should enable only European indexes.
 
 The table is data in `packages/domain`, and each kind's entry carries the date
 its terms were checked and the published source it was read from; it changes
-only when that source does. Kinds are added only with a verified API, a
+only when that source does. Each vendor's request shape is recorded beside its
+client in `apps/server/src/webSearch/vendorBackends.ts` with where it was read
+from: Exa and Linkup from their official clients, Brave from its API reference
+and its own search server, Mojeek and Staan from published integrations,
+since neither vendor's own reference could be read when they were built. Kinds are added only with a verified API, a
 published or quoted price, and terms that say what the vendor keeps. A kind
 whose results are an answer rather than a list of pages does not fit
 `web-search` and is not added.
@@ -139,7 +146,12 @@ Fallback never leaves the policy: only eligible entries are in the list it
 walks. Under Any, the list may still mix regions; the person orders it.
 
 Each call journals the backend that answered and each one that failed, with
-the failure kind, so the person can see where a query went.
+the failure kind, so the person can see where a query went. The record
+(`web-search.call-routed@1`) names entries and failure kinds only; the query
+stays with the thread's own tool call. A vendor's refusal of the query itself
+(an HTTP 4xx other than a refused key or a rate limit) is an answer and does
+not move on. Which entry's key was refused is held in memory, so after a
+restart the next search learns it again.
 
 ## Research route
 

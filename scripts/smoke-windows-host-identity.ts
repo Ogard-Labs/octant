@@ -275,6 +275,7 @@ try {
     "desktop-provider-credential",
     "push-platform-credential",
     "ssh-key",
+    "web-search-credential",
   ];
   for (const namespace of namespaces) {
     const store = makeWindowsCredentialStore({

@@ -194,6 +194,8 @@ export function startSecretServiceCredentialBroker(
     undefined,
     linkedSecretStores,
     makeStore({ namespace: "ssh-key" }),
+    undefined,
+    makeStore({ namespace: "web-search-credential" }),
   );
 }
 

@@ -31,6 +31,7 @@ import type { NativeHarnessShellPort } from "./nativeHarnessTools";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
 import { MemoryNativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
 import { harnessWebSearch } from "./nativeHarnessWebSearch";
+import { searchWebSearchBackends } from "../webSearch/webSearchBackends";
 import { webSearchSettingsFromChatAddress } from "@octant/domain";
 import { MIGRATED_SEARXNG_ENTRY_ID } from "../webSearch/webSearchSettingsService";
 
@@ -180,7 +181,13 @@ describe("native harness composition", () => {
         harnessWebSearch({
           readEligible: () =>
             webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID).backends,
-          fetch,
+          search: (input) =>
+            searchWebSearchBackends({
+              backends: webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID)
+                .backends,
+              search: input,
+              fetch,
+            }),
         }),
       hostId: authority.hostId,
       readThreadTaint: () => false,
