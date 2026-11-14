@@ -6,6 +6,7 @@ import {
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
@@ -1496,7 +1497,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             notices={sideChatNotice === undefined ? [] : [sideChatNotice]}
             key={String(thread.id)}
             info={
-              <ThreadInfo>
+              <ThreadInfo
+                notes={{
+                  threadId: String(view.thread.id),
+                  onInsert: (note) => {
+                    const next = draftWithNote(props.controller.pendingDraft, note);
+                    draftEditRevisionRef.current += 1;
+                    props.controller.setPendingDraft(next, next.length);
+                  },
+                }}
+              >
                 <ThreadReplyDetailMenu labelled />
                 <ThreadNativeSetupControl
                   disabled={isSending}

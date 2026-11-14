@@ -1036,6 +1036,7 @@ export function startOctantServer(
       threadCheckpointRoutes,
       threadMentionRoutes,
       threadMentionService,
+      threadNotesRoutes,
       workspacePresetRoutes,
     } = yield* wireChat({
       verifyModelToolsOnFirstUse,
@@ -1849,6 +1850,7 @@ export function startOctantServer(
       threadExportRoutes,
       threadHandOffRoutes,
       threadMentionRoutes,
+      threadNotesRoutes,
       threadMessageQueueRoutes,
       usageDashboardRoutes,
       usageRoutes,

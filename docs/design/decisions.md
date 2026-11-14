@@ -54,7 +54,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 18        | 11      | 5            | 2                   |
+| [Workspace](#workspace)                                                               | 18        | 12      | 5            | 1                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **259**   | **153** | **96**       | **10**              |
+| **All areas**                                                                         | **259**   | **154** | **96**       | **9**               |
 
 ## Principles and hard lines
 
@@ -2653,11 +2653,11 @@ Status: Designed, not built. Since: 2026-11-14. Detail: [Thread view: Line notes
 
 A thread has a person-visible recap of what it asked, did and left open, and the person may keep notes of their own on it (maintainer decision, 2026-11-14).
 
-- The recap is written on request by the thread's own model from its transcript, names the turn it was written through, and goes to no other provider.
-- Notes are the person's text, journaled on the thread and sent to the agent only when the person attaches one to a message.
+- The recap is read on request by the host from the thread's newest transcript window, under the thread's open authority. It quotes the thread, names the last message it read and says when older ones fell outside, and is written by no model, so it goes to no provider.
+- Notes are the person's text, journaled on the thread and rebuilt from the journal; the host refuses a note from an agent or from itself. A note reaches the agent only when the person inserts it into a message they send, and purging the thread erases its notes.
 - Neither changes the thread's authority, level or Done.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Thread view: Thread recap and notes](thread-view.md#thread-recap-and-notes).
+Status: Built. Since: 2026-11-14. Detail: [Thread view: Thread recap and notes](thread-view.md#thread-recap-and-notes).
 
 ## Start screen
 
