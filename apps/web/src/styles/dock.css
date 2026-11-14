@@ -2003,7 +2003,7 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   align-items: center;
   justify-content: flex-end;
   padding: 0 var(--oct-space-2);
-  box-shadow: inset 0 -1px 0 var(--octant-border-soft);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
 .dock-artifacts__body {
