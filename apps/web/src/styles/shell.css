@@ -2258,15 +2258,15 @@ html[data-octant-native-host="true"]
         var(--octant-stage-corner-left)
     );
     mask-image:
-      linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000),
+      linear-gradient(currentColor, currentColor), linear-gradient(currentColor, currentColor), linear-gradient(currentColor, currentColor),
       radial-gradient(
         circle at 100% 100%,
-        #000 max(0px, calc(var(--octant-stage-corner-left) - 0.5px)),
+        currentColor max(0px, calc(var(--octant-stage-corner-left) - 0.5px)),
         transparent var(--octant-stage-corner-left)
       ),
       radial-gradient(
         circle at 0 100%,
-        #000 calc(var(--octant-stage-radius) - 0.5px),
+        currentColor calc(var(--octant-stage-radius) - 0.5px),
         transparent var(--octant-stage-radius)
       );
     mask-size:
