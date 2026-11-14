@@ -7065,10 +7065,12 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
    opaque, with or without Glass. The packaged window is transparent and its
    renderer does not draw a backdrop filter there, so the glass material's
    floor and tint (66% and 56%) or an ink wash showed the field of characters
-   through the composer, a person's message and a glass card, and typed text sat
-   on a fill only a blur could have made readable. The fill is the float's own
-   colour at 96%, no tint image and no blur. A browser keeps the material above,
-   which works over its opaque page. */
+   through a person's message and a glass card, and typed text sat on a fill
+   only a blur could have made readable. The fill is the float's own colour at
+   96%, no tint image and no blur. The composer takes it only while Glass is
+   off: under Glass it is the ink wash on the coat above, like every card, and
+   follows the glass level. A browser keeps the material above, which works over
+   its opaque page. */
 html[data-octant-native-host="true"]
   :is(
     .shell--app-backdrop

@@ -270,10 +270,13 @@ under the fill).
   (`html[data-octant-native-host="true"]`). In the desktop app every float
   (menu, popover, select, combobox, hover card, palette, toast, notice, tour
   card, dialog, the Settings sheet) is the dense 96% float with no blur whether
-  Glass is on or off, and a surface that sits over the application ground (the
-  composer box, a person's message, a glass card, Zen's windows and bars) is the
-  float colour at 96% with no tint image and no blur; a card over the ground
-  under Glass is its card colour at 94%. A browser keeps the frosted fills,
+  Glass is on or off, and a surface that sits over the application ground (a
+  person's message, a glass card, Zen's windows and bars; the composer box while
+  Glass is off) is the float colour at 96% with no tint image and no blur; a
+  card over the ground under Glass is its card colour at 94%. Under Glass the
+  composer box is the ink wash every control on the coat is (7%, no blur), so it
+  follows the glass level and the ground shows through it; Increased contrast,
+  Reduced transparency and a window with Glass off make it opaque. A browser keeps the frosted fills,
   where the blur is drawn over an opaque page.
 - **Settings leaves the window as it is; a dialog blurs it.** Settings is a
   sheet so a person can watch the window change while they change its
@@ -1485,7 +1488,7 @@ application ground; every other page covers it with the reading veil.
   from the top, 16px between parts. The hint is 12px meta, centred.
 - **Where a ground shows.** Every ground shows behind the start screens by
   default (`scope: welcome`). A person may put it behind every page
-  (`scope: everywhere`, and under the sidebar with `coversSidebar`); then every
+  (`scope: everywhere`, which includes the sidebar); then every
   surface that shows text or information lies under the reading veil (the sheet
   colour at 80%) and only the start screens stay open on the ground.
 - **The grounds.**

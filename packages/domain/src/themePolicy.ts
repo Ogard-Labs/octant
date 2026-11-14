@@ -129,7 +129,7 @@ export function resolveAppBackground(
     effect,
     photoOpacity: background.photoOpacity / 100,
     scope: background.scope,
-    coversSidebar: background.scope === "everywhere" && background.coversSidebar,
+    coversSidebar: background.scope === "everywhere",
   };
   if (settings.increasedContrast || background.kind === "none" || background.kind === "theme") {
     return {

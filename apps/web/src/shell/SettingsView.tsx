@@ -3527,8 +3527,8 @@ function SidebarBackgroundSettings({
     <div className="settings-view__setting">
       {suspended ? (
         <p className="settings-view__hint">
-          Workspace background covers the sidebar. Turn off Cover the sidebar to use these saved
-          settings.
+          The workspace background is behind everything, the sidebar included. Set it to show behind
+          the start screens only to use these saved settings.
         </p>
       ) : null}
       <label className="settings-view__field">

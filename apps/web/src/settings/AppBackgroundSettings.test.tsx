@@ -510,7 +510,7 @@ describe("AppBackgroundSettings", () => {
     expect(screen.queryByRole("combobox", { name: "Where the background shows" })).toBeNull();
   });
 
-  it("offers the sidebar only once the ground is behind everything", async () => {
+  it("has no separate sidebar switch when the ground is behind everything", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const walnut = {
@@ -535,11 +535,6 @@ describe("AppBackgroundSettings", () => {
         onChange={onChange}
       />,
     );
-    await user.click(screen.getByRole("switch", { name: "Cover the sidebar" }));
-    expect(onChange).toHaveBeenLastCalledWith({
-      ...walnut,
-      scope: "everywhere",
-      coversSidebar: true,
-    });
+    expect(screen.queryByRole("switch", { name: "Cover the sidebar" })).not.toBeInTheDocument();
   });
 });
