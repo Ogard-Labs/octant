@@ -4883,7 +4883,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   height: auto;
   /* At enlarged text sizes neither side of the composer fits the full box.
      Use the positioner's available space so reasoning stays inside the window. */
-  max-height: min(440px, 70vh, var(--available-height, 440px), calc(100dvh - 24px));
+  max-height: min(360px, 70vh, var(--available-height, 360px), calc(100dvh - 24px));
   padding: 0;
   overflow: hidden;
   /* Size and place only. The popover recipe paints the fill, the edge, and the
@@ -5047,8 +5047,8 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 
 .composer-model-picker__level-stops > span {
-  width: 2px;
-  height: 2px;
+  width: 3px;
+  height: 3px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--octant-text-primary) 55%, transparent);
 }
