@@ -33,6 +33,15 @@ export interface OctantCommandSources {
   readonly onJumpToNextWaiting?: () => void;
   /** Opens Zen. Absent when this window cannot enter it. */
   readonly onOpenZen?: () => void;
+  /** Shows or hides the sidebar, the same action as its chord and its button. */
+  readonly onToggleSidebar?: () => void;
+  /** The pages the rail and sidebar open, by the label they carry there. */
+  readonly destinations?: ReadonlyArray<CommandDestination>;
+  /** Settings pages that open without a native capability. */
+  readonly settingsPages?: ReadonlyArray<CommandSettingsPage>;
+  /** The tools the dock can open for the thread in front. */
+  readonly dockTools?: ReadonlyArray<CommandDockTool>;
+  readonly onOpenDockTool?: (tool: CommandDockTool) => void;
   readonly threads: ReadonlyArray<CommandThread>;
   readonly onOpenThread: (thread: CommandThread) => void;
   readonly projects: ReadonlyArray<CommandProject>;
@@ -65,6 +74,23 @@ export interface CommandReplyDetail {
     /** Sets the thread's own level, or `undefined` to follow the default again. */
     readonly onSet: (level: ReplyDetailLevel | undefined) => void;
   };
+}
+
+export interface CommandDestination {
+  readonly id: string;
+  readonly label: string;
+  readonly onOpen: () => void;
+}
+
+export interface CommandSettingsPage {
+  readonly sectionId: string;
+  readonly label: string;
+  readonly onOpen: () => void;
+}
+
+export interface CommandDockTool {
+  readonly id: string;
+  readonly label: string;
 }
 
 export interface CommandProjectAction {
@@ -145,6 +171,25 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
       group: "Modes",
       keywords: ["mode", MODE_LABEL[mode]],
       action: { kind: "run", run: () => sources.onSelectMode(mode) },
+    });
+  }
+
+  for (const destination of sources.destinations ?? []) {
+    commands.push({
+      id: `destination:${destination.id}`,
+      title: `Go to ${destination.label}`,
+      group: "Go to",
+      keywords: ["open", "page", "destination", destination.label],
+      action: { kind: "run", run: destination.onOpen },
+    });
+  }
+  for (const page of sources.settingsPages ?? []) {
+    commands.push({
+      id: `settings-page:${page.sectionId}`,
+      title: `Settings: ${page.label}`,
+      group: "Go to",
+      keywords: ["settings", "preferences", "page", page.label],
+      action: { kind: "run", run: page.onOpen },
     });
   }
 
@@ -308,6 +353,29 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
         detail: "Threads without their own level follow it",
         keywords: [...keywords, "default", level],
         action: { kind: "run", run: () => replyDetail.onSetDefault(level) },
+      });
+    }
+  }
+
+  if (sources.onToggleSidebar !== undefined) {
+    commands.push({
+      id: "workspace:toggle-sidebar",
+      title: "Show or hide the sidebar",
+      group: "Workspace",
+      keywords: ["sidebar", "collapse", "expand", "panel"],
+      action: { kind: "run", run: sources.onToggleSidebar },
+    });
+  }
+  const openDockTool = sources.onOpenDockTool;
+  if (openDockTool !== undefined) {
+    for (const tool of sources.dockTools ?? []) {
+      commands.push({
+        id: `dock-tool:${tool.id}`,
+        title: `Open ${tool.label}`,
+        group: "Workspace",
+        detail: "Dock tool",
+        keywords: ["dock", "tool", "panel", tool.label],
+        action: { kind: "run", run: () => openDockTool(tool) },
       });
     }
   }

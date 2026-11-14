@@ -330,6 +330,7 @@ import {
 import { useHomeShortcut } from "./shell/useHomeShortcut";
 import { useNewThreadShortcut } from "./shell/useNewThreadShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
+import { octantSettingsRegistry } from "./settings/octantSettingsRegistry";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { RailUsageRings } from "./usage/RailUsageRings";
@@ -7556,6 +7557,33 @@ function LaunchedShell(
     onNewThread: () => startNewThreadDraft(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    onToggleSidebar: () =>
+      setSidebarCollapsedPersistent(!presentedSidebarCollapsed, { keepFocus: true }),
+    destinations: [
+      { id: "home", label: "Home", onOpen: openHome },
+      { id: "inbox", label: "Inbox", onOpen: openInbox },
+      ...(activeMode === "chat"
+        ? []
+        : [
+            { id: "thread-board", label: "Board", onOpen: openThreadBoard },
+            { id: "automations", label: "Automations", onOpen: openAutomationCenter },
+          ]),
+      { id: "agents", label: "Agents", onOpen: openAgentsCenter },
+      { id: "artifact-library", label: "Artifacts", onOpen: openArtifactLibrary },
+      { id: "projects", label: "Projects", onOpen: openProjects },
+    ],
+    settingsPages: octantSettingsRegistry.sections
+      .filter((section) => section.nativeRequired === undefined)
+      .map((section) => ({
+        sectionId: section.id,
+        label: section.label,
+        onOpen: () => void controller.openSettings({ section: section.id }),
+      })),
+    dockTools: dockToolSurfaces,
+    onOpenDockTool: (tool) => {
+      const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === tool.id);
+      if (surface !== undefined) openDockTab(surface.id);
+    },
     ...(controller.settings === undefined
       ? {}
       : {
