@@ -37,7 +37,24 @@ export const PROJECT_ICON_CANDIDATES: ReadonlyArray<string> = [
   "icon.svg",
   "icon.png",
   "logo.svg",
+  ...workspaceIconCandidates(),
 ];
+
+/**
+ * A monorepo keeps its favicon in one of its apps, not at the root: two real
+ * Projects had theirs only at `apps/web/public/favicon.svg` and
+ * `packages/web/public/favicon.svg` and showed letters. The likely app folders
+ * are named, not listed from disk, so the lookup stays a fixed list and never
+ * walks the folder. They come after every root path, so a root icon wins.
+ */
+function workspaceIconCandidates(): ReadonlyArray<string> {
+  const parents = ["apps", "packages"];
+  const apps = ["web", "app", "site", "www", "docs", "frontend", "desktop"];
+  const files = ["public/favicon.svg", "public/favicon.png", "public/favicon.ico"];
+  return parents.flatMap((parent) =>
+    apps.flatMap((app) => files.map((file) => `${parent}/${app}/${file}`)),
+  );
+}
 
 export type ProjectIconMediaType = "image/svg+xml" | "image/png" | "image/x-icon";
 
