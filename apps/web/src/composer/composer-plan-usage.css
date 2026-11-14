@@ -32,20 +32,3 @@
 .composer-start__usage > .plan-usage-line {
   padding: 0 var(--oct-space-2);
 }
-
-/* The usage warning stands above the row and grows upward, away from the
-   box: it is out of flow, so it appearing or being put away moves nothing. It
-   starts at the box's left edge, as wide as its own words. */
-.composer-start {
-  position: relative;
-}
-
-.composer-start > .composer-usage-warning-row {
-  position: absolute;
-  inset-inline-start: 0;
-  bottom: 100%;
-  display: grid;
-  justify-items: start;
-  max-width: 100%;
-  margin-bottom: var(--oct-space-2);
-}

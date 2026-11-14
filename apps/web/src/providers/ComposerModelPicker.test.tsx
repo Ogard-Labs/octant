@@ -25,7 +25,6 @@ import {
   ComposerContextMeterProvider,
 } from "../context/composerContextMeterScope";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
-import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { ModelToolVerificationContext } from "./ModelToolVerificationContext";
 
@@ -145,64 +144,6 @@ describe("ComposerModelPicker", () => {
       "Remote Claude",
       "Local OpenCode",
     ]);
-  });
-
-  it("warns that the chosen account is at its limit by its spoken name and offers no other account", async () => {
-    const named = groups().map((group) =>
-      String(group.instance.id) === String(providerA)
-        ? { ...group, instance: { ...group.instance, displayName: "Codex" } }
-        : group,
-    );
-    render(
-      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
-        <ComposerUsageWarning groups={named} selectedProviderInstanceId={String(providerA)} />
-      </PlanUsageProvider>,
-    );
-    const warning = await screen.findByRole("alert");
-    expect(warning).toHaveTextContent("Codex has reached its usage limit.");
-    expect(warning).toHaveTextContent(/Resets in 3h/);
-    expect(
-      within(warning)
-        .getAllByRole("button")
-        .map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["Dismiss"]);
-  });
-
-  it("stays quiet when the chosen account has room", async () => {
-    render(
-      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
-        <ComposerUsageWarning groups={groups()} selectedProviderInstanceId={String(providerB)} />
-      </PlanUsageProvider>,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("leaves a close-to-limit account to the plan usage line and raises no warning", async () => {
-    render(
-      <PlanUsageProvider barStyle="smooth" client={usageClient(0.9)}>
-        <ComposerUsageWarning groups={groups()} selectedProviderInstanceId={String(providerB)} />
-      </PlanUsageProvider>,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("marks a reached limit red and keeps a dismissed warning away when the composer comes back", async () => {
-    const warningFor = () => (
-      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
-        <ComposerUsageWarning groups={groups()} selectedProviderInstanceId={String(providerA)} />
-      </PlanUsageProvider>
-    );
-    const first = render(warningFor());
-    const warning = await screen.findByRole("alert");
-    expect(warning).toHaveAttribute("data-tone", "danger");
-    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    first.unmount();
-    render(warningFor());
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("selects advertised lead and sidekick pairings and remembers speed beside effort", async () => {
@@ -1084,7 +1025,7 @@ describe("ComposerModelPicker", () => {
 });
 
 /** A host that last saw the first account out of its five-hour window and the second with room. */
-function usageClient(secondUtilization = 0.2): ProviderUsageLimitsClient {
+function usageClient(): ProviderUsageLimitsClient {
   const observedAt = new Date().toISOString();
   const resetsAt = new Date(Date.now() + 3 * 60 * 60_000 + 30_000).toISOString();
   const entry = (id: typeof providerA, status: "allowed" | "exhausted", utilization: number) => ({
@@ -1117,7 +1058,7 @@ function usageClient(secondUtilization = 0.2): ProviderUsageLimitsClient {
   const snapshot = {
     version: 1,
     refreshedAt: observedAt,
-    entries: [entry(providerA, "exhausted", 1), entry(providerB, "allowed", secondUtilization)],
+    entries: [entry(providerA, "exhausted", 1), entry(providerB, "allowed", 0.2)],
   };
   return { list: vi.fn(async () => snapshot) } as unknown as ProviderUsageLimitsClient;
 }

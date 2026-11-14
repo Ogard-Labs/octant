@@ -78,7 +78,7 @@ describe("plan usage above the composer", () => {
     expect(group).not.toHaveTextContent("10%");
   });
 
-  it("marks a window close to its limit in words and a spent one as reached", async () => {
+  it("says a window close to its limit in the warning ink and a spent one as reached in words, with no notice above the box", async () => {
     const resetsAt = new Date(Date.now() + 3 * 60 * 60_000 + 17 * 60_000 + 10_000).toISOString();
     const client = clientOf([
       entry(codex, [
@@ -97,11 +97,14 @@ describe("plan usage above the composer", () => {
       name: "5-hour window, codex: 8% left, close to its limit, resets in 3h 17m",
     });
     expect(near).toHaveAttribute("data-level", "near");
+    expect(near).toHaveTextContent("8% 3h 17m");
     const spent = within(group).getByRole("img", {
       name: "7-day window, codex: limit reached, resets in 3h 17m",
     });
     expect(spent).toHaveAttribute("data-level", "spent");
-    expect(spent).toHaveTextContent("0%");
+    expect(screen.queryByRole("alert")).toBeNull();
+    // The words are on the line itself, so the danger ink is never the only sign.
+    expect(spent).toHaveTextContent("0% limit 3h 17m");
   });
 
   it("keeps the line's figures tabular and lets it shrink instead of pushing its neighbours", () => {

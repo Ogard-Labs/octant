@@ -61,7 +61,11 @@ export function PlanUsageLine(props: {
                 data-level={window.level}
                 role="img"
               >
-                {`${String(window.percent)}%${countdown === undefined ? "" : ` ${countdown}`}`}
+                {[
+                  `${String(window.percent)}%`,
+                  ...(window.level === "spent" ? ["limit"] : []),
+                  ...(countdown === undefined ? [] : [countdown]),
+                ].join(" ")}
               </span>
             </OctantTooltip>
           </Fragment>

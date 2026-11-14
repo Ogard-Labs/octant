@@ -5314,36 +5314,16 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
    a second line): a card as wide as the box read as a banner across the page.
    It lifts on the box's own soft shadow, enters with a short fade and a 4px
    rise, and not at all under reduced motion. */
-.callout:is(.composer-notice, .composer-usage-warning),
+.callout.composer-notice,
 .thread-column > .callout {
   width: fit-content;
   max-width: min(480px, 100%);
   box-shadow: var(--oct-shadow-float);
   animation: composer-notice-in var(--oct-motion-base) var(--oct-ease-standard) both;
 }
-/* The usage warning is the one notice that carries its tone into the card: a
-   faint wash of amber (close to the limit) or red (at it) over a thinner fill,
-   and an edge of the same tone, so it reads as a warning at a glance without
-   becoming a banner. The fill stays dense enough that the ground behind never
-   competes with the words, with or without blur; reduced transparency and
-   increased contrast keep the ordinary float fill. */
-.callout.composer-usage-warning {
-  outline-color: color-mix(in oklab, var(--callout-tone) 36%, transparent);
-}
-html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
-  .callout.composer-usage-warning {
-  background: color-mix(
-    in oklab,
-    var(--callout-tone) 8%,
-    color-mix(in srgb, var(--octant-float) 84%, transparent)
-  );
-}
-.callout.composer-usage-warning .callout__actions {
-  gap: var(--oct-space-2);
-}
 /* The words take the room beside the icon and wrap there, instead of dropping
    the icon onto a line of its own when the message is long. */
-.callout:is(.composer-notice, .composer-usage-warning, .thread-column) > .callout__body {
+.callout:is(.composer-notice, .thread-column) > .callout__body {
   flex: 1 1 16ch;
 }
 @keyframes composer-notice-in {

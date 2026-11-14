@@ -25,7 +25,6 @@ import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ThreadPlanWindows } from "../threadStats/ThreadStats";
 import type { PickerGroup } from "@octant/domain";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
-import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
 import "./composer-plan-usage.css";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -160,11 +159,7 @@ export interface ThreadComposerProps {
    */
   readonly planUsage?: {
     readonly providerInstanceId: string | undefined;
-    /**
-     * The accounts a new thread can use, for the chosen one's name. With them,
-     * a chosen account near or at its limit shows a warning; without them, the
-     * meters stand alone.
-     */
+    /** Unused: the usage line needs no account names. Adapters may stop passing it. */
     readonly groups?: ReadonlyArray<PickerGroup>;
   };
   readonly queue?: ReactNode;
@@ -265,12 +260,6 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   const startRow =
     props.startContext === undefined ? null : (
       <div className="composer-start">
-        {props.planUsage?.groups === undefined ? null : (
-          <ComposerUsageWarning
-            groups={props.planUsage.groups}
-            selectedProviderInstanceId={props.planUsage.providerInstanceId}
-          />
-        )}
         {props.startContext}
         {props.planUsage === undefined ? null : (
           <div className="composer-start__usage" data-slot="plan-usage">

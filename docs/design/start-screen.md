@@ -578,22 +578,24 @@ new, and Continue) is laid out in
 land in, and the Image generator surface serves everything else. Attaching an
 image is a composer affordance and is available here.
 
-## Usage-limit warning
+## Plan usage line
 
-**Usage-limit warning.** On a start screen, when the chosen account has a window
-that is spent or at 80% used (the same levels the meters colour), a small
-notice floats above the context chips: which account by its spoken name
-(a saved "Codex CLI" reads "Codex"), that it has reached or is close to its usage limit,
-and the reset time the provider gave. It is amber while close and red once
-reached ([OctantAlert](../../DESIGN.md#octantalert)). It only tells: it offers
-no other account to switch to, since which account runs is the person's choice
-in the model menu. A dismiss button puts it away until its reset time passes or
-the account reaches its limit. The warning never blocks sending: the provider's
-own limit decides whether a turn runs. The model menu's rail lists accounts with
-room first and the ones at their limit last, in the person's own order within
-each, and marks a limited account with the danger dot and "Usage limit reached"
-(a near one with the warning dot and "Near usage limit"); a readiness problem
-takes the dot first.
+**Plan usage line.** On a start screen the chosen account's plan usage is one
+quiet line of text at the right of the context chips, in the meta ink with
+tabular figures: every observed window with the share left and the time to its
+reset ("100% 4h 59m · 70% 1d 19h"). A window at 80% used or more takes the
+warning ink, and one that is spent takes the danger ink and reads "limit" in
+place of nothing but its figure ("0% limit 2h 26m"), so the standing is never
+colour alone; each part's tooltip and accessible name give the window and its
+standing in words ("5-hour window, codex: 8% left, close to its limit, resets
+in 3h 17m"). No notice floats above the box, because one covered the heading on
+a centred composer: the line alone says it, in the space it already holds, so
+nothing moves when a window nears or reaches its limit. The line offers no other
+account and never blocks sending: the provider's own limit decides whether a
+turn runs. The model menu's rail lists accounts with room first and the ones at
+their limit last, in the person's own order within each, and marks a limited
+account with the danger dot and "Usage limit reached" (a near one with the
+warning dot and "Near usage limit"); a readiness problem takes the dot first.
 
 ## First run
 

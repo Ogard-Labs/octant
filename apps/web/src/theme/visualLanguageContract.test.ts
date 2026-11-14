@@ -557,9 +557,8 @@ describe("the public-block visual language", () => {
     const group = /\.composer-notices\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
     const card = /\n\.callout\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
     const floating =
-      /\.callout:is\(\.composer-notice, \.composer-usage-warning\),\s*\.thread-column > \.callout\s*\{([^}]*)\}/.exec(
-        css,
-      )?.[1] ?? "";
+      /\.callout\.composer-notice,\s*\.thread-column > \.callout\s*\{([^}]*)\}/.exec(css)?.[1] ??
+      "";
 
     // One group of cards, with a gap from the box and no room when empty.
     expect(group).toMatch(/display:\s*grid/);

@@ -99,7 +99,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
   });
 
-  it("puts the plan meters at the right of the start screen's context row", async () => {
+  it("puts the plan usage line at the right of the start screen's context row", async () => {
     const providerInstanceId = "10000000-0000-4000-8000-000000000001";
     const observedAt = "2026-10-20T12:00:00.000Z";
     const window = (id: string, utilization: number) => ({
@@ -152,7 +152,7 @@ describe("ThreadComposer", () => {
     expect(row).toContainElement(meters);
     expect(row?.firstElementChild).toHaveClass("composer-tray");
     expect(row?.lastElementChild).toContainElement(meters);
-    expect(meters).toHaveTextContent("5h85%week43%");
+    expect(meters).toHaveTextContent("85% · 43%");
   });
 
   it("keeps the Project's cell and the attach cell when the thread kind has neither", () => {
