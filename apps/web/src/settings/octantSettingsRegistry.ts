@@ -355,7 +355,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("app-background-effect"),
           label: "Background effect",
           scope: "app",
-          keywords: "background effect pixels pixelated dithered dither picture photo",
+          keywords:
+            "background effect pixels pixelated dithered dither ascii characters text picture photo",
         },
         {
           id: settingId("app-background-effect-cell"),

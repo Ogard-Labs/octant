@@ -106,6 +106,7 @@ export * from "./mobileThreadSurfaceClient";
 export * from "./mobileChatAttempt";
 export * from "./chatNdjsonStream";
 export * from "./mobileCodeOperationsClient";
+export * from "./mobileThreadPanesClient";
 export * from "./threadRoutineReceipts";
 export * from "./mobileThreadRoutinesClient";
 export * from "./mobileThreadRewind";

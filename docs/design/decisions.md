@@ -475,6 +475,7 @@ The phone app is a remote-control client under the host's authority. Threads are
 
 - The phone creates Chat, Work and Code threads and sends follow-up turns under each thread's own authority; approvals, folder binding, file edits and shell stay host-only.
 - Attached photos and files go through the mode's own attachment route, and the host strips image metadata from every paired upload.
+- The thread's side panes (Environment, Review, Context & usage, Agents) are read-only on the phone and use only reads the listener already forwards; per-run subagent detail stays with a local window, whose AgentRun routes authorize a window only (maintainer request, 2026-11-14).
 - Internal mobile beta distribution grants the phone no new authority; public store distribution, external tester groups and store listing stay closed until a separate maintainer action.
 - A build counts only after the device pass in the runbook, not when the build service finishes processing it.
 
@@ -2377,6 +2378,7 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#ac
 A new window, its background and its drafts behave predictably.
 
 - Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed, subject to the active pane having an eligible dock subject. The bottom panel starts closed. An explicit show or hide is restored per window later.
+- A picture ground prints as it is, pixelated, dithered, or in ASCII: one 5×5 bitmap glyph per cell from the ramp ` .:-=+*#%@` by luminance, in the cell's colour over that colour at half strength, never below 10-pixel cells (starting at 14) and always still. The desktop and the phone read one glyph table and each keeps its own choice (maintainer request, 2026-11-14).
 - A photo ground comes from the host's background image library (8 MiB, 4096x4096, PNG, JPEG or WebP). The host refuses to delete a photo while it is showing, and ground settings are kept across kinds. _Here only._
 - While an everywhere background covers the sidebar, the sidebar's own background is not drawn and its controls are disabled with a note; saved sidebar values are kept. _Here only._
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.

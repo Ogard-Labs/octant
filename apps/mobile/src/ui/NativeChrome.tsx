@@ -174,7 +174,8 @@ export interface ListSectionProps {
 
 /** An inset grouped section: a quiet header over one rounded group of rows. */
 export function ListSection(props: ListSectionProps) {
-  const { colors } = useTheme();
+  const { colors, surfaceStyle } = useTheme();
+  const glass = surfaceStyle === "glass";
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -196,9 +197,10 @@ export function ListSection(props: ListSectionProps) {
           marginHorizontal: space.md,
           borderRadius: radii.md,
           overflow: "hidden",
-          backgroundColor: colors.surfaceElevatedSolid,
+          // On glass a grouped list lets the ground through like any panel.
+          backgroundColor: glass ? colors.glassFillRegular : colors.surfaceElevatedSolid,
           borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.hairline,
+          borderColor: glass ? colors.glassStroke : colors.hairline,
         },
         footer: {
           color: colors.textTertiary,
@@ -208,7 +210,7 @@ export function ListSection(props: ListSectionProps) {
           marginTop: 6,
         },
       }),
-    [colors],
+    [colors, glass],
   );
   return (
     <View style={styles.section} testID={props.testID}>
@@ -415,7 +417,8 @@ export interface SegmentedControlProps<Id extends string> {
 
 /** The system segmented control: one track, the chosen segment raised. */
 export function SegmentedControl<Id extends string>(props: SegmentedControlProps<Id>) {
-  const { colors, scheme } = useTheme();
+  const { colors, scheme, surfaceStyle } = useTheme();
+  const glass = surfaceStyle === "glass";
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -423,7 +426,7 @@ export function SegmentedControl<Id extends string>(props: SegmentedControlProps
           flexDirection: "row",
           padding: 2,
           borderRadius: 9,
-          backgroundColor: colors.control,
+          backgroundColor: glass ? colors.glassFillThin : colors.control,
         },
         segment: {
           flex: 1,
@@ -436,7 +439,11 @@ export function SegmentedControl<Id extends string>(props: SegmentedControlProps
         // In dark the raised fill matched the track, so the thumb takes the
         // strong border grey there, as the system's dark thumb is lighter.
         selected: {
-          backgroundColor: scheme === "dark" ? colors.hairlineStrong : colors.surfaceElevatedSolid,
+          backgroundColor: glass
+            ? colors.glassThumb
+            : scheme === "dark"
+              ? colors.hairlineStrong
+              : colors.surfaceElevatedSolid,
           shadowColor: colors.shadow,
           shadowOpacity: 0.12,
           shadowRadius: 3,
@@ -445,7 +452,7 @@ export function SegmentedControl<Id extends string>(props: SegmentedControlProps
         },
         label: { fontSize: typography.detail.fontSize, color: colors.textPrimary },
       }),
-    [colors, scheme],
+    [colors, glass, scheme],
   );
   return (
     <View accessibilityRole="tablist" style={styles.track} testID={props.testID}>

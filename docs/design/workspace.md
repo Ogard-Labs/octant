@@ -2542,6 +2542,18 @@ Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
 
+On the phone, a thread's header button opens Environment, Review, Context &
+usage, and Agents as one sheet with a segmented control, read-only and in this
+section's wording at phone scale: the header card's name, branch, and folder
+name; Uncommitted changes with its counts, opening Review's changed files and
+their unified diffs, with the checkout's recent commits under them; Running
+(Local servers, Subagents) and Delivery (the linked pull request). Environment
+and Review appear only on a Code thread. Commit, push, Stop, and steering a
+subagent stay at a window, and a subagent is shown by its counts rather than
+one row per run, because AgentRun reads authorize a local window only. The
+reads it uses and the gaps are in
+[Mobile maturity](mobile-maturity.md#exists-today).
+
 ### Browser toolbar
 
 The Browser toolbar is one row under the tile bar and never wraps. It holds back,

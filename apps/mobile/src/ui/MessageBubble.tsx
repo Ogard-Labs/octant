@@ -7,7 +7,7 @@ import { MessageActions, type MessageActionItem } from "./MessageActions";
 import { MessageBlocks } from "./MessageBlocks";
 import { resolveChatMessageParts } from "./messageDocument";
 import { ReasoningPart } from "./ReasoningPart";
-import { ToolPartCard } from "./ToolPartCard";
+import { ToolActivity, type ToolCall } from "./ToolActivity";
 import { mobileReplyDetailPresentation } from "./replyDetailPresentation";
 
 export interface MessageBubbleProps {
@@ -26,6 +26,29 @@ export interface MessageBubbleProps {
   readonly replyDetail?: ReplyDetailLevel;
 }
 
+type DisplayPart =
+  | Exclude<ChatMessagePart, { readonly kind: "tool" }>
+  | { readonly kind: "tools"; readonly calls: ReadonlyArray<ToolCall> };
+
+/** Joins consecutive tool calls so a run of them draws as one rail. */
+function groupToolCalls(parts: ReadonlyArray<ChatMessagePart>): ReadonlyArray<DisplayPart> {
+  const grouped: Array<DisplayPart> = [];
+  for (const part of parts) {
+    if (part.kind !== "tool") {
+      grouped.push(part);
+      continue;
+    }
+    const call = { name: part.name, status: part.status, summary: part.summary };
+    const previous = grouped.at(-1);
+    if (previous?.kind === "tools") {
+      grouped[grouped.length - 1] = { kind: "tools", calls: [...previous.calls, call] };
+    } else {
+      grouped.push({ kind: "tools", calls: [call] });
+    }
+  }
+  return grouped;
+}
+
 function isUserRole(role: string): boolean {
   const lower = role.toLowerCase();
   return lower === "user" || lower === "human";
@@ -40,17 +63,19 @@ function isResearchRole(role: string): boolean {
  * user = control-fill bubble; assistant = reasoning and tool rows, then bare prose.
  */
 export function MessageBubble(props: MessageBubbleProps) {
-  const { colors } = useTheme();
+  const { colors, surfaceStyle } = useTheme();
   const user = isUserRole(props.role);
   const research = isResearchRole(props.role);
   const showActions = props.showActions !== false && !user && !research;
   const parts = useMemo(
     () =>
-      resolveChatMessageParts({
-        role: props.role,
-        body: props.body,
-        ...(props.parts === undefined ? {} : { parts: props.parts }),
-      }),
+      groupToolCalls(
+        resolveChatMessageParts({
+          role: props.role,
+          body: props.body,
+          ...(props.parts === undefined ? {} : { parts: props.parts }),
+        }),
+      ),
     [props.body, props.parts, props.role],
   );
 
@@ -72,16 +97,18 @@ export function MessageBubble(props: MessageBubbleProps) {
         // A person's message: the control fill and a hairline, no accent
         // (docs/design/thread-view.md › Transcript); the reply beside it is bare prose.
         bubbleUser: {
-          backgroundColor: colors.userBubble,
+          // On glass the bubble takes the thin glass fill so the ground shows
+          // through it like every other panel; flat keeps the control fill.
+          backgroundColor: surfaceStyle === "glass" ? colors.glassFillRegular : colors.userBubble,
           borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.hairline,
+          borderColor: surfaceStyle === "glass" ? colors.glassStrokeStrong : colors.hairline,
         },
         assistantStack: {
           width: "100%",
           gap: space.xs,
         },
       }),
-    [colors],
+    [colors, surfaceStyle],
   );
 
   if (user) {
@@ -119,14 +146,14 @@ export function MessageBubble(props: MessageBubbleProps) {
               />
             );
           }
-          if (part.kind === "tool") {
+          if (part.kind === "tools") {
+            const presentation = mobileReplyDetailPresentation(level, "");
             return (
-              <ToolPartCard
-                defaultOpen={mobileReplyDetailPresentation(level, "").toolDetailOpen}
+              <ToolActivity
+                calls={part.calls}
+                defaultDetailOpen={presentation.toolDetailOpen}
+                defaultOpen={presentation.toolCallsOpen}
                 key={key}
-                name={part.name}
-                status={part.status}
-                summary={part.summary}
               />
             );
           }

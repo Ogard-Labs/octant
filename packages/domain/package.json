@@ -109,6 +109,7 @@
     "./shell-policy": "./src/shellPolicy.ts",
     "./sidebar-thread-status-policy": "./src/sidebarThreadStatusPolicy.ts",
     "./theme-policy": "./src/themePolicy.ts",
+    "./ascii-print": "./src/asciiPrint.ts",
     "./tool-action-policy": "./src/toolActionPolicy.ts",
     "./tool-call-policy": "./src/toolCallPolicy.ts",
     "./tool-egress-policy": "./src/toolEgressPolicy.ts",

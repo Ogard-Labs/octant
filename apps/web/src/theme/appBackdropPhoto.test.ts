@@ -8,6 +8,7 @@ import {
   ditherPixels,
   drawDitheredPhoto,
   drawPhoto,
+  drawPrinted,
   PHOTO_CELL_PX,
   watchDisplayPixelRatio,
 } from "./appBackdropPhoto";
@@ -99,6 +100,24 @@ describe("welcome photo backing store", () => {
     drawDitheredPhoto(canvas, source(), image, { width: 200, height: 100 });
     expect(canvas.width).toBe(Math.ceil(200 / PHOTO_CELL_PX));
     expect(canvas.height).toBe(Math.ceil(100 / PHOTO_CELL_PX));
+  });
+
+  it("prints characters at five canvas pixels per cell, whatever the display", () => {
+    const canvas = document.createElement("canvas");
+    setDevicePixelRatio(2);
+    drawPrinted(
+      canvas,
+      source(),
+      image,
+      { width: 200, height: 100 },
+      {
+        kind: "ascii",
+        cell: 8,
+        levels: 8,
+      },
+    );
+    expect(canvas.width).toBe(Math.ceil(200 / 8) * 5);
+    expect(canvas.height).toBe(Math.ceil(100 / 8) * 5);
   });
 
   it("asks the photo to redraw when the display's pixel ratio changes", () => {

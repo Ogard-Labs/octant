@@ -394,6 +394,17 @@ describe("application background policy", () => {
       appBackground: { ...waving.appBackground, effect: "none" as const },
     };
     expect(resolveAppBackground(plain).backgroundAnimated).toBe(false);
+    // Characters stay still, and are never printed smaller than a glyph can read.
+    const ascii = {
+      ...waving,
+      appBackground: { ...waving.appBackground, effect: "ascii" as const, effectCell: 3 },
+    };
+    expect(resolveAppBackground(ascii).backgroundAnimated).toBe(false);
+    expect(resolveAppBackground(ascii).effect).toEqual({ kind: "ascii", cell: 10, levels: 8 });
+    expect(
+      resolveAppBackground({ ...ascii, appBackground: { ...ascii.appBackground, kind: "pixels" } })
+        .effect.kind,
+    ).toBe("dither");
   });
 
   it("holds the character field still when a person chose Still", () => {

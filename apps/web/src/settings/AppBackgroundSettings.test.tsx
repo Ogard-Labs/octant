@@ -388,6 +388,22 @@ describe("AppBackgroundSettings", () => {
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ effect: "dither", effectTones: 5 }),
     );
+
+    // ASCII starts at a readable character size and offers no tones or Motion.
+    await user.click(screen.getByRole("button", { name: "ASCII" }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ effect: "ascii", effectCell: 14 }),
+    );
+    rerender(
+      <AppBackgroundSettings
+        background={{ ...walnut, effect: "ascii", effectCell: 14 }}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByRole("slider", { name: "Pixel size" })).toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Colours" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Background motion" })).toBeNull();
   });
 
   it("reads a photo saved before the effect choice as dithered", () => {
