@@ -480,6 +480,18 @@ html[data-octant-native-host="true"][data-octant-theme-mode="light"]:not(
   background: color-mix(in srgb, var(--octant-float) 78%, transparent);
 }
 
+/* Where a ground is drawn behind the window (a picture, pixels, characters), a
+   modal surface keeps it out of its text: at 66% the pixel ground's ridges ran
+   across Settings' rows and swatches. The glass coat alone, with no ground
+   drawn, stays at the normal alpha above. */
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  ):has(.shell-frame > .app-backdrop)
+  :is(.octant-sheet__popup, .octant-dialog__popup) {
+  background: color-mix(in srgb, var(--octant-float) 96%, transparent);
+}
+
 /* A popup grows out of the point it is anchored to; a dialog has no anchor
    and settles about its own centre. */
 :is(

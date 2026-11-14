@@ -57,9 +57,11 @@ const CALM_FLOOR = 1 / 3;
 /**
  * Ridges is the bold scene, so it runs at full strength outside the text: its
  * own sky is empty behind the heading and subtitle, and the column is calmed
- * only where the composer and its chips sit, in the foot of the window, to half.
+ * only where the composer and its chips sit, in the foot of the window, to a
+ * fifth. At half its crests still ran through the chips, the usage meter and
+ * the notice that sit on the ground with no fill of their own.
  */
-const RIDGES_CALM_FLOOR = 0.5;
+const RIDGES_CALM_FLOOR = 0.2;
 const RIDGES_COMPOSER_ZONE = { from: 0.72, to: 0.8 } as const;
 
 function smoothstep(low: number, high: number, value: number): number {

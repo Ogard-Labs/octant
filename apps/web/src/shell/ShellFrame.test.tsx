@@ -30,6 +30,35 @@ function cssRule(selector: string): string {
 }
 
 describe("ShellFrame", () => {
+  it("lays the ground in the frame before the sidebar, the chrome and the workspace", () => {
+    const { container } = render(
+      <ShellFrame
+        backdrop={<div data-testid="shell-ground" />}
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        wideContextOpen={false}
+        welcomeGround={<div data-testid="welcome-ground" />}
+        workspace={<main>Workspace</main>}
+      />,
+    );
+    const order = [...(container.querySelector(".shell-frame")?.children ?? [])].map(
+      (child) => child.getAttribute("data-testid") ?? child.tagName,
+    );
+    const ground = Math.max(order.indexOf("shell-ground"), order.indexOf("welcome-ground"));
+    expect(order.indexOf("shell-ground")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("welcome-ground")).toBeGreaterThanOrEqual(0);
+    for (const later of ["ASIDE", "HEADER", "MAIN"]) {
+      const at = order.indexOf(later);
+      if (at >= 0) expect(at, later).toBeGreaterThan(ground);
+    }
+  });
+
   it("reserves a real native drag target at the top edge without covering the traffic lights", () => {
     const { container } = render(
       <ShellFrame

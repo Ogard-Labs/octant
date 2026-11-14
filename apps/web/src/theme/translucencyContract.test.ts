@@ -79,6 +79,32 @@ describe("window glass", () => {
     expect(css).toContain("color-mix(in srgb, var(--octant-float) 78%, transparent)");
   });
 
+  it("keeps the ground under every content layer, the sheet and its scrim, and out of a modal's text", () => {
+    const surface = read("styles/surface.css");
+    const shell = read("styles/shell.css");
+    const components = read("styles/components.css");
+    const dock = read("styles/dock.css");
+    // The ground is a negative level inside a frame that holds its own
+    // stacking context, so it can lie neither over a pane nor behind the frame.
+    expect(/\.app-backdrop\[data-placement="welcome"\]\s*\{[^}]*z-index:\s*-1;/.test(surface)).toBe(
+      true,
+    );
+    expect(/\.shell\.shell-frame\s*\{[^}]*isolation:\s*isolate;/.test(shell)).toBe(true);
+    // The sheet and its scrim live outside the frame at a floating level.
+    for (const layer of ["octant-sheet__backdrop", "octant-sheet__viewport"]) {
+      const rule = new RegExp(`\\.${layer}\\s*\\{([^}]*)\\}`).exec(dock)?.[1] ?? "";
+      expect(rule, layer).toContain("position: fixed;");
+      expect(rule, layer).toContain("z-index: var(--oct-z-floating);");
+    }
+    // Where a ground is drawn a modal is the dense float, so the ground does not
+    // run across its rows and swatches; the glass coat alone keeps the lighter fill.
+    const dense =
+      /:has\(\.shell-frame > \.app-backdrop\)\s*:is\(\.octant-sheet__popup, \.octant-dialog__popup\)\s*\{([^}]*)\}/.exec(
+        components,
+      )?.[1] ?? "";
+    expect(dense).toContain("color-mix(in srgb, var(--octant-float) 96%, transparent)");
+  });
+
   it("puts no blur under the translucent shell", () => {
     for (const name of ["styles/octant.css", "styles/settings.css"]) {
       const css = read(name);

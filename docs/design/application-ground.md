@@ -44,7 +44,7 @@ tall as its content) and dimmed behind the start screen's content column, across
 full width and height, to a third of its strength, back to full 140px past the
 column's edge, so the brightest cells stay away from text. Ridges is the bold scene, so
 it runs at full strength outside the text: its own sky is empty behind the heading and
-subtitle, and the column calms it (to half) only at the foot of the window, where the
+subtitle, and the column calms it (to a fifth) only at the foot of the window, where the
 composer and its chips sit. Under the sidebar, where a
 ground runs there, every scene keeps a third. A ground whose scope is the start
 screens is one layer in the window frame, a level under the sidebar, the title
