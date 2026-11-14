@@ -1228,7 +1228,7 @@ describe("App", () => {
     // Nothing in this fixture is waiting, and the tile says the same.
     expect(await screen.findByRole("heading", { level: 1, name: "To review" })).toBeVisible();
     expect(screen.getByRole("button", { name: "To review, 0" })).toBeVisible();
-    expect(screen.getByText("Nothing waiting for review")).toBeVisible();
+    expect(screen.getByText("Nothing waiting for review.")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Back to workspace" }));
     expect(screen.queryByRole("heading", { level: 1, name: "To review" })).toBeNull();

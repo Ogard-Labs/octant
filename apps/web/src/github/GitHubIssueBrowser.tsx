@@ -54,6 +54,11 @@ import {
 export interface GitHubIssueBrowserProps {
   readonly client: GithubClient;
   readonly onClose?: () => void;
+  /**
+   * The current Project's one GitHub remote. When the host has used it, the page
+   * opens on that repository instead of on every recent one.
+   */
+  readonly projectRepository?: { readonly owner: string; readonly name: string };
   /** Hands the issue being read to a new Code thread as its context. */
   readonly onStartThread?: (issue: RepositoryIssueRow) => void;
   /** Injectable for tests; defaults to `window.localStorage` when available. */
@@ -179,6 +184,20 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
         if (cancelled) return;
         const rows = response.kind === "recent-repositories" ? response.rows : [];
         setRecents(rows);
+        const own = props.projectRepository;
+        const preselected =
+          own === undefined
+            ? undefined
+            : rows.find(
+                (row) =>
+                  row.owner.toLowerCase() === own.owner.toLowerCase() &&
+                  row.name.toLowerCase() === own.name.toLowerCase(),
+              );
+        if (preselected !== undefined) {
+          setRepository(preselected);
+          setScope("repository");
+          return;
+        }
         setScope(rows.length > 0 ? "all" : "repository");
       })
       .catch(() => {
@@ -189,6 +208,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
     return () => {
       cancelled = true;
     };
+  // The Project's repository only decides the opening scope, once per client.
   }, [client]);
 
   const clearSelection = () => {

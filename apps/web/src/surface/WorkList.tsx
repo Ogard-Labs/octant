@@ -80,19 +80,19 @@ export const WorkListRow = memo(function WorkListRow(props: WorkListRowProps) {
       type="button"
       variant="bare"
     >
+      <span
+        aria-label={props.state.label}
+        className="work-list__state"
+        data-state={props.state.tone}
+        role="img"
+      >
+        <Icon aria-hidden="true" size={16} />
+      </span>
       <span className="work-list__title" title={props.title}>
         {props.title}
       </span>
       <span className="work-list__status-cell">{props.trailing}</span>
       <span className="work-list__meta">
-        <span
-          aria-label={props.state.label}
-          className="work-list__state"
-          data-state={props.state.tone}
-          role="img"
-        >
-          <Icon aria-hidden="true" size={14} />
-        </span>
         {props.repository === undefined ? null : (
           <span className="work-list__meta-text">{props.repository}</span>
         )}

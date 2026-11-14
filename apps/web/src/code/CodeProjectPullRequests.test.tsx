@@ -288,7 +288,8 @@ describe("CodeProjectPullRequests", () => {
     renderWorkspace({ load: async () => ({ ...view(), rows }) });
 
     const draft = await screen.findByRole("button", { name: /A draft/ });
-    expect(within(draft).getByText("Draft", { selector: "[data-status]" })).toBeVisible();
+    // A draft is said by its glyph at the row's start, not by a pill.
+    expect(within(draft).queryByText("Draft", { selector: "[data-status]" })).toBeNull();
     expect(within(draft).getByRole("img", { name: "Draft" })).toBeInTheDocument();
     expect(
       within(screen.getByRole("button", { name: /A conflict/ })).getByText("Conflicts", {
@@ -579,7 +580,7 @@ describe("CodeProjectPullRequests", () => {
     expect(await screen.findByText(/GitHub rate-limited the last refresh/)).toBeVisible();
     expect(screen.getByText(/preview bound of 25/)).toBeVisible();
     expect(screen.getByText(/preview bound of 100/)).toBeVisible();
-    expect(screen.getByText("Draft")).toBeVisible();
+    expect(screen.getByRole("img", { name: "Draft" })).toBeInTheDocument();
     expect(document.querySelector(".code-project-pull-requests")).toHaveAttribute(
       "data-narrow",
       "false",
@@ -1110,13 +1111,13 @@ describe("CodeProjectPullRequests", () => {
     expect(ruleBody(page, ".pr-page .work-list__list")).toMatch(/gap:\s*4px/);
   });
 
-  it("sizes a row from its two lines and cuts the title after two", () => {
+  it("sizes a row from its two lines and cuts the title after one", () => {
     const row = ruleBody(stylesheet, ".work-list__row");
     expect(row).toMatch(/height:\s*auto/);
     expect(row).toMatch(/padding:\s*var\(--oct-space-2\)/);
     expect(row).not.toMatch(/border-bottom/);
     const title = ruleBody(stylesheet, ".work-list__title");
-    expect(title).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(title).toMatch(/-webkit-line-clamp:\s*1/);
     expect(title).toMatch(/font-weight:\s*var\(--oct-weight-medium\)/);
     expect(ruleBody(stylesheet, ".work-list__number")).toMatch(
       /font-variant-numeric:\s*tabular-nums/,

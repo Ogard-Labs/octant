@@ -17,6 +17,13 @@
   --oct-surface-measure: 980px;
 }
 
+/* A wide pane has room for two columns, so the measure opens to hold them. */
+@media (min-width: 1200px) {
+  .inbox-page {
+    --oct-surface-measure: 1240px;
+  }
+}
+
 .inbox-page > .surface__inner {
   margin-inline: var(--oct-surface-gutter) auto;
   /* The cards ask this box, not the window, how wide they may be. */
@@ -37,17 +44,18 @@
   gap: var(--oct-space-4);
 }
 
-@container inbox-cards (min-width: 720px) {
+/* From a pane of about 1100px: Needs you takes a 560px column on the left and
+   the sources (GitHub, Linear, plan usage) stack on the right. Below that the
+   cards are one column. */
+@container inbox-cards (min-width: 1100px) {
   .inbox-page__cards {
-    /* The list a person came for takes the wider column. At one to two its
-       filter chips wrapped to a second row and long titles to three lines. */
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: 560px minmax(0, 1fr);
   }
 }
 
 /* A Needs you card with nothing in it is one quiet line, and the sources take
    the page's full width under it instead of leaving the wide column empty. */
-@container inbox-cards (min-width: 720px) {
+@container inbox-cards (min-width: 1100px) {
   .inbox-page__cards[data-needs-you="empty"] {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -100,6 +108,12 @@
 .inbox-card__empty {
   margin: 0;
   padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+.inbox-card__skeleton {
+  display: block;
+  height: 12px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .inbox-card__empty {

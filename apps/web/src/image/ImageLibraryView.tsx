@@ -57,7 +57,7 @@ export function ImageLibraryView(props: ImageLibraryViewProps) {
                   </OctantButton>
                 ),
               })}
-          detail="Add one under Settings › Voice & images."
+          detail="Generate images from a prompt and keep them on this computer. A profile names the model that makes them; add one under Settings › Voice & images."
           icon={<Images size={20} />}
           title="No image profile yet"
         />

@@ -7,7 +7,6 @@ import {
 } from "@octant/domain";
 import {
   Check,
-  ClipboardCheck,
   Clock,
   CornerUpLeft,
   Minus,
@@ -59,6 +58,8 @@ export interface ReviewPageProps {
   readonly changeRevision: number;
   readonly now: number;
   readonly onClose: () => void;
+  /** The one action from an empty page: start a thread. Absent hides the button. */
+  readonly onStartThread?: () => void;
   readonly onOpen: (entry: ReviewEntry) => void;
   readonly onComplete: (entry: ReviewEntry) => Promise<ReviewActionOutcome>;
   readonly onSnooze: (entry: ReviewEntry, until: string) => Promise<ReviewActionOutcome>;
@@ -490,9 +491,21 @@ export function ReviewPage(props: ReviewPageProps) {
       >
         {selected === undefined ? (
           <SurfaceEmpty
-            detail="Finished threads you have not opened will appear here."
-            icon={<ClipboardCheck size={20} />}
-            title="Nothing waiting for review"
+            {...(props.onStartThread === undefined
+              ? {}
+              : {
+                  action: (
+                    <OctantButton
+                      onClick={props.onStartThread}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Start a thread
+                    </OctantButton>
+                  ),
+                })}
+            title="Nothing waiting for review."
           />
         ) : (
           <>

@@ -443,6 +443,11 @@
   color: var(--oct-fg);
 }
 
+/* A page's description is two short lines, not one stretched across the pane. */
+.surface-empty > .oct-row-detail {
+  max-width: 48ch;
+}
+
 .surface-empty__icon {
   display: inline-flex;
   margin-bottom: var(--oct-space-2);

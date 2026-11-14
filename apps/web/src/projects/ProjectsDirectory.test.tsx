@@ -34,6 +34,31 @@ describe("ProjectsDirectory", () => {
     expect(within(directory).getByRole("button", { name: /Octant, Code Project/ })).toBeVisible();
   });
 
+  it("shows how many threads a Project holds instead of the word Available", () => {
+    const project = {
+      id: "20000000-0000-4000-8000-000000000003",
+      name: "Harbor",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/2",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/harbor" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+    render(
+      <ProjectsDirectory
+        onOpenProject={vi.fn()}
+        projects={[project]}
+        threadCountByProject={new Map([[String(project.id), 3]])}
+      />,
+    );
+    expect(screen.getByText("3 threads")).toBeVisible();
+    expect(screen.queryByText("Available")).toBeNull();
+  });
+
   it("leaves the page through the same Back to workspace control as the other destinations", async () => {
     const user = userEvent.setup();
     const onBack = vi.fn();

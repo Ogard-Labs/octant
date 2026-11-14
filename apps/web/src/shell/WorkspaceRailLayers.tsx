@@ -188,7 +188,9 @@ export interface WorkspaceRailLayersProps {
   readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
   readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   readonly onOpenLinearIssues?: () => void;
-  readonly onOpenBoard?: () => void;
+  readonly onStartThread?: () => void;
+  /** The current Project's one GitHub remote, which the Issues page opens on. */
+  readonly projectRepository?: { readonly owner: string; readonly name: string };
 }
 
 export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
@@ -226,7 +228,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.onOpenLinearIssues === undefined
                 ? {}
                 : { onOpenLinearIssues: props.onOpenLinearIssues })}
-              {...(props.onOpenBoard === undefined ? {} : { onOpenBoard: props.onOpenBoard })}
+              {...(props.onStartThread === undefined
+                ? {}
+                : { onStartThread: props.onStartThread })}
             />
           </LazyRailSurface>
         </div>
@@ -244,6 +248,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             <GitHubIssueBrowser
               client={props.githubClient}
               onClose={props.onCloseGithubIssues}
+              {...(props.projectRepository === undefined
+                ? {}
+                : { projectRepository: props.projectRepository })}
               {...(props.onStartThreadFromIssue === undefined
                 ? {}
                 : { onStartThread: props.onStartThreadFromIssue })}
@@ -434,6 +441,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               narrow={props.isNarrow}
               onClose={props.onCloseAgentsCenter}
               onOpenThread={props.onOpenAgentsThread}
+              {...(props.onStartThread === undefined
+                ? {}
+                : { onStartThread: props.onStartThread })}
               {...(props.onOpenAgentsCanvas === undefined
                 ? {}
                 : { onOpenCanvas: props.onOpenAgentsCanvas })}

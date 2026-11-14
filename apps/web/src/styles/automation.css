@@ -29,8 +29,9 @@
   font-size: var(--oct-text-detail);
 }
 
+/* A fact about delivery, not a step in creating: it sits under the cards. */
 .automation-center__delivery {
-  margin: 0 0 1rem;
+  margin: 1rem 0 0;
 }
 
 .automation-center__body {
@@ -118,6 +119,8 @@
 .automation-center__suggestion-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Every card in a row is as tall as the tallest, so the grid reads even. */
+  grid-auto-rows: 1fr;
   gap: 0.5rem;
   margin-top: 0.75rem;
 }

@@ -295,20 +295,6 @@ export function AutomationCenter(props: AutomationCenterProps) {
         </div>
       )}
 
-      {deliveryStatus === undefined ? null : (
-        <p
-          className="oct-meta automation-center__delivery"
-          data-delivery-enabled={deliveryStatus.deliveryEnabled ? "true" : "false"}
-          role="status"
-        >
-          {deliveryStatus.providerDelivery === "unavailable"
-            ? "Notification delivery is unavailable until APNs/FCM credentials are configured."
-            : deliveryStatus.deliveryEnabled
-              ? "Notification delivery is enabled for this host."
-              : "Notification delivery is currently unavailable."}
-        </p>
-      )}
-
       <div
         className="automation-center__body"
         data-detail-open={detailOpen ? "true" : "false"}
@@ -541,6 +527,19 @@ export function AutomationCenter(props: AutomationCenterProps) {
           </div>
         )}
       </div>
+      {deliveryStatus === undefined ? null : (
+        <p
+          className="oct-meta automation-center__delivery"
+          data-delivery-enabled={deliveryStatus.deliveryEnabled ? "true" : "false"}
+          role="status"
+        >
+          {deliveryStatus.providerDelivery === "unavailable"
+            ? "Notification delivery is unavailable until APNs/FCM credentials are configured."
+            : deliveryStatus.deliveryEnabled
+              ? "Notification delivery is enabled for this host."
+              : "Notification delivery is currently unavailable."}
+        </p>
+      )}
     </Surface>
   );
 }

@@ -19,6 +19,7 @@ import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   agentRunAcknowledgementLabel,
@@ -52,6 +53,8 @@ export interface AgentsCenterProps {
     readonly projectId: ProjectId;
   }) => void;
   readonly onClose?: () => void;
+  /** The one action from an empty page: start a thread, where agents begin. */
+  readonly onStartThread?: () => void;
   readonly narrow?: boolean;
   readonly projectNames?: ReadonlyMap<string, string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
@@ -175,6 +178,7 @@ export function AgentsCenter(props: AgentsCenterProps) {
                 controller={controller}
                 controls={controls}
                 onOpenThread={props.onOpenThread}
+                onStartThread={props.onStartThread}
                 projectNames={props.projectNames ?? new Map()}
                 providerLabels={props.providerLabels ?? new Map()}
                 onSelect={(runId) => controller.select(runId)}
@@ -245,25 +249,16 @@ function AgentsCenterToolbar(props: {
           </OctantToggleGroupItem>
         ))}
       </OctantToggleGroup>
-      <OctantToggleGroup<(typeof MODE_FILTERS)[number]["value"]>
+      <OctantSelectField
         aria-label="Filter by mode"
-        className="agents-center__filters segmented"
+        className="agents-center__mode"
         onValueChange={(value) => {
-          const selected = value[0];
-          if (selected !== undefined) controller.setModeFilter(selected);
+          const selected = MODE_FILTERS.find((filter) => filter.value === value);
+          if (selected !== undefined) controller.setModeFilter(selected.value);
         }}
-        value={[controller.modeFilter]}
-      >
-        {MODE_FILTERS.map((filter) => (
-          <OctantToggleGroupItem
-            className="agents-center__filter segment"
-            key={filter.value}
-            value={filter.value}
-          >
-            {filter.label}
-          </OctantToggleGroupItem>
-        ))}
-      </OctantToggleGroup>
+        options={MODE_FILTERS.map((filter) => ({ id: filter.value, label: filter.label }))}
+        value={controller.modeFilter}
+      />
       {props.view === undefined || props.onViewChange === undefined ? null : (
         <AgentsCenterViewToggle onViewChange={props.onViewChange} view={props.view} />
       )}
@@ -312,6 +307,7 @@ function AgentsCenterListBody(props: {
   readonly controller: AgentsCenterController;
   readonly controls: ReturnType<typeof useAgentRunControlCommands>;
   readonly onOpenThread?: AgentsCenterProps["onOpenThread"];
+  readonly onStartThread?: (() => void) | undefined;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly providerLabels: ReadonlyMap<string, string>;
   readonly onSelect: (runId: string) => void;
@@ -364,11 +360,24 @@ function AgentsCenterListBody(props: {
                 </OctantButton>
               ),
             }
-          : {})}
+          : props.onStartThread === undefined
+            ? {}
+            : {
+                action: (
+                  <OctantButton
+                    onClick={props.onStartThread}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Start a thread
+                  </OctantButton>
+                ),
+              })}
         detail={
           hasActiveFilters
             ? "Clear or adjust the active filters to see other runs."
-            : "Child agents appear here after a thread starts one."
+            : "Agents are the helpers a thread starts for a part of its work. Each one lists here with its task, its status and its result."
         }
         icon={<Bot size={20} />}
         title={hasActiveFilters ? "No agent runs match these filters" : "No agent runs yet"}

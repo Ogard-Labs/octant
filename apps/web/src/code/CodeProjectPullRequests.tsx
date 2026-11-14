@@ -1222,10 +1222,11 @@ const PullRequestRow = memo(function PullRequestRow(props: {
   readonly onSelect: (key: string) => void;
 }) {
   const { row } = props;
-  const attention = pullRequestAttention(row);
+  // A draft is said by its glyph, so only a state that needs the person is a pill.
+  const attention = row.draft ? undefined : pullRequestAttention(row);
   const sentence = pullRequestStatusSentence(row);
   const branches = `${row.headBranch} → ${row.baseBranch}`;
-  const resolved = attention === undefined && row.mergeability === "mergeable";
+  const resolved = !row.draft && attention === undefined && row.mergeability === "mergeable";
   const linked = row.linkedThreads.map((thread) => thread.title).join(", ");
   return (
     <WorkListRow

@@ -58,6 +58,7 @@ export interface ReaderPagesContainerProps {
     | "openThreadBoard"
     | "openWorkThread"
     | "selectChatThread"
+    | "startNewThreadDraft"
     | "selectCodeThread"
     | "selectProjectPullRequest"
     | "selectProjectPullRequestIdentity"
@@ -299,6 +300,10 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
             changeRevision: navigationRevision,
             now,
             onClose: () => actions.setReviewOpen(false),
+            onStartThread: () => {
+              actions.closeWorkspaceReaders();
+              actions.startNewThreadDraft(activeMode);
+            },
             ...(inboxDecisions === undefined ? {} : { decisions: inboxDecisions }),
             codeProjectAccess: {
               boundProjectId:
@@ -368,6 +373,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         : undefined,
     [
       actions,
+      activeMode,
       allProjects,
       boundCodeProjectId,
       inboxDecisions,
@@ -378,6 +384,27 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
       reviewSource,
     ],
   );
+
+  const activeProject = allProjects.find(
+    (project) => activeProjectId !== undefined && String(project.id) === String(activeProjectId),
+  );
+  const activeProjectRepository =
+    activeProject?.type === "code" && activeProject.connectedRepository !== undefined
+      ? {
+          owner: activeProject.connectedRepository.owner,
+          name: activeProject.connectedRepository.repository,
+        }
+      : undefined;
+
+  const projectThreadCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const thread of [...(workThreads ?? []), ...(codeThreads ?? [])]) {
+      if (thread.lifecycle === "archived" || thread.projectId === undefined) continue;
+      const key = String(thread.projectId);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [codeThreads, workThreads]);
 
   const archiveEntries = useMemo<ReadonlyArray<ArchivedThreadEntry>>(
     () => [
@@ -462,6 +489,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         <div className="projects-page-layer">
           <ProjectsDirectory
             availabilityByProject={availabilityByProject}
+            threadCountByProject={projectThreadCounts}
             onAddProject={() => openProjectCreate()}
             onBack={() => actions.setProjectsListOpen(false)}
             onOpenProject={(project) => void openSelectedProject(project)}
@@ -505,16 +533,10 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
             signalProjectId,
           );
         }}
-        // Chat has no board: asking for one there opens a layer that
-        // hides the workspace and renders nothing in its place.
-        {...(activeMode === "chat" || !threadBoardAvailable
-          ? {}
-          : {
-              onOpenBoard: () => {
-                actions.closeWorkspaceReaders();
-                actions.openThreadBoard();
-              },
-            })}
+        onStartThread={() => {
+          actions.closeWorkspaceReaders();
+          actions.startNewThreadDraft(activeMode);
+        }}
         {...(githubIssuesReadAvailable ? { loadAssignedGithubWork } : {})}
         {...(linearIssuesRead
           ? {
@@ -525,6 +547,9 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
               },
             }
           : {})}
+        {...(activeProjectRepository === undefined
+          ? {}
+          : { projectRepository: activeProjectRepository })}
         codeBoardOpen={codeBoardOpen}
         threadBoardAvailable={threadBoardAvailable}
         codePullRequestsOpen={codePullRequestsOpen}

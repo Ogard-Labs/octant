@@ -72,8 +72,8 @@ export interface InboxViewProps {
   readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   /** Opens the full Linear issue browser when the inbox list is incomplete. */
   readonly onOpenLinearIssues?: () => void;
-  /** The next step from an empty Inbox: see every thread on the Board. */
-  readonly onOpenBoard?: () => void;
+  /** The one action from an empty Inbox: start a thread in the current mode. */
+  readonly onStartThread?: () => void;
 }
 
 type GithubSection =
@@ -279,9 +279,9 @@ export function InboxView(props: InboxViewProps) {
           {groups.length === 0 ? (
             <div className="inbox-card__empty" role="status">
               <p className="oct-row-detail">{activeFilter?.empty}</p>
-              {filter === "all" && props.onOpenBoard !== undefined ? (
-                <OctantButton onClick={props.onOpenBoard} size="sm" type="button" variant="ghost">
-                  Open the Board
+              {props.onStartThread !== undefined ? (
+                <OctantButton onClick={props.onStartThread} size="sm" type="button" variant="ghost">
+                  Start a thread
                 </OctantButton>
               ) : null}
             </div>
@@ -373,9 +373,7 @@ export function InboxView(props: InboxViewProps) {
           {loadGithub === undefined ? null : (
             <InboxCard label="GitHub">
               {github.kind === "loading" ? (
-                <p className="oct-row-detail inbox-card__note" role="status">
-                  Loading assigned work…
-                </p>
+                <InboxSkeletonRow label="Loading assigned work…" />
               ) : github.kind === "failed" ? (
                 <OctantAlert className="inbox-card__note" tone="warning">
                   {github.message}
@@ -431,9 +429,7 @@ export function InboxView(props: InboxViewProps) {
           {loadLinear === undefined ? null : (
             <InboxCard label="Linear">
               {linear.kind === "loading" ? (
-                <p className="oct-row-detail inbox-card__note" role="status">
-                  Loading assigned issues…
-                </p>
+                <InboxSkeletonRow label="Loading assigned issues…" />
               ) : linear.kind === "failed" ? (
                 <OctantAlert className="inbox-card__note" tone="warning">
                   {linear.message}
@@ -505,6 +501,19 @@ export function InboxView(props: InboxViewProps) {
         </div>
       </div>
     </Surface>
+  );
+}
+
+/**
+ * A source still loading: one quiet row in the shape of a list row, so the card
+ * keeps its height when the rows arrive. The words stay for assistive technology.
+ */
+function InboxSkeletonRow(props: { readonly label: string }) {
+  return (
+    <div className="inbox-card__note" role="status">
+      <span className="sr-only">{props.label}</span>
+      <span aria-hidden="true" className="skeleton inbox-card__skeleton" />
+    </div>
   );
 }
 

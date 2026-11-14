@@ -453,7 +453,7 @@ describe("ReviewPage", () => {
       within(current()).getByRole("heading", { name: "Tidy the settings copy" }),
     ).toBeVisible();
     view.rerender(<ReviewPage {...page} entries={[]} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Nothing waiting for review");
+    expect(screen.getByRole("status")).toHaveTextContent("Nothing waiting for review.");
   });
 
   it("keeps the selected thread when board facts re-sort the list after the first paint", async () => {

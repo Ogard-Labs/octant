@@ -355,14 +355,14 @@ describe("InboxView waiting agent approvals", () => {
 });
 
 describe("InboxView", () => {
-  it("offers a real button to the Board when nothing is waiting", async () => {
+  it("offers a button that starts a thread when nothing is waiting", async () => {
     const user = userEvent.setup();
-    const onOpenBoard = vi.fn();
+    const onStartThread = vi.fn();
     render(
       <InboxView
         attentionItems={[]}
         onClose={vi.fn()}
-        onOpenBoard={onOpenBoard}
+        onStartThread={onStartThread}
         onOpenThread={vi.fn()}
       />,
     );
@@ -370,8 +370,8 @@ describe("InboxView", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Threads that need an answer, an approval or a look show up here.",
     );
-    await user.click(screen.getByRole("button", { name: "Open the Board" }));
-    expect(onOpenBoard).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
+    expect(onStartThread).toHaveBeenCalledOnce();
   });
 
   it("announces unseen GitHub and Linear rows to assistive technology", async () => {
