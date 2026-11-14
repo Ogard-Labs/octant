@@ -10847,7 +10847,7 @@ launch's tool bridge through the loopback relay.
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`, `language-server` and `debug-adapter` (Code only)), composer addressing
+`desktop-provider`, `theme`, `language-server` and `debug-adapter` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -12798,6 +12798,39 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                               |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned       |
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                      |
+
+**Themes as plugin contributions** (maintainer decision, 2026-11-14; built).
+A plugin may contribute one or more themes as data only. Each is a component
+of kind `theme` whose `theme` field holds a preset in the semantic theme
+schema: the modes it supports, one colour map per supported mode (semantic
+role names to six-digit hex colours), and optional dither inks. The manifest
+schema in `@octant/contracts/extensions`, re-exported by `@octant/plugin-api`,
+admits nothing else: a theme component declares no capability and no entry
+point, and any field the schema does not name (a font, image, video, script,
+stylesheet, or remote address) is refused, as is any colour that is not a hex
+value. `@octant/plugin-host/themes` reads a component as a preset and checks it
+with `@octant/theme`'s preset validation, the same check every built-in preset
+passes: every role present in each supported mode and text that meets
+contrast. The package inspector refuses a package whose theme fails, whole,
+with `theme-invalid` and the host-worded validation errors, before anything is
+stored. A contributed preset's id is assigned by the host from the package id
+and component id (`plugin:<packageId>:<componentId>`), so a plugin cannot take
+a built-in preset's id or another plugin's.
+
+The renderer reads contributed themes from the same extension snapshot as the
+first-party switches, re-read on each extension change, and lists a theme in
+the Light and Dark preset pickers only while the host reports its component
+effective, which already means installed, trusted, and enabled at the plugin
+and the component; installation, trust, and enablement stay separate steps,
+and discovery or a catalog listing offers nothing. The one runtime theme
+authority applies a listed theme as it applies a built-in preset, and token
+export draws it the same way. Switching the plugin off, or removing it, takes
+its themes out of the pickers at once; a stored choice that names one then
+draws the default theme and the picker shows the default. The stored choice
+is kept, as disabling a plugin preserves its selections, so turning the plugin
+back on restores the theme. _Rationale:_ rewriting the setting on disable
+would lose the person's choice to a reversible switch, and the default is
+already what a missing preset draws.
 
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
