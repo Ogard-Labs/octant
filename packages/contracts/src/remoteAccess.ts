@@ -296,6 +296,33 @@ export const DeviceCredentialExpiredV1 = Schema.Struct({
 }).annotations(strict);
 export type DeviceCredentialExpiredV1 = typeof DeviceCredentialExpiredV1.Type;
 
+/**
+ * How long a paired device stays paired, counted from its pairing: a host
+ * setting the person chooses (maintainer decision, 2026-11-13). `never` keeps
+ * a pairing until it is revoked.
+ */
+export const PAIRED_DEVICE_LIFETIMES = ["7-days", "30-days", "90-days", "1-year", "never"] as const;
+export const PairedDeviceLifetime = Schema.Literal(...PAIRED_DEVICE_LIFETIMES);
+export type PairedDeviceLifetime = typeof PairedDeviceLifetime.Type;
+/** The deadline every registration was given before the setting existed. */
+export const DEFAULT_PAIRED_DEVICE_LIFETIME: PairedDeviceLifetime = "30-days";
+
+/**
+ * A paired device's registration deadline, moved when the person changes how
+ * long a paired device stays paired. A registration that never expires
+ * records the latest representable instant, so every reader that compares
+ * the deadline with the clock keeps working unchanged.
+ */
+export const DeviceRegistrationDeadlineChangedV1 = Schema.Struct({
+  hostId: StableHostId,
+  deviceId: DeviceId,
+  credentialGeneration: positiveInteger,
+  expiresAt: UtcTimestamp,
+  lifetime: PairedDeviceLifetime,
+  changedAt: UtcTimestamp,
+}).annotations(strict);
+export type DeviceRegistrationDeadlineChangedV1 = typeof DeviceRegistrationDeadlineChangedV1.Type;
+
 export const HostKeyRotatedV1 = Schema.Struct({
   hostId: StableHostId,
   previousKeyGeneration: positiveInteger,
@@ -403,6 +430,7 @@ export const REMOTE_ACCESS_EVENT_NAMES = {
   deviceRevoked: "remote.device-revoked@1",
   sessionInvalidated: "remote.session-invalidated@1",
   deviceCredentialExpired: "remote.device-credential-expired@1",
+  deviceRegistrationDeadlineChanged: "remote.device-registration-deadline-changed@1",
   hostKeyRotated: "remote.host-key-rotated@1",
   commandReceiptRecorded: "remote.command-receipt-recorded@1",
   securityAuditRecorded: "remote.security-audit-recorded@1",
@@ -431,6 +459,9 @@ export const decodeRemoteSessionInvalidatedV1 = Schema.decodeUnknownSync(
   RemoteSessionInvalidatedV1,
 );
 export const decodeDeviceCredentialExpiredV1 = Schema.decodeUnknownSync(DeviceCredentialExpiredV1);
+export const decodeDeviceRegistrationDeadlineChangedV1 = Schema.decodeUnknownSync(
+  DeviceRegistrationDeadlineChangedV1,
+);
 export const decodeHostKeyRotatedV1 = Schema.decodeUnknownSync(HostKeyRotatedV1);
 export const decodeRemoteCommandReceiptRecordedV1 = Schema.decodeUnknownSync(
   RemoteCommandReceiptRecordedV1,

@@ -253,6 +253,7 @@ describe("Journal", () => {
         browserUploadFileCountLimit: 5,
         rememberedBrowserTransfers: [],
         persistentBrowserOwner: false,
+        pairedDeviceLifetime: "30-days",
       },
     } as const;
 

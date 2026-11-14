@@ -1,4 +1,4 @@
-import type { ProtocolRange } from "@octant/contracts/remote-access";
+import type { PairedDeviceLifetime, ProtocolRange } from "@octant/contracts/remote-access";
 
 export const PAIRING_TICKET_TTL_MS = 5 * 60 * 1_000;
 export const PAIRING_MAX_FAILED_ATTEMPTS = 5;
@@ -6,8 +6,6 @@ export const SESSION_IDLE_TTL_MS = 15 * 60 * 1_000;
 export const SESSION_ABSOLUTE_TTL_MS = 12 * 60 * 60 * 1_000;
 export const SESSION_ROTATION_INTERVAL_MS = 15 * 60 * 1_000;
 export const REMOTE_REQUEST_CLOCK_SKEW_MS = 30 * 1_000;
-export const DEVICE_INACTIVITY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
-export const DEVICE_ABSOLUTE_TTL_MS = 90 * 24 * 60 * 60 * 1_000;
 export const DEVICE_LAST_SEEN_COARSEN_MS = 60 * 60 * 1_000;
 export const REMOTE_DEVICE_SECURITY_FLOOR = 1;
 export const DEVICE_LABEL_MAX_LENGTH = 128;
@@ -345,37 +343,70 @@ export function normalizeDeviceLabel(
   return { kind: "accepted", deviceLabel };
 }
 
-export function evaluateDeviceRegistration(input: {
+const DAY_MS = 24 * 60 * 60 * 1_000;
+
+const PAIRED_DEVICE_LIFETIME_MS: Readonly<Record<Exclude<PairedDeviceLifetime, "never">, number>> =
+  {
+    "7-days": 7 * DAY_MS,
+    "30-days": 30 * DAY_MS,
+    "90-days": 90 * DAY_MS,
+    "1-year": 365 * DAY_MS,
+  };
+
+/**
+ * The deadline a registration that never expires records: the latest instant
+ * an ISO timestamp can state, so every reader that compares the stored
+ * deadline with the clock reads it as current without a special case.
+ */
+export const NEVER_EXPIRES_AT_MS = Date.parse("9999-12-31T23:59:59.999Z");
+
+/**
+ * When a paired device stops being paired: its pairing time plus the length
+ * the person chose. The deadline is counted from pairing alone; using the
+ * device does not move it (a device's last-seen time is not refreshed).
+ */
+export function deviceRegistrationDeadline(input: {
+  readonly createdAt: number;
+  readonly lifetime: PairedDeviceLifetime;
+}): number {
+  if (input.lifetime === "never") return NEVER_EXPIRES_AT_MS;
+  return input.createdAt + PAIRED_DEVICE_LIFETIME_MS[input.lifetime];
+}
+
+/**
+ * The deadline a registration takes when the person changes how long a paired
+ * device stays paired (maintainer decision, 2026-11-13). Only a registration
+ * that is still current moves: an active one before its deadline takes its
+ * pairing time plus the new length, which can already be past (it expires at
+ * once) or never. A revoked or expired registration, or one already past its
+ * deadline, keeps it, so a longer setting never revives a lapsed pairing.
+ */
+export function retimeDeviceRegistration(input: {
   readonly state: "active" | "revoked" | "expired";
   readonly now: number;
   readonly createdAt: number;
-  readonly lastSeenAt: number;
+  readonly expiresAt: number;
+  readonly lifetime: PairedDeviceLifetime;
+}): { readonly kind: "unchanged" } | { readonly kind: "retimed"; readonly expiresAt: number } {
+  if (input.state !== "active" || input.now >= input.expiresAt) return { kind: "unchanged" };
+  const expiresAt = deviceRegistrationDeadline(input);
+  return expiresAt === input.expiresAt ? { kind: "unchanged" } : { kind: "retimed", expiresAt };
+}
+
+export function evaluateDeviceRegistration(input: {
+  readonly state: "active" | "revoked" | "expired";
+  readonly now: number;
+  readonly expiresAt: number;
 }):
   | { readonly kind: "active" }
-  | {
-      readonly kind: "expired";
-      readonly reason: "absolute-expiry" | "inactivity-expiry";
-    }
+  | { readonly kind: "expired"; readonly reason: "registration-expired" }
   | { readonly kind: "rejected"; readonly reason: "revoked" | "already-expired" } {
   if (input.state === "revoked") return { kind: "rejected", reason: "revoked" };
   if (input.state === "expired") return { kind: "rejected", reason: "already-expired" };
-  if (input.now >= input.createdAt + DEVICE_ABSOLUTE_TTL_MS) {
-    return { kind: "expired", reason: "absolute-expiry" };
-  }
-  if (input.now >= input.lastSeenAt + DEVICE_INACTIVITY_TTL_MS) {
-    return { kind: "expired", reason: "inactivity-expiry" };
+  if (!Number.isFinite(input.expiresAt) || input.now >= input.expiresAt) {
+    return { kind: "expired", reason: "registration-expired" };
   }
   return { kind: "active" };
-}
-
-export function nextDeviceExpiry(input: {
-  readonly createdAt: number;
-  readonly lastSeenAt: number;
-}): number {
-  return Math.min(
-    input.createdAt + DEVICE_ABSOLUTE_TTL_MS,
-    input.lastSeenAt + DEVICE_INACTIVITY_TTL_MS,
-  );
 }
 
 export function shouldPersistDeviceLastSeen(input: {

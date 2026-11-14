@@ -775,6 +775,7 @@ describe("createPhase1RuntimeRegistries", () => {
       settings: {
         ...decodePersistedShellSettings(legacyPayload.settings),
         persistentBrowserOwner: false,
+        pairedDeviceLifetime: "30-days",
       },
     });
     for (const [contextSidebarWidth, lastContextSurface, modeSwitcherPresentation] of [
@@ -817,6 +818,7 @@ describe("createPhase1RuntimeRegistries", () => {
           browserUploadFileCountLimit: 5,
           rememberedBrowserTransfers: [],
           persistentBrowserOwner: false,
+          pairedDeviceLifetime: "30-days",
           computerUse: { enabled: false, automaticUpdates: false },
           projectViewSwitcherPresentation: "dropdown",
           transcriptTextSize: "medium",
@@ -1076,6 +1078,7 @@ function validSettingsPayload() {
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
       persistentBrowserOwner: false,
+      pairedDeviceLifetime: "30-days",
       computerUse: { enabled: true, automaticUpdates: true },
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "medium",

@@ -18,7 +18,7 @@
 
 import { randomUUID as defaultRandomUUID } from "node:crypto";
 import { Schema } from "effect";
-import type { StableHostId } from "@octant/contracts/remote-access";
+import type { PairedDeviceLifetime, StableHostId } from "@octant/contracts/remote-access";
 import {
   HOST_HELLO_CLIENT_NONCE_PARAMETER,
   HostHelloClientNonce,
@@ -141,6 +141,8 @@ export interface RemoteGatewayServices {
     | undefined;
   readonly connection: SqliteConnection;
   readonly journal: Journal;
+  /** How long a device paired now stays paired; the host setting, 30 days when absent. */
+  readonly registrationLifetime?: () => PairedDeviceLifetime;
   readonly hostId: StableHostId;
   readonly displayName: string;
   readonly serverBuildVersion: string;
@@ -552,6 +554,9 @@ function assembleServices(
     connection: options.connection,
     now,
     uuid,
+    ...(options.registrationLifetime === undefined
+      ? {}
+      : { registrationLifetime: options.registrationLifetime }),
   });
 
   // Protocol service — signed host hello, pairing, negotiation.

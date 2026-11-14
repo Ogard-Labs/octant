@@ -173,6 +173,7 @@ import { DirectPushService } from "../hub/directPushService";
 import { PushService } from "../hub/pushService";
 import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
 import { deviceLifecycleAt, SpokeLinkService } from "../hub/spokeLinkService";
+import { retimeDeviceRegistrations } from "../remote/deviceRegistrationLifetime";
 import { SpokePushService } from "../hub/spokePushService";
 import {
   TailscaleCertificateService,
@@ -494,6 +495,8 @@ export function wireRemote(deps: RemoteDependencies) {
     return {
       connection: persistence.connection,
       journal: persistence.journal,
+      registrationLifetime: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).pairedDeviceLifetime,
       hostId: identity.hostId,
       displayName: identity.displayName,
       serverBuildVersion: version,
@@ -522,6 +525,22 @@ export function wireRemote(deps: RemoteDependencies) {
   // is held here for the local device administration routes and the returned
   // server shape. Callers read it through the accessors below.
   let currentRemoteGateway: RemoteGateway | undefined;
+  // A new paired-device length moves every still-current registration's
+  // deadline, journaled as the person who chose it, whether or not the
+  // listener is on; a device it already expires loses its sessions at once.
+  shellService.onSettingsReplaced(({ previous, settings, actor }) => {
+    if (previous.pairedDeviceLifetime === settings.pairedDeviceLifetime) return;
+    const { expiredNow } = retimeDeviceRegistrations({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      lifetime: settings.pairedDeviceLifetime,
+      actor,
+      now: Date.now(),
+      uuid: randomUUID,
+    });
+    if (expiredNow.length > 0)
+      currentRemoteGateway?.localDeviceAdministration()?.reconcileExpired();
+  });
   let startupRemoteListener: PrivateListener | undefined;
   const remoteHost = {
     gateway: (): RemoteGateway | undefined => currentRemoteGateway,

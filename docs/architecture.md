@@ -15411,6 +15411,32 @@ approval-gated` command that undoes it. The terminal shows no one-time
     signed in, or whose credential has rotated, is never removed this way, and
     a restart forgets the deadline rather than risk removing a device whose
     client still holds its key.
+  - **How long a pairing lasts.** A paired device's registration has one
+    deadline: its pairing time plus the length the person chose under
+    Settings › Remote access, Keep devices paired for: 7 days, 30 days (the
+    default, the deadline every registration recorded before the setting
+    existed), 90 days, 1 year, or Never expires (maintainer decision,
+    2026-11-13). Using a device does not move the deadline. Sign-in (the
+    challenge and the session it mints) and every signed request read the
+    deadline itself, so a device past it is refused as expired before the
+    expiry is reconciled into its state, and it must pair again. Never
+    expires records the latest instant a timestamp can state, so only Revoke
+    ends such a pairing; Revoke ends any pairing at any time whatever the
+    setting. The setting is a shell setting, so a local window or a device
+    the host's own person paired changes it (`/api/shell/settings`; any
+    other device session is refused). Changing it moves every still-current
+    pairing to its own pairing time plus the new length, one
+    `remote.device-registration-deadline-changed@1` per device journaled as
+    the person who changed it, whether or not the listener is on: a shorter
+    length can expire some devices at once (their sessions and streams end
+    when the listener is on), and a longer one or Never lifts the deadline.
+    A pairing already past its deadline, expired, or revoked is never
+    revived. Rationale: counting from pairing makes the outcome of a change
+    predictable from the device list alone, and refusing to revive a lapsed
+    pairing keeps a longer setting from silently restoring a device the
+    person may have stopped trusting. The session lifetimes (15 minutes idle,
+    12 hours absolute, with rotation) are separate and unchanged; a session
+    never outlives its device's deadline.
   - **Host identity on every connection.** Every hello request a client
     makes names a fresh client nonce, 32 random bytes in unpadded base64url:
     `GET /api/remote/hello?clientNonce=…`. The host hello carries the host

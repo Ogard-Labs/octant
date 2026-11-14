@@ -94,6 +94,28 @@ describe("shell settings from a paired device", () => {
     expect(service.replaceSettings).not.toHaveBeenCalled();
   });
 
+  it("lets a device the host's own person paired choose how long paired devices stay paired, and refuses a restricted device", async () => {
+    const { handle, service } = setup();
+    const lifetime = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: 4,
+        settings: { ...settings, pairedDeviceLifetime: "never" },
+      }),
+    } satisfies RequestInit;
+    expect((await handle(deviceRequest("hub-roster", lifetime)))?.status).toBe(403);
+    expect(service.replaceSettings).not.toHaveBeenCalled();
+    const response = await handle(deviceRequest("host-person", lifetime));
+    expect(response?.status).toBe(200);
+    expect(service.replaceSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: { kind: "remote-device", actorId: deviceId, deviceId },
+        settings: expect.objectContaining({ pairedDeviceLifetime: "never" }),
+      }),
+    );
+  });
+
   it("refuses a query, another method and a malformed replacement, and reports a stale version as a conflict", async () => {
     const { handle } = setup({
       category: "conflict",
