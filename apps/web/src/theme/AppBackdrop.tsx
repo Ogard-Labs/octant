@@ -1,5 +1,6 @@
 import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { runAsciiField } from "./appBackdropAscii";
 import { runFlowingField } from "./appBackdropFlowing";
 import { runMovingPrint } from "./appBackdropPrint";
@@ -18,10 +19,11 @@ const START_SCREEN_SELECTOR = ".draft-thread, .work-composer-adapter, .code-comp
 /**
  * Where the ground is drawn: under one welcome surface, masked away behind
  * its composer; under the whole shell, where there is no composer to clear
- * and only the edges soften; or under a Zen space, which fills the window
- * edge to edge.
+ * and only the edges soften; under a Zen space, which fills the window edge to
+ * edge; or, for a start screen, behind the sidebar panel alone, so the
+ * sidebar's translucent fill shows it softly while a start screen is open.
  */
-export type AppBackdropPlacement = "welcome" | "shell" | "zen";
+export type AppBackdropPlacement = "welcome" | "shell" | "zen" | "sidebar";
 
 export interface AppBackdropProps {
   readonly resolved: ResolvedAppBackground;
@@ -37,6 +39,15 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   const flowingRoot = useRef<HTMLDivElement>(null);
   const flowingCanvas = useRef<HTMLCanvasElement>(null);
   const wavesWithin = placement === "shell" ? START_SCREEN_SELECTOR : undefined;
+  // A start screen's ground also runs behind the sidebar, which is not inside
+  // the screen's own stage: a second ground is drawn into the shell frame, one
+  // level under the sidebar, for as long as the start screen is open.
+  const root = useRef<HTMLDivElement>(null);
+  const [shellFrame, setShellFrame] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (placement !== "welcome") return;
+    setShellFrame(root.current?.closest<HTMLElement>(".shell-frame") ?? null);
+  }, [placement]);
   const [photo, setPhoto] = useState<DecodedPhoto | null>(null);
   const active = resolved.kind !== "none";
   // The pixel ground's Picture scene reads its photo the same way a photo
@@ -190,58 +201,70 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
               }),
         } as CSSProperties);
 
+  const beneathSidebar =
+    placement === "welcome" && shellFrame !== null
+      ? createPortal(
+          <AppBackdrop fetcher={fetcher} placement="sidebar" resolved={resolved} />,
+          shellFrame,
+        )
+      : null;
+
   return (
-    <div
-      aria-hidden="true"
-      className="app-backdrop"
-      data-octant-app-backdrop={resolved.kind}
-      data-placement={placement}
-    >
-      {builtinUrl === null ? null : (
-        <div
-          aria-hidden="true"
-          className="app-backdrop__builtin"
-          data-animated={resolved.backgroundAnimated ? "true" : "false"}
-          style={builtinStyle}
-        />
-      )}
-      {characters ? (
-        <canvas
-          className="app-backdrop__characters"
-          data-animated={resolved.backgroundAnimated ? "true" : "false"}
-          ref={charactersCanvas}
-        />
-      ) : null}
-      {pixels ? (
-        <canvas
-          className="app-backdrop__pixels"
-          data-animated={resolved.backgroundAnimated ? "true" : "false"}
-          ref={pixelsCanvas}
-        />
-      ) : null}
-      {flowing ? (
-        <div
-          className="app-backdrop__flowing"
-          data-animated={resolved.backgroundAnimated ? "true" : "false"}
-          ref={flowingRoot}
-        >
-          <canvas className="app-backdrop__flowing-canvas" ref={flowingCanvas} />
-          <div aria-hidden="true" className="app-backdrop__flowing-fallback" />
-          <div aria-hidden="true" className="app-backdrop__flowing-grain" />
-        </div>
-      ) : null}
-      {pictureSource === null || pixels ? null : (
-        <canvas
-          className="app-backdrop__photo"
-          data-dithered={resolved.effect.kind === "none" ? "false" : "true"}
-          data-effect={resolved.effect.kind}
-          data-photo-ready={photo !== null}
-          ref={photoCanvas}
-          // A photo sits under the page at its own strength; a built-in fills
-          // the ground the way its plain CSS image does.
-          style={{ opacity: photoId === null ? 1 : resolved.photoOpacity }}
-        />
-      )}
-    </div>
+    <>
+      <div
+        aria-hidden="true"
+        className="app-backdrop"
+        data-octant-app-backdrop={resolved.kind}
+        data-placement={placement}
+        ref={root}
+      >
+        {builtinUrl === null ? null : (
+          <div
+            aria-hidden="true"
+            className="app-backdrop__builtin"
+            data-animated={resolved.backgroundAnimated ? "true" : "false"}
+            style={builtinStyle}
+          />
+        )}
+        {characters ? (
+          <canvas
+            className="app-backdrop__characters"
+            data-animated={resolved.backgroundAnimated ? "true" : "false"}
+            ref={charactersCanvas}
+          />
+        ) : null}
+        {pixels ? (
+          <canvas
+            className="app-backdrop__pixels"
+            data-animated={resolved.backgroundAnimated ? "true" : "false"}
+            ref={pixelsCanvas}
+          />
+        ) : null}
+        {flowing ? (
+          <div
+            className="app-backdrop__flowing"
+            data-animated={resolved.backgroundAnimated ? "true" : "false"}
+            ref={flowingRoot}
+          >
+            <canvas className="app-backdrop__flowing-canvas" ref={flowingCanvas} />
+            <div aria-hidden="true" className="app-backdrop__flowing-fallback" />
+            <div aria-hidden="true" className="app-backdrop__flowing-grain" />
+          </div>
+        ) : null}
+        {pictureSource === null || pixels ? null : (
+          <canvas
+            className="app-backdrop__photo"
+            data-dithered={resolved.effect.kind === "none" ? "false" : "true"}
+            data-effect={resolved.effect.kind}
+            data-photo-ready={photo !== null}
+            ref={photoCanvas}
+            // A photo sits under the page at its own strength; a built-in fills
+            // the ground the way its plain CSS image does.
+            style={{ opacity: photoId === null ? 1 : resolved.photoOpacity }}
+          />
+        )}
+      </div>
+      {beneathSidebar}
+    </>
   );
 }

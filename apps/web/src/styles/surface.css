@@ -815,6 +815,39 @@
   );
 }
 
+/* A start screen's ground also runs behind the sidebar panel, one level under
+   it inside the shell frame, so the sidebar's translucent fill shows it
+   softly (the drawn grounds dim themselves to a third there). It is drawn only
+   where the sidebar's fill is translucent: not on a phone, not with the
+   sidebar collapsed, and not under Glass, reduced transparency or increased
+   contrast, which keep the sidebar whole. */
+.app-backdrop[data-placement="sidebar"] {
+  display: none;
+  z-index: -1;
+}
+
+@media (min-width: 681px) {
+  .shell-frame:not(.shell--sidebar-collapsed, .shell--material-translucent)
+    > .app-backdrop[data-placement="sidebar"] {
+    display: block;
+    inset: var(--oct-title-rail-h) auto 0 var(--octant-rail-offset, 0px);
+    width: var(--octant-rendered-sidebar-width);
+  }
+}
+
+html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell-frame
+  > .app-backdrop[data-placement="sidebar"] {
+  display: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .shell-frame:not(.shell--sidebar-collapsed, .shell--material-translucent)
+    > .app-backdrop[data-placement="sidebar"] {
+    display: none;
+  }
+}
+
 /* Under a Zen space the ground is the floor of the window, not a wash behind
    a page: there is no composer to clear and no transcript reading through it,
    because Zen's cards carry their own glass. So it takes no mask, and

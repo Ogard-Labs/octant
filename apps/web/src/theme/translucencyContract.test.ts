@@ -113,4 +113,15 @@ describe("window glass", () => {
       /@media \(prefers-reduced-transparency: reduce\) \{\s*:is\(\.shell, [^)]*\) \{[^}]*--octant-sidebar-keep: 100%;/,
     );
   });
+
+  it("draws a start screen's ground behind the sidebar only where the sidebar's fill is translucent", () => {
+    const surface = read("styles/surface.css");
+    expect(surface).toContain('.app-backdrop[data-placement="sidebar"] {');
+    expect(surface).toMatch(
+      /\.shell-frame:not\(\.shell--sidebar-collapsed, \.shell--material-translucent\)\s*> \.app-backdrop\[data-placement="sidebar"\] \{[^}]*display: block;/,
+    );
+    expect(surface).toMatch(
+      /html:is\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)\s*\.shell-frame\s*> \.app-backdrop\[data-placement="sidebar"\] \{[^}]*display: none/,
+    );
+  });
 });

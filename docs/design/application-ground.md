@@ -46,7 +46,16 @@ column's edge, so the brightest cells stay away from text. Ridges is the bold sc
 it runs at full strength outside the text: its own sky is empty behind the heading and
 subtitle, and the column calms it (to half) only at the foot of the window, where the
 composer and its chips sit. Under the sidebar, where a
-ground runs there, every scene keeps a third. Ridges keeps the sky behind the heading
+ground runs there, every scene keeps a third. A ground whose scope is the start
+screens also runs behind the sidebar while a start screen is open: a second copy
+is drawn into the window frame one level under the sidebar panel, over the
+sidebar's own width and the height of the window below the title band, so the
+sidebar's translucent fill (82%) shows it softly. It is drawn only where that fill
+is translucent: not on a phone, not with the sidebar collapsed, not under Glass,
+and not under reduced transparency or increased contrast, which keep the sidebar
+opaque. On every other page the sidebar sits on the plain frame as before. The
+sidebar's copy is its own composition at its own size, not a continuation of the
+start screen's picture. Ridges keeps the sky behind the heading
 and its subtitle empty, so the sun sits low toward a corner and no cell lies under text. Motion is slow: ridges drift
 a few cells a second, the sun and the burst breathe, the streaks slide. It runs at
 fifteen frames a second, stops while the document is hidden or the ground is off
