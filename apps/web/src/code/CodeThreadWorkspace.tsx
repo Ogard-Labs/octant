@@ -292,6 +292,11 @@ export interface CodeThreadWorkspaceProps {
    * prompts that wait for the person's decision. Absent on any other thread.
    */
   readonly coordinatorProposals?: ReactNode;
+  /**
+   * A coordinator's workers' pending approvals and questions, drawn as rows at
+   * the end of its transcript. Absent on any other thread.
+   */
+  readonly coordinatorWorkerAsks?: ReactNode;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
@@ -1703,6 +1708,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     serverUrl={props.serverUrl}
                     windowCapability={props.windowCapability}
                   />
+                  {props.coordinatorWorkerAsks}
                 </>
               }
               className="code-thread-workspace__conversation transcript-scroll"
