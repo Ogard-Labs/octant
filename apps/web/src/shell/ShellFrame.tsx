@@ -1,4 +1,5 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -81,7 +82,97 @@ export function ShellThemeRoot(props: ShellThemeRootProps) {
   );
 }
 
+/** How long a slide may run before the shell stops waiting for its transition to end. */
+const SIDEBAR_SLIDE_LIMIT_MS = 400;
+
+/**
+ * A slide is only for a wide window that has not asked for less motion. A
+ * drawer at phone width and a reduced-motion window change at once.
+ */
+function sidebarMaySlide(): boolean {
+  if (typeof globalThis.matchMedia !== "function") return false;
+  if (document.documentElement.getAttribute("data-octant-reduced-motion") === "true") return false;
+  return (
+    globalThis.matchMedia("(min-width: 681px)").matches &&
+    !globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/**
+ * Says the sidebar is sliding open or shut, from the moment `collapsed` flips
+ * until its width has settled. Only the open or shut flip sets it: a drag of
+ * the sidebar's edge or a window resize changes widths without it, so they stay
+ * glued to the pointer.
+ */
+function useSidebarSliding(collapsed: boolean): {
+  readonly sliding: boolean;
+  readonly settle: () => void;
+} {
+  const [sliding, setSliding] = useState(false);
+  const [seenCollapsed, setSeenCollapsed] = useState(collapsed);
+  if (seenCollapsed !== collapsed) {
+    setSeenCollapsed(collapsed);
+    if (sidebarMaySlide()) setSliding(true);
+  }
+  useEffect(() => {
+    if (!sliding) return undefined;
+    const timer = setTimeout(() => setSliding(false), SIDEBAR_SLIDE_LIMIT_MS);
+    return () => clearTimeout(timer);
+  }, [sliding, seenCollapsed]);
+  return { sliding, settle: () => setSliding(false) };
+}
+
+/**
+ * Keeps a still copy of the open sidebar through a closing slide. The live one
+ * unmounts the moment the shell is collapsed, which would leave the stage
+ * sliding over an empty strip; the copy travels out with the column's edge.
+ */
+function useClosingSidebarCopy(
+  shell: RefObject<HTMLDivElement | null>,
+  collapsed: boolean,
+  sliding: boolean,
+): void {
+  const lastOpen = useRef<{
+    readonly node: HTMLElement;
+    readonly left: number;
+    readonly width: number;
+  } | null>(null);
+  // Every commit while the sidebar is open and still, so a dragged width is the
+  // width the copy keeps.
+  useLayoutEffect(() => {
+    if (collapsed || sliding) return;
+    const node = shell.current?.querySelector<HTMLElement>(
+      ":scope > .sidebar[data-octant-sidebar]",
+    );
+    lastOpen.current =
+      node === null || node === undefined
+        ? null
+        : {
+            node,
+            left: Number.parseFloat(getComputedStyle(node).marginLeft) || 0,
+            width: node.getBoundingClientRect().width,
+          };
+  });
+  useLayoutEffect(() => {
+    const frame = shell.current;
+    const open = lastOpen.current;
+    if (frame === null || !collapsed || !sliding || open === null) return undefined;
+    const copy = open.node.cloneNode(true) as HTMLElement;
+    copy.removeAttribute("data-octant-sidebar");
+    copy.setAttribute("data-octant-sidebar-ghost", "");
+    copy.setAttribute("aria-hidden", "true");
+    copy.setAttribute("inert", "");
+    copy.style.setProperty("--ghost-left", `${open.left}px`);
+    copy.style.setProperty("--ghost-width", `${open.width}px`);
+    frame.appendChild(copy);
+    return () => copy.remove();
+  }, [shell, collapsed, sliding]);
+}
+
 export function ShellFrame(props: ShellFrameProps) {
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const { sliding, settle } = useSidebarSliding(props.sidebarCollapsed === true);
+  useClosingSidebarCopy(shellRef, props.sidebarCollapsed === true, sliding);
   return (
     <ShellThemeRoot
       {...(props.theme === undefined ? {} : { theme: props.theme })}
@@ -89,6 +180,16 @@ export function ShellFrame(props: ShellFrameProps) {
       {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
     >
       <div
+        ref={shellRef}
+        data-octant-sidebar-sliding={sliding ? "true" : undefined}
+        onTransitionEnd={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            event.propertyName === "--octant-rendered-sidebar-width"
+          ) {
+            settle();
+          }
+        }}
         className={
           props.standaloneSurface !== undefined
             ? `shell shell-frame--standalone shell--material-${props.material}`

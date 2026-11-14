@@ -96,7 +96,7 @@ describe("native feel", () => {
   it("makes the title band exactly as tall as the rail is wide, and slim", () => {
     expect(octant).toMatch(/--oct-title-rail-h:\s*38px;/);
     expect(read("styles/shell.css")).toMatch(
-      /\.shell\.shell-frame\.shell--sidebar-rail \{\s*--octant-rendered-sidebar-width: var\(--oct-title-rail-h\);/,
+      /\.shell\.shell-frame\.shell--sidebar-rail \{\s*--octant-sidebar-target-width: var\(--oct-title-rail-h\);/,
     );
     expect(read("styles/shell.css")).toMatch(
       /\.shell\.shell-frame\.shell--rail-beside \{\s*--octant-rail-offset: var\(--oct-title-rail-h\);/,

@@ -30,6 +30,83 @@ function cssRule(selector: string): string {
 }
 
 describe("ShellFrame", () => {
+  function frameFor(collapsed: boolean, width: number) {
+    return (
+      <ShellFrame
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={
+          <aside className="sidebar" data-octant-sidebar>
+            Sidebar
+          </aside>
+        }
+        sidebarCollapsed={collapsed}
+        sidebarResizable
+        sidebarWidth={width}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+      />
+    );
+  }
+
+  function stubWindowMedia(reducedMotion: boolean) {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("reduce") ? reducedMotion : query.includes("min-width"),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  }
+
+  it("slides the sidebar when it is shut and keeps a still copy through the closing slide", () => {
+    stubWindowMedia(false);
+    try {
+      const { container, rerender } = render(frameFor(false, 232));
+      const shell = container.querySelector(".shell-frame");
+      expect(shell?.hasAttribute("data-octant-sidebar-sliding")).toBe(false);
+      rerender(frameFor(true, 232));
+      expect(shell?.getAttribute("data-octant-sidebar-sliding")).toBe("true");
+      expect(shell?.querySelector("[data-octant-sidebar-ghost]")).not.toBeNull();
+      fireEvent.transitionEnd(shell as Element, {
+        propertyName: "--octant-rendered-sidebar-width",
+      });
+      expect(shell?.hasAttribute("data-octant-sidebar-sliding")).toBe(false);
+      expect(shell?.querySelector("[data-octant-sidebar-ghost]")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not slide when the sidebar's edge is dragged to a new width", () => {
+    stubWindowMedia(false);
+    try {
+      const { container, rerender } = render(frameFor(false, 232));
+      rerender(frameFor(false, 300));
+      rerender(frameFor(false, 340));
+      const shell = container.querySelector(".shell-frame");
+      expect(shell?.hasAttribute("data-octant-sidebar-sliding")).toBe(false);
+      expect(shell?.getAttribute("style")).toContain("--octant-sidebar-width: 340px");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("changes at once, without sliding, when the window has asked for reduced motion", () => {
+    stubWindowMedia(true);
+    try {
+      const { container, rerender } = render(frameFor(false, 232));
+      rerender(frameFor(true, 232));
+      expect(
+        container.querySelector(".shell-frame")?.hasAttribute("data-octant-sidebar-sliding"),
+      ).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("lays the ground in the frame before the sidebar, the chrome and the workspace", () => {
     const { container } = render(
       <ShellFrame

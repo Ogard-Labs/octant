@@ -2091,7 +2091,7 @@ The sidebar slides open and shut like a Mac sidebar: the stage's left edge moves
 with it over `--oct-motion-panel` (300ms) on `--oct-ease-panel`, and the stage's
 left corners and clip follow without a notch (they leave at the start of an
 opening and arrive after the slide has landed when it shuts). The title band's
-drag strip and the traffic-light reserve do not move. There is no motion under
+drag strip and the traffic-light reserve do not move. The slide is for opening and shutting only: dragging the sidebar's edge or resizing the window follows the pointer exactly. The sidebar keeps its full width through the slide and its column clips it, so its contents travel with the edge. There is no motion under
 the system's reduced-motion setting or the app's own.
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact

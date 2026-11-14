@@ -6,7 +6,12 @@
 }
 
 .shell.shell-frame {
-  --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
+  --octant-sidebar-target-width: var(--octant-sidebar-width, 232px);
+  /* What the grid, the ground and the stage read. It follows the target at
+     once, and glides to it only while the shell says the sidebar is sliding
+     (data-octant-sidebar-sliding), so dragging the sidebar's edge or resizing
+     the window never trails the pointer. */
+  --octant-rendered-sidebar-width: var(--octant-sidebar-target-width);
   /* Published by WindowChrome from each cluster's measured width. The literals
      are only the pre-measurement fallback: both clusters' real widths swing
      with which controls a thread renders, so no constant is right for every
@@ -19,7 +24,9 @@
   height: 100vh;
   min-width: 0;
   min-height: 100vh;
-  grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+  grid-template-columns: calc(
+      var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width)
+    ) minmax(0, 1fr);
   grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   position: relative;
@@ -184,7 +191,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 /* The rail beside the sidebar spends width from the same budget, so the
    clamp subtracts it too. */
 .shell.shell-frame.shell--wide-context-open {
-  --octant-rendered-sidebar-width: min(
+  --octant-sidebar-target-width: min(
     var(--octant-sidebar-width, 232px),
     calc(
       100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
@@ -194,11 +201,11 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .shell.shell-frame.shell--projects-sidebar-open {
-  --octant-rendered-sidebar-width: calc(var(--octant-sidebar-width, 232px) + 320px);
+  --octant-sidebar-target-width: calc(var(--octant-sidebar-width, 232px) + 320px);
 }
 
 .shell.shell-frame.shell--wide-context-open.shell--projects-sidebar-open {
-  --octant-rendered-sidebar-width: min(
+  --octant-sidebar-target-width: min(
     calc(var(--octant-sidebar-width, 232px) + 320px),
     calc(
       100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
@@ -318,7 +325,7 @@ html[data-octant-native-host="true"]
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {
-  --octant-rendered-sidebar-width: 0px;
+  --octant-sidebar-target-width: 0px;
 }
 
 /* The chrome spans both columns while the sidebar is shut so its leading
@@ -333,8 +340,11 @@ html[data-octant-native-host="true"]
    column. The rail is one icon wide and exactly as wide as the title band is
    tall, so the frame reads as one even L. */
 .shell.shell-frame.shell--sidebar-rail {
-  --octant-rendered-sidebar-width: var(--oct-title-rail-h);
-  grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+  --octant-sidebar-target-width: var(--oct-title-rail-h);
+}
+
+.shell--sidebar-rail.shell-frame > .sidebar-rail {
+  width: var(--oct-title-rail-h);
 }
 
 /* In the desktop app the traffic lights sit in the title band across the
@@ -361,11 +371,7 @@ html[data-octant-native-host="true"]
    frame's two arms visibly differ. */
 .shell.shell-frame.shell--rail-beside {
   --octant-rail-offset: var(--oct-title-rail-h);
-  /* One column for the rail and the sidebar together, so a collapse to the
-     rail keeps the same number of tracks and the stage's column can slide. */
-  grid-template-columns: calc(
-      var(--octant-rail-offset) + var(--octant-rendered-sidebar-width)
-    ) minmax(0, 1fr);
+  --octant-rail-bound: var(--oct-title-rail-h);
 }
 
 /* Beside the open sidebar the rail stays one narrow icon column in the desktop
@@ -380,7 +386,7 @@ html[data-octant-native-host="true"]
 }
 
 .shell--rail-beside.shell-frame > .sidebar-rail {
-  width: var(--octant-rail-offset);
+  width: var(--oct-title-rail-h);
 }
 
 .shell--rail-beside.shell-frame > .sidebar {
@@ -2254,7 +2260,13 @@ html[data-octant-density="compact"]
   initial-value: 0px;
 }
 
-@property --octant-panel-left {
+@property --octant-rendered-sidebar-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --octant-rail-offset {
   syntax: "<length>";
   inherits: true;
   initial-value: 0px;
@@ -2298,28 +2310,85 @@ html[data-octant-density="compact"]
     --octant-panel-left: var(--octant-rail-offset);
   }
 
-  /* The sidebar slides like a Mac sidebar. The stage's corner and clip leave
-     at once when it opens, and arrive only once the slide has landed when it
-     shuts, so no notch shows at the stage's left edge. The title band's drag
-     strip and traffic-light reserve do not take part: they are placed by
-     measured widths, not by this column. */
-  .shell.shell-frame {
+  /* The sidebar slides like a Mac sidebar, but only while the shell carries
+     data-octant-sidebar-sliding, which it sets when the sidebar opens or shuts
+     and never for a drag of its edge or a window resize, so those stay glued
+     to the pointer. The width the grid, the ground and the stage read glides,
+     and they move together. The stage's corner and clip leave at once when it
+     opens and arrive once the slide has landed when it shuts, so no notch shows
+     at the stage's left edge. The title band's drag strip and traffic-light
+     reserve are placed by measured widths, not by this column. */
+  .shell.shell-frame[data-octant-sidebar-sliding] {
     transition:
-      grid-template-columns var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-rendered-sidebar-width var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-rail-offset var(--oct-motion-panel) var(--oct-ease-panel),
       --octant-stage-gap-left var(--oct-motion-panel) var(--oct-ease-panel),
-      --octant-panel-left var(--oct-motion-panel) var(--oct-ease-panel),
       --octant-stage-clip-left var(--oct-motion-fast) var(--oct-ease-standard),
       --octant-stage-corner-left var(--oct-motion-fast) var(--oct-ease-standard);
   }
 
-  html[data-octant-reduced-motion="true"] .shell.shell-frame,
-  html[data-octant-reduced-motion="true"] .shell.shell-frame.shell--sidebar-collapsed {
+  .shell.shell-frame.shell--sidebar-collapsed[data-octant-sidebar-sliding] {
+    transition:
+      --octant-rendered-sidebar-width var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-rail-offset var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-gap-left var(--oct-motion-panel) var(--oct-ease-panel),
+      --octant-stage-clip-left var(--oct-motion-fast) var(--oct-ease-standard)
+        var(--oct-motion-base),
+      --octant-stage-corner-left var(--oct-motion-fast) var(--oct-ease-standard)
+        var(--oct-motion-base);
+  }
+
+  /* The sidebar keeps its full width through the slide and its column clips
+     it, so its contents travel with the edge instead of reflowing squeezed.
+     Closing, the shell holds a still copy of the sidebar (the ghost) because
+     the live one is gone the moment the state flips. */
+  .shell[data-octant-sidebar-sliding] > .sidebar:not([data-octant-sidebar-ghost]) {
+    --octant-slide-shift: min(
+      0px,
+      calc(var(--octant-rendered-sidebar-width) - var(--octant-sidebar-target-width))
+    );
+    justify-self: start;
+    width: var(--octant-sidebar-target-width);
+    clip-path: inset(
+      0 0 0
+        max(
+          0px,
+          calc(
+            var(--octant-rail-bound, 0px) - var(--octant-rail-offset, 0px) -
+              var(--octant-slide-shift)
+          )
+        )
+    );
+    pointer-events: none;
+    transform: translateX(var(--octant-slide-shift));
+  }
+
+  .shell > .sidebar[data-octant-sidebar-ghost] {
+    --octant-slide-shift: min(
+      0px,
+      calc(
+        var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width) - var(--ghost-left) -
+          var(--ghost-width)
+      )
+    );
+    grid-column: 1;
+    justify-self: start;
+    width: var(--ghost-width);
+    margin-left: var(--ghost-left);
+    clip-path: inset(0 0 0 calc(-1 * var(--octant-slide-shift)));
+    pointer-events: none;
+    transform: translateX(var(--octant-slide-shift));
+  }
+
+  html[data-octant-reduced-motion="true"] .shell.shell-frame[data-octant-sidebar-sliding],
+  html[data-octant-reduced-motion="true"]
+    .shell.shell-frame.shell--sidebar-collapsed[data-octant-sidebar-sliding] {
     transition: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .shell.shell-frame,
-    .shell.shell-frame.shell--sidebar-collapsed {
+    .shell.shell-frame[data-octant-sidebar-sliding],
+    .shell.shell-frame.shell--sidebar-collapsed[data-octant-sidebar-sliding] {
       transition: none;
     }
   }
@@ -2330,18 +2399,10 @@ html[data-octant-density="compact"]
   .shell--sidebar-collapsed.shell-frame {
     --octant-stage-clip-left: 1px;
     --octant-stage-corner-left: calc(var(--oct-radius-md) - 1px);
-    transition:
-      grid-template-columns var(--oct-motion-panel) var(--oct-ease-panel),
-      --octant-stage-gap-left var(--oct-motion-panel) var(--oct-ease-panel),
-      --octant-panel-left var(--oct-motion-panel) var(--oct-ease-panel),
-      --octant-stage-clip-left var(--oct-motion-fast) var(--oct-ease-standard)
-        var(--oct-motion-base),
-      --octant-stage-corner-left var(--oct-motion-fast) var(--oct-ease-standard)
-        var(--oct-motion-base);
   }
 
   .shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) {
-    --octant-panel-left: var(--octant-panel-gap);
+    --octant-panel-left: var(--octant-stage-gap-left);
     --octant-stage-gap-left: var(--octant-panel-gap);
   }
 
@@ -2639,12 +2700,11 @@ html[data-octant-density="compact"]
 
 @media (min-width: 681px) and (max-width: 960px) {
   .shell.shell-frame {
-    --octant-rendered-sidebar-width: min(var(--octant-sidebar-width, 232px), 236px);
-    grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
+    --octant-sidebar-target-width: min(var(--octant-sidebar-width, 232px), 236px);
   }
 
   .shell.shell-frame.shell--projects-sidebar-open {
-    --octant-rendered-sidebar-width: min(
+    --octant-sidebar-target-width: min(
       calc(var(--octant-sidebar-width, 232px) + 280px),
       calc(100vw - 320px)
     );
