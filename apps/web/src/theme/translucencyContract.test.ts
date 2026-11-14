@@ -101,4 +101,16 @@ describe("window glass", () => {
       'html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])',
     );
   });
+
+  it("lets the ground show softly through the sidebar fill and keeps it whole under reduced transparency and increased contrast", () => {
+    const shell = read("styles/shell.css");
+    expect(shell).toContain("--octant-sidebar-keep: 82%;");
+    expect(shell).toMatch(/var\(--octant-sidebar-keep\),\s*transparent/);
+    expect(shell).toMatch(
+      /html:is\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)\s*:is\(\.shell, \.shell\[data-octant-sidebar-vibrancy\]\) \{[^}]*--octant-sidebar-keep: 100%;/,
+    );
+    expect(shell).toMatch(
+      /@media \(prefers-reduced-transparency: reduce\) \{\s*:is\(\.shell, [^)]*\) \{[^}]*--octant-sidebar-keep: 100%;/,
+    );
+  });
 });

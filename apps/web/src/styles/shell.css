@@ -56,11 +56,16 @@
   --octant-panel-surface: var(--octant-panel-opaque);
   /* The sidebar inside the framed panel is the panel's tone, a few steps toward
      the ground at most, so the two sides of the seam read as one surface with
-     a line between them, and it is near-opaque so the application ground never
-     shows behind a row of text. Under Glass it keeps the glass tint instead. */
+     a line between them. It keeps 82% of its colour, so the application ground
+     shows through softly, and the drawn grounds dim themselves to a third
+     under it so a row of text never meets a glyph. No blur: the desktop app
+     does not draw one. Reduced transparency and increased contrast keep it
+     whole, and under Glass it keeps the glass tint instead. */
+  --octant-sidebar-keep: 82%;
   --octant-sidebar-fill: color-mix(
     in srgb,
-    color-mix(in srgb, var(--octant-panel-opaque) 90%, var(--octant-ground-opaque)) 97%,
+    color-mix(in srgb, var(--octant-panel-opaque) 90%, var(--octant-ground-opaque))
+      var(--octant-sidebar-keep),
     transparent
   );
   /* Every pane (the thread, a tool tile, the bottom panel, the dock's
@@ -153,6 +158,7 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
   --octant-panel-surface: var(--octant-panel-opaque);
+  --octant-sidebar-keep: 100%;
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
@@ -164,6 +170,7 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
     --octant-sheet-surface: var(--octant-workspace);
     --octant-stage-surface: var(--octant-app-background);
     --octant-panel-surface: var(--octant-panel-opaque);
+    --octant-sidebar-keep: 100%;
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
@@ -1320,6 +1327,19 @@ html[data-octant-native-host="true"]
 .project-nav__list-switch > button {
   aspect-ratio: 1;
   padding-inline: 0;
+}
+
+/* The row's glyph buttons rest in the secondary ink, never the muted meta ink
+   (a glyph is not a caption: at 4.1:1 on the sidebar they all but vanished),
+   and the chosen view takes the primary ink and its fill. The switch is a
+   standing choice, not a popover: it stays while a view is saved so the way
+   back to the others is never what went missing. */
+.project-nav__toolbar button:not([data-pressed], [aria-pressed="true"]) {
+  color: var(--oct-fg-2);
+}
+
+.project-nav__toolbar button:not([data-pressed], [aria-pressed="true"]):hover {
+  color: var(--oct-fg);
 }
 
 .sidebar-navigation__threads {
