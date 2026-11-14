@@ -34,7 +34,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 7         | 2       | 4            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
-| [App-managed tools](#app-managed-tools)                                               | 5         | 4       | 1            | 0                   |
+| [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 1            | 1                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 10      | 6            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **252**   | **152** | **96**       | **4**               |
+| **All areas**                                                                         | **253**   | **152** | **96**       | **5**               |
 
 ## Principles and hard lines
 
@@ -585,6 +585,18 @@ Octant has one web search definition, `web-search`, offered to every Chat provid
 - A successful result marks the thread as having read outside content. The harness's tainted-query refusal applies to harness threads, as before, and not to a Chat thread on another provider.
 
 Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md#web-search).
+
+### Web search backends and data policy
+
+Octant's own `web-search` searches an ordered list of backends the person sets up, filtered by one host data policy (Any, ZDR only, EU only, EU and ZDR), so a person under a zero data retention agreement or an EU data boundary can search (maintainer request, 2026-11-14).
+
+- The tool's name, schema and result shape do not change, and the definition never names a backend; the answering backend is journaled, not returned to the model.
+- A backend is eligible only when the person states ZDR or EU processing for it and its vendor offers that; with no eligible backend the tool is not offered.
+- A query moves to the next backend only when one did not answer; an empty result does not move on.
+- A provider's own search stays a separate route, follows the same policy, and marks the thread as outside content inside the native harness.
+- A stored SearXNG address migrates to the first entry under Any.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Web search backends and data policy](web-search-backends.md).
 
 ## Canvas authority
 
