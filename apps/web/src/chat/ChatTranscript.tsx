@@ -864,7 +864,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly tailAttempt: boolean;
   readonly threadUsageResume: ChatThreadView["thread"]["usageResume"];
 }) {
-  const handoff = handoffLabel(props.previousAttempt, props.attempt);
+  const handoff = handoffLabel(props.previousAttempt, props.attempt, props.providerGroups ?? []);
   const responseContents = props.attempt.responseRefs.map((reference) =>
     resolvedContent(props.contentById, reference, "assistant"),
   );
@@ -1282,7 +1282,11 @@ function CitationList(props: { readonly citations: ChatThreadView["citations"] }
   );
 }
 
-function handoffLabel(previous: ChatAttempt | undefined, current: ChatAttempt): string | undefined {
+function handoffLabel(
+  previous: ChatAttempt | undefined,
+  current: ChatAttempt,
+  groups: ReadonlyArray<PickerGroup>,
+): string | undefined {
   if (previous === undefined) return undefined;
   if (
     previous.providerInstanceId === current.providerInstanceId &&
@@ -1292,9 +1296,15 @@ function handoffLabel(previous: ChatAttempt | undefined, current: ChatAttempt): 
     // completed one is a regeneration; the person asked for a new answer.
     return previous.outcome === "completed" ? "Regenerated" : undefined;
   }
-  return previous.modelId === current.modelId
+  if (previous.modelId !== current.modelId) return `Provider handoff · ${current.modelId}`;
+  // Same model on another instance is a move to another account, so the
+  // marker names the account the conversation went to.
+  const account = groups.find(
+    (group) => String(group.instance.id) === String(current.providerInstanceId),
+  )?.instance.displayName;
+  return account === undefined
     ? "Provider handoff · provider changed"
-    : `Provider handoff · ${current.modelId}`;
+    : `Provider handoff · ${account}`;
 }
 
 function handoffWarningText(

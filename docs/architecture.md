@@ -6649,16 +6649,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   with no assigned directory also reads the one file `~/.claude.json`: refused
   it, the runtime retries for about six seconds, longer than the sign-in probe
   waits.
-  A thread stays on the instance it started with until the person moves it
-  (maintainer decision, 2026-11-14; not built yet): the person may move a
-  thread to another account or instance, and the move is carried out by the
-  disclosed text handoff in
+  A thread stays on its instance until the person moves it: the thread's
+  **Move to account…** action (or the model picker) moves it to another
+  account, and the next turn starts there with the disclosed handoff of
   [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
-  journaled like any provider change. A per-thread setting the person opts
-  into, "when this account hits its usage limit, hand off to" a named account,
-  is allowed later; it hands off by the same path and names the move in the
-  thread. Octant never rotates, fails over, or load-balances between accounts
-  silently or on its own choice. Discovery can find
+  whose marker names the new account. The host accepts the move only from the
+  person, at a window or on a device they paired, and only while no turn runs
+  and no model pool is on (the pool names the current account);
+  a move from the host itself or an agent is refused, so there is no silent or
+  automatic failover, rotation, or load-balancing between accounts (maintainer
+  decision, 2026-11-14). Built for Chat; Work and Code move through the model
+  picker. An opt-in "on a usage limit, hand off to this account" is not built.
+  Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
