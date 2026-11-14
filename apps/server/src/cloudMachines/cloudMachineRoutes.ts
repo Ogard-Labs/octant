@@ -21,7 +21,14 @@ export interface CloudMachineRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly service: Pick<
     CloudMachineService,
-    "view" | "create" | "bindProject" | "refresh" | "suspend" | "resume" | "requestDestroy" | "destroy"
+    | "view"
+    | "create"
+    | "bindProject"
+    | "refresh"
+    | "suspend"
+    | "resume"
+    | "requestDestroy"
+    | "destroy"
   >;
   readonly now?: () => number;
 }

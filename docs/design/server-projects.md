@@ -591,6 +591,16 @@ checks never change registry/configuration or journal state.
   file tools also ran against a throwaway Linux container's `sshd` with bash,
   dash, zsh, fish 3.6, tcsh, and csh as login shells. Linux hosts are likewise
   untested; the connection uses only `ssh` options both platforms share.
+- Routines on a server Project (maintainer decision, 2026-11-14). Today a
+  routine cannot target one: the routine dispatcher revalidates its Project
+  against this host's local catalog only, where a server Project's id reads as
+  missing (`project-mismatch`), and a turn here is offered no routine tool
+  ([Work Projects](#work-projects)). The design: a routine bound to a server
+  Project is run by this host's scheduler, revalidates the binding and the
+  registered server at every occurrence, and starts an ordinary thread here
+  whose commands run on the server through the Project's connection, under
+  the same rules as a person-started thread. An unreachable server blocks the
+  occurrence and runs nothing anywhere.
 
 ## Machines in the person's cloud account
 
@@ -619,7 +629,8 @@ service stays out of scope
 - **Every act is the person's.** Creating, binding, refreshing, suspending,
   resuming and destroying are the person's acts at a local window
   (`/api/cloud-machines`). An agent and a routine are refused `needs-person`
-  before any target or broker is asked; a paired device is refused
+  before any target or broker is asked. The design also lets a device the
+  host's own person paired act; not built yet, it is refused
   `needs-local-window`, as binding a server Project still is.
 - **Destroy asks once.** Destroying is irreversible and ends what the
   person's account pays for, so it needs a confirmation the host issues for

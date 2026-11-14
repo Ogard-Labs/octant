@@ -44,11 +44,7 @@ export function fakeCloudMachineTarget(
       if (state === undefined || state === "destroyed") return { status: "missing" };
       if (to !== undefined) machines.set(input.providerMachineId, to);
       const answered =
-        to === undefined
-          ? state
-          : options.transitional === true
-            ? IN_BETWEEN[to]
-            : to;
+        to === undefined ? state : options.transitional === true ? IN_BETWEEN[to] : to;
       return {
         status: "accepted",
         machine: {

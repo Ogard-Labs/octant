@@ -411,7 +411,8 @@ describe("machines in the person's cloud account", () => {
     const fake = fakeCloudMachineTarget({ transitional: true });
     const { machines } = host(journal, fake.target);
     const created = await machines.create({ ...createInput, principal: "local-window" });
-    if (created.kind !== "changed" || created.machine === undefined) throw Error("Expected fixture");
+    if (created.kind !== "changed" || created.machine === undefined)
+      throw Error("Expected fixture");
     const machineId = String(created.machine.id);
 
     expect(await machines.suspend({ machineId, principal: "local-window" })).toMatchObject({
@@ -443,13 +444,18 @@ describe("machines in the person's cloud account", () => {
     const fake = fakeCloudMachineTarget({ transitional: true });
     const { machines } = host(journal, fake.target);
     const created = await machines.create({ ...createInput, principal: "local-window" });
-    if (created.kind !== "changed" || created.machine === undefined) throw Error("Expected fixture");
+    if (created.kind !== "changed" || created.machine === undefined)
+      throw Error("Expected fixture");
     const machineId = String(created.machine.id);
     const ask = machines.requestDestroy({ machineId, principal: "local-window" });
     if (ask.kind !== "confirm") throw Error("Expected a confirmation");
 
     expect(
-      await machines.destroy({ machineId, confirmation: ask.confirmation, principal: "local-window" }),
+      await machines.destroy({
+        machineId,
+        confirmation: ask.confirmation,
+        principal: "local-window",
+      }),
     ).toMatchObject({ kind: "changed", machine: { lifecycle: "created", state: "destroying" } });
     expect(journaledEventNames(journal)).not.toContain(CLOUD_MACHINES_EVENT_NAMES.destroyed);
 
