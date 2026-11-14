@@ -299,6 +299,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "desktop-provider",
   "language-server",
   "debug-adapter",
+  "cloud-machine-target",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(

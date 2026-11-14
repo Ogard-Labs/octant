@@ -309,6 +309,15 @@ import {
   ServerWorkDeveloperToolsChangedPayload,
 } from "@octant/contracts/server-projects";
 import {
+  CLOUD_MACHINES_EVENT_NAMES,
+  CloudMachineCreatedPayload,
+  CloudMachineCreationEndedPayload,
+  CloudMachineCreationRequestedPayload,
+  CloudMachineDestroyedPayload,
+  CloudMachineProjectBoundPayload,
+  CloudMachineStateChangedPayload,
+} from "@octant/contracts/cloud-machines";
+import {
   RUNTIME_NETWORK_EVENT_NAMES,
   RuntimeNetworkDecisionsRecordedPayload,
   RuntimeNetworkLaunchStartedPayload,
@@ -683,6 +692,12 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       ServerWorkDeveloperToolsChangedPayload,
     )
+    .register(CLOUD_MACHINES_EVENT_NAMES.creationRequested, 1, CloudMachineCreationRequestedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.created, 1, CloudMachineCreatedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.creationEnded, 1, CloudMachineCreationEndedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.projectBound, 1, CloudMachineProjectBoundPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.stateChanged, 1, CloudMachineStateChangedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.destroyed, 1, CloudMachineDestroyedPayload)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SHIELD_FORGE_CHANGE_EVENT_NAMES.observed, 1, ShieldForgeChangeObservedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)

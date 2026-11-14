@@ -39,7 +39,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 10      | 6            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 2       | 3            | 0                   |
-| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
+| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 4            | 0                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **252**   | **152** | **96**       | **4**               |
+| **All areas**                                                                         | **252**   | **152** | **97**       | **3**               |
 
 ## Principles and hard lines
 
@@ -1003,8 +1003,10 @@ Octant operates no deployment infrastructure and offers no ship target of its ow
 - A ship integration never receives a secret; it names a credential reference and the host hands it a bounded, purpose-scoped handle at use. _Here only._
 - Delivery is dormant: the ship service exists, but the host wires no target source, build observer or per-act approval bound to target, revision and build.
 - Delivery stays absent from the interface until all three exist; a standing grant never replaces the per-act approval.
+- A target may also be a machine Octant creates in the person's own cloud account through a credential reference in the credential broker; it appears as a Server Project, and the person suspends and resumes it (maintainer decision, 2026-11-14). An Octant-operated hosted service stays out of scope.
+- A cloud machine target is a plugin contribution offered only once installed, trusted and enabled; every create, bind, suspend, resume and destroy is a person's act at a local window, journaled, and destroy needs one host-issued confirmation for that machine. Built: the seam, the host lifecycle and its journal; not built: a target plugin, host-key pinning, a per-machine key, wake-on-open, cost display and the interface ([Server Projects: Machines in the person's cloud account](server-projects.md#machines-in-the-persons-cloud-account)).
 
-Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Partly built. Since: —; cloud machines 2026-11-14. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Project planner thread
 

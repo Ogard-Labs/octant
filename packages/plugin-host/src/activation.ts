@@ -97,6 +97,10 @@ export function isExtensionComponentHostConfined(
   platform: string,
   component: ExtensionComponent,
 ): boolean {
+  // A cloud machine target calls a cloud provider on the person's account, and
+  // no launch class yet confines a process that needs that network reach, so
+  // no platform runs one from a stored package.
+  if (component.kind === "cloud-machine-target") return false;
   return (
     (component.kind !== "provider-driver" && component.kind !== "canvas-export-target") ||
     isOutsideDriverHostConfined(platform)

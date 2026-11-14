@@ -1,6 +1,7 @@
 import {
   decodeServerProjectsCommand,
   type ServerProject,
+  type ServerProjectCloudMachine,
   type ServerProjectsCommand,
   type ServerProjectsCommandResult,
   type ServerProjectsRefusalReason,
@@ -26,6 +27,8 @@ export interface ServerProjectRouteDependencies {
     ServerProjectStore,
     "projects" | "bind" | "rename" | "remove" | "setActions" | "setDeveloperTools"
   >;
+  /** The cloud machine behind a Project, when Octant created one for it. */
+  readonly cloudMachineOf?: (projectId: string) => ServerProjectCloudMachine | undefined;
   readonly now?: () => number;
 }
 
@@ -99,7 +102,11 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
       // own person paired; every other device session is refused here too.
       if (boundPrincipalIsRestricted(request))
         return failure("Server Projects are read only by the host's own person.", 403, origin);
-      return json({ view: catalogView(dependencies.store.projects()) }, 200, origin);
+      return json(
+        { view: catalogView(dependencies.store.projects(), dependencies.cloudMachineOf) },
+        200,
+        origin,
+      );
     }
     let command: ServerProjectsCommand;
     try {
@@ -138,7 +145,10 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
               : dependencies.store.remove({ projectId: String(command.projectId), principal });
     const result: ServerProjectsCommandResult =
       change.kind === "changed"
-        ? { kind: "server-projects-updated", view: catalogView(dependencies.store.projects()) }
+        ? {
+            kind: "server-projects-updated",
+            view: catalogView(dependencies.store.projects(), dependencies.cloudMachineOf),
+          }
         : {
             kind: "server-projects-refused",
             reason: change.reason,
@@ -148,14 +158,26 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
   };
 }
 
-/** The catalog as a window reads it: each Work Project with the binding its threads are made against. */
-function catalogView(projects: ReadonlyArray<ServerProject>): ServerProjectsView {
+/**
+ * The catalog as a window reads it: each Work Project with the binding its
+ * threads are made against, and each Project on a cloud machine with that
+ * machine's last reported state.
+ */
+function catalogView(
+  projects: ReadonlyArray<ServerProject>,
+  cloudMachineOf: ServerProjectRouteDependencies["cloudMachineOf"],
+): ServerProjectsView {
   return {
-    projects: projects.map((project) =>
-      project.mode === "work"
-        ? { ...project, workBindingRevisionId: serverWorkBindingRevisionId(project) }
-        : project,
-    ),
+    projects: projects.map((project) => {
+      const cloudMachine = cloudMachineOf?.(String(project.id));
+      return {
+        ...project,
+        ...(project.mode === "work"
+          ? { workBindingRevisionId: serverWorkBindingRevisionId(project) }
+          : {}),
+        ...(cloudMachine === undefined ? {} : { cloudMachine }),
+      };
+    }),
   };
 }
 

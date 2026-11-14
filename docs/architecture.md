@@ -3555,6 +3555,18 @@ enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
 
+**Machines in the person's own cloud account** (maintainer decision,
+2026-11-14; partly built). A delivery target may also be a machine Octant
+creates in the person's own cloud account, through a credential reference the
+credential broker holds. It appears as a
+[Server Project](design/server-projects.md#machines-in-the-persons-cloud-account)
+and can be suspended and resumed by the person. A cloud machine target plugin
+does the provider work; every act is the person's, server-enforced and
+journaled, and destroying asks once. Built: the seam and the host lifecycle;
+no target plugin ships. Octant operates no hosted machines of its own; an
+Octant-operated hosted service stays out of scope
+([Current Release Boundary](#current-release-boundary)).
+
 **Coordinator threads start and direct worker threads.** A person may make a
 Code thread a coordinator: a long-lived thread whose own actions are read-only,
 which starts worker threads without asking (or proposes them, when the person
