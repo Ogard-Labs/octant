@@ -222,6 +222,7 @@ function harness(
     readonly ownMemory?: () => boolean;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
+    readonly maxTrackedToolUses?: number;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -360,6 +361,9 @@ function harness(
       ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
+      ...(options.maxTrackedToolUses === undefined
+        ? {}
+        : { maxTrackedToolUses: options.maxTrackedToolUses }),
       process,
       sdk,
       credentialResolver,
@@ -1445,6 +1449,121 @@ describe("Claude execution policy", () => {
     await f.queries[0]!.emit(completed("sdk-session-1"));
     await expect(terminalEvent).resolves.toMatchObject({ value: { kind: "completed" } });
     expect(f.queries[0]?.close).not.toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("keeps a pending approval and an unused grant answerable after forgetting more than 256 settled tool uses", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "long", attachments: [], tools: [] }),
+    );
+    const edit = (name: string) => ({
+      file_path: `${projectRoot}/${name}.ts`,
+      old_string: "before",
+      new_string: "after",
+    });
+    const preEdit = (name: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input: edit(name),
+        toolUseId: name,
+        signal,
+      });
+    await expect(preEdit("pending")).resolves.toEqual({ behavior: "ask" });
+    const pending = open.canUseTool({
+      toolName: "Edit",
+      input: edit("pending"),
+      toolUseId: "pending",
+      signal,
+    });
+    await expect(preEdit("granted")).resolves.toEqual({ behavior: "ask" });
+    for (let index = 0; index < 300; index += 1) {
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: `${projectRoot}/${index}.txt` },
+          toolUseId: `settled-${index}`,
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "allow" });
+    }
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    await expect(pending).resolves.toEqual({ behavior: "allow" });
+    const granted = open.canUseTool({
+      toolName: "Edit",
+      input: edit("granted"),
+      toolUseId: "granted",
+      signal,
+    });
+    await vi.waitFor(() =>
+      expect(
+        acquired.connection.approvalCall?.({ sessionId, requestId: "request-2" }),
+      ).toMatchObject({ tool: "Edit" }),
+    );
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-2", approved: true }),
+    );
+    await expect(granted).resolves.toEqual({ behavior: "allow" });
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("fails the turn when every remembered tool use is still unsettled", async () => {
+    const f = harness("subscription", "current-session", { maxTrackedToolUses: 3 });
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const terminalEvent = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "held", attachments: [], tools: [] }),
+    );
+    const preEdit = (name: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input: { file_path: `${projectRoot}/${name}.ts`, old_string: "a", new_string: "b" },
+        toolUseId: name,
+        signal,
+      });
+    // A settled read is forgotten to make room, so it never counts against the bound.
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Read",
+        input: { file_path: `${projectRoot}/read.txt` },
+        toolUseId: "settled-read",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "allow" });
+    for (const name of ["held-0", "held-1", "held-2"]) {
+      await expect(preEdit(name)).resolves.toEqual({ behavior: "ask" });
+    }
+    await expect(preEdit("held-overflow")).resolves.toMatchObject({ behavior: "deny" });
+    await expect(terminalEvent).resolves.toMatchObject({
+      value: {
+        kind: "failed",
+        failure: { message: "Claude exceeded its bounded tool authority state." },
+      },
+    });
     await acquired.close();
   });
 

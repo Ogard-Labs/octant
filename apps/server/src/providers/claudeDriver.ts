@@ -855,6 +855,11 @@ export interface ClaudeDriverOptions {
    * always passes it; a standalone driver falls back to wall time.
    */
   readonly authorityNow?: () => number;
+  /**
+   * How many tool-use ids a session remembers; {@link MAX_TRACKED_TOOL_USES}
+   * unless a test needs to reach the bound with a few calls.
+   */
+  readonly maxTrackedToolUses?: number;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
   readonly taskId?: () => string;
@@ -1015,6 +1020,7 @@ const CLAUDE_COMPACTION_UNCERTAIN = {
 interface ConnectionFactories {
   readonly clock: () => string;
   readonly authorityNow: () => number;
+  readonly maxTrackedToolUses: number;
   readonly makeCorrelation: () => string;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
@@ -1141,10 +1147,10 @@ function expireClaudePreToolGrants(state: SessionState, now: number): void {
  * still needs the grant `PreToolUse` records. An id still pending or holding
  * a grant is never settled, so it is never forgotten.
  */
-function forgetSettledToolUses(state: SessionState): void {
-  if (state.observedToolUseIds.size < MAX_TRACKED_TOOL_USES) return;
+function forgetSettledToolUses(state: SessionState, limit: number): void {
+  if (state.observedToolUseIds.size < limit) return;
   for (const toolUseId of state.observedToolUseIds) {
-    if (state.observedToolUseIds.size < MAX_TRACKED_TOOL_USES) return;
+    if (state.observedToolUseIds.size < limit) return;
     if (!state.settledToolUseIds.has(toolUseId)) continue;
     state.observedToolUseIds.delete(toolUseId);
     state.settledToolUseIds.delete(toolUseId);
@@ -1644,6 +1650,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   const factories: ConnectionFactories = {
     clock: options.clock ?? (() => new Date().toISOString()),
     authorityNow: options.authorityNow ?? Date.now,
+    maxTrackedToolUses: options.maxTrackedToolUses ?? MAX_TRACKED_TOOL_USES,
     makeCorrelation: options.correlationId ?? randomUUID,
     makeRequestId: options.requestId ?? randomUUID,
     makeTaskId: options.taskId ?? randomUUID,
@@ -1905,8 +1912,8 @@ function makeConnection(
     });
     const admitToolUse = (state: SessionState, toolUseId: string): boolean => {
       if (state.observedToolUseIds.has(toolUseId)) return true;
-      forgetSettledToolUses(state);
-      if (state.observedToolUseIds.size >= MAX_TRACKED_TOOL_USES) {
+      forgetSettledToolUses(state, factories.maxTrackedToolUses);
+      if (state.observedToolUseIds.size >= factories.maxTrackedToolUses) {
         terminal(state, {
           kind: "failed",
           failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
