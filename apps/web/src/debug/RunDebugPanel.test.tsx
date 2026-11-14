@@ -841,7 +841,9 @@ describe("Run and debug panel", () => {
       // The tree is one Tab stop; arrows move focus row by row.
       expect(scope).toHaveAttribute("tabindex", "0");
       scope.focus();
+      console.log("ACTIVE1", document.activeElement?.getAttribute("data-row-key"));
       await user.keyboard("{ArrowDown}");
+      console.log("ACTIVE2", document.activeElement?.outerHTML.slice(0, 200));
       expect(within(tree).getByRole("treeitem", { name: /count/ })).toHaveFocus();
       await user.keyboard("{ArrowDown}{ArrowRight}");
       const settings = within(tree).getByRole("treeitem", { name: /settings/ });

@@ -515,12 +515,11 @@ function Variables(props: {
   });
 
   useEffect(() => {
+    console.log("EFFECT", pendingFocus.current, active?.key);
     if (!pendingFocus.current || active === undefined) return;
     pendingFocus.current = false;
-    const row = treeRef.current?.querySelector<HTMLElement>(
-      `[data-row-key="${CSS.escape(active.key)}"]`,
-    );
-    row?.focus();
+    const rowElements = treeRef.current?.querySelectorAll<HTMLElement>("[data-row-key]") ?? [];
+    for (const row of rowElements) if (row.dataset.rowKey === active.key) row.focus();
   });
 
   const toggle = (row: VariableTreeRow) => {
@@ -550,6 +549,7 @@ function Variables(props: {
   };
   const onKeyDown = (event: KeyboardEvent<HTMLElement>, row: VariableTreeRow) => {
     const at = items.indexOf(row);
+    console.log("KEY", event.key, at, items.length);
     const canToggle = row.kind === "scope" || (row.kind === "variable" && row.expandable);
     switch (event.key) {
       case "ArrowDown":
