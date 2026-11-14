@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useEffect, useRef, useState } from "react";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import {
@@ -9,7 +10,6 @@ import type { ProviderFileReviewRead } from "@octant/contracts/provider-file-rev
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
@@ -104,7 +104,7 @@ export function CodeProviderFileReview(props: {
       </header>
       <p>Supplementary session history. Git remains the checkout comparison.</p>
       {result === undefined ? (
-        <ShellState state="loading" title="Reading provider checkpoint" />
+        <OctantEmpty state="loading" title="Reading provider checkpoint" />
       ) : result.status === "refused" ? (
         <OctantAlert
           tone="warning"

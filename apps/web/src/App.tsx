@@ -1,3 +1,4 @@
+import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
 import { useAgentBrowserCard } from "./threadActivity/browserCardActivity";
@@ -349,7 +350,6 @@ import {
 } from "./shell/shellModeRouting";
 import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
-import { ShellState } from "./shell/ShellState";
 import type { FirstRunHandoffProject } from "./onboarding/firstRunHandoffModel";
 import {
   describeDiscoveryNotice,
@@ -644,8 +644,8 @@ export function App(props: AppProps) {
   if (launch === undefined && locationLaunch.status === "refused") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Browser session"
           message={locationLaunch.message}
           state="warning"
@@ -675,8 +675,8 @@ export function App(props: AppProps) {
   if (launch === undefined) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -690,8 +690,8 @@ export function App(props: AppProps) {
     if (launchSession.status === "loading") {
       return (
         <main className="shell-boundary">
-          <ShellState
-            presentation="page"
+          <OctantEmpty
+            layout="page"
             eyebrow="Browser session"
             message="Establishing the authenticated Octant browser session."
             state="loading"
@@ -706,8 +706,8 @@ export function App(props: AppProps) {
       // typed address, an expired tab, or a restarted host lands here.
       return (
         <main className="shell-boundary">
-          <ShellState
-            presentation="page"
+          <OctantEmpty
+            layout="page"
             eyebrow="Browser session"
             message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
             state="warning"
@@ -721,8 +721,8 @@ export function App(props: AppProps) {
       if (resolvedWindowId === undefined) {
         return (
           <main className="shell-boundary">
-            <ShellState
-              presentation="page"
+            <OctantEmpty
+              layout="page"
               eyebrow="Project authority"
               message="Octant could not establish the window identity for this browser session."
               state="warning"
@@ -746,8 +746,8 @@ export function App(props: AppProps) {
     }
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Project authority"
           message={
             launchSession.failureMessage ??
@@ -763,8 +763,8 @@ export function App(props: AppProps) {
   if (!isProjectWindowCapability(injectedCapability)) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Project authority"
           message="Retry from the Octant desktop application to establish this window session."
           state="warning"
@@ -777,8 +777,8 @@ export function App(props: AppProps) {
   if (desktopWindowId === undefined) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -5789,8 +5789,8 @@ function LaunchedShell(
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
@@ -5802,8 +5802,8 @@ function LaunchedShell(
   if (controller.status === "conflict-reload") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="A command outcome may have changed this workspace. Loading authoritative state."
           state="loading"
@@ -5815,8 +5815,8 @@ function LaunchedShell(
   if (controller.status === "recovery-required") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           action={{ label: "Retry after recovery", onClick: controller.retry }}
           eyebrow="Local storage"
           message={controller.errorMessage ?? "Octant storage needs recovery before continuing."}
@@ -5830,8 +5830,8 @@ function LaunchedShell(
   if (controller.status === "disconnected") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           action={{ label: "Retry connection", onClick: controller.retry }}
           eyebrow="Connection"
           message={controller.errorMessage ?? "The local Octant server is unavailable."}
@@ -5849,8 +5849,8 @@ function LaunchedShell(
   ) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"

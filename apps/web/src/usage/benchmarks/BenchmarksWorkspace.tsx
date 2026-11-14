@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../../ui/base/OctantEmpty";
 import { Download, FileSpreadsheet, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -26,7 +27,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
-import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../../surface/SurfaceHeader";
+import { Surface, SurfaceHeader, SurfaceSection } from "../../surface/SurfaceHeader";
 import { BenchmarkCaseCompare } from "./BenchmarkCaseCompare";
 import { BenchmarkHistory } from "./BenchmarkHistory";
 import { BenchmarkLeaderboard } from "./BenchmarkLeaderboard";
@@ -636,7 +637,7 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
             </div>
           ) : null}
           {suites.length === 0 ? (
-            <SurfaceEmpty
+            <OctantEmpty layout="line"
               detail="A suite is a set of prompts with checks. Run it against several models to see which does best."
               title="No suites yet"
             />

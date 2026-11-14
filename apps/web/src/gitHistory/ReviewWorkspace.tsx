@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { lazy, Suspense, useMemo, useState } from "react";
 import { createGitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { DockReviewToolProps } from "../shell/DockReviewTool";
@@ -6,7 +7,6 @@ import { LocalCommitsPanel } from "./LocalCommitsPanel";
 import { SavedAgentReview, type AgentResultReviewRequest } from "./SavedAgentReview";
 import { useDockBarControls } from "../shell/dockBarControls";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
-import { ShellState } from "../shell/ShellState";
 import "./git-history.css";
 
 const WorkingTree = lazy(() =>
@@ -101,14 +101,14 @@ function BoundReview(props: DockReviewToolProps) {
         </div>
       )}
       <div className="git-history__list git-history__list--changes" hidden={view !== "changes"}>
-        <Suspense fallback={<ShellState state="loading" title="Loading changes" />}>
+        <Suspense fallback={<OctantEmpty state="loading" title="Loading changes" />}>
           <WorkingTree {...props} />
         </Suspense>
       </div>
       {openedLocal ? (
         <div className="git-history__list" hidden={view !== "local"}>
           {reader === undefined || props.checkoutId === undefined ? (
-            <ShellState
+            <OctantEmpty
               state="neutral"
               title="Local commits are unavailable"
               message="Reconnect to this checkout to see its local commits."
@@ -125,13 +125,13 @@ function BoundReview(props: DockReviewToolProps) {
       {openedHistory ? (
         <div className="git-history__list" hidden={view !== "history"}>
           {reader === undefined || props.checkoutId === undefined ? (
-            <ShellState
+            <OctantEmpty
               state="neutral"
               title="History is unavailable"
               message="Reconnect to this checkout to browse its history."
             />
           ) : (
-            <Suspense fallback={<ShellState state="loading" title="Loading history" />}>
+            <Suspense fallback={<OctantEmpty state="loading" title="Loading history" />}>
               <History reader={reader} threadId={props.threadId} checkoutId={props.checkoutId} />
             </Suspense>
           )}

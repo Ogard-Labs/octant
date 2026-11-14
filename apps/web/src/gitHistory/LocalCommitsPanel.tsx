@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useEffect, useMemo, useState } from "react";
 import type { GitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
@@ -5,7 +6,6 @@ import type { GitHistoryCommit, GitHistoryDetail } from "@octant/contracts/git-h
 import { useCodeDiffIgnoreWhitespace } from "../code/codeDiffWhitespacePreference";
 import { parseUnifiedDiff } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
-import { ShellState } from "../shell/ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WhitespaceToggle } from "./CommitDetail";
@@ -82,7 +82,7 @@ export function LocalCommitsPanel(props: LocalCommitsPanelProps) {
           Refresh
         </OctantButton>
       </div>
-      {listing.kind === "loading" ? <ShellState state="loading" title="Loading commits" /> : null}
+      {listing.kind === "loading" ? <OctantEmpty state="loading" title="Loading commits" /> : null}
       {listing.kind === "unavailable" ? (
         <OctantAlert className="git-history__notice" tone="warning">
           {listing.message}
@@ -190,7 +190,7 @@ function LocalCommitDiff(props: {
   }, [props.reader, props.threadId, props.checkoutId, props.commit.oid, props.ignoreWhitespace]);
   const files = useMemo(() => parseUnifiedDiff(detail?.diff ?? ""), [detail?.diff]);
   if (message !== undefined) return <p className="git-history__notice">{message}</p>;
-  if (detail === undefined) return <ShellState state="loading" title="Loading commit" />;
+  if (detail === undefined) return <OctantEmpty state="loading" title="Loading commit" />;
   return (
     <>
       {detail.truncated ? (

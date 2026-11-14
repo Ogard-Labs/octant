@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { UsageName } from "./UsageName";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
@@ -29,7 +30,7 @@ import { RefreshCw } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { UsageActivityHeatmap } from "./UsageActivityHeatmap";
 import { UsageThreadMetrics } from "./UsageThreadMetrics";
 import { LatencyStatsSection } from "./LatencyStatsSection";
@@ -675,7 +676,7 @@ function EmptySection({ scanTruncated }: { readonly scanTruncated: boolean }) {
   if (scanTruncated) {
     return (
       <SurfaceSection label="Usage unread">
-        <SurfaceEmpty
+        <OctantEmpty layout="line"
           detail="This range holds more records than one read returns, and none of the records read carried usage that could be shown. Narrow the range or the filters to read the rest — this is not a report that the range is empty."
           title="Range not fully read"
         />
@@ -684,7 +685,7 @@ function EmptySection({ scanTruncated }: { readonly scanTruncated: boolean }) {
   }
   return (
     <SurfaceSection label="No usage">
-      <SurfaceEmpty
+      <OctantEmpty layout="line"
         detail="No usage has been recorded for this range. Providers that report token facts populate this view after their first reconciled request; a runtime that reports no token details still appears here as request activity with usage marked unavailable."
         title="No usage in this range"
       />

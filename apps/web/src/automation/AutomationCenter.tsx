@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   AutomationEventSourceChoice,
   AutomationDefinition,
@@ -28,9 +29,8 @@ import {
   routineScheduleLine,
 } from "./routinePresentation";
 import { useEffect, useRef, useState } from "react";
-import { ShellState } from "../shell/ShellState";
 import { ListArrangementMenu } from "../shell/ListArrangementMenu";
-import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -566,7 +566,7 @@ function AutomationListBody(props: {
   const { controller } = props;
   if (controller.list.status === "loading") {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Automation Center"
         message="Loading automations."
         state="loading"
@@ -576,7 +576,7 @@ function AutomationListBody(props: {
   }
   if (controller.list.status === "unavailable") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry", onClick: controller.retryList }}
         eyebrow="Automation Center"
         message={controller.list.message}
@@ -595,7 +595,7 @@ function AutomationListBody(props: {
   });
   if (groups.length === 0) {
     return (
-      <SurfaceEmpty
+      <OctantEmpty layout="line"
         action={
           <OctantButton
             onClick={() => {
@@ -888,7 +888,7 @@ function AutomationDetail(props: {
 
   if (controller.detail.status === "loading" || controller.detail.status === "idle") {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Automation Center"
         message="Loading the automation."
         state="loading"
@@ -898,7 +898,7 @@ function AutomationDetail(props: {
   }
   if (controller.detail.status === "unavailable") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry", onClick: controller.retryDetail }}
         eyebrow="Automation Center"
         message={controller.detail.message}

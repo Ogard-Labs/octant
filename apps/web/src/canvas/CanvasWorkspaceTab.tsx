@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControls";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CanvasDesignSystemPanel } from "./CanvasDesignSystemPanel";
@@ -38,7 +39,6 @@ import type {
 } from "@octant/contracts/canvas-share-snapshot";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { ChevronDown, Globe, MessageSquare, MoreHorizontal, X } from "lucide-react";
-import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";
@@ -802,7 +802,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
 
   if (definition === undefined) {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Canvas unavailable"
         message={message}
         state="warning"

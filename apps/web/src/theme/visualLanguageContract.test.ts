@@ -1311,7 +1311,7 @@ describe("the public-block visual language", () => {
     expect(dashboard).not.toContain("OctantCard");
     expect(dashboard).toContain('className="surface-toolbar"');
     expect(dashboard).toContain("<SurfaceSection");
-    expect(dashboard).toContain("<SurfaceEmpty");
+    expect(dashboard).toContain(`<OctantEmpty layout="line"`);
     expect(limits).not.toContain("OctantCard");
     expect(limits).toContain('className="surface-row provider-limits__row"');
   });

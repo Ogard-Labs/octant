@@ -1,9 +1,9 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { unavailable } from "./moduleState";
 import { ReviewWorkspace } from "../gitHistory/ReviewWorkspace";
 import { decodeCodeThreadId } from "@octant/contracts";
 import { Suspense } from "react";
-import { ShellState } from "../shell/ShellState";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
@@ -26,7 +26,7 @@ export default function ReviewModule(props: Props) {
     return unavailable("Review", "Review opens from a Code thread.");
   }
   return (
-    <Suspense fallback={<ShellState state="loading" title="Loading review" />}>
+    <Suspense fallback={<OctantEmpty state="loading" title="Loading review" />}>
       <ReviewWorkspace
         {...(props.requestedCodeReviewFile === undefined
           ? {}

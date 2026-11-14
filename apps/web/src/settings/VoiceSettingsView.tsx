@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   SPEECH_SYNTHESIS_MODEL_PRESETS,
   SPEECH_SYNTHESIS_VOICE_PRESETS,
@@ -17,7 +18,6 @@ import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { SettingRow, SettingsSection } from "./primitives";
 import { settingId } from "./registry";
 
@@ -47,7 +47,7 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
   return (
     <section aria-label="Voice" id="settings-voice">
       {eligible.length === 0 && !hasConfiguredEndpoint ? (
-        <SurfaceEmpty
+        <OctantEmpty layout="line"
           action={
             props.onOpenModelEndpoints === undefined ? null : (
               <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">

@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   ArtifactKind,
   ArtifactLibraryEntry,
@@ -6,7 +7,7 @@ import type {
 } from "@octant/contracts/artifact-library";
 import type { CanvasId, OctantMode, ProjectId } from "@octant/contracts";
 import { Layers, LayoutGrid, List, Plus, Search } from "lucide-react";
-import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -334,7 +335,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       )}
 
       {props.busy || entries.length > 0 || synced.length > 0 ? null : (
-        <SurfaceEmpty
+        <OctantEmpty layout="line"
           {...(filters.tab === "shared" || hasActiveFilters
             ? {
                 action: (

@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { lazy, Suspense, useEffect, useMemo, useState, useRef } from "react";
 import type { GitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
@@ -9,7 +10,6 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
-import { ShellState } from "../shell/ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
@@ -87,7 +87,7 @@ export function CommitDetail(props: {
       )}
       {detail === undefined ? (
         message === undefined ? (
-          <ShellState state="loading" title="Loading commit" />
+          <OctantEmpty state="loading" title="Loading commit" />
         ) : null
       ) : (
         <>
@@ -177,7 +177,7 @@ export function CommitDetail(props: {
                   {selected.binary ? (
                     <p>This file has no textual diff.</p>
                   ) : (
-                    <Suspense fallback={<ShellState state="loading" title="Loading comparison" />}>
+                    <Suspense fallback={<OctantEmpty state="loading" title="Loading comparison" />}>
                       <MonacoDiffAdapter
                         ariaLabel={`Diff for ${selected.path}`}
                         language="plaintext"

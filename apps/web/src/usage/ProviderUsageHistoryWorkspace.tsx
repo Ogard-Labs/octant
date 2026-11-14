@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import {
@@ -11,7 +12,6 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ProviderUsageHistoryChart } from "./ProviderUsageHistoryChart";
 import { SettingsSection } from "../settings/primitives";
-import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import "./providerUsageHistory.css";
 
 type Range = "24h" | "7d" | "30d" | "90d";
@@ -450,7 +450,7 @@ export function ProviderUsageHistoryWorkspace(props: {
             </table>
           </div>
           {data !== undefined && data.totals.requestCount === 0 ? (
-            <SurfaceEmpty
+            <OctantEmpty layout="line"
               detail="Check the source coverage below."
               title="No provider history was found in this period"
             />

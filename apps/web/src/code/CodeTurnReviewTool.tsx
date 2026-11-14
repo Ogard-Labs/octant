@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import {
   decodeCodeOperationCommand,
@@ -12,7 +13,6 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
-import { ShellState } from "../shell/ShellState";
 import { CodeDiffPane } from "./CodeDiffPane";
 import { CodeLocalReview, readLocalReview, type CodeReviewLineSelection } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
@@ -304,7 +304,7 @@ function BoundTurnReview(props: Props) {
         )}
       </section>
       {display === undefined ? (
-        <ShellState
+        <OctantEmpty
           state={loading ? "loading" : "warning"}
           title="Captured comparison unavailable"
         />

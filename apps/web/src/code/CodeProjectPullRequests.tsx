@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   CodeProjectPullRequestBackgroundRefreshState,
   CodeProjectPullRequestConnection,
@@ -23,13 +24,12 @@ import {
   X,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { ShellState } from "../shell/ShellState";
 import {
   defaultBoardStorage,
   readStoredValue,
   writeStoredValue,
 } from "../threadBoard/threadBoardState";
-import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -388,7 +388,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       )}
 
       {workspace.status === "loading" ? (
-        <ShellState
+        <OctantEmpty
           eyebrow="Pull requests"
           message="Open and draft pull requests will list here."
           state="loading"
@@ -404,20 +404,20 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         ) : null
       ) : !hasProjects ? (
         dock ? (
-          <SurfaceEmpty
+          <OctantEmpty layout="line"
             detail="Only a Code Project with a github.com origin lists pull requests."
             icon={<GitPullRequest size={20} />}
             title="No pull-request source for this Project"
           />
         ) : (
-          <SurfaceEmpty
+          <OctantEmpty layout="line"
             detail="Add a Code Project to see pull requests here."
             icon={<GitPullRequest size={20} />}
             title="No Code Projects yet"
           />
         )
       ) : !onGitHub ? (
-        <SurfaceEmpty
+        <OctantEmpty layout="line"
           action={
             <OctantButton
               disabled={busy}
@@ -473,7 +473,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 </p>
               ))}
           {visibleRows.length === 0 && normalizedSearch !== "" ? (
-            <SurfaceEmpty
+            <OctantEmpty layout="line"
               action={
                 <OctantButton
                   onClick={() => setSearch("")}
@@ -488,7 +488,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             />
           ) : null}
           {visibleRows.length === 0 && normalizedSearch === "" && filterCount > 0 ? (
-            <SurfaceEmpty
+            <OctantEmpty layout="line"
               action={
                 <OctantButton
                   onClick={() => chooseFilters(NO_PULL_REQUEST_FILTERS)}

@@ -1,7 +1,8 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { IMAGE_LIBRARY_SCOPE_ID, type ImageGenerationProfileView } from "@octant/contracts";
 import { Images } from "lucide-react";
-import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { GeneratedImageList } from "./GeneratedImageList";
 import { ImageGenerationAction } from "./ImageGenerationAction";
@@ -42,7 +43,7 @@ export function ImageLibraryView(props: ImageLibraryViewProps) {
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
       {props.profiles.length === 0 ? (
-        <SurfaceEmpty
+        <OctantEmpty layout="line"
           {...(props.onOpenSettings === undefined
             ? {}
             : {

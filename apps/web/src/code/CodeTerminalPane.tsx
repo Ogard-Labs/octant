@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useDockBarControls } from "../shell/dockBarControls";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import { CodeClientFailure } from "@octant/client-runtime/code-client";
@@ -17,7 +18,6 @@ import {
   type TerminalOutputSink,
   type XtermAdapterRuntime,
 } from "./XtermTerminalAdapter";
-import { ShellState } from "../shell/ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -721,7 +721,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           output={initialOutput}
         />
       ) : (
-        <ShellState state="loading" title="Loading terminal" />
+        <OctantEmpty state="loading" title="Loading terminal" />
       )}
     </section>
   );

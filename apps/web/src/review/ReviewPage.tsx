@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   describeChord,
   matchPageKeybinding,
@@ -26,7 +27,7 @@ import {
 } from "../pendingRequests/usePendingRequestRows";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { isApplePlatform } from "../platform";
-import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -489,7 +490,7 @@ export function ReviewPage(props: ReviewPageProps) {
         tabIndex={-1}
       >
         {selected === undefined ? (
-          <SurfaceEmpty
+          <OctantEmpty layout="line"
             detail="Finished threads you have not opened will appear here."
             icon={<ClipboardCheck size={20} />}
             title="Nothing waiting for review"

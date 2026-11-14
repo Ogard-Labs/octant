@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { CodeLocalReview, type CodeReviewLineSelection } from "../code/CodeLocalReview";
 import { CodeTurnReviewTool } from "../code/CodeTurnReviewTool";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
@@ -17,7 +18,6 @@ import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
 import { observeCodeThreadDiff } from "../code/observeCodeThreadDiff";
 import { useCodeDiffIgnoreWhitespace } from "../code/codeDiffWhitespacePreference";
 import { useCodeFileChangeWatch } from "../code/useCodeFileChangeWatch";
-import { ShellState } from "./ShellState";
 import type { OctantHostBridge } from "./hostBridge";
 
 export interface DockReviewToolProps {
@@ -55,14 +55,14 @@ export function DockReviewTool(props: DockReviewToolProps) {
       : undefined;
   const checkoutId = props.checkoutId ?? view?.checkout.id;
   if (props.client === undefined || view === undefined || checkoutId === undefined) {
-    return <ShellState state="loading" title="Loading review" />;
+    return <OctantEmpty state="loading" title="Loading review" />;
   }
   if (
     props.requestedCodeReviewFile !== undefined &&
     props.requestedCodeReviewFile.checkoutId !== checkoutId
   )
     return (
-      <ShellState
+      <OctantEmpty
         state="warning"
         title="Receipt checkout unavailable"
         message="This receipt belongs to an earlier checkout binding. Open its original checkout to review it; its files cannot be retargeted here."

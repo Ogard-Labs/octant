@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   AgentRunCenterSummary,
   AgentRunParentThreadId,
@@ -14,8 +15,7 @@ import type { AgentMessageClient } from "@octant/client-runtime/agent-message-cl
 import { Bot, Search } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
-import { ShellState } from "../shell/ShellState";
-import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -319,12 +319,12 @@ function AgentsCenterListBody(props: {
   const { controller } = props;
   if (controller.list.status === "loading") {
     return (
-      <ShellState eyebrow="Agents" message="Loading agent runs." state="loading" title="Loading" />
+      <OctantEmpty eyebrow="Agents" message="Loading agent runs." state="loading" title="Loading" />
     );
   }
   if (controller.list.status === "unavailable") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry", onClick: controller.retryList }}
         eyebrow="Agents"
         message={controller.list.message}
@@ -343,7 +343,7 @@ function AgentsCenterListBody(props: {
       controller.providerInstanceId !== undefined ||
       controller.parentThreadId !== undefined;
     return (
-      <SurfaceEmpty
+      <OctantEmpty layout="line"
         {...(hasActiveFilters
           ? {
               action: (

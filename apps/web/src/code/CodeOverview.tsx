@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
 import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
@@ -19,7 +20,6 @@ import {
   Terminal,
 } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { ShellState } from "../shell/ShellState";
 import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -89,7 +89,7 @@ export function CodeOverview(props: CodeOverviewProps) {
       : undefined;
   if (props.controller.status === "disconnected") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry Code", onClick: props.controller.retry }}
         eyebrow="Code workspace"
         message={props.controller.errorMessage ?? "The local Code service is unavailable."}
@@ -102,7 +102,7 @@ export function CodeOverview(props: CodeOverviewProps) {
   if (view === undefined) {
     const unavailable = props.controller.errorCategory;
     return (
-      <ShellState
+      <OctantEmpty
         {...(unavailable === undefined
           ? {}
           : { action: { label: "Retry Code", onClick: props.controller.retry } })}

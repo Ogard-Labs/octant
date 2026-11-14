@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import { browserProfileFromChoice } from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
@@ -66,7 +67,6 @@ import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
-import { ShellState } from "../shell/ShellState";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
 import { useProductFeedback } from "./useProductFeedback";
 import { useBrowserFeedbackPointing } from "./useBrowserFeedbackPointing";
@@ -643,7 +643,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         aria-label="Browser automation"
         className="browser-workspace browser-workspace--state"
       >
-        <ShellState
+        <OctantEmpty
           eyebrow="Browser unavailable"
           message="The host requires one exact owning thread before it can create an isolated context."
           state="neutral"

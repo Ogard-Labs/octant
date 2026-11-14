@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { readContinuationLink } from "../continuity/continuationLink";
 import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { ConversationInputClientContext } from "../continuity/ConversationInputs";
@@ -20,13 +21,11 @@ import { RemoteAccessDefaults } from "./RemoteAccessDefaults";
 import { RemoteCoordinatorProposals } from "./RemoteCoordinatorProposals";
 import { RemoteCodeThreadStart, RemoteWorkThreadStart } from "./RemoteThreadStart";
 import { useProviderController } from "../providers/useProviderController";
-import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
-import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import type { RemoteProductClients } from "./remoteProductClients";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -517,15 +516,15 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
         {props.status === "disconnected" ? (
           /* ui-boundary-exception: empty-state */
           <div role="alert">
-            <SurfaceEmpty
+            <OctantEmpty layout="line"
               detail={props.errorMessage ?? `${label} could not be read from the host.`}
               title={`${label} could not be read`}
             />
           </div>
         ) : props.status === "loading" ? (
-          <SurfaceEmpty title={`Reading ${label} threads…`} />
+          <OctantEmpty layout="line" title={`Reading ${label} threads…`} />
         ) : props.threads.length === 0 ? (
-          <SurfaceEmpty
+          <OctantEmpty layout="line"
             {...(props.emptyMessage === undefined ? {} : { detail: props.emptyMessage })}
             title={`No ${label} threads yet`}
           />
@@ -559,7 +558,7 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
       <div className="remote-workspace__thread-view">
         {props.children ?? null}
         {props.children === null || props.children === undefined ? (
-          <ShellState
+          <OctantEmpty
             message={`Choose a ${label} thread to read it here and send a turn to the host.`}
             state="neutral"
             title={`${label} on the paired host`}

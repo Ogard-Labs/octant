@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import { decodeCodeRelativePath } from "@octant/contracts/code";
@@ -5,7 +6,6 @@ import { useEffect, useState } from "react";
 import { useCodeFileChangeWatch, noticeTouches } from "../code/useCodeFileChangeWatch";
 import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { Markdown } from "../markdown/Markdown";
-import { ShellState } from "./ShellState";
 
 export interface DockDocumentToolProps {
   readonly client: Pick<CodeClient, "openFile" | "content">;
@@ -109,10 +109,10 @@ export function DockDocumentTool(props: DockDocumentToolProps) {
   }, [client, threadId, checkoutId, path, revision]);
 
   if (load.kind === "loading") {
-    return <ShellState state="loading" title="Loading document" />;
+    return <OctantEmpty state="loading" title="Loading document" />;
   }
   if (load.kind === "unavailable") {
-    return <ShellState message={load.message} state="neutral" title="Document is unavailable" />;
+    return <OctantEmpty message={load.message} state="neutral" title="Document is unavailable" />;
   }
   return (
     <article aria-label={path} className="dock-document-tool">

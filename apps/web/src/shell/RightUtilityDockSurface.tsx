@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { moveWithinTabList } from "../ui/base/radioGroupKeys";
 import { Plus, X } from "lucide-react";
 import {
@@ -16,7 +17,6 @@ import { endDockToolDrag, useDraggedDockTool } from "./dockToolDrag";
 import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
-import { ShellState } from "./ShellState";
 import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import {
   MINIMISABLE_DOCK_SURFACES,
@@ -374,7 +374,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         available.kind === "surface" ? (
           renderToolBody(tab, tab.id, pages, !tiled)
         ) : (
-          <ShellState
+          <OctantEmpty
             message={unavailableMessage()}
             state="neutral"
             title={`${tool.label} is unavailable`}
@@ -430,14 +430,14 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       >
         {props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface" ? (
           quickToolsProjectId === undefined ? (
-            <ShellState state="neutral" title="Tools open once the task starts" />
+            <OctantEmpty state="neutral" title="Tools open once the task starts" />
           ) : (
             <StartQuickTools projectId={quickToolsProjectId} />
           )
         ) : props.resolution.kind === "closed" ? (
           <div className="dock-start">{props.overview}</div>
         ) : !tiled && props.resolution.kind === "unavailable" ? (
-          <ShellState
+          <OctantEmpty
             message={unavailableMessage()}
             state="neutral"
             title={`${activeSurface?.label ?? "Tool"} is unavailable`}

@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   createContext,
   useCallback,
@@ -22,7 +23,7 @@ import { Copy, RefreshCw } from "lucide-react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { DiagnosticsDashboardView } from "./DiagnosticsDashboardView";
 import { HostHealthSection } from "./HostHealthSection";
 import { UsageName } from "./UsageName";
@@ -398,7 +399,7 @@ export function TurnDiagnosticsWorkspace(props: TurnDiagnosticsWorkspaceProps) {
       ) : null}
 
       {report === undefined ? null : report.turns === 0 ? (
-        <SurfaceEmpty
+        <OctantEmpty layout="line"
           detail="Turns are recorded when they end, on every provider. Widen the range or clear a filter."
           title="No turns in this range"
         />
