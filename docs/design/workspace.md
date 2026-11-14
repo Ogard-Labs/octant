@@ -1026,7 +1026,10 @@ one ordinary follow-up message in the owning thread through the normal send
 path, so mode, access level, Plan and every host check apply unchanged. The
 message lists each note with its file, side and line or lines, the first
 line's text quoted and cut to 120 characters, then the note. Send waits while
-the thread runs a turn, and a refused send keeps the notes. A line note
+the thread runs a turn or a pending note is being edited. Notes count as sent
+once the host accepts the message, whatever its turn then does, so a turn that
+waits, stops or fails never invites sending them twice; only a refusal keeps
+them. A line note
 carries no finding reference: its message is plain person text, the same as
 typing the quoted line into the composer, so the outside-content record that a
 correction draft's references take does not apply. Local findings and their

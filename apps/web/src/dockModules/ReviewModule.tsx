@@ -4,6 +4,8 @@ import { ReviewWorkspace } from "../gitHistory/ReviewWorkspace";
 import { decodeCodeThreadId } from "@octant/contracts";
 import { Suspense } from "react";
 import { ShellState } from "../shell/ShellState";
+import type { CodeLineNotesSendResult } from "../code/CodeLineNotes";
+import type { CodeController } from "../code/useCodeController";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
@@ -21,6 +23,55 @@ type Props = Pick<
   | "requestedCodeReviewFile"
   | "onAgentReviewBack"
 >;
+
+const LINE_NOTES_REFUSED: CodeLineNotesSendResult = {
+  status: "refused",
+  message: "The thread did not accept the notes; its reason shows there.",
+};
+
+/**
+ * Sends line notes as one ordinary follow-up. They count as sent the moment
+ * the host accepts the message and starts its turn: that message is journaled
+ * then, so a turn that later waits, stops or fails must not keep the notes
+ * pending, where sending them again would repeat the instructions.
+ */
+export function sendLineNotesAsFollowUp(
+  controller: Pick<CodeController, "sendFollowUp">,
+  message: string,
+): Promise<CodeLineNotesSendResult> {
+  return new Promise((resolve) => {
+    let accepted = false;
+    const accept = () => {
+      accepted = true;
+      resolve({ status: "sent" });
+    };
+    controller
+      .sendFollowUp(
+        message,
+        [],
+        [],
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        [],
+        undefined,
+        [],
+        false,
+        undefined,
+        { onAccepted: accept },
+      )
+      .then((sent) => {
+        if (accepted) return;
+        if (sent) accept();
+        else resolve(LINE_NOTES_REFUSED);
+      })
+      .catch(() => {
+        if (!accepted) resolve(LINE_NOTES_REFUSED);
+      });
+  });
+}
 
 export default function ReviewModule(props: Props) {
   if (props.subject.mode !== "code") {
@@ -59,28 +110,7 @@ export default function ReviewModule(props: Props) {
         {...(controller === undefined || !sendsForThread
           ? {}
           : {
-              onSendLineNotes: async (message: string) =>
-                (await controller.sendFollowUp(
-                  message,
-                  [],
-                  [],
-                  [],
-                  undefined,
-                  undefined,
-                  undefined,
-                  undefined,
-                  [],
-                  undefined,
-                  [],
-                  false,
-                  undefined,
-                  true,
-                ))
-                  ? ({ status: "sent" } as const)
-                  : ({
-                      status: "refused",
-                      message: "The thread did not accept the notes; its reason shows there.",
-                    } as const),
+              onSendLineNotes: (message: string) => sendLineNotesAsFollowUp(controller, message),
             })}
         {...(lineNotesSendUnavailable === undefined ? {} : { lineNotesSendUnavailable })}
         {...(props.subject.checkoutId === undefined

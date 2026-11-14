@@ -2744,12 +2744,16 @@ export function useCodeController(options: CodeControllerOptions) {
       toolCatalogHandoff = false,
       contextInputPolicy?: ConversationInputPolicy,
       /**
-       * True for a message composed outside the composer, such as a turn's
-       * line notes: the composer's own draft is neither read, cleared nor
+       * Set for a message composed outside the composer, such as a turn's line
+       * notes: the composer's own draft is neither read, cleared nor
        * overwritten, so its unsent text survives this send either way.
+       * `onAccepted` fires once the host has accepted the message and started
+       * its turn; the returned boolean also reports how that turn ended, and a
+       * turn that later waits, stops or fails must not read as a refused send.
        */
-      outsideComposer = false,
+      fromOutsideComposer?: { readonly onAccepted: () => void },
     ): Promise<boolean> => {
+      const outsideComposer = fromOutsideComposer !== undefined;
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
       if (trimmed.length === 0 || view === undefined) return false;
@@ -2865,6 +2869,7 @@ export function useCodeController(options: CodeControllerOptions) {
           status: "running",
         });
         setTurnStatus("running");
+        fromOutsideComposer?.onAccepted();
         // A steered send may have emptied the composer so the user can keep
         // typing. Clearing here is safe only when no draft revision landed
         // after this dispatch.

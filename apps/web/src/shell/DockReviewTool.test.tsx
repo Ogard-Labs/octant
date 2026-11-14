@@ -466,3 +466,40 @@ it("sends notes on two changed lines as one follow-up message naming both anchor
     expect(within(notes).queryByRole("button", { name: /^Send/ })).not.toBeInTheDocument(),
   );
 });
+
+it("holds Send while a pending note is being edited, then sends the saved edit", async () => {
+  const user = userEvent.setup();
+  const onSendLineNotes = vi.fn(async (_message: string) => ({ status: "sent" as const }));
+  render(
+    <DockReviewTool
+      {...bound()}
+      requestedCodeReviewFile={{
+        checkoutId: ids.checkout as never,
+        path: "src/index.ts",
+        receiptOperationId: ids.operation as never,
+      }}
+      onSendLineNotes={onSendLineNotes}
+    />,
+  );
+
+  await user.click(
+    await screen.findByRole("button", { name: "Comment on src/index.ts modified line 12" }),
+  );
+  const notes = screen.getByRole("region", { name: "Line notes" });
+  await user.type(within(notes).getByLabelText("Note"), "Old text");
+  await user.click(within(notes).getByRole("button", { name: "Add note" }));
+  await user.click(
+    within(notes).getByRole("button", { name: "Edit note on src/index.ts, new line 12" }),
+  );
+  await user.clear(within(notes).getByLabelText("Note"));
+  await user.type(within(notes).getByLabelText("Note"), "New text");
+
+  expect(within(notes).getByRole("button", { name: "Send 1 note" })).toBeDisabled();
+  expect(within(notes).getByText(/Save or cancel the note you are editing/)).toBeVisible();
+
+  await user.click(within(notes).getByRole("button", { name: "Save note" }));
+  await user.click(within(notes).getByRole("button", { name: "Send 1 note" }));
+  expect(onSendLineNotes).toHaveBeenCalledTimes(1);
+  expect(onSendLineNotes.mock.calls[0]?.[0]).toContain("New text");
+  expect(onSendLineNotes.mock.calls[0]?.[0]).not.toContain("Old text");
+});

@@ -126,7 +126,7 @@ export function CodeLineNotes(props: {
   }
 
   async function send() {
-    if (props.onSend === undefined || notes.length === 0 || sending) return;
+    if (props.onSend === undefined || notes.length === 0 || sending || editing) return;
     const sent = notes;
     setSending(true);
     setNotice(undefined);
@@ -147,6 +147,12 @@ export function CodeLineNotes(props: {
     }
   }
 
+  // Sending mid-edit would send the note's old text and then let Save write
+  // the edit into a note that is already gone.
+  const editing = draft?.editingId !== undefined;
+  const sendHeld = editing
+    ? "Save or cancel the note you are editing before sending."
+    : props.sendUnavailable;
   const pendingLabel = notes.length === 1 ? "Send 1 note" : `Send ${notes.length} notes`;
   return (
     <section aria-label="Line notes" className="code-line-notes">
@@ -267,14 +273,14 @@ export function CodeLineNotes(props: {
             type="button"
             size="sm"
             variant="default"
-            disabled={sending || props.onSend === undefined || props.sendUnavailable !== undefined}
+            disabled={sending || props.onSend === undefined || sendHeld !== undefined}
             onClick={() => void send()}
           >
             {sending ? "Sending…" : pendingLabel}
           </OctantButton>
-          {props.sendUnavailable === undefined ? null : (
+          {sendHeld === undefined ? null : (
             <p className="code-line-notes__hint" role="status">
-              {props.sendUnavailable}
+              {sendHeld}
             </p>
           )}
         </>

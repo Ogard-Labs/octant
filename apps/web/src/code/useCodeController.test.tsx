@@ -22,6 +22,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
 import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
+import { sendLineNotesAsFollowUp } from "../dockModules/ReviewModule";
 
 const now = "2026-07-21T12:00:00.000Z";
 const ids = {
@@ -1793,27 +1794,53 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
     act(() => result.current.setPendingDraft("half-written reply"));
 
-    let sent = true;
+    let outcome: Awaited<ReturnType<typeof sendLineNotesAsFollowUp>> | undefined;
     await act(async () => {
-      sent = await result.current.sendFollowUp(
-        "Notes on the changed lines:",
-        [],
-        [],
-        [],
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        [],
-        undefined,
-        [],
-        false,
-        undefined,
-        true,
-      );
+      outcome = await sendLineNotesAsFollowUp(result.current, "Notes on the changed lines:");
     });
-    expect(sent).toBe(false);
+    expect(outcome?.status).toBe("refused");
     expect(executeOperation).toHaveBeenCalledOnce();
+    expect(result.current.pendingDraft).toBe("half-written reply");
+    unmount();
+  });
+
+  it("reports line notes sent once the host accepts them, even when that turn later fails", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000044";
+    async function* failedFrames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "failed" },
+      };
+    }
+    const client = fakeClient({
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => failedFrames()) as never,
+    });
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("half-written reply"));
+
+    let outcome: Awaited<ReturnType<typeof sendLineNotesAsFollowUp>> | undefined;
+    await act(async () => {
+      outcome = await sendLineNotesAsFollowUp(result.current, "Notes on the changed lines:");
+    });
+    expect(outcome).toEqual({ status: "sent" });
+    await waitFor(() => expect(result.current.turnStatus).toBe("failed"));
     expect(result.current.pendingDraft).toBe("half-written reply");
     unmount();
   });
