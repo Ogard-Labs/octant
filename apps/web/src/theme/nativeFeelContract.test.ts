@@ -93,8 +93,8 @@ describe("native feel", () => {
     }
   });
 
-  it("makes the title band exactly as tall as the rail is wide, and slim", () => {
-    expect(octant).toMatch(/--oct-title-rail-h:\s*38px;/);
+  it("makes the title band exactly as tall as the rail is wide, at the Mac toolbar height", () => {
+    expect(octant).toMatch(/--oct-title-rail-h:\s*44px;/);
     expect(read("styles/shell.css")).toMatch(
       /\.shell\.shell-frame\.shell--sidebar-rail \{\s*--octant-sidebar-target-width: var\(--oct-title-rail-h\);/,
     );

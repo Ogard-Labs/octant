@@ -637,15 +637,15 @@ the tokens in `octant.css`; what each region holds is in
 **The frame.** The icon rail and the title band sit on the frame ground (or the
 coat), painted once on the shell. Neither has a fill or line of its own.
 
-- **Title band**: `--oct-title-rail-h` (38px, the compact height of a Mac
-  window's unified title bar). Its controls are 28px
+- **Title band**: `--oct-title-rail-h` (44px, the height of a Mac window's
+  unified title bar with a toolbar; 38px read as cramped in the desktop app). Its controls are 28px
   (`--oct-rail-button-h`) with the control corner, 4px apart, on an 8px inset at
   both ends. The band's text starts on the thread column's edge (the larger of
   a 20px gutter and half of the pane less the thread measure). A slot a Project
   fills only sometimes takes no room while empty.
-- **Icon rail**: as wide as the band is tall (38px), so the frame is one even
+- **Icon rail**: as wide as the band is tall (44px), so the frame is one even
   L. Faces are 32px, 2px apart (the button's `rail` variant); the first face is
-  centred on the band's centreline (3px down). The current face takes
+  centred on the band's centreline (6px down). The current face takes
   `--oct-wash-selected`, the pointed-at face `--oct-wash-hover`, no border.
 - **Desktop title bar**: Electron's native frame with `titleBarStyle:
 hiddenInset` and no custom `trafficLightPosition` (it would grow the native
