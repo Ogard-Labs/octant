@@ -32,14 +32,20 @@ export interface AgentAccessListenerRouteOptions {
 }
 
 /**
- * The agent-access routes the private listener serves: `claim`, where an
- * agent's machine offers its new key against a one-time ticket, and `mcp`, the
- * one endpoint an outside agent reaches. Both answer only the LAN-private and
- * Tailscale source classes; every credential failure is the same 401.
+ * The agent-access routes: `claim`, where an agent's machine offers its new
+ * key against a one-time ticket, and `mcp`, the one endpoint an outside agent
+ * reaches. The private listener serves both to the LAN-private and Tailscale
+ * source classes. The loopback server serves `mcp` alone, to an MCP client on
+ * this computer that joined as a bridge does: its key was still claimed over
+ * the listener and confirmed by the person, and loopback adds nothing to what
+ * the grant allows. Every credential failure is the same 401.
  */
 export function createAgentAccessListenerRouteHandler(
   options: AgentAccessListenerRouteOptions,
-): (request: Request, facts?: RemoteRouteFacts) => Promise<Response | undefined> {
+): (
+  request: Request,
+  facts?: Pick<RemoteRouteFacts, "sourceClass">,
+) => Promise<Response | undefined> {
   return async (request, facts) => {
     const url = new URL(request.url);
     if (
@@ -49,7 +55,10 @@ export function createAgentAccessListenerRouteHandler(
       return undefined;
     }
     const sourceClass = facts?.sourceClass;
-    if (sourceClass !== "lan-private" && sourceClass !== "tailscale") return unauthorized();
+    if (sourceClass === undefined || sourceClass === "unknown") return unauthorized();
+    if (sourceClass === "loopback" && url.pathname !== AGENT_ACCESS_LISTENER_ROUTES.mcp) {
+      return unauthorized();
+    }
     if (request.method !== "POST") {
       return new Response(null, { status: 405, headers: { allow: "POST" } });
     }

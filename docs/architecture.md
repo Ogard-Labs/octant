@@ -3678,14 +3678,9 @@ definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), weekly at a
 local time in an IANA time zone, or matching file arrivals in a local Work
 Project (Work and `new-thread` only). A routine targets a Chat, Work, or Code
-Project in this host's local catalog. A routine cannot target a
-[Server Project](design/server-projects.md) today: Server Projects are a
-catalog of their own, the dispatcher revalidates the routine's Project against
-the local catalog only (a server Project's id reads as missing and the run is
-blocked as `project-mismatch`), and a turn in a server Project is offered no
-routine tool. Routines on a Server Project's host, run by this host's
-scheduler and executed on the server through the Project's SSH connection,
-are designed and not built (maintainer decision, 2026-11-14). A **Chat routine** keeps Chat's authority, since a Chat thread has no
+Project; a Work or Code routine may target a Project on a registered server,
+whose turn runs there as a person-started turn would
+([Server Projects: Routines](design/server-projects.md#routines)). A **Chat routine** keeps Chat's authority, since a Chat thread has no
 file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
 folder or binding revision), its authority snapshot grants no filesystem,
@@ -10880,7 +10875,7 @@ launch's tool bridge through the loopback relay.
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`, `language-server` and `debug-adapter` (Code only)), composer addressing
+`desktop-provider`, `theme`, `language-server` and `debug-adapter` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -12832,14 +12827,38 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned       |
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                      |
 
-**Themes as plugin contributions** (maintainer decision, 2026-11-14; not built
-yet). A plugin may contribute a theme as data only: a document in the semantic
-theme schema of `@octant/theme`, validated by that package's importer and
-contrast checks before it is listed. A theme contribution carries no renderer
-code, stylesheet, script, or asset loader; a contribution that fails
-validation is refused whole, and the one runtime theme authority applies a
-valid one exactly as it applies a built-in preset. Installation, trust, and
-enablement stay separate steps as for every other component.
+**Themes as plugin contributions** (maintainer decision, 2026-11-14; built).
+A plugin may contribute one or more themes as data only. Each is a component
+of kind `theme` whose `theme` field holds a preset in the semantic theme
+schema: the modes it supports, one colour map per supported mode (semantic
+role names to six-digit hex colours), and optional dither inks. The manifest
+schema in `@octant/contracts/extensions`, re-exported by `@octant/plugin-api`,
+admits nothing else: a theme component declares no capability and no entry
+point, and any field the schema does not name (a font, image, video, script,
+stylesheet, or remote address) is refused, as is any colour that is not a hex
+value. `@octant/plugin-host/themes` reads a component as a preset and checks it
+with `@octant/theme`'s preset validation, the same check every built-in preset
+passes: every role present in each supported mode and text that meets
+contrast. The package inspector refuses a package whose theme fails, whole,
+with `theme-invalid` and the host-worded validation errors, before anything is
+stored. A contributed preset's id is assigned by the host from the package id
+and component id (`plugin:<packageId>:<componentId>`), so a plugin cannot take
+a built-in preset's id or another plugin's.
+
+The renderer reads contributed themes from the same extension snapshot as the
+first-party switches, re-read on each extension change, and lists a theme in
+the Light and Dark preset pickers only while the host reports its component
+effective, which already means installed, trusted, and enabled at the plugin
+and the component; installation, trust, and enablement stay separate steps,
+and discovery or a catalog listing offers nothing. The one runtime theme
+authority applies a listed theme as it applies a built-in preset, and token
+export draws it the same way. Switching the plugin off, or removing it, takes
+its themes out of the pickers at once; a stored choice that names one then
+draws the default theme and the picker shows the default. The stored choice
+is kept, as disabling a plugin preserves its selections, so turning the plugin
+back on restores the theme. _Rationale:_ rewriting the setting on disable
+would lose the person's choice to a reversible switch, and the default is
+already what a missing preset draws.
 
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
@@ -15367,6 +15386,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   agent key; each tool runs in process as a paired-device principal whose
   device id is the grant's own scope id, after a guard that admits only the
   routes the tools use inside the grant, so every device clamp applies too.
+  An MCP client on the host's own computer may hold such a grant too, joined
+  and confirmed the same way: the loopback server serves it the same `mcp`
+  route alone, with the same signed proof, through
+  `octant agent mcp --connection <file> --local` (maintainer decision,
+  2026-11-14); loopback adds nothing to the grant.
   It never answers approvals or adds Projects, its threads are journaled as its
   own and marked as outside content, and revoking the grant ends its sessions.
   Settings › Remote access › Agent access administers grants from a local
@@ -17038,6 +17062,32 @@ cards; general Azure CLI credentials remain unavailable by design.
     re-allowed. A confined launch also counts as its own the read and write
     roots it was granted by name, except the bound root and the temporary
     directory. No own path ever reopens a file in another group.
+  - **On Windows** the same groups name the Windows locations (maintainer
+    decision, 2026-11-14): Credential Manager's `Credentials` folders, the
+    DPAPI `Protect` folder and the `Vault` folders under `AppData`, the
+    password managers' vault folders there, browser profile stores under
+    `AppData\Local` and `AppData\Roaming` (six levels) and the Firefox
+    profiles, the Slack and Discord `Local Storage` folders, `gcloud` under
+    `AppData\Roaming`, `_netrc`, the forge sign-in under
+    `AppData\Roaming\GitHub CLI`, and the Copilot sign-in under
+    `AppData\Local`; the home-folder files (`.ssh`, `.aws`, `.kube`,
+    `.docker`, registry tokens, provider sign-ins) keep their names. Windows
+    has no confined launch yet, so the list there is enforced only by
+    Octant's own file tools, Shield and redaction. Those judge only a
+    drive-absolute path, compared whatever its letter case and slash
+    direction, with `..` resolved inside the drive, each name stripped of the
+    trailing dots and spaces and the `:stream` suffix Windows ignores when it
+    opens a file, and under the final path its longest existing prefix
+    resolves to. A share, device (`\\?\`), drive-relative, or driveless
+    rooted path is refused rather than judged, every path is refused when the
+    home folder is not drive-absolute, and a search is refused when its root
+    is at or above any protected location, or inside a pattern entry's folder
+    with levels of it left (a browser profile folder), whether or not the
+    file exists. On macOS and Linux a search rooted inside a pattern entry's
+    folder is checked by walking from the root, and a walk that passes 4,096
+    entries refuses the search rather than answer that nothing was found.
+    An absolute path a person added is a POSIX path and names nothing on
+    Windows; only `~/` additions apply there.
 - **The person can add paths and remove built-ins.** Settings › Permissions
   › Protected files (`ProtectedFilesService`, `/api/protected-files`) shows
   each group with the paths it covers on this host and the channel that
@@ -18052,6 +18102,30 @@ and Code there on Windows is tracked as its own work and needs Windows forms
 of the confined launches first (maintainer decision, 2026-11-12); today every
 level is refused. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
+
+**Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
+deliverable and keeps every gate above:
+
+1. Built: the [secret guard](#secret-guard) names the Windows locations and
+   refuses a path it cannot judge, and the platform-independent domain and
+   contract suites also run on a hosted Windows runner (not a required check
+   until they have been seen green there).
+2. A Windows confinement design for the confined launches (process, file,
+   and network boundary equivalent to Seatbelt and Bubblewrap, with the
+   secret guard as an OS rule), approved and documented here before any
+   guarded level is admitted. Until then Work and Code stay refused on
+   Windows at every level, and the honest capability report says so.
+3. Work and Code at Full access on Windows on top of the confined launches'
+   Windows forms; Code terminals with an explicit shell setting (PowerShell
+   by default, never a guessed POSIX shell), Windows process-tree stop in
+   place of process-group signals, and no `/tmp` or POSIX path assumptions in
+   provider launches.
+4. The `octant` CLI on Windows: native host paths (today the generic host
+   paths refuse `win32`), a browser opener that runs no shell, and a service
+   manager equivalent; until then the CLI's service commands refuse Windows.
+5. An installer, Authenticode signing, and a signed update feed that builds
+   on the Linux signed-feed trust root once that path has been exercised on a
+   real image; the unsigned QA ZIP stays QA-only.
 
 The Windows owned-control prerequisite is an original in-process Node-API
 binding, not a separate owner daemon. Only a host-selected scope UUID reaches

@@ -82,6 +82,9 @@ export class ServerProjectStore {
   readonly #options: ServerProjectStoreOptions;
   readonly #personActor: EventActorValue;
   readonly #projects = new Map<string, ServerProject>();
+  // Ids the person removed, so a routine still naming one can say why it
+  // stopped instead of reading as a Project nobody knows.
+  readonly #removed = new Set<string>();
   #version = 0;
 
   constructor(options: ServerProjectStoreOptions) {
@@ -92,6 +95,7 @@ export class ServerProjectStore {
   /** Rebuilds the catalog from the journal, in journal order. A record that no longer decodes changes nothing. */
   load(): void {
     this.#projects.clear();
+    this.#removed.clear();
     let after = 0;
     for (;;) {
       const batch = this.#options.journal.replayAggregateType({
@@ -123,6 +127,11 @@ export class ServerProjectStore {
 
   project(projectId: string): ServerProject | undefined {
     return this.#projects.get(projectId);
+  }
+
+  /** Whether the person removed a server Project with this id. */
+  wasRemoved(projectId: string): boolean {
+    return this.#removed.has(projectId);
   }
 
   /** A server Project whose threads are Code threads; a Work one is not. */
@@ -357,7 +366,9 @@ export class ServerProjectStore {
       return;
     }
     if (eventName === SERVER_PROJECTS_EVENT_NAMES.removed) {
-      this.#projects.delete(String(decodeServerProjectRemovedPayload(payload).projectId));
+      const projectId = String(decodeServerProjectRemovedPayload(payload).projectId);
+      this.#projects.delete(projectId);
+      this.#removed.add(projectId);
     }
   }
 

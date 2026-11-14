@@ -14,6 +14,7 @@ import {
 } from "./serverProjectThreads";
 import {
   listServerWorktreeRefs,
+  serverCurrentBranch,
   serverPullRequestRepository,
   withServerWorktreeCreation,
 } from "./serverWorktrees";
@@ -119,6 +120,11 @@ describe.skipIf(!canRunThrowawaySshd)("a worktree on a server", () => {
     const refs = await listServerWorktreeRefs(options(), projectId, signal);
     expect(refs).toEqual([{ name: "main", kind: "local", isCurrent: true }]);
     expect(await listServerWorktreeRefs(options(), "another", signal)).toBeUndefined();
+    // A routine's worktree starts from the same branch the composer offers first.
+    expect(await serverCurrentBranch(options(), projectId)).toEqual({
+      kind: "branch",
+      name: "main",
+    });
   });
 
   it("makes the thread's worktree on a new branch beside the folder, and removes it on rollback", async () => {
@@ -192,6 +198,14 @@ describe.skipIf(!canRunThrowawaySshd)("a worktree on a server", () => {
     });
     expect(local.prepare).not.toHaveBeenCalled();
     expect(existsSync(serverWorktreeFolder(project, threadId))).toBe(false);
+    expect(
+      await serverCurrentBranch(
+        options(() => sshd.closedAlias),
+        projectId,
+      ),
+    ).toMatchObject({
+      kind: "unreachable",
+    });
   }, 30_000);
 
   it("names the pull request's repository by the GitHub remote on the server", async () => {

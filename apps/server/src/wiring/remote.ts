@@ -2121,6 +2121,10 @@ export function wireRemote(deps: RemoteDependencies) {
     session: agentSessionDependencies,
     version,
   });
+  // This loopback server serves the agent endpoint to an MCP client on this
+  // computer; only a request here is ever judged as coming from loopback.
+  const agentAccessLoopbackRoutes = (request: Request) =>
+    agentAccessListenerRoutes(request, { sourceClass: "loopback" });
   const stopAgentGrantTurns = async (grantId: string): Promise<void> => {
     const grant = agentAccessService.read(grantId);
     if (grant === undefined) return;
@@ -2566,6 +2570,7 @@ export function wireRemote(deps: RemoteDependencies) {
     hubAdministrationRoutes,
     localDeviceAdministrationRoutes,
     agentAccessAdministrationRoutes,
+    agentAccessLoopbackRoutes,
     privateListenerAdministrationRoutes,
     privateListenerController,
     privateListenerSetting,
