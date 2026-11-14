@@ -743,7 +743,17 @@ describe("Claude execution policy", () => {
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
       allowDangerouslySkipPermissions: false,
-      tools: ["Read", "Glob", "Grep", "TodoWrite", "ExitPlanMode"],
+      tools: [
+        "Read",
+        "Glob",
+        "Grep",
+        "TodoWrite",
+        "ExitPlanMode",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskList",
+        "TaskGet",
+      ],
       fullToolSet: false,
     });
     // A Code Plan turn runs read-only commands only where its Seatbelt profile
@@ -754,6 +764,10 @@ describe("Claude execution policy", () => {
       "Grep",
       "TodoWrite",
       "ExitPlanMode",
+      "TaskCreate",
+      "TaskUpdate",
+      "TaskList",
+      "TaskGet",
       "Bash",
     ]);
     for (const [mode, platform] of [
@@ -767,6 +781,10 @@ describe("Claude execution policy", () => {
         "Grep",
         "TodoWrite",
         "ExitPlanMode",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskList",
+        "TaskGet",
       ]);
     }
   });
@@ -1725,7 +1743,17 @@ describe("Claude execution policy", () => {
       planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
     );
     const planOpen = plan.opens[0]!;
-    expect(planOpen.tools).toEqual(["Read", "Glob", "Grep", "TodoWrite", "ExitPlanMode"]);
+    expect(planOpen.tools).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+      "TodoWrite",
+      "ExitPlanMode",
+      "TaskCreate",
+      "TaskUpdate",
+      "TaskList",
+      "TaskGet",
+    ]);
     const signal = new AbortController().signal;
     const prePlan = (toolName: string, input: unknown, toolUseId: string) =>
       planOpen.preToolUse({
@@ -1752,6 +1780,14 @@ describe("Claude execution policy", () => {
     // The checklist touches nothing outside Claude's session, so Plan keeps it.
     const checklist = { todos: [{ content: "Read", status: "pending", activeForm: "Reading" }] };
     await expect(prePlan("TodoWrite", checklist, "todo")).resolves.toEqual({ behavior: "allow" });
+    // The task tools write only the session's list in the account directory,
+    // which Plan refuses to share with the checkout, so Plan keeps them too.
+    await expect(
+      prePlan("TaskCreate", { subject: "Read", description: "Read the spec" }, "task-create"),
+    ).resolves.toEqual({ behavior: "allow" });
+    await expect(
+      prePlan("TaskUpdate", { taskId: "1", status: "completed" }, "task-update"),
+    ).resolves.toEqual({ behavior: "allow" });
     await expect(
       planOpen.canUseTool({
         toolName: "Read",
@@ -6103,6 +6139,55 @@ describe("Claude exact resume", () => {
       expect(f.opens[2]?.sandbox).toBeUndefined();
     } finally {
       await acquired.close();
+    }
+  });
+
+  it("opens a resumed session's first turn with the task list Claude stored for it", async () => {
+    const accountDirectory = await mkdtemp(join(tmpdir(), "octant-claude-stored-tasks-"));
+    const stored = join(accountDirectory, "tasks", "sdk-session-1");
+    await mkdir(stored, { recursive: true });
+    const storedTask = (id: string, subject: string, status: string) =>
+      JSON.stringify({ id, subject, description: "", status, blocks: [], blockedBy: [] });
+    await writeFile(join(stored, "1.json"), storedTask("1", "Read the spec", "completed"));
+    await writeFile(join(stored, "2.json"), storedTask("2", "Write the test", "in_progress"));
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    const acquired = await acquire(f.driver);
+    try {
+      const started = await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: started.resumeCursor!,
+          executionPolicy: "approval-gated",
+        }),
+      );
+      const turnEvents = Effect.runPromise(
+        Stream.runCollect(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter((event) => event.sessionId === sessionId),
+            Stream.takeUntil((event) => event.kind === "completed"),
+          ),
+        ),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "go on", attachments: [], tools: [] }),
+      );
+      await f.queries.at(-1)!.emit(completed("sdk-session-1"));
+
+      const panel = [...(await turnEvents)].flatMap((event) =>
+        event.kind === "task-progress"
+          ? [`${event.status} ${event.summary}`]
+          : event.kind === "task-list"
+            ? [`list of ${event.taskIds.length}`]
+            : [],
+      );
+      expect(panel).toEqual(["completed Read the spec", "in-progress Write the test", "list of 2"]);
+    } finally {
+      await acquired.close();
+      await rm(accountDirectory, { recursive: true, force: true });
     }
   });
 

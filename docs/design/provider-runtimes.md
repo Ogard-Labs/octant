@@ -516,9 +516,11 @@ and `TaskStop` take the shell's approval rules; a `Monitor` command, like a
 `Bash` one, is named in its prompt and marks the thread when it reaches a
 server. Session-internal tools that read
 no file, write nothing, and reach no network run unasked at every level, as
-in Claude Code: the checklist (`TodoWrite`) and `ToolSearch`, which only
-loads deferred tool definitions (the bundled 2.1.211 runtime marks it
-read-only; maintainer decision, 2026-11-14). A name joins that list only on
+in Claude Code: the checklist (`TodoWrite`), the task tools (`TaskCreate`,
+`TaskUpdate`, `TaskList`, `TaskGet`), which read and write only the
+session's task list in the account's configuration directory, and
+`ToolSearch`, which only loads deferred tool definitions (the bundled 2.1.211
+runtime marks it read-only; maintainer decision, 2026-11-14). A name joins that list only on
 such evidence. Every other built-in tool is judged at the Project root and
 asks below Full access, which runs without asking, so a tool a later Claude
 Code release adds works from that release and fails closed; a path it names
@@ -533,9 +535,37 @@ decision, 2026-11-14). Because a
 native build may serve searches through its shell, `Grep` and `Glob` are
 also listed in `allowedTools`; the `PreToolUse` hook still answers each call
 first. Plan keeps its explicit list (`Read`, `Glob`, `Grep`, the checklist,
-`ExitPlanMode`, and `Bash` where its sandbox confines it). Chat keeps the earlier explicit
-list at every level and holds no part of the preset: its filesystem and shell
-stay withheld, so it gains nothing from tools Octant has not named.
+`ExitPlanMode`, the task tools, and `Bash` where its sandbox confines it). The task tools
+write nothing in the workspace, and Plan already refuses an account directory
+that overlaps the checkout. Chat keeps the earlier explicit list at every
+level and holds no part of the preset: its filesystem and shell stay
+withheld, so it gains nothing from tools Octant has not named.
+
+Claude Code's default replaces the checklist with the task tools, and Octant
+leaves that default alone: `CLAUDE_CODE_ENABLE_TASKS` is not set (maintainer
+decision, 2026-11-14). The task panel keeps reading whole lists. The driver
+keeps each session's list across its turns and applies each task tool call
+when its result arrives, because the runtime assigns a task's id and returns
+it only in the structured result (`tool_use_result`): `TaskCreate` adds the
+task it names, `TaskUpdate` applies a successful update (a `deleted` status
+removes the task), `TaskGet` refreshes a task the list holds, and `TaskList`
+replaces the list. After each change the mapper restates the whole list as
+`task-progress` events and a closing `task-list`, the shape a `TodoWrite`
+call produces, so the panel, the journal, and replay are unchanged. A failed
+call, a result without its structured output, or an update to a task the
+session never saw changes nothing; no id is ever guessed. The list itself
+lives outside the transcript, in `<config>/tasks/<session id>/<id>.json`
+(each file a task with `id`, `subject`, `description`, `status`, `blocks`,
+and `blockedBy`), so a session that opens or resumes reads that folder and
+its first turn opens with the whole stored list. The files are untrusted:
+only that session's folder is read, symlinks are refused and task files are
+opened without following one, a list holds at most 256 tasks of at most
+64 KiB each and 1 MiB in all, and every task must match Claude's schema.
+Anything else refuses the whole list with a logged reason, and the panel
+starts empty until the next task tool call. A task Claude marks `_internal`
+is left out, as `TaskList` leaves it out. Where the runtime still offers
+`TodoWrite`, it maps as before, and threads journaled from it replay as
+they did.
 
 ### Native plan capture
 
@@ -605,13 +635,6 @@ Rationale: holding the person's turn keeps one journaled turn per send and
 reuses the gate, the stop, and the session's one-turn lifetime unchanged; a
 host-side runner for turns that start on an idle thread would add a second
 turn lifecycle the thread model does not have.
-
-The task tools
-(`TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`) stay off through
-`CLAUDE_CODE_ENABLE_TASKS: "false"`: the panel needs the whole list each
-call, which `TodoWrite` gives, while a task list carries runtime-assigned
-ids and persists outside the session, so a resumed session would show a
-list Octant never saw whole.
 
 ## Codex
 

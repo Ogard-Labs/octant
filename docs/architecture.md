@@ -4796,12 +4796,19 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
 ## Agent task display
 
 Providers that report their own task plans (Claude, Codex, ACP, OpenCode) emit
-`task-progress` runtime events, and the host journals them. Claude's checklist
-is its `TodoWrite` tool: the driver offers it in every posture, Plan included,
-and lets it run unasked, because it changes only Claude's own session state
-(no file, shell, network, or person). Each call restates the whole list, and
-a task id follows a list position, so the panel keeps Claude's latest order and
-wording.
+`task-progress` runtime events, and the host journals them. Claude's plan
+comes from its task tools (`TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`),
+which Claude Code uses by default, or from its older `TodoWrite` checklist
+where the runtime still offers it. The driver offers both in every posture,
+Plan included, and lets them run unasked, because they change only Claude's
+own session state (no file, shell, network, or person). A `TodoWrite` call
+restates the whole list, and a task id follows a list position, so the panel
+keeps Claude's latest order and wording. A task tool call changes one task,
+so the driver keeps the session's list, applies each call's result (the
+runtime assigns ids and returns them only there), and restates the whole list
+after each; a resumed session's first turn opens with the list Claude stored
+for it (maintainer decision, 2026-11-14;
+[Provider runtimes](design/provider-runtimes.md#claude-code) owns the detail).
 
 `task-progress` adds or updates one task. Because every one of these providers
 restates its whole plan, each restatement ends with a `task-list` event naming
