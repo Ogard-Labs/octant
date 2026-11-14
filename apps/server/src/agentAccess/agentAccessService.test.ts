@@ -15,7 +15,9 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { agentProofPayload } from "@octant/domain";
+import { createAgentAccessListenerRouteHandler } from "./agentAccessRoutes";
 import { AGENT_ACCESS_LOCAL_ACTOR, AgentAccessService } from "./agentAccessService";
+import type { AgentSessionDependencies } from "./agentAccessSession";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -410,5 +412,154 @@ describe("agent grants", () => {
       service.takeTurn(grantId),
       service.takeTurn(grantId),
     ]).toEqual([true, true, false]);
+  });
+});
+
+describe("the agent endpoint for an MCP client on this computer", () => {
+  function endpoint(service: AgentAccessService) {
+    const dispatched: Array<string> = [];
+    const session: AgentSessionDependencies = {
+      service,
+      dispatch: async (handoff) => {
+        dispatched.push(new URL(handoff.request.url).pathname);
+        return undefined;
+      },
+      hostId: () => hostId,
+      threadProject: () => undefined,
+      threadAccess: () => undefined,
+      markOutsideContent: () => undefined,
+    };
+    const routes = createAgentAccessListenerRouteHandler({ service, session, version: "test" });
+    return { routes, dispatched };
+  }
+
+  function confirmedKey(service: AgentAccessService, grantId: string) {
+    const enrolled = enroll(service, grantId);
+    service.claim({
+      ticketId: enrolled.code.ticketId,
+      ticketProof: enrolled.code.ticketProof,
+      publicKey: enrolled.publicKey,
+      fingerprint: enrolled.fingerprint,
+      label: "editor",
+    });
+    service.execute(
+      { kind: "confirm-key", grantId: grantId as never, fingerprint: enrolled.fingerprint },
+      AGENT_ACCESS_LOCAL_ACTOR,
+    );
+    return enrolled;
+  }
+
+  let nonce = 0;
+  function loopbackCall(
+    key: { readonly grantId: string; readonly fingerprint: string; readonly privateKey: KeyObject },
+    at: number,
+    message: Readonly<Record<string, unknown>>,
+  ): Request {
+    const text = JSON.stringify({ jsonrpc: "2.0", ...message });
+    const body = new TextEncoder().encode(text);
+    nonce += 1;
+    return new Request("http://127.0.0.1:4800/api/agent-access/mcp", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-agent-proof": proof({
+          ...key,
+          at,
+          nonce: `loopback-nonce-${String(nonce).padStart(4, "0")}`,
+          body,
+        }),
+      },
+      body: text,
+    });
+  }
+
+  it("lists only the tools the grant ticks to a client that reaches it over loopback", async () => {
+    const { service, clock } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Editor", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    const { routes } = endpoint(service);
+
+    const response = await routes(
+      loopbackCall({ grantId, fingerprint, privateKey: pair.privateKey }, clock.now, {
+        id: 1,
+        method: "tools/list",
+      }),
+      { sourceClass: "loopback" },
+    );
+
+    expect(response?.status).toBe(200);
+    const answer = (await response?.json()) as {
+      readonly result: { readonly tools: ReadonlyArray<{ readonly name: string }> };
+    };
+    expect(answer.result.tools.map((tool) => tool.name).sort()).toEqual([
+      "read_thread",
+      "start_work",
+    ]);
+    expect(service.list()[0]?.lastSourceClass).toBe("loopback");
+  });
+
+  it("refuses start_work from a local client whose key holds no grant, or whose grant does not tick it, before anything is dispatched", async () => {
+    const { service, clock } = harness();
+    const unconfirmed = created(
+      service.execute(
+        { kind: "create", draft: { name: "Unconfirmed", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const stray = enroll(service, unconfirmed);
+    service.claim({
+      ticketId: stray.code.ticketId,
+      ticketProof: stray.code.ticketProof,
+      publicKey: stray.publicKey,
+      fingerprint: stray.fingerprint,
+      label: "editor",
+    });
+    const readOnly = created(
+      service.execute(
+        {
+          kind: "create",
+          draft: { name: "Reader", scope: scope({ tools: ["read_thread"] }), days: 30 },
+        },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const reader = confirmedKey(service, readOnly);
+    const { routes, dispatched } = endpoint(service);
+    const startWork = {
+      id: 7,
+      method: "tools/call",
+      params: { name: "start_work", arguments: { prompt: "Fix the build", mode: "code" } },
+    };
+
+    const ungranted = await routes(
+      loopbackCall(
+        { grantId: unconfirmed, fingerprint: stray.fingerprint, privateKey: stray.pair.privateKey },
+        clock.now,
+        startWork,
+      ),
+      { sourceClass: "loopback" },
+    );
+    expect(ungranted?.status).toBe(401);
+    expect(await ungranted?.json()).toEqual({ error: "unauthorized" });
+
+    const unticked = await routes(
+      loopbackCall(
+        { grantId: readOnly, fingerprint: reader.fingerprint, privateKey: reader.pair.privateKey },
+        clock.now,
+        startWork,
+      ),
+      { sourceClass: "loopback" },
+    );
+    expect(await unticked?.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 7,
+      error: { code: -32602, message: "Unknown tool: start_work" },
+    });
+    expect(dispatched).toEqual([]);
   });
 });

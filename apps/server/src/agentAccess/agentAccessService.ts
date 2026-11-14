@@ -64,7 +64,7 @@ const BEARER_PATTERN = /^oak_([0-9a-f]{32})_([A-Za-z0-9_-]{43})$/;
 const PROOF_PATTERN =
   /^v1\.([0-9a-f-]{36})\.([0-9a-f]{64})\.(\d{10,16})\.([A-Za-z0-9_-]{16,64})\.([A-Za-z0-9_-]{40,200})$/;
 
-export type AgentSourceClass = "lan-private" | "tailscale";
+export type AgentSourceClass = "loopback" | "lan-private" | "tailscale";
 
 export interface AgentListenerFacts {
   readonly origin: string;

@@ -50,7 +50,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 11        | 4       | 6            | 1                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 11        | 5       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **260**   | **153** | **96**       | **11**              |
+| **All areas**                                                                         | **260**   | **154** | **96**       | **10**              |
 
 ## Principles and hard lines
 
@@ -2191,7 +2191,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority,
 An agent on another machine on the person's own network starts and follows work in Octant as its own principal, held to an agent grant the person creates. It is never listed as a paired device and never the person, so the rule that a paired device is the person does not reach it; product routes see it as a paired-device principal with the grant's own scope id, so every device clamp applies.
 
 - A grant names its Projects, modes, highest access level (Full access when the person chooses it for the grant; maintainer decision, 2026-11-12; the pick shows the one-time Full access warning, and `start_work` accepts an explicit Full access for such a grant and gives it to the thread alone, never the Project; maintainer decision, 2026-11-13), tools, models, spend limits and expiry, inside every clamp of a restricted device session and its own closed list of routes; its prompts stay marked as outside content at Full access, and the mark is recorded only, as at Full access anywhere. It is created or widened from a local window, the loopback CLI or a device the host's own person paired (maintainer decision, 2026-11-12). Not built yet: today it is created or widened only from a local window or the loopback CLI, and a paired device may only view and revoke it.
-- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
+- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only (and, for a client on the host's own computer, on the loopback server: [Local MCP clients use an agent grant](#local-mcp-clients-use-an-agent-grant)); the tools run in process under the principal.
 - The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
 - It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent, and every turn it sent says so under its prompt.
 - Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
@@ -2201,12 +2201,13 @@ Status: Partly built. Since: 2026-11-11. Detail: [Agent access from other machin
 
 ### Local MCP clients use an agent grant
 
-An MCP client on the host's own machine may use Octant as an MCP server under an agent grant, enrolled, scoped and confirmed as a bridge grant is (maintainer decision, 2026-11-14).
+An MCP client on the host's own computer may use Octant as an MCP server under an agent grant, enrolled, scoped and confirmed as a bridge grant is (maintainer decision, 2026-11-14).
 
-- It connects over loopback with the bridge's signed requests; loopback grants nothing the grant does not, its prompts are outside content, and its approvals wait in Needs you for the person.
-- The existing local `octant agent mcp` path under the bridge secret is unchanged.
+- It runs `octant agent mcp --connection <file> --local`, which sends the bridge's signed requests to the loopback server's `POST /api/agent-access/mcp`; the claim stays on the private listener, and the listener must be on, as for any agent request.
+- Loopback grants nothing the grant does not: the same credential, grant and remote checks apply, an ungranted key is refused with the same `unauthorized`, `tools/list` names only the tools the grant ticks, its prompts are outside content, and its approvals wait in Needs you for the person.
+- The bridge never reads or sends the host's bridge secret; the existing local `octant agent mcp` path under that secret is unchanged.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Agent access: Ways to connect](agent-access.md#ways-to-connect).
+Status: Built. Since: 2026-11-14. Detail: [Agent access: Ways to connect](agent-access.md#ways-to-connect).
 
 ## Credentials and sign-in
 

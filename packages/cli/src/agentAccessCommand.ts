@@ -434,6 +434,7 @@ export async function runAgentAccessJoin(
       `Now confirm this key on the Octant host:`,
       `  octant agent-access confirm ${String(code.grantId).slice(0, 8)} ${fingerprint.slice(0, 16)}`,
       `Then add Octant to your MCP client as: octant agent mcp --connection ${command.out}`,
+      `(on the Octant host's own computer, add --local to reach it over loopback)`,
       "",
     ].join("\n"),
   );
