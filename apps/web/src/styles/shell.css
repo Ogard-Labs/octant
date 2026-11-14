@@ -337,14 +337,13 @@ html[data-octant-native-host="true"]
 
 /* A collapsed sidebar can stay as an icon rail. It keeps the sidebar's
    column and material, and the chrome and workspace return to the second
-   column. The rail is one icon wide and exactly as wide as the title band is
-   tall, so the frame reads as one even L. */
+   column. The rail is one icon wide, `--oct-rail-w`. */
 .shell.shell-frame.shell--sidebar-rail {
-  --octant-sidebar-target-width: var(--oct-title-rail-h);
+  --octant-sidebar-target-width: var(--oct-rail-w);
 }
 
 .shell--sidebar-rail.shell-frame > .sidebar-rail {
-  width: var(--oct-title-rail-h);
+  width: var(--oct-rail-w);
 }
 
 /* In the desktop app the traffic lights sit in the title band across the
@@ -366,12 +365,10 @@ html[data-octant-native-host="true"]
    `--octant-rail-offset` moves everything placed at the sidebar's trailing
    edge (the resize handle, the native drag strip, the glass/ground split)
    right by the rail's width; the sidebar column keeps its own width rules,
-   including the Projects pane and the wide-context clamp. The rail is as wide
-   as the title band is tall: a rail wider or narrower than the band made the
-   frame's two arms visibly differ. */
+   including the Projects pane and the wide-context clamp. */
 .shell.shell-frame.shell--rail-beside {
-  --octant-rail-offset: var(--oct-title-rail-h);
-  --octant-rail-bound: var(--oct-title-rail-h);
+  --octant-rail-offset: var(--oct-rail-w);
+  --octant-rail-bound: var(--oct-rail-w);
 }
 
 /* Beside the open sidebar the rail stays one narrow icon column in the desktop
@@ -386,7 +383,7 @@ html[data-octant-native-host="true"]
 }
 
 .shell--rail-beside.shell-frame > .sidebar-rail {
-  width: var(--oct-title-rail-h);
+  width: var(--oct-rail-w);
 }
 
 .shell--rail-beside.shell-frame > .sidebar {
@@ -435,7 +432,7 @@ html[data-octant-native-host="true"]
    column scrolled as a whole, so in a short window the foot was out of reach
    and the last destination was cut through its icon by the window's bottom
    edge. Now the list ends in a short fade rather than a half icon, and the
-   foot is always on screen. The rail is as wide as the title band around 32px
+   foot is always on screen. The rail is only a little wider than its 32px
    faces: a classic scrollbar took 10px of that once the list overflowed and
    clipped every face, so it scrolls without drawing one. */
 .sidebar-rail__scroll {

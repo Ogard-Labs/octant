@@ -93,13 +93,13 @@ describe("native feel", () => {
     }
   });
 
-  it("makes the title band exactly as tall as the rail is wide, at the Mac toolbar height", () => {
+  it("makes the title band 44px, the Mac toolbar height, with a 52px icon rail beside it", () => {
     expect(octant).toMatch(/--oct-title-rail-h:\s*44px;/);
     expect(read("styles/shell.css")).toMatch(
-      /\.shell\.shell-frame\.shell--sidebar-rail \{\s*--octant-sidebar-target-width: var\(--oct-title-rail-h\);/,
+      /\.shell\.shell-frame\.shell--sidebar-rail \{\s*--octant-sidebar-target-width: var\(--oct-rail-w\);/,
     );
     expect(read("styles/shell.css")).toMatch(
-      /\.shell\.shell-frame\.shell--rail-beside \{\s*--octant-rail-offset: var\(--oct-title-rail-h\);/,
+      /\.shell\.shell-frame\.shell--rail-beside \{\s*--octant-rail-offset: var\(--oct-rail-w\);/,
     );
   });
 

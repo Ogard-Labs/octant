@@ -645,8 +645,8 @@ coat), painted once on the shell. Neither has a fill or line of its own.
   both ends. The band's text starts on the thread column's edge (the larger of
   a 20px gutter and half of the pane less the thread measure). A slot a Project
   fills only sometimes takes no room while empty.
-- **Icon rail**: as wide as the band is tall (44px), so the frame is one even
-  L. Faces are 32px, 2px apart (the button's `rail` variant); the first face is
+- **Icon rail**: `--oct-rail-w`, 52px, a little wider than the band is tall:
+  at 44px its 32px faces had 6px either side and the rail read as a thin strip. Faces are 32px, 2px apart (the button's `rail` variant); the first face is
   centred on the band's centreline (6px down). The current face takes
   `--oct-wash-selected`, the pointed-at face `--oct-wash-hover`, no border.
 - **Desktop title bar**: Electron's native frame with `titleBarStyle:
