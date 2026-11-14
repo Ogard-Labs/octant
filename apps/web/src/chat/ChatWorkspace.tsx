@@ -2201,18 +2201,26 @@ function researchBackend(
     observation?.capabilities.appManagedTools === "supported" ||
     (observation?.verifiedToolModelIds?.some((id) => String(id) === String(view.thread.modelId)) ??
       false);
-  if (view.thread.researchRouting === "searxng") {
-    return controller.bootstrap?.settings.searxngBaseUrl === undefined || !effectiveAppManagedTools
-      ? { kind: "unavailable", reason: "SearXNG is not configured for this provider." }
-      : { kind: "selected", backend: "searxng" };
+  // The host says whether its data policy leaves a web search backend
+  // eligible; a host that predates the backend list has only Chat's address.
+  const webSearchReady =
+    controller.bootstrap?.webSearchReady ??
+    controller.bootstrap?.settings.searxngBaseUrl !== undefined;
+  if (view.thread.researchRouting === "octant") {
+    return !webSearchReady || !effectiveAppManagedTools
+      ? {
+          kind: "unavailable",
+          reason: "No web search backend is ready for this provider under the data policy.",
+        }
+      : { kind: "selected", backend: "octant" };
   }
   if (view.thread.researchRouting === "provider-native") {
     return observation?.capabilities.nativeWebResearch === "supported"
       ? { kind: "selected", backend: "provider-native" }
       : { kind: "unavailable", reason: "Provider-native research is unsupported." };
   }
-  if (controller.bootstrap?.settings.searxngBaseUrl !== undefined && effectiveAppManagedTools) {
-    return { kind: "selected", backend: "searxng" };
+  if (webSearchReady && effectiveAppManagedTools) {
+    return { kind: "selected", backend: "octant" };
   }
   return observation?.capabilities.nativeWebResearch === "supported"
     ? { kind: "selected", backend: "provider-native" }

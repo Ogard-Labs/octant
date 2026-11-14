@@ -43,7 +43,7 @@ function renderComposer(
       value: "provider-a",
     },
     research: {
-      backend: { kind: "selected", backend: "searxng" },
+      backend: { kind: "selected", backend: "octant" },
       enabled: false,
       routing: "automatic",
     },
@@ -91,7 +91,7 @@ describe("ChatComposer", () => {
         onSend: vi.fn(async () => true),
         provider: { options: [{ id: "provider-a", label: "Provider A" }], value: "provider-a" },
         research: {
-          backend: { kind: "selected", backend: "searxng" },
+          backend: { kind: "selected", backend: "octant" },
           enabled: false,
           routing: "automatic",
         },
@@ -277,7 +277,7 @@ describe("ChatComposer", () => {
     expect(document.querySelector(".chat-composer--running")).toBeNull();
     const prompt = screen.getByLabelText("Message");
     expect(prompt).toHaveAccessibleDescription(
-      "Research uses SearXNG. Enter a message before sending.",
+      "Research uses Octant web search. Enter a message before sending.",
     );
     // The region the prompt names is the one polite status region.
     expect(screen.getByRole("status")).toHaveTextContent("Enter a message before sending.");
@@ -378,7 +378,7 @@ describe("ChatComposer", () => {
       research: {
         backend: { kind: "unavailable", reason: "SearXNG is not configured." },
         enabled: true,
-        routing: "searxng",
+        routing: "octant",
       },
     });
 

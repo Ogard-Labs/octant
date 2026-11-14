@@ -4979,18 +4979,29 @@ an agent ran and got back (maintainer request, 2026-11-12).
 
 Octant has one web search, `web-search` (`WEB_SEARCH_TOOL_DEFINITION`): one
 name, one argument schema, and one result shape wherever a model meets it. It
-searches the SearXNG endpoint in Chat settings for a query of 1 to 512
-characters and returns that query with each result's title, URL, and snippet,
-5 results unless the call asks for 1 to 10. It opens no page. Searching an
-ordered list of backends under a data policy, and a provider's own search in
-the native harness under that policy, are designed, not built
-([Web search backends and data policy](design/web-search-backends.md)).
+searches the host's web search backends for a query of 1 to 512 characters
+and returns that query with each result's title, URL, and snippet, 5 results
+unless the call asks for 1 to 10. It opens no page.
+
+- **Backends and data policy.** The host keeps an ordered list of backends
+  and one data policy (Any, ZDR only, EU only, EU and ZDR), journaled under
+  `web-search-settings` and changed only by the host's own person through
+  `/api/host-control/web-search`. A pure policy in `packages/domain` returns
+  the entries the policy leaves eligible, in the person's order; with none,
+  `web-search` is not offered. A SearXNG address Chat settings held becomes
+  the first entry, under Any, until a list is saved. The only kind so far is
+  `searxng`, and a query goes to the first eligible entry; vendor backends,
+  fallback, and a provider's own search in the native harness under the policy
+  are designed, not built
+  ([Web search backends and data policy](design/web-search-backends.md)).
 
 - **Where.** A Chat thread is offered it on every provider while its research
-  is on and its research route is ready through SearXNG; a provider-native
-  route uses the provider's own search instead. Automatic routing picks the
-  provider's own search first and SearXNG only when the provider has none, so
-  a fresh install searches without an endpoint. The native harness offers the
+  is on and its research route is ready through Octant's own backends (the
+  `octant` route, stored as `searxng` before the backend list and still read
+  that way); a provider-native route uses the provider's own search instead.
+  Automatic routing picks the provider's own search first and Octant's own
+  backends only when the provider has none, so a fresh install searches
+  without an endpoint. The native harness offers the
   same definition as its own tool in Work and Code, and in Chat under the
   same research grant ([Native harness](#native-harness)). A harness Chat
   thread gets it once, from the harness's own tool set: the turn adds no second
@@ -9354,7 +9365,7 @@ the model at another size.
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). `web-fetch` and
   `web-search` are offered only where the host has them (`web-search` needs a
-  configured SearXNG endpoint). A Chat thread gets them only while its
+  web search backend the data policy leaves eligible). A Chat thread gets them only while its
   research is on, because research is its grant to reach the web; Work and
   Code need no such grant, and a child gets them only with network authority.
   `web-search` is Octant's one search definition, the one a Chat thread on

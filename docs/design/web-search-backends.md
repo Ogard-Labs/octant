@@ -10,11 +10,15 @@ one definition, and its result shape
 harness refuses on a tainted thread stay in
 [Search queries on a tainted thread](search-query-taint.md).
 
-Status: designed, not built. Today `web-search` searches one SearXNG endpoint
-from Chat settings, a host with none set has no search of its own, and the
-native harness refuses any built-in tool a provider starts in its stream as
-`unsupported`, so a harness endpoint reports `nativeWebResearch` as
-`unsupported`.
+Status: partly built. Built: the settings contract and its journaled
+`/api/host-control/web-search` route, the eligibility policy, the research
+route's rename to `octant`, and the migration; `web-search` searches the first
+eligible backend, and the only kind so far is `searxng`. Not built: the vendor
+backends, their credential broker namespace and the fallback (slice 2),
+Settings › Web search (slice 3), and a provider's own search in the native
+harness (slice 4), which still refuses any built-in tool a provider starts in
+its stream as `unsupported`, so a harness endpoint reports
+`nativeWebResearch` as `unsupported`.
 
 ## Why
 
@@ -280,7 +284,9 @@ entry, and a link to the old field opens this page.
 
 A stored `searxngBaseUrl` becomes one `searxng` entry, with no statements made
 and the policy set to Any, so a host that searched before searches the same
-way after. A host with no SearXNG address gets an empty list. A stored research
+way after. The host reads that entry from Chat settings until the person first
+saves a list; the save journals the migrated list as the change's previous
+value, and from then on the saved list alone decides. A host with no SearXNG address gets an empty list. A stored research
 route of `searxng`, on a thread or as Chat's default, reads as `octant`; the
 decoder accepts the old value and the next write stores the new one.
 

@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { Schema } from "effect";
 import type { ProviderSessionId } from "./providers";
 import {
   CHAT_EVENT_NAMES,
@@ -17,6 +18,7 @@ import {
   decodeChatResearchRouting,
   decodeChatBootstrap,
   decodeChatNavigation,
+  ChatSettings,
   decodeChatSettings,
   decodeChatThread,
   decodeChatThreadView,
@@ -118,9 +120,16 @@ const settingsFixture = {
 describe("chat contracts", () => {
   it("decodes the exact ChatResearchRouting values and rejects unknown routing", () => {
     expect(decodeChatResearchRouting("automatic")).toBe("automatic");
-    expect(decodeChatResearchRouting("searxng")).toBe("searxng");
+    expect(decodeChatResearchRouting("octant")).toBe("octant");
     expect(decodeChatResearchRouting("provider-native")).toBe("provider-native");
     expect(() => decodeChatResearchRouting("default")).toThrow();
+  });
+
+  it("reads a stored searxng research route as octant and writes octant back", () => {
+    expect(decodeChatResearchRouting("searxng")).toBe("octant");
+    const stored = decodeChatSettings({ ...settingsFixture, defaultResearchRouting: "searxng" });
+    expect(stored.defaultResearchRouting).toBe("octant");
+    expect(Schema.encodeSync(ChatSettings)(stored).defaultResearchRouting).toBe("octant");
   });
 
   it("decodes the exact ChatAttemptOutcome values and rejects unknown outcomes", () => {

@@ -1712,7 +1712,7 @@ describe("useChatController", () => {
       settings: {
         ...current.settings,
         defaultResearchEnabled: true,
-        defaultResearchRouting: "searxng",
+        defaultResearchRouting: "octant",
         version: 2,
       },
     });
@@ -1739,7 +1739,7 @@ describe("useChatController", () => {
       defaultProviderInstanceId: current.settings.defaultProviderInstanceId,
       defaultModelId: current.settings.defaultModelId,
       defaultResearchEnabled: true,
-      defaultResearchRouting: "searxng" as const,
+      defaultResearchRouting: "octant" as const,
       defaultPersonalityInstructions: current.settings.defaultPersonalityInstructions,
     };
     await act(async () => expect(await result.current.updateSettings(command)).toBe(true));

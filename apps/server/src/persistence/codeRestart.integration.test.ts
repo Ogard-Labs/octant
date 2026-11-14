@@ -330,6 +330,7 @@ describe("Code persistence restart", () => {
       { projection_name: "usage", reason: "unsupported-event-version" },
       { projection_name: "usage-resume", reason: "unsupported-event-version" },
       { projection_name: "validation-evidence", reason: "unsupported-event-version" },
+      { projection_name: "web-search-settings", reason: "unsupported-event-version" },
       { projection_name: "zen", reason: "unsupported-event-version" },
     ]);
     inspected.close();

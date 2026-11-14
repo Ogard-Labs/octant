@@ -168,7 +168,7 @@ describe("chat thread lifecycle", () => {
       }),
     ).toThrow(ChatPolicyRejected);
     expect(() =>
-      changeChatResearch(thread, { ...stale, researchEnabled: true, researchRouting: "searxng" }),
+      changeChatResearch(thread, { ...stale, researchEnabled: true, researchRouting: "octant" }),
     ).toThrow(ChatPolicyRejected);
     expect(() => archiveChatThread(thread, stale)).toThrow(ChatPolicyRejected);
     expect(() => requestChatThreadDeletion(thread, stale)).toThrow(ChatPolicyRejected);
@@ -260,14 +260,14 @@ describe("chat thread lifecycle", () => {
     const original = makeThread();
     const updated = changeChatResearch(original, {
       researchEnabled: true,
-      researchRouting: "searxng",
+      researchRouting: "octant",
       expectedVersion: 1 as AggregateVersion,
       updatedAt: later,
     });
 
     expect(updated).toMatchObject({
       researchEnabled: true,
-      researchRouting: "searxng",
+      researchRouting: "octant",
       version: 2,
       updatedAt: later,
     });

@@ -1,30 +1,29 @@
-import { SearxngClient, type SearxngFetch } from "../chat/research/searxngClient";
+import type { WebSearchBackendEntry } from "@octant/contracts";
+import type { SearxngFetch } from "../chat/research/searxngClient";
+import { searchWebSearchBackends } from "../webSearch/webSearchBackends";
 import type { NativeHarnessToolPorts } from "./nativeHarnessTools";
 
 /**
- * The harness `web-search` port backed by the SearXNG endpoint in Chat
- * settings, or nothing when no endpoint is set so the tool is not offered and
- * no request can leave the host. Call it when a turn's tools are composed:
- * the endpoint can be set, changed, or cleared while the host runs.
+ * The harness `web-search` port over the web search backends the host's data
+ * policy leaves eligible, or nothing when none is, so the tool is not offered
+ * and no request can leave the host. Call it when a turn's tools are composed:
+ * the list can change while the host runs.
  */
-export function searxngHarnessWebSearch(options: {
-  readonly readBaseUrl: () => string | undefined;
+export function harnessWebSearch(options: {
+  readonly readEligible: () => ReadonlyArray<WebSearchBackendEntry>;
   readonly fetch?: SearxngFetch;
 }): NativeHarnessToolPorts["webSearch"] {
-  if (options.readBaseUrl() === undefined) return undefined;
+  if (options.readEligible().length === 0) return undefined;
   return async (input) => {
     // Read again per call: a turn may outlive the setting it started with,
-    // and a cleared endpoint must stop requests immediately.
-    const baseUrl = options.readBaseUrl();
-    if (baseUrl === undefined) return [];
-    const found = await new SearxngClient({
-      baseUrl,
+    // and a backend the policy no longer allows must stop receiving queries.
+    const backends = options.readEligible();
+    if (backends.length === 0) return [];
+    const found = await searchWebSearchBackends({
+      backends,
+      search: input,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-    }).search(input);
-    return found.results.map((result) => ({
-      title: result.title,
-      url: result.url,
-      snippet: result.snippet,
-    }));
+    });
+    return found.results;
   };
 }

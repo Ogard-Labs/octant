@@ -52,7 +52,7 @@ describe("ChatSettingsView", () => {
     await chooseSelectFieldOption(
       user,
       screen.getByRole("combobox", { name: "Default research backend" }),
-      "SearXNG",
+      "Octant web search",
     );
     await user.type(screen.getByLabelText("SearXNG base URL"), "https://search.example/");
     await user.clear(screen.getByLabelText("Instructions for new Chat threads"));
@@ -68,7 +68,7 @@ describe("ChatSettingsView", () => {
       defaultProviderInstanceId: providerB as never,
       defaultModelId: "model-b-plus" as never,
       defaultResearchEnabled: true,
-      defaultResearchRouting: "searxng",
+      defaultResearchRouting: "octant",
       searxngBaseUrl: "https://search.example/",
       defaultPersonalityInstructions: "Be calm and precise.",
       providerFallback: {

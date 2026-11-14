@@ -58,7 +58,7 @@ import {
   type SlashCommandToken,
 } from "../palette/commandModel";
 
-export type ChatComposerResearchRouting = "automatic" | "searxng" | "provider-native";
+export type ChatComposerResearchRouting = "automatic" | "octant" | "provider-native";
 
 export interface ChatComposerOption {
   readonly disabled?: boolean;
@@ -78,7 +78,7 @@ export type ChatComposerAttachmentCapability =
 
 export type ChatComposerResearchBackend =
   | { readonly kind: "disabled" }
-  | { readonly kind: "selected"; readonly backend: "searxng" | "provider-native" }
+  | { readonly kind: "selected"; readonly backend: "octant" | "provider-native" }
   | { readonly kind: "unavailable"; readonly reason: string };
 
 export interface ChatComposerResearch {
@@ -795,7 +795,7 @@ export function ChatComposer(props: ChatComposerProps) {
               }
               options={[
                 { id: "automatic", label: "Automatic" },
-                { id: "searxng", label: "SearXNG" },
+                { id: "octant", label: "Octant web search" },
                 { id: "provider-native", label: "Provider-native" },
               ]}
               value={props.research.routing}
@@ -1010,7 +1010,7 @@ function composeStatus(input: {
     });
   } else if (input.research.kind === "selected") {
     quiet.push(
-      `Research uses ${input.research.backend === "searxng" ? "SearXNG" : "provider-native research"}.`,
+      `Research uses ${input.research.backend === "octant" ? "Octant web search" : "provider-native research"}.`,
     );
   }
   if (input.statusMessage !== undefined) {
