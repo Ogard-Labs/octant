@@ -76,6 +76,22 @@ describe("Xterm runtime", () => {
     expect(mocks.webglDispose).toHaveBeenCalledOnce();
   });
 
+  it("keeps at most four terminals on the GPU and hands a slot on when one closes", () => {
+    const open = () =>
+      mount(document.createElement("div"), {
+        interactive: false,
+        onData: vi.fn(),
+        onResize: vi.fn(),
+        output: "",
+      });
+    const sessions = [open(), open(), open(), open(), open()];
+
+    expect(mocks.webglConstruct).toHaveBeenCalledTimes(4);
+    sessions[0]?.dispose();
+    expect(mocks.webglConstruct).toHaveBeenCalledTimes(5);
+    for (const session of sessions.slice(1)) session.dispose();
+  });
+
   it("still opens a terminal on a machine that refuses a GPU context", () => {
     mocks.webglConstruct.mockImplementationOnce(() => {
       throw new Error("WebGL is unavailable.");

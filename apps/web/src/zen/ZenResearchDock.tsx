@@ -1,3 +1,4 @@
+import { moveWithinTabList } from "../ui/base/radioGroupKeys";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
@@ -421,7 +422,12 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
         </div>
       ) : (
         <>
-          <div aria-label="Research tabs" className="zen-research__rail" role="tablist">
+          <div
+            aria-label="Research tabs"
+            className="zen-research__rail"
+            onKeyDown={moveWithinTabList}
+            role="tablist"
+          >
             {(tabs.length === 0
               ? [
                   {
@@ -432,9 +438,17 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
                 ]
               : tabs
             ).map((tab) => (
-              <span className="zen-research__tab" key={tab.tabId}>
+              <span className="zen-research__tab" key={tab.tabId} role="presentation">
                 <OctantButton
                   aria-selected={tab.tabId === state?.activeTabId}
+                  tabIndex={
+                    tab.tabId ===
+                    (tabs.some((entry) => entry.tabId === state?.activeTabId)
+                      ? state?.activeTabId
+                      : (tabs[0]?.tabId ?? state?.activeTabId))
+                      ? 0
+                      : -1
+                  }
                   onClick={() => void tabCommand("select", tab.tabId)}
                   role="tab"
                   title={tab.url}

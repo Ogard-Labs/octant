@@ -1273,6 +1273,22 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
   background: var(--oct-surface);
 }
 
+/* Jump to latest floats at the foot of a following transcript the reader has
+   scrolled away from, above the composer's edge fade. */
+.transcript-jump-anchor {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  height: 0;
+}
+
+.transcript-jump {
+  position: absolute;
+  bottom: var(--oct-space-3);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
 .transcript-find__status {
   min-width: 4.5rem;
   font-size: var(--oct-text-xs);

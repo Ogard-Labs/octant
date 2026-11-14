@@ -1411,7 +1411,7 @@ describe("the public-block visual language", () => {
     expect(dashboard).not.toContain("OctantCard");
     expect(dashboard).toContain('className="surface-toolbar"');
     expect(dashboard).toContain("<SurfaceSection");
-    expect(dashboard).toContain("<SurfaceEmpty");
+    expect(dashboard).toMatch(/<OctantEmpty\s+layout="line"/);
     expect(limits).not.toContain("OctantCard");
     expect(limits).toContain('className="surface-row provider-limits__row"');
   });
@@ -1663,6 +1663,7 @@ describe("the public-block visual language", () => {
         ".phone-scroll",
         ".setnav",
         ".sidebar-rail__scroll",
+        ".workspace-content-tabs",
       ];
       const strays: string[] = [];
       for (const path of cssFiles(webRoot)) {

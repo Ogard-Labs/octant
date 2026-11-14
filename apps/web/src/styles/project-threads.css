@@ -570,6 +570,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The label takes the slack so the chevron leads and the count closes the row. */
+.project-archive__label {
+  flex: 1 1 auto;
+}
+
 /* The Snoozed and Put away shelves share the archive shelf's quiet summary
    row; their rows are ordinary thread rows, so nothing else is restyled. */
 .project-shelf > .project-threads {
@@ -735,7 +740,7 @@
 
 .project-dialog__folder:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .project-dialog__folder svg {
@@ -845,7 +850,7 @@
 
 .project-button:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .project-dialog__status {
@@ -1915,7 +1920,7 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
 }
 
 .project-coordinator__fold:disabled {
-  opacity: 0.35;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .project-coordinator__thread {

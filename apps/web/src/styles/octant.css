@@ -5690,6 +5690,15 @@ html[data-octant-reduced-motion="true"] .callout {
   color: var(--oct-meta);
   padding: 0;
 }
+/* The glyph stays 16px; the press target grows to the 24px minimum. */
+.filetab-close {
+  position: relative;
+}
+.filetab-close::after {
+  position: absolute;
+  inset: -4px;
+  content: "";
+}
 .filetab-close:hover {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
@@ -6748,6 +6757,17 @@ html[data-octant-reduced-motion="true"] .callout {
   cursor: nwse-resize;
   touch-action: none;
   background: linear-gradient(135deg, transparent 50%, var(--oct-border) 50%);
+}
+
+/* The corner mark stays 14px; the drag target reaches the 24px minimum
+   inward, so it never spills past the element's edge. */
+.zen-el-grip::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 24px;
+  height: 24px;
+  content: "";
 }
 
 /* minimised keeps the title bar and drops everything else, so the
@@ -10033,4 +10053,16 @@ html[data-octant-reduced-motion="true"] .skeleton::after {
 .questionnaire-summary dd {
   margin: 0;
   white-space: pre-wrap;
+}
+
+/* Holds a disabled switch's hover explanation; the switch itself takes no
+   pointer events while disabled. */
+.octant-switch__frame {
+  display: inline-flex;
+  position: relative;
+}
+
+.octant-switch__disabled-reason {
+  position: absolute;
+  inset: 0;
 }

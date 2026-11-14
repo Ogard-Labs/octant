@@ -1,7 +1,8 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import { Folder, FolderPlus, PanelLeftClose, Plus, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
-import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ProjectIcon } from "./ProjectIcon";
@@ -131,7 +132,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
         </OctantToggleGroup>
       </div>
       {visibleProjects.length === 0 ? (
-        <SurfaceEmpty {...emptyProps} />
+        <OctantEmpty layout="line" {...emptyProps} />
       ) : (
         <ul className="surface-list">
           {visibleProjects.map((project) => {

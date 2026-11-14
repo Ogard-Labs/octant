@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
 import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
@@ -20,7 +21,6 @@ import {
 } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
-import { ShellState } from "../shell/ShellState";
 import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -31,6 +31,7 @@ import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
 import { CodeProjectCoordinatorStarting } from "./CodeProjectCoordinatorStarting";
 import { CodeProjectPlanner } from "./CodeProjectPlanner";
 import type { PlannerProposalReview } from "./plannerProposalCreation";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export type CodeOverviewProps =
   | {
@@ -90,7 +91,7 @@ export function CodeOverview(props: CodeOverviewProps) {
       : undefined;
   if (props.controller.status === "disconnected") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry Code", onClick: props.controller.retry }}
         eyebrow="Code workspace"
         message={props.controller.errorMessage ?? "The local Code service is unavailable."}
@@ -103,7 +104,7 @@ export function CodeOverview(props: CodeOverviewProps) {
   if (view === undefined) {
     const unavailable = props.controller.errorCategory;
     return (
-      <ShellState
+      <OctantEmpty
         {...(unavailable === undefined
           ? {}
           : { action: { label: "Retry Code", onClick: props.controller.retry } })}
@@ -622,8 +623,7 @@ function CodeProjectThreadRow(props: {
         {pinned ? <span className="tag">Pinned</span> : null}
       </div>
       {detail.length === 0 ? null : (
-        <details className="code-project-thread__more">
-          <summary>Details</summary>
+        <OctantCollapsible className="code-project-thread__more" summary="Details">
           <dl className="kv">
             {detail.map((fact) => (
               <Fragment key={fact.label}>
@@ -632,7 +632,7 @@ function CodeProjectThreadRow(props: {
               </Fragment>
             ))}
           </dl>
-        </details>
+        </OctantCollapsible>
       )}
     </article>
   );

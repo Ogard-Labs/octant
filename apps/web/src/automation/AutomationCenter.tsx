@@ -1,3 +1,5 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   AutomationEventSourceChoice,
   AutomationDefinition,
@@ -28,9 +30,8 @@ import {
   routineScheduleLine,
 } from "./routinePresentation";
 import { useEffect, useRef, useState } from "react";
-import { ShellState } from "../shell/ShellState";
 import { ListArrangementMenu } from "../shell/ListArrangementMenu";
-import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -565,7 +566,7 @@ function AutomationListBody(props: {
   const { controller } = props;
   if (controller.list.status === "loading") {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Automation Center"
         message="Loading automations."
         state="loading"
@@ -575,7 +576,7 @@ function AutomationListBody(props: {
   }
   if (controller.list.status === "unavailable") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry", onClick: controller.retryList }}
         eyebrow="Automation Center"
         message={controller.list.message}
@@ -594,7 +595,8 @@ function AutomationListBody(props: {
   });
   if (groups.length === 0) {
     return (
-      <SurfaceEmpty
+      <OctantEmpty
+        layout="line"
         action={
           <OctantButton
             onClick={() => {
@@ -887,7 +889,7 @@ function AutomationDetail(props: {
 
   if (controller.detail.status === "loading" || controller.detail.status === "idle") {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Automation Center"
         message="Loading the automation."
         state="loading"
@@ -897,7 +899,7 @@ function AutomationDetail(props: {
   }
   if (controller.detail.status === "unavailable") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry", onClick: controller.retryDetail }}
         eyebrow="Automation Center"
         message={controller.detail.message}
@@ -1119,11 +1121,11 @@ function AutomationDetail(props: {
         )}
       </dl>
 
-      <details className="automation-detail__advanced">
-        <summary>
-          <span>Advanced</span>
-          <ChevronDown aria-hidden="true" size={14} />
-        </summary>
+      <OctantCollapsible
+        chevron="end"
+        className="automation-detail__advanced"
+        summary={<span>Advanced</span>}
+      >
         <dl className="automation-detail__facts">
           <div>
             <dt>Authority</dt>
@@ -1138,23 +1140,18 @@ function AutomationDetail(props: {
             <dd>{String(automation.definitionRevision)}</dd>
           </div>
         </dl>
-      </details>
+      </OctantCollapsible>
 
-      <details
+      <OctantCollapsible
+        chevron="end"
         className="automation-detail__history"
         onToggle={(event) => {
-          if (
-            (event.target as HTMLDetailsElement).open &&
-            controller.history.status === "collapsed"
-          ) {
+          if (event.currentTarget.open && controller.history.status === "collapsed") {
             void controller.expandHistory();
           }
         }}
+        summary={<span>Run history</span>}
       >
-        <summary>
-          <span>Run history</span>
-          <ChevronDown aria-hidden="true" size={14} />
-        </summary>
         <AutomationHistoryBody
           automation={automation}
           automationName={automation.displayName}
@@ -1166,7 +1163,7 @@ function AutomationDetail(props: {
             : { notificationClient: props.notificationClient })}
           {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
         />
-      </details>
+      </OctantCollapsible>
     </section>
   );
 }

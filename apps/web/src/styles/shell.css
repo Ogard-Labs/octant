@@ -760,7 +760,7 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 }
 
 .window-chrome__button[aria-disabled="true"] {
-  opacity: 0.45;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .dock-tool-buttons {
@@ -1742,6 +1742,13 @@ html[data-octant-density="compact"]
   min-height: 18px;
   padding: 0;
   transform: translateY(-50%);
+}
+
+/* The 18px mark keeps its size; its press target reaches the 24px minimum. */
+.sidebar-navigation__thread-lineage::after {
+  position: absolute;
+  inset: -3px;
+  content: "";
 }
 
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
@@ -3829,7 +3836,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .browser-profile-control:disabled {
-  opacity: 0.5;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .browser-extensions-button {

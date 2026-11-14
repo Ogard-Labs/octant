@@ -785,7 +785,7 @@ html[data-octant-increased-contrast="true"] .environment-card__rows {
 }
 
 .environment-move__member:disabled {
-  opacity: 0.6;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .environment-move__name {

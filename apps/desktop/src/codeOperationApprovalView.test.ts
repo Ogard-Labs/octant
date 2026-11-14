@@ -74,6 +74,7 @@ function makeFixture(options: { readonly expiryMs?: number } = {}) {
     },
     setBounds: vi.fn(),
     setVisible: vi.fn(),
+    focus: vi.fn(),
   };
   const host = {
     createView: vi.fn(() => view),
@@ -179,6 +180,48 @@ describe("Code operation approval view controller", () => {
     await expect(result).resolves.toBe(ids.approval);
     expect(fixture.host.detach).toHaveBeenCalledWith(fixture.window, fixture.view);
     expect(fixture.view.webContents.close).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the window under a renderer overlay and refuses to allow while hidden", async () => {
+    const fixture = makeFixture();
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    const result = fixture.controller.request({
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(fixture.view.focus).toHaveBeenCalledOnce();
+
+    fixture.controller.setObscured("window-1", true);
+    expect(fixture.view.setVisible).toHaveBeenLastCalledWith(false);
+    await expect(
+      fixture.controller.decision({
+        senderId: 41,
+        token: "approval-view-token",
+        challengeId: ids.challenge,
+        decision: "approve",
+      }),
+    ).resolves.toBeUndefined();
+    expect(fixture.confirm).not.toHaveBeenCalled();
+
+    fixture.controller.setObscured("window-1", false);
+    expect(fixture.view.setVisible).toHaveBeenLastCalledWith(true);
+    expect(fixture.view.focus).toHaveBeenCalledTimes(2);
+    await expect(
+      fixture.controller.decision({
+        senderId: 41,
+        token: "approval-view-token",
+        challengeId: ids.challenge,
+        decision: "approve",
+      }),
+    ).resolves.toBe(ids.approval);
+    await expect(result).resolves.toBe(ids.approval);
   });
 
   it("expires a request even while the host is still preparing its challenge", async () => {

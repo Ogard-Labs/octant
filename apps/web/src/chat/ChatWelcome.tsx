@@ -10,6 +10,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
+import { pastedImageName } from "./composerImagePaste";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
@@ -60,7 +61,12 @@ export interface ChatWelcomeProps {
     prompt: string,
     modelOptionValues?: ProviderModelOptionValues,
     extensionSelections?: ReadonlyArray<ExtensionSelection>,
-  ) => void;
+    /**
+     * Files staged before the chat exists. They upload to the new thread once it
+     * is created and leave with the first message, as a Work draft's images do.
+     */
+    attachments?: ReadonlyArray<File>,
+  ) => Promise<boolean | void> | void;
   readonly onSelectProvider?: (selection: ModelPickerSelection) => void;
   readonly onOpenSettings?: () => void;
   readonly onRetry?: () => void;
@@ -94,6 +100,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   const ready = props.status === undefined || props.status === "ready";
   const [prompt, setPrompt] = useNewTaskPrompt();
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
+  const [stagedFiles, setStagedFiles] = useState<ReadonlyArray<File>>([]);
   // This composer has no suggestion list, so a capability token typed here can
   // only ever leave as unattached prose; the refusal says where one attaches.
   const slash = useComposerSlashCommands({
@@ -141,12 +148,31 @@ export function ChatWelcome(props: ChatWelcomeProps) {
       receipt.selection === undefined ? [] : [receipt.selection],
     );
     const options = Object.keys(modelOptionValues).length === 0 ? undefined : modelOptionValues;
-    if (extensionSelections.length > 0) {
+    if (stagedFiles.length > 0) {
+      const submitted = stagedFiles;
+      const created = props.onCreateChat(
+        trimmed,
+        options,
+        extensionSelections.length > 0 ? extensionSelections : undefined,
+        submitted,
+      );
+      // The files stay staged until the first message has left with them: a
+      // refused create or a failed upload otherwise lost them while the prompt
+      // stayed. Files staged or removed meanwhile are left as the person set them.
+      if (created === undefined) setStagedFiles([]);
+      else
+        void created.then((outcome) => {
+          if (outcome === true) {
+            setStagedFiles((current) => current.filter((file) => !submitted.includes(file)));
+          }
+        });
+      if (extensionSelections.length > 0) extensionDraft.clear();
+    } else if (extensionSelections.length > 0) {
       props.onCreateChat(trimmed, options, extensionSelections);
       extensionDraft.clear();
     } else if (options === undefined) props.onCreateChat(trimmed);
     else props.onCreateChat(trimmed, options);
-  }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues]);
+  }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues, stagedFiles]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (atMenu.handleKeyDown(event)) return;
@@ -269,26 +295,52 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               />
             }
             chips={
-              extensionDraft.receipts.length > 0 ? (
-                <ul aria-label="Selected extensions" className="composer-chips">
-                  {extensionDraft.receipts.map((receipt) => (
-                    <li className="chip" key={receipt.reference}>
-                      <span>{receipt.label}</span>
-                      {receipt.status.kind === "blocked" ? (
-                        <span>{`Blocked: ${receipt.status.reason}`}</span>
-                      ) : null}
-                      <OctantButton
-                        aria-label={`Remove ${receipt.label} extension`}
-                        className="chip-x window-no-drag"
-                        onClick={() => extensionDraft.remove(receipt.reference)}
-                        type="button"
-                        variant="bare"
-                      >
-                        ×
-                      </OctantButton>
-                    </li>
-                  ))}
-                </ul>
+              extensionDraft.receipts.length > 0 || stagedFiles.length > 0 ? (
+                <>
+                  {stagedFiles.length === 0 ? null : (
+                    <ul aria-label="Attachments" className="composer-chips">
+                      {stagedFiles.map((file, index) => (
+                        <li className="chip" key={`${file.name}-${index}`}>
+                          <span>{pastedImageName(file)}</span>
+                          <OctantButton
+                            aria-label={`Remove ${pastedImageName(file)} attachment`}
+                            className="chip-x window-no-drag"
+                            onClick={() =>
+                              setStagedFiles((current) =>
+                                current.filter((staged) => staged !== file),
+                              )
+                            }
+                            type="button"
+                            variant="bare"
+                          >
+                            ×
+                          </OctantButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {extensionDraft.receipts.length === 0 ? null : (
+                    <ul aria-label="Selected extensions" className="composer-chips">
+                      {extensionDraft.receipts.map((receipt) => (
+                        <li className="chip" key={receipt.reference}>
+                          <span>{receipt.label}</span>
+                          {receipt.status.kind === "blocked" ? (
+                            <span>{`Blocked: ${receipt.status.reason}`}</span>
+                          ) : null}
+                          <OctantButton
+                            aria-label={`Remove ${receipt.label} extension`}
+                            className="chip-x window-no-drag"
+                            onClick={() => extensionDraft.remove(receipt.reference)}
+                            type="button"
+                            variant="bare"
+                          >
+                            ×
+                          </OctantButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               ) : undefined
             }
             typeahead={
@@ -301,9 +353,12 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             row={{
               attach: (
                 <ComposerAttachButton
-                  refusedReason="Attachments can be added once the chat starts."
+                  busy={!ready || props.creating === true}
                   onRefused={setAttachmentNotice}
-                  onFileSelected={() => undefined}
+                  onFileSelected={(file) => {
+                    setAttachmentNotice(undefined);
+                    setStagedFiles((current) => [...current, file]);
+                  }}
                 />
               ),
               leading: <></>,

@@ -1,3 +1,4 @@
+import { useMinuteNow } from "../polling/useMinuteTick";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import { BellRing } from "lucide-react";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
@@ -64,7 +65,8 @@ export function createNeedsYouCard(source: NeedsYouCardSource): HomeListCardDefi
  * the first read the list says nothing rather than "Looking…".
  */
 function useNeedsYouListRows(source: NeedsYouCardSource): HomeListRead {
-  const { now, onOpenThread, onOpenInbox } = source;
+  const { onOpenThread, onOpenInbox } = source;
+  const now = useMinuteNow(source.now);
   const { rows, answer, defer, asks, answerAsk } = usePendingRequestRows(source);
   if (rows === undefined) return { status: "loading" };
   return {

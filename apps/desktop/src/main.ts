@@ -168,7 +168,7 @@ import {
 import { createQuitShortcutGuard } from "./quitShortcutGuard";
 import {
   buildApplicationMenuTemplate,
-  buildStableMenuTemplate,
+  buildWindowsLinuxMenuTemplate,
   developerToolsAllowed,
 } from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
@@ -1914,6 +1914,18 @@ function popupViewOf(view: WebContentsView): ExtensionPopupView {
   };
 }
 
+/**
+ * Tells the window's renderer when it enters or leaves full screen: macOS
+ * hides the traffic lights there, so the titlebar inset is no longer reserved.
+ */
+function reportWindowFullScreen(window: BrowserWindow): void {
+  const send = (fullScreen: boolean) => {
+    if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.windowFullScreen, fullScreen);
+  };
+  window.on("enter-full-screen", () => send(true));
+  window.on("leave-full-screen", () => send(false));
+}
+
 function popupWindowOf(window: BrowserWindow): ExtensionPopupShellWindow {
   return {
     isDestroyed: () => window.isDestroyed(),
@@ -1924,6 +1936,14 @@ function popupWindowOf(window: BrowserWindow): ExtensionPopupShellWindow {
       removeChildView: (view) => {
         if (view instanceof WebContentsView) window.contentView.removeChildView(view);
       },
+    },
+    onMoveOrResize: (listener) => {
+      window.on("move", listener);
+      window.on("resize", listener);
+      return () => {
+        window.removeListener("move", listener);
+        window.removeListener("resize", listener);
+      };
     },
   };
 }
@@ -2386,6 +2406,24 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) return;
   const root = repositoryRoot();
   markHostInteraction("host", "window-create-start");
+  // Reading saved window bounds is local and grants nothing, so it runs while
+  // the host starts instead of after it. The window itself still waits: its
+  // capability comes from the running host, and no renderer exists before it.
+  const displays = screen.getAllDisplays().map(({ workArea }) => workArea);
+  const stateStore = createNativeWindowStateStore({
+    directory: app.getPath("userData"),
+    displays,
+    files: {
+      mkdir: async (path) => void (await mkdir(path, { recursive: true })),
+      readFile: (path) => readFile(path, "utf8"),
+      rename,
+      writeFile: async (path, contents) => void (await writeFile(path, contents, "utf8")),
+    },
+    uuid: randomUUID,
+  });
+  const loadedState = stateStore.load();
+  // A failed read surfaces where it is awaited below, as it did before.
+  void loadedState.catch(() => undefined);
   const admission = await hostLifecycle.ensureRunning();
   if (admission.status === "closing") return;
   const host = admission.host;
@@ -2411,19 +2449,8 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
     logQuitProblem(`Octant could not refresh host activity at launch: ${String(error)}`);
   });
 
-  const displays = screen.getAllDisplays().map(({ workArea }) => workArea);
-  nativeStateStore = createNativeWindowStateStore({
-    directory: app.getPath("userData"),
-    displays,
-    files: {
-      mkdir: async (path) => void (await mkdir(path, { recursive: true })),
-      readFile: (path) => readFile(path, "utf8"),
-      rename,
-      writeFile: async (path, contents) => void (await writeFile(path, contents, "utf8")),
-    },
-    uuid: randomUUID,
-  });
-  const state = await nativeStateStore.load();
+  nativeStateStore = stateStore;
+  const state = await loadedState;
   stableWindowId = state.windowId;
   // Glass once refused on a Mac driven over screen sharing with no reason said:
   // the system's rich-animation hint reads false there, and it is not a Glass
@@ -2651,12 +2678,14 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
         window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
         window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, resolvedGlassRefusal);
+        window.webContents.send(IPC_CHANNELS.windowFullScreen, window.isFullScreen());
         while (pendingCodeDeepLinks.length > 0) {
           window.webContents.send(IPC_CHANNELS.codeDeepLink, pendingCodeDeepLinks.shift());
         }
       });
       window.webContents.on("render-process-gone", (_event, details) => {
         codeOperationApprovalViews?.closeWindow(state.windowId);
+        browserExtensionPopupHost?.close(state.windowId);
         void Promise.all([
           browserSurfaceHost?.closeOwnerContexts(state.windowId),
           closeAuthority(),
@@ -2670,6 +2699,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         markHostInteraction("native-window", "ready-to-show");
         window.show();
       });
+      reportWindowFullScreen(window);
       window.on("close", (event) => {
         if (quitPrepared) return;
         event.preventDefault();
@@ -2682,6 +2712,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
       });
       window.once("closed", () => {
         codeOperationApprovalViews?.closeWindow(state.windowId);
+        browserExtensionPopupHost?.close(state.windowId);
         approvalPalettesByWindow.delete(state.windowId);
         void browserSurfaceHost?.closeOwnerContexts(state.windowId).catch(() => undefined);
         unregisterTrustedRendererRequestContext(window);
@@ -2952,9 +2983,11 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
           window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
           window.webContents.send(IPC_CHANNELS.resolvedGlassRefusal, resolvedGlassRefusal);
+          window.webContents.send(IPC_CHANNELS.windowFullScreen, window.isFullScreen());
         });
         window.webContents.on("render-process-gone", () => {
           codeOperationApprovalViews?.closeWindow(windowId);
+          browserExtensionPopupHost?.close(windowId);
           void Promise.all([
             browserSurfaceHost?.closeOwnerContexts(windowId),
             closeAuthority(),
@@ -2966,8 +2999,10 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           markHostInteraction("native-window", "ready-to-show");
           window.show();
         });
+        reportWindowFullScreen(window);
         window.once("closed", () => {
           codeOperationApprovalViews?.closeWindow(windowId);
+          browserExtensionPopupHost?.close(windowId);
           approvalPalettesByWindow.delete(windowId);
           void browserSurfaceHost?.closeOwnerContexts(windowId).catch(() => undefined);
           unregisterTrustedRendererRequestContext(window);
@@ -3770,6 +3805,14 @@ function installIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.cancelCodeOperationApproval, (event) => {
     const context = ownedTopLevelWindowContext(event);
     codeOperationApprovalViews?.cancel(context.windowId);
+  });
+  ipcMain.handle(IPC_CHANNELS.setRendererOverlayOpen, (event, value: unknown) => {
+    const context = ownedTopLevelWindowContext(event);
+    const open = value === true;
+    // Native views paint above the renderer: the approval leaves the window
+    // while the overlay is up, and a transient extension popup closes.
+    codeOperationApprovalViews?.setObscured(context.windowId, open);
+    if (open) browserExtensionPopupHost?.close(context.windowId);
   });
   ipcMain.handle(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.decision, async (event, value: unknown) => {
     if (codeOperationApprovalViews === undefined) return undefined;
@@ -5189,25 +5232,22 @@ function installApplicationMenu(): void {
     packaged: app.isPackaged,
     version: app.getVersion(),
   });
-  if (process.platform !== "darwin") {
-    // Electron's default menu carries Toggle Developer Tools and its shortcut;
-    // replace it with the same menu minus those items, not with no menu.
-    if (!developerTools) Menu.setApplicationMenu(Menu.buildFromTemplate(buildStableMenuTemplate()));
-    return;
-  }
+  const options = {
+    appName: app.name,
+    developerTools,
+    onQuit: (request: { readonly viaShortcut: boolean }) => quitShortcutGuard.request(request),
+    onOpenSettings: () => {
+      const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+      if (window === undefined || window.isDestroyed()) return;
+      window.webContents.send(IPC_CHANNELS.openSettings);
+    },
+    onPrepareToShutDown: () => openPrepareToShutDown({ fromQuit: false }),
+  };
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
-      buildApplicationMenuTemplate({
-        appName: app.name,
-        developerTools,
-        onQuit: (request) => quitShortcutGuard.request(request),
-        onOpenSettings: () => {
-          const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
-          if (window === undefined || window.isDestroyed()) return;
-          window.webContents.send(IPC_CHANNELS.openSettings);
-        },
-        onPrepareToShutDown: () => openPrepareToShutDown({ fromQuit: false }),
-      }),
+      process.platform === "darwin"
+        ? buildApplicationMenuTemplate(options)
+        : buildWindowsLinuxMenuTemplate(options),
     ),
   );
 }

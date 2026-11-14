@@ -19,7 +19,17 @@ import {
   Redo2,
   Square,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -37,9 +47,7 @@ import {
   type DebugSessionView as SessionView,
 } from "./useCodeDebugSession";
 import { useFocusWhenShown } from "./useFocusWhenShown";
-
-/** Nested values open at most this deep, so a value that holds itself stops somewhere. */
-const MAX_VARIABLE_DEPTH = 8;
+import { visibleVariableRows, type VariableTreeRow } from "./variableTree";
 
 export interface DebugSessionViewProps {
   readonly client: CodeDebugClient;
@@ -310,6 +318,78 @@ function sameLines(left: ReadonlyArray<number>, right: ReadonlyArray<number>): b
   return left.length === right.length && left.every((line, index) => line === right[index]);
 }
 
+const FRAME_VIRTUALIZATION_THRESHOLD = 40;
+const FRAME_ROW_ESTIMATE = 28;
+
+/**
+ * The host asks the adapter for up to 200 frames, and a deep recursion fills
+ * them all; past the threshold only the rows in view are mounted. The selected
+ * frame stays mounted so its `aria-current` and focus survive scrolling, and
+ * each row states its place so assistive technology still hears the length.
+ */
+function FrameList(props: {
+  readonly frames: ReadonlyArray<CodeDebugStackFrame>;
+  readonly selectedFrameId: number | undefined;
+  readonly renderFrame: (frame: CodeDebugStackFrame) => ReactNode;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const virtualized = props.frames.length > FRAME_VIRTUALIZATION_THRESHOLD;
+  const virtualizer = useVirtualizer({
+    count: virtualized ? props.frames.length : 0,
+    estimateSize: () => FRAME_ROW_ESTIMATE,
+    getItemKey: (index) => String(props.frames[index]?.id ?? index),
+    getScrollElement: () => listRef.current,
+    overscan: 8,
+    rangeExtractor: (range) => {
+      const indexes = defaultRangeExtractor(range);
+      const selected = props.frames.findIndex((frame) => frame.id === props.selectedFrameId);
+      return selected < 0 || indexes.includes(selected)
+        ? indexes
+        : [...indexes, selected].sort((left, right) => left - right);
+    },
+  });
+  if (!virtualized) {
+    return (
+      <ol className="run-debug__frames">
+        {props.frames.map((frame) => (
+          <li key={frame.id}>{props.renderFrame(frame)}</li>
+        ))}
+      </ol>
+    );
+  }
+  return (
+    <div className="run-debug__frames-scroll" ref={listRef}>
+      <ol
+        className="run-debug__frames"
+        style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+      >
+        {virtualizer.getVirtualItems().map((item) => {
+          const frame = props.frames[item.index];
+          if (frame === undefined) return null;
+          return (
+            <li
+              aria-posinset={item.index + 1}
+              aria-setsize={props.frames.length}
+              data-index={item.index}
+              key={item.key}
+              ref={virtualizer.measureElement}
+              style={{
+                left: 0,
+                position: "absolute",
+                top: 0,
+                transform: `translateY(${String(item.start)}px)`,
+                width: "100%",
+              }}
+            >
+              {props.renderFrame(frame)}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function CallStack(props: {
   readonly view: SessionView;
   readonly controls: DebugSessionControls;
@@ -329,35 +409,35 @@ function CallStack(props: {
           {props.stopped ? "The adapter named no frames." : "Shown when the program pauses."}
         </p>
       ) : (
-        <ol className="run-debug__frames">
-          {frames.map((frame) => (
-            <li key={frame.id}>
-              <OctantButton
-                aria-current={frame.id === props.view.selectedFrameId ? "true" : undefined}
-                className="run-debug__frame"
-                onClick={() => {
-                  props.controls.selectFrame(frame.id);
-                  const location = frame.location;
-                  if (location.kind === "checkout") {
-                    props.onShowLocation(location.path, location.line);
-                  } else if (
-                    location.kind === "outside-checkout" &&
-                    location.sourceReference !== undefined
-                  ) {
-                    void props.controls.source(location.sourceReference).then((text) => {
-                      if (text !== undefined) setSource({ title: frame.name, text });
-                    });
-                  }
-                }}
-                type="button"
-                variant="bare"
-              >
-                <span className="run-debug__frame-name">{frame.name}</span>
-                <span className="run-debug__frame-place">{framePlace(frame)}</span>
-              </OctantButton>
-            </li>
-          ))}
-        </ol>
+        <FrameList
+          frames={frames}
+          renderFrame={(frame) => (
+            <OctantButton
+              aria-current={frame.id === props.view.selectedFrameId ? "true" : undefined}
+              className="run-debug__frame"
+              onClick={() => {
+                props.controls.selectFrame(frame.id);
+                const location = frame.location;
+                if (location.kind === "checkout") {
+                  props.onShowLocation(location.path, location.line);
+                } else if (
+                  location.kind === "outside-checkout" &&
+                  location.sourceReference !== undefined
+                ) {
+                  void props.controls.source(location.sourceReference).then((text) => {
+                    if (text !== undefined) setSource({ title: frame.name, text });
+                  });
+                }
+              }}
+              type="button"
+              variant="bare"
+            >
+              <span className="run-debug__frame-name">{frame.name}</span>
+              <span className="run-debug__frame-place">{framePlace(frame)}</span>
+            </OctantButton>
+          )}
+          selectedFrameId={props.view.selectedFrameId}
+        />
       )}
       {props.view.framesTruncated ? (
         <p className="run-debug__empty">More frames are not shown.</p>
@@ -394,6 +474,10 @@ function framePlace(frame: CodeDebugStackFrame): string {
   }
 }
 
+/** Past this many visible rows the tree draws only the rows near its viewport. */
+const VARIABLE_VIRTUALIZATION_THRESHOLD = 100;
+const VARIABLE_ROW_ESTIMATE = 24;
+
 function Variables(props: {
   readonly view: SessionView;
   readonly controls: DebugSessionControls;
@@ -401,132 +485,206 @@ function Variables(props: {
 }) {
   const headingId = useId();
   const [closed, setClosed] = useState<ReadonlySet<number>>(new Set());
-  const { scopes } = props.view;
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  // The row that takes Tab into the tree (roving tabindex), and the row a key
+  // press moved focus to, which takes it once it is mounted.
+  const [activeKey, setActiveKey] = useState<string | undefined>(undefined);
+  const pendingFocus = useRef<string | undefined>(undefined);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const treeRef = useRef<HTMLUListElement>(null);
+  const rows = visibleVariableRows(props.view, closed, opened);
+  const items = rows.filter((row) => row.kind !== "more");
+  const active = items.find((row) => row.key === activeKey) ?? items[0];
+  const activeIndex = active === undefined ? -1 : rows.indexOf(active);
+  const virtualized = rows.length > VARIABLE_VIRTUALIZATION_THRESHOLD;
+  const virtualizer = useVirtualizer({
+    count: virtualized ? rows.length : 0,
+    estimateSize: () => VARIABLE_ROW_ESTIMATE,
+    getItemKey: (index) => rows[index]?.key ?? String(index),
+    getScrollElement: () => scrollRef.current,
+    overscan: 10,
+    rangeExtractor: (range) => {
+      // The focusable row stays mounted, so Tab and focus never land on a row
+      // that scrolled away and unmounted.
+      const indexes = defaultRangeExtractor(range);
+      return activeIndex < 0 || activeIndex >= range.count || indexes.includes(activeIndex)
+        ? indexes
+        : [...indexes, activeIndex].sort((left, right) => left - right);
+    },
+  });
+
+  useEffect(() => {
+    if (pendingFocus.current === undefined || pendingFocus.current !== active?.key) return;
+    pendingFocus.current = undefined;
+    const rowElements = treeRef.current?.querySelectorAll<HTMLElement>("[data-row-key]") ?? [];
+    for (const row of rowElements) if (row.dataset.rowKey === active.key) row.focus();
+  });
+
+  const toggle = (row: VariableTreeRow) => {
+    if (row.kind === "scope") {
+      if (!row.loaded) props.controls.loadScope(row.reference);
+      setClosed((current) => {
+        const next = new Set(current);
+        if (row.expanded) next.add(row.reference);
+        else next.delete(row.reference);
+        return next;
+      });
+    } else if (row.kind === "variable" && row.expandable) {
+      if (!row.expanded && !row.loaded) props.controls.expand(row.variable.variablesReference);
+      setOpened((current) => {
+        const next = new Set(current);
+        if (row.expanded) next.delete(row.key);
+        else next.add(row.key);
+        return next;
+      });
+    }
+  };
+  const moveTo = (row: VariableTreeRow | undefined) => {
+    if (row === undefined) return;
+    pendingFocus.current = row.key;
+    setActiveKey(row.key);
+    if (virtualized) virtualizer.scrollToIndex(rows.indexOf(row));
+  };
+  const onKeyDown = (
+    event: KeyboardEvent<HTMLElement>,
+    row: Exclude<VariableTreeRow, { readonly kind: "more" }>,
+  ) => {
+    const at = items.indexOf(row);
+    const canToggle = row.kind === "scope" || (row.kind === "variable" && row.expandable);
+    switch (event.key) {
+      case "ArrowDown":
+        moveTo(items[at + 1]);
+        break;
+      case "ArrowUp":
+        moveTo(items[at - 1]);
+        break;
+      case "Home":
+        moveTo(items[0]);
+        break;
+      case "End":
+        moveTo(items.at(-1));
+        break;
+      case "ArrowRight":
+        if (canToggle && !row.expanded) toggle(row);
+        else if (row.expanded && (items[at + 1]?.level ?? 0) > row.level) moveTo(items[at + 1]);
+        break;
+      case "ArrowLeft":
+        if (canToggle && row.expanded) toggle(row);
+        else moveTo(items.slice(0, at).findLast((item) => item.level === row.level - 1));
+        break;
+      case "Enter":
+      case " ":
+        toggle(row);
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  };
+
+  const renderRow = (row: VariableTreeRow, style?: CSSProperties, index?: number) => {
+    const depth = { "--run-debug-depth": String(row.level - 1) } as CSSProperties;
+    const measured =
+      index === undefined ? {} : { "data-index": index, ref: virtualizer.measureElement };
+    if (row.kind === "more") {
+      return (
+        <li
+          className="run-debug__empty run-debug__tree-row"
+          key={row.key}
+          role="none"
+          style={{ ...depth, ...style }}
+          {...measured}
+        >
+          More values are not shown.
+        </li>
+      );
+    }
+    const canToggle = row.kind === "scope" || row.expandable;
+    const chevron = row.expanded ? (
+      <ChevronDown aria-hidden="true" size={14} />
+    ) : (
+      <ChevronRight aria-hidden="true" size={14} />
+    );
+    return (
+      <li
+        aria-expanded={canToggle ? row.expanded : undefined}
+        aria-level={row.level}
+        aria-posinset={row.posInSet}
+        aria-setsize={row.setSize}
+        className="run-debug__tree-row"
+        data-row-key={row.key}
+        key={row.key}
+        onClick={() => {
+          setActiveKey(row.key);
+          toggle(row);
+        }}
+        onKeyDown={(event) => onKeyDown(event, row)}
+        role="treeitem"
+        style={{ ...depth, ...style }}
+        tabIndex={row === active ? 0 : -1}
+        {...measured}
+      >
+        {row.kind === "scope" ? (
+          <span className="run-debug__toggle">
+            {chevron}
+            <span className="run-debug__scope-name">{row.name}</span>
+          </span>
+        ) : row.expandable ? (
+          <span className="run-debug__toggle">
+            {chevron}
+            <VariableValue variable={row.variable} />
+          </span>
+        ) : (
+          <div className="run-debug__leaf">
+            <VariableValue variable={row.variable} />
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  const empty = !props.stopped || props.view.scopes.length === 0;
   return (
     <section aria-labelledby={headingId} className="run-debug__section">
       <h3 className="run-debug__heading" id={headingId}>
         Variables
       </h3>
-      {!props.stopped || scopes.length === 0 ? (
+      {empty ? (
         <p className="run-debug__empty">
           {props.stopped ? "This frame has no variables." : "Shown when the program pauses."}
         </p>
-      ) : (
-        <ul className="run-debug__tree">
-          {scopes.map((view) => {
-            const reference = view.scope.variablesReference;
-            const open = view.variables !== undefined && !closed.has(reference);
-            return (
-              <li key={`${view.scope.name}-${reference}`}>
-                <OctantButton
-                  aria-expanded={open}
-                  className="run-debug__toggle"
-                  onClick={() => {
-                    if (view.variables === undefined) props.controls.loadScope(reference);
-                    setClosed((current) => {
-                      const next = new Set(current);
-                      if (open) next.add(reference);
-                      else next.delete(reference);
-                      return next;
-                    });
-                  }}
-                  type="button"
-                  variant="bare"
-                >
-                  {open ? (
-                    <ChevronDown aria-hidden="true" size={14} />
-                  ) : (
-                    <ChevronRight aria-hidden="true" size={14} />
-                  )}
-                  <span className="run-debug__scope-name">{view.scope.name}</span>
-                </OctantButton>
-                {open && view.variables !== undefined ? (
-                  <VariableList
-                    controls={props.controls}
-                    depth={1}
-                    truncated={view.truncated === true}
-                    variables={view.variables}
-                    view={props.view}
-                  />
-                ) : null}
-              </li>
-            );
-          })}
+      ) : !virtualized ? (
+        <ul aria-labelledby={headingId} className="run-debug__tree" ref={treeRef} role="tree">
+          {rows.map((row) => renderRow(row))}
         </ul>
+      ) : (
+        <div className="run-debug__tree-scroll" ref={scrollRef}>
+          <ul
+            aria-labelledby={headingId}
+            className="run-debug__tree"
+            ref={treeRef}
+            role="tree"
+            style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+          >
+            {virtualizer.getVirtualItems().map((item) => {
+              const row = rows[item.index];
+              if (row === undefined) return null;
+              return renderRow(
+                row,
+                {
+                  left: 0,
+                  position: "absolute",
+                  top: 0,
+                  transform: `translateY(${String(item.start)}px)`,
+                  width: "100%",
+                },
+                item.index,
+              );
+            })}
+          </ul>
+        </div>
       )}
     </section>
-  );
-}
-
-function VariableList(props: {
-  readonly variables: ReadonlyArray<CodeDebugVariable>;
-  readonly truncated: boolean;
-  readonly depth: number;
-  readonly view: SessionView;
-  readonly controls: DebugSessionControls;
-}) {
-  return (
-    <ul className="run-debug__tree">
-      {props.variables.map((variable, index) => (
-        <VariableRow
-          controls={props.controls}
-          depth={props.depth}
-          key={`${variable.name}-${index}`}
-          variable={variable}
-          view={props.view}
-        />
-      ))}
-      {props.truncated ? <li className="run-debug__empty">More values are not shown.</li> : null}
-    </ul>
-  );
-}
-
-function VariableRow(props: {
-  readonly variable: CodeDebugVariable;
-  readonly depth: number;
-  readonly view: SessionView;
-  readonly controls: DebugSessionControls;
-}) {
-  const { variable } = props;
-  const [open, setOpen] = useState(false);
-  const expandable = variable.variablesReference > 0 && props.depth < MAX_VARIABLE_DEPTH;
-  const children = props.view.children.get(variable.variablesReference);
-  const value = <VariableValue variable={variable} />;
-  return (
-    <li>
-      {expandable ? (
-        <OctantButton
-          aria-expanded={open}
-          className="run-debug__toggle"
-          onClick={() => {
-            if (!open && children === undefined) {
-              props.controls.expand(variable.variablesReference);
-            }
-            setOpen(!open);
-          }}
-          type="button"
-          variant="bare"
-        >
-          {open ? (
-            <ChevronDown aria-hidden="true" size={14} />
-          ) : (
-            <ChevronRight aria-hidden="true" size={14} />
-          )}
-          {value}
-        </OctantButton>
-      ) : (
-        <div className="run-debug__leaf">{value}</div>
-      )}
-      {open && children !== undefined ? (
-        <VariableList
-          controls={props.controls}
-          depth={props.depth + 1}
-          truncated={children.truncated}
-          variables={children.variables}
-          view={props.view}
-        />
-      ) : null}
-    </li>
   );
 }
 

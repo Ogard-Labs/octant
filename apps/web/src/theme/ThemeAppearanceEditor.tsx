@@ -8,8 +8,8 @@ import {
   type ThemeStyle,
 } from "@octant/contracts/theme";
 import { customThemeTokens } from "@octant/theme/custom-preset";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { THEME_PRESETS } from "@octant/theme";
-import { ChevronDown } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -418,25 +418,20 @@ export function ThemeAppearanceEditor(props: {
           </SettingRow>
         </div>
       </SettingsSection>
-      <details
+      <OctantCollapsible
+        chevron="end"
+        chevronSize={16}
         className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
         {...(focusedSetting === "appearance.theme-import-export" ? { open: true } : {})}
+        summary={<span>Import or export theme</span>}
       >
-        <summary>
-          <span>Import or export theme</span>
-          <ChevronDown
-            aria-hidden="true"
-            className="settings-theme-editor__disclosure-icon"
-            size={16}
-          />
-        </summary>
         <div className="setgroup settings-theme-editor__disclosure-body">
           <ThemeTransfer
             controller={theme}
             focused={focusedSetting === "appearance.theme-import-export"}
           />
         </div>
-      </details>
+      </OctantCollapsible>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import type { ServerProjectsClient } from "@octant/client-runtime";
 import type { ServerProject, ServerPreviewView } from "@octant/contracts/server-projects";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export function ServerProjectPreviewTunnel(props: {
   readonly project: ServerProject;
@@ -80,8 +81,11 @@ export function ServerProjectPreviewTunnel(props: {
     Number(localPort) >= 0 &&
     Number(localPort) <= 65535;
   return (
-    <details className="w-full min-w-0" onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>Dev server preview</summary>
+    <OctantCollapsible
+      className="w-full min-w-0"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      summary="Dev server preview"
+    >
       <p className="shield-servers__note">
         Open a port already running on this server. If this computer is paired with it, use its
         existing paired-host preview.
@@ -167,6 +171,6 @@ export function ServerProjectPreviewTunnel(props: {
           Start preview
         </OctantButton>
       )}
-    </details>
+    </OctantCollapsible>
   );
 }

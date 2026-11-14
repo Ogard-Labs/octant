@@ -5067,12 +5067,20 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Both adapters run the store in WAL mode with `synchronous = FULL`:
-  a Chat reply's and a Code turn's streamed deltas batch into one journal commit
-  per short burst (a Code burst also flushes before any other event of its turn
-  and when the turn ends), so the authoritative journal fsyncs a bounded number
-  of times per second instead of once per token, and a power loss loses at most
-  the burst that was still open — never a committed one. A burst is also
+  the port. Both adapters run the store in WAL mode with `synchronous = NORMAL`,
+  a 64 MiB `journal_size_limit` and a 256 MiB `mmap_size`: a Chat reply's and a
+  Code turn's streamed deltas batch into one journal commit per short burst (a
+  Code burst also flushes before any other event of its turn and when the turn
+  ends), so the journal commits a bounded number of times per second instead
+  of once per token. Every commit survives a crash of the server process; an OS
+  crash or power loss may lose the commits since the last WAL checkpoint, never
+  leaves a torn or half-applied one, and the journal stays consistent.
+  Rationale (maintainer decision, 2026-11-14): `FULL` fsynced the WAL on every
+  commit, a full barrier on macOS that held the single-threaded control plane
+  2–15 ms per append, dozens of times a second with concurrent turns; the
+  local-first store accepts losing the newest seconds on power loss for that.
+  The size limit truncates the WAL after a checkpoint instead of leaving it at
+  its largest size. A burst is also
   bounded in size (256 Ki characters of Code text, merged into one event; 64
   Chat deltas, each its own event), so no single commit, including the one
   that settles a Stop, grows with how fast the provider streams: an unbounded Chat burst under a flood held nearly 600 deltas and
@@ -5112,7 +5120,12 @@ flowchart LR
   has no identity: it neither reads nor writes a watermark and scans
   everything, and a start that migrated computes nothing. The first start of
   every new build therefore runs one full scan; hashing the bundle costs about
-  10 ms. The next start of the same build decodes only rows after the watermark. A different fingerprint, a
+  10 ms. The next start of the same build decodes only rows after the watermark,
+  and its status inspection walks only those rows for version gaps and stale
+  aggregate heads (every stored head must still name a journal row) and skips
+  SQLite's `integrity_check`, which runs on every full scan; a tail that looks
+  wrong falls back to the full inspection, and a refused start clears the
+  watermark. A different fingerprint, a
   migration in the same start, a missing, malformed or too-high watermark, or
   any rewrite or delete of a journal row (a trigger clears it in the same
   transaction, so purge, compaction and host-identity rewrites are covered)
@@ -8089,8 +8102,7 @@ reference) and every later delta journals `chat.attempt-response-appended@1`
 carrying only the reference it appended and the attempt's `updatedAt`, so
 journal bytes per reply are linear in its length. Deltas inside a short burst
 share one journal commit, folded ahead of any full attempt update in the same
-transaction, so the store fsyncs per burst rather than per token and stays on
-`synchronous = FULL`. A tool event journals `chat.attempt-tool-step@1` the same way
+transaction, so the store commits per burst rather than per token. A tool event journals `chat.attempt-tool-step@1` the same way
 ([Tool calls in Chat and Work](#tool-calls-in-chat-and-work)). The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the

@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import { browserProfileFromChoice } from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
@@ -66,7 +67,6 @@ import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
-import { ShellState } from "../shell/ShellState";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
 import { useProductFeedback } from "./useProductFeedback";
 import { useBrowserFeedbackPointing } from "./useBrowserFeedbackPointing";
@@ -110,6 +110,8 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".code-board-layer",
   // A divider being dragged across a tile, or a tab being dragged onto the dock.
   ".dock-tiles__drag-shield",
+  // A shell or split divider mid-drag: the native page would swallow the pointer.
+  ".shell-resize-shield",
   ".rail-placeholder",
   ".workspace-drag-preview",
   ".workspace-drop-overlay",
@@ -122,6 +124,20 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".octant-sheet__backdrop",
   ".octant-sheet__viewport",
   ".octant-sheet__popup",
+  // Floating chrome a click opens over the page area: notices, menus,
+  // popovers and disclosures. Tooltips stay out on purpose: they open on
+  // hover, and the page leaving the window whenever any tooltip in the window
+  // opened would flash it away. The Browser toolbar uses native titles, which
+  // the system draws above the native view.
+  ".toast-stack",
+  '[data-slot="popover-content"]',
+  '[data-slot="combobox-content"]',
+  '[data-slot="select-content"]',
+  '[data-slot="dropdown-menu-content"]',
+  '[data-slot="context-menu-content"]',
+  ".thread-info__panel:not([hidden])",
+  ".window-chrome__disclosure",
+  ".zen-panel",
 ].join(", ");
 
 const BROWSER_REFRESH_INTERVAL_MS = 500;
@@ -627,7 +643,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         aria-label="Browser automation"
         className="browser-workspace browser-workspace--state"
       >
-        <ShellState
+        <OctantEmpty
           eyebrow="Browser unavailable"
           message="The host requires one exact owning thread before it can create an isolated context."
           state="neutral"

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import type { HomeListCardDefinition, HomeListRead } from "./homeCards";
 import { pullRequestListRow } from "./homeListRows";
+import { useMinuteNow } from "../polling/useMinuteTick";
 import {
   buildPullRequestCard,
   PULL_REQUESTS_CARD_ID,
@@ -54,7 +55,10 @@ export function createPullRequestsCard(source: PullRequestsCardSource): HomeList
  */
 function usePullRequestsListRows(source: PullRequestsCardSource): HomeListRead {
   const read = usePullRequestRead(source.load);
-  const { now, onOpenAll, onOpenRow, viewerLogin } = source;
+  const { onOpenAll, onOpenRow, viewerLogin } = source;
+  // The card is built once, so `source.now` is the clock at creation; the
+  // caveat still has to age with the minute.
+  const now = useMinuteNow(source.now);
   const model = useMemo(
     () =>
       read.status === "ready"

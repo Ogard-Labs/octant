@@ -348,6 +348,7 @@ export interface OctantHostBridge {
     anchor: CodeOperationApprovalAnchor,
   ) => Promise<void>;
   readonly cancelCodeOperationApproval: () => Promise<void>;
+  readonly setRendererOverlayOpen: (open: boolean) => Promise<void>;
   readonly projectWindowCapability: string;
   readonly subscribeProjectWindowCapability: (listener: (capability: string) => void) => () => void;
   readonly windowId?: string;
@@ -417,6 +418,7 @@ export interface OctantHostBridge {
   readonly subscribeResolvedMaterial: (
     listener: (material: ResolvedSidebarMaterial) => void,
   ) => () => void;
+  readonly subscribeWindowFullScreen: (listener: (fullScreen: boolean) => void) => () => void;
   readonly subscribeResolvedSidebarVibrancy: (
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;
@@ -428,7 +430,7 @@ export interface OctantHostBridge {
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
   /** Reports the person's setting: whether the quit shortcut needs a second press. */
   readonly setQuitShortcutSecondPress: (needed: boolean) => void;
-  /** Prepare to Shut Down… from the menu, or Move threads first… from the quit confirmation. */
+  /** Prepare to shut down… from the menu, or Move threads first… from the quit confirmation. */
   readonly subscribePrepareToShutDown?: (
     listener: (request: { readonly fromQuit: boolean }) => void,
   ) => () => void;
@@ -881,6 +883,8 @@ export function createHostBridge(
       return invoke(IPC_CHANNELS.updateCodeOperationApprovalAnchor, anchor);
     },
     cancelCodeOperationApproval: () => invoke(IPC_CHANNELS.cancelCodeOperationApproval),
+    setRendererOverlayOpen: (open: boolean) =>
+      invoke(IPC_CHANNELS.setRendererOverlayOpen, open === true),
     ...(applicationIdentity === undefined ? {} : { applicationIdentity }),
     ...(applicationIdentity?.data === undefined
       ? {}
@@ -1136,6 +1140,13 @@ export function createHostBridge(
       // A palette carries no authority, and the main process decodes it
       // authoritatively before any approval document is built with it.
       return invoke(IPC_CHANNELS.approvalSurfacePalette, palette);
+    },
+    subscribeWindowFullScreen: (listener: (fullScreen: boolean) => void) => {
+      const receive: MaterialListener = (_event, fullScreen) => {
+        if (typeof fullScreen === "boolean") listener(fullScreen);
+      };
+      ipc.on(IPC_CHANNELS.windowFullScreen, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.windowFullScreen, receive);
     },
     subscribeResolvedMaterial: (listener: (material: ResolvedSidebarMaterial) => void) => {
       const receive: MaterialListener = (_event, material) => {
@@ -3088,7 +3099,34 @@ export function installHostBridge(
   );
 }
 
+/**
+ * An app shortcut the focused native Browser page held back. It is replayed as
+ * a keydown in this renderer, so the same listeners that handle the chord when
+ * the renderer has focus handle it now; it carries only keys, no authority.
+ */
+export function replayBrowserAppShortcut(value: unknown, target: Document = document): void {
+  if (typeof value !== "object" || value === null) return;
+  const chord = value as Record<string, unknown>;
+  if (typeof chord.key !== "string" || chord.key.length === 0 || chord.key.length > 16) return;
+  target.defaultView?.focus();
+  (target.activeElement ?? target.body)?.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: chord.key,
+      code: typeof chord.code === "string" ? chord.code : "",
+      metaKey: chord.meta === true,
+      ctrlKey: chord.control === true,
+      shiftKey: chord.shift === true,
+      altKey: chord.alt === true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 if (process.versions.electron !== undefined) {
+  ipcRenderer.on(IPC_CHANNELS.browserAppShortcut, (_event, value: unknown) =>
+    replayBrowserAppShortcut(value),
+  );
   installHostBridge(
     contextBridge,
     ipcRenderer,

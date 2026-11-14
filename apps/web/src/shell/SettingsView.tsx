@@ -549,6 +549,10 @@ export function SettingsView(props: SettingsViewProps) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== "f" || event.shiftKey || event.altKey) return;
       if (!event.metaKey && !event.ctrlKey) return;
+      // The keybindings editor is Monaco, which owns Find inside its own text.
+      if (event.target instanceof Element && event.target.closest(".monaco-editor") !== null) {
+        return;
+      }
       event.preventDefault();
       focusSearch();
     };
@@ -973,9 +977,12 @@ function SettingsSearchField(props: {
               event.preventDefault();
               results.focus();
             }
-          } else if (event.key === "Escape") {
-            if (props.value === "") input.current?.blur();
-            else props.onChange("");
+          } else if (event.key === "Escape" && props.value !== "") {
+            // A first Escape clears the query and stops here, so the Settings
+            // sheet stays open; Escape on an empty field closes the sheet.
+            event.preventDefault();
+            event.stopPropagation();
+            props.onChange("");
           }
         }}
         placeholder="Search settings"

@@ -1,3 +1,4 @@
+import { useMinuteNow } from "../polling/useMinuteTick";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { Activity } from "lucide-react";
 import { useMemo } from "react";
@@ -44,11 +45,12 @@ export function createWorkingNowCard(source: WorkingNowCardSource): HomeListCard
 
 /** The rows the card lists, for the start screen's list; "See all" is the Running view. */
 function useWorkingNowListRows(source: WorkingNowCardSource): HomeListRead {
+  const now = useMinuteNow(source.now);
   const rows = useWorkingNowRows(source);
   return {
     status: "ready",
     seeAll: { "in-progress": { label: "See all", onSelect: source.onOpenRunning } },
-    rows: rows.map((row) => workingNowListRow(row, source.now, () => source.onOpenRow(row))),
+    rows: rows.map((row) => workingNowListRow(row, now, () => source.onOpenRow(row))),
   };
 }
 

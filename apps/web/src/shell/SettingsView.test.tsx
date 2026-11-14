@@ -504,6 +504,43 @@ describe("SettingsView", () => {
     expect(search).toHaveFocus();
   });
 
+  it("clears the search on Escape without letting Escape close the Settings sheet", async () => {
+    const user = userEvent.setup();
+    const { onSearchChange } = renderSettingsWithSearch("mode");
+    // The sheet dismisses on a document-level Escape, as Base UI's dialog does.
+    const sheetDismiss = vi.fn();
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") sheetDismiss();
+    };
+    document.addEventListener("keydown", onDocumentKeyDown);
+    try {
+      await user.click(screen.getByRole("searchbox", { name: "Search settings" }));
+      await user.keyboard("{Escape}");
+      expect(onSearchChange).toHaveBeenLastCalledWith("");
+      expect(sheetDismiss).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", onDocumentKeyDown);
+    }
+  });
+
+  it("leaves Find to the keybindings editor when focus is inside it", () => {
+    renderSettings();
+    const editor = document.createElement("div");
+    editor.className = "monaco-editor";
+    const editorInput = document.createElement("textarea");
+    editor.append(editorInput);
+    document.body.append(editor);
+    try {
+      editorInput.focus();
+      fireEvent.keyDown(editorInput, { key: "f", metaKey: true });
+      expect(editorInput).toHaveFocus();
+      fireEvent.keyDown(document.body, { key: "f", metaKey: true });
+      expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus();
+    } finally {
+      editor.remove();
+    }
+  });
+
   it("says a page's scope once under its title, not on every row that shares it", () => {
     renderSettings();
 

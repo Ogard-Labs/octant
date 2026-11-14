@@ -1,3 +1,4 @@
+import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
 import { useAgentBrowserCard } from "./threadActivity/browserCardActivity";
@@ -99,8 +100,10 @@ import { useStableActions } from "./app/useStableActions";
 import { WindowChromeContainer } from "./app/WindowChromeContainer";
 import { ZenContainer } from "./app/ZenContainer";
 import {
+  decodeChatAttachmentId,
   decodeChatThreadId,
   decodeChatTurnId,
+  type ChatAttachmentId,
   type ChatThreadId,
   type ChatTurnId,
 } from "@octant/contracts/chat";
@@ -141,7 +144,7 @@ import {
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
-import { useMinuteTick } from "./polling/useMinuteTick";
+import { useSnoozeClock } from "./polling/useSnoozeClock";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import { ThreadActivityRevisionsContext } from "./polling/ThreadActivityRevisions";
 import type {
@@ -206,6 +209,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import "./styles.css";
 import "./styles/shell.css";
@@ -316,6 +320,7 @@ import {
   useReleaseRingSync,
   glassOffNote,
   useHostReportedGlassRefusal,
+  useHostFullScreen,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useSidebarDrawerViewport,
@@ -327,6 +332,7 @@ import {
   useSidebarVibrancySupported,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
+import { useRendererOverlayReport } from "./browser/useRendererOverlayReport";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
 import { useNewThreadShortcut } from "./shell/useNewThreadShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
@@ -348,7 +354,6 @@ import {
 } from "./shell/shellModeRouting";
 import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
-import { ShellState } from "./shell/ShellState";
 import type { FirstRunHandoffProject } from "./onboarding/firstRunHandoffModel";
 import {
   describeDiscoveryNotice,
@@ -370,7 +375,10 @@ import {
   type ProjectActionTarget,
 } from "./projects/ProjectActionRunDialog";
 import { ProjectIconProvider } from "./projects/ProjectIcon";
-import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
+import {
+  type ProjectThreadsAccess,
+  ProjectThreadsProvider,
+} from "./projects/ProjectThreadsSection";
 import {
   ServerCodeProjectsContext,
   serverCodeProjectFor,
@@ -642,8 +650,8 @@ export function App(props: AppProps) {
   if (launch === undefined && locationLaunch.status === "refused") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Browser session"
           message={locationLaunch.message}
           state="warning"
@@ -673,8 +681,8 @@ export function App(props: AppProps) {
   if (launch === undefined) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -688,8 +696,8 @@ export function App(props: AppProps) {
     if (launchSession.status === "loading") {
       return (
         <main className="shell-boundary">
-          <ShellState
-            presentation="page"
+          <OctantEmpty
+            layout="page"
             eyebrow="Browser session"
             message="Establishing the authenticated Octant browser session."
             state="loading"
@@ -704,8 +712,8 @@ export function App(props: AppProps) {
       // typed address, an expired tab, or a restarted host lands here.
       return (
         <main className="shell-boundary">
-          <ShellState
-            presentation="page"
+          <OctantEmpty
+            layout="page"
             eyebrow="Browser session"
             message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
             state="warning"
@@ -719,8 +727,8 @@ export function App(props: AppProps) {
       if (resolvedWindowId === undefined) {
         return (
           <main className="shell-boundary">
-            <ShellState
-              presentation="page"
+            <OctantEmpty
+              layout="page"
               eyebrow="Project authority"
               message="Octant could not establish the window identity for this browser session."
               state="warning"
@@ -744,8 +752,8 @@ export function App(props: AppProps) {
     }
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Project authority"
           message={
             launchSession.failureMessage ??
@@ -761,8 +769,8 @@ export function App(props: AppProps) {
   if (!isProjectWindowCapability(injectedCapability)) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Project authority"
           message="Retry from the Octant desktop application to establish this window session."
           state="warning"
@@ -775,8 +783,8 @@ export function App(props: AppProps) {
   if (desktopWindowId === undefined) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -805,7 +813,12 @@ function LaunchedShell(
   // A system-framed host (Windows, Linux) and a remote client in a browser both
   // keep their own title bar, so reserving the inset there wastes a strip of the
   // window and lays a drag region over chrome the OS already draws.
-  const hostReservesTitlebarInset = props.hostBridge?.windowChrome === "hidden-inset";
+  // In macOS full screen the titlebar and traffic lights are gone, so the inset
+  // is released for as long as the host reports full screen.
+  const hostFullScreen = useHostFullScreen(props.hostBridge);
+  useRendererOverlayReport(props.hostBridge);
+  const hostReservesTitlebarInset =
+    props.hostBridge?.windowChrome === "hidden-inset" && !hostFullScreen;
   useLayoutEffect(() => {
     const root = document.documentElement;
     if (!hostReservesTitlebarInset) {
@@ -1109,8 +1122,6 @@ function LaunchedShell(
   }, [automationCenterOpen]);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  // Snoozed rows wake on the clock, so the sidebar keeps a minute-coarse one.
-  const minuteNow = useMinuteTick();
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] = useState<
@@ -4832,6 +4843,23 @@ function LaunchedShell(
   // This model is rebuilt only when its inputs change. It used to be recomputed
   // by every App render — including the once-a-minute clock tick and every
   // machine-change revision — and handed fresh array identities to the sidebar.
+  // Snoozed rows wake on the clock with no journal event, so the shell reads
+  // the clock at each wake (and label or day change) instead of every minute.
+  const snoozeUntil = useMemo(
+    () =>
+      [
+        ...chatController.navigation,
+        ...(codeController.status === "ready" ? codeController.navigation : []),
+        ...workNavigation.navigation,
+      ].flatMap((thread) => (thread.snooze === undefined ? [] : [thread.snooze.until])),
+    [
+      chatController.navigation,
+      codeController.navigation,
+      codeController.status,
+      workNavigation.navigation,
+    ],
+  );
+  const snoozeClockNow = useSnoozeClock(snoozeUntil);
   const navigationModel = useMemo(() => {
     // A worker names its coordinator by title only while that coordinator is
     // still in the list; an archived one leaves the worker an ordinary row.
@@ -4885,7 +4913,7 @@ function LaunchedShell(
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
             ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
             ...threadRest(thread, {
-              now: minuteNow,
+              now: snoozeClockNow,
               awaitingInput:
                 thread.awaitingInput === true ||
                 (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
@@ -4898,7 +4926,10 @@ function LaunchedShell(
     const workProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
       workNavigation.navigation.map((thread) => ({
         ...thread,
-        ...threadRest(thread, { now: minuteNow, awaitingInput: thread.activity === "attention" }),
+        ...threadRest(thread, {
+          now: snoozeClockNow,
+          awaitingInput: thread.activity === "attention",
+        }),
       }));
     const sidebarThreadGroups = sidebarThreadGroupsForMode({
       activeMode,
@@ -4957,7 +4988,10 @@ function LaunchedShell(
       // Chat's durable follow-up never wakes a row, but the agent's own
       // approval or the turn's question is the host's live signal that the
       // thread needs the person.
-      ...threadRest(thread, { now: minuteNow, awaitingInput: thread.awaitingKind !== undefined }),
+      ...threadRest(thread, {
+        now: snoozeClockNow,
+        awaitingInput: thread.awaitingKind !== undefined,
+      }),
     }));
     // The pane header says "Running" for exactly the threads the sidebar's
     // status mark calls working, so the two never disagree.
@@ -4990,7 +5024,7 @@ function LaunchedShell(
     codeController.navigation,
     codeController.status,
     codeProviderRequestsByThreadId,
-    minuteNow,
+    snoozeClockNow,
     providerController.instances,
     workNavigation.navigation,
   ]);
@@ -5005,9 +5039,9 @@ function LaunchedShell(
               ...(chatController.status === "ready" ? navigationModel.markedChatNavigation : []),
               ...navigationModel.workProjectThreads,
             ],
-        minuteNow,
+        snoozeClockNow,
       ),
-    [activeMode, chatController.status, minuteNow, navigationModel],
+    [activeMode, chatController.status, snoozeClockNow, navigationModel],
   );
 
   // The start-screen cards read these, so they are held here with the other
@@ -5538,7 +5572,7 @@ function LaunchedShell(
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
     needsYouAskClients,
-    now: minuteNow.getTime(),
+    now: snoozeClockNow.getTime(),
     openRunningServiceLive,
     pendingRequestClient,
     remoteRunningServicesClient,
@@ -5765,8 +5799,8 @@ function LaunchedShell(
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
@@ -5778,8 +5812,8 @@ function LaunchedShell(
   if (controller.status === "conflict-reload") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="A command outcome may have changed this workspace. Loading authoritative state."
           state="loading"
@@ -5791,8 +5825,8 @@ function LaunchedShell(
   if (controller.status === "recovery-required") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           action={{ label: "Retry after recovery", onClick: controller.retry }}
           eyebrow="Local storage"
           message={controller.errorMessage ?? "Octant storage needs recovery before continuing."}
@@ -5806,8 +5840,8 @@ function LaunchedShell(
   if (controller.status === "disconnected") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           action={{ label: "Retry connection", onClick: controller.retry }}
           eyebrow="Connection"
           message={controller.errorMessage ?? "The local Octant server is unavailable."}
@@ -5825,8 +5859,8 @@ function LaunchedShell(
   ) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
@@ -6289,7 +6323,8 @@ function LaunchedShell(
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     paneId?: PaneId,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
-  ) {
+    attachments?: ReadonlyArray<File>,
+  ): Promise<boolean | void> | void {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
       setDraftError(undefined);
@@ -6299,12 +6334,12 @@ function LaunchedShell(
       void controller.openDraftThread("chat");
       return;
     }
-    void handleDraftCreateThread(
+    return handleDraftCreateThread(
       "chat",
       prompt,
       undefined,
       undefined,
-      undefined,
+      attachments,
       undefined,
       undefined,
       undefined,
@@ -7060,13 +7095,35 @@ function LaunchedShell(
         const draftExtensionSelections =
           extensionSelections ?? (computerUseSelection === undefined ? [] : [computerUseSelection]);
         try {
+          // Files staged on the welcome composer upload to the thread that now
+          // exists, then leave with the first message, as a Work draft's images do.
+          const attachmentIds: ChatAttachmentId[] = [];
+          for (const file of images ?? []) {
+            const attachmentId = decodeChatAttachmentId(globalThis.crypto.randomUUID());
+            await chatController.upload({
+              threadId: thread.id,
+              attachmentId,
+              displayName: pastedImageName(file),
+              mediaType: file.type,
+              bytes: new Uint8Array(await file.arrayBuffer()),
+            });
+            attachmentIds.push(attachmentId);
+          }
+          // Each upload journals an attachment event on the thread and moves
+          // its version on, so the send expects the version the host now
+          // holds; the pre-upload version was refused as stale.
+          const expectedVersion =
+            attachmentIds.length === 0 || chatClient === undefined
+              ? thread.version
+              : (await chatClient.thread(thread.id)).thread.version;
           const sent = await chatController.execute({
             kind: "send-chat-turn",
+            ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
             ...(draftExtensionSelections.length === 0
               ? {}
               : { extensionSelections: draftExtensionSelections }),
             threadId: thread.id,
-            expectedVersion: thread.version,
+            expectedVersion,
             prompt,
           });
           if (sent === undefined) {
@@ -7074,12 +7131,16 @@ function LaunchedShell(
               "The first message could not be sent. Retry from the open thread.",
             );
             seedOpenedComposerDraft("chat", String(thread.id), prompt);
+            // False keeps the files the welcome composer staged, so a failed
+            // first send does not drop them along with the message.
+            return false;
           }
         } catch {
           chatController.reportError(
             "The first message could not be sent. Retry from the open thread.",
           );
           seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          return false;
         }
       } else if (mode === "code") {
         const destinationHostId = refuseUnlessCreatableDestination({
@@ -7972,7 +8033,6 @@ function LaunchedShell(
                       loadAssignedLinearIssues={loadAssignedLinearIssues}
                       navigationRevision={pendingRequestFeedRevision}
                       needsYouAskClients={needsYouAskClients}
-                      now={minuteNow.getTime()}
                       projectNames={workingNowProjectNames}
                       projects={projectController.projects}
                       projectsListOpen={projectsListOpen}
@@ -8156,7 +8216,6 @@ function LaunchedShell(
                       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
                       isNarrow={isNarrow}
                       navigation={navigationModel}
-                      now={minuteNow.getTime()}
                       {...(dockOverviewThread === undefined
                         ? {}
                         : { overviewThread: dockOverviewThread })}
@@ -8617,7 +8676,7 @@ function LaunchedShell(
                               serverUrl={props.launch.serverUrl}
                               windowCapability={props.projectWindowCapability}
                             >
-                              <ProjectThreadsProvider value={projectThreadsAccess}>
+                              <StableProjectThreadsProvider value={projectThreadsAccess}>
                                 <NewTaskDraftsContext.Provider value={newTaskDrafts}>
                                   <StreamRepliesContext.Provider
                                     value={controller.settings?.streamReplies !== false}
@@ -8677,7 +8736,7 @@ function LaunchedShell(
                                     </ReplyDetailSourceContext.Provider>
                                   </StreamRepliesContext.Provider>
                                 </NewTaskDraftsContext.Provider>
-                              </ProjectThreadsProvider>
+                              </StableProjectThreadsProvider>
                             </ProjectIconProvider>
                           </SidebarThreadTabsContext.Provider>
                         </SidebarThreadDragContext.Provider>
@@ -8700,4 +8759,30 @@ function focusLogicalOpener(opener: InspectorOpener): void {
       ? opener.element
       : document.querySelector<HTMLElement>(`[data-${opener.logicalTarget}-opener="true"]`);
   current?.focus();
+}
+
+/**
+ * The shell rebuilds `projectThreadsAccess` on every render, and the Project
+ * Overview below it re-rendered with each new object. This keeps the provided
+ * value's identity until the data it carries changes; callbacks are reached
+ * through a ref because the shell recreates them every render. It lives in its
+ * own component because the shell returns early while loading, so the hooks
+ * cannot sit there.
+ */
+function StableProjectThreadsProvider(props: {
+  readonly value: ProjectThreadsAccess;
+  readonly children: ReactNode;
+}) {
+  const latest = useRef(props.value);
+  latest.current = props.value;
+  const { status, errorMessage, threads } = props.value;
+  const value = useMemo<ProjectThreadsAccess>(
+    () => ({
+      ...latest.current,
+      onRetry: () => latest.current.onRetry?.(),
+      onSelectThread: (navigationId: string) => latest.current.onSelectThread(navigationId),
+    }),
+    [status, errorMessage, threads],
+  );
+  return <ProjectThreadsProvider value={value}>{props.children}</ProjectThreadsProvider>;
 }

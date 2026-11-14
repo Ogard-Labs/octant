@@ -28,6 +28,7 @@ import {
   treemapTotals,
   type CanvasTreemapRect,
 } from "@octant/domain/canvas-treemap-layout";
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 
 const PLOT_WIDTH = 320;
 const PLOT_HEIGHT = 200;
@@ -603,8 +604,7 @@ function TreemapTable({ block, sort, totals, onSort, onOpenFile }: TreemapTableP
   walk(rootId, 0);
 
   return (
-    <details className="canvas-block__treemap-data">
-      <summary>View treemap data</summary>
+    <OctantCollapsible className="canvas-block__treemap-data" summary="View treemap data">
       <div
         aria-label="Treemap data"
         className="canvas-block__treemap-table"
@@ -658,7 +658,7 @@ function TreemapTable({ block, sort, totals, onSort, onOpenFile }: TreemapTableP
           </tbody>
         </table>
       </div>
-    </details>
+    </OctantCollapsible>
   );
 }
 

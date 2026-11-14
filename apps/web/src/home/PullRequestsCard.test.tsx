@@ -3,9 +3,9 @@ import {
   decodeCodeProjectPullRequestView,
   decodeProjectId,
 } from "@octant/contracts";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";
 import { createPullRequestsCard, type PullRequestsCardSource } from "./PullRequestsCard";
 
@@ -98,6 +98,10 @@ function renderCard(overrides: Partial<PullRequestsCardSource> = {}) {
 }
 
 describe("the Pull requests card", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("lists a review asked of you under Needs you and one you opened under Your pull requests", async () => {
     const onOpenRow = vi.fn();
     renderCard({ onOpenRow });
@@ -230,5 +234,26 @@ describe("the Pull requests card", () => {
     });
     expect(await screen.findByRole("button", { name: /Please review/ })).toBeInTheDocument();
     expect(screen.getByText("Pull requests last checked 3h ago.")).toBeInTheDocument();
+  });
+
+  it("ages the last checked line every minute after the card is built", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(NOW);
+    renderCard({
+      load: vi.fn(async () =>
+        view({
+          freshness: {
+            status: "stale",
+            staleReason: "timeout",
+            lastSuccessfulRefreshAt: "2026-08-22T08:00:00.000Z",
+          },
+        }),
+      ),
+    });
+    expect(await screen.findByText("Pull requests last checked 3h ago.")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(60 * 60_000);
+    });
+    expect(screen.getByText("Pull requests last checked 4h ago.")).toBeInTheDocument();
   });
 });

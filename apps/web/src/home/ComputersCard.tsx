@@ -1,3 +1,4 @@
+import { useMinuteNow } from "../polling/useMinuteTick";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { HostResourceSnapshot } from "@octant/contracts/host-resources";
 import { Monitor } from "lucide-react";
@@ -89,6 +90,7 @@ function isQuietLaunchHost(
 }
 
 function useComputersContent(source: ComputersCardSource): HomeCardContent {
+  const now = useMinuteNow(source.now);
   const runs = useActiveAgentRuns(source.agentRunClient, source.runRevision);
   const hosts = source.hosts.map((host) =>
     host.hostId === source.launchHostId && runs !== undefined
@@ -115,7 +117,7 @@ function useComputersContent(source: ComputersCardSource): HomeCardContent {
     body: (
       <ComputerRows
         hosts={hosts}
-        now={source.now}
+        now={now}
         onOpenRunning={source.onOpenRunning}
         snapshots={snapshots}
       />

@@ -47,6 +47,7 @@ import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
+import { followSelectionWithin } from "../transcript/selectionOwner";
 import { ChildResultCards } from "../agents/ChildResultCards";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
@@ -1172,34 +1173,10 @@ function QuoteableAssistantBody(props: {
 
   useEffect(() => {
     if (!props.enabled) return;
-    function onSelectionChange() {
-      const selection = document.getSelection();
-      if (selection === null || selection.isCollapsed || selection.rangeCount === 0) {
-        setOffer(undefined);
-        return;
-      }
-      const text = selection.toString().trim();
-      if (text.length === 0) {
-        setOffer(undefined);
-        return;
-      }
-      const root = selection.anchorNode;
-      const focus = selection.focusNode;
-      const container = document.getElementById(props.rootId);
-      if (
-        container === null ||
-        root === null ||
-        focus === null ||
-        !container.contains(root) ||
-        !container.contains(focus)
-      ) {
-        setOffer(undefined);
-        return;
-      }
-      setOffer({ text });
-    }
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => document.removeEventListener("selectionchange", onSelectionChange);
+    return followSelectionWithin(
+      () => document.getElementById(props.rootId),
+      (text) => setOffer(text === "" ? undefined : { text }),
+    );
   }, [props.rootId, props.enabled]);
 
   return (

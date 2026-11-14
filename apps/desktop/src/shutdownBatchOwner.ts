@@ -30,7 +30,7 @@ export class ShutdownBatchOwner {
     return true;
   }
 
-  /** The window whose dialog Prepare to Shut Down… brings back; undefined when no batch runs. */
+  /** The window whose dialog Prepare to shut down… brings back; undefined when no batch runs. */
   windowToOpen(): number | undefined {
     return this.#owner;
   }

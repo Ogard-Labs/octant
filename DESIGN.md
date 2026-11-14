@@ -848,6 +848,31 @@ float follows [Translucency](#translucency).
   label. **Don't** use it for two to seven exclusive choices
   (`OctantToggleGroup`).
 
+### OctantCollapsible
+
+**Purpose.** A disclosure: a summary row that opens a body below it.
+**Anatomy.** Props `summary` (any content: a label, a label and a count, a
+heading, or several lines), `summaryClassName`, `summaryProps` (native summary
+attributes such as `id` or `aria-label`), `chevron` (`start`, the default, or
+`end` for a row whose label spans it, such as a section heading),
+`chevronSize` (12, 14, or 16), `children`, and every native `<details>` prop
+(`open`, `onToggle`, `className`).
+**Sizes and tokens.** A 14px chevron by default, 8px from the summary, inheriting
+the row's ink unless the caller's summary rule colours it; the user-agent
+triangle is hidden. The chevron points right when closed and down when open,
+turning on its own disclosure only, so a closed disclosure inside an open one
+still points closed.
+**States.** Closed, open (the chevron turns 90 degrees, without motion).
+**Keyboard and accessibility.** It stays a native `<details>`: Enter and Space on
+the summary toggle it, the browser reports expanded state, and find-in-page opens
+a closed body that holds a match.
+**Do and do not.** Use it for every disclosure; do not ship a raw `<details>`.
+The exceptions are transcript rows that draw their own chevron and mount their
+body lazily (turn activity, thinking) and the Settings background catalog, whose
+summary is a Change and Done control rather than a disclosure row. A body that
+is costly to render mounts only while open.
+**Gallery.** Composed patterns.
+
 ### OctantCombobox
 
 - **Purpose.** A searchable choice from a bounded list.
@@ -919,16 +944,31 @@ float follows [Translucency](#translucency).
 
 ### OctantEmpty
 
-- **Purpose.** An empty, connection or error state inside a pane or panel.
-- **Anatomy.** `title`, `message`, `eyebrow`, `icon`, `action`, `role`; parts
-  Root, Header, Content, Description, Eyebrow, Media, Title.
-- **Tokens.** At most 480px wide, 16px padding, 8px gaps, `--oct-radius-md`, the
-  card fill and one hairline; the mark a 24px neutral tile; eyebrow 12px muted;
-  title 15/600; message 13px muted.
-- **States.** One tone: the mark is neutral whatever went wrong. Glass: ink 4%.
-- **Accessibility.** Title is a level-2 heading; the caller sets `role` for a
-  live state. **Don't** recreate it with spans; a page's empty state follows
-  [Page shell](#page-shell).
+- **Purpose.** Every empty, connection, error, loading and whole-window state.
+- **Anatomy.** One component, three layouts. **card** (the default) takes
+  `title`, `message`, `eyebrow`, `icon`, `action` (any node) and `role` (`alert`
+  or `status`). Giving it a `state` (`disconnected`, `loading`, `neutral`,
+  `warning`) draws that state's glyph instead of an icon and takes `action` as
+  `{ label, onClick, glyph? }`, one secondary button with a retry glyph by
+  default; a loading state spins its glyph, is a `status` region and may omit
+  `message`. **page** (`layout="page"` with a `state`) is a state that is the
+  whole window. **line** (`layout="line"`) is the quiet single line a page shows
+  when it has nothing on it: `title`, `detail`, `icon`, `action` and `tone`
+  (`page` or `lane`). Parts Root, Header, Content, Description, Eyebrow, Media,
+  Title stay exported for composed states.
+- **Tokens.** The card is at most 480px wide, 16px padding, 8px gaps,
+  `--oct-radius-md`, the card fill and one hairline; the mark a 24px neutral
+  tile; eyebrow 12px muted; title 15/600; message 13px muted. The page layout
+  is in [Empty, loading and whole-window states](#empty-loading-and-whole-window-states);
+  the line layout in [Page shell](#page-shell), where `tone="lane"` sets the line
+  in the meta ink for one empty column beside full ones.
+- **States.** One tone: the mark is neutral whatever went wrong. A loading state
+  in the page layout falls back to the card, since a spinner is not a dotted
+  mark. Glass: ink 4%.
+- **Accessibility.** The card title is a level-2 heading and the page title a
+  level-1 heading; the caller sets `role` for a live state, except that loading
+  and the line are always `status`. **Don't** recreate it with spans or a second
+  component; a page's empty state follows [Page shell](#page-shell).
 
 ### OctantField
 
@@ -1132,6 +1172,11 @@ float follows [Translucency](#translucency).
   a sheet or menu handed back to its trigger. Closes on pointer leave, on a
   press of its trigger (without fading over what opened) and on Escape.
 - **Rail.** A rail button's tooltip is a compact one-word chip (13px, 4px by 8px padding) that opens to the right of the rail, centred on the button; it lies over the sidebar and covers as little of it as it must.
+- **Icon buttons.** `OctantIconButton` keeps the native `title` for its label
+  rather than this tooltip: the system draws a native title above a native
+  Browser page, where this tooltip would open underneath it. Tooltips are not
+  counted as overlays that move a Browser page out of the window, because any
+  hover would make the page flash.
 - **Accessibility.** `role="tooltip"`; opens on keyboard focus-visible. Never the only
   place an essential word appears.
 
@@ -1216,7 +1261,9 @@ list scrolls; add actions stay pinned under the list.
 ### Title band
 
 See [Window frame](#window-frame). Open in is the one band control with an
-edge (outline, 28px, control corner). Behaviour of the tool row and toggles is
+edge (outline, 28px, control corner). In native full screen macOS hides the
+traffic lights, so the desktop reports the change and no traffic-light width is
+reserved there. Behaviour of the tool row and toggles is
 in [Workspace: Shell grid and tool row](docs/design/workspace.md#shell-grid-and-tool-row).
 
 ### One tile bar
@@ -1288,7 +1335,8 @@ Surface (measure 880px, or wide)
   surface-toolbar search · filters · view switch
   SurfaceSection  section label over a hairline
     surface-row   label + detail left, control right
-  SurfaceEmpty    a 20px mark, one line, one outline button
+  OctantEmpty layout="line"
+                  a 20px mark, one line, one outline button
   SurfaceLoading  the page in outline
 ```
 
@@ -1342,7 +1390,9 @@ sheets share `--oct-z-floating`; popups stand above them.
 ### Toasts and notices
 
 - **Inline notices** are `OctantAlert`; a raw `role="alert"` or `role="dialog"`
-  in feature source fails `ui:check` unless recorded.
+  in feature source fails `ui:check` unless recorded (the recipe owners,
+  `OctantAlert`, `OctantToast`, `OctantApprovalCard`, `FieldError` and
+  `OctantEmpty`, set the role themselves).
 - **Product notices** are `OctantToast`, stacked at the top trailing corner
   under the title band (at the bottom they would cover the composer).
 - **Field errors** stay by their field; a warning to review stays inline.
@@ -1357,11 +1407,12 @@ sheets share `--oct-z-floating`; popups stand above them.
 - A destination still loading shows its outline (`SurfaceLoading`); the sheen
   stops under reduced motion.
 - A route or tool still loading is one quiet line on the page, never a card.
-- A state inside a pane is `OctantEmpty`.
+- A state inside a pane is `OctantEmpty`'s card layout.
 - A section with nothing in it inside a card (an Inbox list, an Environment
   card) is one line in the detail role with at most one button, never an
   `OctantEmpty` card inside the card.
-- A state that is the whole window is `ShellState`: centred, a 96px dot-grid
+- A state that is the whole window is `OctantEmpty`'s page layout
+  (`layout="page"` with a `state`): centred, a 96px dot-grid
   mark in the primary ink, a title at `--oct-text-xl`, one secondary line, the
   way back as an accent-ink link.
 
