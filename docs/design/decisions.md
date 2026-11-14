@@ -1327,6 +1327,7 @@ The provider catalog lists only bundled driver manifests under a closed schema, 
 - First-run enablement of the two key CLI providers is decided once per scan from durable host state: only while first-run onboarding is pending and no instance was ever recorded. Later auto-registers stay disabled. _Here only._
 - Discovery may recover a single-token executable alias only by reading named shell startup files, byte-bounded, through the discovery filesystem port. The files are never sourced or executed. _Here only._
 - Outside drivers are installed held from a local folder, trusted at a digest, and run in a confined process on macOS only. A publisher key is pinned at first trust.
+- An account saved as exactly "Codex CLI" (codex) or "OpenCode CLI" (opencode) is renamed to "Codex" / "OpenCode" once at host start through the ordinary rename; an account with a rename in its journal, another name, or a taken new name is left alone (maintainer decision, 2026-11-14).
 - A bundled driver can be withheld: the driver is not admitted, no instance or process is created, and stored instances and threads are kept (maintainer decision, 2026-10-29). None is withheld; fx is offered again (maintainer decision, 2026-10-31).
 
 Status: Built. Since: 2026-10-26. Detail: [Architecture: Providers](../architecture.md#providers) and [Outside provider drivers](outside-provider-drivers.md).

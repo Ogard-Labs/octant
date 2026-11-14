@@ -6639,6 +6639,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   switch) to say "Update available"; only the person's click runs the
   provider's own updater, per
   [Runtime updates](design/provider-runtimes.md#runtime-updates).
+- **Default account names.** Discovery names an account for its runtime ("Codex",
+  "OpenCode"). An account saved earlier as exactly "Codex CLI" on the codex driver or
+  "OpenCode CLI" on the opencode driver is renamed once when the host starts, through
+  the same rename command and `provider.instance-renamed@1` event a person's edit
+  produces, after the provider projection is read and before a scan registers any
+  account. Any other name is never touched, an account that already has a rename in its
+  journal keeps its name (so renaming it back sticks), a name another account holds is
+  skipped, and a refusal is logged and never fails startup.
 - **Provider catalog.** Settings › Providers & Models › Provider catalog lists the bundled
   provider-driver packages (`bundledProviderDriverCatalog` in
   `@octant/plugin-host`). Each entry is validated against the public
