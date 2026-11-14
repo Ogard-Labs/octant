@@ -114,9 +114,19 @@ export interface OpenCodeProcessStartInput {
    * The person let OpenCode load its own skills: the launch keeps the
    * `.claude/skills` and `.agents/skills` discovery OpenCode does by itself and
    * does not deny the `skill` permission. Its project configuration and
-   * plugins stay off either way.
+   * plugins stay off unless `projectConfig` is set.
    */
   readonly ownSkills?: true;
+  /**
+   * A Project the person trusted for OpenCode, outside Plan and Chat:
+   * `OPENCODE_DISABLE_PROJECT_CONFIG` goes, so OpenCode loads the Project's
+   * own `opencode.json(c)` and `.opencode` agents, plugins, and commands as it
+   * does on its own (maintainer decision, 2026-11-14). Those files load after
+   * the private configuration and may override Octant's rules, which the
+   * person accepted by trusting the Project; the launch is then never
+   * attested as isolated. Ignored in Plan and Chat, which keep it set.
+   */
+  readonly projectConfig?: true;
   /**
    * The person let OpenCode run as itself with its tool servers: these are the
    * MCP servers they added to their own configuration, written into the
@@ -197,6 +207,27 @@ function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
     ...kept
   } = OPENCODE_GUARDS;
   return kept;
+}
+
+/** The guards a launch keeps: `projectConfig` lifts only the Project configuration switch. */
+function openCodeLaunchGuards(
+  ownSkills: boolean,
+  projectConfig: boolean,
+): Readonly<Record<string, string>> {
+  const guards = ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS;
+  if (!projectConfig) return guards;
+  const { OPENCODE_DISABLE_PROJECT_CONFIG: _projectConfigOff, ...kept } = guards;
+  return kept;
+}
+
+/** Plan stays read-only and Chat keeps no folder, so neither loads a Project's own configuration. */
+function launchLoadsProjectConfig(input: OpenCodeProcessStartInput): boolean {
+  return (
+    input.projectConfig === true &&
+    input.executionPolicy !== undefined &&
+    input.executionPolicy !== "plan" &&
+    (input.mode === "work" || input.mode === "code")
+  );
 }
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
@@ -747,6 +778,7 @@ export function createPrivateOpenCodeProfile(
   betaPermissions?: ReadonlyArray<PermissionV2Rule>,
   ownSkills = false,
   ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+  projectConfig = false,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -787,7 +819,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      ...(ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS),
+      ...openCodeLaunchGuards(ownSkills, projectConfig),
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -1404,6 +1436,7 @@ function acquireOpenCodeServer(
           runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
           input.ownSkills === true,
           input.ownToolServers,
+          launchLoadsProjectConfig(input),
         );
       } catch {
         resume(
@@ -1727,7 +1760,9 @@ export function makeOpenCodeProcessLive(
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,
-            supportsOpenCodeIsolation(probe.version),
+            // A Project's own plugins and servers enter a launch that loads
+            // its configuration, so that launch is never isolated.
+            supportsOpenCodeIsolation(probe.version) && !launchLoadsProjectConfig(input),
             input.onProcessStarted,
           ).pipe(
             Effect.tap((managed) =>

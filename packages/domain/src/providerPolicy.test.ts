@@ -2582,7 +2582,13 @@ describe("provider instance policy", () => {
   });
 
   it("runs a key provider account as itself unless the person turns it off, and keeps that choice through an account edit", () => {
-    for (const account of [claudeProvider(), codexProvider(), provider(), mistralVibeProvider()]) {
+    for (const account of [
+      claudeProvider(),
+      codexProvider(),
+      provider(),
+      mistralVibeProvider(),
+      kimiCodeProvider(),
+    ]) {
       const off = setProviderNativeSetup(account, { enabled: false, updatedAt });
       expect(off.nativeSetup).toBe(false);
       expect(off.version).toBe(account.version + 1);
@@ -2604,14 +2610,15 @@ describe("provider instance policy", () => {
     });
     expect(recoloured.nativeSetup).toBe(false);
 
-    for (const account of [kimiCodeProvider(), piProvider(), ollamaProvider(), httpProvider()]) {
+    for (const account of [piProvider(), ollamaProvider(), httpProvider()]) {
       expect(() => setProviderNativeSetup(account, { enabled: true, updatedAt })).toThrow(
-        "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+        "Only a Claude Code, Codex, OpenCode, or ACP agent account runs as itself.",
       );
     }
-    // The journal refuses the switch on any other ACP agent, so a hand-written
-    // row cannot slip one past the policy.
-    expect(() => decodeProviderInstance({ ...kimiCodeProvider(), nativeSetup: true })).toThrow();
+    // Every ACP agent is a key provider, so the journal keeps its switch too.
+    expect(decodeProviderInstance({ ...kimiCodeProvider(), nativeSetup: false })).toMatchObject({
+      nativeSetup: false,
+    });
   });
 
   it("rejects Claude reconfiguration before changing an instance with active sessions", () => {

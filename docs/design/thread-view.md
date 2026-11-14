@@ -589,7 +589,9 @@ window with no Project controller shows the words and Not now without Trust,
 and the host refuses the command from anyone but its own person. The card never
 shows for a trusted Project, a Project folder without that provider's Project
 code, or a provider whose trust loads none (any provider that is not a key
-provider, and Codex). The host's answer and the entries it reads are
+provider, and Codex). Every ACP agent is a key provider, so the card names
+Gemini CLI, Goose, Kimi Code, and the others for the Project files their
+launches hold until trust (maintainer decision, 2026-11-14). The host's answer and the entries it reads are
 in [Architecture: Key providers run as themselves](../architecture.md#providers).
 
 ## Turn menu panels

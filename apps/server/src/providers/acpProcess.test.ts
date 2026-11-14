@@ -32,6 +32,7 @@ import {
   SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
+import { projectCodeEntries } from "@octant/domain";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -2318,5 +2319,104 @@ describe("Mistral Vibe running as itself", () => {
     expect(vibe.sessionMode("chat", "approval-gated", true)).toBe("ask");
     expect(vibe.sessionMode("code", "plan", true)).toBe("plan");
     expect(kimi.ownReviewer).toBeUndefined();
+  });
+});
+
+describe("ACP agents running as themselves", () => {
+  const everything = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: true,
+  } as const;
+  // What Plan and an untrusted Project carry: the person's skills, no Project code.
+  const untrusted = { ...everything, toolServers: false, hooks: false, projectCode: false };
+
+  it("holds each agent's Project entries until the Project is trusted for it, and the trust prompt names every one", () => {
+    for (const profile of Object.values(acpProviderProfiles)) {
+      const held = profile.process.forbiddenRootEntries ?? [];
+      const release = profile.process.nativeSetup;
+      if (profile.kind === "opencode") continue;
+      expect(release, profile.kind).toBeDefined();
+      if (release === undefined) continue;
+      const launch = { executionPolicy: "approval-gated" as const, mode: "code" as const };
+      const named = new Set(projectCodeEntries(profile.kind).map((entry) => entry.path));
+      const beforeTrust = new Set(release(untrusted, launch).releasedRootEntries);
+      for (const entry of held) {
+        expect(release(everything, launch).releasedRootEntries, profile.kind).toContain(entry);
+        // An entry readable before trust is instruction text, never code.
+        if (beforeTrust.has(entry)) expect(entry, profile.kind).toBe("AGENTS.md");
+        else expect(named.has(entry), `${profile.kind} ${entry}`).toBe(true);
+      }
+    }
+  });
+
+  it("keeps Goose's Project plugins and skills unreadable until the Project is trusted", async () => {
+    const target = fixture(goose);
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+    });
+    const launch = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        confinement.prepare({
+          profile: goose,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: { PATH: "/usr/bin" },
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+    const plugins = join(target.canonicalRoot, ".agents/plugins");
+    const denies = (args: ReadonlyArray<string>) =>
+      args.some((arg) => arg.includes(`(deny file-read* (subpath "${plugins}"))`));
+    expect(denies((await launch()).args)).toBe(true);
+    expect(denies((await launch(untrusted)).args)).toBe(true);
+    expect(denies((await launch(everything)).args)).toBe(false);
+  });
+
+  it("reads the person's own Kimi Code skills, servers and hooks with their setup, and none without it", async () => {
+    const target = fixture(kimi);
+    const hostDirectory = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostDirectory, { recursive: true });
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: hostDirectory,
+    });
+    const launch = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        confinement.prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: { PATH: "/usr/bin" },
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+    const deniesHome = (args: ReadonlyArray<string>, entry: string) =>
+      args.some((arg) => arg.includes(`${realpathSync(hostDirectory)}/${entry}"`));
+    const locked = (await launch()).args;
+    const own = (await launch(everything)).args;
+    for (const entry of ["mcp.json", "skills", "plugins", "hooks", "AGENTS.md"]) {
+      expect(deniesHome(locked, entry), entry).toBe(true);
+      expect(deniesHome(own, entry), entry).toBe(false);
+    }
+    // Plan carries no hooks or servers, so those stay held while skills load.
+    const plan = (await launch(untrusted)).args;
+    expect(deniesHome(plan, "skills")).toBe(false);
+    expect(deniesHome(plan, "hooks")).toBe(true);
+    expect(deniesHome(plan, "mcp.json")).toBe(true);
   });
 });

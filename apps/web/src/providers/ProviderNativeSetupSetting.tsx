@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import { SettingRow } from "../settings/primitives";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { keyProviderLabel } from "./providerSettingsPresentation";
 
 export interface ProviderNativeSetupSettingProps {
   readonly instance: {
@@ -20,13 +21,6 @@ export interface ProviderNativeSetupSettingProps {
   readonly disabled: boolean;
   readonly onChange: (enabled: boolean) => Promise<boolean>;
 }
-
-const PROVIDER_NAMES: Readonly<Record<KeyProviderDriverKind, string>> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  opencode: "OpenCode",
-  "mistral-vibe": "Mistral Vibe",
-};
 
 const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
   subagents: "its own subagents",
@@ -46,7 +40,7 @@ const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
  * all, so a feature Octant cannot see is never implied.
  */
 export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProps) {
-  const name = PROVIDER_NAMES[props.instance.driverKind];
+  const name = keyProviderLabel(props.instance.driverKind);
   const settingId = `provider-${props.instance.id}-native-setup`;
   const unsupported = unsupportedFeatures(props.observed?.capabilities);
   return (
@@ -111,7 +105,7 @@ export interface ProviderOwnMemorySettingProps {
  * server refuses others).
  */
 export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
-  const name = PROVIDER_NAMES[props.instance.driverKind];
+  const name = keyProviderLabel(props.instance.driverKind);
   const settingId = `provider-${props.instance.id}-own-memory`;
   return (
     <SettingRow

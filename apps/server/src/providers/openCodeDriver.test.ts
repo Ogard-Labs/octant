@@ -13,7 +13,7 @@ import type {
   Session,
 } from "@opencode-ai/sdk/v2/types";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Fiber, Stream } from "effect";
@@ -30,11 +30,7 @@ import {
   type OpenCodeClientPort,
 } from "./openCodeDriver";
 import type { OpenCodeEvent } from "./openCodeEventMapper";
-import {
-  NO_OPENCODE_OWN_SETUP,
-  readOpenCodeProjectSetup,
-  type OpenCodeOwnSetup,
-} from "./openCodeOwnSetup";
+import { NO_OPENCODE_OWN_SETUP, type OpenCodeOwnSetup } from "./openCodeOwnSetup";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import {
   betaPermissionsForRelease,
@@ -930,7 +926,7 @@ describe("OpenCode driver", () => {
     ["full-access", "bash", "allow"],
     ["full-access", "task", "allow"],
     ["full-access", "todowrite", "allow"],
-    ["full-access", "external_directory", "deny"],
+    ["full-access", "external_directory", "allow"],
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "task", "ask"],
@@ -993,7 +989,9 @@ describe("OpenCode driver", () => {
       const shell = executionPolicy === "full-access" ? "allow" : "ask";
       expect(evaluatePermission(work, "bash")).toBe(shell);
       expect(evaluatePermission(work, "task")).toBe(shell);
-      expect(evaluatePermission(work, "external_directory")).toBe("deny");
+      expect(evaluatePermission(work, "external_directory")).toBe(
+        executionPolicy === "full-access" ? "allow" : "deny",
+      );
     },
   );
 
@@ -2956,7 +2954,7 @@ describe("OpenCode driver", () => {
     ["auto-accept-edits", "external_directory", "deny"],
     ["full-access", "edit", "allow"],
     ["full-access", "bash", "allow"],
-    ["full-access", "external_directory", "deny"],
+    ["full-access", "external_directory", "allow"],
   ] as const)("maps 2.x agent permission rules for %s %s as %s", (policy, action, effect) => {
     const rules = betaAgentPermissionRules(policy, "code");
     expect(evaluateV2Permission(rules, action)).toBe(effect);
@@ -3123,6 +3121,28 @@ describe("OpenCode driver", () => {
         "websearch",
       ),
     ).toBe("allow");
+  });
+
+  it("reaches a folder outside the Project only at Full access, and still refuses a protected file there", () => {
+    const outside = "/elsewhere/notes/a.ts";
+    const key = join(homedir(), ".ssh", "id_ed25519");
+    const rulesFor = (policy: "full-access" | "approval-gated") => [
+      permissionRules(policy, "code", undefined, ["/work/notes"]).map((rule) => ({
+        action: rule.permission,
+        resource: rule.pattern,
+        effect: rule.action,
+      })),
+      betaAgentPermissionRules(policy, "code", ["/work/notes"]),
+    ];
+    for (const rules of rulesFor("full-access")) {
+      expect(lastMatch(rules, "external_directory", outside)).toBe("allow");
+      expect(lastMatch(rules, "read", key)).toBe("deny");
+    }
+    for (const rules of rulesFor("approval-gated")) {
+      expect(lastMatch(rules, "external_directory", outside)).toBe("deny");
+      // The Project's extra folder stays reachable below Full access.
+      expect(lastMatch(rules, "external_directory", "/work/notes/todo.md")).toBe("allow");
+    }
   });
 
   it("gives 2.x Work mode the shell and child-agent rules Code mode gets at each level", () => {
@@ -3358,72 +3378,39 @@ describe("OpenCode driver", () => {
     expect(plan).not.toHaveProperty("ownToolServers");
   });
 
-  it("loads a trusted Project's own OpenCode rules and servers under the level's denies, and none while untrusted or in Plan", async () => {
-    const root = mkdtempSync(join(tmpdir(), "octant-opencode-project-"));
-    try {
-      writeFileSync(
-        join(root, "opencode.json"),
-        JSON.stringify({
-          permission: { "*": "allow", edit: "allow", external_directory: "allow" },
-          mcp: { tracker: { type: "local", command: ["tracker-server"] } },
-          plugin: ["./plugin.ts"],
-        }),
+  it("lets OpenCode load a trusted Project's own configuration outside Plan, and keeps it off while untrusted or in Plan", async () => {
+    const launch = async (executionPolicy: "approval-gated" | "plan", projectCode: boolean) => {
+      const fixture = betaDriver({ readOwnSetup: () => NO_OPENCODE_OWN_SETUP });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* fixture.driver.acquire({
+              instanceId,
+              projectRoot: "/tmp/project",
+              mode: "code",
+            });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy,
+              nativeSetup: {
+                subagents: true,
+                webTools: true,
+                skills: true,
+                toolServers: executionPolicy !== "plan",
+                hooks: executionPolicy !== "plan",
+                projectCode,
+              },
+            });
+          }),
+        ),
       );
-      const readProjectSetup = vi.fn(() => readOpenCodeProjectSetup(root));
-      const launch = async (executionPolicy: "approval-gated" | "plan", projectCode: boolean) => {
-        const fixture = betaDriver({ readOwnSetup: () => NO_OPENCODE_OWN_SETUP, readProjectSetup });
-        await Effect.runPromise(
-          Effect.scoped(
-            Effect.gen(function* () {
-              const connection = yield* fixture.driver.acquire({
-                instanceId,
-                projectRoot: "/tmp/project",
-                mode: "code",
-              });
-              yield* connection.start({
-                sessionId,
-                modelId,
-                executionPolicy,
-                nativeSetup: {
-                  subagents: true,
-                  webTools: true,
-                  skills: true,
-                  toolServers: executionPolicy !== "plan",
-                  hooks: executionPolicy !== "plan",
-                  projectCode,
-                },
-              });
-            }),
-          ),
-        );
-        return fixture.processInputs.at(-1);
-      };
+      return fixture.processInputs.at(-1);
+    };
 
-      const trusted = await launch("approval-gated", true);
-      const trustedRules = [...(trusted?.betaPermissions ?? [])];
-      expect(evaluateV2Permission(trustedRules, "edit")).toBe("allow");
-      // The Project's catch-all and its outside-folder allow never reach the launch.
-      expect(evaluateV2Permission(trustedRules, "shell")).toBe("ask");
-      expect(evaluateV2Permission(trustedRules, "external_directory")).toBe("deny");
-      expect(trusted?.ownToolServers).toEqual({
-        tracker: { type: "local", command: ["tracker-server"] },
-      });
-      expect(JSON.stringify(trusted)).not.toContain("plugin.ts");
-
-      readProjectSetup.mockClear();
-      const untrusted = await launch("approval-gated", false);
-      expect(evaluateV2Permission([...(untrusted?.betaPermissions ?? [])], "edit")).toBe("ask");
-      expect(untrusted?.ownToolServers).toEqual({});
-      expect(readProjectSetup).not.toHaveBeenCalled();
-
-      const plan = await launch("plan", false);
-      const planRules = [...(plan?.betaPermissions ?? [])];
-      expect(evaluateV2Permission(planRules, "edit")).toBe("deny");
-      expect(evaluateV2Permission(planRules, "external_directory")).toBe("deny");
-      expect(readProjectSetup).not.toHaveBeenCalled();
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    expect((await launch("approval-gated", true))?.projectConfig).toBe(true);
+    expect(await launch("approval-gated", false)).not.toHaveProperty("projectConfig");
+    expect(await launch("plan", false)).not.toHaveProperty("projectConfig");
   });
 
   it("keeps Plan's denials and the outside-folder refusal over a Project rule that allows them", () => {
@@ -3498,7 +3485,6 @@ function betaDriver(
     readonly permissionPersistence?: "project-default";
     readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
-    readonly readProjectSetup?: (projectRoot: string) => OpenCodeOwnSetup;
   } = {},
 ) {
   const launchScratch = launchScratchDirectory();
@@ -3561,7 +3547,6 @@ function driverFixture(
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
     /** The version a 2.x client reports: its process's, never a health route's. */
     readonly healthVersion?: string;
-    readonly readProjectSetup?: (projectRoot: string) => OpenCodeOwnSetup;
   } = {},
 ) {
   const calls: string[] = [];
@@ -3732,9 +3717,6 @@ function driverFixture(
         };
       },
       ...(options.readOwnSetup === undefined ? {} : { readOwnSetup: options.readOwnSetup }),
-      ...(options.readProjectSetup === undefined
-        ? {}
-        : { readProjectSetup: options.readProjectSetup }),
       permissionPersistence: () =>
         typeof options.permissionPersistence === "function"
           ? options.permissionPersistence()

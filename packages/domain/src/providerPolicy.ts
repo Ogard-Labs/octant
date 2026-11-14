@@ -1962,11 +1962,11 @@ export function setProviderNativeSetup(
     current.driverKind !== "claude" &&
     current.driverKind !== "codex" &&
     current.driverKind !== "opencode" &&
-    current.driverKind !== "mistral-vibe"
+    !isAcpAgentInstance(current)
   ) {
     reject(
       "invalid-configuration",
-      "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+      "Only a Claude Code, Codex, OpenCode, or ACP agent account runs as itself.",
     );
   }
   const { nativeSetup: _previous, ...rest } = current;

@@ -8,6 +8,7 @@ import {
   type ProviderInstance,
   type ProviderObservedState,
   type ProviderRefusalReason,
+  type KeyProviderDriverKind,
 } from "@octant/contracts";
 import { isOutsideDriverQuarantined } from "@octant/domain";
 import { thisComputerName } from "../platform";
@@ -177,6 +178,11 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   // An outside driver package never borrows a bundled provider's name.
   if (driverKind === "outside-harness-endpoint") return "Outside driver";
   return "OpenAI-compatible";
+}
+
+/** A key provider's product name, as its own-setup and Project trust controls show it. */
+export function keyProviderLabel(driverKind: KeyProviderDriverKind): string {
+  return driverKind === "claude" ? "Claude Code" : driverLabel(driverKind);
 }
 
 export function providerRefusalCopy(

@@ -1527,8 +1527,12 @@ function makeConnection(
             if (refusal !== undefined) throw failure("incompatible", refusal);
             const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
             if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
+            // A Project trusted for the agent, outside Plan, loads the files
+            // the refusal is about, as the agent does on its own.
             const projectRefusal =
-              runtimeRoot === projectRoot ? profile.refusesProject?.(projectRoot) : undefined;
+              runtimeRoot === projectRoot && input.nativeSetup?.projectCode !== true
+                ? profile.refusesProject?.(projectRoot)
+                : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
             const { bridgeTools } = partitionTools(input.tools);
             if (bridgeTools.length > 0 && process.platform !== "darwin") {
@@ -2041,11 +2045,15 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
-                if (profile.reviewedCommands !== undefined && prompt.trimStart().startsWith("/")) {
+                if (
+                  profile.reviewedCommands !== undefined &&
+                  (mode === "chat" || state.executionPolicy === "plan") &&
+                  prompt.trimStart().startsWith("/")
+                ) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      `${name} slash commands are disabled. Rephrase the request without a leading slash.`,
+                      `${name} slash commands do not run in Plan or Chat. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }

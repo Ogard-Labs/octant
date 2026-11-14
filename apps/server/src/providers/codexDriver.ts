@@ -142,7 +142,6 @@ export interface CodexThreadConfig {
   readonly "features.view_image"?: false;
   readonly "features.plugins"?: false;
   readonly "features.apps"?: false;
-  readonly project_doc_max_bytes?: 0;
   /**
    * The person's compaction point for this thread, in tokens: Codex compacts
    * once the context passes it, mid-turn too. Passed in the thread's own
@@ -176,25 +175,6 @@ export interface CodexThreadResumeInput {
 const CODEX_SHELL_OFF_CONFIG = {
   "features.shell_tool": false,
   "features.unified_exec": false,
-} as const satisfies CodexThreadConfig;
-
-/**
- * A Work turn does not read an agent brief already in the Project's folder.
- * Codex loads every `AGENTS.md` (and `AGENTS.override.md` or a configured
- * fallback name) from the repository root down to `cwd` into the model's
- * instructions by itself; a project doc budget of zero bytes skips that
- * discovery and leaves the user's own `$CODEX_HOME/AGENTS.md` in place.
- * Measured against codex-cli 0.162.1 with turns sent to a local stand-in
- * endpoint: a thread started in a Project holding an `AGENTS.md` sent its
- * contents with the first turn, the same thread started or resumed with
- * `project_doc_max_bytes = 0` did not, and a resume without the override sent
- * them again, so it is stated on every resume like the shell overrides. Read
- * at the Codex source tags, a zero budget has skipped discovery since 0.24.0
- * and `thread/start` has applied its `config` since it arrived in 0.56.0, so
- * every release with this protocol honors it.
- */
-const CODEX_WORK_CONFIG = {
-  project_doc_max_bytes: 0,
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -1677,9 +1657,7 @@ function makeConnection(
             ? nativeSetup?.toolServers === true
               ? CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG
               : yield* codexChatThreadConfig(client, projectRoot)
-            : mode === "work"
-              ? CODEX_WORK_CONFIG
-              : {};
+            : {};
         const webConfig =
           nativeSetup?.webTools === true
             ? modeConfig

@@ -52,19 +52,20 @@ current thread or Project spend ceiling.
 
 ## Key providers
 
-Claude Code, Codex, Mistral Vibe, and OpenCode run as themselves inside
-Octant ([Architecture: key providers run as themselves](../architecture.md#providers)).
+Claude Code, Codex, Mistral Vibe, OpenCode, and every other ACP agent run as
+themselves inside Octant ([Architecture: key providers run as themselves](../architecture.md#providers);
+the other ACP agents are in [ACP agents run as themselves](#acp-agents-run-as-themselves)).
 The switch-offs in the sections below are today's build. Each key provider's
 target wire behaviour, gated by the thread's
 [guardrail level](../architecture.md#security-and-authority) (off at Guarded
 and Reviewed until the person turns it on, on at Full access):
 
-| Provider     | Switched off today                                                                                                                                  | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                                                                                             |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                               | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                           |
-| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off; `web_search = "disabled"`                               | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                           |
-| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`, `VIBE_DISABLED_TOOLS='["web_search","web_fetch"]'` | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire    |
-| OpenCode     | Skills and project config off, `skill` denied; `websearch` and `webfetch` denied at every level; Octant's denies outrank saved grants; `once` only  | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, and the MCP servers and permission rules in the person's own configuration and, in a trusted Project outside Plan, the Project's own (below); Reviewed through Octant Shield at Auto |
+| Provider     | Switched off today                                                                                                                                  | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                               | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
+| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off; `web_search = "disabled"`                               | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
+| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`, `VIBE_DISABLED_TOOLS='["web_search","web_fetch"]'` | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire                                             |
+| OpenCode     | Skills and project config off, `skill` denied; `websearch` and `webfetch` denied at every level; Octant's denies outrank saved grants; `once` only  | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, the MCP servers and permission rules in the person's own configuration, and in a trusted Project outside Plan `OPENCODE_DISABLE_PROJECT_CONFIG` unset; outside folders at Full access; Reviewed through Octant Shield at Auto |
 
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
@@ -126,27 +127,25 @@ the Accept edits wall), and `auto-approve` (maintainer decision,
 out a mode Octant selects gets a refused session start, not a different
 mode.
 
-OpenCode in a trusted Project outside Plan reads the Project's
-`opencode.jsonc`, `opencode.json`, `.opencode/opencode.jsonc`, and
-`.opencode/opencode.json` the way it reads the person's own configuration:
-their permission rules (a catch-all and the rules Octant owns dropped) follow
-the person's under the level's denies, and their MCP servers join the
-launch's private configuration (maintainer decision, 2026-11-14).
-`OPENCODE_DISABLE_PROJECT_CONFIG` stays set, so a Project plugin, agent, or
-command never runs, in Plan or anywhere else. Rationale: OpenCode's own
-source puts no layer Octant controls above a Project's own rules. In v1.18.21
-(`packages/opencode/src/config/config.ts:401-475`) the order is global,
-`OPENCODE_CONFIG`, the Project's `opencode.json(c)`, `.opencode` folders, then
-`OPENCODE_CONFIG_CONTENT`, merged deeply, and each agent's own rules are
-appended after the top-level ones (`agent/agent.ts:293`). In v2.0.27
-(`packages/core/src/config.ts:230-237`) `OPENCODE_CONFIG_CONTENT` also loads
-last, but every document's top-level `permissions` are pushed onto each agent
-first and each document's per-agent `permissions` after them
-(`packages/core/src/config/plugin/agent.ts:84-123`), and a rule decides by
-last match (`packages/core/src/permission.ts:87-91`). So a Project agent's
-`*: allow`, or a Project agent made the default, would follow any rule Octant
-could write, and handing the raw files over would let a Project reopen what
-the level denies.
+OpenCode in a trusted Project outside Plan loads the Project's own
+configuration exactly as it does on its own: the launch leaves
+`OPENCODE_DISABLE_PROJECT_CONFIG` unset, so OpenCode reads the Project's
+`opencode.json(c)` and its `.opencode` agents, commands, plugins, and tools
+(maintainer decision, 2026-11-14). In Plan, in Chat, and in a Project not
+trusted for OpenCode the variable stays set and none of it loads, so Plan
+stays read-only. Rationale: OpenCode loads a Project's files after the
+launch's private configuration (v1.18.21 `config/config.ts:401-475`; v2.0.27
+`packages/core/src/config.ts:230-237` and `config/plugin/agent.ts:84-123`),
+and a rule decides by last match, so a Project agent's `*: allow` or a Project
+agent made the default can override Octant's level rules in that Project. The
+maintainer accepted that: trusting a Project for OpenCode is trusting its own
+rules, as OpenCode's own users do, and Plan, where the variable stays set, is
+the hard line. The earlier build read only the files' rules and MCP servers
+into the private configuration under the level's denies and kept plugins,
+agents, and commands off; it is removed. Because a Project's plugins and MCP
+servers then share the process, such a launch is never attested as isolated,
+and Octant's app-managed tools are offered beside them below Full access, as
+at Full access, instead of being refused.
 
 The setup is on by default for every key provider account at every level;
 the person turns it off per account or per thread
@@ -784,7 +783,10 @@ configuration, where OpenCode appends it after every agent's built-in rules
 posture denies all. File reads (`read`, `glob`, `grep`, `list`) are allowed
 at every level on both versions, Plan included, so OpenCode reads inside the
 Project and its extra folders without asking, as Octant's Claude Code file
-gate does; `external_directory` still refuses every other folder. Under the
+gate does; `external_directory` still refuses every other folder below Full
+access, and at Full access it is allowed, as OpenCode allows it on its own
+(maintainer decision, 2026-11-14). The outside-folder allows come after the
+namespaced-tool deny, whose `*_*` also matches `external_directory`. Under the
 catch-all `ask` they had asked at Guarded and never ran in Plan, which
 cannot approve anything (maintainer decision, 2026-11-14). Refusals come last
 so nothing reopens them: OpenCode's own `.env` refusal (its default agent's
@@ -849,8 +851,8 @@ provider credentials live there), and applies them as allow after Octant's
 rules. Octant's denies still win, so Plan's denials hold (Work's shell
 and subagents follow the level as Code's do), and Octant itself never writes such a grant because
 it answers approvals `once`. With the setup on, the person's OpenCode rules
-apply over Octant's level rules, with Plan, the outside-directory refusal,
-and a mode's withheld tools still Octant's denies (built). Octant reads the
+apply over Octant's level rules, with Plan, the outside-directory refusal
+below Full access, and a mode's withheld tools still Octant's denies (built). Octant reads the
 `permission` rules (and the 2.x `permissions` list) from the person's
 OpenCode configuration when a session starts, in the order they wrote them,
 and places them ahead of the level's first deny. It drops a bare catch-all
@@ -1058,6 +1060,49 @@ breaks between any two. The Octant Harness sends one request per agent
 message, so the first text of a later request in a turn starts a new
 paragraph, under the same line-break exception; the history the model reads
 keeps each message as sent. Pi passes an agent's text on as sent.
+
+### ACP agents run as themselves
+
+Every ACP agent is a key provider (maintainer decision, 2026-11-14): its
+account and thread switches work as the other key providers' do, and a
+Project trusted for it loads that Project's own files in Work and Code
+outside Plan. Each profile's `nativeSetup` releases what its launch
+otherwise holds back, and its `nativeSetupSupport` reports only those
+features:
+
+- **A trusted Project.** The profile's `forbiddenRootEntries` become
+  readable, so the agent loads the Project's skills, settings, MCP servers,
+  hooks, plugins, and agent files as it does on its own, under its own folder
+  trust where it keeps one. Each agent's entries are listed in
+  `PROJECT_CODE_ENTRIES` (`packages/domain/src/projectCodeTrustPolicy.ts`),
+  so the one trust prompt names them; a test holds the two lists together.
+  Gemini CLI and Qwen Code start in a trusted Project instead of refusing it.
+  Grok Build's `trusted_folders.toml` becomes readable, so its own trust list
+  decides. In Plan, in Chat, and in an untrusted Project every entry stays
+  held, and the two refusals stay.
+- **The person's own home.** Kimi Code reads its home `AGENTS.md` with any of
+  the setup, `skills` with skills, `mcp.json` and `plugins` with tool servers,
+  and `hooks` with hooks (never in Chat or Plan). Kilo unsets
+  `KILO_DISABLE_EXTERNAL_SKILLS` with skills. fx reads the Project's
+  `AGENTS.md`, instruction text, with any of the setup.
+- **Not lifted.** Kilo's and Devin's managed configuration stays, because it
+  carries the level's permission and the agent or mode Octant selects, which
+  the person's own configuration would replace; so their home configuration
+  and Devin's own subagents stay off, and Kilo's other Project configuration
+  stays off because no Kilo release was read for the files it would load.
+  Grok Build's `GROK_SUBAGENTS` and every agent's own subagents stay off: none
+  of these agents names a child session Octant could show as a child run.
+  What an agent reads from its own profile folder by itself (Goose's, Gemini
+  CLI's, GitHub Copilot's, Cline's, Qwen Code's, GLM Agent's, and Grok
+  Build's) loads as before; the switch cannot hold it back, so it is not
+  reported as a setup feature.
+
+Kimi Code's own slash commands run in Work and Code outside Plan, as in its
+own app (maintainer decision, 2026-11-14); the probe still pins the reviewed
+command inventory, so a release with a new command fails closed. Plan and
+Chat refuse a prompt starting with `/`, since a command such as
+`update-config` writes. The earlier refusal everywhere was Octant's default,
+not a protocol limit: ACP carries the command as prompt text.
 
 ### What an ACP agent cannot do
 
