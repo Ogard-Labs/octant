@@ -372,8 +372,17 @@
   padding-left: var(--oct-space-5);
 }
 
-.run-debug__tree .run-debug__tree {
-  padding-left: var(--oct-space-3);
+/* The tree is one flat list so a large scope can be virtualized; each row
+   indents by its level instead of by a nested list. */
+.run-debug__tree-row {
+  padding-left: calc(var(--oct-space-3) * var(--run-debug-depth, 0));
+  border-radius: var(--oct-radius-sm);
+  cursor: default;
+}
+
+.run-debug__tree-scroll {
+  max-height: 24rem;
+  overflow-y: auto;
 }
 
 .run-debug__scope-name {

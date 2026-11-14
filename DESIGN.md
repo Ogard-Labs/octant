@@ -1103,17 +1103,26 @@ seven exclusive choices use `OctantToggleGroup` instead.
 ### OctantCollapsible
 
 **Purpose.** A disclosure: a summary row that opens a body below it.
-**Anatomy.** Props `summary`, `summaryClassName`, `children`, and every native
-`<details>` prop (`open`, `onToggle`, `className`).
-**Sizes and tokens.** A 14px chevron 8px before the summary, inheriting the
-row's ink; the user-agent triangle is hidden.
+**Anatomy.** Props `summary` (any content: a label, a label and a count, a
+heading, or several lines), `summaryClassName`, `summaryProps` (native summary
+attributes such as `id` or `aria-label`), `chevron` (`start`, the default, or
+`end` for a row whose label spans it, such as a section heading),
+`chevronSize` (12, 14, or 16), `children`, and every native `<details>` prop
+(`open`, `onToggle`, `className`).
+**Sizes and tokens.** A 14px chevron by default, 8px from the summary, inheriting
+the row's ink unless the caller's summary rule colours it; the user-agent
+triangle is hidden. The chevron points right when closed and down when open,
+turning on its own disclosure only, so a closed disclosure inside an open one
+still points closed.
 **States.** Closed, open (the chevron turns 90 degrees, without motion).
 **Keyboard and accessibility.** It stays a native `<details>`: Enter and Space on
 the summary toggle it, the browser reports expanded state, and find-in-page opens
 a closed body that holds a match.
-**Do and do not.** Use it for every new disclosure; do not ship a raw
-`<details>` with the browser triangle. A body that is costly to render mounts
-only while open.
+**Do and do not.** Use it for every disclosure; do not ship a raw `<details>`.
+The exceptions are transcript rows that draw their own chevron and mount their
+body lazily (turn activity, thinking) and the Settings background catalog, whose
+summary is a Change and Done control rather than a disclosure row. A body that
+is costly to render mounts only while open.
 **Gallery.** Composed patterns.
 
 ### OctantCombobox
