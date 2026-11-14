@@ -964,13 +964,11 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   gap: var(--oct-space-3);
 }
 
-/* At the title's scale the tile is the Project's mark, not a stray letter
-   beside it. */
+/* The page mark is 24px, the largest step of the icon scale: the Project's own
+   icon, or the tile when its folder has none. */
 .project-overview__identity .project-tile {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--oct-radius-md);
-  font-size: var(--oct-text-lg);
+  width: 24px;
+  height: 24px;
 }
 
 .project-overview__heading {

@@ -22,6 +22,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { ProjectIcon } from "./ProjectIcon";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
@@ -136,6 +137,17 @@ export interface ProjectOverviewProps {
   readonly project: ProjectSummary;
   readonly projectClient?: ProjectClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+}
+
+/** The Project's own icon when its folder has one, else the coloured tile; the colour menu opens from either. */
+function ProjectPageMark(props: { readonly project: ProjectOverviewProps["project"] }) {
+  return (
+    <ProjectIcon
+      fallback={<ProjectTile project={props.project} />}
+      projectId={String(props.project.id)}
+      size={24}
+    />
+  );
 }
 
 export function ProjectOverview(props: ProjectOverviewProps) {
@@ -266,7 +278,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         <header className="project-overview__toolbar">
           <div className="project-overview__identity">
             {props.onColorChange === undefined || archived || connectionStale ? (
-              <ProjectTile project={props.project} />
+              <ProjectPageMark project={props.project} />
             ) : (
               <OctantMenu
                 items={PROJECT_COLOR_MENU_ITEMS}
@@ -274,7 +286,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   const color = projectColorFromMenuValue(value);
                   if (color !== undefined) void props.onColorChange?.(props.project.id, color);
                 }}
-                trigger={<ProjectTile project={props.project} />}
+                trigger={<ProjectPageMark project={props.project} />}
                 triggerClassName="project-overview__color"
                 triggerLabel={`Project colour for ${props.project.name}`}
                 value={projectColorMenuValue(props.project.color)}
