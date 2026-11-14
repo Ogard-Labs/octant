@@ -277,7 +277,7 @@ export interface WorkspaceViewProps {
     paneId?: PaneId,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
     attachments?: ReadonlyArray<File>,
-  ) => void;
+  ) => Promise<boolean | void> | void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
     draft: string,
@@ -2609,7 +2609,7 @@ function renderNonCodeTab(
             : { extensionClient: props.extensionClient })}
           onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
             if (attachments !== undefined) {
-              props.onCreateChat(
+              return props.onCreateChat(
                 prompt,
                 modelOptionValues,
                 paneId,

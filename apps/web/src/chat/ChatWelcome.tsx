@@ -66,7 +66,7 @@ export interface ChatWelcomeProps {
      * is created and leave with the first message, as a Work draft's images do.
      */
     attachments?: ReadonlyArray<File>,
-  ) => void;
+  ) => Promise<boolean | void> | void;
   readonly onSelectProvider?: (selection: ModelPickerSelection) => void;
   readonly onOpenSettings?: () => void;
   readonly onRetry?: () => void;
@@ -150,13 +150,23 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     );
     const options = Object.keys(modelOptionValues).length === 0 ? undefined : modelOptionValues;
     if (stagedFiles.length > 0) {
-      props.onCreateChat(
+      const submitted = stagedFiles;
+      const created = props.onCreateChat(
         trimmed,
         options,
         extensionSelections.length > 0 ? extensionSelections : undefined,
-        stagedFiles,
+        submitted,
       );
-      setStagedFiles([]);
+      // The files stay staged until the first message has left with them: a
+      // refused create or a failed upload otherwise lost them while the prompt
+      // stayed. Files staged or removed meanwhile are left as the person set them.
+      if (created === undefined) setStagedFiles([]);
+      else
+        void created.then((outcome) => {
+          if (outcome === true) {
+            setStagedFiles((current) => current.filter((file) => !submitted.includes(file)));
+          }
+        });
       if (extensionSelections.length > 0) extensionDraft.clear();
     } else if (extensionSelections.length > 0) {
       props.onCreateChat(trimmed, options, extensionSelections);

@@ -6314,7 +6314,7 @@ function LaunchedShell(
     paneId?: PaneId,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
     attachments?: ReadonlyArray<File>,
-  ) {
+  ): Promise<boolean | void> | void {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
       setDraftError(undefined);
@@ -6324,7 +6324,7 @@ function LaunchedShell(
       void controller.openDraftThread("chat");
       return;
     }
-    void handleDraftCreateThread(
+    return handleDraftCreateThread(
       "chat",
       prompt,
       undefined,
@@ -7114,12 +7114,16 @@ function LaunchedShell(
               "The first message could not be sent. Retry from the open thread.",
             );
             seedOpenedComposerDraft("chat", String(thread.id), prompt);
+            // False keeps the files the welcome composer staged, so a failed
+            // first send does not drop them along with the message.
+            return false;
           }
         } catch {
           chatController.reportError(
             "The first message could not be sent. Retry from the open thread.",
           );
           seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          return false;
         }
       } else if (mode === "code") {
         const destinationHostId = refuseUnlessCreatableDestination({

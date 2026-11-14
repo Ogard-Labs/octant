@@ -1238,20 +1238,32 @@ command they ran from it, moved it in the meantime.
 
 ### OctantEmpty
 
-**Purpose.** An empty, connection, or error state inside a pane or panel.
-**Anatomy.** Props `title`, `message`, `eyebrow`, `icon`, `action`, `role`
-(`alert` or `status`); parts Root, Header, Content, Description, Eyebrow, Media,
-Title.
-**Sizes and tokens.** At most 480px wide, 16px padding, 8px gaps,
-`--oct-radius-md`, the card fill and `--octant-shadow-sm`. The mark is a 24px
-neutral tile; eyebrow 12px muted; title 15/600; message 13px muted.
-**States.** One tone: the mark is neutral whatever went wrong.
-**Keyboard and accessibility.** The title is a level-2 heading; the caller sets
-`role` when the state is a live region.
-**Do and do not.** Use Empty for empty states; do not recreate one with styled
-spans. A page's own empty state follows [Page shell](#page-shell); a state that is
-the whole window is `ShellState` ([Empty, loading, and whole-window states](#empty-loading-and-whole-window-states)).
-**Gallery.** Composed patterns.
+**Purpose.** Every empty, connection, error, loading, and whole-window state.
+**Anatomy.** One component with three layouts. **card** (the default) takes
+`title`, `message`, `eyebrow`, `icon`, `action` (any node), and `role` (`alert`
+or `status`). Giving it a `state` (`disconnected`, `loading`, `neutral`,
+`warning`) draws that state's glyph instead of an icon and takes `action` as
+`{ label, onClick, glyph? }`, one secondary button with a retry glyph by
+default; a loading state spins its glyph, is a `status` region, and may omit
+`message`. **page** (`layout="page"` with a `state`) is a state that is the
+whole window. **line** (`layout="line"`) is the quiet single line a page shows
+when it has nothing on it: `title`, `detail`, `icon`, `action`, and `tone`
+(`page` or `lane`). Parts Root, Header, Content, Description, Eyebrow, Media,
+Title stay exported for composed states.
+**Sizes and tokens.** The card is at most 480px wide, 16px padding, 8px gaps,
+`--oct-radius-md`, the card fill and `--octant-shadow-sm`; its mark is a 24px
+neutral tile, eyebrow 12px muted, title 15/600, message 13px muted. The page
+layout is described in [Empty, loading, and whole-window states](#empty-loading-and-whole-window-states);
+the line layout in [Page shell](#page-shell), where `tone="lane"` sets the line
+in the meta ink for one empty column beside full ones.
+**States.** One tone: the mark is neutral whatever went wrong. A loading state
+in the page layout falls back to the card, since a spinner is not a dotted mark.
+**Keyboard and accessibility.** The card title is a level-2 heading and the page
+title a level-1 heading; the caller sets `role` when the state is a live
+region, except that loading is always `status` and the line is always `status`.
+**Do and do not.** Use OctantEmpty for every such state; do not recreate one with
+styled spans or a second component.
+**Gallery.** Composed patterns (card, named state, page, line).
 
 ### OctantField
 
@@ -1863,7 +1875,8 @@ Surface (reading measure 880px, or wide for boards)
   surface-toolbar search takes the slack · filters · view switch
   SurfaceSection  section label over a hairline
     surface-row   label + detail on the left, control on the right
-  SurfaceEmpty    a quiet icon, one line of text, and a real outline button
+  OctantEmpty layout="line"
+                  a quiet icon, one line of text, and a real outline button
                   for the next step; not a card
   SurfaceLoading  the page in outline while it loads: a title bar and rows
 ```
@@ -2193,9 +2206,9 @@ spans or animated divs.
   recorded exception: an inline field error tied to its input, a compact status row
   that already owns its mark or switches between status and alert, a
   screen-reader-only announcement, a positioned banner whose placement is not a
-  callout, an empty-state live region owned by `ShellState` or `OctantEmpty`, or a
+  callout, an empty-state live region owned by `OctantEmpty`, or a
   non-modal glass panel. The recipe owners (`OctantAlert`, `OctantToast`,
-  `OctantApprovalCard`, `FieldError`, and `ShellState`) set the role themselves.
+  `OctantApprovalCard`, `FieldError`, and `OctantEmpty`) set the role themselves.
 - **Product notices** are `OctantToast`: a semantic icon, short title, supporting
   detail, and an explicit Dismiss button. Success and waiting announcements use
   `status`; errors that need attention use `alert`. The recipe owns the opaque
@@ -2228,11 +2241,11 @@ spans or animated divs.
   title) on the page ground, never a raised card: a card with a title and a
   sentence reads as a finished empty state.
 - **A page with nothing on it** follows [Page shell](#page-shell).
-- **A state inside a pane or panel** is `OctantEmpty`'s compact layout: glyph,
+- **A state inside a pane or panel** is `OctantEmpty`'s card layout: glyph,
   eyebrow, title, sentence, and a button.
 - **A state that is the whole window** (a refused launch address, a launch session
   that expired, Project authority that is unavailable, a lost connection, storage
-  recovery) is the page presentation of `ShellState`: centred on the page, a 96px
+  recovery) is `OctantEmpty`'s page layout (`layout="page"` with a `state`): centred on the page, a 96px
   mark that is the state's glyph drawn as an open grid of dots in the primary ink
   (a warning is a filled triangle with its mark cut out), a title at the
   `--oct-text-xl` step, one line in the secondary ink, and the way back as a text

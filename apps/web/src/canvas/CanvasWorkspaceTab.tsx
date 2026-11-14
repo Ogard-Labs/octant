@@ -92,6 +92,7 @@ import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
 import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
+import "../styles/canvas.css";
 
 const CANVAS_TOOL_DIALOGS = [
   "refine",

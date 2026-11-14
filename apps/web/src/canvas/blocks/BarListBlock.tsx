@@ -15,6 +15,7 @@ import {
   type CanvasBarListRowLayout,
 } from "@octant/domain/canvas-bar-list-layout";
 import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
+import "../../styles/canvas.css";
 
 type BarListDirection = "desc" | "asc";
 
