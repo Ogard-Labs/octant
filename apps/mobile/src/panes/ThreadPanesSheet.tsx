@@ -388,13 +388,21 @@ function ReviewPane(props: {
         ) : (
           files.map((file, index) => (
             <ListRow
-              detail={file.binary ? "Binary file" : undefined}
+              detail={
+                file.binary ? "Binary file" : file.withoutDiff === true ? "New file" : undefined
+              }
               key={file.path}
               label={file.path}
               last={index === files.length - 1}
-              onPress={file.binary ? undefined : () => setOpen(file.path)}
+              onPress={
+                file.binary || file.withoutDiff === true ? undefined : () => setOpen(file.path)
+              }
               testID={`mobile-pane-review-file-${index}`}
-              value={file.binary ? undefined : diffstatText(file.additions, file.deletions)}
+              value={
+                file.binary || file.withoutDiff === true
+                  ? undefined
+                  : diffstatText(file.additions, file.deletions)
+              }
             />
           ))
         )}

@@ -151,6 +151,37 @@ export interface MobileDiffFile {
   /** True when Git said the file is binary, so there are no lines to show. */
   readonly binary: boolean;
   readonly lines: ReadonlyArray<MobileDiffLine>;
+  /**
+   * True when Git lists the path as changed but the diff holds no text for it,
+   * as for a new untracked file, so the row says so instead of showing an
+   * empty diff.
+   */
+  readonly withoutDiff?: boolean;
+}
+
+/**
+ * Every path Git reports as changed, with its diff where the diff has one. The
+ * diff alone misses untracked files: a checkout holding only new files has an
+ * empty diff, and reading the diff alone called it clean.
+ */
+export function mobileChangedFiles(
+  diffFiles: ReadonlyArray<MobileDiffFile>,
+  changedPaths: ReadonlyArray<string>,
+): ReadonlyArray<MobileDiffFile> {
+  const seen = new Set(diffFiles.map((file) => file.path));
+  const missing = changedPaths
+    .filter((path) => !seen.has(path))
+    .map(
+      (path): MobileDiffFile => ({
+        path,
+        additions: 0,
+        deletions: 0,
+        binary: false,
+        lines: [],
+        withoutDiff: true,
+      }),
+    );
+  return [...diffFiles, ...missing];
 }
 
 /**
@@ -254,8 +285,12 @@ export function loadMobileWorkingTreeReview(
     }
     if (result.kind !== "git-observed") return { status: "unavailable", message: failure };
     const branch = result.head.kind === "branch" ? result.head.name : undefined;
+    const changedPaths = result.changedPaths.map(String);
     if (result.diff.byteLength === 0) {
-      return { status: "ready", value: { branch, files: [], truncated: false } };
+      return {
+        status: "ready",
+        value: { branch, files: mobileChangedFiles([], changedPaths), truncated: false },
+      };
     }
     const batch = await readJson(
       await transport.authenticatedFetch({
@@ -283,7 +318,7 @@ export function loadMobileWorkingTreeReview(
       status: "ready",
       value: {
         branch,
-        files: parseMobileUnifiedDiff(text),
+        files: mobileChangedFiles(parseMobileUnifiedDiff(text), changedPaths),
         truncated: result.diff.truncated === true,
       },
     };

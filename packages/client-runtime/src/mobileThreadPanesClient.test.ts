@@ -104,6 +104,34 @@ describe("phone thread panes", () => {
     expect(read.status === "ready" ? read.value.files.length : 0).toBe(2);
   });
 
+  it("lists new untracked files Git reports even when the diff is empty", async () => {
+    const transport = transportAnswering(({ body }) => {
+      const sent = JSON.parse(body ?? "{}") as {
+        readonly operationId?: string;
+        readonly gitOperationId?: string;
+      };
+      return jsonResponse({
+        kind: "git-observed",
+        operationId: sent.operationId,
+        gitOperationId: sent.gitOperationId,
+        head: { kind: "branch", name: "feature/panes", oid: "b".repeat(40) },
+        stateToken: "a".repeat(64),
+        status: [{ path: "src/new.ts", index: "?", worktree: "?" }],
+        changedPaths: ["src/new.ts"],
+        diff: { contentId, digest: "d".repeat(64), byteLength: 0, truncated: false },
+        remotes: [],
+        upstream: null,
+        worktrees: [],
+      });
+    });
+
+    const read = await loadMobileWorkingTreeReview(transport, { threadId, checkoutId });
+
+    expect(read.status === "ready" ? read.value.files : []).toEqual([
+      expect.objectContaining({ path: "src/new.ts", withoutDiff: true }),
+    ]);
+  });
+
   it("says the host refused a read instead of failing when a paired device may not have it", async () => {
     const read = await loadMobileCodeEnvironment(
       transportAnswering(() => jsonResponse({ category: "unauthorized" }, 403)),
