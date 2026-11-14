@@ -1,4 +1,4 @@
-import { decodeChatThreadId } from "@octant/contracts";
+import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
 import { continueChatTurns, cutOffToolCallHold } from "../wiring/continuation";
 import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
 import { threadRestartContinuationId } from "../harness/threadRestartContinuation";
@@ -11740,6 +11740,59 @@ describe("handing a Chat conversation to a new provider session", () => {
         (block) => block.kind === "user-message" || block.kind === "assistant-message",
       ),
     ).toHaveLength(2);
+  });
+
+  describe("moving a thread to another account", () => {
+    const person = decodeEventActor({ kind: "local-user", actorId: ids.actor });
+    const moveAccount = (
+      fixture: ReturnType<typeof openFixture>,
+      threadId: ChatThreadId,
+      context?: Parameters<typeof fixture.service.execute>[1],
+    ) =>
+      fixture.service.execute(
+        {
+          kind: "move-chat-thread-account",
+          threadId,
+          expectedVersion: fixture.service.read(threadId).thread.version,
+          providerInstanceId: otherNative,
+        },
+        context,
+      );
+
+    it("moves on the person's request and the next turn discloses the handoff from the earlier account", async () => {
+      const fixture = openMoving({ nativeConversationFor: ownsConversation });
+      const threadId = await answeredThread(fixture);
+
+      await moveAccount(fixture, threadId, { actor: person });
+      expect(fixture.service.read(threadId).thread).toMatchObject({
+        providerInstanceId: otherNative,
+        modelId: "model-a",
+      });
+
+      await sendFollowUp(fixture, threadId);
+      expect(lastAttempt(fixture, threadId)).toMatchObject({
+        providerInstanceId: otherNative,
+        handoff: {
+          reason: "provider-switch",
+          previousProviderInstanceId: native,
+          nativeSessionTransferred: false,
+          hiddenReasoningTransferred: false,
+        },
+      });
+      expect(fixture.fakeDriver.resumeInputs).toEqual([]);
+    });
+
+    it("refuses a move nobody asked for, from the host itself or from an agent", async () => {
+      const fixture = openMoving({ nativeConversationFor: ownsConversation });
+      const threadId = await answeredThread(fixture);
+      const agent = { kind: "agent", actorId: ids.actor, providerInstanceId: native, threadId };
+
+      await expect(moveAccount(fixture, threadId)).rejects.toThrow("only when you ask for it");
+      await expect(
+        moveAccount(fixture, threadId, { actor: decodeEventActor(agent) }),
+      ).rejects.toThrow("only when you ask for it");
+      expect(String(fixture.service.read(threadId).thread.providerInstanceId)).toBe(native);
+    });
   });
 
   it("lets a provider that keeps its own session give way to a host-held one without a handoff", async () => {

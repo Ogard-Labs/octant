@@ -8,7 +8,7 @@ import { ThreadInfo } from "../composer/ThreadInfo";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { sideChatDraftNotice } from "../composer/sideChatDraftNotice";
-import type { ProviderModelOptionValues } from "@octant/contracts";
+import type { ProviderInstanceId, ProviderModelOptionValues } from "@octant/contracts";
 import {
   decodeChatAttachmentId,
   type ChatAttachmentId,
@@ -38,7 +38,11 @@ import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { decodeProviderModelId } from "@octant/contracts/providers";
-import { startedConversationPickerGroups, type PickerGroup } from "@octant/domain";
+import {
+  providerAccountMoveTargets,
+  startedConversationPickerGroups,
+  type PickerGroup,
+} from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
@@ -233,6 +237,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           );
         }).length;
   const chatStarted = view !== undefined && view.turns.some((turn) => turn.attempts.length > 0);
+  const accountMoveTargets =
+    view === undefined || props.providerGroups === undefined
+      ? []
+      : providerAccountMoveTargets(props.providerGroups, {
+          providerInstanceId: view.thread.providerInstanceId,
+          modelId: view.thread.modelId,
+        });
   // The next message starts a new session with the conversation handed over as
   // text when the selected provider keeps its own session and the conversation
   // so far is not in one of its sessions; the person hears that before sending.
@@ -1077,6 +1088,27 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                             projectId,
                           });
                           return result?.kind === "thread-updated";
+                        },
+                      },
+                    })}
+                {...(accountMoveTargets.length === 0
+                  ? {}
+                  : {
+                      moveToAccount: {
+                        accounts: accountMoveTargets.map((group) => ({
+                          id: group.instance.id,
+                          name: group.instance.displayName,
+                        })),
+                        onMove: async (providerInstanceId: ProviderInstanceId) => {
+                          const result = await props.controller.execute({
+                            kind: "move-chat-thread-account",
+                            threadId: view.thread.id,
+                            expectedVersion: view.thread.version,
+                            providerInstanceId,
+                          });
+                          return result?.kind === "thread-updated"
+                            ? undefined
+                            : "The conversation could not be moved. Nothing changed.";
                         },
                       },
                     })}

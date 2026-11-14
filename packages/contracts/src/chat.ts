@@ -633,6 +633,18 @@ export const ChangeChatProviderCommand = Schema.Struct({
 }).annotations(strict);
 
 /**
+ * The person moves the thread to another account (provider instance) of the
+ * same provider, keeping its model. The host accepts it only from the person,
+ * at a window or on a device they paired, and only while no turn runs; the
+ * next turn starts on the new account with the disclosed conversation handoff.
+ */
+export const MoveChatThreadAccountCommand = Schema.Struct({
+  kind: Schema.Literal("move-chat-thread-account"),
+  ...ChatThreadCommandFields,
+  providerInstanceId: ProviderInstanceId,
+}).annotations(strict);
+
+/**
  * Server-authoritative selection/clearing of a thread's multi-model pool
  * This is a data-layer seam only: it adds no Composer/Settings UI.
  * Omitting `pool` clears pool mode and restores ordinary
@@ -957,6 +969,7 @@ export const ChatCommand = Schema.Union(
   SnoozeChatThreadAtUsageResetCommand,
   WakeChatThreadCommand,
   ChangeChatProviderCommand,
+  MoveChatThreadAccountCommand,
   SelectChatMultiModelPoolCommand,
   ChangeChatResearchCommand,
   ChangeChatInstructionsCommand,

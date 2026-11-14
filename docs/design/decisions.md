@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
+| [Providers](#providers)                                                               | 7         | 4       | 3            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 4       | 4            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **252**   | **152** | **96**       | **4**               |
+| **All areas**                                                                         | **252**   | **151** | **97**       | **4**               |
 
 ## Principles and hard lines
 
@@ -1293,15 +1293,16 @@ and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-c
 
 ### Provider instances and accounts
 
-Providers are multi-instance, and a thread stays on the instance it started with. There is no automatic failover, rotation or load-balancing between accounts.
+Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff. There is no silent or automatic failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
 
 - A selected model is a host, provider instance and model id, and the model picker is provider-first.
 - Extra accounts use Octant-assigned state directories. Removing an account leaves its directory in place, and deleting it is the person's step.
 - Two instances of the same driver cannot share one effective state directory.
 - Plan-usage readings come only from the provider's own process, are kept per account, and a failed refresh keeps the last snapshot with its age.
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
+- Move to account: the person moves a thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired) and while a turn runs. Built for Chat; Work and Code threads move through the model picker. Not built yet: an opt-in "on a usage limit, hand off to this account".
 
-Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Partly built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ### Provider credentials and sign-in
 
