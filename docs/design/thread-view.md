@@ -421,37 +421,57 @@ the frame.
 
 ## Model picker
 
-The compact model picker uses explicit horizontal provider selection, sub-provider
-grouping, search, Favorites, and Recent. Source tabs are marks alone and name
-themselves in a tooltip. The picker of a thread whose model can no longer
+The compact model picker is one float with 12px corners. From the top: a row
+of icon tabs (Favorites, Recent, then one tab per provider showing its mark;
+the current tab has a quiet filled square behind its icon, and a tooltip names
+each); a borderless search field with a 1px accent underline; the model rows;
+a hairline and the Reasoning row; a hairline and the service-tier row. Sub-provider
+grouping stays as catalog chips under the search where a provider fronts several
+catalogs. The picker of a thread whose model can no longer
 change (a completed Work thread, which passes `locked`) keeps the name in the
 ordinary meta ink (the blanket disabled opacity left it at 2.11:1) and looks
 unpressable by its dimmed chevron, default cursor and absent hover; a picker
 disabled for any other reason, such as a running turn or no ready provider,
-keeps the ordinary disabled look. The chosen model carries a check, not a
-filled row; a row's star shows on hover, on focus, or once it is on; and a
-provider mark leads each row only in a list mixed from several providers.
+keeps the ordinary disabled look.
+
+A row is about 40px: the provider's mark, the model name, a small check right
+after the name for the current model, and a hint chip at the right edge. The
+current row carries the selected wash; a row's star shows on hover, on focus,
+or once it is on. A mixed list (Favorites, Recent, a search) names the account
+under the model, since two accounts of one provider share a mark. The first
+nine choosable rows show "⌘1" to "⌘9", and while the picker is open that chord
+chooses the row; nothing is bound while it is closed. Typing a letter anywhere
+in the picker goes to the search field, the arrows walk the rows (Up from the
+first returns to the search field), and Enter chooses. A provider with more
+than five models shows the first five and a quiet "Show more" line (a search
+shows every match, and the chosen model is never left behind the fold); the
+list scrolls inside the frame.
+
 The popup is one fixed frame, 360px wide
 and 440px tall (shorter only when the window is), opening 8px above its
 trigger with its edge aligned to the trigger's end: switching Favorites,
-Recent or a provider, an empty or short list, and choosing a model never
-resize or move it or its trigger; the list scrolls inside, and the reasoning
-and service-tier settings stay pinned beneath a hairline. The mode menu and
+Recent or a provider, an empty or short list, Show more, a search, and
+choosing a model or a setting never resize or move it or its trigger. The
+Reasoning and service-tier rows are always there for a picker whose caller can
+set model options, so the frame does not depend on the model. Reasoning is a
+segmented control of the levels the model declares, least to most, with the
+chosen level in accent ink on a raised segment, "Reasoning" on the left and
+the model's name on the right; pressing the chosen level again returns to the
+provider's default, and a chosen level shows at once and never snaps back
+while it saves. A model with no levels keeps the row, disabled, with one line
+saying so. The tier row is a segmented "Standard | Fast" (the provider's own
+names, with a bolt on the fast one); a model with no faster tier keeps the row
+disabled with its reason. The mode menu and
 the other composer-row menus open 8px above their button and never over it.
 Choosing a model keeps the menu open, since the
-reasoning level beneath is often the next choice. Its reasoning control shows
-the full track, discrete stops, and filled range, with the reading ("Reasoning
-High") and reset above, and Faster and Smarter at the track's two ends. The fill
-is a dot grain that grows denser, brighter, and more purple, with a soft glow,
-the higher the level; a chosen level shows at once and never snaps back while
-it saves. Explicit model and reasoning choices are remembered
+reasoning level beneath is often the next choice. Explicit model and reasoning choices are remembered
 locally for new threads; model settings are keyed by provider/model and restored only
 while supported. Existing thread selections remain authoritative. The same picker
 shows every declared model setting in Chat, Work, and Code. Paired model families
-show Lead and Sidekick selectors drawn from available catalog entries; choosing
+show Lead and Sidekick selectors above the Reasoning row, drawn from available catalog entries; choosing
 one preserves the other choice and carries still-supported explicit effort and
-speed settings. Devin's Speed selector offers Standard and Fast where the CLI
-supports Fast Mode, plus Default to use the provider's choice. The settings area
+speed settings. Devin's Speed is the tier row, Standard and Fast where the CLI
+supports Fast Mode. Any other declared choice is a select above the Reasoning row. The settings area
 scrolls within the bounded popup at narrow or short viewport sizes.
 Model choices and settings wait for an asynchronous model change to finish before
 accepting another edit, so the next configuration choice uses the confirmed pairing.

@@ -122,6 +122,7 @@ import { KeyIcon } from "@phosphor-icons/react/dist/csr/Key";
 import { KeyboardIcon } from "@phosphor-icons/react/dist/csr/Keyboard";
 import { LaptopIcon } from "@phosphor-icons/react/dist/csr/Laptop";
 import { LayoutIcon } from "@phosphor-icons/react/dist/csr/Layout";
+import { LightningIcon } from "@phosphor-icons/react/dist/csr/Lightning";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { LinkSimpleIcon } from "@phosphor-icons/react/dist/csr/LinkSimple";
 import { ListIcon } from "@phosphor-icons/react/dist/csr/List";
@@ -345,6 +346,7 @@ export const LayoutGrid = /* @__PURE__ */ makeIcon("layout-grid", SquaresFourIco
 export const LayoutPanelLeft = /* @__PURE__ */ makeIcon("layout-panel-left", SidebarIcon);
 export const LayoutPanelTop = /* @__PURE__ */ makeIcon("layout-panel-top", LayoutIcon);
 export const LayoutTemplate = /* @__PURE__ */ makeIcon("layout-template", LayoutIcon);
+export const Lightning = /* @__PURE__ */ makeIcon("lightning", LightningIcon);
 export const Link = /* @__PURE__ */ makeIcon("link", LinkIcon);
 export const Link2 = /* @__PURE__ */ makeIcon("link2", LinkSimpleIcon);
 export const List = /* @__PURE__ */ makeIcon("list", ListIcon);
