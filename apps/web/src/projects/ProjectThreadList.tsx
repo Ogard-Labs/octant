@@ -60,6 +60,7 @@ import {
   type CoordinatorThreadGroup,
 } from "./projectThreadGrouping";
 import { readFoldedCoordinators, writeFoldedCoordinators } from "../shell/activityViewModel";
+import { useMinuteClock } from "./minuteClock";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import {
   SidebarThreadRowContent,
@@ -212,20 +213,32 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
  */
 /**
  * The row's own age: the shortest true reading, because the row has one word
- * of room at its edge and the card beside it spells the rest out.
+ * of room at its edge and the card beside it spells the rest out. Minutes,
+ * hours, days and weeks floor, so "59m" never rounds up to a false "60m", and
+ * a thread older than five weeks reads as the short date it last moved.
  */
-export function threadRowShortAge(updatedAt: string | undefined): string | undefined {
+export function threadRowShortAge(
+  updatedAt: string | undefined,
+  now: number = Date.now(),
+): string | undefined {
   if (updatedAt === undefined) return undefined;
   const date = new Date(updatedAt);
   if (Number.isNaN(date.getTime())) return undefined;
-  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  const minutes = Math.max(0, Math.floor((now - date.getTime()) / 60000));
   if (minutes < 1) return "now";
   if (minutes < 60) return `${minutes}m`;
-  const hours = Math.round(minutes / 60);
+  const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h`;
-  const days = Math.round(hours / 24);
-  if (days < 365) return `${days}d`;
-  return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  if (days < 35) return `${Math.floor(days / 7)}w`;
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleDateString(
+    undefined,
+    sameYear
+      ? { month: "short", day: "numeric" }
+      : { month: "short", day: "numeric", year: "numeric" },
+  );
 }
 
 /**
@@ -239,6 +252,7 @@ export function threadRowAgeFact(
     readonly updatedAt?: string;
   },
   showsLastUpdated: boolean,
+  now: number = Date.now(),
 ): { readonly label: string; readonly title?: string } | undefined {
   if (thread.wakeLabel !== undefined) {
     return {
@@ -249,10 +263,12 @@ export function threadRowAgeFact(
     };
   }
   if (!showsLastUpdated) return undefined;
-  const label = threadRowShortAge(thread.updatedAt);
-  if (label === undefined) return undefined;
-  const title = threadRowAge(thread.updatedAt);
-  return { label, ...(title === undefined ? {} : { title }) };
+  const label = threadRowShortAge(thread.updatedAt, now);
+  if (label === undefined || thread.updatedAt === undefined) return undefined;
+  // The tooltip and the spoken label carry the full moment, which the one
+  // short word at the row's edge cannot.
+  const title = `Updated ${new Date(thread.updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+  return { label, title };
 }
 
 export function threadRowAge(updatedAt: string | undefined): string | undefined {
@@ -809,6 +825,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     followUpParent !== undefined &&
     props.lineageThreads.some((thread) => thread.threadId === followUpParent);
   const shows = useSidebarRowProperties();
+  const now = useMinuteClock();
   const rowId = props.thread.navigationId ?? props.thread.threadId;
   const projectName = props.projectNameForThread?.(props.thread);
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
@@ -865,7 +882,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
   // it was rather than at the top. Hiding Last updated hides the timestamp,
   // never the wake time: a rested thread that never says when it returns reads
   // as one that is simply gone.
-  const rowAge = threadRowAgeFact(props.thread, shows.lastUpdated);
+  const rowAge = threadRowAgeFact(props.thread, shows.lastUpdated, now);
   const rowState = shows.status
     ? threadRowState({
         activity,
@@ -883,7 +900,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         ...(rowCheckout === undefined ? {} : { branch: rowCheckout.label }),
         ...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest }),
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
-        ...(rowAge === undefined ? {} : { age: rowAge.label }),
+        ...(rowAge === undefined ? {} : { age: rowAge.title ?? rowAge.label }),
       })}
       className="sidebar-navigation__thread project-threads__thread justify-start"
       /* Open is not the same as focused. With several panes showing several

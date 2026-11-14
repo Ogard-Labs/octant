@@ -3,7 +3,12 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarRowPropertyVisibility } from "@octant/contracts/shell";
-import { ProjectThreadList, ProjectThreadRows } from "./ProjectThreadList";
+import {
+  ProjectThreadList,
+  ProjectThreadRows,
+  threadRowAgeFact,
+  threadRowShortAge,
+} from "./ProjectThreadList";
 import { mergeThreadRowActions } from "./mergeThreadRowActions";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarRowPropertiesContext } from "../shell/sidebarRowProperties";
@@ -77,7 +82,7 @@ describe("ProjectThreadRows", () => {
       "open",
     );
     // One name for the whole row: title first, then the pull request, then the time.
-    expect(row).toHaveAccessibleName("Controller foundation, pull request #12 open, 2h");
+    expect(row).toHaveAccessibleName(/^Controller foundation, pull request #12 open, Updated .+\d/);
   });
 
   it("keeps a long thread list bounded to the visible window", async () => {
@@ -1325,7 +1330,9 @@ describe("ProjectThreadRows display properties", () => {
     expect(within(row).getByText("#12 open")).toBeVisible();
     expect(within(row).getByText("feature/x")).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
-    expect(row).toHaveAccessibleName("Controller foundation, feature/x, pull request #12 open, 2h");
+    expect(row).toHaveAccessibleName(
+      /^Controller foundation, feature\/x, pull request #12 open, Updated .+\d/,
+    );
   });
 
   it("omits a hidden property without leaving a gap in its place", () => {
@@ -1658,5 +1665,55 @@ describe("coordinators in a Project's thread list", () => {
     expect(screen.getByRole("button", { name: "Show workers of Backlog" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Bump the parser/ })).toBeNull();
     sessionStorage.clear();
+  });
+});
+
+describe("A thread row's short age", () => {
+  const now = new Date(2026, 10, 14, 12, 0, 0).getTime();
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  const MINUTE = 60_000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+
+  it("reads now under a minute and never rounds a minute up to the next unit", () => {
+    expect(threadRowShortAge(ago(59_000), now)).toBe("now");
+    expect(threadRowShortAge(ago(MINUTE), now)).toBe("1m");
+    expect(threadRowShortAge(ago(59 * MINUTE + 40_000), now)).toBe("59m");
+    expect(threadRowShortAge(ago(HOUR), now)).toBe("1h");
+    expect(threadRowShortAge(ago(23 * HOUR + 50 * MINUTE), now)).toBe("23h");
+  });
+
+  it("counts days to six and then weeks to four before it gives a short date", () => {
+    expect(threadRowShortAge(ago(DAY), now)).toBe("1d");
+    expect(threadRowShortAge(ago(6 * DAY + 23 * HOUR), now)).toBe("6d");
+    expect(threadRowShortAge(ago(7 * DAY), now)).toBe("1w");
+    expect(threadRowShortAge(ago(34 * DAY), now)).toBe("4w");
+    expect(threadRowShortAge(ago(35 * DAY), now)).toBe(
+      new Date(now - 35 * DAY).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    );
+  });
+
+  it("adds the year to a short date from an earlier year", () => {
+    const old = new Date(2025, 9, 4, 9, 0, 0).toISOString();
+    expect(threadRowShortAge(old, now)).toBe(
+      new Date(old).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+    );
+  });
+
+  it("carries the full date and time as the row's tooltip", () => {
+    const updatedAt = ago(3 * DAY);
+    const fact = threadRowAgeFact({ updatedAt }, true, now);
+    expect(fact?.label).toBe("3d");
+    expect(fact?.title).toBe(
+      `Updated ${new Date(updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`,
+    );
+  });
+
+  it("is absent while Last updated is hidden", () => {
+    expect(threadRowAgeFact({ updatedAt: ago(DAY) }, false, now)).toBeUndefined();
   });
 });

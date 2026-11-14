@@ -150,6 +150,7 @@ import {
   hasInlineActions,
   ThreadRowContextMenu,
 } from "./ProjectThreadList";
+import { useMinuteClock } from "./minuteClock";
 import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
@@ -1583,7 +1584,8 @@ function ActivityThreadButton(props: {
   const checkout = shows.branch ? props.thread.checkoutChip : undefined;
   // As in the Project tree, a rested row keeps its wake time even when Last
   // updated is hidden.
-  const age = threadRowAgeFact(props.thread, shows.lastUpdated);
+  const now = useMinuteClock();
+  const age = threadRowAgeFact(props.thread, shows.lastUpdated, now);
   const rowState = shows.status
     ? threadRowState({
         activity: props.thread.activity,
