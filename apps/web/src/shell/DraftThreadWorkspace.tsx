@@ -114,6 +114,7 @@ import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { ComposerStartTray } from "../composer/ComposerStartTray";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
@@ -1257,7 +1258,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           <WelcomeHeading />
         </div>
         <div className="draft-thread__composer composer-stack">
-          {createFromControl}
           <ThreadComposer
             notices={
               props.errorMessage === undefined
@@ -1272,21 +1272,24 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               groups: props.providerGroups,
             }}
             startContext={
-              <div className="composer-tray composer-tray--start" aria-label="Thread context">
-                {props.mode === "chat" ? <WorkKindSwitch /> : null}
-                <DraftContextStrip
-                  mode={props.mode}
-                  {...hostSelectorBinding}
-                  {...(props.approvalLabel === undefined
-                    ? {}
-                    : { approvalLabel: props.approvalLabel })}
-                  {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
-                  {...(props.mode === "chat" || props.projectName === undefined
-                    ? {}
-                    : { projectName: props.projectName })}
-                  {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
-                />
-              </div>
+              <ComposerStartTray
+                {...(props.mode === "chat" ? { kind: <WorkKindSwitch /> } : {})}
+                environment={
+                  <DraftContextStrip
+                    mode={props.mode}
+                    {...hostSelectorBinding}
+                    {...(props.approvalLabel === undefined
+                      ? {}
+                      : { approvalLabel: props.approvalLabel })}
+                    {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+                    {...(props.mode === "chat" || props.projectName === undefined
+                      ? {}
+                      : { projectName: props.projectName })}
+                    {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+                  />
+                }
+                {...(createFromControl === null ? {} : { createFrom: createFromControl })}
+              />
             }
             chips={
               <>

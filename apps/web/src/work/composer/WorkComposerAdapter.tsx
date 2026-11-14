@@ -46,6 +46,7 @@ import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
+import { ComposerRowSlot, ComposerStartTray } from "../../composer/ComposerStartTray";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -421,16 +422,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               groups: props.providerGroups,
             }}
             startContext={
-              <div className="composer-tray composer-tray--start" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  <WorkKindSwitch />
-                  {projectControl}
-                  {environmentControl}
-                </div>
-                {props.createFromControl === undefined ? null : (
-                  <div className="composer-tray__trailing">{props.createFromControl}</div>
-                )}
-              </div>
+              <ComposerStartTray
+                kind={<WorkKindSwitch />}
+                project={projectControl}
+                environment={environmentControl}
+                createFrom={props.createFromControl}
+              />
             }
             chips={
               <>
@@ -536,7 +533,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   onFileSelected={(file) => images.attach([file])}
                 />
               ),
-              leading: <></>,
+              leading: <ComposerRowSlot />,
               trailing: (
                 <>
                   <ComposerModelPicker

@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OutsideContentContext } from "./OutsideContentNotice";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { FrozenBarScope } from "./frozenBarScope";
+import { ComposerStartTray } from "./ComposerStartTray";
 import { ThreadComposer } from "./ThreadComposer";
 
 describe("ThreadComposer", () => {
@@ -150,8 +151,46 @@ describe("ThreadComposer", () => {
     const row = container.querySelector(".composer-start");
     expect(row).toContainElement(meters);
     expect(row?.firstElementChild).toHaveClass("composer-tray");
-    expect(row?.lastElementChild).toBe(meters);
+    expect(row?.lastElementChild).toContainElement(meters);
     expect(meters).toHaveTextContent("5h85%week43%");
+  });
+
+  it("keeps the Project's cell and the attach cell when the thread kind has neither", () => {
+    const row = {
+      actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } },
+    };
+    const input = <textarea aria-label="Message" className="composer-input" />;
+    const tray = (project?: React.ReactNode) => (
+      <ComposerStartTray
+        kind={<button type="button">Chat</button>}
+        {...(project === undefined ? {} : { project })}
+        createFrom={<button type="button">Create from…</button>}
+      />
+    );
+    const { container, rerender } = render(
+      <ThreadComposer input={input} row={row} startContext={tray()} />,
+    );
+    const slot = container.querySelector('[data-slot="project"]');
+    expect(slot).toHaveAttribute("data-held", "true");
+    expect(slot).toHaveAttribute("aria-hidden", "true");
+    expect(container.querySelector(".composer-field__attach--held")).not.toBeNull();
+    const leading = container.querySelector(".composer-tray__leading");
+    expect([...(leading?.children ?? [])].map((child) => child.tagName)).toEqual(["BUTTON", "DIV"]);
+
+    rerender(
+      <ThreadComposer
+        input={input}
+        row={{ ...row, attach: <button type="button">Attach</button> }}
+        startContext={tray(<button type="button">Choose a Project</button>)}
+      />,
+    );
+    expect(container.querySelector('[data-slot="project"]')).toBe(slot);
+    expect(slot).not.toHaveAttribute("data-held");
+    expect(slot).toContainElement(screen.getByRole("button", { name: "Choose a Project" }));
+    expect(container.querySelector(".composer-field__attach--held")).toBeNull();
+    expect(container.querySelector(".composer-tray__trailing")).toContainElement(
+      screen.getByRole("button", { name: "Create from…" }),
+    );
   });
 
   it("says a notice in a card above the box and keeps the checkout context in the row under it", () => {

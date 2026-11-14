@@ -4775,6 +4775,10 @@ input.switch:checked::after {
 }
 /* The controls stand where the prompt's gutter was, so the prompt keeps only
    a small inset beside them. */
+.composer-field__attach--held {
+  width: var(--oct-composer-cell);
+  height: var(--oct-composer-cell);
+}
 .composer-field__attach + .composer-field__prompt .composer-input {
   padding-inline-start: var(--oct-composer-gap);
 }

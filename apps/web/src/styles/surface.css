@@ -569,6 +569,32 @@
   color: var(--oct-meta);
 }
 
+/* "Create from…" stands at the row's end, so a chip that only some modes show
+   never decides where it sits. */
+.composer-tray--start .composer-tray__trailing {
+  margin-left: auto;
+}
+
+/* The Project's cell is reserved in every mode: a mode without a Project here
+   (Chat keeps its chooser under the box) leaves it empty, not collapsed. */
+.composer-tray__slot {
+  display: inline-flex;
+  min-width: 8.5rem;
+  min-height: 24px;
+  align-items: center;
+}
+
+.composer-tray__slot[data-held="true"] {
+  visibility: hidden;
+}
+
+.composer-row__slot {
+  display: inline-flex;
+  min-width: 7rem;
+  min-height: 28px;
+  visibility: hidden;
+}
+
 .composer-tray__leading,
 .composer-tray__trailing {
   display: inline-flex;

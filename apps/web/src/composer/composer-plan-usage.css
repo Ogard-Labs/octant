@@ -18,19 +18,34 @@
   min-width: 0;
 }
 
-.composer-start > .plan-usage {
+/* The meter's cell is reserved whether or not the chosen provider reports a
+   window, so switching Chat and a folder (each may pick another provider)
+   never changes how much room the chips have. */
+.composer-start__usage {
+  display: flex;
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  min-width: 6.5rem;
   margin-left: auto;
+}
+
+.composer-start__usage > .plan-usage {
   padding: 0 var(--oct-space-2);
 }
 
-/* The usage warning takes its own row above the context chips and hugs its
-   content at the row's left edge, so it reads as part of the composer and not
-   as a page banner. */
+/* The usage warning stands above the row and grows upward, away from the
+   box: it is out of flow, so it appearing or being put away moves nothing. It
+   starts at the box's left edge, as wide as its own words. */
+.composer-start {
+  position: relative;
+}
+
 .composer-start > .composer-usage-warning-row {
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: 100%;
   display: grid;
   justify-items: start;
-  flex: 1 1 100%;
-  /* The row's own 4px and the frame's 4px are taken back, so the card stands
-     on the box's edges like the notices that sit directly above it. */
-  margin: 0 calc(var(--oct-space-1) * -2) var(--oct-space-2);
+  max-width: 100%;
+  margin-bottom: var(--oct-space-2);
 }

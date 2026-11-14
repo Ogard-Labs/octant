@@ -30,6 +30,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { StartSuggestionChip } from "../composer/StartSuggestionChip";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
+import { ComposerStartTray } from "../composer/ComposerStartTray";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -211,9 +212,9 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               groups: props.providerGroups ?? [],
             }}
             startContext={
-              <div className="composer-tray composer-tray--start" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  <WorkKindSwitch />
+              <ComposerStartTray
+                kind={<WorkKindSwitch />}
+                environment={
                   <HostSelector
                     presentation="environment"
                     {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
@@ -230,8 +231,8 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                       : { onSelectHost: props.onSelectHost })}
                     requiredCapability="chat"
                   />
-                </div>
-              </div>
+                }
+              />
             }
             input={
               <OctantTextarea

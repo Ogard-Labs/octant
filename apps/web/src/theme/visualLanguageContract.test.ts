@@ -938,8 +938,11 @@ describe("the public-block visual language", () => {
     );
     expect(system).not.toMatch(/\.composer--follow-up \.composer-input \{/);
     expect(surface).not.toMatch(/\.composer-stack > \.composer > \.composer-input \{/);
+    expect(readFileSync(join(webRoot, "composer/ComposerStartTray.tsx"), "utf8")).toMatch(
+      /className="composer-tray composer-tray--start"/,
+    );
     for (const source of welcomes) {
-      expect(source).toMatch(/className="composer-tray composer-tray--start"/);
+      expect(source).toContain("<ComposerStartTray");
       expect(source).not.toMatch(/footer=\{\s*<div className="composer-tray"/);
       expect(source).not.toContain("context-strip");
     }

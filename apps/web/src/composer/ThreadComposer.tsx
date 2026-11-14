@@ -273,7 +273,9 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         )}
         {props.startContext}
         {props.planUsage === undefined ? null : (
-          <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
+          <div className="composer-start__usage" data-slot="plan-usage">
+            <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
+          </div>
         )}
       </div>
     );
@@ -364,8 +366,12 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
       {props.queue}
       {props.chips}
       <div className="composer-field">
-        {props.row.attach === undefined ? null : (
+        {props.row.attach !== undefined ? (
           <div className="composer-field__attach">{props.row.attach}</div>
+        ) : props.startContext === undefined ? null : (
+          // A start surface that cannot attach (Chat) keeps the button's cell,
+          // so choosing a folder does not shift the prompt sideways.
+          <div aria-hidden="true" className="composer-field__attach composer-field__attach--held" />
         )}
         <div className="composer-field__prompt">
           {props.label === undefined ? (

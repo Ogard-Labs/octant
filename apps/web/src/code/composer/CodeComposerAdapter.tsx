@@ -64,6 +64,7 @@ import {
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { providerFamilyForThread } from "../../providers/providerFamily";
+import { ComposerStartTray } from "../../composer/ComposerStartTray";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -923,23 +924,21 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               groups: props.providerGroups,
             }}
             startContext={
-              <div className="composer-tray composer-tray--start" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  {projectControl}
-                  {branchControl}
-                  {environmentControl}
-                </div>
-                <div className="composer-tray__trailing">
-                  {hasProject ? (
+              <ComposerStartTray
+                project={projectControl}
+                branch={branchControl}
+                environment={environmentControl}
+                trailing={
+                  hasProject ? (
                     <CodeWorkspaceSelector
                       onChange={setWorkspaceOverride}
                       value={workspace}
                       {...(props.creating === true ? { disabled: true } : {})}
                     />
-                  ) : null}
-                  {props.createFromControl}
-                </div>
-              </div>
+                  ) : null
+                }
+                createFrom={props.createFromControl}
+              />
             }
             chips={
               <>

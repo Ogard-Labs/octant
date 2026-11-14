@@ -58,6 +58,13 @@ same stylesheets and described in
 6. **Colour carries meaning.** Colour is the default style and Mono draws the
    same app in greys. A hue names a state, a Project, a kind of Canvas or a
    provider, and always comes with a shape or a word.
+7. **Nothing moves under the pointer.** Clicking, choosing or typing never moves
+   another control. A control that a choice adds or removes keeps a reserved
+   slot (hidden, not collapsed), a row keeps its items in one order in every
+   state, and something appearing above an anchored surface (a notice above the
+   composer) grows away from it instead of pushing it. The person's next click
+   lands where they last saw the target. Only the person's own act of moving
+   something (a drag, a resize, opening the sidebar) moves layout.
 
 **Voice.** The same words, face and hierarchy travel to every surface.
 Sentence case everywhere, product nouns keep their capital (Project, Chat,
