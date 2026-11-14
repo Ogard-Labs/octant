@@ -34,6 +34,7 @@ describe("UnifiedDiffList", () => {
       path: "src/example.ts",
       side: "modified",
       line: 10,
+      text: "const newTwo = 2;",
     });
   });
 
