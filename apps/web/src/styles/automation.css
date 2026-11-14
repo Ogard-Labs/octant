@@ -207,10 +207,6 @@
   text-align: start;
 }
 
-.automation-row__open:hover .automation-row__name {
-  text-decoration: underline;
-}
-
 .automation-row__meta {
   grid-column: 1;
   display: flex;

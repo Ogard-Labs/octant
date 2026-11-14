@@ -597,6 +597,7 @@ html {
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 :where(

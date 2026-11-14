@@ -7043,10 +7043,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   cursor: default;
 }
 
-.code-board__card-open:hover .board-card-title {
-  text-decoration: underline;
-}
-
 .code-board__card-details {
   margin-top: var(--oct-space-1);
 }
