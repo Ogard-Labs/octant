@@ -264,9 +264,9 @@
      its part of that rail; below it the sidebar runs 30px rows down to a
      40px account row, and every leading icon in it sits on one 12px inset. */
   --oct-title-rail-h: 44px;
-  /* The icon rail is wider than the band is tall: at 44px its 32px faces had
-     6px either side and the rail read as a thin strip beside the sidebar. */
-  --oct-rail-w: 60px;
+  /* The icon rail is 52px, a little wider than the band is tall, so its 36px
+     faces have 8px either side. */
+  --oct-rail-w: 52px;
   --oct-rail-tab-h: 30px;
   --oct-rail-button-h: 28px;
   /* A segment in a tray: the small control step. A tray is the segment plus

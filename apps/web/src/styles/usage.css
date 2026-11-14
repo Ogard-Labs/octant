@@ -520,9 +520,9 @@ p.provider-limits__warning {
   border-radius: var(--oct-radius-pill);
 }
 
-/* Plan usage rings at the foot of the icon rail. Each ring takes its
-   provider's identity colour (colour names identity), and a window near
-   or at its limit takes the danger ink so a spent week reads at a glance. */
+/* Plan usage rings at the foot of the icon rail, drawn in the meta ink; a
+   window near or at its limit takes the danger ink so a spent week reads at a
+   glance. */
 .rail-usage {
   display: flex;
   flex-direction: column;
@@ -574,7 +574,10 @@ p.provider-limits__warning {
 }
 
 .rail-usage__arc {
-  stroke: var(--rail-usage-color, var(--oct-fg));
+  /* The ring says how much is left; the colour of the provider's disc was the
+     loudest thing at the foot of the rail, so the arc and its logo take the
+     meta ink. Only a window near its limit is coloured. */
+  stroke: color-mix(in oklab, var(--oct-fg) 58%, transparent);
   stroke-linecap: round;
 }
 
@@ -587,6 +590,7 @@ p.provider-limits__warning {
 }
 
 .rail-usage__face > .rail-usage__glyph {
+  color: color-mix(in oklab, var(--oct-fg) 58%, transparent);
   position: absolute;
   width: 12px;
   height: 12px;

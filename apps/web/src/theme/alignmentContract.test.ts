@@ -65,7 +65,7 @@ describe("the shell's edges and gaps", () => {
     expect(rule(dock, ".dock-tile__control > svg")).toContain("var(--oct-icon-sm)");
   });
 
-  it("makes each rail button its 40px face, and centres the first face on the title rail", () => {
+  it("makes each rail button its 36px face, and centres the first face on the title rail", () => {
     // The rail variant of the button draws no border, so the button is its
     // face and no negative margin gives a border back.
     expect(rule(shell, ".sidebar-rail__button")).not.toMatch(/margin/);
@@ -73,7 +73,7 @@ describe("the shell's edges and gaps", () => {
     expect(source("ui/shadcn/button.tsx")).toMatch(/rail:\s*"[^"]*border-0/);
     const scroll = rule(shell, ".sidebar-rail__scroll");
     expect(scroll).toMatch(
-      /--sidebar-rail-top:\s*calc\(\(var\(--oct-title-rail-h\) - 40px\) \/ 2\)/,
+      /--sidebar-rail-top:\s*calc\(\(var\(--oct-title-rail-h\) - 36px\) \/ 2\)/,
     );
     expect(scroll).toMatch(/padding:\s*var\(--sidebar-rail-top\) 0/);
   });

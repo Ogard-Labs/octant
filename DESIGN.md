@@ -650,10 +650,10 @@ coat), painted once on the shell. Neither has a fill or line of its own.
   opens or closes or the dock opens, only when the sidebar is resized or
   toggled. A slot a Project
   fills only sometimes takes no room while empty.
-- **Icon rail**: `--oct-rail-w`, 60px, wider than the band is tall: at 44px
-  and at 52px it read as a thin strip. Its faces are 40px with 20px icons,
-  2px apart (the button's `rail` variant); the first face is centred on the band's
-  centreline (2px down). The current face takes
+- **Icon rail**: `--oct-rail-w`, 52px (maintainer decision, 2026-11-14: it
+  gives the stage the room). Its faces are 36px at the control radius with 20px
+  icons, 2px apart (the button's `rail` variant); the first face is centred on
+  the band's centreline (4px down). The current face takes
   `--oct-wash-selected`, the pointed-at face `--oct-wash-hover`, no border.
 - **Desktop title bar**: Electron's native frame with `titleBarStyle:
 hiddenInset` and no custom `trafficLightPosition` (it would grow the native

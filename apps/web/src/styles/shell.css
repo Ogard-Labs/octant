@@ -397,7 +397,7 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   /* The first face centres on the title rail's centreline, as the band's
      controls do, so it starts (rail − face) / 2 down, and the edge fade ends
      there instead of dimming the face. */
-  --sidebar-rail-top: calc((var(--oct-title-rail-h) - 40px) / 2);
+  --sidebar-rail-top: calc((var(--oct-title-rail-h) - 36px) / 2);
   padding: var(--sidebar-rail-top) 0 var(--oct-space-3);
   overflow-x: hidden;
   overflow-y: auto;
@@ -443,8 +443,8 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   --sidebar-rail-fill: transparent;
   position: relative;
   display: flex;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);
