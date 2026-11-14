@@ -158,8 +158,12 @@ else from the settings document, through `GET /api/reply-detail`
 thread opens and when the app returns to the foreground, a paired browser when
 its workspace opens, when the mode changes, and when the window regains focus.
 Until an answer arrives, or if none can, they draw Low. On the phone the
-reasoning panel opens at High and shows its first line at Medium, and a
-finished tool card opens at High; a change of level remounts them.
+reasoning panel opens at High and shows its first line at Medium. A run of
+consecutive tool calls draws as one rail of 28pt rows, each with a round
+status mark; a settled run folds behind "N tool calls" at Low (naming any
+failed calls) and starts open at Medium and High, a finished call's detail
+opens at High, and an open run past five rows shows its latest five behind
+"+N earlier". A change of level remounts them.
 
 ## Streaming and earlier messages
 

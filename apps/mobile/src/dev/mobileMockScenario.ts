@@ -140,6 +140,8 @@ function createChatView(thread: ChatThread, rich: boolean): ChatThreadView {
             kind: "reasoning",
             text: "Checking authority, native configuration, and the review evidence before proposing changes.",
           },
+          { kind: "tool", name: "read_file", status: "done", summary: "app.config.ts" },
+          { kind: "tool", name: "search", status: "done", summary: "12 matches for expo-blur" },
           {
             kind: "tool",
             name: "mobile_quality_check",
