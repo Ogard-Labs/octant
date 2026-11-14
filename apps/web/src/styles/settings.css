@@ -2881,7 +2881,7 @@ html[data-octant-increased-contrast="true"]
   place-items: center;
   color: var(--octant-text-primary);
   background: color-mix(in oklab, var(--oct-bg) 80%, transparent);
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
 }
 
 .settings-app-background__tile:hover .settings-app-background__tile-remove,
