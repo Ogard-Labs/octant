@@ -2223,6 +2223,8 @@ clipboard, Done today a double check, Board a kanban, Issues the issue dot,
 Pull requests the pull-request arrow, Linear a checklist, Projects stacked
 folders, Agents a bot, Automations a calendar clock, Artifacts layers, Image
 generator images, Plugins blocks, and the Activity feed a pulse line.
+The To-dos destination, a circle with a check, is designed, not built
+([To-dos](todos.md#the-to-dos-destination)).
 
 **Sidebar header width.** The mode tray never shrinks. Where the sidebar header
 (modes, Home when no rail stands beside it, Search, New thread, Hide, Back and
