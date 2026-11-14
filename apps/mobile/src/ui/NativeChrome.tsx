@@ -440,9 +440,7 @@ export function SegmentedControl<Id extends string>(props: SegmentedControlProps
         // strong border grey there, as the system's dark thumb is lighter.
         selected: {
           backgroundColor: glass
-            ? scheme === "dark"
-              ? "rgba(255, 255, 255, 0.16)"
-              : colors.glassHighlight
+            ? colors.glassThumb
             : scheme === "dark"
               ? colors.hairlineStrong
               : colors.surfaceElevatedSolid,

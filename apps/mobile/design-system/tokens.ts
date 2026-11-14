@@ -43,6 +43,8 @@ export type ThemeColors = {
   glassStroke: string;
   glassStrokeStrong: string;
   glassHighlight: string;
+  /** The chosen segment's raised thumb on a glass segmented control. */
+  glassThumb: string;
   textPrimary: string;
   textSecondary: string;
   textTertiary: string;
@@ -131,6 +133,7 @@ export const lightColors: ThemeColors = {
   glassStroke: shared("border", "light"),
   glassStrokeStrong: shared("border-strong", "light"),
   glassHighlight: "rgba(255, 255, 255, 0.65)",
+  glassThumb: "rgba(255, 255, 255, 0.65)",
   textPrimary: shared("text-primary", "light"),
   textSecondary: shared("text-secondary", "light"),
   textTertiary: shared("text-muted", "light"),
@@ -208,6 +211,7 @@ export const darkColors: ThemeColors = {
   glassStroke: shared("border", "dark"),
   glassStrokeStrong: shared("border-strong", "dark"),
   glassHighlight: "rgba(255, 255, 255, 0.07)",
+  glassThumb: "rgba(255, 255, 255, 0.16)",
   textPrimary: shared("text-primary", "dark"),
   textSecondary: shared("text-secondary", "dark"),
   textTertiary: shared("text-muted", "dark"),
