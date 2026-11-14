@@ -863,6 +863,30 @@ describe("mapClaudeMessage", () => {
     ).toMatchObject([{ kind: "failure" }]);
   });
 
+  it("marks the answer of each claude.ai service tool as outside content", () => {
+    for (const [toolName, input] of [
+      ["Projects", { method: "project_read", path: "notes.md" }],
+      ["ClaudeDesign", { operation: "list", arguments: {} }],
+      ["RemoteTrigger", { action: "get", trigger_id: "trig_1" }],
+      ["PushNotification", { message: "Done", status: "proactive" }],
+    ] as const) {
+      const started = mapped(context(), {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: { kind: "tool-use", toolUseId: `sdk-${toolName}`, toolName, input },
+        },
+      });
+      expect(eventValues(started)[1]).toMatchObject({
+        kind: "outside-content-read",
+        source: "hosted-tool",
+        toolName,
+      });
+    }
+  });
+
   it("treats claude.ai's answer to an artifact publish as outside content and carries the page it names", () => {
     const ctx = context();
     const started = mapped(ctx, {

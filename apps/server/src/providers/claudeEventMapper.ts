@@ -53,6 +53,11 @@ const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
   // Publishing runs on claude.ai, and its answer (the page's address, title,
   // and any warnings) reaches the model as content Octant did not write.
   ["Artifact", { source: "hosted-tool", targetKey: "url" }],
+  // The account's other claude.ai services answer the model the same way.
+  ["Projects", { source: "hosted-tool", targetKey: "path" }],
+  ["ClaudeDesign", { source: "hosted-tool", targetKey: "operation" }],
+  ["RemoteTrigger", { source: "hosted-tool", targetKey: "trigger_id" }],
+  ["PushNotification", { source: "hosted-tool", targetKey: "message" }],
 ]);
 // Claude's AskUserQuestion schema itself carries at most this many questions
 // in one tool call; more than that is not a shape the SDK can answer.

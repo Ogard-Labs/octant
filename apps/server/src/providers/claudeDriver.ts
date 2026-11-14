@@ -216,10 +216,19 @@ export const CLAUDE_ARTIFACT_TOOL = "Artifact";
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
 /**
  * Tools that change only Claude's own session state: no file, shell, network,
- * or person is involved, so every posture, Plan included, runs them unasked.
- * The checklist is the thread's task panel.
+ * or person is involved, so every posture runs them unasked, as Claude Code
+ * does. Plan holds only the checklist of these, its task panel.
+ *
+ * - `TodoWrite`: the checklist, the thread's task panel.
+ * - `ToolSearch`: loads the definitions of tools the session already holds
+ *   but deferred; it calls no tool itself. Claude Code 2.1.211's own tool
+ *   marks it read-only (`isReadOnly` true, read from the bundled binary,
+ *   2026-11-14), and the SDK describes tool search as deferring tool
+ *   definitions behind it.
+ *
+ * A name joins only on such evidence; every other tool keeps asking.
  */
-const CLAUDE_SESSION_TOOLS = new Set<string>([CLAUDE_CHECKLIST_TOOL]);
+const CLAUDE_SESSION_TOOLS = new Set<string>([CLAUDE_CHECKLIST_TOOL, "ToolSearch"]);
 const CLAUDE_INCOMPATIBLE_FALLBACK = "Claude runtime policy is incompatible with Octant.";
 const CLAUDE_INCOMPATIBLE_REASONS = new Set([
   "Claude probe did not initialize its runtime.",
@@ -264,13 +273,6 @@ const CLAUDE_WITHHELD_TOOLS = [
   "Workflow",
   "CronCreate",
   "ScheduleWakeup",
-  // These reach the account's claude.ai services from the session, an
-  // outward call no Octant setting covers; Claude's Artifact tool has its
-  // own switch and gate instead.
-  "RemoteTrigger",
-  "PushNotification",
-  "Projects",
-  "ClaudeDesign",
   // Runs JavaScript inside the runtime process, outside the command sandbox
   // that holds every shell command below Full access and outside the secret
   // guard's file checks.
@@ -655,7 +657,8 @@ export function claudeFileToolSecretRefusal(
   // rule of its own for included; an MCP server's tool runs in its own
   // process and its arguments are its own.
   if (toolName.startsWith("mcp__")) return undefined;
-  for (const key of ["file_path", "notebook_path", "path"] as const) {
+  // `local_path` is the local file Claude's Projects tool uploads.
+  for (const key of ["file_path", "notebook_path", "path", "local_path"] as const) {
     const value = input[key];
     if (typeof value !== "string") continue;
     const refusal = secretGuardRefusal(rootedClaudeFilePath(value, projectRoot), options);

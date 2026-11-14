@@ -426,6 +426,9 @@ describe("Claude file tools and the secret guard", () => {
     expect(refusal("NotebookEdit", { notebook_path: `${home}/.ssh/id_ed25519` })).toContain(
       "SSH private keys",
     );
+    expect(
+      refusal("Projects", { method: "project_write", local_path: `${home}/.ssh/id_ed25519` }),
+    ).toContain("SSH private keys");
     // A built-in tool the gate has no rule of its own for is held to the same list.
     expect(refusal("FutureFileTool", { path: `${home}/.aws/credentials` })).toContain(
       "Cloud command-line credentials",
@@ -771,6 +774,17 @@ describe("Claude execution policy", () => {
             signal,
           });
         const asked = executionPolicy === "full-access" ? "allow" : "ask";
+        for (const service of ["RemoteTrigger", "PushNotification", "Projects", "ClaudeDesign"]) {
+          expect(open.withheldTools).not.toContain(service);
+        }
+        // A claude.ai service call uses the person's own account and asks below Full access.
+        await expect(
+          tool("Projects", { method: "project_search", query: "roadmap" }, "projects"),
+        ).resolves.toEqual({ behavior: asked });
+        // Loading deferred tool definitions touches nothing, so it never asks.
+        await expect(
+          tool("ToolSearch", { query: "select:Read", max_results: 1 }, "tool-search"),
+        ).resolves.toEqual({ behavior: "allow" });
         // A tool a later Claude Code release adds works on release, and asks.
         await expect(tool("FutureTool", { anything: true }, "future")).resolves.toEqual({
           behavior: asked,

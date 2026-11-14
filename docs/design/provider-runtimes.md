@@ -444,23 +444,32 @@ decision, 2026-11-14). `disallowedTools` withholds only what would break a
 rule the server enforces, and the decoder refuses a runtime or a call that
 names a withheld tool:
 
-| Withheld                                                        | Why                                                                                                                                                  |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EnterPlanMode`, `ExitPlanMode`                                 | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list                                                      |
-| `EnterWorktree`, `ExitWorktree`                                 | The thread is bound to one checkout                                                                                                                  |
-| `Monitor`, `Workflow`, `CronCreate`, `ScheduleWakeup`           | Each wakes the model later and starts a turn Octant never sent; a result with no turn pending ends the session, and the decoder refuses their frames |
-| `RemoteTrigger`, `PushNotification`, `Projects`, `ClaudeDesign` | Calls to the account's claude.ai services that no Octant setting covers (the Artifact tool has its own switch)                                       |
-| `REPL`                                                          | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                   |
-| `Agent`, `WebSearch`, `WebFetch`, `Skill`                       | Only while the person's own setup has that feature off                                                                                               |
-| `Artifact`                                                      | Unless the session offers Claude artifacts                                                                                                           |
+| Withheld                                              | Why                                                                                                                                                  |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EnterPlanMode`, `ExitPlanMode`                       | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list                                                      |
+| `EnterWorktree`, `ExitWorktree`                       | The thread is bound to one checkout                                                                                                                  |
+| `Monitor`, `Workflow`, `CronCreate`, `ScheduleWakeup` | Each wakes the model later and starts a turn Octant never sent; a result with no turn pending ends the session, and the decoder refuses their frames |
+| `REPL`                                                | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                   |
+| `Agent`, `WebSearch`, `WebFetch`, `Skill`             | Only while the person's own setup has that feature off                                                                                               |
+| `Artifact`                                            | Unless the session offers Claude artifacts                                                                                                           |
 
 Octant's gate keeps its own rules for the tools it names: reads run unasked
 inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits held
 to the Project and the secret guard, and `Bash`, `TaskOutput`, and
-`TaskStop` take the shell's approval rules. Every other built-in tool is
-judged at the Project root and asks below Full access, which runs without
-asking, so a tool a later Claude Code release adds works from that release
-and fails closed; a path it names still meets the secret guard. Because a
+`TaskStop` take the shell's approval rules. Session-internal tools that read
+no file, write nothing, and reach no network run unasked at every level, as
+in Claude Code: the checklist (`TodoWrite`) and `ToolSearch`, which only
+loads deferred tool definitions (the bundled 2.1.211 runtime marks it
+read-only; maintainer decision, 2026-11-14). A name joins that list only on
+such evidence. Every other built-in tool is judged at the Project root and
+asks below Full access, which runs without asking, so a tool a later Claude
+Code release adds works from that release and fails closed; a path it names
+still meets the secret guard. The account's claude.ai service tools
+(`RemoteTrigger`, `PushNotification`, `Projects`, `ClaudeDesign`) are such
+tools: they use the person's own claude.ai account, a `Projects` upload's
+`local_path` meets the secret guard, and each answer marks the thread as
+outside content (`hosted-tool`), as an Artifact publish does (maintainer
+decision, 2026-11-14). Because a
 native build may serve searches through its shell, `Grep` and `Glob` are
 also listed in `allowedTools`; the `PreToolUse` hook still answers each call
 first. Plan keeps its explicit list (`Read`, `Glob`, `Grep`, the checklist,
