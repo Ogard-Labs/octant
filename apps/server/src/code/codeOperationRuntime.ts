@@ -48,6 +48,10 @@ import {
   decodeHarnessRetryNotice,
   decodeCodeReviewFindingId,
   decodeProviderSessionId,
+  decodeCodeNativeSessionId,
+  type AdoptCodeNativeSessionResult,
+  type CodeNativeSessionId,
+  type CodeNativeSessions,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
   type AndroidEmulatorRequest,
@@ -1160,6 +1164,19 @@ export interface CodeOperationRuntime {
       { readonly acquire: ProviderAcquireInput; readonly resume: ProviderSessionResume } | undefined
     >;
   };
+  /**
+   * Starting an empty thread from a session its provider keeps for the same
+   * account and folder, begun outside Octant. Each answers under the asking
+   * window's authority over the thread's Project and checkout.
+   */
+  readonly nativeSessions?: {
+    readonly list: (windowId: WindowId, threadId: CodeThreadId) => Promise<CodeNativeSessions>;
+    readonly adopt: (
+      windowId: WindowId,
+      threadId: CodeThreadId,
+      nativeSessionId: CodeNativeSessionId,
+    ) => Promise<AdoptCodeNativeSessionResult>;
+  };
   close(): Promise<void>;
   reconcile?: () => Promise<void>;
   /**
@@ -1670,6 +1687,73 @@ export function createCodeOperationRuntime(
   };
 
   const fileReviewLeases = new Set<string>();
+  const adoptingThreads = new Set<string>();
+  /**
+   * What an adoption of a thread's provider session would act on, or why the
+   * thread cannot be started from one: only an active, empty thread on this
+   * host, read by a window that can open its Project, whose provider can take
+   * up its own sessions.
+   */
+  const adoptionTarget = async (
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly thread: CodeThread;
+        readonly projectRoot: string;
+        readonly nativeSessions: NonNullable<ProviderDriver["nativeSessions"]>;
+      }
+    | { readonly status: "refused"; readonly message: string; readonly adopted?: string }
+  > => {
+    const thread = options.persistence.readCodeThread(threadId);
+    if (thread === undefined || String(thread.id) !== String(threadId))
+      return { status: "refused", message: "This thread is unavailable." };
+    if (!(await options.windowAccess.canAccessProject(windowId, thread.projectId)))
+      return { status: "refused", message: "This thread is not open to this window." };
+    const adopted = events.adoptedNativeSession(thread.id);
+    const recovered = events.providerSessionForThread(thread.id, NO_OPERATION);
+    if (recovered.status !== "ok")
+      return { status: "refused", message: "This thread's history could not be read." };
+    if (
+      adopted !== undefined ||
+      recovered.priorTurn ||
+      recovered.session !== undefined ||
+      startingTurns.has(String(thread.id)) ||
+      turns.holdsTurn(String(thread.id))
+    )
+      return {
+        status: "refused",
+        message: "Only a thread with no messages yet can continue a session started elsewhere.",
+        ...(adopted === undefined ? {} : { adopted: adopted.nativeSessionId }),
+      };
+    if (thread.lifecycle !== "active")
+      return { status: "refused", message: "This thread is not active." };
+    const checkout = options.persistence.readCodeCheckout(thread.checkoutId);
+    if (checkout === undefined || checkout.kind === "remote-root")
+      return {
+        status: "refused",
+        message: "Only a thread on this computer can continue a session started here.",
+      };
+    const root = await options.resolveCheckoutRoot(windowId, thread, checkout);
+    if (root === undefined || root === null)
+      return { status: "refused", message: "This thread's folder is unavailable." };
+    const driver = await options.resolveProviderDriver(thread);
+    if (driver?.nativeSessions === undefined)
+      return {
+        status: "refused",
+        message: "This thread's provider cannot continue a session started outside Octant.",
+      };
+    return {
+      status: "ready",
+      thread,
+      projectRoot:
+        thread.workingFolderId === undefined
+          ? root.checkoutRoot
+          : (root.workingDirectory ?? root.checkoutRoot),
+      nativeSessions: driver.nativeSessions,
+    };
+  };
   const readProviderFileReview = createCodeProviderFileReview({
     host: options,
     source: compactableSession,
@@ -2221,6 +2305,124 @@ export function createCodeOperationRuntime(
             tools: [],
           },
         };
+      },
+    },
+    nativeSessions: {
+      list: async (windowId, threadId) => {
+        const target = await adoptionTarget(windowId, threadId);
+        if (target.status === "refused")
+          return {
+            threadId,
+            sessions: [],
+            unavailable: target.message,
+            ...(target.adopted === undefined
+              ? {}
+              : { adopted: { nativeSessionId: target.adopted } }),
+          };
+        const listed = await Effect.runPromise(
+          Effect.either(
+            target.nativeSessions.list({
+              instanceId: target.thread.providerInstanceId,
+              projectRoot: target.projectRoot,
+            }),
+          ),
+        );
+        if (listed._tag === "Left")
+          return { threadId, sessions: [], unavailable: listed.left.message };
+        return {
+          threadId,
+          sessions: listed.right.flatMap((session) => {
+            try {
+              return [
+                {
+                  nativeSessionId: decodeCodeNativeSessionId(session.nativeSessionId),
+                  lastModified: Math.max(0, session.lastModified),
+                  ...(session.title === undefined ? {} : { title: session.title.slice(0, 200) }),
+                  ...(session.gitBranch === undefined
+                    ? {}
+                    : { gitBranch: session.gitBranch.slice(0, 256) }),
+                },
+              ];
+            } catch {
+              return [];
+            }
+          }),
+        };
+      },
+      adopt: async (windowId, threadId, nativeSessionId) => {
+        const key = String(threadId);
+        if (adoptingThreads.has(key))
+          return {
+            kind: "code-native-session-refused",
+            message: "This thread is already taking up a session.",
+          };
+        adoptingThreads.add(key);
+        try {
+          const target = await adoptionTarget(windowId, threadId);
+          if (target.status === "refused")
+            return { kind: "code-native-session-refused", message: target.message };
+          const sessionId = decodeProviderSessionId(options.uuid());
+          const adopted = await Effect.runPromise(
+            Effect.either(
+              target.nativeSessions.adopt({
+                instanceId: target.thread.providerInstanceId,
+                projectRoot: target.projectRoot,
+                mode: "code",
+                sessionId,
+                nativeSessionId,
+                modelId: target.thread.modelId,
+              }),
+            ),
+          );
+          if (adopted._tag === "Left")
+            return { kind: "code-native-session-refused", message: adopted.left.message };
+          // The session began outside Octant, so whatever it read there is
+          // unseen here: the thread carries outside content from its start.
+          const marked = options.recordExternalContentIngestion?.({
+            threadId: String(target.thread.id),
+            provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+            contentReference: `adopted-session-${createHash("sha256")
+              .update(`${String(target.thread.providerInstanceId)}\0${nativeSessionId}`)
+              .digest("hex")}`,
+            correlationId: options.uuid(),
+            authorized: true,
+          });
+          if (
+            marked === undefined ||
+            (marked.kind !== "recorded" && marked.kind !== "already-recorded")
+          )
+            return {
+              kind: "code-native-session-refused",
+              message: "The thread could not be marked as carrying outside content.",
+            };
+          const operationId = decodeCodeOperationId(options.uuid());
+          events.append({
+            threadId: target.thread.id,
+            operationId,
+            expectedCursor: 0,
+            event: {
+              kind: "native-session-adopted",
+              nativeSessionId,
+              providerInstanceId: target.thread.providerInstanceId,
+            },
+          });
+          events.append({
+            threadId: target.thread.id,
+            operationId,
+            expectedCursor: 1,
+            event: {
+              kind: "provider-session-ready",
+              sessionId,
+              providerInstanceId: target.thread.providerInstanceId,
+              modelId: target.thread.modelId,
+              checkoutId: target.thread.checkoutId,
+              resumeCursor: adopted.right,
+            },
+          });
+          return { kind: "code-native-session-adopted", threadId, nativeSessionId };
+        } finally {
+          adoptingThreads.delete(key);
+        }
       },
     },
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>

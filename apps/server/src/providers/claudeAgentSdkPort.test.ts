@@ -135,7 +135,7 @@ function makeHarness(
 ) {
   const query = new FakeQuery(output);
   let invocation: ClaudeAgentSdkQueryInvocation | undefined;
-  const listSessions = vi.fn(async () => [
+  const listSessions = vi.fn<ClaudeAgentSdkBridge["listSessions"]>(async () => [
     {
       sessionId: "session-1",
       summary: "private prompt summary",
@@ -1203,6 +1203,35 @@ describe("Claude Agent SDK port", () => {
         harness.port.findSession({ sessionId: "session-1", projectRoot: "/other" }),
       ),
     ).resolves.toBeUndefined();
+  });
+
+  test("lists this folder's sessions with their titles for the person to pick one, and never on a resume lookup", async () => {
+    const harness = makeHarness();
+    harness.listSessions.mockImplementation(async () => [
+      {
+        sessionId: "session-1",
+        summary: "Fix the login test",
+        customTitle: "",
+        gitBranch: "fix/login",
+        lastModified: 123,
+        cwd: "/repo",
+      },
+      { sessionId: "session-2", summary: "Elsewhere", lastModified: 1, cwd: "/other" },
+    ]);
+    await expect(
+      Effect.runPromise(harness.port.listSessions!({ projectRoot: "/repo" })),
+    ).resolves.toEqual([
+      {
+        sessionId: "session-1",
+        projectRoot: "/repo",
+        lastModified: 123,
+        title: "Fix the login test",
+        gitBranch: "fix/login",
+      },
+    ]);
+    await expect(
+      Effect.runPromise(harness.port.findSession({ sessionId: "session-1", projectRoot: "/repo" })),
+    ).resolves.toEqual({ sessionId: "session-1", projectRoot: "/repo", lastModified: 123 });
   });
 
   test("looks up an isolated account's sessions under that account directory", async () => {

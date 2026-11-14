@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { decodeCodeThreadId, decodeWindowId } from "@octant/contracts";
+import { decodeCodeNativeSessionId, decodeCodeThreadId, decodeWindowId } from "@octant/contracts";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createCodeSessionRouteHandler } from "./codeSessionRoutes";
 
@@ -9,11 +9,21 @@ const otherThreadId = "95000000-0000-4000-8000-000000000009";
 const capability = `${"C".repeat(42)}A`;
 const authorized = { "x-octant-window-capability": capability };
 
-function setup() {
+function setup(isPerson: (window: string) => boolean = () => true) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const stopLiveTasks = vi.fn(async () => true);
+  const adopt = vi.fn(async () => ({
+    kind: "code-native-session-adopted" as const,
+    threadId,
+    nativeSessionId: decodeCodeNativeSessionId("outside-session-1"),
+  }));
   const handle = createCodeSessionRouteHandler({
+    isPerson: (window) => isPerson(String(window)),
+    nativeSessions: () => ({
+      list: async () => ({ threadId, sessions: [] }),
+      adopt,
+    }),
     windowAuthorityStore: store,
     canOpenThread: (_window, thread) => String(thread) === String(threadId),
     liveTasks: () => ({
@@ -23,8 +33,19 @@ function setup() {
     stopLiveTasks,
     now: () => 1,
   });
-  return { handle, stopLiveTasks };
+  return { handle, stopLiveTasks, adopt };
 }
+
+const adoption = (headers: Record<string, string>) =>
+  new Request("http://localhost/api/code-native-sessions/adopt", {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({
+      kind: "adopt-code-native-session",
+      threadId,
+      nativeSessionId: "outside-session-1",
+    }),
+  });
 
 describe("Code live task routes", () => {
   it("lists a thread's live tasks only to an authenticated window that can open the thread", async () => {
@@ -61,5 +82,27 @@ describe("Code live task routes", () => {
     const stopped = await stop(String(threadId));
     expect(await stopped?.json()).toEqual({ kind: "code-live-tasks-stopped", stopped: true });
     expect(stopLiveTasks).toHaveBeenCalledWith(threadId);
+  });
+
+  it("refuses an adoption from a client that is not paired with this host", async () => {
+    const { handle, adopt } = setup();
+    expect((await handle(adoption({})))?.status).toBe(401);
+    expect(
+      (await handle(adoption({ "x-octant-window-capability": `${"D".repeat(42)}A` })))?.status,
+    ).toBe(401);
+    expect(adopt).not.toHaveBeenCalled();
+  });
+
+  it("refuses an adoption the host would make for a routine rather than the person", async () => {
+    const { handle, adopt } = setup(() => false);
+    expect((await handle(adoption(authorized)))?.status).toBe(403);
+    expect(adopt).not.toHaveBeenCalled();
+  });
+
+  it("starts a thread from a session at the person's request", async () => {
+    const { handle, adopt } = setup();
+    const answered = await handle(adoption(authorized));
+    expect(await answered?.json()).toMatchObject({ kind: "code-native-session-adopted" });
+    expect(adopt).toHaveBeenCalledWith(windowId, threadId, "outside-session-1");
   });
 });

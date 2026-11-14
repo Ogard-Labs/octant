@@ -2458,6 +2458,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
       liveTasks: (threadId) => outlivingCodeSessions.liveTasks(codeSessionKey(threadId)),
       stopLiveTasks: (threadId) => outlivingCodeSessions.stopThread(codeSessionKey(threadId)),
+      // A window here or the host's own paired device is the person; the
+      // host acting for a routine is not.
+      isPerson: (windowId) => !isRoutineHostScope(windowId),
+      nativeSessions: () => codeOperationRuntime?.nativeSessions,
     });
     return {
       androidToolchainRoutes,

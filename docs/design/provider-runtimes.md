@@ -915,6 +915,34 @@ with no anchor, or a failed copy goes back with the text handoff
 ([Architecture: native session anchors](../architecture.md#native-session-anchors)).
 `rewindFiles` is not used; files go back through Octant's checkpoints.
 
+#### Sessions started outside Octant
+
+An empty Code thread can continue a Claude Code session the person began
+outside Octant, in the same folder on the same account (maintainer decision,
+2026-11-14). The driver's `nativeSessions` lists the account's sessions
+whose own folder is the thread's (the SDK's `listSessions` under the
+account's configuration folder, as the resume lookup reads it), newest
+first, at most 50, leaving out any session an Octant thread already resumes:
+adopting one would point its resume record at another thread and strand the
+first. Each carries its title (the name the person gave it, or the runtime's
+summary of its first prompt) and branch for the picker only; a resume lookup
+never reads the title, and nothing journals it. Adopting writes the same
+resume record a session Octant started writes (`ClaudeResumeIdentity`, with
+the thread's new Octant session id, the folder, the model and the sign-in)
+and answers the bound resume cursor, so the thread's next turn resumes it
+through the ordinary exact-resume checks. The host journals the adoption in
+an operation of its own that holds no turn: `native-session-adopted`, naming
+only the runtime's session id, then the `provider-session-ready` with the
+cursor. The session read things Octant never saw, so the thread is marked as
+carrying outside content (`adopted-provider-session`) before anything is
+journaled; a thread that cannot be marked is not adopted. Only the person
+adopts: a window on the host or the host's own paired device, over a Project
+it can open, never the host acting for a routine; a client this host has not
+paired is refused before anything is read. A thread with a message or a
+session of its own is refused. A session still open in a terminal is not
+detected; continuing it in both places writes two branches of one
+conversation. A Work thread cannot be started from a session yet.
+
 #### Wake-ups the model schedules
 
 `ScheduleWakeup` (a delay, held to one minute to one hour), `CronCreate` (a

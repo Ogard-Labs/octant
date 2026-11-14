@@ -59,6 +59,8 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   decodeProviderSessionId,
+  decodeCodeNativeSessionId,
+  type ProviderSessionId,
   decodeBrowserAutomationSnapshot,
   decodeToolActionAuthority,
   decodeSiblingThreadsToolResult,
@@ -5807,6 +5809,100 @@ describe("CodeOperationRuntime", () => {
       });
       expect(stopThread).toHaveBeenCalledWith(`code:${String(threadId)}`);
       expect(result).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("starts an empty thread from a session begun outside Octant, journals the adoption, and resumes it on the next turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const outside = decodeCodeNativeSessionId("outside-session-1");
+    const adopt = vi.fn((input: { readonly sessionId: ProviderSessionId }) =>
+      Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: `resumed-${outside}` }),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: {
+        list: () => Effect.succeed([{ nativeSessionId: outside, lastModified: 5, title: "Login" }]),
+        adopt,
+      },
+    };
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: [] },
+    }));
+    const fixture = runtimeFixture({ provider, recordExternalContentIngestion });
+    try {
+      const sessions = fixture.runtime.nativeSessions!;
+      expect(await sessions.list(windowId, threadId)).toEqual({
+        threadId,
+        sessions: [{ nativeSessionId: outside, lastModified: 5, title: "Login" }],
+      });
+      expect(await sessions.adopt(windowId, threadId, outside)).toEqual({
+        kind: "code-native-session-adopted",
+        threadId,
+        nativeSessionId: outside,
+      });
+      expect(recordExternalContentIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: String(threadId),
+          provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+        }),
+      );
+      // The thread names the session it continues and offers no other.
+      expect(await sessions.list(windowId, threadId)).toMatchObject({
+        adopted: { nativeSessionId: outside },
+        sessions: [],
+      });
+      const adoptedSessionId = adopt.mock.calls[0]![0].sessionId;
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1385),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() =>
+        expect(connection.resume).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: adoptedSessionId,
+            resumeCursor: { driverKind: "codex", value: `resumed-${outside}` },
+          }),
+        ),
+      );
+      expect(connection.start).not.toHaveBeenCalled();
+      expect(await sessions.adopt(windowId, threadId, outside)).toMatchObject({
+        kind: "code-native-session-refused",
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses to start a thread from a session for a window that cannot open its Project", async () => {
+    const adopt = vi.fn(() =>
+      Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: "x" }),
+    );
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: { list: () => Effect.succeed([]), adopt },
+    };
+    const fixture = runtimeFixture({ provider, projectAccess: false });
+    try {
+      expect(
+        await fixture.runtime.nativeSessions!.adopt(
+          windowId,
+          threadId,
+          decodeCodeNativeSessionId("outside-session-1"),
+        ),
+      ).toEqual({
+        kind: "code-native-session-refused",
+        message: "This thread is not open to this window.",
+      });
+      expect(adopt).not.toHaveBeenCalled();
     } finally {
       fixture.close();
     }

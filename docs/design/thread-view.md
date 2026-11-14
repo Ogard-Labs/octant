@@ -555,6 +555,21 @@ itself after background work it was running reported.` in place of a
 person's message. The rules are in
 [Provider runtimes](provider-runtimes.md#background-commands-and-runtime-started-turns).
 
+## Sessions started outside Octant
+
+An empty Code thread whose provider keeps sessions of its own for the
+thread's folder and account, begun outside Octant, shows one row above the
+message queue: a history icon, how many sessions there are, and **Continue
+one**, which opens a list of them in place. Each choice shows the session's
+title (its name, or the provider's summary of it) on one line, then its
+branch and when it was last written; **Continue in this thread** starts the
+thread from the chosen one. A refusal shows the host's sentence under the
+row. Once the thread has a message the row is gone. A thread started from a
+session shows, in the same place, its details row: **Continues a session
+started outside Octant**, the session's own id in monospace (cut with an
+ellipsis at a narrow width, whole on hover), and **Copy**. The rules are in
+[Provider runtimes](provider-runtimes.md#sessions-started-outside-octant).
+
 ## Credential requests
 
 A one-use credential request appears inline at the end of the Code conversation.

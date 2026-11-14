@@ -42,6 +42,7 @@ import type {
   ProviderSessionForkRequest,
   ProviderWakeupSchedule,
   ProviderBackgroundWork,
+  ProviderNativeSession,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -2311,6 +2312,117 @@ function forkClaudeSession(
   });
 }
 
+/** How many of the account's sessions in a folder a thread is offered to start from. */
+const MAX_OFFERED_NATIVE_SESSIONS = 50;
+
+/**
+ * The account's own Claude Code sessions a thread may be started from
+ * (maintainer decision, 2026-11-14). Only a session whose folder is the
+ * thread's is listed, and one an Octant session already resumes is left out:
+ * adopting it would point its resume record at another thread and strand the
+ * first. Adopting writes the same resume record a session Octant started
+ * writes, so the thread's next turn resumes it through the ordinary checks.
+ */
+function makeClaudeNativeSessions(
+  options: ClaudeDriverOptions,
+  listSessions: NonNullable<ClaudeAgentSdkPort["listSessions"]>,
+): NonNullable<ProviderDriver["nativeSessions"]> {
+  const controller = () => new AbortController().signal;
+  const configDirectory =
+    options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory };
+  // Only these sentences reach the person; anything else thrown on the way
+  // is reduced to one generic sentence.
+  const refusals = new WeakSet<ProviderFailure>();
+  const refuse = (category: ProviderFailure["category"], message: string) => {
+    const refusal = failure(category, message);
+    refusals.add(refusal);
+    return refusal;
+  };
+  const heldByOctant = (sdkSessionId: string) =>
+    options.resumeIdentityPort
+      .lookup({ providerInstanceId: options.instanceId, sdkSessionId }, controller())
+      .then((identity) => identity !== undefined);
+  return {
+    list: ({ instanceId, projectRoot }) =>
+      instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : listSessions({ projectRoot, ...configDirectory }).pipe(
+            Effect.flatMap((sessions) =>
+              Effect.tryPromise({
+                try: async () => {
+                  const newest = [...sessions].sort(
+                    (left, right) => right.lastModified - left.lastModified,
+                  );
+                  const offered: ProviderNativeSession[] = [];
+                  for (const session of newest) {
+                    if (offered.length >= MAX_OFFERED_NATIVE_SESSIONS) break;
+                    if (await heldByOctant(session.sessionId)) continue;
+                    offered.push({
+                      nativeSessionId: session.sessionId,
+                      lastModified: session.lastModified,
+                      ...(session.title === undefined ? {} : { title: session.title }),
+                      ...(session.gitBranch === undefined ? {} : { gitBranch: session.gitBranch }),
+                    });
+                  }
+                  return offered;
+                },
+                catch: () => failure("unavailable", "Claude's sessions could not be read."),
+              }),
+            ),
+          ),
+    adopt: (input) =>
+      Effect.tryPromise({
+        try: async () => {
+          if (input.instanceId !== options.instanceId) {
+            throw refuse("invalid-configuration", "Provider instance does not match driver.");
+          }
+          if (await heldByOctant(input.nativeSessionId)) {
+            throw refuse("unavailable", "That Claude session already belongs to an Octant thread.");
+          }
+          const found = await Effect.runPromise(
+            options.sdk.findSession({
+              sessionId: input.nativeSessionId,
+              projectRoot: input.projectRoot,
+              ...configDirectory,
+            }),
+          );
+          if (found === undefined || found.projectRoot !== input.projectRoot) {
+            throw refuse(
+              "stale-resume",
+              "That Claude session is not one of this folder's on this account.",
+            );
+          }
+          await options.resumeIdentityPort.put(
+            {
+              providerInstanceId: options.instanceId,
+              octantSessionId: input.sessionId,
+              sdkSessionId: input.nativeSessionId,
+              projectRoot: input.projectRoot,
+              modelId: input.modelId,
+              authentication: options.authentication,
+            },
+            controller(),
+          );
+          return {
+            driverKind: "claude" as const,
+            value: input.nativeSessionId,
+            binding: providerResumeBinding({
+              instanceId: options.instanceId,
+              sessionId: input.sessionId,
+              projectRoot: input.projectRoot,
+              mode: input.mode,
+              modelId: input.modelId,
+            }),
+          };
+        },
+        catch: (error) =>
+          typeof error === "object" && error !== null && refusals.has(error as ProviderFailure)
+            ? (error as ProviderFailure)
+            : failure("unavailable", "The Claude session could not be taken up."),
+      }),
+  };
+}
+
 export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   const environmentFactory = options.makeEnvironmentScope ?? makeClaudeEnvironmentScope;
   const factories: ConnectionFactories = {
@@ -2340,6 +2452,9 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
       })
         ? CLAUDE_ARTIFACT_TOOL
         : undefined,
+    ...(options.sdk.listSessions === undefined
+      ? {}
+      : { nativeSessions: makeClaudeNativeSessions(options, options.sdk.listSessions) }),
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
     forkSession: (input) => forkClaudeSession(options, input),

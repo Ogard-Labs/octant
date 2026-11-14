@@ -284,6 +284,9 @@ function harness(
         return copied;
       }),
     ),
+    listSessions: vi.fn(({ projectRoot: root }) =>
+      Effect.succeed([...sessions.values()].filter((session) => session.projectRoot === root)),
+    ),
   };
   const process: ClaudeProcessPort = {
     probeVersion: vi.fn(() => Effect.succeed(options.runtimeVersion ?? "2.1.211")),
@@ -6670,6 +6673,111 @@ describe("Claude session copies for a fork or rewind", () => {
       ).toBeUndefined();
     }
     expect(f.sdk.forkSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("Claude sessions started outside Octant", () => {
+  const outside = "outside-session-1";
+
+  it("lists this folder's sessions an Octant thread does not hold, newest first", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    f.sessions.set(outside, {
+      sessionId: outside,
+      projectRoot,
+      lastModified: 50,
+      title: "Fix the login test",
+    });
+    f.sessions.set("older-outside", { sessionId: "older-outside", projectRoot, lastModified: 20 });
+    f.sessions.set("elsewhere", {
+      sessionId: "elsewhere",
+      projectRoot: "/tmp/other",
+      lastModified: 90,
+    });
+
+    const listed = await Effect.runPromise(
+      f.driver.nativeSessions!.list({ instanceId, projectRoot }),
+    );
+    // The session Octant started (sdk-session-1) is left out.
+    expect(listed).toEqual([
+      { nativeSessionId: outside, lastModified: 50, title: "Fix the login test" },
+      { nativeSessionId: "older-outside", lastModified: 20 },
+    ]);
+    await acquired.close();
+  });
+
+  it("takes up a session begun outside Octant so the thread's next turn resumes it", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    const cursor = await Effect.runPromise(
+      f.driver.nativeSessions!.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: outside,
+        modelId,
+      }),
+    );
+    expect(cursor).toMatchObject({
+      driverKind: "claude",
+      value: outside,
+      binding: { sessionId, projectRoot, mode: "code" },
+    });
+    expect(f.resumeIdentities.get(outside)).toMatchObject({
+      octantSessionId: sessionId,
+      sdkSessionId: outside,
+      projectRoot,
+      authentication: "subscription",
+    });
+
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: cursor,
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(f.opens.at(-1)?.resumeSessionId).toBe(outside);
+    await acquired.close();
+  });
+
+  it("refuses a session another Octant thread holds, or one from another folder", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    const adopt = (nativeSessionId: string) =>
+      Effect.runPromise(
+        Effect.flip(
+          f.driver.nativeSessions!.adopt({
+            instanceId,
+            projectRoot,
+            mode: "code",
+            sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000799"),
+            nativeSessionId,
+            modelId,
+          }),
+        ),
+      );
+    await expect(adopt("sdk-session-1")).resolves.toMatchObject({
+      message: "That Claude session already belongs to an Octant thread.",
+    });
+    f.sessions.set("elsewhere", {
+      sessionId: "elsewhere",
+      projectRoot: "/tmp/other",
+      lastModified: 1,
+    });
+    await expect(adopt("elsewhere")).resolves.toMatchObject({ category: "stale-resume" });
+    expect(f.resumeIdentities.get("sdk-session-1")?.octantSessionId).toBe(sessionId);
+    await acquired.close();
   });
 });
 

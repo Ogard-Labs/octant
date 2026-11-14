@@ -333,7 +333,41 @@ export interface ProviderUserInputAnswer {
   readonly answer: string;
 }
 
+/** A session the runtime keeps for this account and folder, begun outside Octant. */
+export interface ProviderNativeSession {
+  readonly nativeSessionId: string;
+  /** The runtime's own title for it: a name the person gave it, or its summary. */
+  readonly title?: string;
+  /** When the runtime last wrote it, in milliseconds since the epoch. */
+  readonly lastModified: number;
+  readonly gitBranch?: string;
+}
+
+/**
+ * The runtime's own sessions a thread may be started from. `list` names the
+ * sessions of the instance's account in one folder, newest first, leaving out
+ * any an Octant thread already holds. `adopt` records that an Octant session
+ * resumes one of them and answers the cursor that resumes it; it refuses a
+ * session another Octant thread holds, or one in another folder.
+ */
+export interface ProviderNativeSessions {
+  readonly list: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot: string;
+  }) => Effect.Effect<ReadonlyArray<ProviderNativeSession>, ProviderFailure>;
+  readonly adopt: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot: string;
+    readonly mode: "work" | "code";
+    readonly sessionId: ProviderSessionId;
+    readonly nativeSessionId: string;
+    readonly modelId: ProviderModelId;
+  }) => Effect.Effect<ProviderResumeCursor, ProviderFailure>;
+}
+
 export interface ProviderDriver {
+  /** Starting a thread from the runtime's own sessions; absent, a driver offers none. */
+  readonly nativeSessions?: ProviderNativeSessions;
   /** A verified read adapter exists; acquiring still checks the exact runtime version. */
   readonly fileReviewReads?: true;
   readonly cloudSessions?: CloudSessionDriver;

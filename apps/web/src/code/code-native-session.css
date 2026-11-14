@@ -1,0 +1,74 @@
+.code-native-session {
+  padding: 0.25rem 0.75rem;
+  font-size: var(--oct-text-xs);
+  color: var(--octant-text-secondary);
+}
+.code-native-session__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 28px;
+}
+.code-native-session__icon {
+  flex: none;
+}
+.code-native-session__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The id is what a person copies into a terminal, so it never wraps; on a
+   narrow composer it is cut with an ellipsis and stays whole in its title. */
+.code-native-session__id {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--oct-font-mono);
+  color: var(--octant-text-primary);
+}
+.code-native-session__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  max-height: 14rem;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+}
+.code-native-session__legend {
+  padding: 0;
+  margin-bottom: 0.25rem;
+  color: var(--octant-text-primary);
+}
+.code-native-session__choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--oct-space-2);
+  align-items: baseline;
+  padding: 0.25rem 0;
+  cursor: pointer;
+}
+.code-native-session__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--octant-text-primary);
+}
+.code-native-session__meta {
+  grid-column: 2;
+  font-variant-numeric: tabular-nums;
+}
+.code-native-session__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+}
+.code-native-session__message {
+  margin: 0.25rem 0 0;
+}
