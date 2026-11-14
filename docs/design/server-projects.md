@@ -589,6 +589,36 @@ checks never change registry/configuration or journal state.
   file tools also ran against a throwaway Linux container's `sshd` with bash,
   dash, zsh, fish 3.6, tcsh, and csh as login shells. Linux hosts are likewise
   untested; the connection uses only `ssh` options both platforms share.
+- Routines on a server Project (maintainer decision, 2026-11-14). Today a
+  routine cannot target one: the routine dispatcher revalidates its Project
+  against this host's local catalog only, where a server Project's id reads as
+  missing (`project-mismatch`), and a turn here is offered no routine tool
+  ([Work Projects](#work-projects)). The design: a routine bound to a server
+  Project is run by this host's scheduler, revalidates the binding and the
+  registered server at every occurrence, and starts an ordinary thread here
+  whose commands run on the server through the Project's connection, under
+  the same rules as a person-started thread. An unreachable server blocks the
+  occurrence and runs nothing anywhere.
+
+## Machines in the person's cloud account
+
+Designed, not built (maintainer decision, 2026-11-14). Octant may create a
+machine in the person's own cloud account and bind it as a server Project, as
+a [delivery target the person owns](../architecture.md#modes-chat-work-and-code).
+
+- The cloud credential is a reference held by the credential broker; Octant
+  never stores or journals its value, and the machine's SSH key is made for
+  it and registered as a server like any other.
+- Creating, suspending, resuming, and deleting the machine are the person's
+  acts at a local window or a device the host's own person paired, each
+  journaled; an agent or routine may not create or delete one. A suspended
+  machine's Project stays listed and refuses turns with a named reason until
+  the person resumes it.
+- The person's account pays for the machine; Octant shows the provider's
+  reported state and never claims a cost it did not read.
+- Octant operates no hosted machines of its own; an Octant-operated hosted
+  service stays out of scope
+  ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
 ## Person-operated dev-server previews
 

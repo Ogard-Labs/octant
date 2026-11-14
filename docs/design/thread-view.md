@@ -560,3 +560,31 @@ ordinary notice content cannot issue an approval receipt.
 A panel a turn's menu opens inline (a checkpoint's name, the question before
 files are restored) takes focus once the menu has closed, the safe answer
 first, and hands focus back to that turn's More actions control when it ends.
+
+## Line notes on a turn's changes
+
+Designed, not built (maintainer decision, 2026-11-14). Opening a row of a
+turn's "N files changed while this ran" card shows that turn's recorded change
+for the file, and the person may leave a note on any line of it. Notes collect
+under the card as a pending list the person can edit or remove; **Send notes**
+sends them together as one follow-up turn in the same thread, each note naming
+its file, side and line from the turn's record. Nothing is sent until the
+person sends it, and a note never approves, resolves or reverts anything. A
+line the record cannot show (binary, purged, uncaptured, or past the record's
+path limit) says why it takes no note. The notes follow the same anchoring and
+provenance rules as the local notes in
+[Workspace: Captured Review](workspace.md#tool-lifecycles): an anchor never
+moves silently, and a note's quoted lines from the change are framed as
+evidence.
+
+## Thread recap and notes
+
+Designed, not built (maintainer decision, 2026-11-14). A thread has a recap the
+person can open: a short summary of what the thread asked, did and left open,
+written on request by the thread's own model from the thread's transcript and
+shown with the turn it was written through, so a stale recap says so. The recap
+is read-only and goes to no provider other than the thread's own. Beside it the
+person may keep notes of their own on the thread; notes are the person's text,
+journaled on the thread, never sent to the agent unless the person attaches one
+to a message, and removed with the thread. Neither a recap nor a note changes
+the thread's authority, level or Done.
