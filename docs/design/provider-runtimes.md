@@ -712,7 +712,10 @@ nothing, and the capability is reported `supported`. An earlier 2.x release
 keeps `question` denied, as before, so the model is told no and carries on
 instead of the turn failing on a form Octant cannot map. A question asking for
 several answers (a multiselect field) fails the turn as an unsupported
-format, as on 1.x, and any other form (a sign-in, a server's own request)
+format, as on 1.x. A form with a question that asks for a password,
+passphrase, API key, access token, or private key is never shown or
+journaled: each of its fields is answered at once with the refusal Codex
+gets, telling the model Octant does not collect secrets in chat. Any other form (a sign-in, a server's own request)
 still fails the turn rather than hang on an unanswerable form. Resume,
 interruption, and tool activity are reported. A Stop the person asked for
 (`user`) and OpenCode's own `superseded` and `inactivity` interruptions stay

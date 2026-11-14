@@ -24,6 +24,7 @@ import {
 import { outsideContentTarget } from "./outsideContentRead";
 import { proposedPlanText } from "./proposedPlan";
 import { rateLimitWindowId } from "./rateLimitWindowIdentity";
+import { asksForSecret, SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -109,19 +110,6 @@ export interface CodexPendingQuestion {
 export type CodexUserInputResult = {
   readonly answers: Readonly<Record<string, { readonly answers: ReadonlyArray<string> }>>;
 };
-
-/**
- * Codex's answer when it asks for a secret. A password or key typed into the
- * questionnaire would sit in the thread's journal and Codex's own history, so
- * the set is answered with this instead, and the model is pointed at the
- * channels that keep secrets out of the conversation.
- */
-export const CODEX_SECRET_QUESTION_REFUSAL =
-  "Octant does not collect secrets, passwords, or keys in chat. Ask the person to put it in a credential or environment setting outside the conversation, then continue without it.";
-
-/** A question whose answer is a secret by Codex's own mark or by what it asks for. */
-const SECRET_QUESTION =
-  /\b(?:password|passphrase|passcode|api[\s_-]?key|access[\s_-]?token|secret[\s_-]?key|private[\s_-]?key|bearer[\s_-]?token)s?\b/iu;
 
 interface CodexAgentMessageState {
   lifecycle: "active" | "terminal";
@@ -768,8 +756,8 @@ function userInputRequest(
     questions.some(
       (question) =>
         question.isSecret === true ||
-        SECRET_QUESTION.test(question.question) ||
-        SECRET_QUESTION.test(question.header),
+        asksForSecret(question.question) ||
+        asksForSecret(question.header),
     )
   ) {
     context.requestIds.set(message.id, context.makeRequestId());
@@ -779,10 +767,7 @@ function userInputRequest(
         providerRequestId: message.id,
         result: {
           answers: Object.fromEntries(
-            questions.map((question) => [
-              question.id,
-              { answers: [CODEX_SECRET_QUESTION_REFUSAL] },
-            ]),
+            questions.map((question) => [question.id, { answers: [SECRET_QUESTION_REFUSAL] }]),
           ),
         },
       },

@@ -68,6 +68,7 @@ import type {
   ProviderRuntimeRegistry,
 } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
+import { asksForSecret, SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
 export interface OpenCodeSessionRecord {
   readonly id: string;
@@ -1652,6 +1653,33 @@ function makeConnection(
                 retireState(state);
               });
             },
+            refuseQuestion: (formId: string, count: number) => {
+              const active = client;
+              const source = replySource ?? state.sourceId;
+              const failed = () => {
+                if (state.terminal) return;
+                offer(
+                  unmappedBetaFailure(
+                    state,
+                    options.instanceId,
+                    clock,
+                    "OpenCode 2 question reply failed.",
+                  ),
+                );
+                retireState(state);
+              };
+              if (active === undefined || source === undefined) {
+                failed();
+                return;
+              }
+              void active
+                .replyQuestion(
+                  source,
+                  formId,
+                  Array.from({ length: count }, () => SECRET_QUESTION_REFUSAL),
+                )
+                .catch(failed);
+            },
           };
     /**
      * An event of a session OpenCode delegated to. Its activity is reported as
@@ -2928,6 +2956,8 @@ function mapAndOffer(
     /** An approval here is answered `always`, a grant kept in OpenCode's own store. */
     readonly remembersInOpenCode: boolean;
     readonly reply: (requestId: string, reply: "once" | "reject") => void;
+    /** Answers every field of a question form with the secret refusal. */
+    readonly refuseQuestion: (formId: string, count: number) => void;
   },
 ): void {
   if (state.terminal) return;
@@ -2944,6 +2974,19 @@ function mapAndOffer(
   if (beta !== undefined && String(event.type) === "form.created" && questionForm === undefined) {
     offer(unmappedBetaFailure(state, instanceId, clock, "OpenCode 2 questions are not mapped."));
     retire(state);
+    return;
+  }
+  // A form asking for a password or key is answered at once with a refusal,
+  // as Codex's question set is, and never reaches the person or the journal:
+  // a typed secret would sit in both and in OpenCode's own history.
+  if (
+    beta !== undefined &&
+    questionForm !== undefined &&
+    questionForm.properties.questions.some(
+      (question) => asksForSecret(question.question) || asksForSecret(question.header),
+    )
+  ) {
+    beta.refuseQuestion(questionForm.properties.id, questionForm.properties.questions.length);
     return;
   }
   // A 2.x reject settles every pending request in the session, observed with

@@ -28,7 +28,7 @@ import {
   type CodexLaunchAuthority,
 } from "./codexProcess";
 import { CodexRpcClientFailure } from "./codexRpcClient";
-import { CODEX_SECRET_QUESTION_REFUSAL } from "./codexEventMapper";
+import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 import type { CodexServerMessage } from "./codexProtocol";
 import type {
   CodexAccountReadResult,
@@ -3625,7 +3625,7 @@ describe("Codex execution authority and approvals", () => {
         method: "approval/respond",
         input: {
           providerRequestId: "ask-2",
-          result: { answers: { pw: { answers: [CODEX_SECRET_QUESTION_REFUSAL] } } },
+          result: { answers: { pw: { answers: [SECRET_QUESTION_REFUSAL] } } },
         },
       }),
     );

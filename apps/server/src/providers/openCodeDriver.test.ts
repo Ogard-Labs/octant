@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Fiber, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   adaptBetaOpenCodeEvent,
   betaAgentPermissionRules,
@@ -37,6 +37,7 @@ import {
   type OpenCodeProcessPort,
   type OpenCodeProcessStartInput,
 } from "./openCodeProcess";
+import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000101");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000102");
@@ -2584,6 +2585,72 @@ describe("OpenCode driver", () => {
     });
     expect(answer?._tag).toBe("Success");
     expect(fixture.calls).toContain("question.reply:Yes");
+  });
+
+  it("refuses a 2.x question form that asks for a secret and never shows or journals it", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "form.created",
+          properties: {
+            form: {
+              id: "frm_secret",
+              sessionID: "provider-session",
+              title: "Questions",
+              metadata: { kind: "question" },
+              fields: [
+                {
+                  key: "q0",
+                  title: "Region",
+                  description: "Which region should the deploy use?",
+                  type: "string",
+                  options: [{ value: "eu", label: "eu", description: "Europe" }],
+                },
+                {
+                  key: "q1",
+                  title: "Credentials",
+                  description: "Paste the API key for the deploy account.",
+                  type: "string",
+                  options: [],
+                },
+              ],
+            },
+          },
+        } as unknown as Event,
+        idleEvent("provider-session"),
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(events.some((event) => event.kind === "user-input-request")).toBe(false);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+    expect(JSON.stringify(events)).not.toContain("API key");
+    await vi.waitFor(() =>
+      expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual([
+        `question.reply:${SECRET_QUESTION_REFUSAL}|${SECRET_QUESTION_REFUSAL}`,
+      ]),
+    );
   });
 
   it("ends a 2.x turn OpenCode's shutdown cut off as held for recovery, and sends nothing again", async () => {
