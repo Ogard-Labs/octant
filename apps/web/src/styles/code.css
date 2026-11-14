@@ -2906,8 +2906,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-1);
-  padding: 0 var(--oct-space-2) var(--oct-space-1)
-    calc(var(--oct-space-2) + 14px + var(--oct-space-2));
+  padding: 0 var(--oct-space-2) var(--oct-space-1) var(--oct-space-8);
 }
 
 .code-where__line {

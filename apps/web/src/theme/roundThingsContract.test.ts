@@ -30,6 +30,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   '.check input[type="radio"]',
   '.check input[type="radio"]:checked::after',
   ".device-pick__radio",
+  ".code-where__dot",
   // Avatars and monogram glyphs.
   ".avatar",
   ".user-avatar",
