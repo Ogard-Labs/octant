@@ -309,6 +309,74 @@ html:not([data-octant-reduced-transparency="true"])
   gap: var(--oct-space-2);
 }
 
+/* Line notes sit between the diff and the findings: pending drafts the person
+   sends together, so they read as a short list, not as tracked findings. */
+.code-line-notes {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-line-notes__title {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.code-line-notes__hint,
+.code-line-notes__anchor {
+  margin: 0;
+  color: var(--oct-meta);
+}
+
+.code-line-notes__form {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.code-line-notes__excerpt {
+  display: block;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  font-family: var(--oct-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-line-notes__list {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.code-line-notes__list li {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) 0;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-line-notes__list p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.code-line-notes__actions {
+  display: flex;
+  gap: var(--oct-space-2);
+}
+
+.code-line-notes > button {
+  justify-self: start;
+}
+
 /* ─── repository file tree ─────────────────────────────────────────────
    The Files dock is 320px wide, so every row spends its width the same
    way: one fixed indent step for files and folders alike, one row height,
