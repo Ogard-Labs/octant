@@ -17,6 +17,8 @@ export interface CodeWhereControlProps {
   readonly projectRoot?: string;
   /** The existing base-branch picker, drawn after "from" when a new worktree is chosen. */
   readonly baseBranchPicker?: ReactNode;
+  /** The "Start from origin" choice for a new worktree, drawn under the base branch. */
+  readonly sourceControl?: ReactNode;
   /** The existing working-folder fields, drawn in place as the "Subfolder" row. */
   readonly subfolder?: ReactNode;
   /** The working subfolder when it is not the whole folder, said on the chip. */
@@ -136,6 +138,7 @@ export function CodeWhereControl(props: CodeWhereControlProps) {
                     <code>{props.worktreeBranch}</code>
                     <span className="code-where__meta">(auto)</span>
                   </div>
+                  {props.sourceControl}
                 </div>
               ) : null}
             </div>

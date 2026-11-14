@@ -536,8 +536,9 @@ describe("CodeComposerAdapter", () => {
     expect(html).not.toContain("Pool control slot");
   });
 
-  it("renders a default-enabled Start from origin control only when server-authoritative remote facts are provided", () => {
-    const html = renderToStaticMarkup(
+  it("renders a default-enabled Start from origin control only when server-authoritative remote facts are provided", async () => {
+    const user = userEvent.setup();
+    render(
       <CodeComposerAdapter
         {...defaultProps}
         // Start from origin only decides where a new worktree branches from,
@@ -546,9 +547,9 @@ describe("CodeComposerAdapter", () => {
         worktreeRemoteFacts={{ remotes: ["origin"], defaultRemote: "origin" }}
       />,
     );
-    expect(html).toContain("Start from origin");
-    expect(html).toContain("Fetch and start from origin/development");
-    expect(html).toContain('aria-checked="true"');
+    await user.click(whereChip());
+    expect(screen.getByRole("switch", { name: "Start from origin" })).toBeChecked();
+    expect(screen.getByText("Fetch and start from origin/development")).toBeVisible();
   });
 
   it("F4: disables Start from origin when no server-authoritative remote facts are provided", () => {
@@ -603,7 +604,10 @@ describe("CodeComposerAdapter interactions", () => {
     await act(async () => {
       root.render(<CodeComposerAdapter {...defaultProps} newThreadWorkspace="managed-worktree" />);
     });
-    expect(container.querySelector('[role="switch"]')).toHaveAttribute("aria-checked", "false");
+    await act(async () => {
+      whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(document.querySelector('[role="switch"]')).toHaveAttribute("aria-checked", "false");
 
     await act(async () => {
       root.render(
@@ -615,7 +619,7 @@ describe("CodeComposerAdapter interactions", () => {
       );
     });
 
-    expect(container.querySelector('[role="switch"]')).toHaveAttribute("aria-checked", "true");
+    expect(document.querySelector('[role="switch"]')).toHaveAttribute("aria-checked", "true");
     root.unmount();
     container.remove();
   });
@@ -1152,6 +1156,7 @@ describe("CodeComposerAdapter interactions", () => {
     );
     const rendered = render(view);
     expect(whereChip()).toHaveTextContent("New worktree");
+    await user.click(whereChip());
     expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
       "aria-checked",
       "true",
@@ -1161,11 +1166,11 @@ describe("CodeComposerAdapter interactions", () => {
     render(view);
 
     expect(whereChip()).toHaveTextContent("New worktree");
+    await user.click(whereChip());
     expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    await user.click(whereChip());
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
     expect(await screen.findByRole("radio", { name: /New worktree/ })).toHaveAttribute(
       "aria-checked",

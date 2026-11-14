@@ -825,11 +825,29 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       {...(props.creating === true ? { disabled: true } : {})}
     />
   ) : null;
+  const sourceControl =
+    props.projectId === undefined ? null : (
+      <CodeWorktreeSourceControl
+        branch={resolvedBaseBranch ?? "Default branch"}
+        {...(props.execute !== undefined ? { onRefresh: sourcePreview.refresh } : {})}
+        onSelectRemote={setWorktreeRemote}
+        onStartFromOriginChange={setStartFromOriginOverride}
+        remoteFacts={worktreeRemoteFacts}
+        resolution={
+          props.execute !== undefined
+            ? sourcePreview.resolution
+            : (props.worktreeResolution ?? { kind: "idle" })
+        }
+        selectedRemote={resolvedWorktreeRemote}
+        startFromOrigin={startFromOrigin}
+      />
+    );
   const branchControl = hasProject ? (
     <>
       {serverLocation}
       <CodeWhereControl
         baseBranchPicker={branchPicker}
+        sourceControl={sourceControl}
         branch={resolvedBaseBranch ?? "Default branch"}
         onWorkspaceChange={setWorkspaceOverride}
         worktreeBranch={defaultDeliveryBranchIntent(resolvedBaseBranch ?? "", shortId)}
@@ -1146,26 +1164,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         </div>
 
         {props.projectSetup}
-
-        {/* Start from origin only decides where a new worktree branches from.
-              Binding the current checkout resolves no source, so the control
-              would be a lie rather than a choice. */}
-        {props.projectId === undefined || workspace !== "managed-worktree" ? null : (
-          <CodeWorktreeSourceControl
-            branch={resolvedBaseBranch ?? "Default branch"}
-            {...(props.execute !== undefined ? { onRefresh: sourcePreview.refresh } : {})}
-            onSelectRemote={setWorktreeRemote}
-            onStartFromOriginChange={setStartFromOriginOverride}
-            remoteFacts={worktreeRemoteFacts}
-            resolution={
-              props.execute !== undefined
-                ? sourcePreview.resolution
-                : (props.worktreeResolution ?? { kind: "idle" })
-            }
-            selectedRemote={resolvedWorktreeRemote}
-            startFromOrigin={startFromOrigin}
-          />
-        )}
 
         {/* The prompts sit directly under the composer they fill in, and the
             cards follow. Under the cards they were a screen away from the

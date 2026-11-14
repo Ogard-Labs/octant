@@ -622,7 +622,8 @@ thread work?", a radio group (arrow keys move, Escape closes and returns focus
 to the chip): **This checkout** names the Project's folder in meta ink and
 "on <current branch>", read only; **New worktree** says "isolated copy, its
 own branch" and, once chosen, shows the base-branch picker and the branch name
-the host will create. Below sit a quiet **Subfolder** row (the working folder
+the host will create, then the "Start from origin" choice, so nothing
+appears or disappears outside the panel when the choice changes. Below sit a quiet **Subfolder** row (the working folder
 fields) and, when a Project's remembered default can be recorded, **Remember
 for this Project**. Choosing only sets the draft's workspace; the worktree is
 created with the thread. The chip's width may follow the choice; nothing else
