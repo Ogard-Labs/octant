@@ -252,7 +252,10 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
         <p>Local only · GitHub review mutation unavailable</p>
       </header>
       {findings.length === 0 ? (
-        <p role="status">No local findings.</p>
+        <p role="status">
+          No local findings.
+          {props.target === undefined ? " Select an exact file and line to add one." : ""}
+        </p>
       ) : (
         <ul className="code-review-pane__findings">
           {findings.map((finding) => (
@@ -318,7 +321,7 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           ))}
         </ul>
       )}
-      {props.onPrepareCorrection === undefined ? null : (
+      {props.onPrepareCorrection === undefined || findings.length === 0 ? null : (
         <OctantButton
           type="button"
           size="sm"
@@ -338,15 +341,13 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           Prepare correction draft
         </OctantButton>
       )}
-      <p>
-        Findings stay open until you review the resulting changes and resolve or dismiss them
-        yourself.
-      </p>
-      {props.target === undefined ? (
-        <p className="code-delivery-pane__notice">
-          Select an exact file and line to add a finding.
+      {findings.length === 0 ? null : (
+        <p>
+          Findings stay open until you review the resulting changes and resolve or dismiss them
+          yourself.
         </p>
-      ) : (
+      )}
+      {props.target === undefined ? null : (
         <div className="code-review-pane__form">
           <p>
             {props.target.path} · {props.target.anchor?.side ?? "file"} line {props.target.line}

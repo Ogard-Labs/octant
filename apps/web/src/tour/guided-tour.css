@@ -15,7 +15,16 @@
   border: 2px solid var(--oct-accent);
   /* A thin page-coloured line outside the accent keeps the ring readable on a
      fill of its own colour, such as the filled composer or a selected row. */
-  box-shadow: 0 0 0 1px var(--oct-bg);
+  box-shadow:
+    0 0 0 1px var(--oct-bg),
+    0 0 0 6px color-mix(in oklab, var(--oct-accent) 18%, transparent);
+}
+
+/* One hairline and the 16px corner, restated over the shared float recipe,
+   which draws a card with no border at all. */
+.guided-tour .guided-tour__card {
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-lg);
 }
 
 .guided-tour__card {
@@ -44,13 +53,25 @@
   position: relative;
   border-radius: var(--oct-radius-md);
   background-color: color-mix(in oklab, var(--oct-fg) 4%, transparent);
-  background-image: radial-gradient(
-    circle at center,
-    color-mix(in oklab, var(--oct-fg) 16%, transparent) 1px,
-    transparent 1.5px
-  );
-  background-size: 14px 14px;
-  background-position: 7px 7px;
+  /* The illustration band is a faint dotted grid under a soft glow of the
+     accent, about two fifths of the card's height. */
+  background-image:
+    radial-gradient(
+      ellipse 70% 80% at 50% 0%,
+      color-mix(in oklab, var(--oct-accent) 22%, transparent),
+      transparent 75%
+    ),
+    radial-gradient(
+      circle at center,
+      color-mix(in oklab, var(--oct-fg) 16%, transparent) 1px,
+      transparent 1.5px
+    );
+  background-size:
+    100% 100%,
+    14px 14px;
+  background-position:
+    0 0,
+    7px 7px;
   overflow: hidden;
 }
 
@@ -128,7 +149,7 @@
 
 .guided-tour__title {
   margin: 0;
-  font-size: var(--oct-text-base);
+  font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-medium);
   line-height: var(--oct-leading-snug);
 }

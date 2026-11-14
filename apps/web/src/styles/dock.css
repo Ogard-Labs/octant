@@ -2023,3 +2023,19 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   margin: var(--oct-space-2) 0 0;
   color: var(--octant-text-muted);
 }
+
+/* The Review and Files heads inside a dock tile stand 28px tall in 12px type,
+   so their first line sits on the same rhythm as the tile's 40px header
+   above them. */
+.right-utility-dock__tool .code-delivery-pane__toolbar,
+.right-utility-dock__tool .work-files-panel__heading {
+  min-height: 28px;
+  padding-block: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.right-utility-dock__tool .code-delivery-pane__toolbar h1,
+.right-utility-dock__tool .code-delivery-pane__toolbar p,
+.right-utility-dock__tool .work-files-panel__heading > * {
+  font-size: var(--oct-text-xs);
+}

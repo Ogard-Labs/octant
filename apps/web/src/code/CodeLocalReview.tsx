@@ -214,7 +214,7 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
           props.onRefreshComparison?.();
         }}
       >
-        Refresh findings and checks
+        {targetNotice === undefined ? "Refresh findings and checks" : "Try again"}
       </OctantButton>
       <p role="status">
         {checks?.result === undefined
