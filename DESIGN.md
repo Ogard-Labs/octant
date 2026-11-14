@@ -1517,6 +1517,11 @@ press opened.
 **Keyboard and accessibility.** `role="tooltip"`; it opens on keyboard focus as
 on hover.
 **Do and do not.** Never the only place an essential word appears.
+`OctantIconButton` keeps the native `title` for its label rather than this
+tooltip: the system draws a native title above a native Browser page, where
+this tooltip would open underneath it. Tooltips are also not counted as
+overlays that move a Browser page out of the window, because any hover would
+make the page flash.
 **Gallery.** Popover, tooltip and preview card.
 
 ### OctantAlert
