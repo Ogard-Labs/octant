@@ -1,37 +1,66 @@
 import { OctantButton } from "../ui/base/OctantButton";
 
-/** What a Code thread's checkout has changed since its last commit. */
+/**
+ * What a Project's checkout has changed since its last commit. The counts are
+ * absent until a first reading lands, and `updating` marks a value that may
+ * describe an earlier tree.
+ */
 export interface TitleBandChangesFacts {
-  readonly insertions: number;
-  readonly deletions: number;
+  readonly insertions?: number;
+  readonly deletions?: number;
+  readonly updating: boolean;
   readonly onOpen: () => void;
 }
 
 /**
- * The open Code thread's uncommitted line changes, as one button into the
- * changes view.
+ * The checkout's uncommitted line changes, as one button into the changes view.
  *
- * The size of the diff was only visible under the composer or in a panel the
- * reader had to open. In the title band it stays in view while the person
- * reads the transcript, and it sits at the leading end of the trailing cluster
- * so a longer number grows leftward and never moves a tool button under the
- * pointer.
+ * It is always there while the window is on a Project with a Git checkout, "+0
+ * −0" included, so the band never gains or loses a control as a reading
+ * arrives: until the first one lands an em dash holds the same slot, and a
+ * reading that has gone stale stays on screen in meta ink with "Updating…" as
+ * its tooltip. A count is green or red only when it is above zero. It sits at
+ * the leading end of the trailing cluster so a longer number grows leftward and
+ * never moves a tool button under the pointer.
  */
 export function TitleBandChanges(props: { readonly changes: TitleBandChangesFacts }) {
-  const added = props.changes.insertions.toLocaleString("en");
-  const removed = props.changes.deletions.toLocaleString("en");
+  const { insertions, deletions, updating } = props.changes;
+  const known = insertions !== undefined && deletions !== undefined;
+  const added = known ? insertions.toLocaleString("en") : undefined;
+  const removed = known ? deletions.toLocaleString("en") : undefined;
   return (
     <OctantButton
-      aria-label={`Uncommitted changes: ${added} lines added, ${removed} removed`}
+      aria-label={
+        known
+          ? `Uncommitted changes: ${added ?? ""} lines added, ${removed ?? ""} removed`
+          : "Uncommitted changes: not read"
+      }
       className="window-chrome__changes"
+      data-updating={updating || !known ? "true" : undefined}
       onClick={props.changes.onOpen}
       size="sm"
-      title="Review changes"
+      title={updating ? "Updating…" : known ? "Review changes" : "No changes could be read"}
       type="button"
       variant="bare"
     >
-      <span aria-hidden="true" className="window-chrome__changes-added">{`+${added}`}</span>
-      <span aria-hidden="true" className="window-chrome__changes-removed">{`−${removed}`}</span>
+      {known ? (
+        <>
+          <span
+            aria-hidden="true"
+            className="window-chrome__changes-added"
+            data-zero={insertions === 0 ? "true" : undefined}
+          >{`+${added ?? ""}`}</span>
+          <span
+            aria-hidden="true"
+            className="window-chrome__changes-removed"
+            data-zero={deletions === 0 ? "true" : undefined}
+          >{`−${removed ?? ""}`}</span>
+        </>
+      ) : (
+        <span aria-hidden="true" className="window-chrome__changes-none">
+          —
+        </span>
+      )}
     </OctantButton>
   );
 }

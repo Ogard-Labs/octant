@@ -695,12 +695,17 @@ hiddenInset` and no custom `trafficLightPosition` (it would grow the native
   `window-no-drag`, and nothing after the layer is a drag region over the
   band: either left the band's empty stretches undraggable. Test title-bar
   controls in the packaged app.
-- **Changes in the band**: with a Code thread open the band's trailing cluster
-  starts with its checkout's uncommitted line changes, "+added −removed" in the
-  success and danger inks at the meta size with tabular numbers, as a button
-  that opens the dock's changes view. It is hidden without a fresh checkout
-  reading, shows "+0 −0" as is, and grows leftward from a 56px minimum so the
-  buttons after it never move.
+- **Changes in the band**: whenever the window is on a Code Project with a
+  Git checkout, in an open Code thread (that thread's checkout) and on the Code
+  start screen or draft (the Project's own checkout), the band's trailing
+  cluster starts with its uncommitted line changes, "+added −removed" at the
+  meta size with tabular numbers, as a button that opens the dock's changes
+  view. A count above zero is in the success or danger ink; a zero ("+0 −0"
+  included) is in meta ink. A reading that has gone stale stays on screen in
+  meta ink with "Updating…" as its tooltip; until a first reading lands an em
+  dash holds the slot, so nothing in the band moves when the number arrives. It
+  grows leftward from a 56px minimum so the buttons after it never move, and it
+  is absent only for a Project with no Git checkout.
 - **New thread**: Mod+N by default and bindable; every New thread button shows
   the chord as a quiet key cap in its tooltip.
 
