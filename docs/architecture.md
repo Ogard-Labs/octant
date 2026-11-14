@@ -3179,18 +3179,30 @@ hold for every action in it:
 Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
 
-- **Guarded and Reviewed.** Pull-request changes go through the
-  pull-request tool, which is the only sanctioned path. Octant refuses a
-  recognizable push or pull-request write before its Harness shell runs it,
-  and before answering a provider approval request that includes the pending
-  command. A generic shell approval or a Judge allow cannot authorize that
-  write: the agent must use the structured tool, whose repository, branch,
-  revision, consent, required-check and live-authority checks still apply.
-  A refused provider approval is recorded as a failed tool row, not as a
-  Shield or provider-reviewer verdict. This refusal applies with or without
-  Shield. A provider reviewer that
-  answers internally never sends Octant that pending command; enforcement
-  on that path is unsupported, as detailed below.
+- **Guarded and Reviewed.** A provider runtime's own `git push` and `gh`
+  writes are an ordinary ask, as they are in the runtime on its own
+  (maintainer decision, 2026-11-14): at Guarded and Accept edits the person
+  approves the pending command, and at Reviewed Shield decides it, its forge
+  hard lines included, or hands it to the person. Octant's structured
+  pull-request tools, with their repository, branch, revision, consent,
+  required-check and live-authority checks, stay an option the agent may
+  use, not a requirement. The Octant Harness, whose shell is Octant's own,
+  still refuses a recognizable push or pull-request write before its shell
+  runs it and sends the agent to those tools. Claude Code runs its commands
+  in its own sandbox below Full access, which cannot read `~/.ssh`,
+  `~/.gitconfig` or `~/.config/gh`; a push or `gh` call the sandbox stopped
+  is retried outside it (`dangerouslyDisableSandbox`), and Octant always
+  asks about that retry itself, whatever the person's own permission rules
+  allow, naming it as a command outside the sandbox, so once approved git
+  and `gh` read their own credentials and config. The person's global git
+  `user.name` and `user.email` are carried into sandboxed commands as
+  `GIT_AUTHOR_*` and `GIT_COMMITTER_*` for each field the checkout does not
+  set itself. A provider reviewer that answers internally never sends Octant
+  that pending command; the change is still journaled when it starts.
+  _Rationale:_ refusing a push the person would approve in the runtime on its
+  own broke the plain workflow of committing, pushing and opening a pull
+  request below Full access, and the forge journal and Shield's hard lines
+  keep the record and the brakes.
 - **Full access.** The provider's own `git` and forge command-line tool
   are the person's choice, as they would be outside Octant. Octant journals
   each push or pull-request change it observes (a shell command whose
@@ -3229,7 +3241,8 @@ Which path reaches the forge depends on the thread's
   there.
 
 At Guarded and Reviewed a known gap remains: a Code agent's shell can
-reach forge credentials today. (At Full access no runtime is sandboxed,
+reach forge credentials today, and an approved command outside Claude's
+sandbox does so by design. (At Full access no runtime is sandboxed,
 so a command can use the host's forge command-line login and Git credential
 helper; that reach is the person's choice at that level, as above.) Under
 Codex's prompting postures, a shell command the person approves escalates out of
@@ -3246,7 +3259,8 @@ A push or pull-request change made through that gap is journaled as a
 forge change where Octant sees the command (above), but none of the rules
 above can be enforced after it starts. The pre-action refusals above cover
 only recognizable commands Octant executes or receives as pending approval
-calls. Provider-reviewer decisions and Full access tool-start observations
+calls, and below Full access they are now asks rather than refusals for a
+provider runtime. Provider-reviewer decisions and Full access tool-start observations
 are records, not consent or pre-action enforcement. Arbitrary scripts,
 aliases, expansions and commands that a runtime does not report cannot be
 classified reliably by this command reader. Complete confinement of those

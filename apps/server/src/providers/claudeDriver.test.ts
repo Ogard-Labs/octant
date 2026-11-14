@@ -232,6 +232,7 @@ function harness(
     readonly authorityNow?: () => number;
     readonly maxTrackedToolUses?: number;
     readonly runtimeTurnsPerTurn?: () => number;
+    readonly gitIdentity?: (checkoutRoot: string) => Promise<{ name?: string; email?: string }>;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -371,6 +372,7 @@ function harness(
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
       ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
+      ...(options.gitIdentity === undefined ? {} : { gitIdentity: options.gitIdentity }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
       ...(options.maxTrackedToolUses === undefined
@@ -1393,6 +1395,76 @@ describe("Claude execution policy", () => {
     expect(claudeOwnRulesDecide("approval-gated", "AskUserQuestion")).toBe(false);
     expect(claudeOwnRulesDecide("auto-accept-edits", "ScheduleWakeup")).toBe(false);
     expect(claudeOwnRulesDecide("auto-accept-edits", "Bash")).toBe(true);
+  });
+
+  it("asks before a push retried outside the sandbox at Guarded and carries the person's git identity into sandboxed commits", async () => {
+    const f = harness("subscription", "current-session", {
+      gitIdentity: async () => ({ name: "Ada Lovelace", email: "ada@example.com" }),
+    });
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    expect(open.sandbox?.allowUnsandboxedCommands).toBe(true);
+    expect(open.authEnvironment).toMatchObject({
+      GIT_AUTHOR_NAME: "Ada Lovelace",
+      GIT_AUTHOR_EMAIL: "ada@example.com",
+      GIT_COMMITTER_NAME: "Ada Lovelace",
+      GIT_COMMITTER_EMAIL: "ada@example.com",
+    });
+    const signal = new AbortController().signal;
+    const observed: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          observed.push(event);
+        }),
+      ),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "push it", attachments: [], tools: [] }),
+    );
+    const push = { command: "git push origin feature/x", dangerouslyDisableSandbox: true };
+    // Whatever the person's own rules allow, Octant asks about the retry
+    // outside the sandbox itself.
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input: push,
+        toolUseId: "push",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+    const decision = open.canUseTool({ toolName: "Bash", input: push, toolUseId: "push", signal });
+    await vi.waitFor(() =>
+      expect(observed).toContainEqual(
+        expect.objectContaining({
+          kind: "approval-request",
+          description: "Bash outside the sandbox · git push origin feature/x",
+        }),
+      ),
+    );
+    await acquired.close();
+    await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+    await Effect.runPromise(Fiber.join(subscriber));
+
+    // Full access with its sandbox keeps every command inside it.
+    const sandboxed = harness();
+    const fullAccess = await acquire(sandboxed.driver);
+    await Effect.runPromise(
+      fullAccess.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "full-access",
+        fullAccessSandbox: true,
+      }),
+    );
+    expect(sandboxed.opens[0]?.sandbox?.allowUnsandboxedCommands).toBe(false);
+    expect(sandboxed.opens[0]?.authEnvironment.GIT_AUTHOR_NAME).toBeUndefined();
+    await fullAccess.close();
   });
 
   it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {

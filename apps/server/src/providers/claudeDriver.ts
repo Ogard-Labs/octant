@@ -1,6 +1,7 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { readClaudeInstructionFiles } from "./claudeInstructionFiles";
 import { providerApprovalCall } from "./providerApprovalCall";
+import { claudeGitIdentityEnvironment, type ClaudeGitIdentity } from "./claudeGitIdentity";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
@@ -733,6 +734,8 @@ export function claudeSandboxSettings(
     // At Guarded and Reviewed a command may leave the sandbox the way Claude
     // Code lets it on its own (`dangerouslyDisableSandbox` on `Bash`); the
     // gate asks about every such command (maintainer decision, 2026-11-14).
+    // A push or a `gh` call needs this: it reads `~/.ssh`, `~/.gitconfig`,
+    // and `~/.config/gh`, which the sandbox denies.
     // Plan's read-only rule and a Full access thread that kept its sandbox
     // let no command out, so the sandbox itself holds them, not only the hook.
     allowUnsandboxedCommands: claudeSandboxLetsCommandsOut(policy),
@@ -1048,6 +1051,11 @@ type ClaudeEnvironmentFactory = (
 
 export interface ClaudeDriverOptions {
   readonly instanceId: ProviderInstanceId;
+  /**
+   * The person's git identity for commits made inside the command sandbox,
+   * which cannot read their global gitconfig; read at each sandboxed launch.
+   */
+  readonly gitIdentity?: (checkoutRoot: string) => Promise<ClaudeGitIdentity>;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
   /** Claude-owned directory for this account. */
@@ -3375,7 +3383,11 @@ function makeConnection(
               ...(outsideProject ? { outsideProject: true as const } : {}),
               ...(asksUnsandboxed ? { unsandboxed: true as const } : {}),
             });
-            return claudeOwnRulesDecide(input.executionPolicy, request.toolName)
+            return claudeOwnRulesDecide(input.executionPolicy, request.toolName) &&
+              // A command leaving the sandbox runs with the person's whole
+              // access to their files and credentials, so Octant always asks
+              // about it itself, whatever their own rules allow.
+              !asksUnsandboxed
               ? { behavior: "own-rules" }
               : { behavior: "ask" };
           };
@@ -3505,9 +3517,17 @@ function makeConnection(
           }
           return answerWakeupCall(request.toolUseId, request.toolName, toolInput, wakeups);
         };
+        const gitIdentity =
+          sandbox === undefined || options.gitIdentity === undefined
+            ? {}
+            : await options.gitIdentity(projectRoot).catch((): ClaudeGitIdentity => ({}));
+        const launchEnvironment = {
+          ...environment.environment,
+          ...claudeGitIdentityEnvironment(gitIdentity),
+        };
         const artifactEnvironment = offersArtifacts
-          ? claudeArtifactLaunchEnvironment(environment.environment)
-          : environment.environment;
+          ? claudeArtifactLaunchEnvironment(launchEnvironment)
+          : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
         const keepsOwnMemory = providerOwnMemoryLaunches({

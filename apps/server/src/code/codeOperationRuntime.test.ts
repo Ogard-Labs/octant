@@ -3537,40 +3537,36 @@ describe("CodeOperationRuntime", () => {
       return { connection, review, fixture, frames, approvalCall };
     };
 
-    it.each([false, true])(
-      "refuses a native forge write before generic approval, with Shield absent %s",
-      async (withoutShield) => {
-        const { connection, review, fixture, frames } = await runWith(
-          "allow",
-          "gh -R other/repository pr merge 7 --squash",
-          withoutShield,
-        );
-        await vi.waitFor(() =>
-          expect(connection.answerApproval).toHaveBeenCalledWith({
-            sessionId,
-            requestId: "provider-approval-9",
-            approved: false,
-            scope: "once",
-          }),
-        );
-        expect(review).not.toHaveBeenCalled();
-        expect(await frames()).toContainEqual(
-          expect.objectContaining({
-            kind: "tool-activity",
-            state: "failed",
-            summary: expect.stringContaining("repository, branch, revision"),
-          }),
-        );
-        expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);
-        await fixture.runtime.close();
-        fixture.close();
-      },
-    );
+    it("asks the person about a push from the runtime's own shell below Full access instead of refusing it", async () => {
+      const { connection, review, fixture, frames } = await runWith(
+        undefined,
+        "git push origin feature/x",
+        true,
+      );
+      await vi.waitFor(async () =>
+        expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(true),
+      );
+      expect(review).not.toHaveBeenCalled();
+      expect(connection.answerApproval).not.toHaveBeenCalled();
+      await fixture.runtime.close();
+      fixture.close();
+    });
 
-    it("interrupts a provider that cannot take a native forge refusal without offering generic consent", async () => {
-      const { connection, fixture, frames } = await runWith("allow", "gh pr merge 7", false, true);
-      await vi.waitFor(() => expect(connection.interrupt).toHaveBeenCalled());
-      expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);
+    it("lets Shield decide a pull-request change from the runtime's own shell where it reviews the thread", async () => {
+      const { connection, review, fixture } = await runWith("deny", "gh pr merge 7 --squash");
+      await vi.waitFor(() =>
+        expect(connection.answerApproval).toHaveBeenCalledWith({
+          sessionId,
+          requestId: "provider-approval-9",
+          approved: false,
+          scope: "once",
+        }),
+      );
+      expect(review).toHaveBeenCalledWith(
+        expect.objectContaining({
+          call: expect.objectContaining({ command: "gh pr merge 7 --squash" }),
+        }),
+      );
       await fixture.runtime.close();
       fixture.close();
     });

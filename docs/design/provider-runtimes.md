@@ -717,7 +717,16 @@ used to become an Octant approval anyway. The command sandbox keeps
 `autoAllowBashIfSandboxed: false`, unlike Claude Code's default: running a
 sandboxed command unasked would end Guarded's approval for each command and
 Reviewed's review of it, which are built features; a person who wants a
-command to run unasked writes an allow rule for it.
+command to run unasked writes an allow rule for it. Below Full access the
+sandbox sets `allowUnsandboxedCommands: true`, so a command the sandbox
+stopped (a push that needs `~/.ssh`, a `gh` call that needs its config) may
+be retried outside it with `dangerouslyDisableSandbox`; the gate always
+answers that retry with Octant's own ask, never the person's rules, and its
+approval reads "Bash outside the sandbox". Full access with its sandbox keeps
+the retry off. Each sandboxed launch carries the person's global git
+`user.name` and `user.email` as `GIT_AUTHOR_*` and `GIT_COMMITTER_*`, for each
+field the checkout does not set itself, since the sandbox cannot read
+`~/.gitconfig` ([Architecture: Git and pull requests](../architecture.md#modes-chat-work-and-code)).
 
 A call's working directory follows the session, as it does in Claude Code:
 after `cd apps/web` the hook names that folder, and the gate accepts any
