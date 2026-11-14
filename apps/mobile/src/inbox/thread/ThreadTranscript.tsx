@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import {
   chatAttemptStatusLabel,
   mobileChatMessages,
@@ -9,7 +10,7 @@ import {
   type MobileCodeConversation,
   type MobileTurnTargets,
 } from "@octant/client-runtime";
-import type { ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
+import type { ChatAttachment, ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
 import { MOBILE_COPY } from "../../copy";
 import { mobileSpacing, mobileTypography } from "../../theme/tokens";
 import { useTheme } from "../../../design-system";
@@ -18,6 +19,7 @@ import { MessageBubble } from "../../ui/MessageBubble";
 import { RoutineReceiptCard } from "../../ui/RoutineReceiptCard";
 import type { MessageActionItem } from "../../ui/MessageActions";
 import { ThreadWorkShelf } from "../../ui/ThreadWorkShelf";
+import { placeAttachments } from "./attachmentPlacement";
 import type { useChatThread } from "./useChatThread";
 
 type ChatThread = ReturnType<typeof useChatThread>;
@@ -64,6 +66,26 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           maxWidth: 280,
         },
         metaBlock: { gap: mobileSpacing.xs, marginBottom: mobileSpacing.sm },
+        chipRow: {
+          flexDirection: "row",
+          flexWrap: "wrap",
+          gap: mobileSpacing.xs,
+        },
+        chipRowUser: { justifyContent: "flex-end", marginTop: -2 },
+        chip: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 5,
+          maxWidth: "84%",
+          minHeight: 26,
+          paddingHorizontal: 9,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.glassStroke,
+          backgroundColor: colors.glassFillThin,
+        },
+        messageWithAttachments: { gap: mobileSpacing.xs },
+        chipLabel: { flexShrink: 1, color: colors.textSecondary, fontSize: 12 },
         metaText: { color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
         warningText: { color: colors.danger, fontSize: 12, lineHeight: 16 },
       }),
@@ -73,6 +95,39 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
   const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
+  const attachmentsByMessage = useMemo(
+    () =>
+      view === undefined
+        ? new Map<string, ReadonlyArray<ChatAttachment>>()
+        : placeAttachments({
+            attachments: view.attachments,
+            turns: view.turns,
+            shownMessageIds: messages.map((entry) => String(entry.content.contentId)),
+          }),
+    [messages, view],
+  );
+  const attachmentChips = (attachments: ReadonlyArray<ChatAttachment>, user: boolean) => (
+    <View style={[styles.chipRow, user ? styles.chipRowUser : null]}>
+      {attachments.map((attachment) => (
+        <View
+          accessibilityLabel={`${MOBILE_COPY.attachmentLabel}: ${attachment.displayName}`}
+          key={String(attachment.id)}
+          style={styles.chip}
+          testID={`mobile-attachment-${String(attachment.id)}`}
+        >
+          <Ionicons
+            color={colors.textTertiary}
+            name={attachment.mediaType.startsWith("image/") ? "image-outline" : "document-outline"}
+            size={13}
+          />
+          <Text numberOfLines={1} style={styles.chipLabel}>
+            {attachment.displayName}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+  const looseAttachments = attachmentsByMessage.get("") ?? [];
 
   return (
     <>
@@ -218,13 +273,9 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 }
               : {})}
           />
-          {view.attachments.length > 0 || view.citations.length > 0 ? (
+          {looseAttachments.length > 0 || view.citations.length > 0 ? (
             <View style={styles.metaBlock} testID="mobile-thread-meta">
-              {view.attachments.map((attachment) => (
-                <Text key={String(attachment.id)} style={styles.metaText}>
-                  {MOBILE_COPY.attachmentLabel}: {attachment.displayName}
-                </Text>
-              ))}
+              {looseAttachments.length > 0 ? attachmentChips(looseAttachments, false) : null}
               {view.citations.map((citation) => (
                 <Text key={String(citation.citationId)} style={styles.metaText}>
                   {MOBILE_COPY.citationLabel}: {citation.sourceTitle}
@@ -255,29 +306,32 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 retryable !== undefined &&
                 chat.activeAttempt === undefined &&
                 props.allowProductMutations;
+              const sentWith = attachmentsByMessage.get(String(content.contentId)) ?? [];
               return (
-                <MessageBubble
-                  replyDetail={props.replyDetail}
-                  body={content.body}
-                  key={content.contentId}
-                  role={content.role}
-                  showActions={isLastAssistant}
-                  testID={`mobile-message-${content.contentId}`}
-                  turnActions={props.turnActionsFor(targets)}
-                  {...(content.parts === undefined ? {} : { parts: content.parts })}
-                  {...(showRetry
-                    ? {
-                        extraActions: [
-                          {
-                            id: "retry",
-                            label: `Retry ${chatAttemptStatusLabel(retryable.outcome).toLowerCase()}`,
-                            icon: "refresh-outline" as const,
-                            onPress: () => void chat.retry(),
-                          },
-                        ],
-                      }
-                    : {})}
-                />
+                <View key={content.contentId} style={styles.messageWithAttachments}>
+                  <MessageBubble
+                    replyDetail={props.replyDetail}
+                    body={content.body}
+                    role={content.role}
+                    showActions={isLastAssistant}
+                    testID={`mobile-message-${content.contentId}`}
+                    turnActions={props.turnActionsFor(targets)}
+                    {...(content.parts === undefined ? {} : { parts: content.parts })}
+                    {...(showRetry
+                      ? {
+                          extraActions: [
+                            {
+                              id: "retry",
+                              label: `Retry ${chatAttemptStatusLabel(retryable.outcome).toLowerCase()}`,
+                              icon: "refresh-outline" as const,
+                              onPress: () => void chat.retry(),
+                            },
+                          ],
+                        }
+                      : {})}
+                  />
+                  {sentWith.length > 0 ? attachmentChips(sentWith, true) : null}
+                </View>
               );
             })
           )}

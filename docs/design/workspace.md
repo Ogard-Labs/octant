@@ -2594,8 +2594,12 @@ Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
 
-On the phone, a thread's header button opens Environment, Review, Context &
-usage, and Agents as one sheet with a segmented control, read-only and in this
+On the phone, a thread's header button (Views and panes) is the one way to
+reach anything beside the conversation. Its sheet lists the full-screen views
+the host would fill (Browser today) under Views; choosing one replaces the
+transcript, and a Conversation chip under the header leads back, so no thread
+carries a tab row it rarely uses. Below them it opens Environment, Review,
+Context & usage, and Agents with a segmented control, read-only and in this
 section's wording at phone scale: the header card's name, branch, and folder
 name; Uncommitted changes with its counts, opening Review's changed files and
 their unified diffs, with the checkout's recent commits under them; Running

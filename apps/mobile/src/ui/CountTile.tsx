@@ -23,8 +23,11 @@ export interface CountTileProps {
  */
 export function CountTile(props: CountTileProps) {
   const { colors, scheme } = useTheme();
-  const solid = scheme === "light";
-  const ink = solid ? colors.primaryForeground : props.hue;
+  // A place with nothing in it steps back to a plain glass tile in the muted
+  // ink, so the tiles that do hold something are what the eye lands on.
+  const quiet = props.count === 0;
+  const solid = scheme === "light" && !quiet;
+  const ink = quiet ? colors.textTertiary : solid ? colors.primaryForeground : props.hue;
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -91,7 +94,12 @@ export function CountTile(props: CountTileProps) {
         <View
           style={[
             styles.face,
-            { backgroundColor: withAlpha(props.hue, 0.18), borderColor: withAlpha(props.hue, 0.3) },
+            quiet
+              ? { backgroundColor: colors.glassFillThin, borderColor: colors.glassStroke }
+              : {
+                  backgroundColor: withAlpha(props.hue, 0.18),
+                  borderColor: withAlpha(props.hue, 0.3),
+                },
           ]}
         >
           {content}

@@ -160,7 +160,8 @@ its workspace opens, when the mode changes, and when the window regains focus.
 Until an answer arrives, or if none can, they draw Low. On the phone the
 reasoning panel opens at High and shows its first line at Medium. A run of
 consecutive tool calls draws as one rail of 28pt rows, each with a round
-status mark; a settled run folds behind "N tool calls" at Low (naming any
+status mark (a finished call shows its check alone; Running and Failed keep
+their words); a settled run folds behind "N tool calls" at Low (naming any
 failed calls) and starts open at Medium and High, a finished call's detail
 opens at High, and an open run past five rows shows its latest five behind
 "+N earlier". A change of level remounts them.

@@ -46,7 +46,10 @@ export function NavBar(props: NavBarProps) {
           paddingRight: space.sm,
         },
         backLabel: { color: colors.accent, fontSize: 17, marginLeft: -2 },
-        center: { flex: 2.4, alignItems: "center" },
+        // Without a back label the sides hold one 44pt control each, so the
+        // title takes the rest: at 2.4 a thread title was cut at about 212pt
+        // with room to spare on both sides.
+        center: { flex: props.backLabel === undefined ? 5 : 2.4, alignItems: "center" },
         title: {
           color: colors.textPrimary,
           fontSize: typography.pageTitle.fontSize,
@@ -55,7 +58,7 @@ export function NavBar(props: NavBarProps) {
         },
         subtitle: { color: colors.textTertiary, fontSize: typography.meta.fontSize, marginTop: 1 },
       }),
-    [colors],
+    [colors, props.backLabel],
   );
 
   return (

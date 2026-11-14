@@ -14,6 +14,9 @@ import {
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
 import type { CodeThread } from "@octant/contracts";
+import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
+import { MOBILE_COPY } from "../copy";
+import type { MobileThreadSurfaceOption } from "../surfaces/threadSurfacePresentation";
 import { threadStats, threadStatsInputOf } from "@octant/domain";
 import { radii, space, typography, useTheme, withAlpha } from "../../design-system";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -38,7 +41,14 @@ export interface ThreadPanesSheetProps {
   readonly threadId: string;
   /** The Code thread once loaded; Environment and Review need its Project and checkout. */
   readonly codeThread: CodeThread | undefined;
+  /** Full-screen views besides the conversation the host would fill (Browser today). */
+  readonly views: ReadonlyArray<MobileThreadSurfaceOption>;
+  readonly onOpenView: (view: RemoteThreadSurfaceKind) => void;
 }
+
+const VIEW_ICONS: Readonly<Partial<Record<RemoteThreadSurfaceKind, "globe-outline">>> = {
+  browser: "globe-outline",
+};
 
 /**
  * The desktop thread's side panes at phone scale, read-only: one sheet, one
@@ -64,9 +74,26 @@ export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
       onClose={props.onClose}
       sheetStyle={styles.sheet}
       testID="mobile-thread-panes"
-      title={PANE_TITLES[active]}
+      title={props.views.length > 0 ? MOBILE_COPY.threadViewsAndPanes : PANE_TITLES[active]}
       visible={props.visible}
     >
+      {props.views.length === 0 ? null : (
+        <View style={styles.views}>
+          <ListSection title={MOBILE_COPY.threadViews}>
+            {props.views.map((view, index) => (
+              <ListRow
+                accessory="chevron"
+                icon={VIEW_ICONS[view.id] ?? "open-outline"}
+                key={view.id}
+                label={view.label}
+                last={index === props.views.length - 1}
+                onPress={() => props.onOpenView(view.id)}
+                testID={`mobile-thread-view-${view.id}`}
+              />
+            ))}
+          </ListSection>
+        </View>
+      )}
       <View style={styles.switcher}>
         <SegmentedControl
           onSelect={setPane}
@@ -116,6 +143,7 @@ const PANE_TITLES: Readonly<Record<MobileThreadPaneId, string>> = {
 
 const styles = StyleSheet.create({
   sheet: { maxHeight: "90%", minHeight: "60%" },
+  views: { paddingBottom: space.sm },
   switcher: { paddingHorizontal: space.md, paddingBottom: space.md },
   scroll: { flexGrow: 0 },
   content: { paddingBottom: space.lg },

@@ -168,12 +168,16 @@ function CallRow(props: {
         <Text numberOfLines={1} style={styles.name}>
           {call.name}
         </Text>
-        <Text style={[styles.state, { color: tone }]}>{statusLabel(call.status)}</Text>
+        {/* The check already says done; words are kept for the states that need attention. */}
+        {call.status === "done" ? null : (
+          <Text style={[styles.state, { color: tone }]}>{statusLabel(call.status)}</Text>
+        )}
         {collapsible ? (
           <Ionicons
             color={colors.textTertiary}
             name={open ? "chevron-down" : "chevron-forward"}
             size={14}
+            style={call.status === "done" ? { marginLeft: "auto" } : undefined}
           />
         ) : null}
       </Pressable>

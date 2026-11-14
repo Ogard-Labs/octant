@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import {
   chatAttemptStatusLabel,
   mobileAttachmentOffer,
@@ -14,7 +23,6 @@ import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
 import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
-import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
@@ -309,6 +317,27 @@ export function ThreadScreen(props: ThreadScreenProps) {
           color: colors.textSecondary,
           fontSize: 12,
         },
+        viewBar: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: mobileSpacing.sm,
+          paddingHorizontal: mobileSpacing.md,
+          paddingBottom: mobileSpacing.xs,
+        },
+        viewReturn: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 2,
+          minHeight: 30,
+          paddingLeft: 6,
+          paddingRight: 10,
+          borderRadius: 15,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.glassStroke,
+          backgroundColor: colors.glassFillThin,
+        },
+        viewReturnLabel: { color: colors.accent, fontSize: 13, fontWeight: "500" },
+        viewName: { color: colors.textSecondary, fontSize: 13, fontWeight: "500" },
       }),
     [colors],
   );
@@ -344,9 +373,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
         trailing={
           offlineDemo || transport === undefined ? undefined : (
             <IconButton
-              accessibilityLabel="Thread panes"
+              accessibilityLabel="Views and panes"
               iconSize={19}
-              name="albums-outline"
+              name="grid-outline"
               onPress={() => setPanesOpen(true)}
               size={34}
               testID="mobile-thread-panes-open"
@@ -356,8 +385,25 @@ export function ThreadScreen(props: ThreadScreenProps) {
         }
       />
 
-      {offlineDemo ? null : (
-        <ThreadSurfaceSwitcher active={activeSurface} onSelect={setSurface} surfaces={surfaces} />
+      {/* A view replaces the transcript, so while one is open a single chip
+          leads back; the views themselves are chosen in the views and panes
+          sheet rather than from a tab row every thread would pay for. */}
+      {activeSurface === "chat" ? null : (
+        <View style={styles.viewBar} testID="mobile-thread-view-bar">
+          <Pressable
+            accessibilityLabel="Back to the conversation"
+            accessibilityRole="button"
+            onPress={() => setSurface("chat")}
+            style={({ pressed }) => [styles.viewReturn, pressed ? { opacity: 0.6 } : null]}
+            testID="mobile-thread-view-return"
+          >
+            <Ionicons color={colors.accent} name="chevron-back" size={15} />
+            <Text style={styles.viewReturnLabel}>{MOBILE_COPY.threadViewReturn}</Text>
+          </Pressable>
+          <Text numberOfLines={1} style={styles.viewName}>
+            {surfaces.find((entry) => entry.id === activeSurface)?.label ?? ""}
+          </Text>
+        </View>
       )}
 
       <ScrollView
@@ -531,6 +577,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
           codeThread={selected.mode === "code" ? code.thread : undefined}
           mode={selected.mode}
           onClose={() => setPanesOpen(false)}
+          onOpenView={(view) => {
+            setSurface(view);
+            setPanesOpen(false);
+          }}
+          views={surfaces.filter((entry) => entry.id !== "chat")}
           threadId={selected.threadId}
           transport={transport}
           visible={panesOpen}
