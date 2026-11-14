@@ -83,6 +83,7 @@
     "./canvas-public-share": "./src/canvasPublicShare.ts",
     "./guardrail-lowering": "./src/guardrailLowering.ts",
     "./provider-tooling": "./src/providerTooling.ts",
+    "./sandbox-policy": "./src/sandboxPolicy.ts",
     "./protected-files": "./src/protectedFiles.ts",
     "./archived-worktrees": "./src/archivedWorktrees.ts",
     "./disk-cleanup": "./src/diskCleanup.ts",

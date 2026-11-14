@@ -355,6 +355,7 @@ jobs:
         run: >-
           bun run --cwd apps/server test --
           src/process/seatbeltProfile.test.ts
+          src/process/sandboxLaunchPolicyProcess.test.ts
           src/process/sessionEscapeProcess.test.ts
           src/process/secretGuard.test.ts
           src/network/providerRuntimeNetwork.hostile.test.ts
@@ -400,6 +401,12 @@ jobs:
           bun run --cwd apps/server test --
           src/process/linuxConfinement.test.ts
           -t "a provider runtime under Bubblewrap"
+      - name: Sandbox policy native launch probes
+        env:
+          OCTANT_REQUIRE_LINUX_ISOLATION: "1"
+        run: >-
+          bun run --cwd apps/server test --
+          src/process/sandboxLaunchPolicyProcess.test.ts
       # The real-page Browser suite drives the runner's Chrome through
       # Playwright; its launch hook timed out on ubuntu-24.04 (run
       # 42205818274). It is not part of Linux client trust, and the macOS job

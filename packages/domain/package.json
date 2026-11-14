@@ -19,6 +19,7 @@
     "./chat-provider-fallback-policy": "./src/chatProviderFallbackPolicy.ts",
     "./chat-message-parts": "./src/chatMessageParts.ts",
     "./code-policy": "./src/codePolicy.ts",
+    "./sandbox-policy": "./src/sandboxPolicy.ts",
     "./guardrail-policy": "./src/guardrailPolicy.ts",
     "./person-memory-policy": "./src/personMemoryPolicy.ts",
     "./secret-guard-policy": "./src/secretGuardPolicy.ts",

@@ -13239,6 +13239,46 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a
       maintainer check.
+  - **Configurable sandbox policy (foundation; enrollment not built).**
+    Autonomy and the selected sandbox boundary are separate: a permitted
+    action keeps its existing approval behavior, including no prompts at
+    sandboxed Full access. A future trusted host planner resolves a complete
+    policy from session, Project, Settings, then legacy behavior, in that
+    order. Repository content and agent tools are not policy authorities.
+    Existing settings and journals are unchanged; no policy is selected by
+    default.
+
+    Built: a strict versioned `SandboxPolicy` contract, resolution provenance,
+    capability admission and an optional shared-confinement launch compiler.
+    Unknown fields, unsupported versions/rules, unavailable folders and
+    overlapping read-only/writable roots refuse before a command starts.
+    The process compiler can add explicit read-only and read/write directory
+    mounts and select existing egress, deny, or unrestricted network. It
+    rejects caller-authored profile rules and broad-read compatibility
+    launches rather than silently weakening a selection. Folder grants do
+    not become provider sign-in exemptions. Built-in protected-file rules
+    remain in force. Protected project paths, isolated credentials and
+    blocked host services are unsupported selections and refuse on both
+    POSIX backends; Windows refuses every selection.
+
+    Each selected launch returns a policy digest and a process-authority
+    reuse key covering revision, host/Project/checkout/session/provider,
+    root identities, effective launch rules, backend identity and OS version.
+    These receipts are preparatory: provider caches do not yet compare them.
+    No running process or turn is updated by the compiler.
+
+    Not built: authoritative persistence, binding and expiry of grants,
+    admission across every provider and direct-tool route, cached-process
+    receipt checks, descendant revocation, restrictions settings, effective
+    summaries, grouped denials and remembered exceptions. Do not enroll
+    sessions or advertise these protections before that integration exists.
+    Native launch probes cover scoped writes, read-only mounts, outside-host
+    canaries, child processes and direct network denial; they do not prove
+    protection against hard-link aliases, concurrent host path replacement,
+    or complete credential and host-service isolation. macOS and packaged
+    provider evidence must be obtained on their actual runtimes. Existing
+    Safe networks, Auto behavior and Full access defaults remain unchanged.
+
   - **Full access is full access for secret files too** (maintainer
     decision, 2026-10-31: "softer guard — full access is full access").
     No runtime or command runs under an OS wall at this level, and a shell

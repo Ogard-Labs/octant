@@ -235,6 +235,12 @@ export function buildBubblewrapLaunch(
   input: ProcessConfinementPrepareInput,
   options: BuildLinuxConfinementLaunchInput = {},
 ): ConfinedProcessLaunch {
+  if (input.sandboxPolicy !== undefined) {
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "A selected sandbox policy must be admitted through the shared confinement port.",
+    );
+  }
   const bwrapPath = options.bwrapPath ?? DEFAULT_BWRAP_PATH;
   requireLinuxConfinement(bwrapPath);
   const admission = pinnedRecipientAdmission(input);
