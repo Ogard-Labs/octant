@@ -63,7 +63,8 @@ export type CodeDiffProjection =
   | { readonly state: "unavailable"; readonly message: string };
 
 export interface CodeDiffPaneProps {
-  readonly onSelectReviewLine?: (selection: CodeReviewLineSelection) => void;
+  /** `text` is the selected line as shown, for a line note's quoted excerpt. */
+  readonly onSelectReviewLine?: (selection: CodeReviewLineSelection, text: string) => void;
   readonly requestedCodeReviewFile?: CodeReviewFileRequest;
   readonly client: Pick<
     CodeClient,
@@ -517,18 +518,25 @@ function AvailableDiff(
             {...(props.onSelectReviewLine === undefined
               ? {}
               : {
-                  onSelectLine: (line: {
+                  onSelectLine: ({
+                    text,
+                    ...line
+                  }: {
                     path: string;
                     side: "original" | "modified";
                     line: number;
+                    text: string;
                   }) =>
-                    props.onSelectReviewLine?.({
-                      ...line,
-                      reviewOperationId: operationId,
-                      ...(props.snapshot.captureCursor === undefined
-                        ? {}
-                        : { captureCursor: props.snapshot.captureCursor }),
-                    }),
+                    props.onSelectReviewLine?.(
+                      {
+                        ...line,
+                        reviewOperationId: operationId,
+                        ...(props.snapshot.captureCursor === undefined
+                          ? {}
+                          : { captureCursor: props.snapshot.captureCursor }),
+                      },
+                      text,
+                    ),
                 })}
             {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
           />
@@ -650,15 +658,18 @@ function AvailableDiff(
                       onSelectLine: (line: { side: "original" | "modified"; line: number }) => {
                         const source = diffModelRowSources(selected, line.side)[line.line - 1];
                         if (source !== undefined)
-                          props.onSelectReviewLine?.({
-                            reviewOperationId: operationId,
-                            ...(props.snapshot.captureCursor === undefined
-                              ? {}
-                              : { captureCursor: props.snapshot.captureCursor }),
-                            path: selected.path,
-                            side: line.side,
-                            line: source.line,
-                          });
+                          props.onSelectReviewLine?.(
+                            {
+                              reviewOperationId: operationId,
+                              ...(props.snapshot.captureCursor === undefined
+                                ? {}
+                                : { captureCursor: props.snapshot.captureCursor }),
+                              path: selected.path,
+                              side: line.side,
+                              line: source.line,
+                            },
+                            selected[line.side].split("\n")[line.line - 1] ?? "",
+                          );
                       },
                     })}
               />

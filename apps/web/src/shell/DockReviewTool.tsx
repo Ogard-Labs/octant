@@ -1,6 +1,11 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { CodeLocalReview, type CodeReviewLineSelection } from "../code/CodeLocalReview";
 import { CodeTurnReviewTool } from "../code/CodeTurnReviewTool";
+import {
+  CodeLineNotes,
+  type CodeLineNoteAnchor,
+  type CodeLineNotesSendResult,
+} from "../code/CodeLineNotes";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -38,6 +43,10 @@ export interface DockReviewToolProps {
   readonly loadRuntime?: () => Promise<MonacoDiffRuntime>;
   /** Injected in tests; otherwise the checkout watch is built from the host. */
   readonly watchClient?: Pick<CodeFileListingClient, "watch">;
+  /** Sends a turn's line notes as one ordinary follow-up message in this thread. */
+  readonly onSendLineNotes?: (message: string) => Promise<CodeLineNotesSendResult>;
+  /** Why line notes cannot be sent right now, such as a turn still running. */
+  readonly lineNotesSendUnavailable?: string;
 }
 
 /**
@@ -82,6 +91,7 @@ export function DockReviewTool(props: DockReviewToolProps) {
         {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
         {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
         {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
+        {...lineNoteProps(props)}
       />
     );
   return (
@@ -106,8 +116,20 @@ export function DockReviewTool(props: DockReviewToolProps) {
       {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
       {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
       {...(props.watchClient === undefined ? {} : { watchClient: props.watchClient })}
+      {...lineNoteProps(props)}
     />
   );
+}
+
+function lineNoteProps(
+  props: Pick<DockReviewToolProps, "onSendLineNotes" | "lineNotesSendUnavailable">,
+): Pick<DockReviewToolProps, "onSendLineNotes" | "lineNotesSendUnavailable"> {
+  return {
+    ...(props.onSendLineNotes === undefined ? {} : { onSendLineNotes: props.onSendLineNotes }),
+    ...(props.lineNotesSendUnavailable === undefined
+      ? {}
+      : { lineNotesSendUnavailable: props.lineNotesSendUnavailable }),
+  };
 }
 
 function BoundReview(props: {
@@ -124,12 +146,15 @@ function BoundReview(props: {
   readonly createUuid?: () => string;
   readonly loadRuntime?: () => Promise<MonacoDiffRuntime>;
   readonly watchClient?: Pick<CodeFileListingClient, "watch">;
+  readonly onSendLineNotes?: (message: string) => Promise<CodeLineNotesSendResult>;
+  readonly lineNotesSendUnavailable?: string;
 }) {
   const nextUuid = useCallback(
     () => props.createUuid?.() ?? globalThis.crypto.randomUUID(),
     [props.createUuid],
   );
   const [line, setLine] = useState<CodeReviewLineSelection>();
+  const [noteAnchor, setNoteAnchor] = useState<CodeLineNoteAnchor>();
   const [projection, setProjection] = useState<CodeDiffProjection>({ state: "loading" });
   const [stale, setStale] = useState(false);
   const [ignoreWhitespace, setIgnoreWhitespace] = useCodeDiffIgnoreWhitespace();
@@ -186,7 +211,17 @@ function BoundReview(props: {
         </p>
       )}
       <CodeDiffPane
-        onSelectReviewLine={setLine}
+        onSelectReviewLine={(selection, text) => {
+          setLine(selection);
+          // Line notes answer a turn, so they appear only in Review opened from one.
+          if (props.requestedCodeReviewFile !== undefined)
+            setNoteAnchor({
+              path: selection.path,
+              side: selection.side,
+              line: selection.line,
+              text,
+            });
+        }}
         {...(props.requestedCodeReviewFile === undefined
           ? {}
           : { requestedCodeReviewFile: props.requestedCodeReviewFile })}
@@ -214,6 +249,15 @@ function BoundReview(props: {
             }
           : {})}
       />
+      {props.requestedCodeReviewFile === undefined ? null : (
+        <CodeLineNotes
+          {...(noteAnchor === undefined ? {} : { anchor: noteAnchor })}
+          {...(props.onSendLineNotes === undefined ? {} : { onSend: props.onSendLineNotes })}
+          {...(props.lineNotesSendUnavailable === undefined
+            ? {}
+            : { sendUnavailable: props.lineNotesSendUnavailable })}
+        />
+      )}
       <CodeLocalReview
         client={props.client}
         scope={scope}

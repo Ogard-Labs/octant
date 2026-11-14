@@ -14,6 +14,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { CodeDiffPane } from "./CodeDiffPane";
+import {
+  CodeLineNotes,
+  type CodeLineNoteAnchor,
+  type CodeLineNotesSendResult,
+} from "./CodeLineNotes";
 import { CodeLocalReview, readLocalReview, type CodeReviewLineSelection } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
@@ -30,6 +35,8 @@ interface Props {
   readonly createUuid?: () => string;
   readonly loadRuntime?: () => Promise<MonacoDiffRuntime>;
   readonly onOpenFile?: (path: CodeRelativePath) => void;
+  readonly onSendLineNotes?: (message: string) => Promise<CodeLineNotesSendResult>;
+  readonly lineNotesSendUnavailable?: string;
 }
 
 export function CodeTurnReviewTool(props: Props) {
@@ -59,6 +66,7 @@ function BoundTurnReview(props: Props) {
   const capturePending = useRef(false);
   const [updates, setUpdates] = useState(0);
   const [line, setLine] = useState<CodeReviewLineSelection>();
+  const [noteAnchor, setNoteAnchor] = useState<CodeLineNoteAnchor>();
   const [ignoreWhitespace, setIgnoreWhitespace] = useCodeDiffIgnoreWhitespace();
   const scope = { threadId: props.threadId, checkoutId: props.request.checkoutId };
   const operationId = props.request.receiptOperationId;
@@ -319,7 +327,17 @@ function BoundTurnReview(props: Props) {
             text: display.text,
           }}
           requestedCodeReviewFile={props.request}
-          {...(display.capture.diff.truncated === true ? {} : { onSelectReviewLine: setLine })}
+          onSelectReviewLine={(selection, text) => {
+            // A partial capture cannot anchor a finding, but a line note is
+            // the person's own message about a line they can see.
+            if (display.capture.diff.truncated !== true) setLine(selection);
+            setNoteAnchor({
+              path: selection.path,
+              side: selection.side,
+              line: selection.line,
+              text,
+            });
+          }}
           executionPolicy={props.view.thread.executionPolicy}
           ignoreWhitespace={{ value: ignoreWhitespace, onChange: setIgnoreWhitespace }}
           {...(props.defaultDiffLayout === undefined
@@ -339,6 +357,13 @@ function BoundTurnReview(props: Props) {
               })}
         />
       )}
+      <CodeLineNotes
+        {...(noteAnchor === undefined ? {} : { anchor: noteAnchor })}
+        {...(props.onSendLineNotes === undefined ? {} : { onSend: props.onSendLineNotes })}
+        {...(props.lineNotesSendUnavailable === undefined
+          ? {}
+          : { sendUnavailable: props.lineNotesSendUnavailable })}
+      />
       <CodeLocalReview
         client={props.client}
         scope={scope}
