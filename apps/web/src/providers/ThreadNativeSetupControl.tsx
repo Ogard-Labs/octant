@@ -119,7 +119,7 @@ export function ThreadNativeSetupControl(props: {
         <ChevronDown aria-hidden="true" size={12} />
       </OctantMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner side="top">
+        <OctantMenuPositioner align="start" side="top" sideOffset={8}>
           <OctantMenuPopup>
             <OctantMenuRadioGroup
               value={choice}

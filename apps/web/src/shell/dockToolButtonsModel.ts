@@ -120,6 +120,8 @@ export interface DockToolButtonsInput {
     readonly id: RightUtilityDockSurfaceId;
     readonly label: string;
   }>;
+  /** Listed tools that cannot be pressed now, by tool, with the reason a tooltip gives. */
+  readonly unavailable?: Readonly<Partial<Record<RightUtilityDockSurfaceId, string>>>;
   /** Tools a draft task will have once its thread exists. */
   readonly awaitingThread?: ReadonlyArray<{
     readonly id: RightUtilityDockSurfaceId;
@@ -345,6 +347,19 @@ export function buildDockToolButtons(input: DockToolButtonsInput): DockToolButto
         tabIds: [],
         menu: [],
         disabledReason: DOCK_TOOLS_AWAIT_TASK_START,
+        press: { kind: "refused" },
+      };
+    }
+    const unavailable = input.unavailable?.[tool.id];
+    if (unavailable !== undefined) {
+      return {
+        id: tool.id,
+        label: tool.label,
+        pressed: false,
+        open: false,
+        tabIds: [],
+        menu: [],
+        disabledReason: unavailable,
         press: { kind: "refused" },
       };
     }

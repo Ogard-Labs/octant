@@ -203,6 +203,7 @@ describe("RightUtilityDock", () => {
                 onHideTile: vi.fn(),
                 onMinimise: vi.fn(),
                 onMove: vi.fn(),
+                onPlace: vi.fn(),
                 onResizeColumn: vi.fn(),
                 onResizeColumns: vi.fn(),
                 onShowAlone: vi.fn(),

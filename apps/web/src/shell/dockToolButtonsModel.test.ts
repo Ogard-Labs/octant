@@ -48,6 +48,24 @@ describe("the title band's tool buttons", () => {
     expect(model.more.map((button) => button.id)).toEqual(["plan", "tests"]);
   });
 
+  it("lists a tool that has no use here as a disabled button with its reason", () => {
+    const model = buildDockToolButtons(
+      input({
+        surfaces: [tool("environment"), tool("ios-simulator")],
+        unavailable: { "ios-simulator": "This Project has no iOS app" },
+      }),
+    );
+    const simulator = byId(model, "ios-simulator");
+    expect(simulator?.disabledReason).toBe("This Project has no iOS app");
+    expect(simulator?.press).toEqual({ kind: "refused" });
+    expect(byId(model, "environment")?.disabledReason).toBeUndefined();
+    const enabled = buildDockToolButtons(
+      input({ surfaces: [tool("environment"), tool("ios-simulator")] }),
+    );
+    expect(byId(enabled, "ios-simulator")?.disabledReason).toBeUndefined();
+    expect(byId(enabled, "ios-simulator")?.press).not.toEqual({ kind: "refused" });
+  });
+
   it("leaves out a tool the thread cannot use", () => {
     const model = buildDockToolButtons(
       input({ surfaces: [tool("environment"), tool("files"), tool("side-chat")] }),

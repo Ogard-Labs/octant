@@ -232,6 +232,7 @@ describe("a device's state kept visible in a bar", () => {
         onFocusTile={() => {}}
         onHideTile={() => {}}
         onMoveTile={() => {}}
+        onPlaceTile={() => {}}
         onResizeColumn={() => {}}
         onResizeColumns={() => {}}
         onShowTileAlone={() => {}}

@@ -4423,7 +4423,11 @@ describe("App", () => {
           name: "Start a fix for web tests on octant#12",
         }),
       );
+      // The handed branch is the draft's base branch, named in the Where
+      // chip's panel.
+      await user.click(await screen.findByRole("button", { name: /^Where this thread works:/ }));
       expect(await screen.findByText("feature/handed-by-start-a-fix")).toBeVisible();
+      await user.keyboard("{Escape}");
       await user.type(
         await screen.findByRole("textbox", { name: "First message" }),
         " Left over from an earlier task",

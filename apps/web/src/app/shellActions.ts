@@ -45,7 +45,7 @@ import type { RightUtilityDockSurfaceId } from "../shell/rightUtilityDockModel";
 import type { ThreadUtilityDockKey } from "../shell/rightUtilityDockSelection";
 import type { useShellController } from "../shell/useShellController";
 import type { useThreadUtilityPresentation } from "../shell/useThreadUtilityPresentation";
-import type { DockTileMove } from "../shell/rightUtilityDockSelection";
+import type { DockTileEdge, DockTileMove } from "../shell/rightUtilityDockSelection";
 import type { VisibleMode } from "../shell/workKind";
 import type { WorkspaceViewProps } from "../shell/WorkspaceView";
 import type { useZenController } from "../zen/useZenController";
@@ -241,6 +241,7 @@ export type ShellActions = {
   /** Takes a minimised tool's card away; the tool stays open, its button in the row. */
   readonly hideDockCard: (tabId: string) => void;
   readonly moveDockTile: (tabId: string, direction: DockTileMove) => void;
+  readonly placeDockTile: (tabId: string, targetTabId: string, edge: DockTileEdge) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly openDockTabBeside: (surface: RightUtilityDockSurfaceId) => void;
   readonly resizeDockTileColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;

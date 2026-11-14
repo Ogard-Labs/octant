@@ -242,7 +242,11 @@ function MoreTools(props: {
                           : tool.open
                             ? { "aria-description": "Open" }
                             : {}
-                        : { "aria-description": tool.disabledReason, disabled: true })}
+                        : {
+                            "aria-description": tool.disabledReason,
+                            disabled: true,
+                            title: tool.disabledReason,
+                          })}
                       checked={tool.pressed}
                       className="workspace-disclosure__action window-no-drag"
                       // A checkbox item keeps its menu open by default; this one

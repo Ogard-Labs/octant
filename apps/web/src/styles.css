@@ -4893,14 +4893,14 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  /* Sources, results, and reasoning share one compact column. */
+  /* Providers, results with search, and reasoning share one column. */
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(320px, calc(100vw - 24px));
-  /* Short results fit their content; long catalogs scroll inside the same bound. */
-  height: auto;
-  /* At enlarged text sizes neither side of the composer fits the full box.
-     Use the positioner's available space so reasoning stays inside the window. */
-  max-height: min(360px, 70vh, var(--available-height, 360px), calc(100dvh - 24px));
+  width: min(360px, calc(100vw - 24px));
+  /* One frame for every tab: the list scrolls inside it, and a short or empty
+     list leaves it as it is, so choosing a provider never moves the popup or
+     its trigger edge. Only a window too short for 440px shortens it, once,
+     at open. */
+  height: min(440px, calc(100dvh - 24px), var(--available-height, 440px));
   padding: 0;
   overflow: hidden;
   /* Size and place only. The popover recipe paints the fill, the edge, and the
@@ -5539,7 +5539,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 @media (max-width: 640px) {
   .composer-model-picker__menu {
-    width: min(360px, calc(100vw - 32px));
+    width: min(360px, calc(100vw - 24px));
   }
 }
 .parallel-runs {

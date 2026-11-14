@@ -421,6 +421,7 @@ import {
   offeredBrowserStaysMinimised,
   restoreUtilityTool,
   moveUtilityTile,
+  placeUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -437,6 +438,7 @@ import {
   threadUtilityDockState,
   threadUtilityDockKey,
   withoutTileLayout,
+  type DockTileEdge,
   type DockTileMove,
   type ThreadUtilityDockKey,
   type ThreadUtilityDockState,
@@ -448,6 +450,7 @@ import { RemotePairingView } from "./shell/deferredSurfaces";
 import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
 import {
   isAuthorizedCanvasDocument,
+  dockToolUnavailableReason,
   isDockToolLaunchable,
   isDockToolStillOpenable,
 } from "./shell/dockToolAvailability";
@@ -4372,6 +4375,9 @@ function LaunchedShell(
   function moveDockTile(tabId: string, direction: DockTileMove) {
     changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
   }
+  function placeDockTile(tabId: string, targetTabId: string, edge: DockTileEdge) {
+    changeDockTiles((state) => placeUtilityTile(state, tabId, targetTabId, edge));
+  }
   function resizeDockTileColumns(shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumns(state, shares));
   }
@@ -5418,6 +5424,7 @@ function LaunchedShell(
       restoreDockTool,
       minimiseDockTool,
       moveDockTile,
+      placeDockTile,
       openDockTabBeside,
       resizeDockTileColumn,
       resizeDockTileColumns,
@@ -5632,6 +5639,16 @@ function LaunchedShell(
     dockAvailable
       ? buildDockToolButtons({
           surfaces: dockToolSurfaces,
+          unavailable: Object.fromEntries(
+            dockToolSurfaces.flatMap((surface) => {
+              const reason = dockToolUnavailableReason(
+                surface.id,
+                { hasAppleSimulator: dockHasAppleSimulator },
+                activeProjectId !== undefined,
+              );
+              return reason === undefined ? [] : [[surface.id, reason]];
+            }),
+          ),
           ...(dockToolsAwaitingThread === undefined
             ? {}
             : {
@@ -7644,7 +7661,14 @@ function LaunchedShell(
         label: section.label,
         onOpen: () => void controller.openSettings({ section: section.id }),
       })),
-    dockTools: dockToolSurfaces,
+    dockTools: dockToolSurfaces.filter(
+      (surface) =>
+        dockToolUnavailableReason(
+          surface.id,
+          { hasAppleSimulator: dockHasAppleSimulator },
+          true,
+        ) === undefined,
+    ),
     onOpenDockTool: (tool) => {
       const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === tool.id);
       if (surface !== undefined) openDockTab(surface.id);

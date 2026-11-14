@@ -1364,6 +1364,45 @@
   inset: 0;
 }
 
+/* Keeps the pointer on the dock while a divider is held. It is not in the
+   renderer's overlay selector: the native page stays in the window and follows
+   the divider, held clear of the pointer by the page's own bounds. */
+.dock-tiles__resize-shield {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+}
+
+/* One zone per tile while a tile is dragged by its bar; the indicator marks
+   the half of the tile the drop would take. */
+.dock-tiles__place-zone {
+  position: absolute;
+}
+
+.workspace-drop-overlay.dock-tiles__place {
+  inset: 0;
+}
+
+.workspace-drop-overlay.dock-tiles__place[data-drop-edge="left"] {
+  right: 50%;
+}
+
+.workspace-drop-overlay.dock-tiles__place[data-drop-edge="right"] {
+  left: 50%;
+}
+
+.workspace-drop-overlay.dock-tiles__place[data-drop-edge="top"] {
+  bottom: 50%;
+}
+
+.workspace-drop-overlay.dock-tiles__place[data-drop-edge="bottom"] {
+  top: 50%;
+}
+
+.dock-tile__lead[draggable="true"] {
+  cursor: grab;
+}
+
 /* A tab dropped on the right third or the lower third becomes a tile there. */
 .workspace-drop-overlay.dock-tiles__drop[data-drop-edge="right"] {
   left: 66.667%;
