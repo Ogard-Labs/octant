@@ -787,6 +787,10 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const contextProject = props.projects.find(
     (project) => String(project.id) === String(contextProjectId),
   );
+  const projectNamesById = useMemo(
+    () => new Map(props.projects.map((project) => [String(project.id), project.name])),
+    [props.projects],
+  );
   // Test doubles hand the view a controller with no navigation at all; the
   // header then simply shows no facts rather than refusing to render.
   const codeNavigation = props.codeController.navigation ?? [];
@@ -857,6 +861,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                 ? {}
                 : { onCloseContentTab: props.onCloseContentTab })}
               {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+              projectNamesById={projectNamesById}
               {...(props.environmentNames === undefined
                 ? {}
                 : { environmentNames: props.environmentNames })}
