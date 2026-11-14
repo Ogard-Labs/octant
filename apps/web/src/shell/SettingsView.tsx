@@ -62,6 +62,7 @@ import {
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
 import { useFirstPartyPluginsEffective } from "./firstPartyPluginsEffective";
+import { SettingsOutlineRow, SETTINGS_OUTLINE_PAGES } from "./SettingsOutlineRow";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
 import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
@@ -173,7 +174,6 @@ import {
   SettingsPageScope,
   SettingsSection,
   SettingsState,
-  revealSettingsAncestors,
   type SettingsOutlineEntry,
 } from "../settings/primitives";
 import { SidebarRowDetailsSettings } from "../settings/SidebarRowDetailsSettings";
@@ -840,36 +840,9 @@ export function SettingsView(props: SettingsViewProps) {
                 ) : null}
               </header>
               {/* Links, not headings: the page already has its h1 and one h2 per
-                  section, and this row only moves the reader between them. A
-                  page of three sections or fewer fits in a glance, so an index
-                  there is only more chrome above the first control. */}
-              {!hasQuery && outline.length >= 4 ? (
-                <nav aria-label="On this page" className="settings-view__outline">
-                  <ul>
-                    {outline.map((entry) => (
-                      <li key={entry.id}>
-                        <a
-                          className="settings-view__outline-link window-no-drag"
-                          href={`#${entry.id}`}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            // A section inside a closed disclosure opens first,
-                            // or the link would scroll to nothing.
-                            // A collapsed section opens on the next frame.
-                            const scroll = () => entry.element.scrollIntoView?.({ block: "start" });
-                            if (revealSettingsAncestors(entry.element)) {
-                              requestAnimationFrame(scroll);
-                            } else {
-                              scroll();
-                            }
-                          }}
-                        >
-                          {entry.title}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </nav>
+                  section, and this row only moves the reader between them. */}
+              {!hasQuery && SETTINGS_OUTLINE_PAGES.has(route.activeSection) ? (
+                <SettingsOutlineRow entries={outline} scrollRoot={contentRef} />
               ) : null}
             </div>
             {hasQuery ? (

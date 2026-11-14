@@ -1072,7 +1072,9 @@ describe("the public-block visual language", () => {
       settings.match(
         /\.settings-view\s+\.settings-card-section\.settings-card-section--open\s*>\s*h2,[\s\S]*?\.settings-section-head\s*>\s*h2\s*\{[^}]+\}/,
       )?.[0] ?? "";
-    expect(openSectionHeading).toMatch(/color:\s*var\(--octant-text-secondary\)/);
+    // A Settings section heading is 13px semibold in the primary ink, so it
+    // never reads as the description under it.
+    expect(openSectionHeading).toMatch(/color:\s*var\(--octant-text-primary\)/);
     expect(openSectionHeading).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
     const openSectionDisclosure =
       settings.match(
@@ -1662,6 +1664,7 @@ describe("the public-block visual language", () => {
         ".dock-browser-pages",
         ".phone-scroll",
         ".setnav",
+        ".settings-view__outline ul",
         ".sidebar-rail__scroll",
         ".workspace-content-tabs",
       ];
