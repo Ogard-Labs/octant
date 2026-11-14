@@ -2311,9 +2311,16 @@ html[data-octant-density="compact"]
      takes. It is a tenth of the ink, not the theme's border: on a near-black
      preset the border is a shade off the page and the panes ran together,
      and under Window glass it is lost on the tint. A share of the ink shows
-     on any fill, in dark, in light and on glass. */
+     on any fill, in dark, in light and on glass. It is mixed into the pane's
+     opaque colour instead of left translucent: over the sidebar's material,
+     the stage's fill and the ground a translucent line read three different
+     strengths, and an edge drawn twice read as double. */
   .shell.shell-frame {
-    --octant-pane-line: var(--oct-hairline);
+    --octant-pane-line: color-mix(
+      in oklab,
+      var(--octant-text-primary) calc(10% * var(--oct-contrast-scale, 1)),
+      var(--octant-panel-opaque)
+    );
     isolation: isolate;
   }
 
@@ -2581,7 +2588,6 @@ html[data-octant-density="compact"]
     grid-column: 1;
     grid-row: 1;
     margin-top: var(--oct-title-rail-h);
-    border-top: 1px solid var(--octant-pane-line);
     border-left: 1px solid var(--octant-pane-line);
     content: "";
     pointer-events: none;
@@ -2591,7 +2597,6 @@ html[data-octant-density="compact"]
     position: absolute;
     z-index: 4;
     inset: var(--oct-title-rail-h) 0 0;
-    border-top: 1px solid var(--octant-pane-line);
     border-left: 1px solid var(--octant-pane-line);
     content: "";
     pointer-events: none;

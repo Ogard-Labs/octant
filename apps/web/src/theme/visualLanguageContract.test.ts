@@ -359,22 +359,29 @@ describe("the public-block visual language", () => {
     const panes = frame.slice(0, frame.indexOf("The window controls float"));
     expect(panes).not.toMatch(/box-shadow/);
     expect(panes).not.toMatch(/row-gap|sheet-inset/);
-    // A divider is drawn above the content on a pane's top and left edges
-    // only: the top one lies under the outline and is clipped away, so the
-    // left one runs the panel's full height and meets the outline at both ends.
+    // A divider is drawn above the content on a pane's left edge, and on its
+    // top edge only where the pane starts below another pane: the stage and the
+    // dock start on the outline's own top edge, so a top line there would draw
+    // it twice and read stronger than every other edge.
     for (const selector of [
       ".shell-frame > .workspace-layer::after",
-      ".shell-frame .bottom-utility-panel::after",
       ".shell-frame .right-utility-dock:not(:has(.dock-tiles))::after",
     ]) {
       const rule = panel(selector);
-      expect(rule, selector).toMatch(/border-top:\s*1px solid var\(--octant-pane-line\)/);
       expect(rule, selector).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
-      expect(rule, selector).not.toMatch(/border-(right|bottom)/);
+      expect(rule, selector).not.toMatch(/border-(top|right|bottom)/);
     }
-    // The line is a share of the ink, so it shows on a near-black preset and
-    // on a glass tint alike, and the strong border under increased contrast.
-    expect(shell).toMatch(/\.shell\.shell-frame \{ --octant-pane-line: var\(--oct-hairline\)/);
+    const bottomRule = panel(".shell-frame .bottom-utility-panel::after");
+    expect(bottomRule).toMatch(/border-top:\s*1px solid var\(--octant-pane-line\)/);
+    expect(bottomRule).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);
+    expect(bottomRule).not.toMatch(/border-(right|bottom)/);
+    // The line is a share of the ink mixed into the pane's opaque colour, so it
+    // shows on a near-black preset and on a glass tint alike and reads the same
+    // over the sidebar, the stage and the ground; the strong border under
+    // increased contrast.
+    expect(shell).toMatch(
+      /\.shell\.shell-frame \{\s*--octant-pane-line: color-mix\(\s*in oklab,\s*var\(--octant-text-primary\) calc\(10% \* var\(--oct-contrast-scale, 1\)\),\s*var\(--octant-panel-opaque\)\s*\)/,
+    );
     expect(panel('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
       /--octant-pane-line:\s*var\(--octant-border-strong\)/,
     );
