@@ -2823,7 +2823,11 @@ notice or a menu. It holds a picture of the feature, a label ("2 of 5 · Project
 in the accent text colour), a title, one or two short lines, progress dots, a
 quiet Back (absent on the first step), a filled Next (Done on the last), and a
 Close button. The picture is drawn from rows, chips and lines over a faint dotted
-grid, in ink and the accent, so it follows the theme in both schemes.
+grid, in ink and the accent, so it follows the theme in both schemes. The card
+never covers the control it points at (with its ring) or the account row: on its
+side of the control it slides along until it clears, and a side where nothing
+clears is passed over. It takes the desktop's dense float fill, so no text shows
+through it.
 
 | Step | Points at                                               | Says                                                                    |
 | ---- | ------------------------------------------------------- | ----------------------------------------------------------------------- |

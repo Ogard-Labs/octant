@@ -18,6 +18,11 @@ export interface OctantTooltipProps {
    * `--oct-fg` text disappears against the inverted ground.
    */
   readonly surface?: "inverted" | "card";
+  /**
+   * A one-word chip for the rail: it opens beside the control, centred on it,
+   * and stays small so it covers as little of the sidebar as it must.
+   */
+  readonly compact?: boolean;
 }
 
 /** Opaque, collision-aware tooltip for compact shell controls. */
@@ -30,12 +35,16 @@ export function OctantTooltip(props: OctantTooltipProps) {
           align={props.align ?? "center"}
           className="octant-tooltip__positioner"
           side={props.side ?? "bottom"}
-          sideOffset={8}
+          sideOffset={props.compact === true ? 6 : 8}
         >
           <TooltipPopup
-            className={
-              props.surface === "card" ? "octant-tooltip octant-tooltip--card" : "octant-tooltip"
-            }
+            className={[
+              "octant-tooltip",
+              props.surface === "card" ? "octant-tooltip--card" : "",
+              props.compact === true ? "octant-tooltip--compact" : "",
+            ]
+              .filter((name) => name !== "")
+              .join(" ")}
             role="tooltip"
           >
             {props.label}

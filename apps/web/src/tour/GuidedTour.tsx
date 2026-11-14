@@ -27,6 +27,7 @@ import {
   placeTourCard,
   TOUR_RING_PAD,
   type GuidedTourStep,
+  type TourPlacementRect,
 } from "./guidedTourSteps";
 import "./guided-tour.css";
 
@@ -114,6 +115,24 @@ export function GuidedTour(props: GuidedTourProps) {
   }, [blocked, open]);
 
   return open ? <GuidedTourSurface /> : null;
+}
+
+/**
+ * Text and controls the card must not cover besides the one it points at: the
+ * rail's buttons and the account row, which sit where a card beside the foot of
+ * the sidebar would otherwise land.
+ */
+function textToLeaveReadable(target: HTMLElement): ReadonlyArray<TourPlacementRect> {
+  const rects: TourPlacementRect[] = [];
+  for (const selector of [".sidebar-rail", SIDEBAR_ACCOUNT_TRIGGER_SELECTOR]) {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (element === null || element === target || element.contains(target)) continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      rects.push({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+    }
+  }
+  return rects;
 }
 
 function GuidedTourSurface() {
@@ -216,6 +235,7 @@ function GuidedTourSurface() {
       { width: window.innerWidth, height: window.innerHeight },
       active.step.sides,
       active.step.align,
+      textToLeaveReadable(active.element),
     );
     setPlacement((before) =>
       before !== undefined && before.left === spot.left && before.top === spot.top ? before : spot,

@@ -322,7 +322,7 @@ function RailButton(props: {
 }) {
   const Icon = props.icon;
   return (
-    <OctantTooltip label={props.label} side="right">
+    <OctantTooltip align="center" compact label={props.label} side="right">
       <OctantButton
         aria-current={props.active === true ? "page" : undefined}
         aria-label={props.label}

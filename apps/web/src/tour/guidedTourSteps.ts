@@ -112,10 +112,30 @@ export interface TourCardPlacement {
 const GAP = 14;
 const MARGIN = 12;
 
+function overlaps(
+  card: {
+    readonly left: number;
+    readonly top: number;
+    readonly width: number;
+    readonly height: number;
+  },
+  other: TourPlacementRect,
+): boolean {
+  return (
+    card.left < other.left + other.width &&
+    card.left + card.width > other.left &&
+    card.top < other.top + other.height &&
+    card.top + card.height > other.top
+  );
+}
+
 /**
  * Puts the card beside the control on the first preferred side where it fits
  * whole, centred on the control along the other axis and kept inside the
- * window. When no side fits it takes the one with the most room.
+ * window. The card never covers the control (with its ring) or any rectangle
+ * in `avoid`, text the tour must leave readable: a card that would is slid
+ * along its side until it clears, and a side where nothing clears is passed
+ * over. When no side fits it takes the one with the most room.
  */
 export function placeTourCard(
   target: TourPlacementRect,
@@ -123,6 +143,7 @@ export function placeTourCard(
   viewport: { readonly width: number; readonly height: number },
   sides: GuidedTourStep["sides"],
   align: NonNullable<GuidedTourStep["align"]> = "center",
+  avoid: ReadonlyArray<TourPlacementRect> = [],
 ): TourCardPlacement {
   const sideTop =
     align === "start"
@@ -162,10 +183,55 @@ export function placeTourCard(
       }),
     },
   } as const;
-  const fitting = sides.find((side) => options[side].room >= 0);
-  const chosen =
-    fitting ??
-    sides.reduce((best, side) => (options[side].room > options[best].room ? side : best));
-  const spot = options[chosen].at();
-  return { left: clampX(spot.left), top: clampY(spot.top) };
+  const keepClear: ReadonlyArray<TourPlacementRect> = [
+    {
+      left: target.left - TOUR_RING_PAD,
+      top: target.top - TOUR_RING_PAD,
+      width: target.width + 2 * TOUR_RING_PAD,
+      height: target.height + 2 * TOUR_RING_PAD,
+    },
+    ...avoid,
+  ];
+  const cleared = (spot: TourCardPlacement) =>
+    keepClear.every((other) => !overlaps({ ...spot, ...card }, other));
+  // Slides a spot along its side's free axis to the nearest place that clears
+  // everything: tucked just above or just below each rectangle in the way.
+  const slide = (side: keyof typeof options, spot: TourCardPlacement) => {
+    if (cleared(spot)) return spot;
+    const vertical = side === "right" || side === "left";
+    const candidates = keepClear.flatMap((other) =>
+      vertical
+        ? [
+            { left: spot.left, top: clampY(other.top - GAP - card.height) },
+            { left: spot.left, top: clampY(other.top + other.height + GAP) },
+          ]
+        : [
+            { left: clampX(other.left - GAP - card.width), top: spot.top },
+            { left: clampX(other.left + other.width + GAP), top: spot.top },
+          ],
+    );
+    const distance = (candidate: TourCardPlacement) =>
+      Math.abs(candidate.left - spot.left) + Math.abs(candidate.top - spot.top);
+    return candidates
+      .filter(cleared)
+      .sort((first, second) => distance(first) - distance(second))[0];
+  };
+  const place = (side: keyof typeof options) => {
+    const spot = options[side].at();
+    return slide(side, { left: clampX(spot.left), top: clampY(spot.top) });
+  };
+  const fitting = sides.find((side) => options[side].room >= 0 && place(side) !== undefined);
+  if (fitting !== undefined) {
+    const spot = place(fitting);
+    if (spot !== undefined) return spot;
+  }
+  const roomiest = sides.reduce((best, side) =>
+    options[side].room > options[best].room ? side : best,
+  );
+  return (
+    place(roomiest) ?? {
+      left: clampX(options[roomiest].at().left),
+      top: clampY(options[roomiest].at().top),
+    }
+  );
 }
