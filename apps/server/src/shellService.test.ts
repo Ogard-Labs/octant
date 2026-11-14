@@ -2588,6 +2588,69 @@ describe("ShellService", () => {
     expect(fixture.append).toHaveBeenCalledOnce();
   });
 
+  it("keeps another Project's Browser pane when the window's lead Project is archived", () => {
+    const otherProject = decodeProjectId("00000000-0000-4000-8000-000000000210");
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
+    const lead = base.layouts.code;
+    if (lead.kind !== "pane") throw new Error("expected pane");
+    const otherContext = {
+      host: base.contextByMode.code.host,
+      mode: "code" as const,
+      projectId: otherProject,
+      boundRoot: "/home/other",
+    };
+    const workspace: WindowWorkspace = {
+      ...base,
+      layouts: {
+        ...base.layouts,
+        code: {
+          kind: "split",
+          nodeId: "00000000-0000-4000-8000-000000000231" as never,
+          orientation: "horizontal",
+          ratio: 0.5 as never,
+          first: lead,
+          second: {
+            kind: "pane",
+            nodeId: "00000000-0000-4000-8000-000000000232" as never,
+            paneId: "00000000-0000-4000-8000-000000000233" as never,
+            surface: {
+              kind: "browser",
+              id: "00000000-0000-4000-8000-000000000234" as never,
+              mode: "code",
+              title: "Browser",
+            },
+            context: otherContext,
+          },
+        },
+      },
+      contextByMode: {
+        ...base.contextByMode,
+        code: { ...otherContext, projectId, boundRoot: "/home/repo" },
+      },
+    };
+    const fixture = persistenceStub({
+      workspace: { workspace, aggregateVersion: 1 as never },
+      projectFor: (id) =>
+        String(id) === String(otherProject)
+          ? ({
+              ...projectFixture("code"),
+              id: otherProject,
+              binding: { canonicalRoot: "/home/other" },
+            } as never)
+          : ({ ...projectFixture("code"), lifecycle: "archived" } as never),
+    });
+    const restored = new ShellService({
+      persistence: fixture.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    }).bootstrap(ids.window).workspace.layouts.code;
+    if (restored.kind !== "split" || restored.second.kind !== "pane") {
+      throw new Error("expected split");
+    }
+    expect(restored.second.surface.kind).toBe("browser");
+    expect(restored.second.context?.projectId).toBe(otherProject);
+  });
+
   it("splits a thread from another Project into its own pane and clears that pane once the Project is archived", () => {
     const otherProject = decodeProjectId("00000000-0000-4000-8000-000000000210");
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "chat" as const };

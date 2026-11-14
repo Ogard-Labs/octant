@@ -29,7 +29,6 @@ import {
 import {
   ShellPolicyRejected,
   WorkspaceContextRejected,
-  applyWorkspaceOperation,
   buildSurfaceCatalog,
   classifyPreviewTabAuthority,
   classifyCanvasTabRestore,
@@ -42,7 +41,7 @@ import {
   normalizeEnvironmentPresentationState,
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
-  recordPaneContext,
+  applyResolvedWorkspaceOperation,
   resolveWorkspaceContext,
   workspaceWelcomeSurface,
   type WorkspaceContextResolves,
@@ -694,11 +693,7 @@ export class ShellService implements ShellServiceApi {
       // The pane's own Project is written from what this host resolves for
       // the placed surface; without it a surface of another Project would sit
       // in the window under the lead's authority.
-      const workspace = recordPaneContext(
-        applyWorkspaceOperation(resolved, command.operation),
-        command.operation,
-        resolves,
-      );
+      const workspace = applyResolvedWorkspaceOperation(resolved, command.operation, resolves);
       const committed = this.#persistence.journal.append({
         aggregate: { aggregateType: "window-workspace", aggregateId: command.windowId },
         expectedVersion: command.expectedVersion,
@@ -997,6 +992,9 @@ function reconcileContextWithProjects(
       };
     }
     if (staleProjectId === null) return layout;
+    // A pane of another Project keeps its own root; only panes the stale lead
+    // spoke for lose their root-backed surfaces.
+    if (layout.context !== undefined) return layout;
     const surface = layout.surface;
     return surface.kind === "browser" || surface.kind === "files"
       ? { ...layout, surface: workspaceWelcomeSurface(mode, surface.id) }

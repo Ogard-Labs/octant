@@ -25,6 +25,7 @@ import {
   WorkspaceContextRejected,
   activePaneContext,
   admissionSet,
+  applyResolvedWorkspaceOperation,
   applyWorkspaceOperation,
   recordPaneContext,
   windowAdmitsProject,
@@ -2548,6 +2549,82 @@ describe("panes of several Projects in one window", () => {
     expect(windowAdmitsProject(emptied, "code", projectB)).toBe(false);
     expect(admissionSet(emptied, "code")).toEqual([projectA]);
     expect(activePaneContext(emptied, "code").projectId).toBe(projectA);
+  });
+
+  it("keeps the old lead out of reach through a Settings pane once a mixed layout is restored under another lead", () => {
+    const mixed = mixedAB();
+    const layout = mixed.layouts.code;
+    if (layout.kind !== "split") throw new Error("expected split");
+    // The lead's pane shows Settings, which holds no Project of its own.
+    const withSettings: WindowWorkspace = {
+      ...mixed,
+      layouts: {
+        ...mixed.layouts,
+        code: {
+          ...layout,
+          first: {
+            ...onlyPane(layout.first),
+            surface: settingsSurface(decodeWorkspaceTabId("00000000-0000-4000-8000-000000000108")),
+          },
+        },
+      },
+    };
+    const inC = run(withSettings, {
+      kind: "switch-project-surface",
+      mode: "code",
+      surface: { ...threadC, id: decodeWorkspaceTabId("00000000-0000-4000-8000-000000000109") },
+    });
+    const back = run(inC, {
+      kind: "switch-project-surface",
+      mode: "code",
+      surface: { ...threadB, id: decodeWorkspaceTabId("00000000-0000-4000-8000-00000000010a") },
+    });
+    expect(back.contextByMode.code.projectId).toBe(projectB);
+    expect(windowAdmitsProject(back, "code", projectA)).toBe(false);
+  });
+
+  it("places a Browser pane of a local Project into a window led by a server Project with no bound root", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const serverLed: WindowWorkspace = {
+      ...base,
+      contextByMode: {
+        ...base.contextByMode,
+        code: { host, mode: "code", projectId: projectC, boundRoot: null },
+      },
+    };
+    const browser = decodeWorkspaceTab({
+      kind: "browser",
+      id: "00000000-0000-4000-8000-00000000010b",
+      threadId: "00000000-0000-4000-8000-000000000621",
+      mode: "code",
+      title: "Browser",
+    });
+    const local = {
+      tabContext: (tab: WorkspaceTab) =>
+        tab.kind === "browser" ? contextOf(projectA) : resolves.tabContext(tab),
+    };
+    const operation = decodeWorkspaceOperation({
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: codePane(base).paneId,
+      surface: browser,
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+    // Validating before the pane's own context is written held it to the
+    // lead's missing root and refused it.
+    expect(() => applyWorkspaceOperation(serverLed, operation)).toThrow(ShellPolicyRejected);
+    const placed = applyResolvedWorkspaceOperation(
+      resolveWorkspaceContext(serverLed, operation, local),
+      operation,
+      local,
+    );
+    expect(windowAdmitsProject(placed, "code", projectA)).toBe(true);
+    expect(placed.contextByMode.code.projectId).toBe(projectC);
   });
 
   it("answers admission over a layout of a different Project in every pane in under 50 microseconds", () => {

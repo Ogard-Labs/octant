@@ -1137,7 +1137,10 @@ function rebaseLayout(
       second: rebaseLayout(layout.second, from, to),
     };
   }
-  return withPaneContext(layout, layout.context ?? from, to);
+  // A surface with no Project of its own did not hold the old lead's; giving
+  // it that context would keep the old lead in reach through a Settings pane.
+  const own = surfaceNamesNoProject(layout.surface) ? undefined : (layout.context ?? from);
+  return withPaneContext(layout, own, to);
 }
 
 /**
@@ -1146,7 +1149,21 @@ function rebaseLayout(
  * authority into the welcome, and such a pane must not keep its Project in reach.
  */
 function paneOwnContext(pane: WorkspacePane): WorkspaceContextKey | undefined {
-  return pane.surface.kind === "welcome" ? undefined : pane.context;
+  return surfaceNamesNoProject(pane.surface) ? undefined : pane.context;
+}
+
+/**
+ * Surfaces that hold no Project of their own: the welcome, Settings, a Side
+ * Chat, and Files, which follow the lead. A pane showing one carries no
+ * context and reaches nothing.
+ */
+function surfaceNamesNoProject(surface: WorkspaceTab): boolean {
+  return (
+    surface.kind === "welcome" ||
+    surface.kind === "settings" ||
+    surface.kind === "side-chat" ||
+    surface.kind === "files"
+  );
 }
 
 function withPaneContext(
@@ -1187,6 +1204,14 @@ export function recordPaneContext(
   operation: WorkspaceOperation,
   resolves: WorkspaceContextResolves,
 ): WindowWorkspace {
+  return validateWorkspace(stampPaneContext(workspace, operation, resolves));
+}
+
+function stampPaneContext(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+  resolves: WorkspaceContextResolves,
+): WindowWorkspace {
   if (
     operation.kind !== "open-surface" &&
     operation.kind !== "replace-pane-surface" &&
@@ -1213,7 +1238,7 @@ export function recordPaneContext(
   const next = withPaneContext(pane, resolved, lead);
   if (next.context === pane.context) return workspace;
   const mapped = mapPane(layout, pane.paneId, () => next);
-  return validateWorkspace(replaceLayout(workspace, mode, mapped.layout));
+  return replaceLayout(workspace, mode, mapped.layout);
 }
 
 /**
@@ -1661,7 +1686,7 @@ function nextVersion(workspace: WindowWorkspace): WindowWorkspace["version"] {
   return (workspace.version + 1) as WindowWorkspace["version"];
 }
 
-function finishOperation(workspace: WindowWorkspace): WindowWorkspace {
+function finishLayout(workspace: WindowWorkspace, validate: boolean): WindowWorkspace {
   const focusedPaneId = workspace.focusedPaneId;
   const focusReachable =
     focusedPaneId === undefined ||
@@ -1672,12 +1697,13 @@ function finishOperation(workspace: WindowWorkspace): WindowWorkspace {
       activePaneIds[mode] = firstPane(workspace.layouts[mode]).paneId;
     }
   }
-  return validateWorkspace({
+  const next: WindowWorkspace = {
     ...workspace,
     activePaneIds,
     ...(focusReachable ? {} : { focusedPaneId: undefined }),
     version: nextVersion(workspace),
-  });
+  };
+  return validate ? validateWorkspace(next) : next;
 }
 
 function requirePane(layout: WorkspaceLayoutNode, paneId: PaneId): WorkspacePane {
@@ -1770,6 +1796,32 @@ export function applyWorkspaceOperation(
   workspace: WindowWorkspace,
   operation: WorkspaceOperation,
 ): WindowWorkspace {
+  return applyOperation(workspace, operation, true);
+}
+
+/**
+ * Applies an operation the host has resolved, writing the placed pane's own
+ * Project context before the layout is validated. A pane is judged against its
+ * own Project: validating first would hold a local Browser pane split into a
+ * window led by a server Project (no bound root) to the lead's missing root
+ * and refuse it before its own root was known.
+ */
+export function applyResolvedWorkspaceOperation(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+  resolves: WorkspaceContextResolves,
+): WindowWorkspace {
+  return validateWorkspace(
+    stampPaneContext(applyOperation(workspace, operation, false), operation, resolves),
+  );
+}
+
+function applyOperation(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+  validate: boolean,
+): WindowWorkspace {
+  const finishOperation = (next: WindowWorkspace) => finishLayout(next, validate);
   validateWorkspace(workspace);
   const mode = operation.mode;
   const layout = workspace.layouts[mode];

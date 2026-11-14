@@ -52,6 +52,7 @@ import type {
 import { createShellClient, type ShellClient } from "@octant/client-runtime/shell-client";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
+  ShellPolicyRejected,
   applyWorkspaceOperation,
   buildSurfaceCatalog,
   normalizeEnvironmentPresentationState,
@@ -530,7 +531,7 @@ export function useShellController(options: ShellControllerOptions) {
     requestedTarget?: ProjectWindowTarget,
   ): Promise<boolean> {
     const generation = ++requestGeneration.current;
-    const preview = applyWorkspaceOperation(previous.workspace, operation);
+    const preview = previewWorkspaceOperation(previous.workspace, operation);
     setAuthoritative({ ...previous, workspace: preview });
     setResizePreview(undefined);
     try {
@@ -1478,7 +1479,12 @@ function createWorkspaceMutation(
       };
       // A thread already shown in a pane, of whichever Project, is selected
       // where it is; only a thread the window does not show moves the window.
-      const existing = findVisibleSurfacePane(layout, surface);
+      const existing = shownUnderProject(
+        latest.workspace,
+        "chat",
+        findVisibleSurfacePane(layout, surface),
+        intent.projectId,
+      );
       if (
         existing === undefined &&
         (isDifferentProject(latest.workspace, "chat", intent.projectId) ||
@@ -1531,7 +1537,12 @@ function createWorkspaceMutation(
                 threadId: intent.threadId,
               },
             };
-      const existing = findVisibleSurfacePane(layout, surface);
+      const existing = shownUnderProject(
+        latest.workspace,
+        "code",
+        findVisibleSurfacePane(layout, surface),
+        intent.projectId,
+      );
       if (
         existing === undefined &&
         isDifferentProject(latest.workspace, "code", intent.projectId)
@@ -1577,7 +1588,12 @@ function createWorkspaceMutation(
                 threadId: intent.threadId,
               },
             };
-      const existing = findVisibleSurfacePane(layout, surface);
+      const existing = shownUnderProject(
+        latest.workspace,
+        "work",
+        findVisibleSurfacePane(layout, surface),
+        intent.projectId,
+      );
       if (
         existing === undefined &&
         isDifferentProject(latest.workspace, "work", intent.projectId)
@@ -2199,6 +2215,45 @@ function presentationLayout(
   return narrow && activePaneId !== undefined
     ? (findPane(layout, activePaneId) ?? firstPane(layout))
     : layout;
+}
+
+/**
+ * A shown pane counts as the thread's place only while it holds the thread
+ * under the thread's own Project: its own context, or the lead's when it has
+ * none. A pane left showing the thread under another lead is not, and the
+ * open moves the window as any open of another Project does.
+ */
+function shownUnderProject(
+  workspace: WindowWorkspace,
+  mode: OctantMode,
+  pane: WorkspacePane | undefined,
+  projectId: ProjectId | undefined,
+): WorkspacePane | undefined {
+  if (pane === undefined || projectId === undefined) return pane;
+  const held = pane.context?.projectId ?? workspace.contextByMode[mode].projectId;
+  return held !== null && String(held) === String(projectId) ? pane : undefined;
+}
+
+/**
+ * The layout shown while the host decides. A placement the renderer cannot
+ * judge alone, a pane of another Project whose own bound root only the host
+ * resolves, shows the current layout until the host answers instead of being
+ * refused here; the host still decides it.
+ */
+function previewWorkspaceOperation(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+): WindowWorkspace {
+  try {
+    return applyWorkspaceOperation(workspace, operation);
+  } catch (error) {
+    const placement =
+      operation.kind === "open-surface" ||
+      operation.kind === "replace-pane-surface" ||
+      operation.kind === "split-pane";
+    if (placement && error instanceof ShellPolicyRejected) return workspace;
+    throw error;
+  }
 }
 
 function modeLabel(mode: OctantMode): string {
