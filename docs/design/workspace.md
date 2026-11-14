@@ -1082,6 +1082,26 @@ Editing prose preserves its references. Clearing a damaged reference requires
 clearing the imported draft or preparing a truthful replacement, not silently
 retaining the excerpt as trusted plain prose.
 
+Line notes are the lighter way to answer a turn from its change view
+(maintainer decision, 2026-11-14). In Review opened from a turn's changed-file
+row, the line-number button on either side of the diff also opens a note
+anchored to that file, side (new or old) and line; the note may extend through
+a later line on the same side. Notes stay pending in that view, where the
+person edits or removes each one. They are this window's unsent drafts: they
+journal nothing and close with the view. **Send notes** sends them together as
+one ordinary follow-up message in the owning thread through the normal send
+path, so mode, access level, Plan and every host check apply unchanged. The
+message lists each note with its file, side and line or lines, the first
+line's text quoted and cut to 120 characters, then the note. Send waits while
+the thread runs a turn or a pending note is being edited. Notes count as sent
+once the host accepts the message, whatever its turn then does, so a turn that
+waits, stops or fails never invites sending them twice; only a refusal keeps
+them. A line note
+carries no finding reference: its message is plain person text, the same as
+typing the quoted line into the composer, so the outside-content record that a
+correction draft's references take does not apply. Local findings and their
+correction draft stay the path for review that is tracked and resolved.
+
 After a correction, Refresh reads the new comparison and latest recorded checks.
 Checks that lack a comparison binding are labeled as such. An agent reply never
 resolves a finding: the person inspects the resulting changes and explicitly

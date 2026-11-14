@@ -97,6 +97,7 @@ export const dockModuleInputs = {
     "requestedCodeReviewFile",
     "onAgentReviewBack",
     "codeClient",
+    "codeController",
     "codeDiffLayout",
     "codeThreadView",
     "hostBridge",
