@@ -18,7 +18,8 @@ sidebar and board presentation is in
 side, the workspace surfaces recorded in
 [Workspace: Coordinators](workspace.md#coordinators), the planner carry-over,
 the proposal card in the coordinator thread, workers' requests in the
-coordinator's composer, the coordinator named on Needs you rows, the owner
+coordinator's composer and as rows in its thread view, the coordinator named on
+Needs you rows, the owner
 device's routes and screens for the wake switches, the proposal review
 prefilled from the request, the read-only proposal card on paired clients, and
 counts that survive a restart are built. None of it has run against a real
@@ -324,12 +325,16 @@ reaches the person through the coordinator they are already talking to.
   are listed in its coordinator's composer, the way a child run's requests are
   listed in its parent's, with the worker named and an Open worker action. The
   person answers them there or in the worker; both answer the same request.
-- **In the coordinator's thread view** (maintainer decision, 2026-11-14;
-  designed, not built). A worker's pending ask also shows in the coordinator's
-  transcript where it arrived, as a request row naming the worker, which the
-  person answers in place; it is the same request, so answering it anywhere
-  settles every copy, and the row reads its outcome once answered. The
-  coordinator agent is never offered a way to answer it.
+- **In the coordinator's thread view** (maintainer decision, 2026-11-14). Each
+  pending ask also shows as a request row at the end of the coordinator's
+  transcript, oldest first, naming the worker (which opens it) with the same
+  answers the composer offers. It is the same request through the same answer
+  path, so answering it anywhere settles every copy. A row whose request
+  leaves the list stays until the thread view closes and reads its outcome:
+  what the person chose, when they answered in that row, or that it is no
+  longer waiting, since the list does not say whether it was answered
+  elsewhere or its turn ended. At most 12 settled rows stay, the oldest leaving
+  first. The coordinator agent is never offered a way to answer it.
 - **The person answers, not the coordinator.** A coordinator agent never answers
   a worker's approval or question. It can read the worker, ask the person with
   `ask-user`, and `send` the worker what the person decided, but a pending
@@ -338,10 +343,11 @@ reaches the person through the coordinator they are already talking to.
   with "via" its coordinator beside it, in Needs you and the Inbox. The board's
   and Review's embedded rows show no thread title, and a board card names the
   coordinator itself.
-- **Where the composer's list comes from.** The window's existing
+- **Where the composer's list and the rows come from.** The window's existing
   pending-requests read, filtered to the coordinator's workers in the window's
-  thread list, so a window sees no request it could not already see. It shows
-  one request at a time with a choice between them. A finished turn's decision
+  thread list, so a window sees no request it could not already see. The
+  composer shows one request at a time with a choice between them; the thread
+  view shows every one as its own row. A finished turn's decision
   stays in Needs you and the worker, since it is not the worker waiting.
 
 ## Seeing workers' subagents
@@ -406,5 +412,6 @@ refused by the read-only gate. For the workers' subagents: the graph read
 refused for a window that does not hold the coordinator and for a thread that is
 not a coordinator, before any run is read; and its answer carrying no reply,
 result, recovery text or version. Rendered checks cover the sidebar section, the
-folded workers, the composer's worker requests, and the dock's worker rows and
+folded workers, the composer's worker requests, the worker request rows in the
+thread view, and the dock's worker rows and
 graphs.

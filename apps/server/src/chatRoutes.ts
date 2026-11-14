@@ -404,6 +404,18 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
             origin,
           );
         }
+        // Moving a thread to another account is the person's own choice; a
+        // device that acts on this host without the person's powers may not.
+        if (boundPrincipalIsRestricted(request) && command.kind === "move-chat-thread-account") {
+          return failureResponse(
+            {
+              category: "unauthorized",
+              message: "Move a thread to another account at a window or on a device you paired.",
+            },
+            403,
+            origin,
+          );
+        }
         return jsonResponse(
           await dependencies.service.execute(command, {
             windowId: authenticatedWindowId,

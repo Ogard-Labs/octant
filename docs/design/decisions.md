@@ -43,18 +43,18 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 8         | 5       | 2            | 1                   |
+| [Providers](#providers)                                                               | 7         | 4       | 3            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
-| [Extensions](#extensions)                                                             | 9         | 4       | 4            | 1                   |
+| [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 11        | 4       | 6            | 1                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 11        | 5       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 18        | 11      | 5            | 2                   |
+| [Workspace](#workspace)                                                               | 17        | 12      | 5            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **258**   | **152** | **96**       | **10**              |
+| **All areas**                                                                         | **257**   | **154** | **97**       | **6**               |
 
 ## Principles and hard lines
 
@@ -204,6 +204,7 @@ Below Full access, secret files stay out of every agent's reach by an operating-
 - At Full access Octant's own file tools still refuse protected paths with the same plain message, Octant Shield's Watcher flags a call that names a protected path and the Octant Harness's secret-then-network commands are tagged, both journaled and never blocking, and redaction stays on.
 - SSH works through the person's SSH agent, Git over HTTPS through the system credential helper, and keys through the credential broker, so agents use credentials without reading them.
 - The person adds paths in Settings › Permissions › Protected files; removing a built-in group needs an explicit confirm and is journaled.
+- Built: on a Windows host the list names the Windows locations (Credential Manager, DPAPI and Vault folders, password-manager vaults and browser profile stores under `AppData`, `_netrc`, and the Windows forge and Copilot sign-ins), and Octant's own file tools judge a drive-absolute path whatever its letter case, slash direction, trailing dots and spaces or `:stream` suffix; a share, device, drive-relative or driveless rooted path is refused rather than judged, and a search rooted at or above any protected location, or inside a pattern entry's folder such as a browser profile, is refused (maintainer decision, 2026-11-14). On every platform a search rooted inside a pattern entry's folder is checked from its root, and a check that cannot finish refuses. Windows has no confined launch yet, so the list is not an operating-system rule there.
 - A refused read by Octant's or Claude Code's file tools names the rule and the channel to use, at every level. Native broad-root search refusals identify the search root, state that no results were returned and offer an ordinary unprotected subfolder. Relative roots and Glob escapes receive the same resolved-path check; no exclusion or partial-result claim is invented.
 - Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log, at every level.
 - Octant Shield's Judge sends a command that reaches a secret file to the person and refuses one that reads secrets then sends something off the computer; it reads the person's protected list beside its own patterns.
@@ -412,6 +413,7 @@ Desktop is one product on macOS, Linux and Windows, and platform differences are
 - The Windows credential-store building block uses a scoped native Credential Manager helper and private pipes. Its atomic protected blob accepts at most 2,560 UTF-8 bytes and refuses overflow before mutation; the broker transport bound remains 12 KiB. It supplies the seven existing desktop auxiliary ports through distinct closed purpose namespaces, preserving provider target names and family/store isolation. Oversized auxiliary values are refused without mutation, not split or stored elsewhere. A fixed native per-user mutex serializes all purposes/families/stores across processes; exact User/SYSTEM ownership/access and bounded waits refuse unsafe, blocked or abandoned coordination before mutation, without retry. It does not admit host startup or Chat or remove the Work/Code gate.
 - The separate desktop identity service has a closed native Windows CNG/Credential Manager backend: a random32-byte secret, SHA256(raw-secret) fingerprint, HMAC-SHA256 signature, non-exporting ensure/sign/rotate/recovery API, and selected-store/family isolation outside all generic credential purposes. Malformed blobs refuse ensure/sign; explicit atomic rotation recovers them. The existing16KiB request bound remains separate from the2560-byte credential blob cap. This is neither the server/member/roster P-256 identity nor owner unlock/profile identity, and admits no Windows startup or Work/Code. Mac and existing Linux behavior remain unchanged.
 - The simulator, the Apple development workbench and window vibrancy stay macOS-only.
+- The remaining Windows steps are sequenced in [the Windows sequence](../architecture.md#current-release-boundary) (maintainer decision, 2026-11-14): confinement design, then Work and Code with an explicit shell setting, then the CLI, then installer, signing and the signed feed.
 
 Status: Partly built. Since: 2026-10-16; ordering gate lifted 2026-11-06. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
@@ -815,6 +817,7 @@ A turn records an observation of what changed while it ran, never an attribution
 - A Work turn watches its bound folder from before the provider starts until the turn settles and records relative paths only, reading no file. An unnameable or refused path marks the record truncated, and a host that cannot watch records nothing. _Here only._
 - A Code turn compares the checkout tree-to-tree at start and settle and journals at most 32 paths with lines added and removed and a binary flag. Renames are both paths. _Here only._
 - A Code turn with no starting capture (Plan, unreadable checkout) or no change records nothing, and recording never fails or delays the turn. _Here only._
+- From a Code turn's change view the person may leave notes on changed lines, keep them pending, and send them together as one ordinary follow-up message in that thread (maintainer decision, 2026-11-14). [Workspace](workspace.md#tool-lifecycles) owns the detail.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -932,7 +935,7 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - The person may fix the workers' level when creating the coordinator at a local window or a device the host's own person paired (maintainer decisions, 2026-11-12 and 2026-11-13; built for a person-paired device), Full access included, and a mark on the coordinator does not lower it; without that choice a worker's level is at most the coordinator's, and never Full access from a marked coordinator (maintainer request, 2026-11-12). The level is journaled on the coordinator and cannot be changed afterwards. A marked coordinator's worker starts marked (label `coordinator-start`); a mark that cannot be journaled refuses the start.
 - At most six open workers per coordinator by default (person-set, 1–16) and 60 starts per hour by default, a per-coordinator setting from 1 to 600 (maintainer request, 2026-11-12). Ordinary turn admission, capacity and spend ceilings apply.
 - A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. The coordinator's wake and round bounds apply: per-coordinator settings with defaults of 30 wakes an hour and 10 rounds (maintainer request, 2026-11-12). The three bounds are journaled on the coordinator, only a person sets them, at a local window or a device the host's own person paired (maintainer decisions, 2026-11-12 and 2026-11-13; built for a person-paired device, journaled as the device; a hub-introduced or restricted device is refused), and a coordinator journaled before them takes the defaults. The New coordinator draft sets the bounds and the workers' level; Coordinator limits in a coordinator's menus changes the bounds on a running coordinator, and Make coordinator offers the workers' level (maintainer decision, 2026-11-13). Built; the dialog and submenu are tested as components and not yet rendered in a browser.
-- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Not built yet: the same asks shown as request rows in the coordinator's thread view, answered there by the person (maintainer decision, 2026-11-14). Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
+- A worker's approvals and questions are listed in its coordinator's composer and, as one request row each naming the worker, at the end of the coordinator's thread view (maintainer decision, 2026-11-14), answered in either through the worker's own answer path; a row whose request leaves the list reads its outcome. Only the person answers them, never the coordinator agent. Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
 - The wake switches (never the role) may also be set from a device the host's own person paired, journaled as that device, with no owner unlock (maintainer decision, 2026-11-12). A device the host knows only through the hub's roster sets them only as an owner device, through the owner routes and the owner access recovery screen on the phone and in a browser, each change under its own fresh unlock.
 - A coordinator proposal's review starts on the requested provider, model and level and offers no higher level; a device the host's own person paired approves as a local window does (maintainer decision, 2026-11-12; built on the server; not built yet: paired browsers and phones still show pending proposals read-only).
 - Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
@@ -1035,7 +1038,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
-- A routine cannot target a Server Project today: the dispatcher revalidates the routine's Project against the local catalog only, where a server Project reads as missing (`project-mismatch`), and a server Project's turns are offered no routine tool. Not built yet: routines on a Server Project's host, run by this host's scheduler and executed on the server through the Project's connection (maintainer decision, 2026-11-14; [Server Projects: Not built yet](server-projects.md#not-built-yet)).
+- Built: a Work or Code routine may target a Project on a registered server (maintainer decision, 2026-11-14). This host's scheduler runs it and its turn runs there as a person-started turn would, over the Project's connection under the same levels and approvals. Revalidation reads the server catalog and refuses, naming why, a removed Project, a server that left the registry, or a changed mode or derived binding; a server that cannot be reached fails the run before any thread exists and runs nothing anywhere. A server Project's turns are offered the routine tools; file triggers are refused there. Not built yet: choosing a server Project in Automation Center's editor ([Server Projects: Routines](server-projects.md#routines)).
 - The scheduler is an in-process timer; nothing runs in a cloud, and a self-hosted wake service on a person's hub can wake a spoke for a routine (built; run only between hosts on loopback with a fake socket).
 - A Work run observes the exact retained first-turn request and captured receipt/thread/Project/host/binding/provider/model. Proven terminal status is journaled before the active slot is reused; missing/mismatched evidence stays active, edits do not replace the run snapshot, and replay or notification failure never redelivers the provider call. First-turn completion does not prove child/process quiescence.
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
@@ -1299,25 +1302,16 @@ and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-c
 
 ### Provider instances and accounts
 
-Providers are multi-instance, and a thread stays on the instance it started with until the person moves it ([Moving a thread to another account](#moving-a-thread-to-another-account)). Octant never rotates, fails over or load-balances between accounts on its own.
+Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff. There is no silent or automatic failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
 
 - A selected model is a host, provider instance and model id, and the model picker is provider-first.
 - Extra accounts use Octant-assigned state directories. Removing an account leaves its directory in place, and deleting it is the person's step.
 - Two instances of the same driver cannot share one effective state directory.
 - Plan-usage readings come only from the provider's own process, are kept per account, and a failed refresh keeps the last snapshot with its age.
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
+- Move to account: the person moves a thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired), while a turn runs, and while the thread's model pool is on. Built for Chat; Work and Code threads move through the model picker. Not built yet: an opt-in "on a usage limit, hand off to this account".
 
-Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#providers).
-
-### Moving a thread to another account
-
-The person may move a thread to another provider account or instance; the move is carried out by the disclosed text handoff in [Handoffs between providers, forks and branches](#handoffs-between-providers-forks-and-branches) (maintainer decision, 2026-11-14).
-
-- Only the person moves a thread; the move is journaled like any provider change, with the handoff's counts, taint and omissions.
-- A per-thread setting the person opts into, "when this account hits its usage limit, hand off to" a named account, is allowed later; it hands off by the same path and names the move in the thread.
-- Silent or automatic rotation, failover and load-balancing between accounts stay refused.
-
-Status: Designed, not built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Partly built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ### Provider credentials and sign-in
 
@@ -1712,8 +1706,9 @@ A plugin may contribute a theme as data only, validated by `@octant/theme` befor
 
 - A theme contribution is a document in the semantic theme schema and carries no renderer code, stylesheet, script or asset loader; one that fails validation is refused whole.
 - The one runtime theme authority applies a valid contribution as it applies a built-in preset; installation, trust and enablement stay separate steps.
+- A contributed theme is listed only while its plugin is installed, trusted and enabled. Switching the plugin off removes its themes; a stored choice of one draws the default theme and is kept for when the plugin returns.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Architecture: Plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extraction).
+Status: Built. Since: 2026-11-14. Detail: [Architecture: Plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extraction).
 
 ## Authority and approvals
 
@@ -2189,7 +2184,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority,
 An agent on another machine on the person's own network starts and follows work in Octant as its own principal, held to an agent grant the person creates. It is never listed as a paired device and never the person, so the rule that a paired device is the person does not reach it; product routes see it as a paired-device principal with the grant's own scope id, so every device clamp applies.
 
 - A grant names its Projects, modes, highest access level (Full access when the person chooses it for the grant; maintainer decision, 2026-11-12; the pick shows the one-time Full access warning, and `start_work` accepts an explicit Full access for such a grant and gives it to the thread alone, never the Project; maintainer decision, 2026-11-13), tools, models, spend limits and expiry, inside every clamp of a restricted device session and its own closed list of routes; its prompts stay marked as outside content at Full access, and the mark is recorded only, as at Full access anywhere. It is created or widened from a local window, the loopback CLI or a device the host's own person paired (maintainer decision, 2026-11-12). Not built yet: today it is created or widened only from a local window or the loopback CLI, and a paired device may only view and revoke it.
-- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only; the tools run in process under the principal.
+- The only route it reaches is `POST /api/agent-access/mcp` on its own listener surface, LAN-private and Tailscale sources only (and, for a client on the host's own computer, on the loopback server: [Local MCP clients use an agent grant](#local-mcp-clients-use-an-agent-grant)); the tools run in process under the principal.
 - The recommended connection is a bridge, `octant agent mcp --connection`, with a key pair made on the agent's machine, signed requests and pinned TLS; a bearer agent key over the listener's Tailscale certificate is opt-in per grant.
 - It never adds Projects or answers approvals; its prompts are outside content, so its threads are marked from the first turn; approvals wait in Needs you named after the agent, and every turn it sent says so under its prompt.
 - Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
@@ -2199,12 +2194,13 @@ Status: Partly built. Since: 2026-11-11. Detail: [Agent access from other machin
 
 ### Local MCP clients use an agent grant
 
-An MCP client on the host's own machine may use Octant as an MCP server under an agent grant, enrolled, scoped and confirmed as a bridge grant is (maintainer decision, 2026-11-14).
+An MCP client on the host's own computer may use Octant as an MCP server under an agent grant, enrolled, scoped and confirmed as a bridge grant is (maintainer decision, 2026-11-14).
 
-- It connects over loopback with the bridge's signed requests; loopback grants nothing the grant does not, its prompts are outside content, and its approvals wait in Needs you for the person.
-- The existing local `octant agent mcp` path under the bridge secret is unchanged.
+- It runs `octant agent mcp --connection <file> --local`, which sends the bridge's signed requests to the loopback server's `POST /api/agent-access/mcp`; the claim stays on the private listener, and the listener must be on, as for any agent request.
+- Loopback grants nothing the grant does not: the same credential, grant and remote checks apply, an ungranted key is refused with the same `unauthorized`, `tools/list` names only the tools the grant ticks, its prompts are outside content, and its approvals wait in Needs you for the person.
+- The bridge never reads or sends the host's bridge secret; the existing local `octant agent mcp` path under that secret is unchanged.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Agent access: Ways to connect](agent-access.md#ways-to-connect).
+Status: Built. Since: 2026-11-14. Detail: [Agent access: Ways to connect](agent-access.md#ways-to-connect).
 
 ## Credentials and sign-in
 
@@ -2636,24 +2632,15 @@ Octant stops a local server only when it can prove the server belongs to a live 
 
 Status: Built. Since: —. Detail: [Workspace: Local-server ownership](workspace.md#local-server-ownership).
 
-### Line notes on a turn's changes
-
-The person may leave notes on lines of a turn's recorded change and send them together as one follow-up turn in the same thread (maintainer decision, 2026-11-14).
-
-- Notes stay pending and editable until the person sends them; a note never approves, resolves or reverts anything.
-- Each note names its file, side and line from the turn's record; anchors never move silently, and a line the record cannot show says why it takes no note.
-
-Status: Designed, not built. Since: 2026-11-14. Detail: [Thread view: Line notes on a turn's changes](thread-view.md#line-notes-on-a-turns-changes).
-
 ### Thread recaps and notes
 
 A thread has a person-visible recap of what it asked, did and left open, and the person may keep notes of their own on it (maintainer decision, 2026-11-14).
 
-- The recap is written on request by the thread's own model from its transcript, names the turn it was written through, and goes to no other provider.
-- Notes are the person's text, journaled on the thread and sent to the agent only when the person attaches one to a message.
+- The recap is read on request by the host from the thread's newest transcript window, under the thread's open authority. It quotes the thread, names the last message it read and says when older ones fell outside, and is written by no model, so it goes to no provider.
+- Notes are the person's text, journaled on the thread and rebuilt from the journal; the host refuses a note from an agent or from itself. A note reaches the agent only when the person inserts it into a message they send, and purging the thread erases its notes.
 - Neither changes the thread's authority, level or Done.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Thread view: Thread recap and notes](thread-view.md#thread-recap-and-notes).
+Status: Built. Since: 2026-11-14. Detail: [Thread view: Thread recap and notes](thread-view.md#thread-recap-and-notes).
 
 ## Start screen
 

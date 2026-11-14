@@ -27,9 +27,11 @@ import {
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
+  type AutomationRunReference,
   type OctantMode,
   type ProjectId,
   type WindowId,
+  type WorkThread,
   type WorkThreadId,
   type WorkStatusDatedItem,
 } from "@octant/contracts";
@@ -444,6 +446,46 @@ export function wireWork(deps: WorkDependencies) {
     });
 
     const feedbackTurns = createProductFeedbackTurnPort({ service: productFeedbackService });
+    // A Work turn's routine tools, local or on a server: they act on this
+    // host's routine records alone, never on a folder.
+    const routineToolsForWorkTurn = (input: {
+      readonly windowId: WindowId;
+      readonly thread: WorkThread;
+      readonly routineRun?: AutomationRunReference;
+    }) => {
+      const routineTurn = {
+        windowId: input.windowId,
+        thread: {
+          id: String(input.thread.id),
+          mode: "work" as const,
+          projectId: String(input.thread.projectId),
+        },
+        isAutomationOrigin: isRoutineHostScope(input.windowId),
+        now: Date.now,
+      };
+      return combineAppManagedToolSets(
+        createRoutineProposalTools({
+          ...routineTurn,
+          proposals: routineProposalService,
+          readPosture: () => {
+            const access = runningWorkTurns.get(String(input.thread.id))?.access;
+            return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
+          },
+        }),
+        createRoutineTools({
+          ...routineTurn,
+          ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
+          routines: {
+            hostId: LOCAL_HOST_ID,
+            projection: persistence.automationProjection,
+            store: automationEventStore,
+            changes: routineProposalService,
+          },
+          recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+          uuid: randomUUID,
+        }),
+      );
+    };
     const workTurnService = new WorkTurnService({
       toolCallRecorders: threadToolCallRecorders({
         connection: persistence.connection,
@@ -509,18 +551,30 @@ export function wireWork(deps: WorkDependencies) {
       // no harness composed, it cannot run at all.
       serverProjects: {
         holds: (thread) => serverWorkProjectOf(serverProjectStore, thread) !== undefined,
-        bind: (thread) =>
-          nativeHarnessComposition === undefined
-            ? { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS }
-            : bindServerWorkTurn(
-                {
-                  store: serverProjectStore,
-                  connection: serverConnection,
-                  composition: nativeHarnessComposition,
-                  record: (record) => shieldServerStore.recordServerCommand(record),
-                },
-                { thread },
-              ),
+        bind: (thread, turn) => {
+          if (nativeHarnessComposition === undefined)
+            return { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS };
+          const bound = bindServerWorkTurn(
+            {
+              store: serverProjectStore,
+              connection: serverConnection,
+              composition: nativeHarnessComposition,
+              record: (record) => shieldServerStore.recordServerCommand(record),
+            },
+            { thread },
+          );
+          // Beside the server tools, only the routine tools, which touch no
+          // folder of this host, as a local Work turn is offered them.
+          return bound.status === "refused"
+            ? bound
+            : {
+                ...bound,
+                tools: combineAppManagedToolSets(
+                  bound.tools,
+                  routineToolsForWorkTurn({ ...turn, thread }),
+                ),
+              };
+        },
       },
       resolveAppManagedTools: (input) => {
         const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
@@ -628,16 +682,6 @@ export function wireWork(deps: WorkDependencies) {
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
-        const routineTurn = {
-          windowId: input.windowId,
-          thread: {
-            id: String(input.thread.id),
-            mode: "work" as const,
-            projectId: String(input.thread.projectId),
-          },
-          isAutomationOrigin: isRoutineHostScope(input.windowId),
-          now: Date.now,
-        };
         // The other open Work threads of this Project, to read and to message:
         // a Work turn carries the messages its siblings left it.
         const threadsTools = !browserSupported
@@ -661,33 +705,7 @@ export function wireWork(deps: WorkDependencies) {
               toolConstraints: [],
               profileDisplayName: "the bound profile",
             });
-        const routineTools = !browserSupported
-          ? undefined
-          : combineAppManagedToolSets(
-              createRoutineProposalTools({
-                ...routineTurn,
-                proposals: routineProposalService,
-                readPosture: () => {
-                  const access = runningWorkTurns.get(String(input.thread.id))?.access;
-                  return access === undefined
-                    ? undefined
-                    : workThreadAccessOf(access).executionPolicy;
-                },
-              }),
-              createRoutineTools({
-                ...routineTurn,
-                ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
-                routines: {
-                  hostId: LOCAL_HOST_ID,
-                  projection: persistence.automationProjection,
-                  store: automationEventStore,
-                  changes: routineProposalService,
-                },
-                recordExternalContentIngestion: (mark) =>
-                  externalContentIngestionStore.record(mark),
-                uuid: randomUUID,
-              }),
-            );
+        const routineTools = !browserSupported ? undefined : routineToolsForWorkTurn(input);
         const agentsTools = !browserSupported
           ? undefined
           : agentsManagedToolsFor({
