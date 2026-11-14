@@ -105,8 +105,11 @@ describe("the Pull requests card", () => {
   it("lists a review asked of you under Needs you and one you opened under Your pull requests", async () => {
     const onOpenRow = vi.fn();
     renderCard({ onOpenRow });
-    const waiting = await screen.findByRole("region", { name: "Needs you" });
-    const review = within(waiting).getByRole("button", { name: /Please review/ });
+    // The sections hold their places while the read is out; the rows replace them.
+    const review = await screen.findByRole("button", { name: /Please review/ });
+    expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("Running")).toBe(
+      within(review).getByText("Running"),
+    );
     // Someone else wrote it, so the line names them; the person's own never does.
     expect(review).toHaveTextContent("octant · #4 · other · 3h");
     expect(review).toHaveTextContent("Running");

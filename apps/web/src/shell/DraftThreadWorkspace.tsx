@@ -851,6 +851,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <HomeDashboard
           cards={props.homeStart?.cards ?? NO_HOME_CARDS}
           customization={props.homeStart?.cardCustomization ?? NO_HOME_CARD_CHOICE}
+          cacheScope={[
+            props.mode,
+            props.serverUrl ?? "",
+            String(props.selectedHostId ?? props.hostId ?? LOCAL_HOST_ID),
+            String(selectedProjectId ?? ""),
+          ].join("|")}
           extraRows={homeListExtras}
           onCustomizationChange={props.homeStart?.onCardCustomizationChange ?? ignoreCardChoice}
         />
