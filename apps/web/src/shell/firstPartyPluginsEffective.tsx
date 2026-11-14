@@ -1,4 +1,5 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { createContext, useContext, useEffect, useState } from "react";
 import { documentIsVisible } from "../polling/documentVisibility";
 import {
@@ -34,14 +35,38 @@ export function useHostFirstPartyPluginsEffective(
   client: ExtensionClient,
   changeRevision: number,
 ): EffectiveMap {
-  const [effective, setEffective] = useState<EffectiveMap>(FIRST_PARTY_PLUGINS_EFFECTIVE);
+  return useHostExtensionSnapshotReading(
+    client,
+    changeRevision,
+    FIRST_PARTY_PLUGINS_EFFECTIVE,
+    firstPartyPluginsEffectiveFromSnapshot,
+    sameEffective,
+  );
+}
+
+/**
+ * One reading of the host's extension snapshot, kept current the same way for
+ * every surface that derives something from it: read once, again on each
+ * reported extension change and when the window becomes visible, never
+ * polled. A failed read keeps the last answer, and a read that changes
+ * nothing keeps the same value so consumers do not re-render. `read` and
+ * `same` must be stable across renders.
+ */
+export function useHostExtensionSnapshotReading<T>(
+  client: ExtensionClient,
+  changeRevision: number,
+  initial: T,
+  read: (snapshot: ExtensionSnapshot) => T,
+  same: (current: T, next: T) => boolean,
+): T {
+  const [value, setValue] = useState<T>(initial);
   useEffect(() => {
     let active = true;
     const load = async () => {
       if (!documentIsVisible()) return;
       try {
-        const next = firstPartyPluginsEffectiveFromSnapshot(await client.snapshot());
-        if (active) setEffective((current) => (sameEffective(current, next) ? current : next));
+        const next = read(await client.snapshot());
+        if (active) setValue((current) => (same(current, next) ? current : next));
       } catch {
         // Keep the last answer: an unreachable extension service is not a
         // switch turned off.
@@ -59,8 +84,8 @@ export function useHostFirstPartyPluginsEffective(
       active = false;
       document.removeEventListener("visibilitychange", loadWhenVisible);
     };
-  }, [client, changeRevision]);
-  return effective;
+  }, [client, changeRevision, read, same]);
+  return value;
 }
 
 function sameEffective(current: EffectiveMap, next: EffectiveMap): boolean {

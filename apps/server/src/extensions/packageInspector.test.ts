@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionPackageManifest } from "@octant/contracts/extensions";
+import { DEFAULT_DARK_TOKENS } from "@octant/theme";
 import {
   calculateExtensionPackageDigest,
   inspectExtensionPackage,
@@ -179,6 +180,34 @@ describe("host-owned extension package inspector", () => {
       "digest-mismatch",
     );
     expectRejected(packageFixture({ manifest: { unknownField: true } }), "manifest-invalid");
+  });
+
+  it("installs a theme that meets the theme schema and refuses one whose text cannot be read", () => {
+    const themePackage = (tokens: Readonly<Record<string, string>>) =>
+      packageFixture({
+        entries: [{ path: "README.md", kind: "file", content: readme }],
+        manifest: {
+          declaredCapabilities: [],
+          primaryComponentId: "harbor-night",
+          components: [
+            {
+              id: "harbor-night",
+              kind: "theme",
+              displayName: "Harbor night",
+              declaredCapabilities: [],
+              theme: { supportedModes: ["dark"], tokens: { dark: tokens } },
+            },
+          ],
+        } as never,
+      });
+
+    expect(
+      inspectExtensionPackage(themePackage(DEFAULT_DARK_TOKENS)).manifest.components[0]?.kind,
+    ).toBe("theme");
+    expectRejected(
+      themePackage({ ...DEFAULT_DARK_TOKENS, "text-primary": DEFAULT_DARK_TOKENS.workspace ?? "" }),
+      "theme-invalid",
+    );
   });
 
   it("rejects missing provenance/license metadata and incompatible hosts", () => {

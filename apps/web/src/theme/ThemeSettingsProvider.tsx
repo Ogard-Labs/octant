@@ -29,6 +29,7 @@ import {
 import { rememberThemeMode } from "./firstPaintTheme";
 import { upgradeLegacyAccent } from "./accentSwatches";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
+import { usePluginThemes } from "./pluginThemes";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   sidebar: ["sidebar-opaque"],
@@ -133,6 +134,7 @@ export function ThemeSettingsProvider(props: {
     };
   }, [settingIncreasedContrast, increasedContrast]);
 
+  const pluginThemes = usePluginThemes();
   const applied = useMemo(() => {
     if (props.settings === undefined) return undefined;
     // The one place stored overrides enter the renderer's painting: an accent
@@ -145,9 +147,13 @@ export function ThemeSettingsProvider(props: {
     // increased contrast gets them even while the in-app setting is off.
     return {
       accessible,
-      resolved: resolveEffectiveTokens({ ...accessible, increasedContrast }, systemPrefersDark),
+      resolved: resolveEffectiveTokens(
+        { ...accessible, increasedContrast },
+        systemPrefersDark,
+        pluginThemes,
+      ),
     };
-  }, [props.settings, systemPrefersDark, increasedContrast]);
+  }, [props.settings, systemPrefersDark, increasedContrast, pluginThemes]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
