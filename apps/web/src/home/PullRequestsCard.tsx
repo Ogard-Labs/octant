@@ -3,6 +3,7 @@ import type { CodeProjectPullRequestView } from "@octant/contracts";
 import { GitPullRequest } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
+import { useMinuteNow } from "../polling/useMinuteTick";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
 import {
@@ -54,7 +55,10 @@ type PullRequestRead =
 
 function usePullRequestsContent(source: PullRequestsCardSource): HomeCardContent {
   const read = usePullRequestRead(source.load);
-  const { now, onOpenAll, viewerLogin } = source;
+  const { onOpenAll, viewerLogin } = source;
+  // The card is built once, so `source.now` is the clock at creation; the
+  // empty label still has to age with the minute.
+  const now = useMinuteNow(source.now);
   const model = useMemo(
     () =>
       read.status === "ready"
@@ -105,16 +109,30 @@ function usePullRequestsContent(source: PullRequestsCardSource): HomeCardContent
       <>
         <PullRequestRows model={model} onOpenAll={onOpenAll} onOpenRow={source.onOpenRow} />
         {checkedAt === undefined ? null : (
-          <p
-            className="oct-meta pull-requests-card__checked"
-            title={absoluteTimeFormatter.format(new Date(checkedAt))}
-          >
-            {`Last checked ${relativeTimeLabel(checkedAt, now)}.`}
-          </p>
+          <PullRequestsCheckedAt checkedAt={checkedAt} clock={source.now} />
         )}
       </>
     ),
   };
+}
+
+/** The snapshot's age, re-read every minute without re-rendering the rows above it. */
+function PullRequestsCheckedAt({
+  checkedAt,
+  clock,
+}: {
+  readonly checkedAt: string;
+  readonly clock: number;
+}) {
+  const now = useMinuteNow(clock);
+  return (
+    <p
+      className="oct-meta pull-requests-card__checked"
+      title={absoluteTimeFormatter.format(new Date(checkedAt))}
+    >
+      {`Last checked ${relativeTimeLabel(checkedAt, now)}.`}
+    </p>
+  );
 }
 
 /** One cached read when the card mounts. A later identity change reads again; nothing else does. */

@@ -15,6 +15,7 @@ import { MemoryEntryDialog } from "./MemoryEntryDialog";
 import { MemoryTransferDialog } from "./MemoryTransferDialog";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 type InspectorDialog =
   | { readonly kind: "create" }
@@ -278,8 +279,7 @@ function MemoryRow(props: {
         <p className="memory-row__source">Original author: {formatActor(entry.author)}</p>
       )}
       {entry.provenance.kind === "transferred" ? (
-        <details className="memory-row__audit">
-          <summary>Transfer provenance</summary>
+        <OctantCollapsible className="memory-row__audit" summary="Transfer provenance">
           <dl>
             <dt>Source Project</dt>
             <dd>{entry.provenance.sourceProjectId}</dd>
@@ -296,7 +296,7 @@ function MemoryRow(props: {
             <dt>Transferred at</dt>
             <dd>{formatTimestamp(entry.provenance.transferredAt)}</dd>
           </dl>
-        </details>
+        </OctantCollapsible>
       ) : null}
       {entry.status === "superseded" ? (
         <p className="memory-row__audit-note">Replaced by {entry.supersededBy}</p>

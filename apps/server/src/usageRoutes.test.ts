@@ -15,7 +15,8 @@ import { USAGE_PROJECTION_SCHEMA_VERSION } from "./persistence/usagePersistenceS
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { TurnMetricsStore } from "./metrics/turnMetricsStore";
 import type { UsageQueryResponse } from "@octant/contracts/usage-rpc";
-import { decodeTurnDiagnosticsReport, type WindowWorkspace } from "@octant/contracts";
+import { decodeTurnDiagnosticsReport, decodeWindowId } from "@octant/contracts";
+import { defaultWindowWorkspace } from "@octant/domain/shell-policy";
 
 const directories: Array<string> = [];
 const now = "2026-07-24T12:00:00.000Z";
@@ -686,13 +687,7 @@ describe("usage route scope for a window bound to no Project", () => {
     ["no persisted workspace", undefined],
     [
       "every mode context unbound",
-      {
-        contextByMode: {
-          chat: { projectId: null },
-          work: { projectId: null },
-          code: { projectId: null },
-        },
-      } as unknown as WindowWorkspace,
+      defaultWindowWorkspace(decodeWindowId("00000000-0000-4000-8000-0000000000f1")),
     ],
   ] as const) {
     it(`gives a window with ${label} only unfiled usage from the query`, async () => {

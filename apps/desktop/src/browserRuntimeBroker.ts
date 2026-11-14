@@ -477,7 +477,8 @@ async function handleBrokerRequest(
     }
     if (url.pathname === "/v1/contexts/describe-point") {
       if (
-        Object.keys(body).length !== 3 ||
+        Object.keys(body).length !== ("markup" in body ? 4 : 3) ||
+        ("markup" in body && body.markup !== true) ||
         !isUuid(body.contextId) ||
         !isUuid(body.selectionId) ||
         !isViewportPoint(body.point) ||
@@ -491,6 +492,7 @@ async function handleBrokerRequest(
           body.point,
           signal ?? request.signal,
           body.selectionId,
+          body.markup === true,
         ),
       );
     }

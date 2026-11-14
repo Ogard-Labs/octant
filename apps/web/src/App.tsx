@@ -1,3 +1,4 @@
+import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
 import { useAgentBrowserCard } from "./threadActivity/browserCardActivity";
@@ -47,6 +48,7 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import {
+  activePaneContext,
   defaultPermissionModeFor,
   listEligibleImageProfiles,
   permissionModeOf,
@@ -99,8 +101,10 @@ import { useStableActions } from "./app/useStableActions";
 import { WindowChromeContainer } from "./app/WindowChromeContainer";
 import { ZenContainer } from "./app/ZenContainer";
 import {
+  decodeChatAttachmentId,
   decodeChatThreadId,
   decodeChatTurnId,
+  type ChatAttachmentId,
   type ChatThreadId,
   type ChatTurnId,
 } from "@octant/contracts/chat";
@@ -141,7 +145,7 @@ import {
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
-import { useMinuteTick } from "./polling/useMinuteTick";
+import { useSnoozeClock } from "./polling/useSnoozeClock";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import { ThreadActivityRevisionsContext } from "./polling/ThreadActivityRevisions";
 import type {
@@ -206,6 +210,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import "./styles.css";
 import "./styles/shell.css";
@@ -314,6 +319,7 @@ import {
   useAutomaticUpdateCheckSync,
   useQuitShortcutSecondPressSync,
   useReleaseRingSync,
+  useHostFullScreen,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useSidebarDrawerViewport,
@@ -325,6 +331,7 @@ import {
   useSidebarVibrancySupported,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
+import { useRendererOverlayReport } from "./browser/useRendererOverlayReport";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
@@ -344,7 +351,6 @@ import {
 } from "./shell/shellModeRouting";
 import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
-import { ShellState } from "./shell/ShellState";
 import type { FirstRunHandoffProject } from "./onboarding/firstRunHandoffModel";
 import {
   describeDiscoveryNotice,
@@ -366,7 +372,10 @@ import {
   type ProjectActionTarget,
 } from "./projects/ProjectActionRunDialog";
 import { ProjectIconProvider } from "./projects/ProjectIcon";
-import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
+import {
+  type ProjectThreadsAccess,
+  ProjectThreadsProvider,
+} from "./projects/ProjectThreadsSection";
 import {
   ServerCodeProjectsContext,
   serverCodeProjectFor,
@@ -382,6 +391,7 @@ import { useChatTranscriptSearch } from "./chat/useChatTranscriptSearch";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
+import { PluginThemesContext, useHostPluginThemes } from "./theme/pluginThemes";
 import { useRepositoryPullRequests } from "./environment/useRepositoryPullRequests";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import type { AgentRunViewRequest } from "./agents/AgentRunHierarchy";
@@ -472,6 +482,7 @@ import {
 } from "./navigator/useNavigatorAssistant";
 import { PERMISSION_MODE_LABEL } from "./code/PermissionModePicker";
 import { ThreadNativeSetupProvider } from "./providers/ThreadNativeSetupControl";
+import { ThreadNotesProvider } from "./threadNotes/ThreadNotes";
 import { useThreadTurnMetrics } from "./threadStats/useThreadTurnMetrics";
 import { useContextController } from "./context/useContextController";
 import { useSessionCompaction } from "./context/useSessionCompaction";
@@ -636,8 +647,8 @@ export function App(props: AppProps) {
   if (launch === undefined && locationLaunch.status === "refused") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Browser session"
           message={locationLaunch.message}
           state="warning"
@@ -667,8 +678,8 @@ export function App(props: AppProps) {
   if (launch === undefined) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -682,8 +693,8 @@ export function App(props: AppProps) {
     if (launchSession.status === "loading") {
       return (
         <main className="shell-boundary">
-          <ShellState
-            presentation="page"
+          <OctantEmpty
+            layout="page"
             eyebrow="Browser session"
             message="Establishing the authenticated Octant browser session."
             state="loading"
@@ -698,8 +709,8 @@ export function App(props: AppProps) {
       // typed address, an expired tab, or a restarted host lands here.
       return (
         <main className="shell-boundary">
-          <ShellState
-            presentation="page"
+          <OctantEmpty
+            layout="page"
             eyebrow="Browser session"
             message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
             state="warning"
@@ -713,8 +724,8 @@ export function App(props: AppProps) {
       if (resolvedWindowId === undefined) {
         return (
           <main className="shell-boundary">
-            <ShellState
-              presentation="page"
+            <OctantEmpty
+              layout="page"
               eyebrow="Project authority"
               message="Octant could not establish the window identity for this browser session."
               state="warning"
@@ -738,8 +749,8 @@ export function App(props: AppProps) {
     }
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Project authority"
           message={
             launchSession.failureMessage ??
@@ -755,8 +766,8 @@ export function App(props: AppProps) {
   if (!isProjectWindowCapability(injectedCapability)) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Project authority"
           message="Retry from the Octant desktop application to establish this window session."
           state="warning"
@@ -769,8 +780,8 @@ export function App(props: AppProps) {
   if (desktopWindowId === undefined) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -799,7 +810,12 @@ function LaunchedShell(
   // A system-framed host (Windows, Linux) and a remote client in a browser both
   // keep their own title bar, so reserving the inset there wastes a strip of the
   // window and lays a drag region over chrome the OS already draws.
-  const hostReservesTitlebarInset = props.hostBridge?.windowChrome === "hidden-inset";
+  // In macOS full screen the titlebar and traffic lights are gone, so the inset
+  // is released for as long as the host reports full screen.
+  const hostFullScreen = useHostFullScreen(props.hostBridge);
+  useRendererOverlayReport(props.hostBridge);
+  const hostReservesTitlebarInset =
+    props.hostBridge?.windowChrome === "hidden-inset" && !hostFullScreen;
   useLayoutEffect(() => {
     const root = document.documentElement;
     if (!hostReservesTitlebarInset) {
@@ -1102,8 +1118,6 @@ function LaunchedShell(
   }, [automationCenterOpen]);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  // Snoozed rows wake on the clock, so the sidebar keeps a minute-coarse one.
-  const minuteNow = useMinuteTick();
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] = useState<
@@ -1518,10 +1532,9 @@ function LaunchedShell(
     dockThreadKey === undefined
       ? fallbackDockState
       : threadUtilityDockState(dockStatesByThread, dockThreadKey);
-  // One drag pipeline for pane grips and sidebar rows. A sidebar row whose
-  // thread belongs to a different Project is rerouted through the ordinary
-  // open path on drop, so a drag cannot place a cross-Project thread without
-  // the switch-Project handling every other open gets.
+  // One drag pipeline for pane grips and sidebar rows. A sidebar row of
+  // another Project of this mode lands as its own pane; the host resolves that
+  // pane's Project and judges every call made from it.
   const sidebarDragRows = useRef(new Map<string, SidebarThreadDragRow>());
   // The Chat list's thread ids, read when a drag starts; filled in below once
   // the Chat controller exists.
@@ -1732,6 +1745,8 @@ function LaunchedShell(
     extensionClient,
     machineChanges.extensions,
   );
+  // Themes the person's installed, trusted and enabled plugins contribute.
+  const pluginThemes = useHostPluginThemes(extensionClient, machineChanges.extensions);
   const zenSwitchedOn = firstPartyPluginsEffective.get("zen") === true;
   useEffect(() => setZenPluginEffective(zenSwitchedOn), [zenSwitchedOn]);
   // Switching the Board plugin off hides the board layers and every opener;
@@ -2568,8 +2583,12 @@ function LaunchedShell(
           ?.projectId)
       : undefined) ??
     // Preserve Project context when a utility tab (browser/files/side-chat) is
-    // active: the mode context remains bound even without an active Project tab.
-    controller.workspace?.contextByMode[activeMode].projectId ??
+    // active: the active pane's Project stays bound even without a Project tab,
+    // and in a window showing several Projects it is that pane's own, so the
+    // dock, skills and plugins follow the pane the person is working in.
+    (controller.workspace === undefined
+      ? undefined
+      : activePaneContext(controller.workspace, activeMode).projectId) ??
     undefined;
   // Skills and plugin MCP servers this host reports as installed and
   // effective. They become the Skills and Plugins groups of the `/` composer
@@ -4822,6 +4841,23 @@ function LaunchedShell(
   // This model is rebuilt only when its inputs change. It used to be recomputed
   // by every App render — including the once-a-minute clock tick and every
   // machine-change revision — and handed fresh array identities to the sidebar.
+  // Snoozed rows wake on the clock with no journal event, so the shell reads
+  // the clock at each wake (and label or day change) instead of every minute.
+  const snoozeUntil = useMemo(
+    () =>
+      [
+        ...chatController.navigation,
+        ...(codeController.status === "ready" ? codeController.navigation : []),
+        ...workNavigation.navigation,
+      ].flatMap((thread) => (thread.snooze === undefined ? [] : [thread.snooze.until])),
+    [
+      chatController.navigation,
+      codeController.navigation,
+      codeController.status,
+      workNavigation.navigation,
+    ],
+  );
+  const snoozeClockNow = useSnoozeClock(snoozeUntil);
   const navigationModel = useMemo(() => {
     // A worker names its coordinator by title only while that coordinator is
     // still in the list; an archived one leaves the worker an ordinary row.
@@ -4875,7 +4911,7 @@ function LaunchedShell(
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
             ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
             ...threadRest(thread, {
-              now: minuteNow,
+              now: snoozeClockNow,
               awaitingInput:
                 thread.awaitingInput === true ||
                 (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
@@ -4888,7 +4924,10 @@ function LaunchedShell(
     const workProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
       workNavigation.navigation.map((thread) => ({
         ...thread,
-        ...threadRest(thread, { now: minuteNow, awaitingInput: thread.activity === "attention" }),
+        ...threadRest(thread, {
+          now: snoozeClockNow,
+          awaitingInput: thread.activity === "attention",
+        }),
       }));
     const sidebarThreadGroups = sidebarThreadGroupsForMode({
       activeMode,
@@ -4947,7 +4986,10 @@ function LaunchedShell(
       // Chat's durable follow-up never wakes a row, but the agent's own
       // approval or the turn's question is the host's live signal that the
       // thread needs the person.
-      ...threadRest(thread, { now: minuteNow, awaitingInput: thread.awaitingKind !== undefined }),
+      ...threadRest(thread, {
+        now: snoozeClockNow,
+        awaitingInput: thread.awaitingKind !== undefined,
+      }),
     }));
     // The pane header says "Running" for exactly the threads the sidebar's
     // status mark calls working, so the two never disagree.
@@ -4980,7 +5022,7 @@ function LaunchedShell(
     codeController.navigation,
     codeController.status,
     codeProviderRequestsByThreadId,
-    minuteNow,
+    snoozeClockNow,
     providerController.instances,
     workNavigation.navigation,
   ]);
@@ -4995,9 +5037,9 @@ function LaunchedShell(
               ...(chatController.status === "ready" ? navigationModel.markedChatNavigation : []),
               ...navigationModel.workProjectThreads,
             ],
-        minuteNow,
+        snoozeClockNow,
       ),
-    [activeMode, chatController.status, minuteNow, navigationModel],
+    [activeMode, chatController.status, snoozeClockNow, navigationModel],
   );
 
   // The start-screen cards read these, so they are held here with the other
@@ -5528,7 +5570,7 @@ function LaunchedShell(
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
     needsYouAskClients,
-    now: minuteNow.getTime(),
+    now: snoozeClockNow.getTime(),
     openRunningServiceLive,
     pendingRequestClient,
     remoteRunningServicesClient,
@@ -5755,8 +5797,8 @@ function LaunchedShell(
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
@@ -5768,8 +5810,8 @@ function LaunchedShell(
   if (controller.status === "conflict-reload") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="A command outcome may have changed this workspace. Loading authoritative state."
           state="loading"
@@ -5781,8 +5823,8 @@ function LaunchedShell(
   if (controller.status === "recovery-required") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           action={{ label: "Retry after recovery", onClick: controller.retry }}
           eyebrow="Local storage"
           message={controller.errorMessage ?? "Octant storage needs recovery before continuing."}
@@ -5796,8 +5838,8 @@ function LaunchedShell(
   if (controller.status === "disconnected") {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           action={{ label: "Retry connection", onClick: controller.retry }}
           eyebrow="Connection"
           message={controller.errorMessage ?? "The local Octant server is unavailable."}
@@ -5815,8 +5857,8 @@ function LaunchedShell(
   ) {
     return (
       <main className="shell-boundary">
-        <ShellState
-          presentation="page"
+        <OctantEmpty
+          layout="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
@@ -6279,7 +6321,8 @@ function LaunchedShell(
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     paneId?: PaneId,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
-  ) {
+    attachments?: ReadonlyArray<File>,
+  ): Promise<boolean | void> | void {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
       setDraftError(undefined);
@@ -6289,12 +6332,12 @@ function LaunchedShell(
       void controller.openDraftThread("chat");
       return;
     }
-    void handleDraftCreateThread(
+    return handleDraftCreateThread(
       "chat",
       prompt,
       undefined,
       undefined,
-      undefined,
+      attachments,
       undefined,
       undefined,
       undefined,
@@ -7050,13 +7093,35 @@ function LaunchedShell(
         const draftExtensionSelections =
           extensionSelections ?? (computerUseSelection === undefined ? [] : [computerUseSelection]);
         try {
+          // Files staged on the welcome composer upload to the thread that now
+          // exists, then leave with the first message, as a Work draft's images do.
+          const attachmentIds: ChatAttachmentId[] = [];
+          for (const file of images ?? []) {
+            const attachmentId = decodeChatAttachmentId(globalThis.crypto.randomUUID());
+            await chatController.upload({
+              threadId: thread.id,
+              attachmentId,
+              displayName: pastedImageName(file),
+              mediaType: file.type,
+              bytes: new Uint8Array(await file.arrayBuffer()),
+            });
+            attachmentIds.push(attachmentId);
+          }
+          // Each upload journals an attachment event on the thread and moves
+          // its version on, so the send expects the version the host now
+          // holds; the pre-upload version was refused as stale.
+          const expectedVersion =
+            attachmentIds.length === 0 || chatClient === undefined
+              ? thread.version
+              : (await chatClient.thread(thread.id)).thread.version;
           const sent = await chatController.execute({
             kind: "send-chat-turn",
+            ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
             ...(draftExtensionSelections.length === 0
               ? {}
               : { extensionSelections: draftExtensionSelections }),
             threadId: thread.id,
-            expectedVersion: thread.version,
+            expectedVersion,
             prompt,
           });
           if (sent === undefined) {
@@ -7064,12 +7129,16 @@ function LaunchedShell(
               "The first message could not be sent. Retry from the open thread.",
             );
             seedOpenedComposerDraft("chat", String(thread.id), prompt);
+            // False keeps the files the welcome composer staged, so a failed
+            // first send does not drop them along with the message.
+            return false;
           }
         } catch {
           chatController.reportError(
             "The first message could not be sent. Retry from the open thread.",
           );
           seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          return false;
         }
       } else if (mode === "code") {
         const destinationHostId = refuseUnlessCreatableDestination({
@@ -7874,255 +7943,265 @@ function LaunchedShell(
         dockTileColumns={dockPresentedOpen ? dockTileColumns : 1}
         workspace={
           <ThreadNativeSetupProvider services={threadNativeSetupServices}>
-            <StartQuickToolsContext.Provider value={startQuickToolsServices}>
-              <StartQuickToolsPlacementProvider
-                // The draft scope WorkspaceView gives the active pane's start screen.
-                activeDraftScope={
-                  dockHoldsForCodeDraft && activePaneId !== undefined
-                    ? `code:${String(activePaneId)}`
-                    : undefined
-                }
-              >
-                <div className="primary-workspace-layer">
-                  <ReaderPagesContainer
-                    actions={actions}
-                    activeMode={activeMode}
-                    {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                    agentsCenterVisible={agentsCenterVisible}
-                    allProjects={projectController.allProjects}
-                    archiveOpen={archiveOpen}
-                    artifactLibraryOpen={artifactLibraryOpen}
-                    automationCenterVisible={automationCenterVisible}
-                    {...(automationCenterFocusId === undefined ? {} : { automationCenterFocusId })}
-                    automationEditorCatalog={automationEditorCatalog}
-                    availabilityByProject={projectController.availabilityByProject}
-                    boundCodeProjectId={controller.boundCodeProjectId}
-                    clients={launchedClients}
-                    codeBoardOpen={codeBoardOpen}
-                    threadBoardAvailable={threadBoardAvailable}
-                    codeBoardProjects={codeBoardProjects}
-                    codeNavigationRows={codeController.navigation}
-                    codePullRequestsOpen={codePullRequestsOpen}
-                    codeProviderGroups={codeProviderGroups}
-                    codeThreads={codeController.bootstrap?.threads}
-                    environmentNames={environmentNames}
-                    githubClient={githubClient}
-                    githubIssuesOpen={githubIssuesOpen}
-                    githubIssuesReadAvailable={githubIssuesReadAvailable}
-                    {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                    imageLibraryOpen={imageLibraryOpen}
-                    imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
-                    inboxAttentionItems={inboxAttentionItems}
-                    inboxOpen={inboxOpen}
-                    isNarrow={isNarrow}
-                    linearClient={linearClient}
-                    linearIssuesOpen={linearIssuesOpen}
-                    linearIssuesRead={linearIssuesRead}
-                    loadAssignedGithubWork={loadAssignedGithubWork}
-                    loadAssignedLinearIssues={loadAssignedLinearIssues}
-                    navigationRevision={pendingRequestFeedRevision}
-                    needsYouAskClients={needsYouAskClients}
-                    now={minuteNow.getTime()}
-                    projectNames={workingNowProjectNames}
-                    projects={projectController.projects}
-                    projectsListOpen={projectsListOpen}
-                    {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
-                    reviewEntries={reviewEntries}
-                    reviewOpen={reviewOpen}
-                    reviewSource={reviewSource}
-                    {...(selectedProjectPullRequestKey === undefined
-                      ? {}
-                      : { selectedProjectPullRequestKey })}
-                    serverUrl={props.launch.serverUrl}
-                    settings={controller.settings}
-                    windowCapability={props.projectWindowCapability}
-                    workBoardOpen={workBoardOpen}
-                    workBoardProjects={workBoardProjects}
-                    workNavigationRows={workNavigation.navigation}
-                    workProviderGroups={workProviderGroups}
-                    workThreads={workNavigation.bootstrap?.threads}
-                    workspace={controller.workspace}
+            <ThreadNotesProvider services={launchedClients.threadNotesClient}>
+              <StartQuickToolsContext.Provider value={startQuickToolsServices}>
+                <StartQuickToolsPlacementProvider
+                  // The draft scope WorkspaceView gives the active pane's start screen.
+                  activeDraftScope={
+                    dockHoldsForCodeDraft && activePaneId !== undefined
+                      ? `code:${String(activePaneId)}`
+                      : undefined
+                  }
+                >
+                  <div className="primary-workspace-layer">
+                    <ReaderPagesContainer
+                      actions={actions}
+                      activeMode={activeMode}
+                      {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                      agentsCenterVisible={agentsCenterVisible}
+                      allProjects={projectController.allProjects}
+                      archiveOpen={archiveOpen}
+                      artifactLibraryOpen={artifactLibraryOpen}
+                      automationCenterVisible={automationCenterVisible}
+                      {...(automationCenterFocusId === undefined
+                        ? {}
+                        : { automationCenterFocusId })}
+                      automationEditorCatalog={automationEditorCatalog}
+                      availabilityByProject={projectController.availabilityByProject}
+                      boundCodeProjectId={controller.boundCodeProjectId}
+                      clients={launchedClients}
+                      codeBoardOpen={codeBoardOpen}
+                      threadBoardAvailable={threadBoardAvailable}
+                      codeBoardProjects={codeBoardProjects}
+                      codeNavigationRows={codeController.navigation}
+                      codePullRequestsOpen={codePullRequestsOpen}
+                      codeProviderGroups={codeProviderGroups}
+                      codeThreads={codeController.bootstrap?.threads}
+                      environmentNames={environmentNames}
+                      githubClient={githubClient}
+                      githubIssuesOpen={githubIssuesOpen}
+                      githubIssuesReadAvailable={githubIssuesReadAvailable}
+                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                      imageLibraryOpen={imageLibraryOpen}
+                      imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
+                      inboxAttentionItems={inboxAttentionItems}
+                      inboxOpen={inboxOpen}
+                      isNarrow={isNarrow}
+                      linearClient={linearClient}
+                      linearIssuesOpen={linearIssuesOpen}
+                      linearIssuesRead={linearIssuesRead}
+                      loadAssignedGithubWork={loadAssignedGithubWork}
+                      loadAssignedLinearIssues={loadAssignedLinearIssues}
+                      navigationRevision={pendingRequestFeedRevision}
+                      needsYouAskClients={needsYouAskClients}
+                      projectNames={workingNowProjectNames}
+                      projects={projectController.projects}
+                      projectsListOpen={projectsListOpen}
+                      {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
+                      reviewEntries={reviewEntries}
+                      reviewOpen={reviewOpen}
+                      reviewSource={reviewSource}
+                      {...(selectedProjectPullRequestKey === undefined
+                        ? {}
+                        : { selectedProjectPullRequestKey })}
+                      serverUrl={props.launch.serverUrl}
+                      settings={controller.settings}
+                      windowCapability={props.projectWindowCapability}
+                      workBoardOpen={workBoardOpen}
+                      workBoardProjects={workBoardProjects}
+                      workNavigationRows={workNavigation.navigation}
+                      workProviderGroups={workProviderGroups}
+                      workThreads={workNavigation.bootstrap?.threads}
+                      workspace={controller.workspace}
+                    />
+                    <ThreadPaneContainer
+                      actions={actions}
+                      activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
+                      activeMode={activeMode}
+                      {...(activeThreadUsageReporting === undefined
+                        ? {}
+                        : { activeThreadUsageReporting })}
+                      agentProfiles={agentProfiles}
+                      {...(browserToolThreadId === undefined ? {} : { browserToolThreadId })}
+                      chatController={chatController}
+                      chatReadCursorStore={chatReadCursorStore}
+                      clients={launchedClients}
+                      codeBoardProjects={codeBoardProjects}
+                      codeController={codeController}
+                      codeDefaultPermissionMode={codeDefaultPermissionMode}
+                      codeProviderChoices={codeProviderChoices}
+                      codeProviderGroups={codeProviderGroups}
+                      codeThreadControllers={codeThreadControllers}
+                      composerCompaction={composerCompaction}
+                      contextController={contextController}
+                      contextSubject={contextSubject}
+                      continueCards={continueCards}
+                      canOpenCrossContextInNewWindow={controller.canOpenCrossContextInNewWindow}
+                      contentTabs={controller.contentTabs}
+                      crossContextOffer={controller.crossContextOffer}
+                      createHostId={createHostId}
+                      createHostViewScope={createHostViewScope}
+                      discoveryController={discoveryController}
+                      dockOpen={dockOpen}
+                      {...(dockSurface === undefined
+                        ? {}
+                        : {
+                            // Environment is open in the dock while any tile shows it.
+                            dockSurface: dockShownTabs.some((tab) => tab.surface === "environment")
+                              ? "environment"
+                              : dockSurface,
+                          })}
+                      draftCreating={draftCreating}
+                      {...(draftError === undefined ? {} : { draftError })}
+                      {...(draftPermissionMode === undefined ? {} : { draftPermissionMode })}
+                      {...(draftPendingMessage === undefined ? {} : { draftPendingMessage })}
+                      {...(draftPermissionPersistence === undefined
+                        ? {}
+                        : { draftPermissionPersistence })}
+                      draftProjectBinding={draftProjectBinding}
+                      draftProjectSelection={draftProjectSelection}
+                      draftProviderGroups={draftProviderGroups}
+                      draftResetRevisions={draftResetRevisions}
+                      {...(effectiveDraftModelId === undefined ? {} : { effectiveDraftModelId })}
+                      {...(effectiveDraftProviderInstanceId === undefined
+                        ? {}
+                        : { effectiveDraftProviderInstanceId })}
+                      environmentNames={environmentNames}
+                      githubClient={githubClient}
+                      hidden={workspaceHidden}
+                      {...(homeStart === undefined ? {} : { homeStart })}
+                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                      hosts={hosts}
+                      {...(imageGenerationProfiles === undefined
+                        ? {}
+                        : { imageGenerationProfiles })}
+                      isNarrow={isNarrow}
+                      {...(lastSelectedHealthyHostId === undefined
+                        ? {}
+                        : { lastSelectedHealthyHostId })}
+                      linearClient={linearClient}
+                      loadAssignedLinearIssues={loadAssignedLinearIssues}
+                      loadOpenLinearIssues={loadOpenLinearIssues}
+                      machineChanges={machineChanges}
+                      navigation={navigationModel}
+                      {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
+                      {...(pendingDraftCoordinator === undefined
+                        ? {}
+                        : { pendingDraftCoordinator })}
+                      pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
+                      {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
+                      {...(pendingIssue === undefined ? {} : { pendingIssue })}
+                      presentedLayout={controller.presentedLayout}
+                      activeProject={projectController.activeProject}
+                      allProjects={projectController.allProjects}
+                      availabilityByProject={projectController.availabilityByProject}
+                      memoryRevision={projectController.memoryRevision}
+                      projectClient={projectController.client}
+                      tabActivation={controller.tabActivation}
+                      workspaceVersion={controller.workspaceVersion}
+                      providerController={providerController}
+                      providerReady={providerReady}
+                      {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
+                      serverUrl={props.launch.serverUrl}
+                      settings={controller.settings}
+                      threadStatsSummary={threadStatsSummary}
+                      {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                      windowCapability={props.projectWindowCapability}
+                      workCreateThreadAvailable={workCreateThreadAvailable}
+                      workNavigation={workNavigation}
+                      workPromotionController={workPromotionController}
+                      workProviderGroups={workProviderGroups}
+                      workspace={controller.workspace}
+                      workspaceDrag={workspaceDrag}
+                      zen={zen}
+                    />
+                  </div>
+                  <NavigatorPopover
+                    controller={navigatorAssistant}
+                    onClose={() => setNavigatorOpen(false)}
+                    onOpenSettings={(target) => {
+                      setNavigatorOpen(false);
+                      void controller.openSettings(target);
+                    }}
+                    open={navigatorOpen}
+                    restoreFocus={navigatorOpener}
                   />
-                  <ThreadPaneContainer
-                    actions={actions}
-                    activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
-                    activeMode={activeMode}
-                    {...(activeThreadUsageReporting === undefined
-                      ? {}
-                      : { activeThreadUsageReporting })}
-                    agentProfiles={agentProfiles}
-                    {...(browserToolThreadId === undefined ? {} : { browserToolThreadId })}
-                    chatController={chatController}
-                    chatReadCursorStore={chatReadCursorStore}
-                    clients={launchedClients}
-                    codeBoardProjects={codeBoardProjects}
-                    codeController={codeController}
-                    codeDefaultPermissionMode={codeDefaultPermissionMode}
-                    codeProviderChoices={codeProviderChoices}
-                    codeProviderGroups={codeProviderGroups}
-                    codeThreadControllers={codeThreadControllers}
-                    composerCompaction={composerCompaction}
-                    contextController={contextController}
-                    contextSubject={contextSubject}
-                    continueCards={continueCards}
-                    canOpenCrossContextInNewWindow={controller.canOpenCrossContextInNewWindow}
-                    contentTabs={controller.contentTabs}
-                    crossContextOffer={controller.crossContextOffer}
-                    createHostId={createHostId}
-                    createHostViewScope={createHostViewScope}
-                    discoveryController={discoveryController}
-                    dockOpen={dockOpen}
-                    {...(dockSurface === undefined
-                      ? {}
-                      : {
-                          // Environment is open in the dock while any tile shows it.
-                          dockSurface: dockShownTabs.some((tab) => tab.surface === "environment")
-                            ? "environment"
-                            : dockSurface,
-                        })}
-                    draftCreating={draftCreating}
-                    {...(draftError === undefined ? {} : { draftError })}
-                    {...(draftPermissionMode === undefined ? {} : { draftPermissionMode })}
-                    {...(draftPendingMessage === undefined ? {} : { draftPendingMessage })}
-                    {...(draftPermissionPersistence === undefined
-                      ? {}
-                      : { draftPermissionPersistence })}
-                    draftProjectBinding={draftProjectBinding}
-                    draftProjectSelection={draftProjectSelection}
-                    draftProviderGroups={draftProviderGroups}
-                    draftResetRevisions={draftResetRevisions}
-                    {...(effectiveDraftModelId === undefined ? {} : { effectiveDraftModelId })}
-                    {...(effectiveDraftProviderInstanceId === undefined
-                      ? {}
-                      : { effectiveDraftProviderInstanceId })}
-                    environmentNames={environmentNames}
-                    githubClient={githubClient}
-                    hidden={workspaceHidden}
-                    {...(homeStart === undefined ? {} : { homeStart })}
-                    {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                    hosts={hosts}
-                    {...(imageGenerationProfiles === undefined ? {} : { imageGenerationProfiles })}
-                    isNarrow={isNarrow}
-                    {...(lastSelectedHealthyHostId === undefined
-                      ? {}
-                      : { lastSelectedHealthyHostId })}
-                    linearClient={linearClient}
-                    loadAssignedLinearIssues={loadAssignedLinearIssues}
-                    loadOpenLinearIssues={loadOpenLinearIssues}
-                    machineChanges={machineChanges}
-                    navigation={navigationModel}
-                    {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
-                    {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
-                    pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
-                    {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
-                    {...(pendingIssue === undefined ? {} : { pendingIssue })}
-                    presentedLayout={controller.presentedLayout}
-                    activeProject={projectController.activeProject}
-                    allProjects={projectController.allProjects}
-                    availabilityByProject={projectController.availabilityByProject}
-                    memoryRevision={projectController.memoryRevision}
-                    projectClient={projectController.client}
-                    tabActivation={controller.tabActivation}
-                    workspaceVersion={controller.workspaceVersion}
-                    providerController={providerController}
-                    providerReady={providerReady}
-                    {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
-                    serverUrl={props.launch.serverUrl}
-                    settings={controller.settings}
-                    threadStatsSummary={threadStatsSummary}
-                    {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
-                    windowCapability={props.projectWindowCapability}
-                    workCreateThreadAvailable={workCreateThreadAvailable}
-                    workNavigation={workNavigation}
-                    workPromotionController={workPromotionController}
-                    workProviderGroups={workProviderGroups}
-                    workspace={controller.workspace}
-                    workspaceDrag={workspaceDrag}
-                    zen={zen}
-                  />
-                </div>
-                <NavigatorPopover
-                  controller={navigatorAssistant}
-                  onClose={() => setNavigatorOpen(false)}
-                  onOpenSettings={(target) => {
-                    setNavigatorOpen(false);
-                    void controller.openSettings(target);
-                  }}
-                  open={navigatorOpen}
-                  restoreFocus={navigatorOpener}
-                />
-                <TabActivationProvider registry={dockTabActivation}>
-                  <DockContainer
-                    actions={actions}
-                    {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
-                    activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
-                    activeMode={activeMode}
-                    {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                    {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
-                    {...(activeProjectExtraFolders.length === 0
-                      ? {}
-                      : { projectExtraFolders: activeProjectExtraFolders })}
-                    bottomPanelHeight={bottomPanelHeight}
-                    bottomPanelOpen={bottomPanelOpen}
-                    bottomPanelPresentation={bottomPanelPresentation}
-                    bottomPanelPresentedOpen={bottomPanelPresentedOpen}
-                    bottomPanelSurfaces={bottomPanelSurfaces}
-                    bottomPanelTabs={bottomPanelTabs}
-                    canvasRevisionsByThread={canvasRevisionsByThread}
-                    chatReadCursorStore={chatReadCursorStore}
-                    clients={launchedClients}
-                    codeNavigationRevision={machineChanges.codeNavigation}
-                    codeProviderGroups={codeProviderGroups}
-                    {...(toolsReadCodeController && activeCodeThreadController !== undefined
-                      ? { codeThreadController: activeCodeThreadController }
-                      : {})}
-                    {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
-                      ? { codeThreadView: activeCodeThreadView }
-                      : {})}
-                    {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
-                    {...(contextController.snapshot === undefined
-                      ? {}
-                      : { contextSnapshot: contextController.snapshot })}
-                    displayedDockState={displayedDockState}
-                    dockPresentationWidth={dockPresentationWidth}
-                    dockPresentedOpen={dockPresentedOpen}
-                    dockReferences={dockReferences}
-                    dockToolButtons={dockToolButtons}
-                    dockResolution={dockResolution}
-                    dockResolveSurface={dockResolveSurface}
-                    dockSidecarsByThread={dockSidecarsByThread}
-                    dockTabs={dockTabs}
-                    {...(dockThread === undefined ? {} : { dockThread })}
-                    {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
-                    dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
-                    {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
-                    {...(dockToolsAwaitingThread === undefined ? {} : { dockToolsAwaitingThread })}
-                    {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                    isNarrow={isNarrow}
-                    navigation={navigationModel}
-                    now={minuteNow.getTime()}
-                    {...(dockOverviewThread === undefined
-                      ? {}
-                      : { overviewThread: dockOverviewThread })}
-                    projectNames={workingNowProjectNames}
-                    projectPullRequestReviewOpen={projectPullRequestReviewOpen}
-                    {...(toolsPresented ? { providerController } : {})}
-                    {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
-                    {...(requestedCodeReviewFile === undefined ? {} : { requestedCodeReviewFile })}
-                    {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
-                    {...(selectedProjectPullRequest === undefined
-                      ? {}
-                      : { selectedProjectPullRequest })}
-                    {...(selectedProjectPullRequestKey === undefined
-                      ? {}
-                      : { selectedProjectPullRequestKey })}
-                    serverUrl={props.launch.serverUrl}
-                    windowCapability={props.projectWindowCapability}
-                    writtenDocumentsByThread={writtenDocumentsByThread}
-                  />
-                </TabActivationProvider>
-              </StartQuickToolsPlacementProvider>
-            </StartQuickToolsContext.Provider>
+                  <TabActivationProvider registry={dockTabActivation}>
+                    <DockContainer
+                      actions={actions}
+                      {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
+                      activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
+                      activeMode={activeMode}
+                      {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                      {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
+                      {...(activeProjectExtraFolders.length === 0
+                        ? {}
+                        : { projectExtraFolders: activeProjectExtraFolders })}
+                      bottomPanelHeight={bottomPanelHeight}
+                      bottomPanelOpen={bottomPanelOpen}
+                      bottomPanelPresentation={bottomPanelPresentation}
+                      bottomPanelPresentedOpen={bottomPanelPresentedOpen}
+                      bottomPanelSurfaces={bottomPanelSurfaces}
+                      bottomPanelTabs={bottomPanelTabs}
+                      canvasRevisionsByThread={canvasRevisionsByThread}
+                      chatReadCursorStore={chatReadCursorStore}
+                      clients={launchedClients}
+                      codeNavigationRevision={machineChanges.codeNavigation}
+                      codeProviderGroups={codeProviderGroups}
+                      {...(toolsReadCodeController && activeCodeThreadController !== undefined
+                        ? { codeThreadController: activeCodeThreadController }
+                        : {})}
+                      {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
+                        ? { codeThreadView: activeCodeThreadView }
+                        : {})}
+                      {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
+                      {...(contextController.snapshot === undefined
+                        ? {}
+                        : { contextSnapshot: contextController.snapshot })}
+                      displayedDockState={displayedDockState}
+                      dockPresentationWidth={dockPresentationWidth}
+                      dockPresentedOpen={dockPresentedOpen}
+                      dockReferences={dockReferences}
+                      dockToolButtons={dockToolButtons}
+                      dockResolution={dockResolution}
+                      dockResolveSurface={dockResolveSurface}
+                      dockSidecarsByThread={dockSidecarsByThread}
+                      dockTabs={dockTabs}
+                      {...(dockThread === undefined ? {} : { dockThread })}
+                      {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                      dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
+                      {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
+                      {...(dockToolsAwaitingThread === undefined
+                        ? {}
+                        : { dockToolsAwaitingThread })}
+                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                      isNarrow={isNarrow}
+                      navigation={navigationModel}
+                      {...(dockOverviewThread === undefined
+                        ? {}
+                        : { overviewThread: dockOverviewThread })}
+                      projectNames={workingNowProjectNames}
+                      projectPullRequestReviewOpen={projectPullRequestReviewOpen}
+                      {...(toolsPresented ? { providerController } : {})}
+                      {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
+                      {...(requestedCodeReviewFile === undefined
+                        ? {}
+                        : { requestedCodeReviewFile })}
+                      {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
+                      {...(selectedProjectPullRequest === undefined
+                        ? {}
+                        : { selectedProjectPullRequest })}
+                      {...(selectedProjectPullRequestKey === undefined
+                        ? {}
+                        : { selectedProjectPullRequestKey })}
+                      serverUrl={props.launch.serverUrl}
+                      windowCapability={props.projectWindowCapability}
+                      writtenDocumentsByThread={writtenDocumentsByThread}
+                    />
+                  </TabActivationProvider>
+                </StartQuickToolsPlacementProvider>
+              </StartQuickToolsContext.Provider>
+            </ThreadNotesProvider>
           </ThreadNativeSetupProvider>
         }
       >
@@ -8428,197 +8507,205 @@ function LaunchedShell(
     <AgentThreadAttributionProvider client={launchedClients.agentGrantClient}>
       <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
         <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
-          <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
-            <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
-              <SpeechCapabilityProvider
-                client={speechClient}
-                instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
-                settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
-              >
-                <OctantCommandProvider commands={octantCommands}>
-                  <OctantDialogPresence>
-                    {projectActionRun === undefined ? null : (
-                      <ProjectActionRunDialog
-                        key={JSON.stringify(projectActionRun.target)}
-                        client={projectTerminalClient}
-                        target={projectActionRun.target}
-                        storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                        open={projectActionRun.open}
-                        onClose={() =>
-                          setProjectActionRun((current) =>
-                            current === undefined ? undefined : { ...current, open: false },
+          <PluginThemesContext.Provider value={pluginThemes}>
+            <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
+              <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
+                <SpeechCapabilityProvider
+                  client={speechClient}
+                  instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+                  settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+                >
+                  <OctantCommandProvider commands={octantCommands}>
+                    <OctantDialogPresence>
+                      {projectActionRun === undefined ? null : (
+                        <ProjectActionRunDialog
+                          key={JSON.stringify(projectActionRun.target)}
+                          client={projectTerminalClient}
+                          target={projectActionRun.target}
+                          storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                          open={projectActionRun.open}
+                          onClose={() =>
+                            setProjectActionRun((current) =>
+                              current === undefined ? undefined : { ...current, open: false },
+                            )
+                          }
+                          {...(zen.enabled &&
+                          !serverCodeProjects.workProjects.some(
+                            (project) => project.projectId === projectActionRun.target.projectId,
                           )
-                        }
-                        {...(zen.enabled &&
-                        !serverCodeProjects.workProjects.some(
-                          (project) => project.projectId === projectActionRun.target.projectId,
-                        )
+                            ? {
+                                onOpenTerminal: (
+                                  terminalId: ReturnType<typeof decodeCodeTerminalId>,
+                                ) => {
+                                  void (async () => {
+                                    if (!zen.active) await zen.enterZen();
+                                    await zen.pinProjectTerminal({
+                                      projectId: projectActionRun.target.projectId,
+                                      terminalId,
+                                    });
+                                  })();
+                                },
+                              }
+                            : {})}
+                        />
+                      )}
+                    </OctantDialogPresence>
+
+                    <OctantDialogPresence>
+                      {preparationTarget === undefined ? null : (
+                        <WorktreePreparationDialog
+                          key={JSON.stringify(preparationTarget)}
+                          client={projectTerminalClient}
+                          runs={agentRunClient}
+                          target={preparationTarget}
+                          onClose={() => setPreparationTarget(undefined)}
+                        />
+                      )}
+                    </OctantDialogPresence>
+                    {actionsProject === undefined ? null : (
+                      <ProjectActionButtons
+                        actions={activeProjectActions}
+                        {...(activeMode === "code" &&
+                        activeCodeThreadView !== undefined &&
+                        activeCodeThreadView.checkout.kind !== "remote-root" &&
+                        String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
                           ? {
-                              onOpenTerminal: (
-                                terminalId: ReturnType<typeof decodeCodeTerminalId>,
-                              ) => {
-                                void (async () => {
-                                  if (!zen.active) await zen.enterZen();
-                                  await zen.pinProjectTerminal({
-                                    projectId: projectActionRun.target.projectId,
-                                    terminalId,
-                                  });
-                                })();
+                              onSetup: () => {
+                                const view = activeCodeThreadView;
+                                setPreparationTarget({
+                                  projectId: actionsProject.id,
+                                  thread: {
+                                    threadId: view.thread.id,
+                                    checkoutId: view.checkout.id,
+                                    ...(view.checkout.head.kind === "none"
+                                      ? {}
+                                      : { head: view.checkout.head.oid }),
+                                  },
+                                });
                               },
                             }
                           : {})}
+                        {...(activeMode === "code" &&
+                        activeCodeThreadView !== undefined &&
+                        String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
+                          ? { defaultFolderLabel: "Active checkout" }
+                          : {})}
+                        {...(actionsProject.type === "code"
+                          ? {
+                              mainFolder: actionsProject.binding.canonicalRoot,
+                              extraFolders: (actionsProject.extraFolders ?? []).map(
+                                (folder) => folder.canonicalRoot,
+                              ),
+                            }
+                          : {})}
+                        onRun={(action, folder) =>
+                          void runProjectAction(actionsProject.id, action, folder)
+                        }
                       />
                     )}
-                  </OctantDialogPresence>
-
-                  <OctantDialogPresence>
-                    {preparationTarget === undefined ? null : (
-                      <WorktreePreparationDialog
-                        key={JSON.stringify(preparationTarget)}
-                        client={projectTerminalClient}
-                        runs={agentRunClient}
-                        target={preparationTarget}
-                        onClose={() => setPreparationTarget(undefined)}
+                    {serverActionsProject === undefined ? null : (
+                      <ProjectActionButtons
+                        actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
+                        {...(serverActionsProject.folder === undefined
+                          ? {}
+                          : { mainFolder: serverActionsProject.folder })}
+                        defaultFolderLabel={
+                          activeMode === "work" ? "Task folder" : "Active server checkout"
+                        }
+                        onRun={(action, folder) =>
+                          void runProjectAction(serverActionsProject.projectId, action, folder)
+                        }
                       />
                     )}
-                  </OctantDialogPresence>
-                  {actionsProject === undefined ? null : (
-                    <ProjectActionButtons
-                      actions={activeProjectActions}
-                      {...(activeMode === "code" &&
-                      activeCodeThreadView !== undefined &&
-                      activeCodeThreadView.checkout.kind !== "remote-root" &&
-                      String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
-                        ? {
-                            onSetup: () => {
-                              const view = activeCodeThreadView;
-                              setPreparationTarget({
-                                projectId: actionsProject.id,
-                                thread: {
-                                  threadId: view.thread.id,
-                                  checkoutId: view.checkout.id,
-                                  ...(view.checkout.head.kind === "none"
-                                    ? {}
-                                    : { head: view.checkout.head.oid }),
-                                },
-                              });
-                            },
-                          }
-                        : {})}
-                      {...(activeMode === "code" &&
-                      activeCodeThreadView !== undefined &&
-                      String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
-                        ? { defaultFolderLabel: "Active checkout" }
-                        : {})}
-                      {...(actionsProject.type === "code"
-                        ? {
-                            mainFolder: actionsProject.binding.canonicalRoot,
-                            extraFolders: (actionsProject.extraFolders ?? []).map(
-                              (folder) => folder.canonicalRoot,
-                            ),
-                          }
-                        : {})}
-                      onRun={(action, folder) =>
-                        void runProjectAction(actionsProject.id, action, folder)
-                      }
-                    />
-                  )}
-                  {serverActionsProject === undefined ? null : (
-                    <ProjectActionButtons
-                      actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
-                      {...(serverActionsProject.folder === undefined
-                        ? {}
-                        : { mainFolder: serverActionsProject.folder })}
-                      defaultFolderLabel={
-                        activeMode === "work" ? "Task folder" : "Active server checkout"
-                      }
-                      onRun={(action, folder) =>
-                        void runProjectAction(serverActionsProject.projectId, action, folder)
-                      }
-                    />
-                  )}
-                  <NeedsYouProvider source={needsYouSource}>
-                    {/* Held here rather than with any Code pane: a thread's controller has to
+                    <NeedsYouProvider source={needsYouSource}>
+                      {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-                    <CodeThreadControllerSlots
-                      client={codeClient}
-                      navigationBootstrap={codeController.bootstrap}
-                      readCursorStore={codeReadCursorStore}
-                      registry={codeThreadControllers}
-                      threadIds={openCodeThreadIds}
-                    />
-                    <TrackerReferenceProvider ports={trackerReferencePorts}>
-                      <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                        <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                          <ProjectIconProvider
-                            serverUrl={props.launch.serverUrl}
-                            windowCapability={props.projectWindowCapability}
-                          >
-                            <ProjectThreadsProvider value={projectThreadsAccess}>
-                              <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                                <StreamRepliesContext.Provider
-                                  value={controller.settings?.streamReplies !== false}
-                                >
-                                  <ReplyDetailSourceContext.Provider value={replyDetailSource}>
-                                    <ReplyDetailContext.Provider
-                                      value={replyDetailSource.reading.defaultLevel}
-                                    >
-                                      {/* The floor for every rendered link: panes that can host a
+                      <CodeThreadControllerSlots
+                        client={codeClient}
+                        navigationBootstrap={codeController.bootstrap}
+                        readCursorStore={codeReadCursorStore}
+                        registry={codeThreadControllers}
+                        threadIds={openCodeThreadIds}
+                      />
+                      <TrackerReferenceProvider ports={trackerReferencePorts}>
+                        <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                          <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                            <ProjectIconProvider
+                              serverUrl={props.launch.serverUrl}
+                              windowCapability={props.projectWindowCapability}
+                            >
+                              <StableProjectThreadsProvider value={projectThreadsAccess}>
+                                <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                                  <StreamRepliesContext.Provider
+                                    value={controller.settings?.streamReplies !== false}
+                                  >
+                                    <ReplyDetailSourceContext.Provider value={replyDetailSource}>
+                                      <ReplyDetailContext.Provider
+                                        value={replyDetailSource.reading.defaultLevel}
+                                      >
+                                        {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                      <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                                        <WorkKindChoiceContext.Provider value={workKindChoice}>
-                                          <ModelToolVerificationContext.Provider
-                                            value={providerController.verifyModelTools}
-                                          >
-                                            <HostFederationStackContext.Provider value={federation}>
-                                              <PlanUsageProvider
-                                                barStyle={
-                                                  controller.settings?.usageBars ?? "smooth"
-                                                }
-                                                client={launchedClients.providerUsageLimitsClient}
-                                                instances={providerController.instances}
+                                        <MarkdownLinkActionsContext.Provider
+                                          value={rootLinkActions}
+                                        >
+                                          <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                            <ModelToolVerificationContext.Provider
+                                              value={providerController.verifyModelTools}
+                                            >
+                                              <HostFederationStackContext.Provider
+                                                value={federation}
                                               >
-                                                <HostPlatformContext.Provider value={hostPlatform}>
-                                                  <ServerCodeProjectsContext.Provider
-                                                    value={serverCodeProjects}
+                                                <PlanUsageProvider
+                                                  barStyle={
+                                                    controller.settings?.usageBars ?? "smooth"
+                                                  }
+                                                  client={launchedClients.providerUsageLimitsClient}
+                                                  instances={providerController.instances}
+                                                >
+                                                  <HostPlatformContext.Provider
+                                                    value={hostPlatform}
                                                   >
-                                                    <CodeDebugWindowProvider
-                                                      origin={
-                                                        new URL(props.launch.serverUrl).origin
-                                                      }
-                                                      windowId={String(props.launch.windowId)}
+                                                    <ServerCodeProjectsContext.Provider
+                                                      value={serverCodeProjects}
                                                     >
-                                                      <QuestionnaireDraftsProvider
-                                                        serverUrl={props.launch.serverUrl}
-                                                        windowId={props.launch.windowId}
+                                                      <CodeDebugWindowProvider
+                                                        origin={
+                                                          new URL(props.launch.serverUrl).origin
+                                                        }
+                                                        windowId={String(props.launch.windowId)}
                                                       >
-                                                        {shell}
-                                                      </QuestionnaireDraftsProvider>
-                                                    </CodeDebugWindowProvider>
-                                                  </ServerCodeProjectsContext.Provider>
-                                                </HostPlatformContext.Provider>
-                                              </PlanUsageProvider>
-                                            </HostFederationStackContext.Provider>
-                                          </ModelToolVerificationContext.Provider>
-                                        </WorkKindChoiceContext.Provider>
-                                      </MarkdownLinkActionsContext.Provider>
-                                    </ReplyDetailContext.Provider>
-                                  </ReplyDetailSourceContext.Provider>
-                                </StreamRepliesContext.Provider>
-                              </NewTaskDraftsContext.Provider>
-                            </ProjectThreadsProvider>
-                          </ProjectIconProvider>
-                        </SidebarThreadTabsContext.Provider>
-                      </SidebarThreadDragContext.Provider>
-                    </TrackerReferenceProvider>
-                  </NeedsYouProvider>
-                </OctantCommandProvider>
-              </SpeechCapabilityProvider>
-            </ThreadActivityRevisionsContext.Provider>
-          </ImageJobChangeRevisionContext.Provider>
+                                                        <QuestionnaireDraftsProvider
+                                                          serverUrl={props.launch.serverUrl}
+                                                          windowId={props.launch.windowId}
+                                                        >
+                                                          {shell}
+                                                        </QuestionnaireDraftsProvider>
+                                                      </CodeDebugWindowProvider>
+                                                    </ServerCodeProjectsContext.Provider>
+                                                  </HostPlatformContext.Provider>
+                                                </PlanUsageProvider>
+                                              </HostFederationStackContext.Provider>
+                                            </ModelToolVerificationContext.Provider>
+                                          </WorkKindChoiceContext.Provider>
+                                        </MarkdownLinkActionsContext.Provider>
+                                      </ReplyDetailContext.Provider>
+                                    </ReplyDetailSourceContext.Provider>
+                                  </StreamRepliesContext.Provider>
+                                </NewTaskDraftsContext.Provider>
+                              </StableProjectThreadsProvider>
+                            </ProjectIconProvider>
+                          </SidebarThreadTabsContext.Provider>
+                        </SidebarThreadDragContext.Provider>
+                      </TrackerReferenceProvider>
+                    </NeedsYouProvider>
+                  </OctantCommandProvider>
+                </SpeechCapabilityProvider>
+              </ThreadActivityRevisionsContext.Provider>
+            </ImageJobChangeRevisionContext.Provider>
+          </PluginThemesContext.Provider>
         </FirstPartyPluginsEffectiveContext.Provider>
       </GuardrailDefaultsContext.Provider>
     </AgentThreadAttributionProvider>
@@ -8631,4 +8718,30 @@ function focusLogicalOpener(opener: InspectorOpener): void {
       ? opener.element
       : document.querySelector<HTMLElement>(`[data-${opener.logicalTarget}-opener="true"]`);
   current?.focus();
+}
+
+/**
+ * The shell rebuilds `projectThreadsAccess` on every render, and the Project
+ * Overview below it re-rendered with each new object. This keeps the provided
+ * value's identity until the data it carries changes; callbacks are reached
+ * through a ref because the shell recreates them every render. It lives in its
+ * own component because the shell returns early while loading, so the hooks
+ * cannot sit there.
+ */
+function StableProjectThreadsProvider(props: {
+  readonly value: ProjectThreadsAccess;
+  readonly children: ReactNode;
+}) {
+  const latest = useRef(props.value);
+  latest.current = props.value;
+  const { status, errorMessage, threads } = props.value;
+  const value = useMemo<ProjectThreadsAccess>(
+    () => ({
+      ...latest.current,
+      onRetry: () => latest.current.onRetry?.(),
+      onSelectThread: (navigationId: string) => latest.current.onSelectThread(navigationId),
+    }),
+    [status, errorMessage, threads],
+  );
+  return <ProjectThreadsProvider value={value}>{props.children}</ProjectThreadsProvider>;
 }

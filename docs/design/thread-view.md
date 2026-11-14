@@ -186,7 +186,15 @@ arrive below. A Code fork's own messages come first; below them the row goes on
 into the messages it was forked from, at the fork point, and up the thread it
 came from, so a fork reads as one conversation. Coming back to a thread puts
 the reader back on the row they left when its loaded messages still start where
-they did, and at the end otherwise.
+they did, and at the end otherwise. While a reader is scrolled away from the
+end of a following transcript, a secondary **Jump to latest** button floats at
+the foot of the transcript; it returns to the end, resumes following, and goes
+away once the reader is back at the end.
+
+Find (⌘F, Ctrl+F) opens for the thread in the active pane, including while
+focus is still on the sidebar row that just chose it; the code editor and the
+terminal keep their own Find. Closing the find bar returns focus to what had it
+when Find opened, or to the transcript when that is gone.
 
 A jump to a Chat message that is not loaded, such as a search hit, shows the
 run of messages that ends with it in place of the newest ones, with the Load
@@ -546,7 +554,11 @@ silently clipped.
 
 A new-task composer keeps its identity while its Project binding changes.
 Message text and local input state reset only for an explicit New task action.
-A refused binding keeps the prior authorized Project and draft. Cross-Project
+A refused binding keeps the prior authorized Project and draft. A new Chat's
+first-run composer stages chosen or captured files as removable chips before the
+thread exists; they upload to the thread once it is created and leave with the
+first message, as a Work draft's images do, and the server's attachment checks
+apply to them unchanged. Cross-Project
 notices appear once beside the active draft composer, with a separate-window
 action when available, as one of the composer's notice cards above the box. A note that stays until
 the person acts is a card too; only a state its surface marks as passing is the
@@ -561,30 +573,39 @@ A panel a turn's menu opens inline (a checkpoint's name, the question before
 files are restored) takes focus once the menu has closed, the safe answer
 first, and hands focus back to that turn's More actions control when it ends.
 
-## Line notes on a turn's changes
-
-Designed, not built (maintainer decision, 2026-11-14). Opening a row of a
-turn's "N files changed while this ran" card shows that turn's recorded change
-for the file, and the person may leave a note on any line of it. Notes collect
-under the card as a pending list the person can edit or remove; **Send notes**
-sends them together as one follow-up turn in the same thread, each note naming
-its file, side and line from the turn's record. Nothing is sent until the
-person sends it, and a note never approves, resolves or reverts anything. A
-line the record cannot show (binary, purged, uncaptured, or past the record's
-path limit) says why it takes no note. The notes follow the same anchoring and
-provenance rules as the local notes in
-[Workspace: Captured Review](workspace.md#tool-lifecycles): an anchor never
-moves silently, and a note's quoted lines from the change are framed as
-evidence.
-
 ## Thread recap and notes
 
-Designed, not built (maintainer decision, 2026-11-14). A thread has a recap the
-person can open: a short summary of what the thread asked, did and left open,
-written on request by the thread's own model from the thread's transcript and
-shown with the turn it was written through, so a stale recap says so. The recap
-is read-only and goes to no provider other than the thread's own. Beside it the
-person may keep notes of their own on the thread; notes are the person's text,
-journaled on the thread, never sent to the agent unless the person attaches one
-to a message, and removed with the thread. Neither a recap nor a note changes
-the thread's authority, level or Done.
+A thread's Thread info panel has two rows after its others: **Recap** and
+**Notes** (maintainer decision, 2026-11-14), in Chat, Work and Code alike.
+
+The recap is read on request: opening the row asks the host, which reads the
+thread's newest transcript window through the owning mode's own reader under
+the same open authority as a mention or Side Chat (40 messages), and returns
+what was asked first and last, the latest reply, whether the person's last
+message still waits for one, how many asks and replies it read, and the time of
+the last message it read, so a recap opened before newer turns says how far it
+reaches. When older messages fell outside the window it says it read the newest
+only, and "Asked first" becomes "Earliest ask read". **Refresh** reads it again.
+It quotes the thread and adds nothing, is not stored, and changes nothing.
+
+Rationale: the recap is assembled by the host, not written by the thread's
+model. A model-written recap would either be a turn in the thread, which puts
+a request the person did not make into the transcript and the next turn's
+context, or a turn outside it, which has no path today that bills, accounts
+and refuses the way a thread turn does. A recap that only quotes the transcript
+costs nothing, sends nothing to any provider, and cannot claim more than the
+thread said. Files changed and open approvals stay in their own surfaces (the
+turn's changes, the Inbox) rather than a second copy here.
+
+Notes are the person's own text, each up to 4,000 characters and up to 100 a
+thread, kept on the host as journal events on the thread (`thread.note-added`,
+`thread.note-edited`, `thread.note-deleted`) and rebuilt from them at start.
+The person adds, edits and deletes them in the row. A note is never sent to the
+agent by itself: **Insert in message** puts its text after the composer's
+draft, and it goes only if the person sends that message. Only a person's
+actor writes a note: the host refuses one from a thread's agent or from the
+host itself, and a device paired for someone other than the host's person
+keeps no notes. Every note event names its thread, so purging the thread
+erases its notes with it; a deleted note leaves the panel at once and its
+journaled text goes with the thread. Neither a recap nor a note changes the
+thread's authority, level or Done.

@@ -264,7 +264,7 @@ describe("WorkspaceRailLayers", () => {
 
     // The thread names itself through the pane that holds it; the thread's own
     // body carries no title. CodeWorkspaceTab is also lazy, and its Suspense
-    // fallback is a ShellState heading titled with the tab name, so a heading
+    // fallback is an OctantEmpty state heading titled with the tab name, so a heading
     // probe would pass on the fallback before the chunk settled.
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();

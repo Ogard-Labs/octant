@@ -16,6 +16,8 @@ export interface ExtensionPopupShellWindow {
     addChildView(view: unknown): void;
     removeChildView(view: unknown): void;
   };
+  /** Calls the listener when the window moves or resizes; returns the unsubscribe. */
+  onMoveOrResize(listener: () => void): () => void;
 }
 
 /** One popup page's view, a native view loaded in the extension's profile session. */
@@ -78,8 +80,9 @@ const MAX_HEIGHT = 600;
  * profile's storage and no other. It is sandboxed, may not open windows, is
  * refused every permission, and cannot navigate away from its extension: this is
  * the extension's page, not a way for it to reach the web. At most one popup is
- * open per window, and opening another, pressing Escape, clicking outside, or the
- * window going away closes it. Only an extension the profile's session has
+ * open per window, and opening another, pressing Escape, clicking outside, focus
+ * leaving the popup, the window moving or resizing, or the window going away
+ * closes it. Only an extension the profile's session has
  * loaded can be shown, so a disabled or removed one has no page to open.
  */
 export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
@@ -89,6 +92,7 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
       readonly view: ExtensionPopupView;
       readonly window: ExtensionPopupShellWindow;
       readonly context: ExtensionPopupContext;
+      readonly stopWatchingWindow: () => void;
     }
   >();
 
@@ -96,6 +100,7 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
     const current = open.get(windowId);
     if (current === undefined) return;
     open.delete(windowId);
+    current.stopWatchingWindow();
     if (!current.window.isDestroyed())
       current.window.contentView.removeChildView(current.view.native);
     if (!current.view.webContents.isDestroyed()) current.view.webContents.close();
@@ -156,7 +161,17 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
           }
         },
       );
-      view.webContents.on("destroyed", () => open.delete(input.windowId));
+      // A popup is transient: once focus leaves it, or the window it is anchored
+      // in moves or resizes, its anchor no longer holds and it closes.
+      view.webContents.on("blur", () => {
+        if (open.get(input.windowId)?.view === view) close(input.windowId);
+      });
+      view.webContents.on("destroyed", () => {
+        const current = open.get(input.windowId);
+        if (current?.view !== view) return;
+        current.stopWatchingWindow();
+        open.delete(input.windowId);
+      });
       view.setBounds(clamp(input.bounds));
       input.window.contentView.addChildView(view.native);
       open.set(input.windowId, {
@@ -167,6 +182,9 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
           profile: input.profile,
           extensionId: input.extensionId,
         },
+        stopWatchingWindow: input.window.onMoveOrResize(() => {
+          if (open.get(input.windowId)?.view === view) close(input.windowId);
+        }),
       });
       try {
         await view.webContents.loadURL(url);

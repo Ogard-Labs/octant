@@ -43,7 +43,7 @@ describe("cloud job thread authority", () => {
     wireProviderCloudSessions({
       persistence: { readCodeThread: () => thread, readProviderInstances: () => [] } as never,
       codeProjectAccess: {
-        standingAuthority: (read: () => boolean) => read(),
+        standingAuthority: (_project: unknown, read: () => boolean) => read(),
         canAccessProject: () => true,
       } as never,
       codeSessionAuthority: { effectiveThread: () => ({ ...thread, executionPolicy }) } as never,

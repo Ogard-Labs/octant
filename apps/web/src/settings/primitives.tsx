@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { ChevronRight } from "lucide-react";
 import {
   createContext,
@@ -515,8 +516,10 @@ export function SettingsDisclosure(props: {
 }) {
   const variant = props.variant ?? "section";
   return (
-    <details
+    <OctantCollapsible
       {...(props.defaultOpen === true ? { open: true } : {})}
+      chevron={variant === "inline" ? "start" : "end"}
+      chevronSize={variant === "inline" ? 12 : 14}
       className={[
         "settings-disclosure",
         variant === "section" ? "settings-disclosure--section" : "settings-disclosure--inline",
@@ -524,18 +527,16 @@ export function SettingsDisclosure(props: {
       ]
         .filter(Boolean)
         .join(" ")}
-    >
-      <summary>
-        {variant === "inline" ? <ChevronRight aria-hidden="true" size={12} /> : null}
+      summary={
         <span className="settings-disclosure__label">
           <span>{props.title}</span>
           {props.description === undefined ? null : (
             <span className="settings-disclosure__description">{props.description}</span>
           )}
         </span>
-        {variant === "section" ? <ChevronRight aria-hidden="true" size={14} /> : null}
-      </summary>
+      }
+    >
       <div className="settings-disclosure__body">{props.children}</div>
-    </details>
+    </OctantCollapsible>
   );
 }

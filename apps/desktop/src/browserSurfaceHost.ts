@@ -172,7 +172,55 @@ export interface BrowserSurfaceShellWindowPort {
   };
   readonly isDestroyed: () => boolean;
   readonly isVisible?: () => boolean;
-  readonly webContents: { readonly send: (channel: string, payload: unknown) => void };
+  readonly webContents: {
+    readonly send: (channel: string, payload: unknown) => void;
+    readonly focus?: () => void;
+  };
+}
+
+/**
+ * The window shortcuts a focused page must not swallow, at their default
+ * chords: the command palette (⌘K), sidebar (⌘\), dock (⌘⇧J), and focusing the
+ * composer (Ctrl+Escape). ⌘ is Ctrl off macOS. Settings (⌘,) is an
+ * application-menu accelerator, which already fires while a page has focus.
+ * Zen's ⌘⇧Z is Redo, and the renderer leaves it to a focused text field; the
+ * page's fields keep it the same way.
+ */
+export function appShortcutOf(
+  input: unknown,
+  platform: NodeJS.Platform = process.platform,
+):
+  | {
+      readonly key: string;
+      readonly code: string;
+      readonly meta: boolean;
+      readonly control: boolean;
+      readonly shift: boolean;
+      readonly alt: boolean;
+    }
+  | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const value = input as Record<string, unknown>;
+  if (value.type !== "keyDown" || typeof value.key !== "string") return undefined;
+  const meta = value.meta === true;
+  const control = value.control === true;
+  const shift = value.shift === true;
+  const alt = value.alt === true;
+  const key = value.key.length === 1 ? value.key.toLowerCase() : value.key;
+  const primary = platform === "darwin" ? meta && !control : control && !meta;
+  const matches =
+    (key === "Escape" && control && !meta && !shift && !alt) ||
+    (primary && !alt && !shift && (key === "k" || key === "\\")) ||
+    (primary && !alt && shift && key === "j");
+  if (!matches) return undefined;
+  return {
+    key: value.key,
+    code: typeof value.code === "string" ? value.code : "",
+    meta,
+    control,
+    shift,
+    alt,
+  };
 }
 
 interface BrowserSurfaceSessionPort {
@@ -351,6 +399,23 @@ export interface BrowserSurfaceHostOptions {
   readonly clipboard?: { readonly writeText: (text: string) => void };
   readonly stateChannel?: string;
   readonly isOwnerWindowAvailable?: (windowId: string) => boolean;
+  /** When a background execution page with nothing in flight gives up its renderer. */
+  readonly hibernation?: { readonly idleMs?: number; readonly hotLimit?: number };
+}
+
+/**
+ * How long a background execution context may sit with nothing in flight
+ * before its pages give up their renderers, and how many such contexts stay
+ * live at once. See the Browser hibernation rule in the workspace specification.
+ */
+const HIBERNATE_IDLE_MS = 5 * 60_000;
+const HIBERNATE_HOT_LIMIT = 4;
+
+/** What a hibernated tab keeps so the page can be opened again where it was. */
+interface HibernatedTab {
+  readonly tabId: string;
+  readonly url: string;
+  readonly title: string;
 }
 
 /** One page of a context. Tabs share the context's session and its guards. */
@@ -386,6 +451,15 @@ interface OwnedSurface {
         readonly shellWindow: BrowserSurfaceShellWindowPort;
         readonly viewportBounds: { readonly width: number; readonly height: number };
         personInputs: number | undefined;
+        /**
+         * The armed page's own hover outline: one read in flight, whether one
+         * shows, and the debugger the outline attached, released with the selection.
+         */
+        highlight: {
+          reading: boolean;
+          shown: boolean;
+          attached: BrowserSurfaceViewPort["webContents"]["debugger"] | undefined;
+        };
       }
     | undefined;
   pointSelectionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -477,6 +551,14 @@ interface OwnedSurface {
    * click never opens a menu in front of the person.
    */
   lastHumanPress: number;
+  /** Queued or direct actions running on this context right now. */
+  inFlight: number;
+  /** When the last action on this context ended, for idle hibernation. */
+  lastUsedAt: number;
+  /** The tabs of a context whose renderers were given up, until it is used again. */
+  hibernated: ReadonlyArray<HibernatedTab> | undefined;
+  /** The reopening of a hibernated context, shared by callers that arrive together. */
+  waking: Promise<void> | undefined;
   /** The agent's recording of one tab, between `record-start` and `record-stop`. */
   recording?: SurfaceRecording | undefined;
 }
@@ -732,6 +814,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       await closeContext(contextId);
       for (const listener of goneListeners) listener(String(contextId));
     },
+    afterSweep: () => hibernateIdle(),
   });
   const embeddedOwner = (owner: BrowserSurfaceOwner) =>
     owner.kind !== "execution" && options.isEmbeddedOwner?.(owner.windowId) === true;
@@ -1105,7 +1188,85 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const clearPointSelection = (owned: OwnedSurface): void => {
     if (owned.pointSelectionTimer !== undefined) clearTimeout(owned.pointSelectionTimer);
     owned.pointSelectionTimer = undefined;
+    const ended = owned.pointSelection;
     owned.pointSelection = undefined;
+    const attached = ended?.highlight.attached;
+    // Detaching drops the outline with the attachment. It waits behind any
+    // surface action, so a read or agent step reusing it is never cut off.
+    if (attached !== undefined)
+      void queueSurfaceAction(owned, async () => {
+        if (owned.pointSelection?.highlight.attached !== attached) detachAgentDebugger(attached);
+      }).catch(() => undefined);
+    else if (ended?.highlight.shown === true) {
+      const client = owned.tabs.find((tab) => tab.tabId === ended.tabId)?.contents.debugger;
+      if (client?.isAttached() === true && agentDebuggers.has(client))
+        void client.sendCommand("Overlay.hideHighlight").catch(() => undefined);
+    }
+  };
+
+  // While pointing is armed the person sees which element a click would pick:
+  // the page's own inspector outline follows the pointer. It is drawn by the
+  // browser over the page, never injected into it, and only on a debugger the
+  // host holds; one someone else attached (developer tools) gets no outline.
+  // One read is in flight at a time, so a fast pointer costs at most one
+  // lookup per protocol round trip.
+  const highlightPointed = (
+    owned: OwnedSurface,
+    view: BrowserSurfaceViewPort,
+    x: number,
+    y: number,
+  ): void => {
+    const selection = owned.pointSelection;
+    const client = view.webContents.debugger;
+    if (
+      selection?.state.status !== "armed" ||
+      selection.highlight.reading ||
+      view.webContents.isDestroyed() ||
+      (client.isAttached() && !agentDebuggers.has(client))
+    )
+      return;
+    if (!client.isAttached()) {
+      try {
+        client.attach("1.3");
+      } catch {
+        return;
+      }
+      agentDebuggers.add(client);
+      selection.highlight.attached = client;
+    }
+    selection.highlight.reading = true;
+    const armed = () => owned.pointSelection === selection && selection.state.status === "armed";
+    void (async () => {
+      try {
+        await client.sendCommand("DOM.enable");
+        await client.sendCommand("Overlay.enable");
+        const hit = await client.sendCommand("DOM.getNodeForLocation", {
+          x: Math.floor(x),
+          y: Math.floor(y),
+          includeUserAgentShadowDOM: false,
+          ignorePointerEventsNone: false,
+        });
+        const backendNodeId =
+          typeof hit === "object" && hit !== null && "backendNodeId" in hit
+            ? hit.backendNodeId
+            : undefined;
+        if (!armed() || typeof backendNodeId !== "number") return;
+        await client.sendCommand("Overlay.highlightNode", {
+          backendNodeId,
+          highlightConfig: {
+            showInfo: true,
+            contentColor: { r: 64, g: 132, b: 255, a: 0.22 },
+            borderColor: { r: 64, g: 132, b: 255, a: 0.9 },
+          },
+        });
+        if (armed()) selection.highlight.shown = true;
+        else void client.sendCommand("Overlay.hideHighlight").catch(() => undefined);
+      } catch {
+        /* The outline is a courtesy; picking still works without it. */
+      } finally {
+        selection.highlight.reading = false;
+      }
+    })();
   };
 
   const surface = (contextId: string): OwnedSurface => {
@@ -1213,6 +1374,118 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (owned.activeTabId === tab.tabId && successor !== undefined) showTab(owned, successor);
     publish(contextId, owned);
   };
+
+  const hibernateIdleMs = options.hibernation?.idleMs ?? HIBERNATE_IDLE_MS;
+  const hibernateHotLimit = options.hibernation?.hotLimit ?? HIBERNATE_HOT_LIMIT;
+
+  /**
+   * Whether a context may give up its renderers now. Only a background
+   * execution context qualifies: it is never in a window, and its lease alone
+   * keeps it. Anything an agent or the person is in the middle of, or that
+   * holds the page between actions, keeps it live.
+   */
+  function mayHibernate(owned: OwnedSurface): boolean {
+    return (
+      owned.owner.kind === "execution" &&
+      persistentOwner.admits(owned.owner) &&
+      owned.hibernated === undefined &&
+      owned.waking === undefined &&
+      owned.inFlight === 0 &&
+      owned.control !== "agent" &&
+      owned.recording === undefined &&
+      owned.tabs.length > 0 &&
+      !scriptHolds.has(owned) &&
+      !ownerControls.holdsPage(owned)
+    );
+  }
+
+  /**
+   * Close a context's pages but keep the context: its session partition (and
+   * so its cookies and storage), its lease, its diagnostics, and each tab's id,
+   * address and title. The next action reopens them.
+   */
+  function hibernate(owned: OwnedSurface): void {
+    owned.hibernated = owned.tabs.map((tab) => ({
+      tabId: tab.tabId,
+      url: tab.contents.isDestroyed() ? "" : tab.contents.getURL(),
+      title: tab.contents.isDestroyed() ? "" : tab.contents.getTitle(),
+    }));
+    clearPointSelection(owned);
+    closeEditingMenu(owned);
+    owned.presentation.close();
+    // Emptied first so the pages' own destroyed reports find no tab to forget
+    // and do not end the context.
+    const closing = owned.tabs;
+    owned.tabs = [];
+    for (const tab of closing) {
+      tab.view.setVisible(false);
+      tab.releasePopups();
+      forgetWebContents(tab);
+      closeSurfaceView(tab.view, tab.contents);
+    }
+  }
+
+  /** Hibernate idle background contexts, then the least recently used past the cap. */
+  function hibernateIdle(): void {
+    const now = Date.now();
+    for (const owned of surfaces.values())
+      if (mayHibernate(owned) && now - owned.lastUsedAt >= hibernateIdleMs) hibernate(owned);
+    const hot = [...surfaces.values()].filter(
+      (owned) => owned.owner.kind === "execution" && owned.hibernated === undefined,
+    );
+    let excess = hot.length - hibernateHotLimit;
+    for (const owned of hot.sort((a, b) => a.lastUsedAt - b.lastUsedAt)) {
+      if (excess <= 0) break;
+      if (!mayHibernate(owned)) continue;
+      hibernate(owned);
+      excess -= 1;
+    }
+  }
+
+  /** Reopen a hibernated context's tabs at their last addresses before it is used. */
+  async function wake(contextId: BrowserContextId | string, owned: OwnedSurface): Promise<void> {
+    owned.lastUsedAt = Date.now();
+    if (owned.waking !== undefined) return owned.waking;
+    const sleeping = owned.hibernated;
+    if (sleeping === undefined) return;
+    owned.hibernated = undefined;
+    owned.waking = (async () => {
+      const reopened = sleeping.map((row) => ({
+        row,
+        tab: openTabView(contextId, owned, row.tabId),
+      }));
+      // The address passes the same navigation guard as any other load; one
+      // the policy no longer admits leaves that tab blank.
+      await Promise.all(
+        reopened.map(({ row, tab }) =>
+          row.url === "" || row.url === "about:blank"
+            ? tab.contents.loadURL("about:blank").catch(() => undefined)
+            : tab.contents.loadURL(row.url).catch(() => undefined),
+        ),
+      );
+    })().finally(() => {
+      owned.waking = undefined;
+      owned.lastUsedAt = Date.now();
+    });
+    await owned.waking;
+    hibernateIdle();
+  }
+
+  /** Run a direct (unqueued) read with the context awake and counted as in flight. */
+  async function awake<T>(
+    contextId: BrowserContextId | string,
+    owned: OwnedSurface,
+    read: () => Promise<T>,
+  ): Promise<T> {
+    owned.inFlight += 1;
+    try {
+      await wake(contextId, owned);
+      return await read();
+    } finally {
+      owned.inFlight -= 1;
+      owned.lastUsedAt = Date.now();
+    }
+  }
 
   /**
    * Open one more page inside a context, wired to that context's own guards.
@@ -1453,6 +1726,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         if (selection !== undefined && selection.expiresAt <= Date.now())
           clearPointSelection(owned);
         if (selection?.state.status === "armed" && owned.pointSelection === selection) {
+          if (
+            input.type === "mouseMove" &&
+            "x" in input &&
+            "y" in input &&
+            typeof input.x === "number" &&
+            typeof input.y === "number" &&
+            Number.isFinite(input.x) &&
+            Number.isFinite(input.y) &&
+            selection.tabId === tabId
+          )
+            highlightPointed(owned, view, input.x, input.y);
           if (input.type === "keyDown" && "key" in input && input.key === "Escape") {
             clearPointSelection(owned);
             prevent();
@@ -1489,6 +1773,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 point: { x: input.x / bounds.width, y: input.y / bounds.height },
               };
               selection.personInputs = owned.personInputs + 1;
+              // The outline must not be in the picture the read crops next.
+              if (selection.highlight.shown) {
+                selection.highlight.shown = false;
+                void view.webContents.debugger
+                  .sendCommand("Overlay.hideHighlight")
+                  .catch(() => undefined);
+              }
               owned.selectionRelease = {
                 tabId,
                 documentRevision: tab.documentRevision,
@@ -1530,6 +1821,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       publish(contextId, owned);
     };
     view.webContents.on("before-input-event", gateUserInput);
+    // App shortcuts belong to the window, not the page: with the page focused
+    // the renderer never sees them, so they are held back and handed to it.
+    view.webContents.on("before-input-event", (event: unknown, input?: unknown) => {
+      const chord = appShortcutOf(input);
+      if (chord === undefined || owned.shellWindow === undefined) return;
+      if (owned.shellWindow.isDestroyed()) return;
+      (event as { preventDefault?: () => void }).preventDefault?.();
+      owned.shellWindow.webContents.focus?.();
+      owned.shellWindow.webContents.send(DESKTOP_IPC_CHANNELS.browserAppShortcut, chord);
+    });
     view.webContents.on("before-mouse-event", gateUserInput);
     // Only Stable's hidden window for a native client presents through
     // human frames; its page popups have no visible window of their own.
@@ -2058,6 +2359,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           documentRevision: tab.documentRevision,
           expiresAt: Date.now() + 60_000,
           personInputs: undefined,
+          highlight: { reading: false, shown: false, attached: undefined },
           shellWindow: owned.shellWindow,
           viewportBounds: { width: owned.lastBounds.width, height: owned.lastBounds.height },
         };
@@ -2528,6 +2830,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       point: { readonly x: number; readonly y: number },
       signal: AbortSignal,
       selectionId: string,
+      withMarkup = false,
     ): Promise<BrowserFeedbackPointObservation> => {
       const owned = surface(contextId);
       let checkObservation: () => void;
@@ -2586,6 +2889,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               },
               point,
               captureSignal,
+              withMarkup,
             ),
           );
         } finally {
@@ -2664,13 +2968,15 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const checkObservation = observation(owned);
       // A field the host cannot reach, in a frame or out of one, counts as
       // sensitive: the check fails closed.
-      const result = await inTargetDocument(contentsView(owned), owned.policy, selector, (target) =>
-        target.run(`(() => {
+      const result = await awake(contextId, owned, () =>
+        inTargetDocument(contentsView(owned), owned.policy, selector, (target) =>
+          target.run(`(() => {
         const element = ${elementExpression(target.element)};
         if (!(element instanceof HTMLInputElement)) return false;
         const hint = [element.type, element.autocomplete, element.name, element.id].join(" ").toLowerCase();
         return element.type === "password" || /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token)/.test(hint);
       })()`),
+        ),
       ).catch(() => true);
       checkObservation();
       return { sensitive: result === true };
@@ -2688,6 +2994,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         throw new Error("Browser execution does not grant file transfers.");
       const checkObservation = observation(owned);
       return queueSurfaceAction(owned, async () => {
+        checkObservation();
+        throwIfAborted(signal);
+        await wake(contextId, owned);
         checkObservation();
         throwIfAborted(signal);
         // The check the server's poll cannot make in time: the person's key
@@ -3051,25 +3360,27 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     ): Promise<BrowserSurfaceRuntimeObservation> => {
       const owned = surface(contextId);
       const checkObservation = observation(owned);
-      const contents = contentsView(owned).webContents;
-      // A context that has not navigated yet has no document to inspect and
-      // no painted frame to capture; both probes below would never resolve.
-      if (contents.getURL() === "") return {};
-      const sensitiveDocument = await hasSensitiveDocument(
-        contentsView(owned),
-        owned.policy.credentialFieldProtection,
-      );
-      const screenshotDataUrl = sensitiveDocument
-        ? undefined
-        : await captureScreenshot(contentsView(owned));
-      checkObservation();
-      return {
-        ...(contents.getURL() === ""
-          ? {}
-          : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
-        ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
-        ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
-      };
+      return awake(contextId, owned, async () => {
+        const contents = contentsView(owned).webContents;
+        // A context that has not navigated yet has no document to inspect and
+        // no painted frame to capture; both probes below would never resolve.
+        if (contents.getURL() === "") return {};
+        const sensitiveDocument = await hasSensitiveDocument(
+          contentsView(owned),
+          owned.policy.credentialFieldProtection,
+        );
+        const screenshotDataUrl = sensitiveDocument
+          ? undefined
+          : await captureScreenshot(contentsView(owned));
+        checkObservation();
+        return {
+          ...(contents.getURL() === ""
+            ? {}
+            : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+          ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
+          ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
+        };
+      });
     },
     command: async (
       contextId: BrowserContextId | string,
@@ -3081,6 +3392,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         throw new Error("Octant Browser command does not own this context.");
       }
       await queueSurfaceAction(owned, async () => {
+        await wake(contextId, owned);
         owned.control = "user";
         const contents = contentsView(owned).webContents;
         if (command === "back" && contents.navigationHistory.canGoBack()) {
@@ -3105,6 +3417,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         throw new Error("Octant Browser tab command does not own this context.");
       }
       return queueSurfaceAction(owned, async () => {
+        await wake(contextId, owned);
         // Opening, selecting, and closing a tab are all the person acting on
         // their own view, so the surface is theirs to drive afterwards. It
         // grants no origin on its own: a new tab starts blank and reaches an
@@ -3436,6 +3749,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       personInputs: 0,
       snapshotPersonInputs: 0,
       lastHumanPress: 0,
+      inFlight: 0,
+      lastUsedAt: Date.now(),
+      hibernated: undefined,
+      waking: undefined,
     };
     openTabView(input.contextId, owned, firstTabId);
     surfaces.set(input.contextId, owned);
@@ -3484,10 +3801,13 @@ async function queueSurfaceAction<T>(
     release = resolve;
   });
   owned[lane] = previous.catch(() => undefined).then(() => completed);
-  await previous.catch(() => undefined);
+  owned.inFlight += 1;
   try {
+    await previous.catch(() => undefined);
     return await action();
   } finally {
+    owned.inFlight -= 1;
+    owned.lastUsedAt = Date.now();
     release();
   }
 }
@@ -3609,6 +3929,26 @@ function originOf(target: string): string | undefined {
 }
 
 function readState(contextId: string, owned: OwnedSurface): BrowserSurfaceState {
+  if (owned.hibernated !== undefined) {
+    // Read from what hibernation kept; reading state does not reopen a page.
+    const active = owned.hibernated.find((tab) => tab.tabId === owned.activeTabId);
+    return {
+      ...(owned.pointSelection === undefined ? {} : { pointSelection: owned.pointSelection.state }),
+      contextId,
+      url: (active?.url ?? "").slice(0, 4_096),
+      title: (active?.title ?? "").slice(0, 1_024),
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      control: owned.control,
+      tabs: owned.hibernated.map((tab) => ({
+        tabId: tab.tabId,
+        url: tab.url.slice(0, 4_096),
+        title: tab.title.slice(0, 1_024),
+      })),
+      activeTabId: owned.activeTabId,
+    };
+  }
   const contents = contentsView(owned).webContents;
   return {
     ...(owned.pointSelection === undefined ? {} : { pointSelection: owned.pointSelection.state }),

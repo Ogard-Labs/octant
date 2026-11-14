@@ -80,6 +80,7 @@ function harness(features: ReadonlyArray<string>, challengeAnswer?: Promise<void
     },
     setBounds: vi.fn(),
     setVisible: vi.fn(),
+    focus: vi.fn(),
   };
   const fetch = vi.fn(async (url: URL | string) =>
     String(url).endsWith("/code-operation-approval-challenges")

@@ -66,6 +66,7 @@ export function watchSurfaceFrameTargets(
   listen: (listener: SurfaceProtocolListener) => () => void,
 ): SurfaceFrameTargets {
   const frames = new Map<string, AttachedFrame>();
+  const autoAttached = new Map<string, Promise<void>>();
   const stop = listen((_event, method, params) => {
     const announced = (params ?? {}) as {
       readonly sessionId?: unknown;
@@ -78,6 +79,9 @@ export function watchSurfaceFrameTargets(
           frames.delete(targetId);
         }
       }
+      // A frame session's own auto-attach request is keyed by its session;
+      // without this, cross-site frame churn kept one entry per frame ever entered.
+      if (typeof announced.sessionId === "string") autoAttached.delete(announced.sessionId);
       return;
     }
     if (
@@ -91,7 +95,7 @@ export function watchSurfaceFrameTargets(
       });
     }
   });
-  return { frames, autoAttached: new Map(), stop };
+  return { frames, autoAttached, stop };
 }
 
 export function surfaceFrames(options: {
@@ -156,11 +160,15 @@ export function surfaceFrames(options: {
         `(${resolveBrowserElement.toString()})(${scriptString(selector)})`,
       );
       if (owner === undefined) return { status: "excluded" };
-      const described = (await options.send(
-        "DOM.describeNode",
-        { objectId: owner },
-        parent.sessionId,
-      )) as { readonly node?: { readonly frameId?: unknown } };
+      // The evaluated element is held by the page until released, and with it
+      // the frame element's whole subtree, for as long as the document lives.
+      const described = (await options
+        .send("DOM.describeNode", { objectId: owner }, parent.sessionId)
+        .finally(() =>
+          options
+            .send("Runtime.releaseObject", { objectId: owner }, parent.sessionId)
+            .catch(() => undefined),
+        )) as { readonly node?: { readonly frameId?: unknown } };
       const frameId = described.node?.frameId;
       if (typeof frameId !== "string") return { status: "excluded" };
       const tree = (await options.send(

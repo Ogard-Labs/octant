@@ -15,6 +15,7 @@ import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField, type OctantSelectOption } from "../../ui/base/OctantSelect";
 import { formatCanvasValue } from "../canvasRuntime";
 import { PathLabel } from "./ReferenceBlocks";
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 
 type TableBlockShape = Extract<CanvasBlock, { readonly kind: "table" }>;
 type ColumnId = CanvasTableColumn["id"];
@@ -539,8 +540,7 @@ export function TableBlock({
             }
           />
         )}
-        <details className="canvas-block__table-columns">
-          <summary>Columns</summary>
+        <OctantCollapsible className="canvas-block__table-columns" summary="Columns">
           <ul>
             {columnViews.map(({ column }) => {
               const shown = !hidden.has(column.id);
@@ -570,7 +570,7 @@ export function TableBlock({
               );
             })}
           </ul>
-        </details>
+        </OctantCollapsible>
       </div>
       <div
         aria-label="Table data"

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_TERMINAL_TRANSCRIPT_BYTES, TerminalService } from "./terminalService";
+import {
+  MAX_RETAINED_ENDED_TERMINALS,
+  MAX_TERMINAL_TRANSCRIPT_BYTES,
+  TerminalService,
+} from "./terminalService";
 
 describe("TerminalService", () => {
   it("refuses a command when its authority is revoked during credential resolution", async () => {
@@ -219,6 +223,73 @@ describe("TerminalService", () => {
     expect(service.attach("terminal-1").transcript.chunks.join("")).toBe("[REDACTED]");
     expect(process.pause).toHaveBeenCalledTimes(2);
     expect(process.resume).toHaveBeenCalledTimes(2);
+  });
+
+  it("redacts a credential split one character per callback after a large transcript", async () => {
+    const process = fakeProcess();
+    const service = new TerminalService({
+      port: { start: () => process },
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "private-token" },
+    });
+    await service.launch({
+      terminalId: "terminal-1",
+      shell: "/bin/zsh",
+      cwd: "/repo",
+      stateScope: "repo_test",
+      columns: 80,
+      rows: 24,
+      credentialReferences: [{ environmentName: "TOKEN", reference: "one" }],
+    });
+    const observer = vi.fn();
+    service.observe("terminal-1", observer, { windowMs: 0 });
+
+    process.emitData("x".repeat(200_000));
+    for (const character of "private-tok") process.emitData(character);
+    process.emitData("enprivate-");
+    process.emitData("token done");
+
+    const transcript = service.attach("terminal-1").transcript.chunks.join("");
+    expect(transcript).toBe(`${"x".repeat(200_000)}[REDACTED][REDACTED] done`);
+    const published = observer.mock.calls.map((call) => String(call[0].text)).join("");
+    expect(published).not.toContain("private-to");
+    expect(published).toBe(transcript);
+  });
+
+  it("forgets the oldest ended terminals nobody observes past the retention bound", async () => {
+    const processes: Array<ReturnType<typeof fakeProcess>> = [];
+    const launching = new TerminalService({
+      port: {
+        start: () => {
+          const process = fakeProcess();
+          processes.push(process);
+          return process;
+        },
+      },
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "" },
+    });
+    for (let index = 0; index <= MAX_RETAINED_ENDED_TERMINALS + 1; index += 1) {
+      await launching.launch({
+        terminalId: `terminal-${index}`,
+        shell: "/bin/zsh",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [],
+      });
+    }
+    const stopObserving = launching.observe("terminal-0", () => undefined);
+    for (const process of processes) process.emitExit({ exitCode: 0 });
+
+    // The observed terminal stays however old it is; the oldest unobserved one goes.
+    expect(launching.attach("terminal-0").status).toBe("exited");
+    expect(() => launching.attach("terminal-1")).toThrow("Terminal does not exist.");
+    expect(launching.attach("terminal-2").status).toBe("exited");
+    stopObserving();
+    expect(() => launching.attach("terminal-0")).toThrow("Terminal does not exist.");
+    expect(launching.attach(`terminal-${MAX_RETAINED_ENDED_TERMINALS + 1}`).status).toBe("exited");
   });
 
   it("echoes the first output of a quiet terminal without waiting for the coalescing window", async () => {

@@ -260,6 +260,7 @@
       "dependencies": {
         "@octant/contracts": "workspace:*",
         "@octant/plugin-api": "workspace:*",
+        "@octant/theme": "workspace:*",
         "yaml": "catalog:",
       },
       "devDependencies": {

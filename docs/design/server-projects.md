@@ -17,9 +17,13 @@ on the server; a thread's own worktree on the server and its pull request
 sidebar, composer, and thread view that open them; and Work Projects there,
 whose Work threads run on the Octant Harness with file tools and commands on
 the server, with the Work sidebar, composer, and thread view that open them
-([Work Projects](#work-projects)); and person-operated loopback dev-server
-previews ([Previews](#person-operated-dev-server-previews)). Remaining items
-are under [Not built yet](#not-built-yet).
+([Work Projects](#work-projects)); routines that target a server Project,
+run by this host's scheduler ([Routines](#routines)); person-operated
+loopback dev-server previews ([Previews](#person-operated-dev-server-previews));
+and the seam and host lifecycle for machines in the person's own cloud
+account, with no target plugin yet
+([Machines in the person's cloud account](#machines-in-the-persons-cloud-account)).
+Remaining items are under [Not built yet](#not-built-yet).
 
 ## Outcome
 
@@ -209,7 +213,8 @@ checks never change registry/configuration or journal state.
   inference stays on this host and whose hands are on the server. Every other
   runtime is refused before it launches, naming why: its own tools act on this
   host's files. Delegation, Browser, Computer, connectors, and forks are not
-  offered there, since each acts on this host.
+  offered there, since each acts on this host. The routine tools are offered,
+  since they act only on this host's routine records ([Routines](#routines)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as
   it does locally: Plan is read-only, Guarded asks for every command and edit,
@@ -388,7 +393,10 @@ checks never change registry/configuration or journal state.
   on this host.
 - **Windows.** A window binds a server Project with no folder of this host
   (`boundRoot: null`), so Files, Browser, and every root-backed surface fail
-  closed, and a server thread opens only its own view.
+  closed, and a server thread opens only its own view. A server Project's
+  thread can also sit in its own pane beside a local Project's, under the same
+  rule: its pane's context has no bound root, and its terminal is reached only
+  while a visible pane shows it.
 - **Checkpoints.** A turn on a server takes no checkpoint, so restoring
   files is not offered there and Rewind to here rewinds the conversation
   only, saying why; Git on the server is the way back for files.
@@ -414,8 +422,9 @@ checks never change registry/configuration or journal state.
   same access levels and approvals, every command asking again below Full
   access, every command journaled as `shield-remote-commands.ran@1`, and no
   delegation. No tool of this host is offered: no Browser, Computer, side
-  task, routine, Canvas, or extension, and a turn that selects an extension
-  is refused. Nothing watches the folder for written files, and the Project's
+  task, Canvas, or extension, and a turn that selects an extension is
+  refused. The routine tools are the exception, since they act only on this
+  host's routine records ([Routines](#routines)). Nothing watches the folder for written files, and the Project's
   status file and extra folders are not read, since each is a folder of this
   host. A turn that cannot bind (a removed server, a runtime other than the
   Octant Harness) is refused before it starts, and a call that cannot reach
@@ -447,6 +456,45 @@ checks never change registry/configuration or journal state.
   that it shows names and sizes only. The person's server Project terminal opens
   only from the bound Settings row above; the general dock tools still have no
   server Work form.
+
+### Routines
+
+A Code or Work routine may target a server Project (maintainer decision,
+2026-11-14). This host's scheduler runs it, and its turn runs in the Project
+exactly as a person-started turn there would: on the Octant Harness, over the
+Project's connection, under the same levels, approvals, and journal.
+
+- **Revalidation.** Every occurrence revalidates the routine against the server
+  catalog, as a local routine's revalidates against the local one. A server
+  Project's binding has no revisions: it is the one the Project derives from
+  its id, server, and folder (a Code routine binds the Project's own folder
+  checkout, a Work routine its derived Work binding), so a folder bound again
+  is a new Project and never matches. The occurrence is refused, and the
+  routine paused, with a reason naming the cause when the person removed the
+  Project (`project-mismatch`), when its server left the registry
+  (`binding-mismatch`), or when its mode or binding no longer matches; host,
+  profile, provider, model, and authority are revalidated as for any routine.
+- **Reaching the server.** A run's first act is on the server, before any
+  thread is created: a Code run reads the branch the Project's folder has
+  checked out there, which its own worktree starts from; a Work run checks the
+  folder answers. A server that cannot be reached, or a folder that is gone,
+  fails that run with a reason naming the server, creates no thread, and runs
+  nothing anywhere; the routine stays enabled for its next occurrence.
+- **Threads.** A Code run makes its own worktree on the server
+  ([Worktrees and pull requests](#worktrees-and-pull-requests)); a Work run's
+  thread works in the Project's folder ([Work Projects](#work-projects)). The
+  run's level is chosen as for a local routine; with no Project level on a
+  server Project, an opted-in routine takes the account default.
+- **Routine tools.** A server Project's turns are offered the routine tools a
+  local turn has (propose a routine, list and read the Project's routines, ask
+  to pause or archive the thread's own, report a run's result), since they act
+  only on this host's routine records. A proposal confirmed from a server
+  thread binds the Project, never the thread's worktree.
+- **Who sees them.** Automation lists and changes a server Project's routines
+  for the host's own person, the principals that may read the server catalog;
+  a restricted device reaches none.
+- **File triggers** watch a folder of this host, so a file routine cannot
+  target a server Project and is refused there.
 
 ### Panels
 
@@ -580,45 +628,109 @@ checks never change registry/configuration or journal state.
   Settings row above, which also offers a saved-action presentation switch; a
   general Developer tools pane remains absent.
 - Extra folders in a server Project.
+- Choosing a server Project in Automation Center's routine editor: it lists
+  local Projects only, so a server Project's routine is made by confirming a
+  proposal from one of its threads. Its routines are listed and managed there
+  once made.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,
   commands, terminals, the Git tab, the Review tool's history, Files, Tests
   and worktrees were exercised against a throwaway local `sshd` only, and
-  pull requests against a stand-in for `gh`, never GitHub. The connection and
+  pull requests against a stand-in for `gh`, never GitHub. Routines there were
+  exercised against fakes of the connection only. The connection and
   file tools also ran against a throwaway Linux container's `sshd` with bash,
   dash, zsh, fish 3.6, tcsh, and csh as login shells. Linux hosts are likewise
   untested; the connection uses only `ssh` options both platforms share.
-- Routines on a server Project (maintainer decision, 2026-11-14). Today a
-  routine cannot target one: the routine dispatcher revalidates its Project
-  against this host's local catalog only, where a server Project's id reads as
-  missing (`project-mismatch`), and a turn here is offered no routine tool
-  ([Work Projects](#work-projects)). The design: a routine bound to a server
-  Project is run by this host's scheduler, revalidates the binding and the
-  registered server at every occurrence, and starts an ordinary thread here
-  whose commands run on the server through the Project's connection, under
-  the same rules as a person-started thread. An unreachable server blocks the
-  occurrence and runs nothing anywhere.
 
 ## Machines in the person's cloud account
 
-Designed, not built (maintainer decision, 2026-11-14). Octant may create a
-machine in the person's own cloud account and bind it as a server Project, as
-a [delivery target the person owns](../architecture.md#modes-chat-work-and-code).
+Partly built (maintainer decision, 2026-11-14). Octant may create a machine in
+the person's own cloud account and bind it as a server Project, as a
+[delivery target the person owns](../architecture.md#modes-chat-work-and-code).
+Octant operates no hosted machines of its own; an Octant-operated hosted
+service stays out of scope
+([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-- The cloud credential is a reference held by the credential broker; Octant
-  never stores or journals its value, and the machine's SSH key is made for
-  it and registered as a server like any other.
-- Creating, suspending, resuming, and deleting the machine are the person's
-  acts at a local window or a device the host's own person paired, each
-  journaled; an agent or routine may not create or delete one. A suspended
-  machine's Project stays listed and refuses turns with a named reason until
-  the person resumes it.
-- The person's account pays for the machine; Octant shows the provider's
-  reported state and never claims a cost it did not read.
-- Octant operates no hosted machines of its own; an Octant-operated hosted
-  service stays out of scope
-  ([Current Release Boundary](../architecture.md#current-release-boundary)).
+- **A target is a plugin.** A cloud machine target is a plugin contribution
+  (component kind `cloud-machine-target`, `@octant/plugin-api/cloud-machine-target`)
+  that creates a machine from a recipe (the provider's image, size and region
+  names, and an optional setup script of at most 16 KiB), describes it,
+  suspends, resumes and destroys it, and reports the SSH endpoint (a host name
+  or address and a login, port 22) the server Project connection uses. The
+  plugin host offers a target only once its plugin is installed, trusted and
+  enabled, read again at every act, and withholds every target that shares an
+  id (`@octant/plugin-host/cloud-machine-targets`). A target is never offered
+  to a thread in any mode, and no stored package may run one until a launch
+  class confines a process that needs a cloud provider's network.
+- **Credentials stay in the broker.** The cloud credential is a credential
+  broker reference. For each act the host resolves it to a handle scoped to
+  that target and act; the target names the handle and never sees the value.
+  The journal records the reference, never a value or a handle.
+- **Every act is the person's.** Creating, binding, refreshing, suspending,
+  resuming and destroying are the person's acts at a local window
+  (`/api/cloud-machines`). An agent and a routine are refused `needs-person`
+  before any target or broker is asked. The design also lets a device the
+  host's own person paired act; not built yet, it is refused
+  `needs-local-window`, as binding a server Project still is.
+- **Destroy asks once.** Destroying is irreversible and ends what the
+  person's account pays for, so it needs a confirmation the host issues for
+  exactly that machine (`request-cloud-machine-destroy`). The confirmation is
+  single-use, expires after five minutes, and is spent by any attempt that
+  carries it; a confirmation for one machine never destroys another.
+- **Journal.** Each machine is its own `cloud-machines` aggregate:
+  `creation-requested@1` is journaled before the provider is asked, so a
+  machine the person pays for always has a record; then `created@1` with the
+  provider's decoded answer, or `creation-ended@1` as `refused` (the target
+  asserts nothing was created) or `uncertain` (no answer, or one that did not
+  decode: a machine may exist, and the person is told to check their
+  account). `project-bound@1`, `state-changed@1` (suspend, resume, a destroy
+  the provider is still finishing, or a refresh) and `destroyed@1` follow.
+  The machines are rebuilt from the journal at startup.
+- **In-between states are reconciled, never gated on.** A provider may accept
+  an act and finish it later, answering `suspending`, `resuming` or
+  `destroying` (or `provisioning`, `unknown`). Before a suspend or resume on a
+  machine journaled in such a state, the host asks the target to describe it
+  and journals the answer, then decides; the person may also refresh a
+  machine (`refresh-cloud-machine`). A machine is recorded destroyed only when
+  its provider reports it destroyed or no longer has it; one still
+  `destroying` stays live, counts against the limit of 32 live machines, and
+  is refreshed until it is gone.
+- **The list is bounded.** The view lists every live machine (at most 32)
+  and only the 16 most recent destroyed machines and refused creations; older
+  settled ones stay in the journal.
+- **Binding.** A created machine's endpoint is registered as a server
+  (Read-only profile, the person's SSH agent), or the person's existing
+  registration at the same address and login is reused, and the Project is
+  bound through the catalog's own folder check. A refused binding leaves the
+  machine created and on record; the person binds again
+  (`bind-cloud-machine-project`) or destroys it. Destroying leaves the Project
+  and server registration for the person to remove.
+- **State on the Project.** The server Project catalog shows the machine
+  behind a Project and the state its provider last reported (`cloudMachine`
+  on the catalog entry). Octant never claims a state or a cost it did not
+  read.
+
+_Rationale:_ creation is journaled first because the failure that matters is
+a paid machine nobody knows about; a refused or uncertain creation still
+lists the machine. Destroy's confirmation is host-issued and bound to one
+machine, rather than a flag in the request, so a replayed or forged request
+cannot stand in for the person's answer.
+
+**Not built yet** (next slice):
+
+- The first real target plugin for one cloud provider, with the launch class
+  that confines it, its credential broker namespace and the person's
+  credential setup, and pinning the machine's provider-reported host key so
+  the strict host check accepts a new machine without a manual first login.
+- A key Octant makes for each machine (`octant-key` sign-in), installed at
+  creation.
+- A suspended machine's Project refusing turns with a named reason until the
+  person resumes it (today its calls fail closed as `server-unreachable`), and
+  waking a suspended machine when the person opens its Project.
+- The provider's reported cost, shown only when the provider reports it.
+- The Settings and Project interface, which stays absent until a target
+  plugin exists.
 
 ## Person-operated dev-server previews
 

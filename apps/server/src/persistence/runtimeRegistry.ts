@@ -309,6 +309,15 @@ import {
   ServerWorkDeveloperToolsChangedPayload,
 } from "@octant/contracts/server-projects";
 import {
+  CLOUD_MACHINES_EVENT_NAMES,
+  CloudMachineCreatedPayload,
+  CloudMachineCreationEndedPayload,
+  CloudMachineCreationRequestedPayload,
+  CloudMachineDestroyedPayload,
+  CloudMachineProjectBoundPayload,
+  CloudMachineStateChangedPayload,
+} from "@octant/contracts/cloud-machines";
+import {
   RUNTIME_NETWORK_EVENT_NAMES,
   RuntimeNetworkDecisionsRecordedPayload,
   RuntimeNetworkLaunchStartedPayload,
@@ -442,6 +451,7 @@ import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerToolEffectEvents } from "../toolEffects/toolEffectLedger";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
+import { registerThreadNoteEvents } from "../threadNotes/threadNotes";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasChoiceAnswerEvents } from "../canvas/canvasChoiceAnswerService";
 import { registerCanvasCommentEvents } from "../canvas/canvasCommentService";
@@ -450,6 +460,7 @@ import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
 import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareService";
 import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
+import { registerTodoEvents } from "../todos/todoStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
@@ -683,6 +694,12 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       ServerWorkDeveloperToolsChangedPayload,
     )
+    .register(CLOUD_MACHINES_EVENT_NAMES.creationRequested, 1, CloudMachineCreationRequestedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.created, 1, CloudMachineCreatedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.creationEnded, 1, CloudMachineCreationEndedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.projectBound, 1, CloudMachineProjectBoundPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.stateChanged, 1, CloudMachineStateChangedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.destroyed, 1, CloudMachineDestroyedPayload)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SHIELD_FORGE_CHANGE_EVENT_NAMES.observed, 1, ShieldForgeChangeObservedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
@@ -853,6 +870,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasPublicShareEvents(events);
   registerProtectedFilesEvents(events);
   registerPersonMemoryEvents(events);
+  registerTodoEvents(events);
   registerCanvasExportFolderEvents(events);
   registerCanvasNetworkAccessEvents(events);
   registerCanvasOutsideContentEvents(events);
@@ -870,6 +888,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerThreadMoveEvents(events);
   registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
+  registerThreadNoteEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
   registerProviderCloudSessionEvents(events);

@@ -410,9 +410,10 @@ export interface CodeOperationRuntimeOptions {
     readonly currentProjectAccess?: CodeOperationAuthorityPort["currentProjectAccess"];
     /**
      * Runs `run` on the window's standing authority: its persisted binding,
-     * judged when each check inside runs, never a request's admission.
+     * judged when each check inside runs, never a request's admission, and
+     * reaching only the turn's own Project.
      */
-    readonly standingAuthority: <T>(run: () => T) => T;
+    readonly standingAuthority: <T>(turnProjectId: CodeThread["projectId"], run: () => T) => T;
     readonly retainProjectAccess?: CodeOperationAuthorityPort["retainProjectAccess"];
   };
   readonly resolveCheckoutRoot: CodeOperationAuthorityPort["resolveCheckoutRoot"];
@@ -661,6 +662,19 @@ export interface CodeOperationRuntimeOptions {
       summary: string,
       signal?: AbortSignal,
     ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+  }) => AppManagedToolSet | undefined;
+  /**
+   * Tool sets a server Project's turn is offered beside its server tools.
+   * Each acts only on this host's own records (a routine card, the routine
+   * list), never on a folder or device of this host, which a server turn
+   * must not reach.
+   */
+  readonly serverTurnTools?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly readThread: () => CodeThread | undefined;
+    /** The routine run this turn was started for, from the dispatcher only. */
+    readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
   /** Lets the model author a Canvas bound to this thread's checkout. */
   readonly canvas?: (input: {
@@ -5120,11 +5134,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   #appManagedTools(active: ActiveTurn): AppManagedToolSet | undefined {
     if (active.serverTools !== undefined) {
-      // The turn's whole tool set: every other set reads or acts on a folder
-      // or a device of this host. The runner closes it when the turn ends.
-      const tools = active.serverTools;
+      // The server tools and the few sets that touch only this host's
+      // records: every other set reads or acts on a folder or a device of
+      // this host. The runner closes them when the turn ends.
+      const tools = combineAppManagedToolSets(
+        active.serverTools,
+        this.#options.serverTurnTools?.({
+          windowId: active.windowId,
+          thread: active.thread,
+          readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
+          ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
+        }),
+      );
       const standing = this.#options.windowAccess.standingAuthority;
-      return { ...tools, execute: (input) => standing(() => tools.execute(input)) };
+      return {
+        ...tools,
+        execute: (input) => standing(active.thread.projectId, () => tools.execute(input)),
+      };
     }
     const supportsAppManagedTools = this.#options.supportsAppManagedTools?.(active.thread) === true;
     const supportsAcpClientCapabilities =
@@ -5415,7 +5441,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // never on any request's admission.
     const tools = combineAppManagedToolSets(...sets);
     const standing = this.#options.windowAccess.standingAuthority;
-    return { ...tools, execute: (input) => standing(() => tools.execute(input)) };
+    return {
+      ...tools,
+      execute: (input) => standing(active.thread.projectId, () => tools.execute(input)),
+    };
   }
 
   #owned(thread: CodeThread, checkoutRoot: string): ActiveTurn | undefined {
@@ -6239,7 +6268,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   ): Promise<(() => boolean) | undefined> {
     const accessCurrent = this.#options.windowAccess.currentProjectAccess;
     if (!current() || accessCurrent === undefined) return undefined;
-    return this.#options.windowAccess.standingAuthority(async () => {
+    return this.#options.windowAccess.standingAuthority(active.thread.projectId, async () => {
       if (
         !(await this.#options.windowAccess.canAccessProject(
           active.windowId,

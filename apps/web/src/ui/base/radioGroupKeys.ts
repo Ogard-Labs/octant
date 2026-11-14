@@ -15,9 +15,23 @@ const STEP: Readonly<Record<string, 1 | -1>> = {
  * the choices stay ordinary buttons for pointer and assistive technology.
  */
 export function moveWithinRadioGroup(event: KeyboardEvent<HTMLElement>): void {
+  moveWithinRole(event, "radio");
+}
+
+/**
+ * The same movement for a bespoke `role="tablist"`: arrows, Home and End move
+ * focus between its `role="tab"` buttons and select the one reached. Pair it
+ * with a roving tabIndex (0 on the selected tab, -1 on the rest) so Tab
+ * arrives once and leaves to the controls after the list.
+ */
+export function moveWithinTabList(event: KeyboardEvent<HTMLElement>): void {
+  moveWithinRole(event, "tab");
+}
+
+function moveWithinRole(event: KeyboardEvent<HTMLElement>, role: "radio" | "tab"): void {
   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
   const radios = Array.from(
-    event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]'),
+    event.currentTarget.querySelectorAll<HTMLElement>(`[role="${role}"]`),
   ).filter((radio) => !radio.matches(':disabled, [aria-disabled="true"]'));
   const at = radios.findIndex((radio) => radio === document.activeElement);
   if (at === -1) return;

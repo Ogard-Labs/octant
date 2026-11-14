@@ -19,8 +19,10 @@
     "./computer-use": "./src/computerUsePlugin.ts",
     "./browser-use": "./src/browserUsePlugin.ts",
     "./replica-store": "./src/replicaStoreActivation.ts",
+    "./cloud-machine-targets": "./src/cloudMachineTargets.ts",
     "./first-party-plugins": "./src/firstPartyPlugins.ts",
-    "./code-tools": "./src/codeTools.ts"
+    "./code-tools": "./src/codeTools.ts",
+    "./themes": "./src/themeContributions.ts"
   },
   "scripts": {
     "fmt": "oxfmt",
@@ -32,6 +34,7 @@
   "dependencies": {
     "@octant/contracts": "workspace:*",
     "@octant/plugin-api": "workspace:*",
+    "@octant/theme": "workspace:*",
     "yaml": "catalog:"
   },
   "devDependencies": {

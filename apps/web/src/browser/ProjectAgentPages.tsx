@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import type { ProjectAgentPage, ProjectBrowserMode } from "@octant/contracts/project-browser";
@@ -45,10 +46,10 @@ export function useProjectAgentPages(input: {
           if (!controller.signal.aborted) setPages([]);
         });
     void load();
-    const timer = globalThis.setInterval(() => void load(), LIST_INTERVAL_MS);
+    const stopRefresh = scheduleVisibleInterval(() => void load(), LIST_INTERVAL_MS);
     return () => {
       controller.abort();
-      globalThis.clearInterval(timer);
+      stopRefresh();
     };
   }, [client, enabled, mode, projectId]);
   return pages;
@@ -141,10 +142,10 @@ export function ProjectAgentPageView(props: ProjectAgentPageViewProps) {
         })
         .catch(() => undefined);
     void load();
-    const timer = globalThis.setInterval(() => void load(), PICTURE_INTERVAL_MS);
+    const stopRefresh = scheduleVisibleInterval(() => void load(), PICTURE_INTERVAL_MS);
     return () => {
       controller.abort();
-      globalThis.clearInterval(timer);
+      stopRefresh();
     };
   }, [client, page.signedIn, page.threadId]);
 

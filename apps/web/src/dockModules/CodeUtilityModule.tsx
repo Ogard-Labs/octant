@@ -1,8 +1,8 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { Suspense } from "react";
 import { autoReviewFor } from "../code/autoReview";
 import { decodeCodeThreadId, decodeWorkspaceTab, type WorkspaceTab } from "@octant/contracts";
 import CodeWorkspaceTab from "../code/CodeWorkspaceTab";
-import { ShellState } from "../shell/ShellState";
 import { unavailable, loading } from "./moduleState";
 import { dockTabIds, workspaceDockTabId } from "./workspaceDockTab";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
@@ -58,7 +58,7 @@ export function CodeUtilityModule(
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   return (
     <Suspense
-      fallback={<ShellState state="loading" title={`Loading ${surfaceLabel(props.surface)}`} />}
+      fallback={<OctantEmpty state="loading" title={`Loading ${surfaceLabel(props.surface)}`} />}
     >
       <CodeWorkspaceTab
         {...(props.appleToolchainClient === undefined
