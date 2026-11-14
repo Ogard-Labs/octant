@@ -4364,10 +4364,10 @@ function LaunchedShell(
   function moveDockTile(tabId: string, direction: DockTileMove) {
     changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
   }
-  function resizeDockTileColumns(shares: ReadonlyArray<number>) {
   function placeDockTile(tabId: string, targetTabId: string, edge: DockTileEdge) {
     changeDockTiles((state) => placeUtilityTile(state, tabId, targetTabId, edge));
   }
+  function resizeDockTileColumns(shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumns(state, shares));
   }
   function resizeDockTileColumn(columnIndex: number, shares: ReadonlyArray<number>) {
@@ -5390,8 +5390,8 @@ function LaunchedShell(
       restoreDockTool,
       minimiseDockTool,
       moveDockTile,
-      openDockTabBeside,
       placeDockTile,
+      openDockTabBeside,
       resizeDockTileColumn,
       resizeDockTileColumns,
       showDockTabAlone,
