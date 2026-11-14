@@ -14,7 +14,16 @@ export interface GuidedTourStep {
   readonly targets: ReadonlyArray<string>;
   /** Where the card prefers to sit beside the control, tried in order. */
   readonly sides: ReadonlyArray<"right" | "below" | "above" | "left">;
+  /**
+   * Beside a control, where the card's edge lines up with it: "start" puts the
+   * card's top level with the ring, for a control at the top of a tall column;
+   * the default centres the card on the control.
+   */
+  readonly align?: "start" | "center";
 }
+
+/** How far the ring stands off the control it surrounds. */
+export const TOUR_RING_PAD = 4;
 
 export const GUIDED_TOUR_STEPS: ReadonlyArray<GuidedTourStep> = [
   {
@@ -30,8 +39,15 @@ export const GUIDED_TOUR_STEPS: ReadonlyArray<GuidedTourStep> = [
     topic: "Projects",
     title: "Projects keep work together",
     body: "Each Project holds its threads, files and settings in one place.",
-    targets: ['nav[aria-label="Projects"]', 'button[aria-label="Projects"]'],
+    // The row of controls at the top of the Projects list, not the whole
+    // panel, which is as tall as the window and leaves nothing to point at.
+    targets: [
+      'nav[aria-label="Projects"] > .project-nav__toolbar',
+      'nav[aria-label="Projects"] h2',
+      'button[aria-label="Projects"]',
+    ],
     sides: ["right", "below"],
+    align: "start",
   },
   {
     id: "tools",
@@ -106,7 +122,12 @@ export function placeTourCard(
   card: { readonly width: number; readonly height: number },
   viewport: { readonly width: number; readonly height: number },
   sides: GuidedTourStep["sides"],
+  align: NonNullable<GuidedTourStep["align"]> = "center",
 ): TourCardPlacement {
+  const sideTop =
+    align === "start"
+      ? target.top - TOUR_RING_PAD
+      : target.top + target.height / 2 - card.height / 2;
   const clampX = (value: number) =>
     Math.max(MARGIN, Math.min(value, viewport.width - card.width - MARGIN));
   const clampY = (value: number) =>
@@ -116,14 +137,14 @@ export function placeTourCard(
       room: viewport.width - (target.left + target.width) - GAP - MARGIN - card.width,
       at: () => ({
         left: target.left + target.width + GAP,
-        top: clampY(target.top + target.height / 2 - card.height / 2),
+        top: clampY(sideTop),
       }),
     },
     left: {
       room: target.left - GAP - MARGIN - card.width,
       at: () => ({
         left: target.left - GAP - card.width,
-        top: clampY(target.top + target.height / 2 - card.height / 2),
+        top: clampY(sideTop),
       }),
     },
     below: {

@@ -26,7 +26,9 @@ function Window(props: GuidedTourProps & { readonly withTools?: boolean }) {
   return (
     <>
       <button aria-label="New chat" ref={placed(box(240, 8, 28, 28))} type="button" />
-      <nav aria-label="Projects" ref={placed(box(52, 56, 312, 600))} />
+      <nav aria-label="Projects" ref={placed(box(52, 56, 312, 600))}>
+        <div className="project-nav__toolbar" ref={placed(box(52, 56, 312, 32))} />
+      </nav>
       {withTools ? (
         <div aria-label="Tools" ref={placed(box(700, 4, 196, 36))} role="toolbar" />
       ) : null}
@@ -90,6 +92,31 @@ describe("GuidedTour", () => {
     expect(readGuidedTourRecord()).toBe("seen");
     rerender(<Window blocked={false} firstRunStatus="completed" />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("rings the row of Project controls and sets the card beside it, level with the ring", () => {
+    render(<Window blocked={false} firstRunStatus="completed" />);
+    act(() => openGuidedTour());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(label()).toBe("2 of 4 · Projects");
+
+    const ring = document.querySelector<HTMLElement>(".guided-tour__ring");
+    const card = screen.getByRole("dialog", { name: "Projects keep work together" });
+    // The ring stands 4px off the 312x32 row, not off the 600px-tall panel.
+    expect(ring?.style.top).toBe("52px");
+    expect(ring?.style.height).toBe("40px");
+    // The card sits right of the sidebar with its top on the ring's top.
+    expect(card.style.left).toBe("378px");
+    expect(card.style.top).toBe("52px");
+  });
+
+  it("keeps the card centred on the control for the other steps", () => {
+    render(<Window blocked={false} firstRunStatus="completed" />);
+    act(() => openGuidedTour());
+    const card = screen.getByRole("dialog", { name: "Start work in a new thread" });
+    // Below the 28px New chat button, centred on it (a card with no measured width sits at its centre).
+    expect(card.style.top).toBe("50px");
+    expect(card.style.left).toBe("254px");
   });
 
   it("includes the Tools step when its buttons are drawn", () => {

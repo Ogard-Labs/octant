@@ -25,6 +25,7 @@ import {
   findTourTarget,
   GUIDED_TOUR_STEPS,
   placeTourCard,
+  TOUR_RING_PAD,
   type GuidedTourStep,
 } from "./guidedTourSteps";
 import "./guided-tour.css";
@@ -214,6 +215,7 @@ function GuidedTourSurface() {
       { width: element.offsetWidth, height: element.offsetHeight },
       { width: window.innerWidth, height: window.innerHeight },
       active.step.sides,
+      active.step.align,
     );
     setPlacement((before) =>
       before !== undefined && before.left === spot.left && before.top === spot.top ? before : spot,
@@ -349,7 +351,7 @@ function ringStyle(
 ): { left: number; top: number; width: number; height: number; borderRadius: number } | undefined {
   if (rect === undefined) return undefined;
   const radius = Number.parseFloat(getComputedStyle(element).borderTopLeftRadius);
-  const pad = 4;
+  const pad = TOUR_RING_PAD;
   return {
     left: rect.left - pad,
     top: rect.top - pad,
