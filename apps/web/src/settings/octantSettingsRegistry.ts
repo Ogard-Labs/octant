@@ -285,6 +285,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "color colour scheme system light dark theme mode preset octant palette",
         },
         {
+          id: settingId("appearance.custom"),
+          label: "Custom theme",
+          scope: "app",
+          keywords:
+            "custom theme preset ground ink accent contrast soft standard firm colours seeds",
+        },
+        {
+          id: settingId("appearance.density"),
+          label: "Density",
+          scope: "app",
+          keywords: "density compact comfortable rows spacing room tight",
+        },
+        {
+          id: settingId("appearance.typography.smoothing"),
+          label: "Smooth text",
+          scope: "app",
+          keywords: "smooth text smoothing antialiasing grayscale font rendering mac",
+        },
+        {
           id: settingId("appearance.scheme.style"),
           label: "Style",
           scope: "app",

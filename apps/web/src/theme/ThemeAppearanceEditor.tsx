@@ -1,4 +1,13 @@
-import type { ThemeSettings, ThemeStyle } from "@octant/contracts/theme";
+import {
+  CUSTOM_THEME_PRESET_ID,
+  decodeThemeHexColor,
+  type ThemeCustomContrast,
+  type ThemeCustomSeeds,
+  type ThemeDensity,
+  type ThemeSettings,
+  type ThemeStyle,
+} from "@octant/contracts/theme";
+import { customThemeTokens } from "@octant/theme/custom-preset";
 import { THEME_PRESETS } from "@octant/theme";
 import { ChevronDown } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
@@ -64,6 +73,8 @@ export function ThemeAppearanceEditor(props: {
     );
   }
   const shownAccent = currentAccentSwatch(draft);
+  const shownDensity: ThemeDensity = draft.density ?? "comfortable";
+  const smoothText = draft.fontSmoothing !== "off";
   const setTypography = (surface: "ui" | "editor" | "terminal", patch: Record<string, unknown>) => {
     void theme.applyPatch({
       typography: {
@@ -142,9 +153,12 @@ export function ThemeAppearanceEditor(props: {
               aria-label="Light preset"
               className="settings-view__select"
               onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
-              options={availablePresets
-                .filter((preset) => preset.supportedModes.includes("light"))
-                .map((preset) => ({ id: preset.id, label: preset.displayName }))}
+              options={[
+                ...availablePresets
+                  .filter((preset) => preset.supportedModes.includes("light"))
+                  .map((preset) => ({ id: preset.id, label: preset.displayName })),
+                { id: CUSTOM_THEME_PRESET_ID, label: "Custom" },
+              ]}
               value={draft.lightPresetId ?? "system"}
             />
           </SettingRow>
@@ -158,11 +172,50 @@ export function ThemeAppearanceEditor(props: {
               aria-label="Dark preset"
               className="settings-view__select"
               onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
-              options={availablePresets
-                .filter((preset) => preset.supportedModes.includes("dark"))
-                .map((preset) => ({ id: preset.id, label: preset.displayName }))}
+              options={[
+                ...availablePresets
+                  .filter((preset) => preset.supportedModes.includes("dark"))
+                  .map((preset) => ({ id: preset.id, label: preset.displayName })),
+                { id: CUSTOM_THEME_PRESET_ID, label: "Custom" },
+              ]}
               value={draft.darkPresetId ?? "system"}
             />
+          </SettingRow>
+          {draft.lightPresetId === CUSTOM_THEME_PRESET_ID ? (
+            <CustomSeedsEditor
+              focusedSetting={focusedSetting}
+              mode="light"
+              onChange={(seeds) => void theme.applyPatch({ customThemeLight: seeds })}
+              seeds={draft.customThemeLight}
+            />
+          ) : null}
+          {draft.darkPresetId === CUSTOM_THEME_PRESET_ID ? (
+            <CustomSeedsEditor
+              focusedSetting={focusedSetting}
+              mode="dark"
+              onChange={(seeds) => void theme.applyPatch({ customThemeDark: seeds })}
+              seeds={draft.customThemeDark}
+            />
+          ) : null}
+          <SettingRow
+            description="Comfortable is the default. Compact takes less room: shorter navigation and Settings rows, a narrower thread gutter, and a tighter prompt."
+            focused={focusedSetting === "appearance.density"}
+            label="Density"
+            scope="app"
+            settingId="appearance.density"
+          >
+            <OctantToggleGroup<ThemeDensity>
+              aria-label="Density"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected === undefined || selected === shownDensity) return;
+                void theme.applyPatch({ density: selected });
+              }}
+              value={[shownDensity]}
+            >
+              <OctantToggleGroupItem value="comfortable">Comfortable</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="compact">Compact</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
           <SettingRow
             description="Colour gives Octant an accent, status hues, and coloured tiles, board marks, and Project accents. Mono keeps everything grey."
@@ -252,6 +305,23 @@ export function ThemeAppearanceEditor(props: {
             onChange={(patch) => setTypography("ui", patch)}
             hideLegend
           />
+          {runsOnMac() ? (
+            <SettingRow
+              description="Grayscale smoothing draws thinner, calmer text, as a Mac's own apps do."
+              focused={focusedSetting === "appearance.typography.smoothing"}
+              label="Smooth text"
+              scope="app"
+              settingId="appearance.typography.smoothing"
+            >
+              <OctantSwitch
+                checked={smoothText}
+                label="Smooth text"
+                onCheckedChange={(value) =>
+                  void theme.applyPatch({ fontSmoothing: value ? "on" : "off" })
+                }
+              />
+            </SettingRow>
+          ) : null}
           <SettingsDisclosure
             title="Code typography"
             defaultOpen={focusedSetting?.startsWith("appearance.typography.editor.") === true}
@@ -351,6 +421,111 @@ export function ThemeAppearanceEditor(props: {
         </div>
       </details>
     </div>
+  );
+}
+
+/** Smoothing is a macOS rendering choice; the switch is hidden on any other system. */
+function runsOnMac(): boolean {
+  return typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
+}
+
+const DEFAULT_CUSTOM_SEEDS: Readonly<Record<"light" | "dark", ThemeCustomSeeds>> = {
+  light: {
+    ground: decodeThemeHexColor("#f4f4f2"),
+    ink: decodeThemeHexColor("#1c1c1e"),
+    accent: decodeThemeHexColor("#1f6f96"),
+    contrast: "standard",
+  },
+  dark: {
+    ground: decodeThemeHexColor("#161616"),
+    ink: decodeThemeHexColor("#ececec"),
+    accent: decodeThemeHexColor("#6aa9d6"),
+    contrast: "standard",
+  },
+};
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * The seeds of the Custom preset for one mode: Ground, Ink, Accent and a
+ * Contrast step. Seeds that cannot keep a text role readable are refused with
+ * the failing role named, and the saved seeds stay where they were.
+ */
+function CustomSeedsEditor(props: {
+  readonly mode: "light" | "dark";
+  readonly seeds: ThemeCustomSeeds | undefined;
+  readonly onChange: (seeds: ThemeCustomSeeds) => void;
+  readonly focusedSetting?: string | undefined;
+}) {
+  const seeds = props.seeds ?? DEFAULT_CUSTOM_SEEDS[props.mode];
+  const [refusal, setRefusal] = useState<string | undefined>(undefined);
+  const modeLabel = props.mode === "light" ? "Light" : "Dark";
+  const commit = (next: ThemeCustomSeeds) => {
+    const result = customThemeTokens(next, props.mode);
+    if (result.status === "refused") {
+      setRefusal(`${result.role} would not stay readable with those colours.`);
+      return;
+    }
+    setRefusal(undefined);
+    props.onChange(next);
+  };
+  const colour = (field: "ground" | "ink" | "accent", label: string) => (
+    <SettingRow
+      focused={props.focusedSetting === `appearance.custom.${props.mode}.${field}`}
+      label={`${modeLabel} ${label}`}
+      scope="app"
+      settingId={`appearance.custom.${props.mode}.${field}`}
+    >
+      <OctantInput
+        aria-label={`${modeLabel} ${label} colour`}
+        className="settings-view__select"
+        defaultValue={String(seeds[field])}
+        key={String(seeds[field])}
+        maxLength={7}
+        onBlur={(event) => {
+          const value = event.currentTarget.value.trim();
+          if (!HEX_COLOR.test(value)) {
+            setRefusal(`${label} needs a six-digit colour such as #1b1d23.`);
+            return;
+          }
+          commit({ ...seeds, [field]: decodeThemeHexColor(value) });
+        }}
+        spellCheck={false}
+      />
+    </SettingRow>
+  );
+  return (
+    <>
+      {colour("ground", "ground")}
+      {colour("ink", "ink")}
+      {colour("accent", "accent")}
+      <SettingRow
+        description="Soft, Standard or Firm moves every derived wash and edge one step each way."
+        focused={props.focusedSetting === `appearance.custom.${props.mode}.contrast`}
+        label={`${modeLabel} contrast`}
+        scope="app"
+        settingId={`appearance.custom.${props.mode}.contrast`}
+      >
+        <OctantToggleGroup<ThemeCustomContrast>
+          aria-label={`${modeLabel} contrast`}
+          onValueChange={(value) => {
+            const selected = value[0];
+            if (selected === undefined || selected === seeds.contrast) return;
+            commit({ ...seeds, contrast: selected });
+          }}
+          value={[seeds.contrast]}
+        >
+          <OctantToggleGroupItem value="soft">Soft</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="standard">Standard</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="firm">Firm</OctantToggleGroupItem>
+        </OctantToggleGroup>
+      </SettingRow>
+      {refusal === undefined ? null : (
+        <OctantAlert className="settings-view__error" tone="danger">
+          {refusal}
+        </OctantAlert>
+      )}
+    </>
   );
 }
 

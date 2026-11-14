@@ -107,6 +107,41 @@ describe("ThemeSettingsProvider", () => {
     expect(root.dataset.octantGlassThin).toBeUndefined();
   });
 
+  it("publishes density, text smoothing and the custom contrast step for the stylesheets", () => {
+    const result = render(
+      <ThemeSettingsProvider
+        settings={{
+          ...DEFAULT_THEME_SETTINGS,
+          mode: "dark",
+          density: "compact",
+          fontSmoothing: "off",
+          darkPresetId: "custom" as never,
+          customThemeDark: {
+            ground: "#1b1d23",
+            ink: "#f2f2f4",
+            accent: "#7aa2ff",
+            contrast: "firm",
+          } as never,
+        }}
+      >
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    const root = document.documentElement;
+    expect(root.dataset.octantDensity).toBe("compact");
+    expect(root.dataset.octantFontSmoothing).toBe("off");
+    expect(root.style.getPropertyValue("--oct-contrast-scale")).toBe("1.5");
+    result.rerender(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    expect(root.dataset.octantDensity).toBe("comfortable");
+    expect(root.dataset.octantFontSmoothing).toBe("on");
+    expect(root.style.getPropertyValue("--oct-contrast-scale")).toBe("");
+    result.unmount();
+  });
+
   it("publishes accessibility state on the data-octant-* attributes the stylesheets read", () => {
     const result = render(
       <ThemeSettingsProvider

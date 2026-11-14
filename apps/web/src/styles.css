@@ -266,9 +266,9 @@ html[data-octant-theme-mode="light"] {
    keeps the frosted float, which works over its opaque page. Declared after the
    dark and light blocks so it wins in both. */
 html[data-octant-host-vibrancy="active"]:not(
-    [data-octant-reduced-transparency="true"],
-    [data-octant-increased-contrast="true"]
-  ) {
+  [data-octant-reduced-transparency="true"],
+  [data-octant-increased-contrast="true"]
+) {
   --octant-float-glass: color-mix(in srgb, var(--octant-float) 96%, transparent);
   --octant-float-blur: none;
 }

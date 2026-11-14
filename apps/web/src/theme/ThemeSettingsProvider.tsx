@@ -1,4 +1,5 @@
 import {
+  CUSTOM_THEME_PRESET_ID,
   GLASS_TINT_DEFAULTS,
   GLASS_TINT_FLOOR,
   GLASS_TINT_SECONDARY_FLOOR,
@@ -10,6 +11,7 @@ import {
   resolveEditorColorProjection,
   type EditorColorProjection,
 } from "@octant/theme/editor-colors";
+import { CUSTOM_CONTRAST_SCALE } from "@octant/theme/custom-preset";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
 import {
   DEFAULT_TERMINAL_COLORS,
@@ -213,6 +215,22 @@ export function ThemeSettingsProvider(props: {
       const thin = thinGlassLevels(resolved.mode, accessible.glassTint);
       if (thin === "") delete root.dataset.octantGlassThin;
       else root.dataset.octantGlassThin = thin;
+      // Density and smoothing are plain attributes the stylesheets read; the
+      // contrast step scales the derived washes only for a Custom preset.
+      root.dataset.octantDensity = accessible.density ?? "comfortable";
+      root.dataset.octantFontSmoothing = accessible.fontSmoothing === "off" ? "off" : "on";
+      const customId =
+        resolved.mode === "light" ? accessible.lightPresetId : accessible.darkPresetId;
+      const customSeeds =
+        resolved.mode === "light" ? accessible.customThemeLight : accessible.customThemeDark;
+      if (customId === CUSTOM_THEME_PRESET_ID && customSeeds !== undefined) {
+        root.style.setProperty(
+          "--oct-contrast-scale",
+          String(CUSTOM_CONTRAST_SCALE[customSeeds.contrast]),
+        );
+      } else {
+        root.style.removeProperty("--oct-contrast-scale");
+      }
       if (rememberMode) rememberThemeMode(accessible.mode);
       root.dataset.octantReducedMotion = String(accessible.reducedMotion);
       root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
@@ -247,6 +265,9 @@ export function ThemeSettingsProvider(props: {
       root.style.removeProperty("--octant-workspace-translucent-strong");
       delete root.dataset.octantThemeMode;
       delete root.dataset.octantGlassThin;
+      delete root.dataset.octantDensity;
+      delete root.dataset.octantFontSmoothing;
+      root.style.removeProperty("--oct-contrast-scale");
       delete root.dataset.octantReducedMotion;
       delete root.dataset.octantReducedTransparency;
       delete root.dataset.octantStyle;

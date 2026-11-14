@@ -367,9 +367,7 @@ describe("the public-block visual language", () => {
     }
     // The line is a share of the ink, so it shows on a near-black preset and
     // on a glass tint alike, and the strong border under increased contrast.
-    expect(shell).toMatch(
-      /\.shell\.shell-frame \{ --octant-pane-line: var\(--oct-hairline\)/,
-    );
+    expect(shell).toMatch(/\.shell\.shell-frame \{ --octant-pane-line: var\(--oct-hairline\)/);
     expect(panel('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
       /--octant-pane-line:\s*var\(--octant-border-strong\)/,
     );

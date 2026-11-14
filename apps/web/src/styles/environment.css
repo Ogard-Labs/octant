@@ -137,7 +137,7 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 44px;
+  min-height: var(--environment-row-h, 44px);
   align-items: center;
   justify-content: flex-start;
   gap: var(--oct-space-2);
@@ -334,7 +334,7 @@
   width: 100%;
   min-width: 0;
   height: auto;
-  min-height: 44px;
+  min-height: var(--environment-row-h, 44px);
   align-items: center;
   justify-content: flex-start;
   gap: var(--oct-space-2);
@@ -760,7 +760,7 @@ html[data-octant-increased-contrast="true"] .environment-card__rows {
 }
 
 .environment-move__row {
-  min-height: 44px;
+  min-height: var(--environment-row-h, 44px);
   padding: var(--oct-space-2) var(--environment-row-inset);
 }
 

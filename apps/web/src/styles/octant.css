@@ -6883,10 +6883,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
    filter keep the ordinary opaque paints. */
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   @media (prefers-reduced-transparency: no-preference) {
-    html:not(
-        [data-octant-reduced-transparency="true"],
-        [data-octant-increased-contrast="true"]
-      )
+    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--app-backdrop:not(.shell--material-translucent)
       :is(.turn-user .bubble, .composer:not(.composer--carded)) {
       border-color: var(--oct-glass-stroke);
@@ -6895,19 +6892,13 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
     }
-    html:not(
-        [data-octant-reduced-transparency="true"],
-        [data-octant-increased-contrast="true"]
-      )
+    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--app-backdrop:not(.shell--material-translucent)
       .composer:not(.composer--carded) {
       box-shadow: none;
     }
     /* Over a ground the box is the glass surface: floor, thick tint, blur. */
-    html:not(
-        [data-octant-reduced-transparency="true"],
-        [data-octant-increased-contrast="true"]
-      )
+    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--app-backdrop:not(.shell--material-translucent)
       .thread-composer__surface {
       background-color: var(--oct-glass-floor);
@@ -6916,20 +6907,14 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
     }
     /* Under window glass: washes, no blur. */
-    html:not(
-        [data-octant-reduced-transparency="true"],
-        [data-octant-increased-contrast="true"]
-      )
+    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--material-translucent
       :is(.thread-composer__surface, .composer:not(.composer--carded)) {
       background: var(--octant-control);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
     }
-    html:not(
-        [data-octant-reduced-transparency="true"],
-        [data-octant-increased-contrast="true"]
-      )
+    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--material-translucent
       :is(.turn-user .bubble, .callout.composer-notice) {
       background: var(--octant-card);
@@ -6938,10 +6923,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
     }
     /* The notice card above the box over a ground on an opaque window is the
        same glass: an opaque callout beside a translucent box read as a block. */
-    html:not(
-        [data-octant-reduced-transparency="true"],
-        [data-octant-increased-contrast="true"]
-      )
+    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--app-backdrop:not(.shell--material-translucent)
       .callout.composer-notice {
       border-color: var(--oct-glass-stroke);
@@ -6950,20 +6932,14 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
     }
-    html:not(
-        [data-octant-reduced-transparency="true"],
-        [data-octant-increased-contrast="true"]
-      )
+    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--app-backdrop:not(.shell--material-translucent)
       .callout.composer-notice[data-tone="warning"] {
       background-image:
         linear-gradient(var(--oct-warn-soft), var(--oct-warn-soft)),
         linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
     }
-    html:not(
-        [data-octant-reduced-transparency="true"],
-        [data-octant-increased-contrast="true"]
-      )
+    html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
       .shell--app-backdrop:not(.shell--material-translucent)
       .callout.composer-notice[data-tone="danger"] {
       background-image:

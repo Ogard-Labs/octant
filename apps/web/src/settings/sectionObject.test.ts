@@ -38,7 +38,7 @@ describe("a settings section", () => {
     // The edge is one hairline outline, drawn inside the box so it takes no
     // room, where a border put every row's 16px inset at 17px from the edge.
     expect(card).toMatch(/border:\s*0;/);
-    expect(card).toMatch(/outline:\s*1px solid var\(--oct-border\)/);
+    expect(card).toMatch(/outline:\s*1px solid var\(--oct-hairline\)/);
     expect(card).toMatch(/outline-offset:\s*-1px/);
     expect(card).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
     expect(card).not.toMatch(/box-shadow/);

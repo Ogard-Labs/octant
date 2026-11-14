@@ -351,16 +351,50 @@ const PLAIN_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({ k
 export const ThemeStyle = Schema.Literal("default", "vivid", "mono");
 export type ThemeStyle = typeof ThemeStyle.Type;
 
+/** How firmly the derived washes and edges draw: one step each way from standard. */
+export const ThemeCustomContrast = Schema.Literal("soft", "standard", "firm");
+export type ThemeCustomContrast = typeof ThemeCustomContrast.Type;
+
+/**
+ * The seeds a Custom preset is built from for one mode: the ground (the page
+ * colour), the ink (the text colour), an accent, and a contrast step. Every
+ * other role is derived from them.
+ */
+export const ThemeCustomSeeds = Schema.Struct({
+  ground: ThemeHexColor,
+  ink: ThemeHexColor,
+  accent: ThemeHexColor,
+  contrast: ThemeCustomContrast,
+}).annotations(strict);
+export type ThemeCustomSeeds = typeof ThemeCustomSeeds.Type;
+
+/** The id the preset pickers use for the preset built from the seeds. */
+export const CUSTOM_THEME_PRESET_ID = "custom";
+
 export const ThemeSettings = Schema.Struct({
   mode: ThemeMode,
   lightPresetId: Schema.optional(ThemePresetId),
   darkPresetId: Schema.optional(ThemePresetId),
-  // Retired: nothing ever read these four. They stay optional so journal
+  /**
+   * How much room rows and gutters take. Absent reads as comfortable. Optional
+   * so rows written before the control existed still decode.
+   */
+  density: Schema.optional(ThemeDensity),
+  /**
+   * Seeds for the Custom preset, per mode. Optional so older rows decode; the
+   * Custom preset resolves only for a mode that has them.
+   */
+  customThemeLight: Schema.optional(ThemeCustomSeeds),
+  customThemeDark: Schema.optional(ThemeCustomSeeds),
+  /**
+   * Grayscale text smoothing on a Mac: "auto" and "on" smooth, "off" leaves the
+   * system default. Absent reads as "auto". Optional so old rows decode.
+   */
+  fontSmoothing: Schema.optional(ThemeFontSmoothing),
+  // Retired: nothing ever read these two. They stay optional so journal
   // events and projection rows written while they existed still replay, and
   // new settings no longer carry them.
-  density: Schema.optional(ThemeDensity),
   translucency: Schema.optional(ThemeTranslucency),
-  fontSmoothing: Schema.optional(ThemeFontSmoothing),
   timestampFormat: Schema.optional(ThemeTimestampFormat),
   typography: ThemeTypography,
   semanticOverrides: ThemeSemanticOverrides,

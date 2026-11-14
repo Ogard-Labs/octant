@@ -63,14 +63,46 @@
      one ground; below a certain surface it turns darker than the thing
      it borders. Hairlines are drawn as inset rings rather than borders
      so they never take part in layout or fight overflow clipping. */
-  --oct-fill-1: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
-  --oct-fill-2: color-mix(in oklab, var(--octant-text-primary) 8%, transparent);
-  --oct-fill-3: color-mix(in oklab, var(--octant-text-primary) 6%, transparent);
-  --oct-fill-4: color-mix(in oklab, var(--octant-text-primary) 4%, transparent);
-  --oct-wash-hover: color-mix(in oklab, var(--octant-text-primary) 3%, transparent);
-  --oct-wash-selected: color-mix(in oklab, var(--octant-text-primary) 4%, transparent);
-  --oct-hairline: color-mix(in oklab, var(--octant-text-primary) 10%, transparent);
-  --oct-hairline-strong: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
+  --oct-fill-1: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(14% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-2: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(8% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-3: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(6% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-fill-4: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(4% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-wash-hover: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(3% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-wash-selected: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(4% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-hairline: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(10% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
+  --oct-hairline-strong: color-mix(
+    in oklab,
+    var(--octant-text-primary) calc(14% * var(--oct-contrast-scale, 1)),
+    transparent
+  );
 
   /* ─── motion ────────────────────────────────────────────────────────
      Colour settles faster than geometry, so hover feels immediate while
@@ -244,4 +276,29 @@ html:not([data-octant-reduced-transparency="true"])
   .octant-switch[data-unchecked]
   [data-slot="switch-thumb"] {
   background: color-mix(in srgb, var(--octant-text-primary) 62%, transparent);
+}
+
+/* ─── density ───────────────────────────────────────────────────────
+   Comfortable is the default and declares nothing. Compact takes the
+   navigation row from 32px to 28px, the Settings section row from 52px to
+   44px (and a row's padding with it), the Environment and dock card rows from
+   44px to 32px, the thread's gutter from 40px to 32px, and the composer's
+   prompt padding from 12px to 8px. Controls stay 28px: density changes room,
+   never what is pressed. The values hang on properties so a feature stylesheet
+   reads one name and never a density. */
+html[data-octant-density="compact"] {
+  --oct-nav-row-h: 28px;
+  --oct-thread-gutter: 32px;
+  --oct-settings-section-row-h: 44px;
+  --oct-settings-row-pad: 8px;
+  --environment-row-h: 32px;
+  --oct-composer-prompt-pad: 8px;
+}
+
+/* ─── text smoothing ────────────────────────────────────────────────
+   Grayscale smoothing is the default on a Mac, and the Smooth text switch in
+   Appearance turns it off. The properties do nothing on another platform. */
+html:not([data-octant-font-smoothing="off"]) {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
