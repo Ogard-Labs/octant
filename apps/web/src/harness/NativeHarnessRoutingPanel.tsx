@@ -362,7 +362,8 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
         title="Model roles"
       >
         {props.providers.length === 0 && !hasSavedRouting ? (
-          <OctantEmpty layout="line"
+          <OctantEmpty
+            layout="line"
             action={
               props.onOpenModelEndpoints === undefined ? null : (
                 <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">

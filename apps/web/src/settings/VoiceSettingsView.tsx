@@ -47,7 +47,8 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
   return (
     <section aria-label="Voice" id="settings-voice">
       {eligible.length === 0 && !hasConfiguredEndpoint ? (
-        <OctantEmpty layout="line"
+        <OctantEmpty
+          layout="line"
           action={
             props.onOpenModelEndpoints === undefined ? null : (
               <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">

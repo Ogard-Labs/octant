@@ -637,7 +637,8 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
             </div>
           ) : null}
           {suites.length === 0 ? (
-            <OctantEmpty layout="line"
+            <OctantEmpty
+              layout="line"
               detail="A suite is a set of prompts with checks. Run it against several models to see which does best."
               title="No suites yet"
             />

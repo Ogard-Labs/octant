@@ -335,7 +335,8 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       )}
 
       {props.busy || entries.length > 0 || synced.length > 0 ? null : (
-        <OctantEmpty layout="line"
+        <OctantEmpty
+          layout="line"
           {...(filters.tab === "shared" || hasActiveFilters
             ? {
                 action: (

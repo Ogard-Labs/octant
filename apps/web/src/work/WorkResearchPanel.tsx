@@ -72,7 +72,8 @@ export function WorkResearchPanel(props: WorkResearchPanelProps) {
   if (props.status !== "ready") {
     return (
       <SurfaceSection className="work-research" label="Research">
-        <OctantEmpty layout="line"
+        <OctantEmpty
+          layout="line"
           action={
             props.onRetry !== undefined && props.status !== "loading" ? (
               <OctantButton

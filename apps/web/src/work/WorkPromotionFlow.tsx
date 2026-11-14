@@ -100,7 +100,8 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
             <label className="work-promotion__field">
               <span className="oct-row-detail">Selected Work artifact</span>
               {noArtifacts ? (
-                <OctantEmpty layout="line"
+                <OctantEmpty
+                  layout="line"
                   detail="Create a starter note below, then propose."
                   title="No Work artifact to hand over yet"
                   tone="lane"

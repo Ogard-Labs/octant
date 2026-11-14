@@ -343,7 +343,8 @@ function AgentsCenterListBody(props: {
       controller.providerInstanceId !== undefined ||
       controller.parentThreadId !== undefined;
     return (
-      <OctantEmpty layout="line"
+      <OctantEmpty
+        layout="line"
         {...(hasActiveFilters
           ? {
               action: (

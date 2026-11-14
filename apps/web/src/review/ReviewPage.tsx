@@ -490,7 +490,8 @@ export function ReviewPage(props: ReviewPageProps) {
         tabIndex={-1}
       >
         {selected === undefined ? (
-          <OctantEmpty layout="line"
+          <OctantEmpty
+            layout="line"
             detail="Finished threads you have not opened will appear here."
             icon={<ClipboardCheck size={20} />}
             title="Nothing waiting for review"

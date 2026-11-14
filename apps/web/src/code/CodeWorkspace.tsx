@@ -29,12 +29,15 @@ import { FolderGit2, LoaderCircle } from "lucide-react";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTabActivatedThisSession } from "../shell/TabActivation";
-import { OctantEmpty, OctantEmptyHeader,
+import {
+  OctantEmpty,
+  OctantEmptyHeader,
   OctantEmptyDescription,
   OctantEmptyEyebrow,
   OctantEmptyMedia,
   OctantEmptyRoot,
-  OctantEmptyTitle, } from "../ui/base/OctantEmpty";
+  OctantEmptyTitle,
+} from "../ui/base/OctantEmpty";
 import { CodeGitPane } from "./CodeGitPane";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";

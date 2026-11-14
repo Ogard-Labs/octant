@@ -516,7 +516,8 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
         {props.status === "disconnected" ? (
           /* ui-boundary-exception: empty-state */
           <div role="alert">
-            <OctantEmpty layout="line"
+            <OctantEmpty
+              layout="line"
               detail={props.errorMessage ?? `${label} could not be read from the host.`}
               title={`${label} could not be read`}
             />
@@ -524,7 +525,8 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
         ) : props.status === "loading" ? (
           <OctantEmpty layout="line" title={`Reading ${label} threads…`} />
         ) : props.threads.length === 0 ? (
-          <OctantEmpty layout="line"
+          <OctantEmpty
+            layout="line"
             {...(props.emptyMessage === undefined ? {} : { detail: props.emptyMessage })}
             title={`No ${label} threads yet`}
           />

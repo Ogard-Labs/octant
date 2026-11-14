@@ -450,7 +450,8 @@ export function ProviderUsageHistoryWorkspace(props: {
             </table>
           </div>
           {data !== undefined && data.totals.requestCount === 0 ? (
-            <OctantEmpty layout="line"
+            <OctantEmpty
+              layout="line"
               detail="Check the source coverage below."
               title="No provider history was found in this period"
             />

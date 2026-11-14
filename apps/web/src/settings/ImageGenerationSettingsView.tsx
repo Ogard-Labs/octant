@@ -78,7 +78,8 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
     >
       {!hasImageProvider && props.settings.customSources.length === 0 ? (
         <>
-          <OctantEmpty layout="line"
+          <OctantEmpty
+            layout="line"
             action={
               props.onOpenModelEndpoints === undefined ? null : (
                 <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">

@@ -84,7 +84,9 @@ export default function ArtifactsModule(props: Props) {
 
   if (state.status === "loading") return <OctantEmpty state="loading" title="Loading artifacts" />;
   if (state.status === "unavailable") {
-    return <OctantEmpty message={state.message} state="neutral" title="Artifacts are unavailable" />;
+    return (
+      <OctantEmpty message={state.message} state="neutral" title="Artifacts are unavailable" />
+    );
   }
 
   if (open !== undefined && open.projectId !== undefined) {

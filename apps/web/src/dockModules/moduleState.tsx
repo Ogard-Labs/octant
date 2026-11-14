@@ -3,5 +3,5 @@ export function unavailable(title: string, message: string) {
 }
 export function loading(title: string) {
   return <OctantEmpty state="loading" title={`Loading ${title}`} />;
-}import { OctantEmpty } from "../ui/base/OctantEmpty";
-
+}
+import { OctantEmpty } from "../ui/base/OctantEmpty";

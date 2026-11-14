@@ -2151,7 +2151,9 @@ function renderNonCodeTab(
   if (tab.kind === "preview") {
     return (
       <Suspense
-        fallback={<OctantEmpty message="Loading preview." state="loading" title="Loading preview" />}
+        fallback={
+          <OctantEmpty message="Loading preview." state="loading" title="Loading preview" />
+        }
       >
         <PreviewWorkspaceTab key={tab.id} tab={tab} client={props.previewClient} />
       </Suspense>

@@ -127,7 +127,8 @@ export function ArchiveView(props: ArchiveViewProps) {
           title="Loading archive"
         />
       ) : entries.length === 0 ? (
-        <OctantEmpty layout="line"
+        <OctantEmpty
+          layout="line"
           icon={<Archive size={20} />}
           detail={
             projectFilter === ALL_PROJECTS

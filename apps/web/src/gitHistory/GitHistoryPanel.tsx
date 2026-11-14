@@ -224,7 +224,9 @@ function BoundHistory(props: GitHistoryPanelProps) {
             </OctantButton>
           </OctantAlert>
         )}
-        {page === undefined && busy ? <OctantEmpty state="loading" title="Loading history" /> : null}
+        {page === undefined && busy ? (
+          <OctantEmpty state="loading" title="Loading history" />
+        ) : null}
         {page !== undefined && commits.length === 0 ? (
           <p className="git-history__notice">
             {search !== ""

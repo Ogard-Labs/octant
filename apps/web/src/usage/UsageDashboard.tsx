@@ -335,7 +335,8 @@ export function UsageDashboard(props: UsageDashboardProps) {
 
       {isEmpty ? (
         data.turnMetrics === undefined || data.turnMetrics.turns.length === 0 ? (
-          <OctantEmpty layout="line"
+          <OctantEmpty
+            layout="line"
             {...(hasFilter
               ? {
                   action: (

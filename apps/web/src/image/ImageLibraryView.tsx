@@ -43,7 +43,8 @@ export function ImageLibraryView(props: ImageLibraryViewProps) {
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
       {props.profiles.length === 0 ? (
-        <OctantEmpty layout="line"
+        <OctantEmpty
+          layout="line"
           {...(props.onOpenSettings === undefined
             ? {}
             : {
