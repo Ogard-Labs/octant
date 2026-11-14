@@ -1,4 +1,5 @@
 import type { EventActor, EventEnvelope, UtcTimestamp } from "@octant/contracts";
+import type { StableHostId } from "@octant/contracts/remote-access";
 import {
   TODO_AGGREGATE_TYPE,
   TODO_CREATED,
@@ -86,6 +87,8 @@ export interface TodoStoreDependencies {
   readonly journal: Pick<Journal, "append" | "replayAggregateType" | "transaction">;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
+  /** This host's stable id, which names its own Projects in a to-do's links. */
+  readonly hostId: () => StableHostId;
 }
 
 /**
@@ -116,6 +119,7 @@ export class TodoStore {
   view(): TodoListView {
     return {
       kind: "todo-list",
+      hostId: this.#dependencies.hostId(),
       todos: todosInOrder([...this.#todos.values()].map((record) => record.todo)),
     };
   }

@@ -61,21 +61,30 @@ export function resolvePrivateListenerHostIdentity(
 ): PrivateListenerHostIdentity {
   const files = admittedFiles(options.dataDirectory, options.identityFiles);
   const directory = join(options.dataDirectory, HOST_IDENTITY_SUBDIR);
-  if (files === undefined) mkdirSync(directory, { recursive: true });
-
+  const hostId = privateListenerHostId(options);
   const projected = readHostIdentity(options.connection);
-  const hostId =
-    projected !== undefined
-      ? decodeStableHostId(projected.host_id)
-      : files === undefined
-        ? loadOrCreateHostId(directory)
-        : storedHostId(files);
   const displayName = boundedDisplayName(
     projected?.display_name ?? options.fallbackDisplayName ?? safeHostname(),
   );
   const signing = files === undefined ? loadOrCreateSigning(directory) : storedSigning(files, true);
   if (signing === undefined) return identityUnavailable();
   return { hostId, displayName, signing };
+}
+
+/**
+ * The host's stable id alone, the one the listener and the hub name it by,
+ * provisioned the same way but without touching key material: a host that
+ * never enables the listener still has one id for every record that names it.
+ */
+export function privateListenerHostId(
+  options: Omit<ResolvePrivateListenerHostIdentityOptions, "fallbackDisplayName">,
+): StableHostId {
+  const files = admittedFiles(options.dataDirectory, options.identityFiles);
+  const directory = join(options.dataDirectory, HOST_IDENTITY_SUBDIR);
+  if (files === undefined) mkdirSync(directory, { recursive: true });
+  const projected = readHostIdentity(options.connection);
+  if (projected !== undefined) return decodeStableHostId(projected.host_id);
+  return files === undefined ? loadOrCreateHostId(directory) : storedHostId(files);
 }
 
 /**

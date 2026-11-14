@@ -10,6 +10,7 @@ import type { OctantKeybindingActionId } from "@octant/domain";
 const COMMAND_KEYBINDING_ACTIONS: Readonly<Partial<Record<string, OctantKeybindingActionId>>> = {
   "thread:next-waiting": "next-waiting-thread",
   "workspace:zen-mode": "zen-mode",
+  "workspace:new-todo": "new-todo",
   "workspace:context-usage": "context-usage",
   "code:file-search": "code-file-search",
   "code:content-search": "code-content-search",
