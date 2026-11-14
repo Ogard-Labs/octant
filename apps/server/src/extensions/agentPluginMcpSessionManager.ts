@@ -1234,16 +1234,16 @@ function mcpInputSchemaEvaluationIsUnsafe(schema: unknown): boolean {
 function localJsonPointerTarget(root: unknown, reference: string): unknown {
   if (reference === "#") return root;
   if (!reference.startsWith("#/")) return undefined;
-  let pointer: string;
-  try {
-    pointer = decodeURIComponent(reference.slice(2));
-  } catch {
-    return undefined;
-  }
   let target = root;
-  for (const encodedToken of pointer.split("/")) {
+  for (const encodedToken of reference.slice(2).split("/")) {
     if (target === null || typeof target !== "object") return undefined;
-    const token = encodedToken.replaceAll("~1", "/").replaceAll("~0", "~");
+    let decodedToken: string;
+    try {
+      decodedToken = decodeURIComponent(encodedToken);
+    } catch {
+      return undefined;
+    }
+    const token = decodedToken.replaceAll("~1", "/").replaceAll("~0", "~");
     if (!Object.prototype.hasOwnProperty.call(target, token)) return undefined;
     target = (target as Readonly<Record<string, unknown>>)[token];
     if (

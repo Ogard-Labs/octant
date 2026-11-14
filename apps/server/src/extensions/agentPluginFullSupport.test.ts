@@ -977,6 +977,15 @@ describe("Agent Plugin MCP session manager", () => {
                               },
                             },
                             {
+                              name: "regex-percent-encoded-pointer",
+                              inputSchema: {
+                                type: "object",
+                                properties: { value: { $ref: "#/hidden%2Fcheck" } },
+                                hidden: { check: { type: "string" } },
+                                "hidden/check": { type: "string", pattern: "^(a+)+$" },
+                              },
+                            },
+                            {
                               name: "recursive-branching-ref",
                               inputSchema: {
                                 type: "object",
