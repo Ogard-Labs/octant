@@ -3662,7 +3662,9 @@ definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), weekly at a
 local time in an IANA time zone, or matching file arrivals in a local Work
 Project (Work and `new-thread` only). A routine targets a Chat, Work, or Code
-Project. A **Chat routine** keeps Chat's authority, since a Chat thread has no
+Project; a Work or Code routine may target a Project on a registered server,
+whose turn runs there as a person-started turn would
+([Server Projects: Routines](design/server-projects.md#routines)). A **Chat routine** keeps Chat's authority, since a Chat thread has no
 file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
 folder or binding revision), its authority snapshot grants no filesystem,

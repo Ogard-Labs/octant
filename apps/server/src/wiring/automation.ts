@@ -102,6 +102,15 @@ import type { WorkspaceWiring } from "./workspace";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
+import type { HarnessStateWiring } from "./harnessState";
+import {
+  reachServerProject,
+  serverRoutineBinding,
+  serverRoutineSourceBranch,
+} from "../serverProjects/serverProjectRoutines";
+import { serverCodeCheckout, serverProjectOf } from "../serverProjects/serverProjectThreads";
+import { serverWorkBindingRevisionId } from "../serverProjects/serverWorkThreads";
+import type { AutomationSourceBranch } from "../automation/automationCodeDispatchPort";
 
 export type AutomationDependencies = {
   readonly integrationEventSources: IntegrationEventSourceProvider;
@@ -115,10 +124,14 @@ export type AutomationDependencies = {
     "capacityScheduler" | "agentRunOrchestration" | "externalContentIngestionStore"
   > &
   Pick<HarnessWiring, "readHarnessProcessReceipts"> &
+  Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<
     CodeRuntimeWiring,
-    "codeCompletedThreadSource" | "contributeCodeTools" | "routeCodeService"
+    | "codeCompletedThreadSource"
+    | "contributeCodeTools"
+    | "contributeServerCodeTools"
+    | "routeCodeService"
   > &
   Pick<ChatWiring, "chatService"> &
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
@@ -140,11 +153,14 @@ export function wireAutomation(deps: AutomationDependencies) {
     codeEvidence,
     codeBoardEventStore,
     contributeCodeTools,
+    contributeServerCodeTools,
     liveTurns,
     persistence,
     projectService,
     routeCodeService,
     routineProposalService,
+    serverConnection,
+    serverProjectStore,
     windowAuthorityStore,
     workThreadProjection,
     workTurnProjection,
@@ -269,13 +285,24 @@ export function wireAutomation(deps: AutomationDependencies) {
   // provider-backed first-turn runtime through the ordinary thread
   // and turn services.
   const automationCodeDispatch = createAutomationCodeDispatchPort({
-    sourceBranchForRun: (run) => {
+    sourceBranchForRun: async (run): Promise<AutomationSourceBranch> => {
       const binding = run.definitionSnapshot.binding;
-      if (binding.kind !== "code") return undefined;
+      const none = {
+        kind: "unavailable",
+        message: "The bound Project checkout has no available source branch.",
+      } as const;
+      if (binding.kind !== "code") return none;
+      // A server Project's branch is read on its server, which is also the
+      // run's first contact with it: one that cannot be reached runs nothing.
+      const onServer = await serverRoutineSourceBranch(
+        { store: serverProjectStore, connection: serverConnection },
+        String(binding.projectId),
+      );
+      if (onServer !== undefined) return onServer;
       const checkout = persistence.readCodeCheckout(binding.checkoutId);
       return checkout?.availability === "available" && checkout.head.kind === "branch"
-        ? checkout.head.name
-        : undefined;
+        ? { kind: "branch", name: checkout.head.name }
+        : none;
     },
     prepareFileInput: async (run, input) => {
       if (automationRunEventSource(run) !== undefined) {
@@ -418,6 +445,11 @@ export function wireAutomation(deps: AutomationDependencies) {
       startFirstTurn: async (windowId, command, options) =>
         workTurnService.startFirstTurn(windowId, command, options),
     },
+    reachServer: (run) =>
+      reachServerProject(
+        { store: serverProjectStore, connection: serverConnection },
+        String(run.definitionSnapshot.projectId),
+      ),
     clock: () => new Date().toISOString() as UtcTimestamp,
     uuid: randomUUID,
   });
@@ -441,6 +473,7 @@ export function wireAutomation(deps: AutomationDependencies) {
   const automationAuthorityDeps: ResolveAutomationAuthorityLiveFactsDeps = {
     hostId: String(LOCAL_HOST_ID),
     readProject: (projectId) => persistence.readProject(projectId as never),
+    readServerProject: (projectId) => serverRoutineBinding(serverProjectStore, projectId),
     readProviderInstance: (providerInstanceId) =>
       persistence.readProviderInstance(providerInstanceId as never),
     providerSupportsModel: (providerInstanceId, modelId) => {
@@ -821,7 +854,12 @@ export function wireAutomation(deps: AutomationDependencies) {
   // Each run's own turn, which acts as the host, is refused proposals and
   // change requests, and is the only turn handed its run to report on. Plan
   // may propose a routine; a change request still reads the turn's posture.
-  contributeCodeTools(({ windowId, thread, readThread, routineRun }) => {
+  const routineToolsForCodeTurn = ({
+    windowId,
+    thread,
+    readThread,
+    routineRun,
+  }: Parameters<Parameters<typeof contributeServerCodeTools>[0]>[0]) => {
     const turn = {
       windowId,
       thread: { id: String(thread.id), mode: "code" as const, projectId: String(thread.projectId) },
@@ -855,7 +893,13 @@ export function wireAutomation(deps: AutomationDependencies) {
         uuid: randomUUID,
       }),
     );
-  });
+  };
+  contributeCodeTools(routineToolsForCodeTurn);
+  // A server Project's turn holds only its server tools, since every other
+  // set acts on this host's folders. The routine tools act on this host's
+  // routine records alone, so a server thread may propose, read, and report
+  // on its Project's routines as a local one does.
+  contributeServerCodeTools(routineToolsForCodeTurn);
   const draftThreadRoutine = (proposal: RoutineProposal) =>
     buildThreadRoutineDraft(
       {
@@ -874,6 +918,12 @@ export function wireAutomation(deps: AutomationDependencies) {
                 };
           }
           const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          // A routine in a server Project runs in the Project's own folder
+          // there, whichever worktree the proposing thread works in.
+          const serverProject =
+            thread === undefined ? undefined : serverProjectOf(serverProjectStore, thread);
+          const serverCheckout =
+            serverProject === undefined ? undefined : serverCodeCheckout(serverProject).checkout;
           return thread === undefined
             ? undefined
             : {
@@ -883,14 +933,37 @@ export function wireAutomation(deps: AutomationDependencies) {
                 modelId: String(thread.modelId),
                 permissionPersistence: thread.permissionPersistence,
                 ...(thread.profileId === undefined ? {} : { profileId: String(thread.profileId) }),
-                checkout: {
-                  repositoryId: String(thread.repositoryId),
-                  checkoutId: String(thread.checkoutId),
-                },
+                checkout:
+                  serverCheckout === undefined
+                    ? {
+                        repositoryId: String(thread.repositoryId),
+                        checkoutId: String(thread.checkoutId),
+                      }
+                    : {
+                        repositoryId: String(serverCheckout.repositoryId),
+                        checkoutId: String(serverCheckout.id),
+                      },
               };
         },
         readProject: (projectId) => {
           const project = persistence.readProject(projectId as never);
+          const serverProject =
+            project === undefined ? serverProjectStore.project(projectId) : undefined;
+          // A server Project has no revisions of its own: its binding is
+          // derived from the Project, server, and folder, which never change.
+          if (serverProject !== undefined) {
+            return {
+              name: serverProject.name,
+              mode: serverProject.mode ?? "code",
+              active: true,
+              version: 1,
+              bindingRevisionId: String(
+                serverProject.mode === "work"
+                  ? serverWorkBindingRevisionId(serverProject)
+                  : serverCodeCheckout(serverProject).bindingRevisionId,
+              ),
+            };
+          }
           if (project === undefined || (project.type !== "work" && project.type !== "code")) {
             return undefined;
           }
@@ -906,6 +979,14 @@ export function wireAutomation(deps: AutomationDependencies) {
           };
         },
         checkoutAvailable: (checkoutId, repositoryId) => {
+          const onServer = serverProjectStore.projects().some((project) => {
+            if (project.mode === "work") return false;
+            const derived = serverCodeCheckout(project).checkout;
+            return (
+              String(derived.id) === checkoutId && String(derived.repositoryId) === repositoryId
+            );
+          });
+          if (onServer) return true;
           const checkout = persistence.readCodeCheckout(checkoutId as never);
           return (
             checkout !== undefined &&
@@ -958,6 +1039,10 @@ export function wireAutomation(deps: AutomationDependencies) {
     },
     windowAuthorityStore,
     projects: projectService,
+    serverProjects: () =>
+      serverProjectStore
+        .projects()
+        .map((project) => ({ id: String(project.id), mode: project.mode ?? "code" })),
     hostId: String(LOCAL_HOST_ID),
     historyAvailable: () => automationHistoryAvailable,
     personPairedDeviceCurrent: (scopeId) =>
