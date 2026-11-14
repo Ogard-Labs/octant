@@ -310,24 +310,49 @@ bold) hold everywhere; every size at the default interface size is a whole pixel
 (`calc(N * --oct-text-step)` with the step 1), and letter-spacing is normal on
 the body.
 
-| Role             | Size            | Weight | Leading | Ink         | Recipe and where                                                                                                                     |
-| ---------------- | --------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Hero             | 26 (20 phone)   | 400    | 30px    | primary     | `oct-title--hero`: the welcome question only                                                                                         |
-| Title            | 28              | 700    | 1.15    | primary     | `oct-title`: a page about one thing (a Project, a thread under review)                                                               |
-| Page title       | 26              | 600    | 1.15    | primary     | `oct-page-title`: every destination and Settings page, tracking -0.025em; its one line of state sits on the baseline, 13px secondary |
-| Dialog title     | 17              | 600    | 1.35    | primary     | `.octant-dialog__title`; a part of a dialog 15 / 600                                                                                 |
-| Reply heading    | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####`, 24px above, 12px below                                                                                       |
-| Section label    | 14              | 600    | 1.3     | secondary   | `oct-section-label`                                                                                                                  |
-| Row label        | 14              | 500    | 1.35    | primary     | `oct-row-label`                                                                                                                      |
-| Navigation name  | 13              | 400    | 1.35    | primary     | `oct-nav-name`                                                                                                                       |
-| Navigation group | 12              | 400    | 1.3     | muted       | `oct-nav-group`                                                                                                                      |
-| Menu option      | 13              | 500    | 1.35    | primary     | `oct-menu-option`                                                                                                                    |
-| Body             | 13              | 400    | 1.5     | primary     | `body`                                                                                                                               |
-| Reply text       | transcript size | 400    | 1.6     | primary     | Appearance's transcript size; lists indent 16px                                                                                      |
-| Activity line    | 13              | 400    | 1.4     | muted       | `oct-activity-line`                                                                                                                  |
-| Detail           | 13              | 400    | 1.45    | secondary   | `oct-row-detail`                                                                                                                     |
-| Meta             | 12              | 400    | 1.4     | muted       | `oct-meta`                                                                                                                           |
-| Identifier       | 12              | 400    | 1.4     | muted, mono | `oct-meta--mono`                                                                                                                     |
+**Native type.** A native Mac app gets SF's size-specific tracking and optical
+size from the text system; a web view gets neither unless it asks. The body
+takes the 13px tracking (`--oct-tracking-sf-13`, -0.006em) and `font-optical-sizing:
+auto`; a role at another size names its own token (`--oct-tracking-sf-11` to
+`-24`, the platform face's own tracking: Apple's published SF Pro table, +0.06pt
+at 11, 0 at 12, -0.08 at 13, -0.15 at 14, -0.2 at 15, -0.31 at 16, -0.43 at 17,
+-0.45 at 20 and +0.07 at 24 and up, as em), because letter-spacing inherits as a
+length. Code, the terminal and the editor keep normal tracking. A line of chrome
+(a sidebar row, a menu option, a button, a label) is as tall as a native one,
+16px at 13px (`--oct-line-chrome`, 1.23) and 14px at 12px (`-sm`, 1.2), in whole
+pixels; reading text keeps its airier leading. Weights follow the platform:
+regular for body and rows, medium where it marks a label or a row's title, strong
+for headings, and 700 nowhere in chrome.
+
+**Window manners.** Chrome behaves like a window, not a page: its text does not
+select (`user-select: none` on the root, with reading matter opting back in),
+controls keep the arrow and only a link in content shows the hand, nothing in
+chrome underlines on pointer hover, there is no tap highlight and no focus edge
+on a click (see Focus), icons and links do not drag, and scroll areas draw the
+system's overlay scrollbars. The desktop app already withholds the browser's
+context menu and offers only the editing menu. Anything that sits on a device
+pixel stays on one: a dragged pane width is saved whole and drawn rounded,
+hairlines are 1px, and icons are 16px in even boxes so no stroke is centred on a
+half pixel.
+
+| Role             | Size            | Weight | Leading | Ink         | Recipe and where                                                                                                                                        |
+| ---------------- | --------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hero             | 26 (20 phone)   | 400    | 30px    | primary     | `oct-title--hero`: the welcome question only                                                                                                            |
+| Title            | 28              | 700    | 1.15    | primary     | `oct-title`: a page about one thing (a Project, a thread under review)                                                                                  |
+| Page title       | 26              | 600    | 1.15    | primary     | `oct-page-title`: every destination and Settings page, the platform's tracking at 24 and up; its one line of state sits on the baseline, 13px secondary |
+| Dialog title     | 17              | 600    | 1.35    | primary     | `.octant-dialog__title`; a part of a dialog 15 / 600                                                                                                    |
+| Reply heading    | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####`, 24px above, 12px below                                                                                                          |
+| Section label    | 14              | 600    | 17px    | secondary   | `oct-section-label`                                                                                                                                     |
+| Row label        | 14              | 500    | 17px    | primary     | `oct-row-label`                                                                                                                                         |
+| Navigation name  | 13              | 400    | 16px    | primary     | `oct-nav-name`                                                                                                                                          |
+| Navigation group | 12              | 400    | 14px    | muted       | `oct-nav-group`                                                                                                                                         |
+| Menu option      | 13              | 500    | 16px    | primary     | `oct-menu-option`                                                                                                                                       |
+| Body             | 13              | 400    | 1.5     | primary     | `body`                                                                                                                                                  |
+| Reply text       | transcript size | 400    | 1.6     | primary     | Appearance's transcript size; lists indent 16px                                                                                                         |
+| Activity line    | 13              | 400    | 1.4     | muted       | `oct-activity-line`                                                                                                                                     |
+| Detail           | 13              | 400    | 1.45    | secondary   | `oct-row-detail`                                                                                                                                        |
+| Meta             | 12              | 400    | 1.4     | muted       | `oct-meta`                                                                                                                                              |
+| Identifier       | 12              | 400    | 1.4     | muted, mono | `oct-meta--mono`                                                                                                                                        |
 
 - **Size tokens** (`octant.css`, each times `--oct-text-step`): `--oct-text-xs`
   12, `--oct-text-detail` 13 (`surface.css`), `--oct-text-sm` 14,
@@ -339,9 +364,11 @@ the body.
   `--oct-weight-medium` (labels, controls, menu options), 600
   `--oct-weight-strong` (section labels, card titles, page and dialog titles),
   700 `--oct-weight-title` (the large title only).
-- **Tracking**: `--oct-tracking-tight` -0.025em (title, display and dialog
-  and page titles), `--oct-tracking-snug` -0.01em (section labels), none on
-  body, `--oct-tracking-wide` 0.06em on mono meta.
+- **Tracking**: the platform's own per size (`--oct-tracking-sf-11` to `-24`,
+  see Native type) on the body and the roles; `--oct-tracking-tight` -0.025em
+  (dialog titles, reply headings and display type, the 17 to 20px values),
+  `--oct-tracking-snug` -0.01em (the 14px values), `--oct-tracking-wide` 0.06em
+  on mono meta.
 - **Leadings**: `--oct-leading-label` 1.35, `-meta` 1.4, `-detail` 1.45,
   `-snug` 1.3, `-heading` 1.14, `-tight` 1.1, `-body` 1.5, `-reading` 1.6,
   `-code` 1.7; the whole-pixel lines `--oct-line-label`, `-detail`, `-meta`,
@@ -398,7 +425,8 @@ token.
 | 24     | button `sm`, `icon-sm`; `--oct-tray-segment-h`; `--oct-toast-control-h`                              | A row action, a chip, a tab, a tray segment, a tile bar control, a toast's dismiss      |
 | 28     | button `default`, `icon`; `--oct-rail-button-h`; `--oct-menu-row-h`; `--oct-settings-control-height` | A button, field, select, combobox, tray, title band control, menu row, Settings control |
 | 32     | button `lg`; `--oct-nav-row-h`                                                                       | A large button, a navigation row, a rail face, a tile bar                               |
-| 44     | `--oct-title-rail-h`, `--oct-nav-head-h`, `--oct-menu-row-two-h`                                     | The title rail, the account row, a two-line row, a touch target, the one-row composer   |
+| 38     | `--oct-title-rail-h`                                                                                 | The title band and the icon rail's width                                                |
+| 44     | `--oct-nav-head-h`, `--oct-menu-row-two-h`                                                           | The account row, a two-line row, a touch target, the one-row composer                   |
 
 Recipe heights are rem rounded to a whole 2px (`h-[round(2.154rem,2px)]` is 28
 at a 13px root) so they grow with the interface size. Other shell heights:
@@ -602,18 +630,21 @@ the tokens in `octant.css`; what each region holds is in
 **The frame.** The icon rail and the title band sit on the frame ground (or the
 coat), painted once on the shell. Neither has a fill or line of its own.
 
-- **Title band**: `--oct-title-rail-h` (44px). Its controls are 28px
+- **Title band**: `--oct-title-rail-h` (38px, the compact height of a Mac
+  window's unified title bar). Its controls are 28px
   (`--oct-rail-button-h`) with the control corner, 4px apart, on an 8px inset at
   both ends. The band's text starts on the thread column's edge (the larger of
   a 20px gutter and half of the pane less the thread measure). A slot a Project
   fills only sometimes takes no room while empty.
-- **Icon rail**: as wide as the band is tall (44px), so the frame is one even
+- **Icon rail**: as wide as the band is tall (38px), so the frame is one even
   L. Faces are 32px, 2px apart (the button's `rail` variant); the first face is
-  centred on the band's centreline (6px down). The current face takes
+  centred on the band's centreline (3px down). The current face takes
   `--oct-wash-selected`, the pointed-at face `--oct-wash-hover`, no border.
 - **Desktop title bar**: Electron's native frame with `titleBarStyle:
 hiddenInset` and no custom `trafficLightPosition` (it would grow the native
-  overlay and eat clicks). The traffic lights sit in the band; the renderer
+  overlay and eat clicks; if a packaged run shows the lights off the band's
+  centreline, the position to try is x 16, y 12, whose 38px overlay is the
+  band's height). The traffic lights sit in the band; the renderer
   keeps `--octant-native-traffic-light-leading-width` (74px) clear before Show
   sidebar, Back and Forward, and one blank drag strip
   (`--octant-native-hidden-inset-titlebar-height`, 24px) reaches the top edge.
@@ -632,7 +663,7 @@ dock and the bottom panel) sit in one panel:
   meet the outline at both ends. A pane draws its line on its top and left
   edges only, so a shared edge is drawn once; the top one lies under the
   outline and is clipped away.
-- The stage clips to the outline's inside (`clip-path: inset(calc(44px + 1px)
+- The stage clips to the outline's inside (`clip-path: inset(calc(38px + 1px)
 1px 1px …)` with the inner radius), so no pane paints over a rounded corner.
 - Opaque, the sidebar paints `--octant-sidebar-fill` (its colour at 82%, so the
   application ground shows through softly; no blur, which the desktop app does

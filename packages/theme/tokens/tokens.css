@@ -206,20 +206,22 @@
   --oct-role-meta-mono-family: var(--oct-font-mono);
   --oct-role-meta-mono-tracking: 0;
   --oct-role-meta-size: var(--oct-text-xs);
+  --oct-role-meta-tracking: var(--oct-tracking-sf-12);
   --oct-role-page-title-family: var(--oct-font-display);
   --oct-role-page-title-leading: 1.15;
   --oct-role-page-title-size: var(--oct-text-2xl);
-  --oct-role-page-title-tracking: var(--oct-tracking-tight);
+  --oct-role-page-title-tracking: var(--oct-tracking-sf-24);
   --oct-role-page-title-weight: var(--oct-weight-strong);
   --oct-role-row-detail-leading: var(--oct-leading-detail);
   --oct-role-row-detail-size: var(--oct-text-detail);
-  --oct-role-row-label-leading: var(--oct-leading-label);
+  --oct-role-row-label-leading: var(--oct-line-chrome);
   --oct-role-row-label-size: var(--oct-text-sm);
+  --oct-role-row-label-tracking: var(--oct-tracking-sf-14);
   --oct-role-row-label-weight: var(--oct-weight-medium);
   --oct-role-section-label-family: var(--oct-font-display);
-  --oct-role-section-label-leading: var(--oct-leading-snug);
+  --oct-role-section-label-leading: var(--oct-line-chrome);
   --oct-role-section-label-size: var(--oct-text-sm);
-  --oct-role-section-label-tracking: var(--oct-tracking-snug);
+  --oct-role-section-label-tracking: var(--oct-tracking-sf-14);
   --oct-role-section-label-weight: var(--oct-weight-strong);
   --oct-role-title-family: var(--oct-font-display);
   --oct-role-title-hero-leading: 1.1;
@@ -252,7 +254,7 @@
   --oct-rail-button-h: 28px;
   --oct-rail-tab-h: 30px;
   --oct-surface-header-h: 40px;
-  --oct-title-rail-h: 44px;
+  --oct-title-rail-h: 38px;
   --oct-touch-min: 44px;
   /* ── Opacity ── */
   --oct-disabled-opacity: 0.75;
@@ -348,6 +350,10 @@
   --oct-z-toast: 55;
   /* ── Support: tokens an exported value reads ── */
   --oct-contrast-scale: 1;
+  --oct-line-chrome: round(calc(1.23 * 1em), 1px);
+  --oct-tracking-sf-12: 0em;
+  --oct-tracking-sf-14: -0.011em;
+  --oct-tracking-sf-24: 0.003em;
 }
 
 :root[data-theme="light"] {

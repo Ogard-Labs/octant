@@ -160,7 +160,7 @@ Use a gap for stacks and groups. A padding or margin off the scale is a defect.
 **Control and row heights.** `--oct-rail-button-h` (28px) is the height of an
 icon control and of the default button; `--oct-menu-row-h` (28px) is a menu or
 picker row; `--oct-nav-row-h` (32px) is a navigation or list row;
-`--oct-title-rail-h` (44px) is the title band. `--oct-control-height` and
+`--oct-title-rail-h` (38px) is the title band. `--oct-control-height` and
 `-sm` (44 and 34px) are the touch sizes, not the desktop default.
 
 **Radius** ([Radii](../../DESIGN.md#radii)). Four numbers and
@@ -261,7 +261,7 @@ Source: [Scale](../../DESIGN.md#scale),
 - The interface is 13px; a row label is 14px at medium weight; metadata is 12px
   and nothing essential sits under 12px.
 - Controls are 28px tall by default (20, 24, 28 and 32 across the sizes), rows
-  32px, a menu row 28px, the title band 44px. A page that sets a bigger control
+  32px, a menu row 28px, the title band 38px. A page that sets a bigger control
   for a desktop surface is not using the system.
 - Padding is on the 4px scale and small: a button's inline padding is
   `--oct-space-2`, a card row's is `--oct-space-4`.

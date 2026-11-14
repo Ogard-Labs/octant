@@ -2206,7 +2206,7 @@ window and cut the last destination through its icon at the window's edge.
 
 **Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
 rail stands in its own column in front of the open sidebar. It is exactly as
-wide as the title band is tall (44px), open or collapsed, so the frame's two
+wide as the title band is tall (38px), open or collapsed, so the frame's two
 arms match. It stands on the window's own ground with no fill and no line of its
 own; the framed panel (the sidebar and the stage, one outline) begins at its
 right edge. In the desktop app the traffic lights sit in the title band above

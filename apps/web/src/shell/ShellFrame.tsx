@@ -118,12 +118,14 @@ export function ShellFrame(props: ShellFrameProps) {
                   ...(props.bottomPanelHeight === undefined
                     ? {}
                     : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
-                  "--octant-context-sidebar-width": `${props.contextSidebarWidth}px`,
+                  "--octant-context-sidebar-width": `${Math.round(props.contextSidebarWidth)}px`,
                   "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
                   "--octant-native-traffic-light-leading-width": `${NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH}px`,
                 }
               : {}),
-            "--octant-sidebar-width": `${props.sidebarWidth}px`,
+            // A dragged width can be saved with a fraction; a pane on one lands
+            // its hairline and every row's text between device pixels.
+            "--octant-sidebar-width": `${Math.round(props.sidebarWidth)}px`,
           } as CSSProperties
         }
       >
