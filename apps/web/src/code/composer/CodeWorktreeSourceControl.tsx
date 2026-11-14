@@ -44,9 +44,25 @@ export function CodeWorktreeSourceControl(props: CodeWorktreeSourceControlProps)
       ? `Fetch and start from ${activeRemote ?? "origin"}/${props.branch}`
       : `Start from the local ${props.branch} commit.`;
 
+  const remotes = props.remoteFacts.remotes;
+  const remoteChoosable = props.startFromOrigin && remoteAvailable && remotes.length > 0;
+
+  // Every row is laid out in every state: a missing remote, a fetch in flight
+  // and a failed fetch change what the rows say, never how many there are, so
+  // the panel that holds them keeps its size while the answer arrives.
   return (
     <section aria-label="Worktree source" className="code-worktree-source">
-      <div className="code-worktree-source__row">
+      <div className="code-worktree-source__row" data-reserved="">
+        <div className="code-worktree-source__labels">
+          <span className="oct-menu-option">Start from origin</span>
+          <span
+            className="oct-menu-detail code-worktree-source__copy"
+            id="code-worktree-source-copy"
+            title={supportingCopy}
+          >
+            {supportingCopy}
+          </span>
+        </div>
         <OctantSwitch
           checked={props.startFromOrigin && remoteAvailable}
           describedBy="code-worktree-source-copy"
@@ -54,46 +70,47 @@ export function CodeWorktreeSourceControl(props: CodeWorktreeSourceControlProps)
           label="Start from origin"
           onCheckedChange={props.onStartFromOriginChange}
         />
-        <div className="code-worktree-source__labels">
-          <span className="code-worktree-source__title">Start from origin</span>
-          <span className="code-worktree-source__copy" id="code-worktree-source-copy">
-            {supportingCopy}
-          </span>
-        </div>
       </div>
 
-      {disclosure === undefined ? null : (
-        <p aria-live="polite" className="code-worktree-source__disclosure" role="status">
-          <span className="code-worktree-source__disclosure-label">{disclosure.label}</span>
-          {disclosure.detail === undefined ? null : (
-            <span className="code-worktree-source__disclosure-detail">{disclosure.detail}</span>
-          )}
-        </p>
-      )}
-
-      {props.resolution.kind === "failed" && props.onRefresh !== undefined ? (
-        <div className="code-worktree-source__retry">
+      <p
+        aria-live="polite"
+        className="code-worktree-source__disclosure"
+        data-reserved=""
+        role="status"
+      >
+        {disclosure === undefined ? null : (
+          <>
+            <span className="code-worktree-source__disclosure-label">{disclosure.label}</span>
+            {disclosure.detail === undefined ? null : (
+              <span className="oct-menu-detail code-worktree-source__disclosure-detail">
+                {disclosure.detail}
+              </span>
+            )}
+          </>
+        )}
+        {props.resolution.kind === "failed" && props.onRefresh !== undefined ? (
           <OctantButton onClick={props.onRefresh} size="sm" type="button" variant="ghost">
             Retry fetch
           </OctantButton>
-        </div>
-      ) : null}
+        ) : null}
+      </p>
 
-      {props.startFromOrigin && remoteAvailable && props.remoteFacts.remotes.length > 0 ? (
-        <label className="code-worktree-source__field">
-          <span>Remote</span>
-          <OctantSelectField
-            aria-label="Remote"
-            disabled={props.disabled === true || props.onSelectRemote === undefined}
-            onValueChange={(value) => props.onSelectRemote?.(value)}
-            options={props.remoteFacts.remotes.map((remote) => ({
-              id: remote,
-              label: remote,
-            }))}
-            value={activeRemote ?? props.remoteFacts.remotes[0] ?? ""}
-          />
-        </label>
-      ) : null}
+      <label className="code-worktree-source__field" data-reserved="">
+        <span className="oct-menu-option">Remote</span>
+        <OctantSelectField
+          aria-label="Remote"
+          disabled={
+            props.disabled === true || props.onSelectRemote === undefined || !remoteChoosable
+          }
+          onValueChange={(value) => props.onSelectRemote?.(value)}
+          options={
+            remotes.length === 0
+              ? [{ id: "", label: "None" }]
+              : remotes.map((remote) => ({ id: remote, label: remote }))
+          }
+          value={remotes.length === 0 ? "" : (activeRemote ?? remotes[0] ?? "")}
+        />
+      </label>
     </section>
   );
 }

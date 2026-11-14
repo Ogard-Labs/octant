@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { expectPopupUnmoved } from "../../test/popupRect.test-support";
 import { CodeWhereControl, type CodeWhereControlProps } from "./CodeWhereControl";
 
 function Harness(
@@ -58,16 +59,19 @@ describe("CodeWhereControl", () => {
     );
   });
 
-  it("offers the base branch and the branch name only for a new worktree, and starts nothing by choosing", async () => {
+  it("keeps the worktree rows laid out and out of reach until a new worktree is chosen, and starts nothing by choosing", async () => {
     const user = userEvent.setup();
     const onChosen = vi.fn();
     render(<Harness onChosen={onChosen} />);
     await user.click(chip());
-    expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
+    const base = screen.getByRole("button", { name: "Base branch" });
+    expect(base.closest("[inert]")).not.toBeNull();
 
-    await user.click(screen.getByRole("radio", { name: /New worktree/ }));
+    await expectPopupUnmoved(document.querySelector(".code-where__panel") as Element, async () => {
+      await user.click(screen.getByRole("radio", { name: /New worktree/ }));
+    });
     expect(onChosen).toHaveBeenCalledExactlyOnceWith("managed-worktree");
-    expect(screen.getByRole("button", { name: "Base branch" })).toBeVisible();
+    expect(base.closest("[inert]")).toBeNull();
     expect(screen.getByText("octant/fix-login")).toBeVisible();
     expect(screen.getByText("(auto)")).toBeVisible();
   });

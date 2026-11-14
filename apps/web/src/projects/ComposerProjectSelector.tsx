@@ -95,6 +95,9 @@ export interface ComposerProjectSelectorProps {
 
 type MenuEntry = ComposerProjectEntry | { readonly kind: "add-github" };
 
+/** The room the GitHub flow needs, so swapping to it never has to grow the menu. */
+const FRAME_MIN_HEIGHT = 240;
+
 export const NEW_PROJECT_FROM_FOLDER_LABEL = "New Project from folder…";
 export const NEW_PROJECT_FROM_GITHUB_LABEL = "New Project from GitHub repository…";
 export const START_IN_DEFAULT_FOLDER_LABEL = "No Project";
@@ -120,6 +123,10 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
     readonly side: "above" | "below";
     readonly maxHeight: number;
   }>();
+  // The menu is as tall as its list is when it opens and stays that tall:
+  // typing in the search, a list that arrives late and the swap to the GitHub
+  // flow scroll inside the frame instead of resizing the menu.
+  const [frameHeight, setFrameHeight] = useState<number>();
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -240,7 +247,10 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
   }, [close, open]);
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setFrameHeight(undefined);
+      return;
+    }
     const trigger = triggerRef.current;
     if (trigger === null) return;
     const rect = trigger.getBoundingClientRect();
@@ -248,10 +258,15 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
     const above = rect.top - margin;
     const below = window.innerHeight - rect.bottom - margin;
     const side = above >= below ? "above" : "below";
-    setPlacement({
-      side,
-      maxHeight: Math.max(160, Math.min(448, side === "above" ? above : below)),
-    });
+    const maxHeight = Math.max(160, Math.min(448, side === "above" ? above : below));
+    setPlacement({ side, maxHeight });
+    // Measured on the first frame, before the cap above is applied to it.
+    const natural = listRef.current?.getBoundingClientRect().height;
+    setFrameHeight((current) =>
+      current !== undefined || natural === undefined
+        ? current
+        : Math.min(maxHeight, Math.max(natural, FRAME_MIN_HEIGHT)),
+    );
   }, [open, view]);
 
   const optionClass = (index: number) =>
@@ -279,7 +294,14 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
           className={`composer-folder-selector__menu${view === "github" ? " composer-folder-selector__menu--github" : ""}${placement?.side === "below" ? " composer-folder-selector__menu--below" : ""}`}
           onKeyDown={handleKeyDown}
           ref={listRef}
-          {...(placement === undefined ? {} : { style: { maxHeight: placement.maxHeight } })}
+          {...(placement === undefined
+            ? {}
+            : {
+                style: {
+                  maxHeight: placement.maxHeight,
+                  ...(frameHeight === undefined ? {} : { height: frameHeight }),
+                },
+              })}
         >
           {view === "github" && github !== undefined ? (
             <>

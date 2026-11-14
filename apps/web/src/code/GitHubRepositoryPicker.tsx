@@ -13,6 +13,8 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { describeGithubRemediation } from "../github/githubRemediation";
 import { parseGithubRepositoryReference } from "./githubRepositoryReference";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { PopupSkeletonRows } from "../ui/base/PopupSkeletonRows";
+import { loadList, peekList } from "../composer/createFromCache";
 
 /**
  * The searchable, paginated, keyboard-operable GitHub
@@ -26,6 +28,8 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 export interface GitHubRepositoryPickerProps {
   readonly client: GithubClient;
   readonly onSelect: (repository: GithubRepositoryRow) => void;
+  /** The pointer or the keyboard is on a repository: a chance to read ahead what choosing it will show. */
+  readonly onPreview?: (repository: GithubRepositoryRow) => void;
   readonly selectedNodeId?: string;
   readonly pageSize?: number;
 }
@@ -81,13 +85,76 @@ function describeUnavailable(state: {
 
 const DEFAULT_PAGE_SIZE = 30;
 
+type RepositoriesResponse = Awaited<ReturnType<GithubClient["readCatalogue"]>>;
+
+const REPOSITORIES_KEY = "github-repositories";
+const RECENT_REPOSITORIES_KEY = "github-recent-repositories";
+
+/** The first page of repositories, shared with whoever reads ahead of the popup opening. */
+export function loadGithubRepositories(
+  client: GithubClient,
+  options: { readonly refresh?: boolean } = {},
+): Promise<RepositoriesResponse> {
+  return loadList(
+    client,
+    REPOSITORIES_KEY,
+    () =>
+      client.readCatalogue({
+        kind: "repositories",
+        pageSize: DEFAULT_PAGE_SIZE as never,
+        // Asked for by the person: the server may not answer from its own cache.
+        ...(options.refresh === true ? { refresh: true } : {}),
+      }),
+    {
+      keep: (response) => response.kind === "repositories",
+      ...(options.refresh === true ? { force: true } : {}),
+    },
+  );
+}
+
+export function loadGithubRecentRepositories(client: GithubClient): Promise<RepositoriesResponse> {
+  return loadList(
+    client,
+    RECENT_REPOSITORIES_KEY,
+    () => client.readCatalogue({ kind: "recent-repositories" }),
+    { keep: (response) => response.kind === "recent-repositories" },
+  );
+}
+
+function catalogueStateFrom(response: RepositoriesResponse): CatalogueState {
+  if (response.kind === "unavailable") {
+    return {
+      kind: "unavailable",
+      reason: response.reason,
+      ...(response.remediation === undefined ? {} : { remediation: response.remediation }),
+    };
+  }
+  if (response.kind !== "repositories") {
+    return { kind: "error", message: "GitHub returned an unexpected response." };
+  }
+  return {
+    kind: "ready",
+    rows: response.page.rows,
+    hasNextPage: response.page.hasNextPage,
+    ...(response.page.endCursor === undefined ? {} : { endCursor: response.page.endCursor }),
+    freshness: response.page.freshness,
+  };
+}
+
 export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
   const { client, onSelect, selectedNodeId } = props;
   const pageSize = props.pageSize ?? DEFAULT_PAGE_SIZE;
   const listboxId = useId();
   const [query, setQuery] = useState("");
-  const [recents, setRecents] = useState<ReadonlyArray<GithubRepositoryRow>>([]);
-  const [catalogue, setCatalogue] = useState<CatalogueState>({ kind: "loading" });
+  // What was read ahead of the popup opening is on screen from the first frame.
+  const [recents, setRecents] = useState<ReadonlyArray<GithubRepositoryRow>>(() => {
+    const cached = peekList<RepositoriesResponse>(client, RECENT_REPOSITORIES_KEY)?.value;
+    return cached?.kind === "recent-repositories" ? cached.rows : [];
+  });
+  const [catalogue, setCatalogue] = useState<CatalogueState>(() => {
+    const cached = peekList<RepositoriesResponse>(client, REPOSITORIES_KEY)?.value;
+    return cached === undefined ? { kind: "loading" } : catalogueStateFrom(cached);
+  });
   const [loadingMore, setLoadingMore] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -104,36 +171,33 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
   const loadPage = useCallback(
     async (search: string, options: { readonly refresh?: boolean } = {}) => {
       const operation = ++generation.current;
-      setCatalogue({ kind: "loading" });
+      // The first page with no search is the one that is read ahead and kept: a
+      // cached answer shows at once and is asked again behind it when old.
+      const kept = search === "" && pageSize === DEFAULT_PAGE_SIZE;
+      const cached =
+        kept && options.refresh !== true
+          ? peekList<RepositoriesResponse>(client, REPOSITORIES_KEY)
+          : undefined;
+      if (cached === undefined) setCatalogue({ kind: "loading" });
+      else {
+        setCatalogue(catalogueStateFrom(cached.value));
+        if (cached.fresh) return;
+      }
       try {
-        const response = await client.readCatalogue({
-          kind: "repositories",
-          pageSize: pageSize as never,
-          ...(search === "" ? {} : { search }),
-          ...(options.refresh === true ? { refresh: true } : {}),
-        });
+        const response = kept
+          ? await loadGithubRepositories(client, options)
+          : await client.readCatalogue({
+              kind: "repositories",
+              pageSize: pageSize as never,
+              ...(search === "" ? {} : { search }),
+              ...(options.refresh === true ? { refresh: true } : {}),
+            });
         if (operation !== generation.current) return;
-        if (response.kind === "unavailable") {
-          setCatalogue({
-            kind: "unavailable",
-            reason: response.reason,
-            ...(response.remediation === undefined ? {} : { remediation: response.remediation }),
-          });
-          return;
-        }
-        if (response.kind !== "repositories") {
-          setCatalogue({ kind: "error", message: "GitHub returned an unexpected response." });
-          return;
-        }
-        setCatalogue({
-          kind: "ready",
-          rows: response.page.rows,
-          hasNextPage: response.page.hasNextPage,
-          ...(response.page.endCursor === undefined ? {} : { endCursor: response.page.endCursor }),
-          freshness: response.page.freshness,
-        });
+        setCatalogue(catalogueStateFrom(response));
       } catch (error) {
         if (operation !== generation.current) return;
+        // A failed refresh behind rows that are already shown leaves them standing.
+        if (cached !== undefined) return;
         setCatalogue({
           kind: "error",
           message: error instanceof Error ? error.message : "GitHub repositories are unavailable.",
@@ -156,7 +220,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
   useEffect(() => {
     const readCatalogue = client.readCatalogue;
     if (typeof readCatalogue !== "function") return;
-    const pending = readCatalogue({ kind: "recent-repositories" });
+    const pending = loadGithubRecentRepositories(client);
     if (pending === null || typeof pending !== "object" || typeof pending.then !== "function") {
       return;
     }
@@ -312,7 +376,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
                 linkGeneration.current += 1;
                 setLinkBusy(false);
               }}
-              placeholder="Search, or paste a GitHub link…"
+              placeholder="Search or paste a link…"
               type="search"
               unstyled
               value={query}
@@ -347,99 +411,98 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
           {linkError}
         </OctantAlert>
       )}
-      {catalogue.kind === "loading" ? (
-        <p className="octant-popover-empty" role="status">
-          Loading repositories…
-        </p>
-      ) : null}
+      <div className="github-picker__results">
+        {catalogue.kind === "loading" ? <PopupSkeletonRows label="Loading repositories…" /> : null}
 
-      {catalogue.kind === "error" ? (
-        <>
-          <OctantAlert tone="warning">{catalogue.message}</OctantAlert>
-          <OctantButton
-            onClick={() => void loadPage(trimmedQuery)}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            Retry
-          </OctantButton>
-        </>
-      ) : null}
-
-      {catalogue.kind === "unavailable" ? (
-        <>
-          <OctantAlert tone="warning">{describeUnavailable(catalogue)}</OctantAlert>
-          <OctantButton
-            onClick={() => void loadPage(trimmedQuery)}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            Retry
-          </OctantButton>
-        </>
-      ) : null}
-
-      {catalogue.kind === "ready" && reference === undefined ? (
-        <>
-          {catalogue.freshness.status === "stale" ? (
-            <p className="github-picker__note" role="status">
-              Results may be stale —{" "}
-              {STALE_REASON_LABELS[catalogue.freshness.staleReason ?? ""] ??
-                "the catalogue could not be refreshed."}{" "}
-              Refresh to retry.
-            </p>
-          ) : null}
-          {options.length === 0 ? (
-            <p className="octant-popover-empty" role="status">
-              No repositories match.
-            </p>
-          ) : (
-            <ul
-              aria-activedescendant={
-                activeOption === undefined ? undefined : optionId(activeOption)
-              }
-              aria-label="GitHub repositories"
-              className="github-picker__listbox"
-              onKeyDown={handleListboxKeyDown}
-              role="listbox"
-              tabIndex={0}
-            >
-              {showRecents ? (
-                <li aria-hidden="true" className="octant-popover-group">
-                  Recent
-                </li>
-              ) : null}
-              {options.map((row, index) => {
-                const isRecentBoundary = showRecents && index === recents.length;
-                return (
-                  <RepositoryOption
-                    active={activeIndex === index}
-                    id={optionId(row)}
-                    key={row.nodeId}
-                    onClick={() => select(row)}
-                    row={row}
-                    selected={row.nodeId === selectedNodeId}
-                    showAllLabel={isRecentBoundary}
-                  />
-                );
-              })}
-            </ul>
-          )}
-          {catalogue.hasNextPage ? (
+        {catalogue.kind === "error" ? (
+          <>
+            <OctantAlert tone="warning">{catalogue.message}</OctantAlert>
             <OctantButton
-              disabled={loadingMore}
-              onClick={() => void loadMore()}
+              onClick={() => void loadPage(trimmedQuery)}
               size="sm"
               type="button"
               variant="secondary"
             >
-              {loadingMore ? "Loading more…" : "Load more repositories"}
+              Retry
             </OctantButton>
-          ) : null}
-        </>
-      ) : null}
+          </>
+        ) : null}
+
+        {catalogue.kind === "unavailable" ? (
+          <>
+            <OctantAlert tone="warning">{describeUnavailable(catalogue)}</OctantAlert>
+            <OctantButton
+              onClick={() => void loadPage(trimmedQuery)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Retry
+            </OctantButton>
+          </>
+        ) : null}
+
+        {catalogue.kind === "ready" && reference === undefined ? (
+          <>
+            {catalogue.freshness.status === "stale" ? (
+              <p className="github-picker__note" role="status">
+                Results may be stale —{" "}
+                {STALE_REASON_LABELS[catalogue.freshness.staleReason ?? ""] ??
+                  "the catalogue could not be refreshed."}{" "}
+                Refresh to retry.
+              </p>
+            ) : null}
+            {options.length === 0 ? (
+              <p className="octant-popover-empty" role="status">
+                No repositories match.
+              </p>
+            ) : (
+              <ul
+                aria-activedescendant={
+                  activeOption === undefined ? undefined : optionId(activeOption)
+                }
+                aria-label="GitHub repositories"
+                className="github-picker__listbox"
+                onKeyDown={handleListboxKeyDown}
+                role="listbox"
+                tabIndex={0}
+              >
+                {showRecents ? (
+                  <li aria-hidden="true" className="octant-popover-group">
+                    Recent
+                  </li>
+                ) : null}
+                {options.map((row, index) => {
+                  const isRecentBoundary = showRecents && index === recents.length;
+                  return (
+                    <RepositoryOption
+                      active={activeIndex === index}
+                      id={optionId(row)}
+                      key={row.nodeId}
+                      onClick={() => select(row)}
+                      onPreview={props.onPreview}
+                      row={row}
+                      selected={row.nodeId === selectedNodeId}
+                      showAllLabel={isRecentBoundary}
+                    />
+                  );
+                })}
+              </ul>
+            )}
+            {catalogue.hasNextPage ? (
+              <OctantButton
+                disabled={loadingMore}
+                onClick={() => void loadMore()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                {loadingMore ? "Loading more…" : "Load more repositories"}
+              </OctantButton>
+            ) : null}
+          </>
+        ) : null}
+      </div>
 
       {selectedRow === undefined ? null : (
         <div className="github-picker__details">
@@ -487,6 +550,7 @@ function RepositoryOption(props: {
   readonly selected: boolean;
   readonly showAllLabel: boolean;
   readonly onClick: () => void;
+  readonly onPreview: ((repository: GithubRepositoryRow) => void) | undefined;
 }) {
   const { row } = props;
   return (
@@ -505,7 +569,9 @@ function RepositoryOption(props: {
         }
         id={props.id}
         onClick={props.onClick}
+        onPointerEnter={() => props.onPreview?.(row)}
         role="option"
+        title={`${row.owner}/${row.name}`}
       >
         <span className="github-picker__option-name">
           {row.owner}/{row.name}

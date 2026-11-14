@@ -1929,8 +1929,12 @@ browser renders the body and comments as markdown with the shared renderer (raw
 HTML is skipped, images are named and never fetched); the issue's own address is
 shown as text and is never followed from inside a Code thread.
 
-Create-from-issue is implemented. The composer `Create from…` Issues tab
-attaches only `{ owner, name, number }` to the draft. At creation the server
+Create-from-issue is implemented. The composer `Create from…` popup is one
+fixed 420 by 400 frame with provider tabs (GitHub, Linear, Terminal), a search
+field and a scrolling list; the lists are read when the start composer mounts
+or the Project changes (and on hovering or focusing the trigger), kept per host
+connection and shown at once on open while they refresh behind the rows. The
+GitHub tab attaches only `{ owner, name, number }` to the draft. At creation the server
 reauthorizes `issues-read`, frames redacted issue text as external content,
 and journals that ingestion
 ([details](host-reads-and-commands.md#github-issues)). Refusal fails creation visibly. The

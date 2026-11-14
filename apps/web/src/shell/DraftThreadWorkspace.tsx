@@ -1,4 +1,3 @@
-import { moveWithinTabList } from "../ui/base/radioGroupKeys";
 import {
   decodeThreadWorkingDirectory,
   type CoordinatorBounds,
@@ -33,7 +32,6 @@ import {
   type GithubAssignedWorkItem,
   type LinearIssueRow,
   type TerminalSessionImportRequest,
-  type TerminalSessionSummary,
 } from "@octant/contracts";
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -71,14 +69,9 @@ import type {
 } from "@octant/contracts";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
-import {
-  CreateFromIssuePicker,
-  useGithubIssuesCreateAvailable,
-} from "../github/CreateFromIssuePicker";
-import {
-  CreateFromLinearIssuePicker,
-  useLinearIssuesCreateAvailable,
-} from "../linear/CreateFromLinearIssuePicker";
+import { useGithubIssuesCreateAvailable } from "../github/CreateFromIssuePicker";
+import { CreateFromControl } from "../composer/CreateFromControl";
+import { useLinearIssuesCreateAvailable } from "../linear/CreateFromLinearIssuePicker";
 import {
   draftThreadModePresentation,
   resolveCodeNewThreadWorkspace,
@@ -115,7 +108,6 @@ import {
 } from "../projects/ComposerProjectSelector";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerStartTray } from "../composer/ComposerStartTray";
@@ -142,14 +134,8 @@ import {
 } from "../projects/serverProjectEntries";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import {
-  createTerminalSessionClient,
-  type TerminalSessionClient,
-} from "@octant/client-runtime/terminal-session-client";
-import {
-  CreateFromTerminalSessionPicker,
-  TERMINAL_SESSION_TOOL_NAMES,
-} from "../terminalSessions/CreateFromTerminalSessionPicker";
+import { createTerminalSessionClient } from "@octant/client-runtime/terminal-session-client";
+import { TERMINAL_SESSION_TOOL_NAMES } from "../terminalSessions/CreateFromTerminalSessionPicker";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
@@ -502,7 +488,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     (issuesCreateAvailable && props.githubClient !== undefined) ||
     (linearCreateAvailable && props.linearClient !== undefined) ||
     terminalSessions !== undefined ? (
-      <CreateFromIssueControl
+      <CreateFromControl
         {...(terminalSessions === undefined ? {} : { terminalSessions })}
         onSelectTerminal={(session) => {
           setCreateFromSelection({
@@ -1525,165 +1511,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         ) : null}
       </div>
     </section>
-  );
-}
-
-function CreateFromIssueControl(props: {
-  readonly githubClient?: GithubClient;
-  readonly linearClient?: IntegrationClient;
-  readonly terminalSessions?: {
-    readonly client: TerminalSessionClient;
-    readonly projectId: ProjectId;
-  };
-  readonly creating: boolean;
-  readonly open: boolean;
-  readonly tab: "github" | "linear" | "terminal";
-  readonly onTabChange: (tab: "github" | "linear" | "terminal") => void;
-  readonly selectedGithub?: GithubIssueContextRequest;
-  readonly selectedLinear?: LinearIssueContextRequest;
-  readonly selectedTerminal?: TerminalSessionImportRequest;
-  readonly onSelectTerminal: (session: TerminalSessionSummary) => void;
-  readonly selectedLabel?: string;
-  readonly onSelectGithub: (issue: GithubIssueContextRequest, title: string) => void;
-  readonly onSelectLinear: (
-    issue: LinearIssueContextRequest & { readonly identifier: string },
-    title: string,
-  ) => void;
-  readonly onClear: () => void;
-  readonly onToggle: () => void;
-}) {
-  const showGithub = props.githubClient !== undefined;
-  const showLinear = props.linearClient !== undefined;
-  const showTerminal = props.terminalSessions !== undefined;
-  const activeTab =
-    props.tab === "linear" && showLinear
-      ? "linear"
-      : props.tab === "github" && showGithub
-        ? "github"
-        : props.tab === "terminal" && showTerminal
-          ? "terminal"
-          : showGithub
-            ? "github"
-            : showLinear
-              ? "linear"
-              : "terminal";
-  const panel = (
-    <div className="create-from-issue-control__panel">
-      <div role="tablist" aria-label="Create from" onKeyDown={moveWithinTabList}>
-        {showGithub ? (
-          <OctantButton
-            aria-selected={activeTab === "github"}
-            onClick={() => props.onTabChange("github")}
-            role="tab"
-            tabIndex={activeTab === "github" ? 0 : -1}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Issues
-          </OctantButton>
-        ) : null}
-        {showLinear ? (
-          <OctantButton
-            aria-selected={activeTab === "linear"}
-            onClick={() => props.onTabChange("linear")}
-            role="tab"
-            tabIndex={activeTab === "linear" ? 0 : -1}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Linear
-          </OctantButton>
-        ) : null}
-        {showTerminal ? (
-          <OctantButton
-            aria-selected={activeTab === "terminal"}
-            onClick={() => props.onTabChange("terminal")}
-            role="tab"
-            tabIndex={activeTab === "terminal" ? 0 : -1}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Terminal
-          </OctantButton>
-        ) : null}
-      </div>
-      {activeTab === "github" && props.githubClient !== undefined ? (
-        <div role="tabpanel">
-          <CreateFromIssuePicker
-            client={props.githubClient}
-            disabled={props.creating}
-            onSelect={props.onSelectGithub}
-            {...(props.selectedGithub === undefined ? {} : { selected: props.selectedGithub })}
-          />
-        </div>
-      ) : null}
-      {activeTab === "linear" && props.linearClient !== undefined ? (
-        <div role="tabpanel">
-          <CreateFromLinearIssuePicker
-            client={props.linearClient}
-            disabled={props.creating}
-            onSelect={props.onSelectLinear}
-            {...(props.selectedLinear === undefined ? {} : { selected: props.selectedLinear })}
-          />
-        </div>
-      ) : null}
-      {activeTab === "terminal" && props.terminalSessions !== undefined ? (
-        <div role="tabpanel">
-          <CreateFromTerminalSessionPicker
-            client={props.terminalSessions.client}
-            disabled={props.creating}
-            onSelect={props.onSelectTerminal}
-            projectId={props.terminalSessions.projectId}
-            {...(props.selectedTerminal === undefined ? {} : { selected: props.selectedTerminal })}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-  // The picker floats over the page. Opened in place it grew the context
-  // strip by a repository list and pushed the prompt down with it.
-  return (
-    <div className="create-from-issue-control">
-      <div className="create-from-issue-control__bar">
-        <OctantPopover
-          align="start"
-          className="create-from-issue-control__popup"
-          onOpenChange={(open) => {
-            if (open !== props.open) props.onToggle();
-          }}
-          open={props.open}
-          side="bottom"
-          sideOffset={8}
-          title={
-            showGithub || showLinear ? "Create from an issue or session" : "Create from a session"
-          }
-          trigger={<>Create from…</>}
-          triggerDisabled={props.creating}
-          triggerLabel="Create from…"
-          triggerVariant="ghost"
-        >
-          {panel}
-        </OctantPopover>
-        {props.selectedLabel === undefined ? null : (
-          <span className="create-from-issue-control__selection">
-            <span>{props.selectedLabel}</span>
-            <OctantButton
-              aria-label="Remove what this thread starts from"
-              disabled={props.creating}
-              onClick={props.onClear}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Remove
-            </OctantButton>
-          </span>
-        )}
-      </div>
-    </div>
   );
 }
 
