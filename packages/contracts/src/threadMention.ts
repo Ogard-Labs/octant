@@ -207,6 +207,12 @@ export const ThreadMentionCommand = Schema.Union(
     requestId: ThreadMentionRequestId,
     query: Schema.String.pipe(Schema.maxLength(200)),
     threadId: Schema.optional(MentionableThreadId),
+    /**
+     * The thread whose composer is searching, when it has one. It only narrows
+     * the list to what that composer may attach; it grants nothing, and the
+     * host still judges every mention again when the message is sent.
+     */
+    readerThreadId: Schema.optional(MentionableThreadId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("resolve-mentions"),

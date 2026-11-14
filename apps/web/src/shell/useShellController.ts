@@ -52,6 +52,7 @@ import type {
 import { createShellClient, type ShellClient } from "@octant/client-runtime/shell-client";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
+  ShellPolicyRejected,
   applyWorkspaceOperation,
   buildSurfaceCatalog,
   normalizeEnvironmentPresentationState,
@@ -530,7 +531,7 @@ export function useShellController(options: ShellControllerOptions) {
     requestedTarget?: ProjectWindowTarget,
   ): Promise<boolean> {
     const generation = ++requestGeneration.current;
-    const preview = applyWorkspaceOperation(previous.workspace, operation);
+    const preview = previewWorkspaceOperation(previous.workspace, operation);
     setAuthoritative({ ...previous, workspace: preview });
     setResizePreview(undefined);
     try {
@@ -1476,23 +1477,32 @@ function createWorkspaceMutation(
         mode: "chat",
         title: intent.title,
       };
+      // A thread already shown in a pane, of whichever Project, is selected
+      // where it is; only a thread the window does not show moves the window.
+      const existing = shownUnderProject(
+        latest.workspace,
+        "chat",
+        findVisibleSurfacePane(layout, surface),
+        intent.projectId,
+      );
       if (
-        isDifferentProject(latest.workspace, "chat", intent.projectId) ||
-        (intent.projectId !== undefined &&
-          latest.workspace.stowedLayouts.some(
-            (stowed) =>
-              stowed.context.mode === "chat" &&
-              stowed.context.projectId !== null &&
-              String(stowed.context.projectId) === String(intent.projectId),
-          )) ||
-        (intent.projectId === undefined && latest.workspace.contextByMode.chat.projectId !== null)
+        existing === undefined &&
+        (isDifferentProject(latest.workspace, "chat", intent.projectId) ||
+          (intent.projectId !== undefined &&
+            latest.workspace.stowedLayouts.some(
+              (stowed) =>
+                stowed.context.mode === "chat" &&
+                stowed.context.projectId !== null &&
+                String(stowed.context.projectId) === String(intent.projectId),
+            )) ||
+          (intent.projectId === undefined &&
+            latest.workspace.contextByMode.chat.projectId !== null))
       ) {
         return {
           operation: { kind: "switch-project-surface", mode: "chat", surface },
           message: `${intent.title} opened in this window.`,
         };
       }
-      const existing = findVisibleSurfacePane(layout, surface);
       return {
         operation: {
           kind: "open-surface",
@@ -1527,14 +1537,22 @@ function createWorkspaceMutation(
                 threadId: intent.threadId,
               },
             };
-      if (isDifferentProject(latest.workspace, "code", intent.projectId)) {
+      const existing = shownUnderProject(
+        latest.workspace,
+        "code",
+        findVisibleSurfacePane(layout, surface),
+        intent.projectId,
+      );
+      if (
+        existing === undefined &&
+        isDifferentProject(latest.workspace, "code", intent.projectId)
+      ) {
         return {
           operation: { kind: "switch-project-surface", mode: "code", surface },
           message: `${intent.title} opened in this window.`,
           ...newWindowTarget,
         };
       }
-      const existing = findVisibleSurfacePane(layout, surface);
       return {
         operation: {
           kind: "open-surface",
@@ -1570,14 +1588,22 @@ function createWorkspaceMutation(
                 threadId: intent.threadId,
               },
             };
-      if (isDifferentProject(latest.workspace, "work", intent.projectId)) {
+      const existing = shownUnderProject(
+        latest.workspace,
+        "work",
+        findVisibleSurfacePane(layout, surface),
+        intent.projectId,
+      );
+      if (
+        existing === undefined &&
+        isDifferentProject(latest.workspace, "work", intent.projectId)
+      ) {
         return {
           operation: { kind: "switch-project-surface", mode: "work", surface },
           message: `${intent.title} opened in this window.`,
           ...newWindowTarget,
         };
       }
-      const existing = findVisibleSurfacePane(layout, surface);
       return {
         operation: {
           kind: "open-surface",
@@ -2191,6 +2217,45 @@ function presentationLayout(
     : layout;
 }
 
+/**
+ * A shown pane counts as the thread's place only while it holds the thread
+ * under the thread's own Project: its own context, or the lead's when it has
+ * none. A pane left showing the thread under another lead is not, and the
+ * open moves the window as any open of another Project does.
+ */
+function shownUnderProject(
+  workspace: WindowWorkspace,
+  mode: OctantMode,
+  pane: WorkspacePane | undefined,
+  projectId: ProjectId | undefined,
+): WorkspacePane | undefined {
+  if (pane === undefined || projectId === undefined) return pane;
+  const held = pane.context?.projectId ?? workspace.contextByMode[mode].projectId;
+  return held !== null && String(held) === String(projectId) ? pane : undefined;
+}
+
+/**
+ * The layout shown while the host decides. A placement the renderer cannot
+ * judge alone, a pane of another Project whose own bound root only the host
+ * resolves, shows the current layout until the host answers instead of being
+ * refused here; the host still decides it.
+ */
+function previewWorkspaceOperation(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+): WindowWorkspace {
+  try {
+    return applyWorkspaceOperation(workspace, operation);
+  } catch (error) {
+    const placement =
+      operation.kind === "open-surface" ||
+      operation.kind === "replace-pane-surface" ||
+      operation.kind === "split-pane";
+    if (placement && error instanceof ShellPolicyRejected) return workspace;
+    throw error;
+  }
+}
+
 function modeLabel(mode: OctantMode): string {
   return mode === "chat" ? "Chat" : mode === "work" ? "Work" : "Code";
 }
@@ -2234,14 +2299,8 @@ function refuseCrossAuthority(
       ...offer,
     };
   }
-  if (isDifferentProject(workspace, mode, projectId)) {
-    throw {
-      category: "cross-context",
-      message:
-        "This surface belongs to a different Project. Open it in a new window to keep its authority.",
-      ...offer,
-    };
-  }
+  // Another Project of this mode and host joins as its own pane; the host
+  // resolves that pane's Project and judges every call on it.
 }
 
 function windowTargetForSurface(
