@@ -256,20 +256,20 @@ on mid-grey glass) and never a blur (the packaged window does not frost
 page content over its native material: a backdrop filter there lays a sharp copy
 under the fill).
 
-| Surface                                                                | Opaque window                                                                                                        | Window glass                                    | Reduced transparency / increased contrast                       |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| Rail, band, sidebar, stage, tiles, bottom panel                        | frame ground; pane; sidebar fill                                                                                     | clear on the coat                               | opaque                                                          |
-| Card (`--octant-card`, `bg-card`), Code Home cards, approval card      | card colour + hairline                                                                                               | ink 4% + hairline                               | card colour + hairline (strong border under increased contrast) |
-| Settings group                                                         | ink 2% + hairline                                                                                                    | ink 2% + hairline                               | ink 2% + hairline                                               |
-| Dock card, Environment card                                            | ink 4% (oklab)                                                                                                       | ink 4% (oklab)                                  | same                                                            |
-| Control fill, chip, segmented track                                    | control roles                                                                                                        | ink 7%, 11% hover, 15% pressed; chosen ink 12%  | control roles                                                   |
-| Outline button                                                         | rests on the page colour                                                                                             | rests on the card step                          | page colour                                                     |
-| Composer box                                                           | card colour + faint hairline + float shadow                                                                          | ink 7% + faint hairline + float shadow, no blur | card colour                                                     |
-| Person's message (bubble)                                              | card colour, no hairline                                                                                             | ink 4%, no blur                                 | card colour; strong border under increased contrast             |
-| Composer notice card                                                   | callout ground                                                                                                       | ink 4% with its tone at 14% over it, no blur    | callout ground                                                  |
-| Menu, popover, select, combobox, hover card, palette, toast, tour card | float at 66% (dark) / 78% (light) over `--octant-float-blur` in a browser; float at 96%, no blur, in the desktop app | float at 96%, no blur                           | opaque float, no blur                                           |
-| Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                                                                             | float at 96%, no blur                           | opaque float                                                    |
-| Tooltip                                                                | the float, opaque                                                                                                    | the same                                        | the same                                                        |
+| Surface                                                                | Opaque window                                                                                                        | Window glass                                           | Reduced transparency / increased contrast                       |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
+| Rail, band, sidebar, stage, tiles, bottom panel                        | frame ground; pane; sidebar fill                                                                                     | clear on the coat                                      | opaque                                                          |
+| Card (`--octant-card`, `bg-card`), Code Home cards, approval card      | card colour + hairline                                                                                               | ink 4% + hairline                                      | card colour + hairline (strong border under increased contrast) |
+| Settings group                                                         | ink 2% + hairline                                                                                                    | ink 2% + hairline                                      | ink 2% + hairline                                               |
+| Dock card, Environment card                                            | ink 4% (oklab)                                                                                                       | ink 4% (oklab)                                         | same                                                            |
+| Control fill, chip, segmented track                                    | control roles                                                                                                        | ink 7%, 11% hover, 15% pressed; chosen ink 12%         | control roles                                                   |
+| Outline button                                                         | rests on the page colour                                                                                             | rests on the card step                                 | page colour                                                     |
+| Composer box                                                           | card colour + faint hairline + float shadow                                                                          | ink 7% + faint hairline + float shadow, no blur        | card colour                                                     |
+| Person's message (bubble)                                              | card colour, no hairline                                                                                             | ink 4%, no blur                                        | card colour; strong border under increased contrast             |
+| Composer notice card                                                   | callout ground                                                                                                       | ink 4% with its tone at 14% over it, no blur           | callout ground                                                  |
+| Menu, popover, select, combobox, hover card, palette, toast, tour card | float at 66% (dark) / 78% (light) over `--octant-float-blur` in a browser; float at 96%, no blur, in the desktop app | float at 96%, no blur                                  | opaque float, no blur                                           |
+| Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                                                                             | float at 96%, no blur (Settings sheet: 80%, 28px blur) | opaque float                                                    |
+| Tooltip                                                                | the float, opaque                                                                                                    | the same                                               | the same                                                        |
 
 - **Why floats are dense on glass.** A frosted menu works over an opaque
   window because the blur hides the page under it. On a translucent window it
@@ -280,7 +280,7 @@ under the fill).
   there, with Glass on or off
   (`html[data-octant-native-host="true"]`). In the desktop app every float
   (menu, popover, select, combobox, hover card, palette, toast, notice, tour
-  card, dialog, the Settings sheet) is the dense 96% float with no blur whether
+  card, dialog) is the dense 96% float with no blur whether
   Glass is on or off, and a surface that sits over the application ground (a
   person's message, a glass card, Zen's windows and bars; the composer box while
   Glass is off) is the float colour at 96% with no tint image and no blur; a
@@ -292,10 +292,11 @@ under the fill).
 - **Settings leaves the window as it is; a dialog blurs it.** Settings is a
   sheet so a person can watch the window change while they change its
   appearance, so behind it nothing is blurred or dimmed: only a 6% shade sets
-  the sheet apart. In the desktop app (whose renderer draws no backdrop filter)
-  the sheet itself is the dense float, 96%, so no thread text reads through
-  the sheet, while everything beside it stays visible; blurring the window
-  past reading hid exactly what Settings is a sheet for. Behind a dialog, a
+  the sheet apart. The sheet itself is frosted: the float at 80% over a 28px
+  backdrop blur, so some of the window shows through it but no thread text can
+  be read through it (maintainer request, 2026-11-15), while everything beside
+  it stays visible; blurring the whole window past reading hid exactly what
+  Settings is a sheet for. Behind a dialog, a
   decision rather than a view, the layers that hold content (the rail, the
   sidebar, the title band, the workspace and its docks) blur past reading (5px)
   and stay at 92%. Where a ground is drawn (a picture, pixels or characters) a

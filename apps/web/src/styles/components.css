@@ -423,9 +423,8 @@ html[data-octant-increased-contrast="true"]
    its appearance, so the window behind it stays exactly as it is: no blur, no
    dim, and only a faint shade that sets the sheet apart. Blurring it past
    reading hid what a person came to Settings to watch. Words never show
-   THROUGH the sheet: on the desktop app (whose renderer draws no backdrop
-   filter) the sheet takes the dense float, so the thread behind it cannot be
-   read through it, while everything beside it stays visible.
+   THROUGH the sheet: it is frosted (rule below), so the thread behind it
+   cannot be read through it, while everything beside it stays visible.
    A dialog is a decision, not a view of the window: while one is open the
    layers that hold content are blurred past reading and barely dimmed, a filter
    on the layers themselves, which the desktop renderer does draw. Only paint
@@ -441,14 +440,6 @@ html[data-octant-native-host="true"]:not(
   > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
   opacity: 0.92;
   filter: blur(5px);
-}
-
-html[data-octant-native-host="true"]:not(
-    [data-octant-reduced-transparency="true"],
-    [data-octant-increased-contrast="true"]
-  )
-  .octant-sheet__popup {
-  background: color-mix(in srgb, var(--octant-float) 96%, transparent);
 }
 
 html[data-octant-native-host="true"]:not(
@@ -510,6 +501,20 @@ html[data-octant-native-host="true"]:not(
   ):has(.shell-frame > .app-backdrop)
   :is(.octant-sheet__popup, .octant-dialog__popup) {
   background: color-mix(in srgb, var(--octant-float) 96%, transparent);
+}
+
+/* The Settings sheet is frosted: some of the window shows through it, blurred
+   so no word behind it can be read. The 66% fill a later rule gave every modal
+   left the thread's text crisp behind Settings' rows. The doubled class wins over
+   the modal rules above whatever their order. */
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  .octant-sheet__popup.octant-sheet__popup {
+  background: color-mix(in srgb, var(--octant-float) 80%, transparent);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
 }
 
 /* A popup grows out of the point it is anchored to; a dialog has no anchor

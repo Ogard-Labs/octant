@@ -83,11 +83,13 @@ describe("window glass", () => {
     expect(Number(/blur\((\d+)px\)/.exec(dialogFade?.[2] ?? "")?.[1])).toBeGreaterThanOrEqual(4);
     expect(dialogFade?.[2]).not.toMatch(/visibility|display|pointer-events/);
     // Settings is a sheet a person watches the window through: no rule blurs or
-    // dims the content layers for it, and the sheet itself is dense, so nothing
-    // reads through the sheet while everything beside it stays visible.
+    // dims the content layers for it, and the sheet itself is frosted, so some
+    // of the window shows through it but no word behind it can be read.
     expect(css).not.toMatch(/:has\([^)]*\.octant-sheet__popup\[data-open\][^)]*\)\s*\.shell-frame/);
-    expect(css).toMatch(
-      /\.octant-sheet__popup \{\s*background: color-mix\(in srgb, var\(--octant-float\) 96%, transparent\);/,
+    const frosted = /\.octant-sheet__popup\.octant-sheet__popup \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(frosted).toContain("color-mix(in srgb, var(--octant-float) 80%, transparent)");
+    expect(Number(/backdrop-filter: blur\((\d+)px\)/.exec(frosted)?.[1])).toBeGreaterThanOrEqual(
+      20,
     );
   });
 
