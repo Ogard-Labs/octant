@@ -153,4 +153,20 @@ describe("the shared host element reader", () => {
     expect(picked?.markup?.html.length).toBeLessThanOrEqual(4_096);
     expect(picked?.markup?.truncated).toBe(true);
   });
+
+  it("gives the element picker no text of an element picked inside an editable region", () => {
+    select(
+      `<div contenteditable="true"><p id="draft"><span>private draft</span> words</p></div>`,
+      "#draft",
+    );
+    const picked = readBrowserFeedbackElement({ ...point, markup: true });
+    expect(picked?.markup?.html).toBe('<p id="draft"></p>');
+  });
+
+  it("marks the picker's markup truncated when one long text run is cut", () => {
+    select(`<p id="long">${"a".repeat(3_000)}</p>`, "#long");
+    const picked = readBrowserFeedbackElement({ ...point, markup: true });
+    expect(picked?.markup?.html.length).toBeLessThan(3_000);
+    expect(picked?.markup?.truncated).toBe(true);
+  });
 });

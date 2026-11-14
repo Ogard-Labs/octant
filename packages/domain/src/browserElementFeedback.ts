@@ -231,10 +231,10 @@ export function readBrowserFeedbackElement(argument: {
       )
         copy.removeAttribute(name);
     }
-    if (
-      source.matches(withheld) ||
-      source.matches("[contenteditable]:not([contenteditable=false])")
-    )
+    // Ancestry, not the node's own attributes: an element picked inside an
+    // editable region holds the person's typed text, as the text read above
+    // already treats it.
+    if (source.closest(`${withheld}, [contenteditable]:not([contenteditable=false])`) !== null)
       return copy;
     for (const child of source.childNodes) {
       if (nodeBudget <= 0) {
@@ -243,7 +243,9 @@ export function readBrowserFeedbackElement(argument: {
       }
       nodeBudget -= 1;
       if (child.nodeType === Node.TEXT_NODE) {
-        copy.appendChild(document.createTextNode((child.textContent ?? "").slice(0, 2_048)));
+        const text = child.textContent ?? "";
+        if (text.length > 2_048) markupCut = true;
+        copy.appendChild(document.createTextNode(text.slice(0, 2_048)));
       } else if (child instanceof Element) {
         const nested = copyOf(child);
         if (nested !== null) copy.appendChild(nested);
