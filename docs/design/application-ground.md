@@ -27,7 +27,7 @@ as one glow that dithers from accent into ink into nothing. It never carries
 more than one accent colour. The ink is at most half opaque on a dark page, and
 the accent at most about seven-tenths there; on a light page the ink is dark, at
 most two-fifths opaque, and the glow stays about half as strong, so it stays
-faint. A Scene chooses what it draws. Ridges is the one bold scene, a picture rather than a texture: five layered ridges from smooth noise, each a solid shape. The crest is a bright, crisp line a few cells thick, near full ink, and the slope under it is filled with denser shading that falls off downward, so each layer occludes the one behind; near layers are larger and brighter, far ones fainter. A large accent sun sits on the horizon to one side, with a valley cut under it: its core saturates to full accent inside a wide dithered halo, and the crests near it catch its light in the accent, fading with distance from it. The sky above is mostly empty, with a sparse haze near the horizon. Ridges carries its own peak opacities above the caps just given: ink up to 0.96 and the accent to full on a dark page, ink up to 0.8 and the accent to 0.72 on a light one, which stays a little lighter. Burst is a soft radial burst of about twenty rounded rays in the accent from
+faint. A Scene chooses what it draws. Ridges is the one bold scene, a picture rather than a texture: five layered ridges from smooth noise, each a solid shape. The crest is a bright, crisp line two or three cells thick, at near full ink on the near layers and fainter on the far ones, and under it a dark dither that is clearly there at the crest and fades downward to black, so each layer occludes the one behind and reads as a shape. A round accent sun sits low toward one side, its core wholly inside the window within a wide soft dithered halo, with a valley cut under it, and the crests near it are rim-lit in the accent, fading with distance from it. The sky above is mostly empty, with a sparse haze near the horizon, and empty behind the heading and subtitle. Ridges carries its own peak opacities above the caps just given: ink up to 0.96 and the accent to full on a dark page, ink up to 0.8 and the accent to 0.72 on a light one, which stays a little lighter. Burst is a soft radial burst of about twenty rounded rays in the accent from
 the top right corner, fading into dither, whose size breathes by a few per cent.
 Drift is diagonal streaks in the ink, in loose bands that break up along their
 length, with a few in the accent, sliding across the page. Your picture prints a
@@ -41,11 +41,12 @@ without a photo draws Drift too. Every scene is generated in code from a fixed
 seed, so it looks the same each time, and none ships an image. Each scene is laid
 out for what the window shows (a start screen that scrolls makes the ground as
 tall as its content) and dimmed behind the start screen's content column, across its
-full width and height, to a third of its strength (Ridges keeps half there, since its
-composer is opaque and its crests are the picture), back to full 140px past the
-column's edge, so the brightest cells stay away from text. Under the sidebar, where a
-ground runs there, every scene keeps a third. Ridges draws dark slopes in a fine dither
-that thins and fades downward under bright crests, and keeps the sky behind the heading
+full width and height, to a third of its strength, back to full 140px past the
+column's edge, so the brightest cells stay away from text. Ridges is the bold scene, so
+it runs at full strength outside the text: its own sky is empty behind the heading and
+subtitle, and the column calms it (to half) only at the foot of the window, where the
+composer and its chips sit. Under the sidebar, where a
+ground runs there, every scene keeps a third. Ridges keeps the sky behind the heading
 and its subtitle empty, so the sun sits low toward a corner and no cell lies under text. Motion is slow: ridges drift
 a few cells a second, the sun and the burst breathe, the streaks slide. It runs at
 fifteen frames a second, stops while the document is hidden or the ground is off

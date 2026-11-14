@@ -103,6 +103,77 @@ describe("the built-in pixel scenes", () => {
     expect(brightCells).toBeGreaterThan(columns);
   });
 
+  it("keeps the ridges' sun round with its core wholly inside the window", () => {
+    const columns = 160;
+    const rows = 90;
+    const scene = createScene("ridges", columns, rows, SCENE_SEED);
+    scene.frame(0);
+    const sample: SceneSample = { ink: 0, glow: 0 };
+    let left = columns;
+    let right = -1;
+    let top = rows;
+    let bottom = -1;
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        scene.read(column, row, sample);
+        // The sun's own cells carry little ink; a rim-lit crest is bright.
+        if (sample.glow < 0.95 || sample.ink > 0.5) continue;
+        left = Math.min(left, column);
+        right = Math.max(right, column);
+        top = Math.min(top, row);
+        bottom = Math.max(bottom, row);
+      }
+    }
+    expect(right).toBeGreaterThan(left);
+    expect(left).toBeGreaterThan(columns * 0.5);
+    expect(right).toBeLessThan(columns - 4);
+    // Round: as wide as it is tall above the horizon, not a flat slab.
+    expect((right - left) / (bottom - top)).toBeGreaterThan(1);
+    expect((right - left) / (bottom - top)).toBeLessThan(3);
+  });
+
+  it("keeps the sky behind the heading and its subtitle empty", () => {
+    const columns = 160;
+    const rows = 90;
+    const scene = createScene("ridges", columns, rows, SCENE_SEED);
+    scene.frame(0);
+    const sample: SceneSample = { ink: 0, glow: 0 };
+    for (let row = Math.floor(rows * 0.36); row < Math.floor(rows * 0.5); row += 1) {
+      for (let column = Math.floor(columns * 0.4); column < Math.floor(columns * 0.6); column += 1) {
+        scene.read(column, row, sample);
+        expect(sample.ink).toBeLessThan(0.01);
+        expect(sample.glow).toBeLessThan(0.01);
+      }
+    }
+  });
+
+  it("draws each ridge's crest two or three cells thick and a dark dither under it that fades downward", () => {
+    const columns = 160;
+    const rows = 240;
+    const scene = createScene("ridges", columns, rows, SCENE_SEED);
+    scene.frame(0);
+    const sample: SceneSample = { ink: 0, glow: 0 };
+    // Down the column far from the sun, the nearest ridge's crest is the first
+    // cell at full ink; the cells under it step down to a dither and then to
+    // black before the next ridge begins.
+    const column = Math.floor(columns * 0.2);
+    const inks: number[] = [];
+    for (let row = Math.floor(rows * 0.7); row < rows; row += 1) {
+      scene.read(column, row, sample);
+      inks.push(sample.ink);
+    }
+    const crest = inks.findIndex((ink) => ink > 0.9);
+    expect(crest).toBeGreaterThanOrEqual(0);
+    let thickness = 0;
+    while ((inks[crest + thickness] ?? 0) > 0.9) thickness += 1;
+    expect(thickness).toBeGreaterThanOrEqual(2);
+    expect(thickness).toBeLessThanOrEqual(4);
+    const under = inks.slice(crest + thickness + 2, crest + thickness + 10);
+    expect(Math.max(...under)).toBeGreaterThan(0.15);
+    expect(Math.max(...under)).toBeLessThan(0.5);
+    expect(under[under.length - 1] ?? 1).toBeLessThan(under[0] ?? 0);
+  });
+
   it("keeps a burst's glow to one corner", () => {
     const columns = 120;
     const rows = 70;

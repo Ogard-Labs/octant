@@ -54,8 +54,13 @@ const WAVE_SECONDS = 1.9;
 const MAX_RATIO = 2;
 /** Behind the content column a scene keeps a third of its strength. */
 const CALM_FLOOR = 1 / 3;
-/** Ridges keeps half: the composer is opaque, and the crests are the picture. */
+/**
+ * Ridges is the bold scene, so it runs at full strength outside the text: its
+ * own sky is empty behind the heading and subtitle, and the column is calmed
+ * only where the composer and its chips sit, in the foot of the window, to half.
+ */
 const RIDGES_CALM_FLOOR = 0.5;
+const RIDGES_COMPOSER_ZONE = { from: 0.72, to: 0.8 } as const;
 
 function smoothstep(low: number, high: number, value: number): number {
   const x = Math.min(1, Math.max(0, (value - low) / (high - low)));
@@ -388,15 +393,19 @@ export function runMovingPrint(
     const contentColumn = readContentColumns(canvas, columns * cell);
     const sidebarColumn = readSidebarColumns(canvas);
     const floor = source.scene === "ridges" ? RIDGES_CALM_FLOOR : CALM_FLOOR;
+    const calmed = scene !== undefined || twoTone !== undefined;
     for (let column = 0; column < columns; column += 1) {
-      const share =
-        scene === undefined && twoTone === undefined
-          ? 1
-          : Math.min(
-              columnShare((column + 0.5) * cell, contentColumn, floor),
-              columnShare((column + 0.5) * cell, sidebarColumn, CALM_FLOOR),
-            );
-      for (let row = 0; row < rows; row += 1) shares[row * columns + column] = share;
+      const x = (column + 0.5) * cell;
+      const content = calmed ? columnShare(x, contentColumn, floor) : 1;
+      const sidebar = calmed ? columnShare(x, sidebarColumn, CALM_FLOOR) : 1;
+      for (let row = 0; row < rows; row += 1) {
+        // Ridges keeps the content column's calm for the foot of the window only.
+        const zone =
+          source.scene === "ridges"
+            ? smoothstep(RIDGES_COMPOSER_ZONE.from, RIDGES_COMPOSER_ZONE.to, row / sceneRows)
+            : 1;
+        shares[row * columns + column] = Math.min(1 - (1 - content) * zone, sidebar);
+      }
     }
   };
 
