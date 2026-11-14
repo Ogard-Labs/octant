@@ -17041,6 +17041,32 @@ cards; general Azure CLI credentials remain unavailable by design.
     re-allowed. A confined launch also counts as its own the read and write
     roots it was granted by name, except the bound root and the temporary
     directory. No own path ever reopens a file in another group.
+  - **On Windows** the same groups name the Windows locations (maintainer
+    decision, 2026-11-14): Credential Manager's `Credentials` folders, the
+    DPAPI `Protect` folder and the `Vault` folders under `AppData`, the
+    password managers' vault folders there, browser profile stores under
+    `AppData\Local` and `AppData\Roaming` (six levels) and the Firefox
+    profiles, the Slack and Discord `Local Storage` folders, `gcloud` under
+    `AppData\Roaming`, `_netrc`, the forge sign-in under
+    `AppData\Roaming\GitHub CLI`, and the Copilot sign-in under
+    `AppData\Local`; the home-folder files (`.ssh`, `.aws`, `.kube`,
+    `.docker`, registry tokens, provider sign-ins) keep their names. Windows
+    has no confined launch yet, so the list there is enforced only by
+    Octant's own file tools, Shield and redaction. Those judge only a
+    drive-absolute path, compared whatever its letter case and slash
+    direction, with `..` resolved inside the drive, each name stripped of the
+    trailing dots and spaces and the `:stream` suffix Windows ignores when it
+    opens a file, and under the final path its longest existing prefix
+    resolves to. A share, device (`\\?\`), drive-relative, or driveless
+    rooted path is refused rather than judged, every path is refused when the
+    home folder is not drive-absolute, and a search is refused when its root
+    is at or above any protected location, or inside a pattern entry's folder
+    with levels of it left (a browser profile folder), whether or not the
+    file exists. On macOS and Linux a search rooted inside a pattern entry's
+    folder is checked by walking from the root, and a walk that passes 4,096
+    entries refuses the search rather than answer that nothing was found.
+    An absolute path a person added is a POSIX path and names nothing on
+    Windows; only `~/` additions apply there.
 - **The person can add paths and remove built-ins.** Settings › Permissions
   › Protected files (`ProtectedFilesService`, `/api/protected-files`) shows
   each group with the paths it covers on this host and the channel that
@@ -18055,6 +18081,30 @@ and Code there on Windows is tracked as its own work and needs Windows forms
 of the confined launches first (maintainer decision, 2026-11-12); today every
 level is refused. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
+
+**Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
+deliverable and keeps every gate above:
+
+1. Built: the [secret guard](#secret-guard) names the Windows locations and
+   refuses a path it cannot judge, and the platform-independent domain and
+   contract suites also run on a hosted Windows runner (not a required check
+   until they have been seen green there).
+2. A Windows confinement design for the confined launches (process, file,
+   and network boundary equivalent to Seatbelt and Bubblewrap, with the
+   secret guard as an OS rule), approved and documented here before any
+   guarded level is admitted. Until then Work and Code stay refused on
+   Windows at every level, and the honest capability report says so.
+3. Work and Code at Full access on Windows on top of the confined launches'
+   Windows forms; Code terminals with an explicit shell setting (PowerShell
+   by default, never a guessed POSIX shell), Windows process-tree stop in
+   place of process-group signals, and no `/tmp` or POSIX path assumptions in
+   provider launches.
+4. The `octant` CLI on Windows: native host paths (today the generic host
+   paths refuse `win32`), a browser opener that runs no shell, and a service
+   manager equivalent; until then the CLI's service commands refuse Windows.
+5. An installer, Authenticode signing, and a signed update feed that builds
+   on the Linux signed-feed trust root once that path has been exercised on a
+   real image; the unsigned QA ZIP stays QA-only.
 
 The Windows owned-control prerequisite is an original in-process Node-API
 binding, not a separate owner daemon. Only a host-selected scope UUID reaches
