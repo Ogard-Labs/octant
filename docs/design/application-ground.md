@@ -108,10 +108,13 @@ opaque) and scramble their glyphs faster, and the ring fades within two seconds.
 Under the whole shell the field answers only a click on a start screen, never one
 in a thread or a list. While a ring is alive the field runs at about forty frames
 a second, and falls back to fifteen once it is gone. A saved choice always wins: only a fresh install and Reset take this default. Behind a
-start screen every other ground is masked away behind the composer and fades out
-below it, so the prompt and the recent-thread list read on the plain page; in the
-light theme it fades out sooner, because dark text over a pale picture has
-less contrast headroom than light text over a dark one. A person
+start screen every ground, the ASCII field and the dithered scenes included,
+fades toward the foot of the window: full strength to about three fifths of its
+height, about a third of it across the lower third, and the window ground
+itself at the foot, as a mask on the ground layer under everything, so the
+composer and the words near it read over a busy picture. In the light theme it
+fades sooner, because dark text over a pale picture has less contrast headroom
+than light text over a dark one. A person
 may instead put the ground behind every page, from the workspace's leading
 edge, and under the sidebar too when they ask for it (see [Depth and material](../../DESIGN.md#depth-and-material)). Every
 surface that shows text or information softens it beneath one continuous
