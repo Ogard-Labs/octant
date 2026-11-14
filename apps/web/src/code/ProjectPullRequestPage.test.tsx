@@ -17,7 +17,7 @@ const query: CodeProjectPullRequestDetailQuery = {
   number: 12,
 };
 
-function detailView() {
+function detailView(description = "Adds manual refresh.") {
   return decodeCodeProjectPullRequestDetailView({
     version: 1,
     query,
@@ -38,7 +38,7 @@ function detailView() {
       author: "octocat",
       mergeability: "mergeable",
       matchesDeliveryBranch: false,
-      description: "Adds manual refresh.",
+      description,
       diff: "diff --git a/README.md b/README.md",
       diffTruncated: false,
       commits: [{ oid: "a".repeat(40), messageHeadline: "Refresh by hand", author: "octocat" }],
@@ -88,6 +88,37 @@ describe("the pull-request reading pane", () => {
     const status = screen.getByRole("complementary", { name: "Pull request status" });
     expect(within(status).getByText("Can merge without conflicts")).toBeVisible();
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("renders the description as markdown with headings, bullets and code", async () => {
+    const view = detailView("## Risks\n\n- One risk module\n- Six graded `actions`\n");
+    renderPage({ load: async () => view, refresh: async () => view });
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Risks" })).toBeVisible();
+    const bullets = screen
+      .getAllByRole("listitem")
+      .filter((item) => item.parentElement?.closest(".pr-detail__prose") !== null);
+    expect(bullets.map((item) => item.textContent)).toEqual([
+      "One risk module",
+      "Six graded actions",
+    ]);
+    expect(screen.getByText("actions").tagName).toBe("CODE");
+  });
+
+  it("keeps Merge and its method menu in one split button", async () => {
+    renderPage({
+      onMerge: async (method) => ({
+        status: "merged" as const,
+        number: 12,
+        method,
+        mergedAt: decodeUtcTimestamp("2026-08-22T08:00:00.000Z"),
+      }),
+    });
+
+    const merge = await screen.findByRole("button", { name: "Merge" });
+    const method = screen.getByRole("button", { name: "Merge method" });
+    expect(merge.parentElement).toBe(method.parentElement);
+    expect(merge.parentElement).toHaveClass("pr-detail__split");
   });
 
   it("lists the failing check first in the status column", async () => {

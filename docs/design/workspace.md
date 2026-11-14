@@ -1198,10 +1198,16 @@ sentence), Checks (failing first, View all), Reviews (each reviewer's latest
 state), Comments (a count that opens Timeline), linked threads, and Automatic
 actions as two compact switch rows whose sentence is a tooltip and still read to
 a screen reader. There is no Request reviewers action: no host command asks a
-reviewer. The text column (720px) and the status column (260px) sit together, centred in
-the pane with a 32px gap; the tab row uses the same columns, so the tabs start at
-the text column's left edge and the actions end at the status column's right
-edge, and switching a tab moves none of them. Where the pane is under 760px the status column folds under the title
+reviewer. The text column (720px) and the status column (260px) sit together with a 32px gap on one grid
+that the tab row and the body share, so the tabs start at the text column's left edge and the
+actions end exactly on the status column's right edge (the actions are 2px apart and fit the
+column; none reaches past it), and switching a tab moves none of them. There is no divider line
+beside the status column. The block is centred in the pane, except where centring would leave
+more than 96px between the pane's edge and the text (a pane wider than 1204px, a window of about
+1900px or more with the sidebar open): then it sits 48px in from the pane's left edge, so the
+reading column stays near the list. The **Merge** control is one split button: the label and a
+20px chevron share the small button's height and radius, divided by one 1px line inside the
+accent fill. A description's lists keep their bullets and numbers. Where the pane is under 760px the status column folds under the title
 into columns on Summary and is not shown on the other tabs. Loading, an
 unavailable read and a missing detail are each one quiet line, not a card.
 Rules and limits
@@ -1784,7 +1790,9 @@ host restart and is cleared when GitHub authority is revoked.
 list column and a reading pane, not a full-width list. The list column is
 320px with its own scroll: a header with the title and, as icon buttons with
 tooltips, Sort, Filter, Repository settings (only while the list is not
-grouped) and Refresh, the count under the title; a search field that also takes
+grouped) and Refresh (with the back arrow first when the page can close), on a 16px inset line
+that the title, the count, the search field and the chips share, the icons ending on the search
+field's right edge, the count under the title; a search field that also takes
 a pasted pull-request link and narrows the list to the one it names; quiet
 status chips with counts (All, Open, Drafts, bound to the Filter menu's
 Status; each counts the rows the list would hold under every other choice, so a

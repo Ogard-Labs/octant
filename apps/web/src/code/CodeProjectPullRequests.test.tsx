@@ -1200,14 +1200,15 @@ describe("CodeProjectPullRequests", () => {
     expect(ruleBody(page, ".pr-page .work-list__list")).toMatch(/gap:\s*4px/);
   });
 
-  it("centres the pull request's text column and status column together, with the tabs and actions on their edges", () => {
+  it("shares one grid between the tab bar and the body, centred, and left-aligned at 48px where centring would leave a hole", () => {
     const page = readFileSync(resolve(import.meta.dirname, "pull-request-page.css"), "utf8");
-    const columns = /grid-template-columns:\s*minmax\(0,\s*720px\)\s+260px/;
-    expect(ruleBody(page, ".pr-detail__body")).toMatch(columns);
-    expect(ruleBody(page, ".pr-detail__body")).toMatch(/justify-content:\s*center/);
-    expect(ruleBody(page, ".pr-detail__bar")).toMatch(columns);
-    expect(ruleBody(page, ".pr-detail__bar")).toMatch(/justify-content:\s*center/);
+    const shared = ruleBody(page, ".pr-detail__bar,\n.pr-detail__body");
+    expect(shared).toMatch(/grid-template-columns:\s*minmax\(0,\s*720px\)\s+260px/);
+    expect(shared).toMatch(/justify-content:\s*center/);
     expect(ruleBody(page, ".pr-detail__tools")).toMatch(/justify-content:\s*flex-end/);
+    expect(ruleBody(page, ".pr-detail__tools")).toMatch(/justify-self:\s*end/);
+    expect(page).toMatch(/@container pr-detail \(min-width: 1205px\)/);
+    expect(page).toMatch(/justify-content:\s*start;\s*padding-inline:\s*var\(--oct-space-12\)/);
   });
 
   it("sizes a row from its two lines and cuts the title after one", () => {
