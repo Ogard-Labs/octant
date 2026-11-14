@@ -247,7 +247,7 @@ describe("ProviderSettingsView", () => {
   it("omits provider metadata when the driver label is already the display name", () => {
     renderProviderSettings(<ProviderSettingsView {...fixture({ instance: cliNamedProvider() })} />);
 
-    const row = screen.getByRole("article", { name: "Codex CLI" });
+    const row = screen.getByRole("article", { name: "Codex" });
     expect(row.querySelector(".prov-observation > .prov-meta")).toBeNull();
   });
 
@@ -1043,7 +1043,8 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Codex local" });
-    expect(within(card).getByText("Codex CLI")).toBeVisible();
+    expect(within(card).getByText("Codex", { selector: ".prov-meta" })).toBeVisible();
+    expect(within(card).queryByText(/\bCLI$/)).toBeNull();
     expect(within(card).getByText(/codex login/i)).toBeVisible();
     expect(within(card).getByLabelText("Account directory")).toHaveValue("~/.codex");
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(/one-shot/i);
@@ -1149,7 +1150,7 @@ describe("ProviderSettingsView", () => {
   it("names the CLI update once, for a provider whose own name already ends in CLI", () => {
     renderExpanded(
       <ProviderSettingsView
-        {...fixture({ instance: cliNamedProvider() })}
+        {...fixture({ instance: cliNamedProvider("Codex CLI") })}
         onUpdateProviderCli={vi.fn(async () => true)}
       />,
     );
@@ -5644,10 +5645,10 @@ function provider(patch: Partial<ProviderInstance> = {}): ProviderInstance {
   });
 }
 
-function cliNamedProvider(): ProviderInstance {
+function cliNamedProvider(displayName = "Codex"): ProviderInstance {
   return decodeProviderInstance({
     ...provider(),
-    displayName: "Codex CLI",
+    displayName,
     driverKind: "codex",
     configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
   });
