@@ -15,6 +15,17 @@ describe("a Project's own code and its trust", () => {
     }
   });
 
+  it("asks to trust a Project that holds its own OpenCode configuration", () => {
+    expect(
+      projectCodeTrust({
+        driverKind: "opencode",
+        projectType: "work",
+        trusted: false,
+        present: [".opencode/opencode.json"],
+      }),
+    ).toEqual({ status: "untrusted", provider: "opencode", found: ["settings"] });
+  });
+
   it("reports a Project already trusted for the provider without asking", () => {
     expect(
       projectCodeTrust({
@@ -38,7 +49,7 @@ describe("a Project's own code and its trust", () => {
   });
 
   it("asks nothing for a provider that is not a key provider, or whose trust loads no Project code", () => {
-    for (const driverKind of ["pi", "codex", "opencode"] as const) {
+    for (const driverKind of ["pi", "codex"] as const) {
       expect(
         projectCodeTrust({
           driverKind,

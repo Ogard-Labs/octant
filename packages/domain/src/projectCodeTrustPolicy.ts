@@ -17,11 +17,12 @@ export interface ProjectCodeEntry {
  * `project` and `local` setting sources, and starts a Project's `.mcp.json`
  * servers only without `strictMcpConfig`; Octant turns both on only with
  * the Project's trust. Mistral Vibe's `.vibe` entries stay unreadable until
- * the Project is trusted. Codex and OpenCode list nothing: Octant's trust
- * loads none of their Project configuration (Codex's own folder trust decides
- * it, and OpenCode's launch keeps Project configuration off at every level),
- * so a prompt to trust for them would promise something that does not
- * happen.
+ * the Project is trusted. OpenCode's Project `opencode.json(c)` files, at the
+ * root and in `.opencode`, have their rules and MCP servers read into the
+ * launch's private configuration only with the Project's trust (maintainer
+ * decision, 2026-11-14). Codex lists nothing: Octant's trust loads none of
+ * its Project configuration (Codex's own folder trust decides it), so a
+ * prompt to trust for it would promise something that does not happen.
  */
 export const PROJECT_CODE_ENTRIES: Readonly<
   Record<KeyProviderDriverKind, ReadonlyArray<ProjectCodeEntry>>
@@ -33,7 +34,12 @@ export const PROJECT_CODE_ENTRIES: Readonly<
     { path: ".claude/skills", kind: "skills" },
   ],
   codex: [],
-  opencode: [],
+  opencode: [
+    { path: "opencode.jsonc", kind: "settings" },
+    { path: "opencode.json", kind: "settings" },
+    { path: ".opencode/opencode.jsonc", kind: "settings" },
+    { path: ".opencode/opencode.json", kind: "settings" },
+  ],
   "mistral-vibe": [
     { path: ".vibe/config.toml", kind: "settings" },
     { path: ".vibe/hooks.toml", kind: "hooks" },

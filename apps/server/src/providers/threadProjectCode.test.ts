@@ -65,6 +65,13 @@ describe("reading a thread's untrusted Project code", () => {
     });
   });
 
+  it("reports a Project's own OpenCode configuration as untrusted until the Project trusts OpenCode", async () => {
+    const root = projectRoot({ "opencode.jsonc": "{}", ".opencode/opencode.json": "{}" });
+    await expect(
+      readThreadProjectCode(sources({ root, driverKind: "opencode" }), { threadId, mode: "code" }),
+    ).resolves.toEqual({ status: "untrusted", provider: "opencode", found: ["settings"] });
+  });
+
   it("reports a Mistral Vibe Project's entries as trusted once the Project trusts Vibe", async () => {
     const root = projectRoot({ ".vibe/config.toml": "", ".vibe/hooks.toml": "" });
     await expect(
@@ -88,7 +95,7 @@ describe("reading a thread's untrusted Project code", () => {
 
   it("reports nothing for a provider that is not a key provider, or whose trust loads no Project code", async () => {
     const root = projectRoot({ ".claude/settings.json": "{}", ".mcp.json": "{}" });
-    for (const driverKind of ["pi", "codex", "opencode"] as const) {
+    for (const driverKind of ["pi", "codex"] as const) {
       await expect(
         readThreadProjectCode(sources({ root, driverKind }), { threadId, mode: "code" }),
       ).resolves.toEqual({ status: "none" });

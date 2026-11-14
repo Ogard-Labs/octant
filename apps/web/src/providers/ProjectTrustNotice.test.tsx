@@ -124,6 +124,26 @@ describe("the Project trust prompt in a thread", () => {
     expect(screen.queryByText(/This Project has its own/)).toBeNull();
   });
 
+  it("offers to trust the Project for OpenCode when it holds its own OpenCode configuration", async () => {
+    const { host, setProjectNativeProviders } = services({
+      projectCode: { status: "untrusted", provider: "opencode", found: ["settings"] },
+    });
+    render(
+      <ThreadNativeSetupProvider services={host}>
+        <Thread />
+      </ThreadNativeSetupProvider>,
+    );
+    expect(
+      await screen.findByText(
+        "This Project has its own OpenCode settings. They load once you trust this Project for OpenCode.",
+      ),
+    ).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Trust for OpenCode" }));
+    await waitFor(() =>
+      expect(setProjectNativeProviders).toHaveBeenCalledWith(projectId, ["opencode"]),
+    );
+  });
+
   it("shows the words without Trust in a window that cannot change the Project's trust", async () => {
     const { host } = services({ canTrust: false });
     render(

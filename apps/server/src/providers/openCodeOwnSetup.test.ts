@@ -1,5 +1,45 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { openCodeOwnRulesAllow, projectOpenCodeOwnSetup } from "./openCodeOwnSetup";
+import {
+  openCodeOwnRulesAllow,
+  projectOpenCodeOwnSetup,
+  readOpenCodeProjectSetup,
+} from "./openCodeOwnSetup";
+
+describe("readOpenCodeProjectSetup", () => {
+  it("reads a Project's root and .opencode files in OpenCode's order, without its catch-all or an invalid file", () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-opencode-project-setup-"));
+    try {
+      writeFileSync(
+        join(root, "opencode.jsonc"),
+        [
+          "{",
+          "  // the Project's own rules",
+          '  "permission": { "*": "allow", "edit": "ask" },',
+          '  "mcp": { "tracker": { "type": "local", "command": ["tracker-server"] } }',
+          "}",
+        ].join("\n"),
+      );
+      writeFileSync(join(root, "opencode.json"), "{ not json");
+      mkdirSync(join(root, ".opencode"));
+      writeFileSync(
+        join(root, ".opencode", "opencode.json"),
+        JSON.stringify({ permission: { edit: "allow", external_directory: "allow" } }),
+      );
+      expect(readOpenCodeProjectSetup(root, {})).toEqual({
+        rules: [
+          { action: "edit", resource: "*", effect: "ask" },
+          { action: "edit", resource: "*", effect: "allow" },
+        ],
+        mcp: { tracker: { type: "local", command: ["tracker-server"] } },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 const environment = new Set(["GITHUB_TOKEN", "HOME"]);
 

@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { projectCodeEntries } from "@octant/domain";
 import type { PermissionV2Rule } from "@opencode-ai/sdk/v2/types";
 import { parseRoutingConfig, routingConfigCandidates } from "./openCodeProcess";
 
@@ -234,6 +236,64 @@ export function readOpenCodeOwnSetup(
     }
   }
   return NO_OPENCODE_OWN_SETUP;
+}
+
+/**
+ * The files at a Project root a trusted Project's OpenCode setup is read
+ * from, in OpenCode's own load order (root `opencode.json(c)`, then the
+ * `.opencode` folder's). The raw files never reach the process: OpenCode
+ * loads Project files after the launch's private configuration and pushes a
+ * Project agent's own rules after every top-level rule (read from the
+ * v1.18.21 and v2.0.27 sources), so a Project file handed over could reopen
+ * what the level denies. Their rules and MCP servers are projected the way
+ * the person's own are and placed under the level's denies instead, and
+ * `OPENCODE_DISABLE_PROJECT_CONFIG` stays set, so no Project plugin, agent,
+ * or command ever runs, in Plan or anywhere else.
+ */
+export const OPENCODE_PROJECT_CONFIG_FILES: ReadonlyArray<string> = projectCodeEntries(
+  "opencode",
+).map((entry) => entry.path);
+
+/** Reads a trusted Project's own OpenCode rules and MCP servers; an unreadable file adds none. */
+export function readOpenCodeProjectSetup(
+  projectRoot: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): OpenCodeOwnSetup {
+  let combined: OpenCodeOwnSetup = NO_OPENCODE_OWN_SETUP;
+  for (const file of OPENCODE_PROJECT_CONFIG_FILES) {
+    let content: string;
+    try {
+      content = readFileSync(join(projectRoot, ...file.split("/")), "utf8");
+    } catch {
+      continue;
+    }
+    try {
+      combined = combineOpenCodeSetups(
+        combined,
+        projectOpenCodeOwnSetup(parseRoutingConfig(content), new Set(Object.keys(environment))),
+      );
+    } catch {
+      // An invalid Project file loads nothing of its own; the others still do.
+    }
+  }
+  return combined;
+}
+
+/**
+ * The person's setup followed by a trusted Project's: the Project's rules come
+ * later, so they decide where both name the same action, and both stay under
+ * the level's denies; a Project server replaces the person's of the same
+ * name, as OpenCode's own merge does.
+ */
+export function combineOpenCodeSetups(
+  first: OpenCodeOwnSetup,
+  then: OpenCodeOwnSetup,
+): OpenCodeOwnSetup {
+  const mcp: Record<string, Readonly<Record<string, unknown>>> = { ...first.mcp };
+  for (const [name, server] of Object.entries(then.mcp)) {
+    if (name in mcp || Object.keys(mcp).length < MAX_SERVERS) mcp[name] = server;
+  }
+  return { rules: [...first.rules, ...then.rules].slice(0, MAX_RULES), mcp };
 }
 
 /** One launch's identity for a setup, so a connection never carries a different one. */
