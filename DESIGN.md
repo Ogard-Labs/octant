@@ -1035,7 +1035,10 @@ float follows [Translucency](#translucency).
   message (a reset time) is the secondary ink (`.callout__second`); the action is
   a small secondary button at the trailing edge. A notice above the composer and
   one in a thread column also lift on `--oct-shadow-float` and enter with a fade
-  and a 4px rise over `--oct-motion-base`, none under reduced motion.
+  and a 4px rise over `--oct-motion-base`, none under reduced motion. Those two
+  hug their content (icon, message, second part, action) at the left edge, no
+  wider than 480px: a longer message wraps onto a second line, and several
+  notices stack, each as wide as its own content.
 - **States.** On glass the fill is the dense 96% float; increased contrast and
   reduced transparency make it opaque.
 - **Accessibility.** Warning and danger are `alert`; the others `status`.
@@ -1143,7 +1146,8 @@ narrowest pane's width.
 - **The row above the box** (start screens): where the work runs, as quiet
   chips (meta ink, no fill at rest, 24px).
 - **Notices** are never in the box: each is the callout's compact card directly
-  above it, 8px from it, in its width, most severe first. Passing progress is
+  above it, 8px from it, at its left edge and as wide as its own content (no
+  wider than 480px), most severe first. Passing progress is
   one meta line above the notices that takes no layout room.
 - What each control says and does is in
   [Thread view](docs/design/thread-view.md).

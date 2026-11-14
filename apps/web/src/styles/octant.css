@@ -5251,6 +5251,8 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
 }
 .composer-notices {
   display: grid;
+  /* Each card is as wide as its own content, at the box's left edge. */
+  justify-items: start;
   gap: var(--oct-space-1);
   min-width: 0;
   margin-bottom: var(--oct-space-1);
@@ -5258,13 +5260,22 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
 .composer-notices:empty {
   display: none;
 }
-/* A notice above the box floats just clear of it, in the box's width, and lifts
-   on the box's own soft shadow. It enters with a short fade and a 4px rise, and
-   not at all under reduced motion. */
+/* A notice above the box floats just clear of it, at its left edge, as wide as
+   its own words and action and no wider than 480px (a longer message wraps onto
+   a second line): a card as wide as the box read as a banner across the page.
+   It lifts on the box's own soft shadow, enters with a short fade and a 4px
+   rise, and not at all under reduced motion. */
 .callout:is(.composer-notice, .composer-usage-warning),
 .thread-column > .callout {
+  width: fit-content;
+  max-width: min(480px, 100%);
   box-shadow: var(--oct-shadow-float);
   animation: composer-notice-in var(--oct-motion-base) var(--oct-ease-standard) both;
+}
+/* The words take the room beside the icon and wrap there, instead of dropping
+   the icon onto a line of its own when the message is long. */
+.callout:is(.composer-notice, .composer-usage-warning, .thread-column) > .callout__body {
+  flex: 1 1 16ch;
 }
 @keyframes composer-notice-in {
   from {

@@ -59,31 +59,35 @@ export function ComposerUsageWarning(props: {
     .slice(0, MAX_ALTERNATIVES);
   const limited = room.standing === "limited";
   return (
-    <OctantAlert
-      action={
-        alternatives.length === 0 ? undefined : (
-          <>
-            {alternatives.map(({ group, selection }) => (
-              <OctantButton
-                key={String(group.instance.id)}
-                onClick={() => void props.onSelect(selection)}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                {`Use ${group.instance.displayName}`}
-              </OctantButton>
-            ))}
-          </>
-        )
-      }
-      className="composer-usage-warning"
-      tone="warning"
-    >
-      <p>
-        {limited ? `${name} has reached its usage limit.` : `${name} is close to its usage limit.`}
-        {reset === undefined ? null : <span className="callout__second">{` ${reset}.`}</span>}
-      </p>
-    </OctantAlert>
+    <div className="composer-usage-warning-row">
+      <OctantAlert
+        action={
+          alternatives.length === 0 ? undefined : (
+            <>
+              {alternatives.map(({ group, selection }) => (
+                <OctantButton
+                  key={String(group.instance.id)}
+                  onClick={() => void props.onSelect(selection)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {`Use ${group.instance.displayName}`}
+                </OctantButton>
+              ))}
+            </>
+          )
+        }
+        className="composer-usage-warning"
+        tone="warning"
+      >
+        <p>
+          {limited
+            ? `${name} has reached its usage limit.`
+            : `${name} is close to its usage limit.`}
+          {reset === undefined ? null : <span className="callout__second">{` ${reset}.`}</span>}
+        </p>
+      </OctantAlert>
+    </div>
   );
 }

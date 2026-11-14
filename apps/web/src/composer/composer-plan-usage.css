@@ -23,9 +23,12 @@
   padding: 0 var(--oct-space-2);
 }
 
-/* The usage warning takes the full row above the context chips, so it reads as
-   part of the composer and not a page banner. */
-.composer-start > .composer-usage-warning {
+/* The usage warning takes its own row above the context chips and hugs its
+   content at the row's left edge, so it reads as part of the composer and not
+   as a page banner. */
+.composer-start > .composer-usage-warning-row {
+  display: grid;
+  justify-items: start;
   flex: 1 1 100%;
   /* The row's own 4px and the frame's 4px are taken back, so the card stands
      on the box's edges like the notices that sit directly above it. */

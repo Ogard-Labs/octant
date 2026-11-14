@@ -566,6 +566,9 @@ describe("the public-block visual language", () => {
     expect(card).toMatch(/padding:\s*var\(--oct-space-2\) var\(--oct-space-3\)/);
     expect(card).toMatch(/flex-wrap:\s*wrap/);
     // One soft float shadow and a short rise on entry (200ms), none under reduced motion.
+    expect(group).toMatch(/justify-items:\s*start/);
+    expect(floating).toMatch(/width:\s*fit-content/);
+    expect(floating).toMatch(/max-width:\s*min\(480px, 100%\)/);
     expect(floating).toMatch(/box-shadow:\s*var\(--oct-shadow-float\)/);
     expect(floating).toMatch(/animation:\s*composer-notice-in var\(--oct-motion-base\)/);
     expect(css).toMatch(/@keyframes composer-notice-in\s*\{\s*from\s*\{[^}]*translateY\(4px\)/);

@@ -2143,11 +2143,14 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 /* Placement only: the recipe is the system's `.callout`, the measure the
    shared `.thread-column`. A notice about this thread spans the thread's
-   own column — running it edge to edge made it read as window chrome. */
+   own column, at its left edge, as wide as its content and no wider than
+   480px: running it edge to edge made it read as window chrome. */
 .code-thread-workspace__callout {
   flex: 0 0 auto;
   align-items: center;
-  margin: 12px auto 0;
+  width: fit-content;
+  max-width: min(480px, var(--oct-thread-column));
+  margin: 12px 0 0 max(0px, calc((100% - var(--oct-thread-column)) / 2));
 }
 
 /* A provider's question takes the approval row with its answer field. */
