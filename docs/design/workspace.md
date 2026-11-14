@@ -1160,7 +1160,10 @@ sentence), Checks (failing first, View all), Reviews (each reviewer's latest
 state), Comments (a count that opens Timeline), linked threads, and Automatic
 actions as two compact switch rows whose sentence is a tooltip and still read to
 a screen reader. There is no Request reviewers action: no host command asks a
-reviewer. Where the pane is under 760px the status column folds under the title
+reviewer. The text column (720px) and the status column (260px) sit together, centred in
+the pane with a 32px gap; the tab row uses the same columns, so the tabs start at
+the text column's left edge and the actions end at the status column's right
+edge, and switching a tab moves none of them. Where the pane is under 760px the status column folds under the title
 into columns on Summary and is not shown on the other tabs. Loading, an
 unavailable read and a missing detail are each one quiet line, not a card.
 Rules and limits
@@ -1746,7 +1749,9 @@ tooltips, Sort, Filter, Repository settings (only while the list is not
 grouped) and Refresh, the count under the title; a search field that also takes
 a pasted pull-request link and narrows the list to the one it names; quiet
 status chips with counts (All, Open, Drafts, bound to the Filter menu's
-Status); then the rows and, once more than 50 are listed, a quiet **Show more**.
+Status; each counts the rows the list would hold under every other choice, so a
+chip never promises rows the list lacks); a **Repository** control beside the
+count (below); then the rows and, once more than 50 are listed, a quiet **Show more**.
 A soft one-line note at the foot says when some Project repositories could not
 be refreshed and that their cached pull requests are still shown. The pane is
 described under **The Pull requests reading pane** below. Under 680px the page
@@ -1776,14 +1781,28 @@ Oldest order by creation time, which the snapshot carries beside each
 pull request's last update. Filter offers Status (any, open, draft), Involvement
 (anyone, involving me, review requested, authored by me; only when the
 signed-in GitHub login is known, and answered from the row's author and
-requested reviewers), a Projects submenu (one connected Project; only with two
-or more), Review (needs review, changes
+requested reviewers), Review (needs review, changes
 requested, approved), Checks (passing, failing, pending) and **Mine**, which
 keeps the pull requests whose author is the signed-in GitHub account
 (maintainer request, 2026-11-12). Not built yet: today the snapshot carries no
+The **Repository** control is a menu in the list header, at one fixed width, on
+the count's row. It lists every repository the list spans, each with how many
+rows it holds under the other choices, as check items: **All repositories** (the
+default and an empty choice) or any number of repositories. The trigger names
+the choice ("All repositories", the repository, or "2 repositories") and never
+changes size, and it is there whenever the list spans two or more repositories
+whatever a chip or filter has narrowed the list to. The choice is remembered in
+this window's local storage. Issues share the control's place and look. Grouping
+is a **Group by repository** check item in the Sort menu: each group head is the
+repository's name at 12px in the meta ink with its count at the right edge.
+
 creation time and the author is not compared with the account, so Newest,
-Oldest and Mine are not offered. Sort, grouping and filters are remembered in this window's
-local storage, and a filter that is narrowing the list marks its button.
+Oldest and Mine are not offered. Sort, grouping, the status choice and the
+repositories are remembered in this window's local storage; Involvement, Review
+and Checks last for the visit only, because kept across visits they hid every row
+behind chips that counted the unfiltered list. A filter that is narrowing the
+list marks its button, and an empty list names the choices that are narrowing it
+beside Clear filters.
 Searching is unchanged and covers the title, author, branches, repository,
 number and linked threads.
 
@@ -1877,8 +1896,9 @@ commands, so completing device sign-in does not require a workspace reload.
 Catalogue reads stay on the existing GitHub catalogue read
 ([route](host-reads-and-commands.md#github-issues)): the issue list includes
 optional server-composed search, and an issue returns a bounded detail. The
-browser renders title, body, and comments as plain text; links stay inert full
-URLs.
+browser renders the body and comments as markdown with the shared renderer (raw
+HTML is skipped, images are named and never fetched); the issue's own address is
+shown as text and is never followed from inside a Code thread.
 
 Create-from-issue is implemented. The composer `Create from…` Issues tab
 attaches only `{ owner, name, number }` to the draft. At creation the server
@@ -2854,12 +2874,18 @@ the global preview bound. Known closed or merged identities are recovered
 separately. Stale cached data is visibly stale. Provider usage follows the same
 provider-neutral context/limit model and preserves unavailable values.
 
-The Issues surface reads like GitHub's issue list: one toolbar with a
-repository chooser (All recent repositories, or one repository, from the same
-popover), state, sort, and search; then a bordered two-pane card with rows on
-the left (state glyph, `#number title`, repository and author beneath) and the
-reader on the right (kicker, title, state and dates, labels, Start a Code
-thread, the body and each comment in their own cards). With no recent
+The Issues surface is laid out as the Pull requests page is: a 320px list
+column with the title and count, the Repository control in the same place and
+at the same fixed width (All repositories, or one repository, from the picker),
+Sort, a search field at the column's width, and Open, Closed and All as the
+same chips; rows are the shared row (state glyph, title, one meta line). The
+reading pane shares the pull request pane's columns: the text column (720px) and
+a 260px facts column, centred together with a 32px gap, and the action (Start a
+Code thread) at the facts column's right edge. The title, state pill and meta
+line sit above the description, which is rendered as markdown by the same
+renderer as a pull request's description, with its task list as read-only
+checkboxes, in a plain reading column with no border and no card. Comments are
+quiet rows (author, age, body as markdown), not cards. With no recent
 repository the page asks for one in a single panel rather than opening on the
 whole catalogue. Start a Code thread leaves the surface with the issue
 attached to a new draft as its Create from context.

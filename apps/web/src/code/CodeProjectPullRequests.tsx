@@ -47,15 +47,13 @@ import {
   OctantMenuRadioItem,
   OctantMenuRoot,
   OctantMenuSeparator,
-  OctantMenuSub,
-  OctantMenuSubPopup,
-  OctantMenuSubTrigger,
 } from "../ui/base/OctantMenu";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import {
   WorkList,
   WorkListGroup,
   WorkListMenuTrigger,
+  WorkListRepositoryMenu,
   WorkListRow,
   WorkListSortMenu,
   type WorkListState,
@@ -71,12 +69,15 @@ import {
   PULL_REQUEST_SORT_OPTIONS,
   PULL_REQUEST_STATE_OPTIONS,
   activeFilterCount,
+  activeFilterNames,
   blockingFact,
+  filterByRepositories,
   filterPullRequests,
   groupPullRequestsByRepository,
   mergeabilityCopy,
   pullRequestAttention,
   pullRequestStatusSentence,
+  repositoryOptions,
   reviewCopy,
   sortPullRequests,
   type PullRequestChecksFilter,
@@ -93,9 +94,18 @@ const LIST_PAGE = 50;
 const SORT_STORAGE_KEY = "octant.code.pull-requests.sort";
 const GROUP_STORAGE_KEY = "octant.code.pull-requests.group-by-repository";
 const STATE_STORAGE_KEY = "octant.code.pull-requests.filter-state";
-const INVOLVEMENT_STORAGE_KEY = "octant.code.pull-requests.filter-involvement";
-const REVIEW_STORAGE_KEY = "octant.code.pull-requests.filter-review";
-const CHECKS_STORAGE_KEY = "octant.code.pull-requests.filter-checks";
+const REPOSITORIES_STORAGE_KEY = "octant.code.pull-requests.repositories";
+
+function parseRepositories(value: string): ReadonlyArray<string> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")
+      ? parsed
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 function oneOf<T extends string>(options: ReadonlyArray<{ readonly value: T }>) {
   return (value: string): T | undefined => options.find((option) => option.value === value)?.value;
@@ -181,17 +191,16 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const [grouped, setGrouped] = useState<boolean>(
     () => readStoredValue(storage, GROUP_STORAGE_KEY, (value) => value) === "true",
   );
+  // Only the status choice and the repositories are remembered. Involvement,
+  // review and checks narrow the list to something quite specific; kept across
+  // sessions they hid every row behind chips that counted the unfiltered list.
   const [filters, setFilters] = useState<PullRequestFilters>(() => ({
+    ...NO_PULL_REQUEST_FILTERS,
     state: readStoredValue(storage, STATE_STORAGE_KEY, oneOf(PULL_REQUEST_STATE_OPTIONS)) ?? "any",
-    involvement:
-      readStoredValue(storage, INVOLVEMENT_STORAGE_KEY, oneOf(PULL_REQUEST_INVOLVEMENT_OPTIONS)) ??
-      "any",
-    review:
-      readStoredValue(storage, REVIEW_STORAGE_KEY, oneOf(PULL_REQUEST_REVIEW_OPTIONS)) ?? "any",
-    checks:
-      readStoredValue(storage, CHECKS_STORAGE_KEY, oneOf(PULL_REQUEST_CHECKS_OPTIONS)) ?? "any",
   }));
-  const [projectFilter, setProjectFilter] = useState<string>();
+  const [repositories, setRepositories] = useState<ReadonlyArray<string>>(() =>
+    parseRepositories(readStoredValue(storage, REPOSITORIES_STORAGE_KEY, (value) => value) ?? ""),
+  );
   const [shown, setShown] = useState(LIST_PAGE);
   const [pickedKey, setPickedKey] = useState(props.selectedRowKey);
   const { selectedRowKey: externalKey } = props;
@@ -260,9 +269,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   function chooseFilters(next: PullRequestFilters): void {
     setFilters(next);
     writeStoredValue(storage, STATE_STORAGE_KEY, next.state);
-    writeStoredValue(storage, INVOLVEMENT_STORAGE_KEY, next.involvement);
-    writeStoredValue(storage, REVIEW_STORAGE_KEY, next.review);
-    writeStoredValue(storage, CHECKS_STORAGE_KEY, next.checks);
+  }
+
+  function chooseRepositories(next: ReadonlyArray<string>): void {
+    setRepositories(next);
+    writeStoredValue(storage, REPOSITORIES_STORAGE_KEY, JSON.stringify(next));
   }
 
   const view =
@@ -297,16 +308,23 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   // counting the page's saved ones, an empty dock said nothing matched "these
   // filters" and offered to clear them, which could show no row and erased the
   // page's choices.
-  const filterCount = dock ? 0 : activeFilterCount(filters) + (projectFilter === undefined ? 0 : 1);
-  const searched = scopedRows
+  const filterCount = dock ? 0 : activeFilterCount(filters) + (repositories.length === 0 ? 0 : 1);
+  const matchingSearch = scopedRows
     .filter((row) => pullRequestMatches(row, normalizedSearch))
-    .filter((row) => pastedLink === undefined || isLinkedRow(row, pastedLink))
-    .filter(
-      (row) => dock || projectFilter === undefined || String(row.projectId) === projectFilter,
-    );
+    .filter((row) => pastedLink === undefined || isLinkedRow(row, pastedLink));
+  // A chip and the menu count what the list would hold under every other
+  // choice, so a number beside a choice is never one the list then contradicts.
+  const searched = dock ? matchingSearch : filterByRepositories(matchingSearch, repositories);
   const visibleRows = sortPullRequests(
     filterPullRequests(searched, dock ? NO_PULL_REQUEST_FILTERS : filters, props.viewerLogin),
     dock ? "updated" : sort,
+  );
+  // Whether the control is there never depends on a chip or a filter, so
+  // choosing one cannot make it appear or go.
+  const repositoriesSpanned = repositoryOptions(scopedRows).length;
+  const repositoryChoices = repositoryOptions(
+    filterPullRequests(matchingSearch, filters, props.viewerLogin),
+    repositories,
   );
   const selectedKey = props.renderDetail === undefined ? props.selectedRowKey : pickedKey;
   const selectedRow =
@@ -382,7 +400,10 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   // is on, so its settings stay reachable and its empty state is told.
   const emptyConnected = showGroups
     ? connectedProjects.filter(
-        (project) => !groups.some((group) => String(group.projectId) === String(project.projectId)),
+        (project) =>
+          !groups.some((group) => String(group.projectId) === String(project.projectId)) &&
+          (repositories.length === 0 ||
+            repositories.includes(`${project.repositoryOwner}/${project.repositoryName}`)),
       )
     : [];
   // Several repositories on one ungrouped list would read alike by bare name
@@ -435,10 +456,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       {ready && !dock && scopedRows.length > 0 ? (
         <div aria-label="Narrow by status" className="pr-page__chips" role="group">
           {PULL_REQUEST_STATE_OPTIONS.map((option) => {
-            const count = filterPullRequests(searched, {
-              ...NO_PULL_REQUEST_FILTERS,
-              state: option.value,
-            }).length;
+            const count = filterPullRequests(
+              searched,
+              { ...filters, state: option.value },
+              props.viewerLogin,
+            ).length;
             return (
               <OctantButton
                 variant="bare"
@@ -563,7 +585,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 <OctantButton
                   onClick={() => {
                     chooseFilters(NO_PULL_REQUEST_FILTERS);
-                    setProjectFilter(undefined);
+                    chooseRepositories([]);
                   }}
                   size="sm"
                   type="button"
@@ -572,6 +594,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                   Clear filters
                 </OctantButton>
               }
+              detail={activeFilterNames(filters, repositories).join(" · ")}
               title="No pull requests match these filters"
             />
           ) : null}
@@ -699,9 +722,8 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       <FilterMenu
         filters={filters}
         onChange={chooseFilters}
-        onProjectChange={setProjectFilter}
-        project={projectFilter}
-        projects={connectedProjects}
+        onClearRepositories={() => chooseRepositories([])}
+        repositoryCount={repositories.length}
         viewerLogin={props.viewerLogin}
       />
       {grouped ? null : (
@@ -759,10 +781,21 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               </OctantButton>
             )}
             <h1 className="pr-page__list-title">Pull requests</h1>
-            {ready && countCopy !== undefined ? (
-              <span className="oct-meta pr-page__list-count">{countCopy}</span>
-            ) : null}
             <div className="pr-page__list-actions">{listActions}</div>
+            {ready ? (
+              <div className="pr-page__list-sub">
+                {countCopy === undefined ? null : (
+                  <span className="oct-meta pr-page__list-count">{countCopy}</span>
+                )}
+                {repositoriesSpanned < 2 && repositories.length === 0 ? null : (
+                  <WorkListRepositoryMenu
+                    onChange={chooseRepositories}
+                    options={repositoryChoices}
+                    selected={repositories}
+                  />
+                )}
+              </div>
+            ) : null}
           </header>
           {body}
         </div>
@@ -806,15 +839,12 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
 function FilterMenu(props: {
   readonly filters: PullRequestFilters;
   readonly onChange: (filters: PullRequestFilters) => void;
-  readonly project: string | undefined;
-  readonly projects: ReadonlyArray<
-    Extract<CodeProjectPullRequestConnection, { kind: "connected" }>
-  >;
-  readonly onProjectChange: (projectId: string | undefined) => void;
+  readonly repositoryCount: number;
+  readonly onClearRepositories: () => void;
   /** Involvement is about the signed-in login; without one it is not offered. */
   readonly viewerLogin: string | undefined;
 }) {
-  const count = activeFilterCount(props.filters) + (props.project === undefined ? 0 : 1);
+  const count = activeFilterCount(props.filters) + (props.repositoryCount === 0 ? 0 : 1);
   const involvement = props.viewerLogin !== undefined && props.viewerLogin !== "";
   return (
     <OctantMenuRoot>
@@ -862,43 +892,13 @@ function FilterMenu(props: {
               options={PULL_REQUEST_CHECKS_OPTIONS}
               value={props.filters.checks}
             />
-            {props.projects.length < 2 ? null : (
-              <>
-                <OctantMenuSeparator />
-                <OctantMenuSub>
-                  <OctantMenuSubTrigger>Projects</OctantMenuSubTrigger>
-                  <OctantMenuSubPopup>
-                    <OctantMenuRadioGroup
-                      onValueChange={(value) =>
-                        props.onProjectChange(value === "" ? undefined : String(value))
-                      }
-                      value={props.project ?? ""}
-                    >
-                      <OctantMenuRadioItem closeOnClick label="All Projects" value="">
-                        All Projects
-                      </OctantMenuRadioItem>
-                      {props.projects.map((project) => (
-                        <OctantMenuRadioItem
-                          closeOnClick
-                          key={String(project.projectId)}
-                          label={project.projectName}
-                          value={String(project.projectId)}
-                        >
-                          {project.projectName}
-                        </OctantMenuRadioItem>
-                      ))}
-                    </OctantMenuRadioGroup>
-                  </OctantMenuSubPopup>
-                </OctantMenuSub>
-              </>
-            )}
             {count === 0 ? null : (
               <>
                 <OctantMenuSeparator />
                 <OctantMenuItem
                   onClick={() => {
                     props.onChange(NO_PULL_REQUEST_FILTERS);
-                    props.onProjectChange(undefined);
+                    props.onClearRepositories();
                   }}
                 >
                   Clear filters
