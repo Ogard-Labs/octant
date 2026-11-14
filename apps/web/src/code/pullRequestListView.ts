@@ -10,14 +10,18 @@ export type PullRequestStateFilter = "any" | "open" | "draft";
 export type PullRequestReviewFilter = "any" | "approved" | "changes-requested" | "needs-review";
 export type PullRequestChecksFilter = "any" | "passing" | "failing" | "pending";
 
+export type PullRequestInvolvementFilter = "any" | "involving-me" | "review-requested" | "authored";
+
 export interface PullRequestFilters {
   readonly state: PullRequestStateFilter;
+  readonly involvement: PullRequestInvolvementFilter;
   readonly review: PullRequestReviewFilter;
   readonly checks: PullRequestChecksFilter;
 }
 
 export const NO_PULL_REQUEST_FILTERS: PullRequestFilters = {
   state: "any",
+  involvement: "any",
   review: "any",
   checks: "any",
 };
@@ -38,6 +42,21 @@ export const PULL_REQUEST_STATE_OPTIONS: ReadonlyArray<{
   { value: "any", label: "Any state" },
   { value: "open", label: "Open" },
   { value: "draft", label: "Draft" },
+];
+
+/**
+ * Who a pull request involves. The rows know the author and who was asked to
+ * review, so those are the questions the list can answer; assignees and
+ * labels are not on a row and are not offered.
+ */
+export const PULL_REQUEST_INVOLVEMENT_OPTIONS: ReadonlyArray<{
+  readonly value: PullRequestInvolvementFilter;
+  readonly label: string;
+}> = [
+  { value: "any", label: "Anyone" },
+  { value: "involving-me", label: "Involving me" },
+  { value: "review-requested", label: "Review requested" },
+  { value: "authored", label: "Authored by me" },
 ];
 
 export const PULL_REQUEST_REVIEW_OPTIONS: ReadonlyArray<{
@@ -63,6 +82,7 @@ export const PULL_REQUEST_CHECKS_OPTIONS: ReadonlyArray<{
 export function activeFilterCount(filters: PullRequestFilters): number {
   return (
     (filters.state === "any" ? 0 : 1) +
+    (filters.involvement === "any" ? 0 : 1) +
     (filters.review === "any" ? 0 : 1) +
     (filters.checks === "any" ? 0 : 1)
   );
@@ -95,11 +115,24 @@ export function sortPullRequests(
   return copy.sort(newestFirst);
 }
 
+function sameLogin(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
 export function filterPullRequests(
   rows: ReadonlyArray<CodeProjectPullRequestRow>,
   filters: PullRequestFilters,
+  /** The signed-in GitHub login; without it the involvement choice narrows nothing. */
+  viewerLogin?: string,
 ): ReadonlyArray<CodeProjectPullRequestRow> {
   return rows.filter((row) => {
+    if (filters.involvement !== "any" && viewerLogin !== undefined && viewerLogin !== "") {
+      const authored = sameLogin(row.author, viewerLogin);
+      const asked = (row.reviewRequestedFrom ?? []).some((login) => sameLogin(login, viewerLogin));
+      if (filters.involvement === "authored" && !authored) return false;
+      if (filters.involvement === "review-requested" && !asked) return false;
+      if (filters.involvement === "involving-me" && !authored && !asked) return false;
+    }
     if (filters.state === "draft" && !row.draft) return false;
     if (filters.state === "open" && row.draft) return false;
     if (filters.review === "needs-review" && row.review !== "pending" && row.review !== "none") {

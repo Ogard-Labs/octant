@@ -7921,6 +7921,9 @@ function LaunchedShell(
                     githubClient={githubClient}
                     githubIssuesOpen={githubIssuesOpen}
                     githubIssuesReadAvailable={githubIssuesReadAvailable}
+                    {...(githubPullRequestCapability.login === undefined
+                      ? {}
+                      : { githubViewerLogin: githubPullRequestCapability.login })}
                     {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
                     imageLibraryOpen={imageLibraryOpen}
                     imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}

@@ -115,6 +115,9 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
   readonly onSelectProjectPullRequest?: (row: CodeProjectPullRequestRow) => void;
+  /** Reads a pull request beside the list; without it a row opens in the dock. */
+  readonly renderProjectPullRequestDetail?: (row: CodeProjectPullRequestRow) => ReactNode;
+  readonly githubViewerLogin?: string;
   readonly pullRequestBackgroundRefresh?: {
     readonly enabledFor: (projectId: ProjectId) => boolean;
     readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
@@ -276,9 +279,14 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.agentForgeChoices === undefined
                 ? {}
                 : { agentForgeChoices: props.agentForgeChoices })}
-              {...(props.onSelectProjectPullRequest === undefined
+              {...(props.renderProjectPullRequestDetail === undefined
+                ? props.onSelectProjectPullRequest === undefined
+                  ? {}
+                  : { onSelectRow: props.onSelectProjectPullRequest }
+                : { renderDetail: props.renderProjectPullRequestDetail })}
+              {...(props.githubViewerLogin === undefined
                 ? {}
-                : { onSelectRow: props.onSelectProjectPullRequest })}
+                : { viewerLogin: props.githubViewerLogin })}
               {...(props.selectedProjectPullRequestKey === undefined
                 ? {}
                 : { selectedRowKey: props.selectedProjectPullRequestKey })}

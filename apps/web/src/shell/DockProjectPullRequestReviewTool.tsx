@@ -31,6 +31,9 @@ export interface DockProjectPullRequestReviewToolProps {
   readonly refresh: (
     command: CodeProjectPullRequestDetailRefreshCommand,
   ) => Promise<CodeProjectPullRequestDetailView>;
+  /** `page` is the destination's reading pane; the dock keeps its one column. */
+  readonly layout?: "dock" | "page";
+  readonly updatedAt?: string;
   readonly onOpenLinkedThread?: (thread: CodeProjectPullRequestLinkedThread) => void;
   readonly onOpenChat?: (detail: CodeProjectPullRequestDetailObserved) => void;
   readonly onMerge?: (
@@ -217,8 +220,20 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     }
   }
 
+  // The page says each of these as one quiet line; the dock keeps its state card.
+  const quiet = (text: string) => (
+    <p className="pr-detail__quiet pr-detail__empty" role="status">
+      {text}
+    </p>
+  );
+  const page = props.layout === "page";
+
   if (workspace.status === "loading") {
-    return <ShellState state="loading" title="Loading review" />;
+    return page ? (
+      quiet("Loading pull request")
+    ) : (
+      <ShellState state="loading" title="Loading review" />
+    );
   }
 
   const view =
@@ -229,6 +244,9 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
         : undefined;
 
   if (view === undefined) {
+    if (page) {
+      return quiet(workspace.status === "error" ? workspace.message : "Detail is unavailable.");
+    }
     return (
       <ShellState
         message={workspace.status === "error" ? workspace.message : "Detail is unavailable."}
@@ -239,6 +257,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
   }
 
   if (view.detail.state === "empty") {
+    if (page) return quiet("No authorized detail is cached for this pull request yet.");
     return (
       <ShellState
         message="No authorized detail is cached for this pull request yet."
@@ -249,6 +268,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
   }
 
   if (view.detail.state === "unavailable") {
+    if (page) return quiet("GitHub could not return detail for this pull request.");
     return (
       <ShellState
         message="GitHub could not return detail for this pull request."
@@ -267,6 +287,8 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
       ) : null}
       <ProjectPullRequestReviewPane
         detail={view.detail}
+        {...(props.layout === undefined ? {} : { layout: props.layout })}
+        {...(props.updatedAt === undefined ? {} : { updatedAt: props.updatedAt })}
         freshness={view.freshness}
         linkedThreads={view.linkedThreads}
         {...(props.onOpenLinkedThread === undefined

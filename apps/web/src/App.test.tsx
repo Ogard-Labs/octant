@@ -5673,7 +5673,7 @@ describe("App", () => {
     expect(screen.getByRole("region", { name: "Workspace pane: Second thread" })).toBeVisible();
   });
 
-  it("opens a selected pull request beside the list without hiding its Review pane", async () => {
+  it("opens a selected pull request in the reading pane beside the list, not in the dock", async () => {
     const user = userEvent.setup();
     const codeApi = codes();
     vi.mocked(codeApi.queryProjectPullRequests).mockResolvedValue(
@@ -5734,7 +5734,7 @@ describe("App", () => {
       }),
     );
     await user.click(await screen.findByRole("button", { name: /Inspect selected pull request/ }));
-    expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     expect(screen.getByRole("region", { name: "Pull requests" })).toBeVisible();
     await waitFor(() =>
       expect(codeApi.refreshProjectPullRequestDetail).toHaveBeenCalledWith({
@@ -5746,11 +5746,6 @@ describe("App", () => {
     );
     await user.click(screen.getByRole("button", { name: "More destinations" }));
     await user.click(await screen.findByRole("menuitem", { name: "Image generator" }));
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("complementary", { name: "Right Utility Dock" }),
-      ).not.toBeInTheDocument(),
-    );
     expect(await screen.findByRole("region", { name: "Image generator" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Archive" }));

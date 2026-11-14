@@ -2580,16 +2580,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   font-variant-numeric: tabular-nums;
 }
 
-/* The page keeps a reading measure of its own and sits at the leading edge: a
-   list a person scans is not centred in a wide window. */
-.code-project-pull-requests-surface {
-  --oct-surface-measure: 720px;
-}
-
-.code-project-pull-requests-surface > .surface__inner {
-  margin-inline: var(--oct-surface-gutter) auto;
-}
-
 .code-project-pull-requests__empty {
   margin: 0;
   padding: var(--oct-space-2) 0;

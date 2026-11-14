@@ -30,6 +30,11 @@ export interface ProjectPullRequestActionsProps {
   ) => Promise<CodeProjectPullRequestActionOutcome>;
   /** Called after an action the forge accepted, so the review can re-read. */
   readonly onChanged?: () => void;
+  /**
+   * "timeline" is the page's Timeline tab: the forms only. Closing and
+   * reopening sit in the page's own menu, so the tab does not repeat them.
+   */
+  readonly layout?: "dock" | "timeline";
 }
 
 type ReadContext = Extract<CodeProjectPullRequestActionContext, { status: "read" }>;
@@ -118,10 +123,16 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
   const openThreads = (context?.reviewThreads ?? []).filter((thread) => !thread.resolved);
 
   return (
-    <section aria-label="Your actions" className="code-pr-review__section code-pr-actions">
-      <header className="code-pr-review__section-header">
-        <h2>Your actions</h2>
-      </header>
+    <section
+      aria-label="Your actions"
+      className="code-pr-review__section code-pr-actions"
+      data-layout={props.layout ?? "dock"}
+    >
+      {props.layout === "timeline" ? null : (
+        <header className="code-pr-review__section-header">
+          <h2>Your actions</h2>
+        </header>
+      )}
       {loadFailure === undefined ? null : (
         <p className="code-pr-actions__note" role="status">
           {loadFailure}
@@ -352,7 +363,7 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
         </form>
       )}
 
-      {merged ? null : (
+      {merged || props.layout === "timeline" ? null : (
         <div className="code-pr-actions__group code-pr-actions__row">
           <span className="code-pr-actions__note">
             {closed
@@ -391,9 +402,9 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
   );
 }
 
-const DESKTOP_ONLY = "Only the desktop window can do this.";
+export const DESKTOP_ONLY = "Only the desktop window can do this.";
 
-function isUnauthorized(error: unknown): boolean {
+export function isUnauthorized(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -415,7 +426,7 @@ function contextFailureCopy(
       : "Labels and review threads could not be read.";
 }
 
-function actionRefusalCopy(
+export function actionRefusalCopy(
   outcome: Exclude<CodeProjectPullRequestActionOutcome, { status: "done" }>,
 ): string {
   if (outcome.status === "unavailable") {

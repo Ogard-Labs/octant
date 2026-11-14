@@ -1072,12 +1072,42 @@ describe("CodeProjectPullRequests", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("keeps the list to a readable measure at the page's leading edge", () => {
-    const surface = ruleBody(stylesheet, ".code-project-pull-requests-surface");
-    expect(surface).toMatch(/--oct-surface-measure:\s*720px/);
-    expect(ruleBody(stylesheet, ".code-project-pull-requests-surface > .surface__inner")).toMatch(
-      /margin-inline:\s*var\(--oct-surface-gutter\)\s+auto/,
+  it("opens the chosen pull request beside the list, and counts the status chips", async () => {
+    const user = userEvent.setup();
+    const onSelectRow = vi.fn();
+    render(
+      <CodeProjectPullRequests
+        load={async () => view()}
+        onSelectRow={onSelectRow}
+        refresh={async () => view()}
+        renderDetail={(row) => <p>Reading #{row.number}</p>}
+        storage={memoryStorage()}
+      />,
     );
+    await screen.findByText("List active pull requests");
+    const chips = screen.getByRole("group", { name: "Narrow by status" });
+    expect(within(chips).getByRole("button", { name: /^All/ })).toHaveTextContent("All");
+    expect(screen.getByText("Choose a pull request to read it.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /List active pull requests/ }));
+    expect(await screen.findByText("Reading #12")).toBeVisible();
+    expect(onSelectRow).not.toHaveBeenCalled();
+  });
+
+  it("narrows the list to a pasted pull request link", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await screen.findByText("List active pull requests");
+    await user.click(screen.getByRole("searchbox", { name: "Search pull requests" }));
+    await user.paste("https://github.com/octant/octant/pull/999");
+    expect(screen.queryByText("List active pull requests")).not.toBeInTheDocument();
+  });
+
+  it("gives the list a 320px column of its own beside a reading pane", () => {
+    const page = readFileSync(resolve(import.meta.dirname, "pull-request-page.css"), "utf8");
+    expect(ruleBody(page, ".pr-page__frame")).toMatch(/grid-template-columns:\s*320px\s+minmax/);
+    expect(ruleBody(page, ".pr-page__list")).toMatch(/overflow:\s*hidden\s+auto/);
+    expect(ruleBody(page, ".pr-page .work-list__list")).toMatch(/gap:\s*4px/);
   });
 
   it("sizes a row from its two lines and cuts the title after two", () => {
