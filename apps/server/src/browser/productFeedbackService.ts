@@ -6,8 +6,10 @@ import {
   EventActor,
   EventId,
   EventName,
+  BROWSER_ELEMENT_SNAPSHOT_STYLES,
   MAX_PENDING_PRODUCT_FEEDBACK_NOTES,
   UtcTimestamp,
+  decodeBrowserElementSnapshot,
   decodeProductFeedbackCommand,
   decodeProductFeedbackNote,
   decodeProductFeedbackNoteId,
@@ -71,6 +73,8 @@ export interface ProductFeedbackBrowserPort {
     readonly point: { readonly x: number; readonly y: number };
     readonly selectionId?: string;
     readonly expectedObservationRevision?: number;
+    /** Only the element picker asks for markup. */
+    readonly withMarkup?: boolean;
     readonly current?: () => boolean;
     readonly signal?: AbortSignal;
   }) => Promise<BrowserPointObservation | { readonly status: "unavailable" }>;
@@ -191,6 +195,7 @@ export class ProductFeedbackService {
     } catch {
       throw new ProductFeedbackError("invalid", "Product feedback command is invalid.");
     }
+    if (command.kind === "pick-browser-element") return this.#pick(windowId, command, execution);
     if (command.kind === "prepare-product-feedback")
       return this.#prepare(windowId, command, execution);
     if (command.kind === "commit-product-feedback")
@@ -291,6 +296,81 @@ export class ProductFeedbackService {
       return { kind: "feedback-refused", reason: "capture-unavailable" };
     } finally {
       if (!retained || execution.signal?.aborted || !current()) this.#previews.release(id);
+    }
+  }
+
+  /**
+   * The Browser element picker: the same host-resolved point read as a note's
+   * preview, but nothing is kept. The thread is marked as holding outside
+   * content before the snapshot leaves the host, and a mark that cannot be
+   * recorded withholds the snapshot, as a page read is withheld.
+   */
+  async #pick(
+    windowId: WindowId,
+    command: Extract<
+      ReturnType<typeof decodeProductFeedbackCommand>,
+      { kind: "pick-browser-element" }
+    >,
+    execution: ProductFeedbackExecutionContext | undefined,
+  ): Promise<ProductFeedbackCommandResult> {
+    const scope = await this.#scope(windowId, command.threadId, execution);
+    const recordIngestion = this.#options.recordExternalContentIngestion;
+    if (scope === undefined || execution === undefined)
+      return { kind: "feedback-refused", reason: "thread-unavailable" };
+    if (recordIngestion === undefined)
+      return { kind: "feedback-refused", reason: "capture-unavailable" };
+    const current = () => execution.admissionCurrent() && scope.current();
+    try {
+      const observed = decodeProductFeedbackPointObservation(
+        await this.#options.browser.describePoint({
+          windowId,
+          threadId: command.threadId,
+          contextId: command.contextId,
+          point: command.point,
+          ...(command.selectionId === undefined ? {} : { selectionId: command.selectionId }),
+          ...(command.expectedObservationRevision === undefined
+            ? {}
+            : { expectedObservationRevision: command.expectedObservationRevision }),
+          withMarkup: true,
+          current,
+          ...(execution.signal === undefined ? {} : { signal: execution.signal }),
+        }),
+      );
+      if (execution.signal?.aborted || !current())
+        return { kind: "feedback-refused", reason: "thread-unavailable" };
+      if (observed.status === "unavailable")
+        return { kind: "feedback-refused", reason: "surface-unavailable" };
+      if (observed.status === "no-element")
+        return { kind: "feedback-refused", reason: "element-unavailable" };
+      const provenance = productFeedbackProvenance({ surface: "browser" }).element;
+      const reported = new Set<string>(BROWSER_ELEMENT_SNAPSHOT_STYLES);
+      const snapshot = decodeBrowserElementSnapshot({
+        threadId: command.threadId,
+        selector: observed.element.selector,
+        tag: observed.element.context?.tag ?? observed.element.role ?? "element",
+        ...(observed.url === undefined ? {} : { url: observed.url }),
+        ...(observed.title === undefined ? {} : { title: observed.title }),
+        ...(observed.markup === undefined ? {} : { markup: observed.markup }),
+        styles: (observed.element.context?.styles ?? []).filter((style) =>
+          reported.has(style.property),
+        ),
+        provenance,
+        capturedAt: decodeTimestamp(this.#options.clock()),
+      });
+      const ingestion = recordIngestion({
+        threadId: command.threadId,
+        provenance,
+        contentReference: `browser-element:${this.#options.uuid()}`,
+        correlationId: this.#options.uuid(),
+        authorized: true,
+      });
+      if (ingestion.kind !== "recorded" && ingestion.kind !== "already-recorded")
+        return { kind: "feedback-refused", reason: "capture-unavailable" };
+      if (execution.signal?.aborted || !current())
+        return { kind: "feedback-refused", reason: "thread-unavailable" };
+      return { kind: "browser-element-picked", snapshot };
+    } catch {
+      return { kind: "feedback-refused", reason: "capture-unavailable" };
     }
   }
 
