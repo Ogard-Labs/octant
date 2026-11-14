@@ -1405,9 +1405,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               },
             }}
           />
-          <p className="draft-thread__hint">
-            Press Enter to start · Shift+Enter for a new line · Escape to close
-          </p>
         </div>
 
         {homeStartNode}
