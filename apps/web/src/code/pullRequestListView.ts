@@ -97,6 +97,66 @@ function repositoryName(row: CodeProjectPullRequestRow): string {
   return `${row.repositoryOwner}/${row.repositoryName}`;
 }
 
+/** The name the Repository control lists and the window remembers. */
+export const pullRequestRepository = repositoryName;
+
+export interface PullRequestRepositoryOption {
+  readonly key: string;
+  readonly count: number;
+}
+
+/**
+ * Every repository the rows span with how many rows each holds, in name order.
+ * The count is of the rows handed in, so the menu says what choosing a
+ * repository alone would leave in the list under the other choices.
+ */
+export function repositoryOptions(
+  rows: ReadonlyArray<CodeProjectPullRequestRow>,
+  known: ReadonlyArray<string> = [],
+): ReadonlyArray<PullRequestRepositoryOption> {
+  const counts = new Map<string, number>(known.map((key) => [key, 0]));
+  for (const row of rows)
+    counts.set(repositoryName(row), (counts.get(repositoryName(row)) ?? 0) + 1);
+  return [...counts]
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => a.key.localeCompare(b.key, undefined, { sensitivity: "base" }));
+}
+
+/** No choice is all repositories: an empty selection narrows nothing. */
+export function filterByRepositories(
+  rows: ReadonlyArray<CodeProjectPullRequestRow>,
+  repositories: ReadonlyArray<string>,
+): ReadonlyArray<CodeProjectPullRequestRow> {
+  if (repositories.length === 0) return rows;
+  return rows.filter((row) => repositories.includes(repositoryName(row)));
+}
+
+/** The words the filters on the list are named by, for an empty list to say what is narrowing it. */
+export function activeFilterNames(
+  filters: PullRequestFilters,
+  repositories: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const label = (
+    options: ReadonlyArray<{ readonly value: string; readonly label: string }>,
+    value: string,
+  ) => options.find((option) => option.value === value)?.label ?? value;
+  return [
+    ...(filters.state === "any" ? [] : [label(PULL_REQUEST_STATE_OPTIONS, filters.state)]),
+    ...(filters.involvement === "any"
+      ? []
+      : [label(PULL_REQUEST_INVOLVEMENT_OPTIONS, filters.involvement)]),
+    ...(filters.review === "any" ? [] : [label(PULL_REQUEST_REVIEW_OPTIONS, filters.review)]),
+    ...(filters.checks === "any" ? [] : [label(PULL_REQUEST_CHECKS_OPTIONS, filters.checks)]),
+    ...(repositories.length === 0
+      ? []
+      : [
+          repositories.length === 1
+            ? (repositories[0] ?? "")
+            : `${String(repositories.length)} repositories`,
+        ]),
+  ];
+}
+
 export function sortPullRequests(
   rows: ReadonlyArray<CodeProjectPullRequestRow>,
   sort: PullRequestSort,

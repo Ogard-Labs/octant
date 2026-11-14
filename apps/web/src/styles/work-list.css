@@ -39,8 +39,9 @@
 .work-list__group-title {
   overflow: hidden;
   min-width: 0;
+  flex: 1 1 auto;
   margin: 0;
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
@@ -199,4 +200,49 @@ time.work-list__meta-text {
 
 .work-list__row[aria-current="true"] {
   background: var(--oct-selection);
+}
+
+/* ── Repository control ─────────────────────────────────────────────── */
+
+/* One fixed width, words cut with an ellipsis: choosing a repository never
+   resizes the trigger or moves what sits beside it. */
+.work-list__repository-trigger {
+  width: 148px;
+  flex: 0 0 148px;
+  justify-content: space-between;
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.work-list__repository-trigger[data-active="true"] {
+  color: var(--oct-fg);
+}
+
+.work-list__repository-words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-list__repository-popup {
+  min-width: 14rem;
+  max-height: min(60vh, 24rem);
+  overflow: auto;
+}
+
+.work-list__repository-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-list__repository-count {
+  flex: 0 0 auto;
+  margin-inline-start: var(--oct-space-4);
+  font-variant-numeric: tabular-nums;
 }

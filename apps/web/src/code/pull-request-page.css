@@ -35,6 +35,12 @@
   padding: 0 var(--oct-space-3) var(--oct-space-6);
 }
 
+/* The column scrolls; its parts keep their own height instead of shrinking
+   into each other. */
+.pr-page__list > * {
+  flex-shrink: 0;
+}
+
 .pr-page__list > .code-project-pull-requests {
   gap: var(--oct-space-2);
 }
@@ -63,9 +69,23 @@
   flex-wrap: wrap;
 }
 
-.pr-page__list-count {
+/* The count and the Repository control share one row under the title. The
+   control has a fixed width, so the count never moves when a repository is chosen. */
+.pr-page__list-sub {
+  display: flex;
   order: 3;
   flex: 1 0 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  min-height: 28px;
+}
+
+.pr-page__list-count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pr-page__list-actions {
@@ -105,6 +125,7 @@
 }
 
 .pr-page__chip-count {
+  min-width: 2ch;
   color: var(--oct-meta);
   font-variant-numeric: tabular-nums;
 }
@@ -218,15 +239,17 @@
   flex-direction: column;
 }
 
+/* The bar uses the body's columns: the tabs start at the content column's left
+   edge and the actions end at the status column's right edge. */
 .pr-detail__bar {
   position: sticky;
   z-index: 2;
   top: 0;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 720px) 260px;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-2) var(--oct-space-4);
+  justify-content: center;
+  column-gap: var(--oct-space-8);
   padding: var(--oct-space-2) var(--oct-space-6);
   background: var(--octant-app-background);
 }
@@ -273,8 +296,9 @@
 
 .pr-detail__tools {
   display: flex;
-  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--oct-space-1);
 }
 
@@ -303,11 +327,12 @@
    status column can sit beside the pull request or fold under its title. */
 .pr-detail__body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 720px) 260px;
   grid-template-areas:
     "head status"
     "content status";
   align-items: start;
+  justify-content: center;
   column-gap: var(--oct-space-8);
   padding: var(--oct-space-4) var(--oct-space-6) var(--oct-space-8);
 }
@@ -626,6 +651,7 @@
   }
 
   .pr-detail__bar {
+    grid-template-columns: minmax(0, 1fr) auto;
     padding-inline: var(--oct-space-4);
   }
 

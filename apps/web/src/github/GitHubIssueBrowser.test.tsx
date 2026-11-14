@@ -176,9 +176,7 @@ describe("GitHubIssueBrowser", () => {
     ]);
     expect(rows[0]).toHaveTextContent("repo-2");
     expect(rows[1]).toHaveTextContent("repo-1");
-    expect(
-      screen.getByRole("button", { name: "Repository: All recent repositories" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Repository: All repositories" })).toBeVisible();
     expect(screen.getByText(/Showing the newest 20 from octant\/repo-1/)).toBeVisible();
 
     fireEvent.click(rows[0]!);
@@ -187,11 +185,9 @@ describe("GitHubIssueBrowser", () => {
       expect.objectContaining({ kind: "issue", name: "repo-2", number: 40 }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Repository: All recent repositories" }));
+    await user.click(screen.getByRole("button", { name: "Repository: All repositories" }));
     expect(await screen.findByRole("option", { name: /octant\/repo-1/ })).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: /All recent repositories/, pressed: true }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /All repositories/, pressed: true })).toBeVisible();
   });
 
   it("asks for a repository before listing anything and hands the issue being read to a new thread", async () => {
@@ -263,8 +259,40 @@ describe("GitHubIssueBrowser", () => {
     const detail = await screen.findByRole("article", { name: "Issue #1" });
     expect(detail).toHaveTextContent("Body of issue 1.");
     expect(detail).toHaveTextContent("https://github.com/octant/repo-1/issues/1");
-    expect(detail).toHaveTextContent("Please check https://github.com/octant/repo-1/wiki.");
-    expect(within(detail).queryByRole("link")).not.toBeInTheDocument();
+    expect(detail).toHaveTextContent("Please check");
+    expect(detail.querySelector("pre.github-issue-browser__body-text")).toBeNull();
+  });
+
+  it("reads an issue's description as markdown with its checklist as read-only boxes and no bordered box", async () => {
+    const body =
+      "## Problem and evidence\n\nIt is **broken**.\n\n- [ ] Show open pull requests\n- [x] List repositories";
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") return recents;
+      if (request.kind === "repositories") return repositories;
+      if (request.kind === "issues") return issuesPageOne;
+      if (request.kind === "issue") {
+        return {
+          kind: "issue",
+          issue: issueDetail(request.number, { body }),
+          freshness: { status: "fresh" },
+        } as GithubCatalogueReadResponse;
+      }
+      throw new Error(`unexpected ${request.kind}`);
+    });
+    render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
+    await selectFirstRepository();
+    fireEvent.click(await screen.findByRole("button", { name: /Issue 1/ }));
+    const detail = await screen.findByRole("article", { name: "Issue #1" });
+
+    expect(within(detail).getByRole("heading", { name: "Problem and evidence" })).toBeVisible();
+    expect(within(detail).getByText("broken").tagName).toBe("STRONG");
+    expect(detail).not.toHaveTextContent("## Problem");
+    expect(detail).not.toHaveTextContent("- [ ]");
+    const boxes = within(detail).getAllByRole("checkbox");
+    expect(boxes).toHaveLength(2);
+    expect(boxes.map((box) => (box as HTMLInputElement).checked)).toEqual([false, true]);
+    expect(boxes.every((box) => (box as HTMLInputElement).disabled)).toBe(true);
+    expect(detail.querySelector(".github-issue-browser__reader")).toBeNull();
   });
 
   it("sends the search query through the catalogue read", async () => {
@@ -654,9 +682,20 @@ describe("GitHubIssueBrowser", () => {
       }
     });
 
-    it("keeps an issue to the list's own measure beside its detail pane", () => {
-      const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles/github.css"), "utf8");
-      expect(stylesheet).toMatch(/grid-template-columns:\s*minmax\(320px,\s*min\(720px,\s*46%\)\)/);
+    it("lays the list column and the reading pane out as the pull request page does", async () => {
+      const { container } = render(
+        <GitHubIssueBrowser client={acrossClient()} storage={memoryStorage()} />,
+      );
+      await screen.findByText("Newest in repo-2");
+      expect(container.querySelector(".pr-page > .pr-page__frame > .pr-page__list")).not.toBeNull();
+      expect(container.querySelector(".pr-page__frame > .pr-page__detail")).not.toBeNull();
+      const chips = screen.getByRole("group", { name: "Issue state" });
+      expect(
+        within(chips)
+          .getAllByRole("button")
+          .map((chip) => chip.textContent),
+      ).toEqual(["Open", "Closed", "All"]);
+      expect(screen.getByRole("heading", { name: "Issues" })).toHaveClass("pr-page__list-title");
     });
   });
 });
