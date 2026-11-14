@@ -400,6 +400,46 @@ describe("Work thread routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("answers Work message search for the authenticated window and refuses any other query key, method, or a missing capability", async () => {
+    const payload = {
+      query: "release",
+      hits: [
+        {
+          threadId,
+          turnId: "73000000-0000-4000-8000-000000000009",
+          title: "Draft brief",
+          lifecycle: "active",
+          projectId,
+          snippet: "the release date",
+          matchRanges: [{ start: 4, end: 11 }],
+        },
+      ],
+      truncated: false,
+    };
+    const searchTranscript = vi.fn(async () => payload);
+    const route = routeFixture({ searchTranscript });
+
+    const response = await route(request("/api/work/transcript-search?q=release"));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual(payload);
+    expect(searchTranscript).toHaveBeenCalledWith(windowId, "release");
+
+    expect((await route(request("/api/work/transcript-search?q=a&scope=all")))?.status).toBe(400);
+    expect(
+      (await route(request("/api/work/transcript-search?q=a", { method: "POST" })))?.status,
+    ).toBe(400);
+    expect(
+      (await route(new Request("http://127.0.0.1/api/work/transcript-search?q=a")))?.status,
+    ).toBe(401);
+    expect(searchTranscript).toHaveBeenCalledOnce();
+  });
+
+  it("answers unavailable for Work message search on a host that keeps none", async () => {
+    const response = await routeFixture({})(request("/api/work/transcript-search?q=release"));
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+
   it("rejects missing capability and caller-supplied window identity", async () => {
     const route = routeFixture({});
 

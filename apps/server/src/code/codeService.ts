@@ -1,4 +1,8 @@
-import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import {
+  decodeThreadWorkingDirectory,
+  MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
+  type CodeTranscriptSearch,
+} from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
@@ -142,6 +146,7 @@ import {
 } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
+import type { CodeTranscriptSearchRows } from "../persistence/codeTranscriptSearchProjection";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
@@ -417,6 +422,11 @@ export interface CodePersistencePort {
   /** The modes whose journaled thread answers to this id. */
   readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  /** Message search over listed threads; absent where the host keeps no search projection. */
+  readonly searchCodeTranscript?: (
+    query: string,
+    visibleThreadIds: ReadonlySet<string>,
+  ) => CodeTranscriptSearchRows;
   /** The thread a Code Project designated as its planner; absent where the host keeps none. */
   readonly readCodePlannerThreadId?: (projectId: ProjectId) => CodeThreadId | undefined;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
@@ -1107,6 +1117,46 @@ export class CodeService {
       runtime: this.#visibleRuntime(threads, pullRequests),
       ...this.#visiblePlanners(threads),
     };
+  }
+
+  /**
+   * Message search over the prompt and reply of each provider turn. It lists
+   * exactly the threads bootstrap lists, by the same browse rule, and the
+   * projection leaves out turns a rewind removed.
+   */
+  async searchTranscript(
+    authenticatedWindowId: WindowId,
+    query: string,
+  ): Promise<CodeTranscriptSearch> {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return { query: "", hits: [], truncated: false };
+    if (trimmed.length > MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH) {
+      throw this.#failure("invalid", "Code transcript search query is too long.");
+    }
+    const search = this.#persistence.searchCodeTranscript;
+    if (search === undefined)
+      throw this.#failure("unavailable", "Code message search is unavailable.");
+    const threads = new Map(
+      (await this.#visibleThreads(authenticatedWindowId)).map(
+        (thread) => [String(thread.id), thread] as const,
+      ),
+    );
+    const found = search(trimmed, new Set(threads.keys()));
+    const hits: CodeTranscriptSearch["hits"][number][] = [];
+    for (const match of found.matches) {
+      const thread = threads.get(String(match.threadId));
+      if (thread === undefined) continue;
+      hits.push({
+        threadId: thread.id,
+        operationId: match.operationId,
+        title: thread.title,
+        lifecycle: thread.lifecycle === "archived" ? "archived" : "active",
+        projectId: thread.projectId,
+        snippet: match.snippet,
+        ...(match.matchRanges.length === 0 ? {} : { matchRanges: match.matchRanges }),
+      });
+    }
+    return { query: trimmed, hits, truncated: found.truncated };
   }
 
   async bootstrap(authenticatedWindowId: WindowId): Promise<CodeBootstrap> {

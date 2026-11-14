@@ -766,6 +766,7 @@ function available(
 
 function client(options: { readonly bytes?: Uint8Array } = {}): CodeClient {
   return {
+    searchTranscript: vi.fn(),
     bootstrap: vi.fn(),
     navigation: vi.fn(),
     queryBoard: vi.fn(),

@@ -49,6 +49,7 @@
     "./work-research": "./src/workResearch.ts",
     "./work-threads": "./src/workThreads.ts",
     "./work-turns": "./src/workTurns.ts",
+    "./thread-transcript-search": "./src/threadTranscriptSearch.ts",
     "./work-workflows": "./src/workflows.ts",
     "./events": "./src/events.ts",
     "./audit-events": "./src/auditEvents.ts",

@@ -55,6 +55,9 @@ const PRODUCT_PROBES = [
   { path: "/api/chat/attachments", method: "POST" },
   { path: "/api/code/board", method: "POST" },
   { path: "/api/work/board", method: "POST" },
+  { path: "/api/chat/transcript-search?q=release", method: "GET" },
+  { path: "/api/work/transcript-search?q=release", method: "GET" },
+  { path: "/api/code/transcript-search?q=release", method: "GET" },
   {
     path: "/api/work/turns/window/00000000-0000-4000-8000-000000000001?limit=30",
     method: "GET",

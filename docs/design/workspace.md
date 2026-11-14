@@ -2221,7 +2221,15 @@ threads: the header's Search icon opens a Filter threads field under the
 header, Escape or its close control clears and hides it, and Settings ›
 Sidebar › Thread filter can keep the field always shown. Enter in the field
 hands its text to the command-style overlay, which searches every thread of
-the mode; the overlay also stays in the command palette. The list's three
+the mode; the overlay also stays in the command palette. The overlay matches
+titles among the threads the host listed and, in every mode, message text
+through that mode's host read (`GET /api/chat/transcript-search`,
+`/api/work/transcript-search`, `/api/code/transcript-search`), which lists
+the same threads as the sidebar and its Archived group. A message hit shows its
+snippet after the title matches and names the turn that holds it; a Chat hit
+opens the thread scrolled to that turn, and a Work or Code hit opens its thread,
+because those transcripts do not yet jump to a turn
+([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view
 picker uses, not an icon in the header. That row stands in the same place in

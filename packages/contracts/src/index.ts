@@ -27,6 +27,7 @@ export * from "./fleetActivity";
 export * from "./workResearch";
 export * from "./workThreads";
 export * from "./workTurns";
+export * from "./threadTranscriptSearch";
 export * from "./workflows";
 export * from "./environment";
 export * from "./workingDirectory";
