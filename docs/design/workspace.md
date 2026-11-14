@@ -1038,7 +1038,32 @@ repository's other labels (a button adds one; no free-text label), a comment
 box, a reply box on each open review thread, and Close or Reopen pull request.
 A comment or reply says it posts under the person's name; a refusal is one
 alert line under the section, and, until a paired device uses the same controls
-(not built yet), it is told only the desktop window can do it. Rules and limits
+(not built yet), it is told only the desktop window can do it.
+
+**The Pull requests reading pane.** The destination reads a pull request beside
+its list; the dock's Review tool keeps the one-column arrangement above with
+the same actions and refusals. The pane has three regions. A tab row (Summary,
+Changes with "+added −removed" in success and danger ink, Timeline) carries, at
+its trailing edge, icon buttons (Open on GitHub, Copy link, Refresh), a quiet
+Open chat button, a **Merge** split button (primary; the chevron's menu picks
+Squash and merge, Merge commit or Rebase and merge, squash by default; Merge
+still asks first in an inline confirmation naming the reviewed head) and a "..."
+menu holding Close or Reopen pull request. Under it, the state pill with
+"repository #number", the title in the page-title role (26px, 600), one meta
+line (author, age, head → base) and, on Summary, the description as markdown at
+13px with a 720px measure; Summary holds no form. Changes lists commits, changed
+files and the diff. Timeline lists the reviews and comments, newest last, then
+the labels, review-thread replies, the comment form and the review form
+(Approve, Request changes with a note) at the end. The status column (260px,
+sticky) has small captions in the navigation-group role: Merge status (one
+sentence), Checks (failing first, View all), Reviews (each reviewer's latest
+state), Comments (a count that opens Timeline), linked threads, and Automatic
+actions as two compact switch rows whose sentence is a tooltip and still read to
+a screen reader. There is no Request reviewers action: no host command asks a
+reviewer. Where the pane is under 760px the status column folds under the title
+into columns on Summary and is not shown on the other tabs. Loading, an
+unavailable read and a missing detail are each one quiet line, not a card.
+Rules and limits
 are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
@@ -1611,11 +1636,21 @@ sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
 host restart and is cleared when GitHub authority is revoked.
 
-**The Pull requests and Issues lists.** The Pull requests page is a dense, calm list in the reading
-measure, at most 720px and left-aligned in the page. Its title band carries the
-count; at the trailing edge sit a Sort menu, a Filter menu, Repository settings
-(only while the list is not grouped) and Refresh, each an icon button with a
-tooltip. A row is two lines. Line one is the title at medium weight, cut after
+**The Pull requests and Issues lists.** The Pull requests destination is a
+list column and a reading pane, not a full-width list. The list column is
+320px with its own scroll: a header with the title and, as icon buttons with
+tooltips, Sort, Filter, Repository settings (only while the list is not
+grouped) and Refresh, the count under the title; a search field that also takes
+a pasted pull-request link and narrows the list to the one it names; quiet
+status chips with counts (All, Open, Drafts, bound to the Filter menu's
+Status); then the rows and, once more than 50 are listed, a quiet **Show more**.
+A soft one-line note at the foot says when some Project repositories could not
+be refreshed and that their cached pull requests are still shown. The pane is
+described under **The Pull requests reading pane** below. Under 680px the page
+is one column, the list or the pull request, with a back button over the
+pane.
+
+A row is two lines. Line one is the title at medium weight, cut after
 two lines, and at its trailing edge the one thing that needs attention, in
 words and as the quiet chip (Draft, Conflicts, Checks failing, Changes
 requested, Checks pending, Review pending), or a small check when the pull
@@ -1627,14 +1662,19 @@ in a group and `owner/name` on an ungrouped list that spans repositories, in bot
 lists. Every row, flagged or not, is one tooltip trigger that opens on hover and
 on keyboard focus of the whole row, with the status sentence and then
 "head → base", and the same text is visually hidden text of the row, so no fact
-is pointer-only. A row has no hairline under it, the row under the pointer takes the
-control hover fill with the row radius, and clicking it opens the pull request
-exactly as before.
+is pointer-only. A row has no hairline under it, rows are 4px apart, the row under the pointer
+takes the hover wash and the open row `--oct-wash-selected`, and clicking a row
+opens that pull request in the reading pane (from anywhere else, the dock's
+Review tool opens it as before).
 
 Sort offers Recently updated (the default), Least recently updated, Newest,
 Oldest and Repository, and a **Group by repository** check item. Newest and
 Oldest order by creation time, which the snapshot carries beside each
-pull request's last update. Filter offers State (open, draft), Review (needs review, changes
+pull request's last update. Filter offers Status (any, open, draft), Involvement
+(anyone, involving me, review requested, authored by me; only when the
+signed-in GitHub login is known, and answered from the row's author and
+requested reviewers), a Projects submenu (one connected Project; only with two
+or more), Review (needs review, changes
 requested, approved), Checks (passing, failing, pending) and **Mine**, which
 keeps the pull requests whose author is the signed-in GitHub account
 (maintainer request, 2026-11-12). Not built yet: today the snapshot carries no
@@ -2720,14 +2760,13 @@ repository the page asks for one in a single panel rather than opening on the
 whole catalogue. Start a Code thread leaves the surface with the issue
 attached to a new draft as its Create from context.
 
-The Pull requests page is a dense list in a 720px reading measure at the
-page's leading edge: a title band with the count and Sort, Filter, Repository
-settings and Refresh icon buttons; rows of a medium-weight title (two lines at
-most) and one 12px meta line (state glyph, repository, author, age, and the
-number in tabular numerals at the trailing edge); one quiet chip or a success
-check at the trailing edge of the title line instead of three chips; no hairline
-between rows and the control hover fill with the row radius under the pointer.
-Grouping by repository gives each group a slim header with a "..." menu holding
+The Pull requests page is the list column and reading pane above: rows of a
+13px title (two lines at most) and one 12px meta line (state glyph, repository,
+author, age, and the number in tabular numerals at the trailing edge); one
+quiet chip or a success check at the trailing edge of the title line instead of
+three chips; no hairline between rows. Rows carry no avatar or folder mark and
+the filter has no Labels submenu or Closed and Merged status, because the
+snapshot holds no avatar, label or closed pull request. Grouping by repository gives each group a slim header with a "..." menu holding
 Auto-refresh, Agents may merge, Agents may comment on pull requests and Refresh. A Project that is not on GitHub is
 one notice at the foot, never an empty block. Where agents may merge is on, the
 group shows a quiet chip and the Repository settings button a dot. The Issues
