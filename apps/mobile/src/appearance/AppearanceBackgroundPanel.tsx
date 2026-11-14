@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { ASCII_DEFAULT_CELL, ASCII_MIN_CELL } from "@octant/domain/ascii-print";
 import {
   EFFECT_MAX,
   EFFECT_MIN,
@@ -57,6 +58,7 @@ const EFFECT_OPTIONS: ReadonlyArray<{
   { id: "none", label: MOBILE_COPY.backgroundEffectNone },
   { id: "pixelate", label: MOBILE_COPY.backgroundEffectPixelate },
   { id: "dither", label: MOBILE_COPY.backgroundEffectDither },
+  { id: "ascii", label: MOBILE_COPY.backgroundEffectAscii },
 ];
 
 async function readAsDataUri(uri: string): Promise<string> {
@@ -79,6 +81,8 @@ interface DialProps {
   readonly value: number;
   readonly onChange: (value: number) => void;
   readonly testID: string;
+  /** The lowest value, when the effect needs more than the shared minimum. */
+  readonly min?: number;
 }
 
 /** A whole-number dial on the desktop's 2..16 range, with 44pt steppers. */
@@ -125,7 +129,7 @@ function Dial(props: DialProps) {
         <Pressable
           accessibilityLabel={`${MOBILE_COPY.backgroundDialLess} ${props.label.toLowerCase()}`}
           accessibilityRole="button"
-          disabled={props.value <= EFFECT_MIN}
+          disabled={props.value <= (props.min ?? EFFECT_MIN)}
           hitSlop={6}
           onPress={() => props.onChange(props.value - 1)}
           style={styles.dialButton}
@@ -136,7 +140,7 @@ function Dial(props: DialProps) {
         <Text
           accessibilityLabel={props.label}
           accessibilityRole="adjustable"
-          accessibilityValue={{ min: EFFECT_MIN, max: EFFECT_MAX, now: props.value }}
+          accessibilityValue={{ min: props.min ?? EFFECT_MIN, max: EFFECT_MAX, now: props.value }}
           style={styles.dialValue}
           testID={`${props.testID}-value`}
         >
@@ -327,7 +331,18 @@ export function AppearanceBackgroundPanel() {
       >
         <View style={styles.segmentRow}>
           <SegmentedControl
-            onSelect={(kind) => void appearance.setEffect({ ...effect, kind })}
+            onSelect={(kind) =>
+              // A character needs room to read, so ASCII starts at a readable
+              // cell rather than inheriting a 2 pt one, as on the desktop.
+              void appearance.setEffect({
+                ...effect,
+                kind,
+                cell:
+                  kind === "ascii" && effect.cell < ASCII_MIN_CELL
+                    ? ASCII_DEFAULT_CELL
+                    : effect.cell,
+              })
+            }
             optionTestID={(id) => `mobile-appearance-effect-${id}`}
             options={EFFECT_OPTIONS}
             selected={effect.kind}
@@ -338,6 +353,7 @@ export function AppearanceBackgroundPanel() {
           <>
             <Dial
               label={MOBILE_COPY.backgroundPixelSize}
+              {...(effect.kind === "ascii" ? { min: ASCII_MIN_CELL } : {})}
               onChange={(cell) => void appearance.setEffect({ ...effect, cell })}
               testID="mobile-appearance-dial-cell"
               value={effect.cell}

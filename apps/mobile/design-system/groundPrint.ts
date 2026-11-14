@@ -1,9 +1,11 @@
 /**
  * The pure half of the printed ground: the same ordered threshold, effect
  * limits and cover fit the desktop uses, so a picture prints identically on
- * both. The shader in PrintedGround.tsx mirrors `bayerThreshold`.
+ * both. The shader in PrintedGround.tsx mirrors `bayerThreshold`, and its
+ * ASCII print reads the desktop's own glyph table through `asciiGlyphRows`.
  */
 
+import { ASCII_GLYPH_ROWS, asciiCell } from "@octant/domain/ascii-print";
 import type { ImageSourcePropType } from "react-native";
 
 export type GroundPicture =
@@ -14,9 +16,9 @@ export type GroundPicture =
   | "custom"
   | "plain";
 
-/** How a picture is printed: as it is, in square cells, or in dithered cells. */
+/** How a picture is printed: as it is, in square cells, dithered cells, or characters. */
 export interface GroundEffect {
-  readonly kind: "none" | "pixelate" | "dither";
+  readonly kind: "none" | "pixelate" | "dither" | "ascii";
   /** Points per cell. */
   readonly cell: number;
   /** Colour steps per channel, for dither. */
@@ -33,11 +35,15 @@ function clampStep(value: number, fallback: number): number {
   return Math.min(EFFECT_MAX, Math.max(EFFECT_MIN, Math.round(value)));
 }
 
-/** Keeps the dials on the integer range the desktop's sliders offer. */
+/**
+ * Keeps the dials on the integer range the desktop's sliders offer; an ASCII
+ * cell is never smaller than a glyph can read, as on the desktop.
+ */
 export function clampEffect(effect: GroundEffect): GroundEffect {
+  const cell = clampStep(effect.cell, DEFAULT_EFFECT.cell);
   return {
     kind: effect.kind,
-    cell: clampStep(effect.cell, DEFAULT_EFFECT.cell),
+    cell: effect.kind === "ascii" ? asciiCell(cell) : cell,
     levels: clampStep(effect.levels, DEFAULT_EFFECT.levels),
   };
 }
@@ -54,6 +60,14 @@ export function bayerThreshold(x: number, y: number): number {
     ((xy & 4) >> 1) |
     ((row & 4) >> 2);
   return (value + 0.5) / 64;
+}
+
+/**
+ * The glyph table flattened for the shader's `uGlyphs` uniform: five rows per
+ * ramp level, top row first, each row's bit 4 the leftmost pixel.
+ */
+export function asciiGlyphRows(): ReadonlyArray<number> {
+  return ASCII_GLYPH_ROWS.flat();
 }
 
 /**

@@ -230,6 +230,7 @@ export const MOBILE_COPY = {
   backgroundEffectNone: "Off",
   backgroundEffectPixelate: "Pixelate",
   backgroundEffectDither: "Dither",
+  backgroundEffectAscii: "ASCII",
   backgroundPixelSize: "Pixel size",
   backgroundColours: "Colours",
   backgroundDialLess: "Decrease",

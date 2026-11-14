@@ -871,9 +871,11 @@ Deep-link capture and live transport ownership do not mount in that branch.
 Leaving the demo discards its sample state and returns to the explicit connection
 choice. This is review preparation, not evidence of native or store acceptance.
 
-Its background shares the desktop's three Gradient pictures and Pixelate/Dither
-print effect (Appearance › Background), drawn once through a GL shader that
-uses the same ordered threshold.
+Its background shares the desktop's three Gradient pictures and
+Pixelate/Dither/ASCII print effect (Appearance › Background), drawn once
+through a GL shader that uses the same ordered threshold and the same glyph
+table. The phone keeps its own effect choice on the device; it never follows
+the desktop's.
 
 Internal TestFlight distributes this same client and grants the phone no new
 authority. The bundle is `app.octant.mobile` (installed name Octant) at source
