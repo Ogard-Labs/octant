@@ -171,29 +171,6 @@
   line-height: 1.45;
 }
 
-/* A session's tool and age are short and always read whole; the title gives
-   way first. Shrinking the meta clipped "16d ago" beside a long title; the
-   picker's shared meta rule loads after this sheet, hence the compound
-   selector. */
-.github-picker__option-meta.terminal-session-picker__meta {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.terminal-session-picker__source {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  gap: var(--oct-space-1);
-}
-
-.terminal-session-picker__folder {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
 /* The terminal session a Work or Code thread started from: folded above the
    thread's own turns, in the provenance tint, since it is a record of what
    was said elsewhere rather than turns of this thread. */

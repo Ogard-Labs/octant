@@ -621,9 +621,15 @@ folder, branch and checkout chips. It opens one panel, "Where should this
 thread work?", a radio group (arrow keys move, Escape closes and returns focus
 to the chip): **This checkout** names the Project's folder in meta ink and
 "on <current branch>", read only; **New worktree** says "isolated copy, its
-own branch" and, once chosen, shows the base-branch picker and the branch name
-the host will create, then the "Start from origin" choice, so nothing
-appears or disappears outside the panel when the choice changes. Below sit a quiet **Subfolder** row (the working folder
+own branch". The panel is one fixed size (360px wide) in every state: the
+base-branch picker, the branch name, the "Start from origin" switch, the line
+saying what it resolved to and the Remote are always laid out, quiet and out of
+reach while This checkout is chosen, and fill in as their facts arrive, so
+choosing, toggling or a fetch finishing never resizes or moves it. It hangs
+above the chip, aligned to its start. The same holds for every start-row popup
+(base-branch picker, Project, Create from…): fixed frame, list scrolls inside,
+skeleton rows while loading, lists read before it opens
+([DESIGN.md](../../DESIGN.md) principle 7). Below sit a quiet **Subfolder** row (the working folder
 fields) and, when a Project's remembered default can be recorded, **Remember
 for this Project**. Choosing only sets the draft's workspace; the worktree is
 created with the thread. The chip's width may follow the choice; nothing else

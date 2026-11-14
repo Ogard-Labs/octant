@@ -1146,6 +1146,16 @@ html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
   min-width: 0;
 }
 
+/* Loading, the rows, "none" and an error all stand in this one box, so a
+   popup that fixes its height gives the box a size and keeps it. */
+.github-picker__results {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-height: 0;
+}
+
 .github-picker__listbox {
   margin: 0;
   padding: 0;
@@ -2844,103 +2854,149 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   color: var(--oct-danger-fg);
 }
 
+/* The panel is one size in every state. Everything a choice could add (the
+   worktree rows, the origin line, the remote, the subfolder's note) is laid
+   out from the start and only goes quiet, so choosing, toggling or the facts
+   arriving never changes its height or moves its edge. Names are the 13px menu
+   option, what they say about themselves the 12px meta, each on one line. */
 .code-where__panel {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-2);
-  width: min(380px, calc(100vw - 32px));
-  padding: var(--oct-space-3);
+  gap: var(--oct-space-1);
+  width: min(360px, calc(100vw - 32px));
+  padding: var(--oct-menu-inset);
+  overflow: hidden;
 }
 
 .code-where__title {
-  margin: 0;
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
-  color: var(--octant-text-primary);
+  display: flex;
+  align-items: center;
+  height: var(--oct-space-6);
+  padding-inline: var(--oct-menu-row-inset);
 }
 
 .code-where__choices {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
+  gap: 1px;
 }
 
 .code-where__radio {
   display: grid;
-  grid-template-columns: 14px 1fr;
-  column-gap: var(--oct-space-2);
-  align-items: start;
+  grid-template-columns: var(--oct-icon-md) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: var(--oct-menu-row-gap);
+  align-content: center;
+  align-items: center;
   width: 100%;
-  height: auto;
-  padding: var(--oct-space-1) var(--oct-space-2);
+  height: var(--oct-menu-row-two-h);
+  padding: 0 var(--oct-menu-row-inset);
   text-align: start;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .code-where__dot {
   grid-row: 1 / span 2;
   width: 14px;
   height: 14px;
-  margin-top: 2px;
+  justify-self: center;
   border: 1px solid var(--octant-border-strong);
   border-radius: 50%;
 }
 
-.code-where__choice[data-selected="true"] .code-where__dot {
+.code-where__radio[aria-checked="true"] .code-where__dot {
   border: 4px solid var(--octant-text-primary);
 }
 
 .code-where__name {
-  font-size: var(--oct-text-detail);
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .code-where__meta {
   grid-column: 2;
-  overflow-wrap: anywhere;
-  font-size: var(--oct-text-xs);
-  color: var(--octant-text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .code-where__detail {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
-  padding: 0 var(--oct-space-2) var(--oct-space-1) var(--oct-space-8);
+  gap: 0;
+  margin-inline-start: calc(
+    var(--oct-menu-row-inset) + var(--oct-icon-md) + var(--oct-menu-row-gap)
+  );
+  padding-inline-end: var(--oct-menu-row-inset);
+  --oct-disabled-opacity: 0.5;
 }
 
 .code-where__line {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
-  font-size: var(--oct-text-xs);
-  color: var(--octant-text-secondary);
+  height: var(--oct-menu-row-h);
+  min-width: 0;
 }
 
-.code-where__line code {
+.code-where__line-label {
+  flex: 0 0 var(--oct-space-12);
+}
+
+.code-where__code {
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  color: var(--octant-text-primary);
 }
 
 .code-where__subfolder {
-  padding-top: var(--oct-space-2);
+  padding: var(--oct-space-1) 0 0;
   border-top: 1px solid var(--oct-hairline);
 }
 
 .code-where__subfolder .working-directory-control {
-  padding: 0;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-menu-row-inset);
   border-bottom: 0;
+}
+
+.code-where__subfolder .working-directory-control label {
+  display: flex;
+  align-items: center;
+  height: var(--oct-space-6);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+}
+
+.code-where__subfolder .working-directory-control input {
+  height: var(--oct-menu-row-h);
+  padding: 0 var(--oct-menu-row-inset);
+  font-size: var(--oct-text-detail);
+}
+
+/* The note under the field is one line in its own slot; a refusal takes the
+   slot's place in the danger ink instead of adding a block below it. */
+.code-where__subfolder .working-directory-control small {
+  display: block;
+  height: var(--oct-space-6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: var(--oct-space-6);
+}
+
+.code-where__subfolder .working-directory-control small[data-invalid="true"] {
+  color: var(--oct-danger-fg);
 }
 
 .code-where__remember {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: var(--oct-text-detail);
-  color: var(--octant-text-secondary);
-}
-
-.code-where__detail .code-worktree-source {
-  justify-items: start;
-  padding: 0;
+  height: var(--oct-menu-row-h);
+  padding-inline: var(--oct-menu-row-inset);
+  border-top: 1px solid var(--oct-hairline);
+  box-sizing: content-box;
+  padding-top: var(--oct-space-1);
 }

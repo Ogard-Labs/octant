@@ -3,6 +3,7 @@ import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
 import { ChevronDown, FolderGit2, FolderOpen } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { MiddleEllipsis } from "../../ui/base/MiddleEllipsis";
 import { OctantPopover } from "../../ui/base/OctantPopover";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
@@ -76,10 +77,13 @@ export function CodeWhereControl(props: CodeWhereControlProps) {
 
   return (
     <OctantPopover
+      align="start"
       className="code-where__panel"
       keepMounted
       onOpenChange={setOpen}
       open={open}
+      side="top"
+      sideOffset={6}
       titledBy={headingId}
       trigger={
         <>
@@ -93,7 +97,7 @@ export function CodeWhereControl(props: CodeWhereControlProps) {
       {...(subfolderUsable ? {} : { triggerDataAttributes: { "data-invalid": true } })}
       triggerLabel={`Where this thread works: ${label}`}
     >
-      <h3 className="code-where__title" id={headingId}>
+      <h3 className="oct-nav-group code-where__title" id={headingId}>
         Where should this thread work?
       </h3>
       <div
@@ -105,52 +109,65 @@ export function CodeWhereControl(props: CodeWhereControlProps) {
         {CHOICES.map((candidate) => {
           const selected = candidate.id === props.workspace;
           return (
-            <div
-              className="code-where__choice"
-              data-selected={selected ? "true" : undefined}
+            <OctantButton
+              aria-checked={selected}
+              className="code-where__radio"
               key={candidate.id}
+              onClick={() => props.onWorkspaceChange(candidate.id)}
+              role="radio"
+              tabIndex={selected ? 0 : -1}
+              type="button"
+              variant="bare"
             >
-              <OctantButton
-                aria-checked={selected}
-                className="code-where__radio"
-                onClick={() => props.onWorkspaceChange(candidate.id)}
-                role="radio"
-                tabIndex={selected ? 0 : -1}
-                type="button"
-                variant="bare"
-              >
-                <span aria-hidden="true" className="code-where__dot" />
-                <span className="code-where__name">{candidate.label}</span>
-                <span className="code-where__meta">
-                  {candidate.id === "current-checkout"
-                    ? `${props.projectRoot === undefined ? "" : `${props.projectRoot} · `}on ${props.branch}`
-                    : "isolated copy, its own branch"}
+              <span aria-hidden="true" className="code-where__dot" />
+              <span className="oct-menu-option code-where__name">{candidate.label}</span>
+              {candidate.id === "current-checkout" ? (
+                props.projectRoot === undefined ? (
+                  <span className="oct-menu-detail code-where__meta">{`on ${props.branch}`}</span>
+                ) : (
+                  <MiddleEllipsis
+                    className="oct-menu-detail code-where__meta"
+                    suffix={` · on ${props.branch}`}
+                    text={props.projectRoot}
+                  />
+                )
+              ) : (
+                <span className="oct-menu-detail code-where__meta">
+                  isolated copy, its own branch
                 </span>
-              </OctantButton>
-              {candidate.id === "managed-worktree" && selected ? (
-                <div className="code-where__detail">
-                  <div className="code-where__line">
-                    <span>from</span>
-                    {props.baseBranchPicker}
-                  </div>
-                  <div className="code-where__line">
-                    <span>branch</span>
-                    <code>{props.worktreeBranch}</code>
-                    <span className="code-where__meta">(auto)</span>
-                  </div>
-                  {props.sourceControl}
-                </div>
-              ) : null}
-            </div>
+              )}
+            </OctantButton>
           );
         })}
       </div>
+      {/* The rows a new worktree adds are always laid out. Choosing "This
+          checkout" quiets and disables them instead of removing them, so the
+          panel is the same size in both states and nothing moves. */}
+      <div
+        className="code-where__detail"
+        data-quiet={worktree ? undefined : "true"}
+        data-reserved=""
+        inert={!worktree}
+      >
+        <div className="code-where__line" data-reserved="">
+          <span className="oct-menu-detail code-where__line-label">from</span>
+          {props.baseBranchPicker}
+        </div>
+        <div className="code-where__line" data-reserved="">
+          <span className="oct-menu-detail code-where__line-label">branch</span>
+          <MiddleEllipsis className="code-where__code" text={props.worktreeBranch} />
+          <span className="oct-menu-detail">(auto)</span>
+        </div>
+        {props.sourceControl}
+      </div>
       {props.subfolder === undefined ? null : (
-        <div className="code-where__subfolder">{props.subfolder}</div>
+        <div className="code-where__subfolder" data-reserved="">
+          {props.subfolder}
+        </div>
       )}
       {remembered === undefined ? null : (
-        <div className="code-where__remember">
-          <span>Remember for this Project</span>
+        <div className="code-where__remember" data-reserved="">
+          <span className="oct-menu-option">Remember for this Project</span>
           <OctantSwitch
             checked={remembered.value === props.workspace}
             disabled={remembered.value === props.workspace && !worktree}

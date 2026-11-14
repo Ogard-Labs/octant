@@ -62,7 +62,14 @@ same stylesheets and described in
    another control. A control that a choice adds or removes keeps a reserved
    slot (hidden, not collapsed), a row keeps its items in one order in every
    state, and something appearing above an anchored surface (a notice above the
-   composer) grows away from it instead of pushing it. The person's next click
+   composer) grows away from it instead of pushing it. A popup opens at its final size and keeps it: data
+   arriving, a choice made inside it or a toggle that reveals detail never
+   resizes or moves it. Its width and height are fixed, a list scrolls inside
+   them, loading draws skeleton rows of the real rows' height, and the rows a
+   choice could add are laid out from the start, quiet and out of reach, never
+   inserted. It hangs from its trigger's edge (above, aligned to its start or
+   end, 6px off) and never covers the trigger; what it will show is read before
+   it opens. The person's next click
    lands where they last saw the target. Only the person's own act of moving
    something (a drag, a resize, opening the sidebar) moves layout.
 

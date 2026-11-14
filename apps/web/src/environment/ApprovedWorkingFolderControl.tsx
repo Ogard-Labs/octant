@@ -51,6 +51,18 @@ export function ApprovedWorkingFolderControl(props: {
       : shown === "."
         ? selected.label
         : `${selected.label} / ${shown}`;
+  // The note under the field. Inline, in the Where panel, it is one line in one
+  // slot, so a refusal takes the slot's place instead of adding a block.
+  const note =
+    !valid && props.inline === true
+      ? "Use . or a relative subfolder without .. before starting."
+      : selected === undefined
+        ? "Working folder unavailable. Choose a current Project folder."
+        : selected.kind === "extra" && props.code
+          ? "Shared folder: outside the child worktree. Git, changed files and Review cover the Code checkout only."
+          : props.inline === true
+            ? "Use . for the whole folder, or a path inside it such as apps/web."
+            : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new task.";
   const fields = (
     <div className="working-directory-control">
       {props.inline === true && props.folders.length < 2 ? null : (
@@ -91,19 +103,16 @@ export function ApprovedWorkingFolderControl(props: {
           }
         }}
       />
-      {!valid ? (
+      {!valid && props.inline !== true ? (
         <OctantAlert tone="danger">
           Use . or a relative subfolder without .. before starting this task.
         </OctantAlert>
       ) : null}
-      <small>
-        {selected === undefined
-          ? "Working folder unavailable. Choose a current Project folder."
-          : selected.kind === "extra" && props.code
-            ? "Shared folder: outside the child worktree. Git, changed files and Review cover the Code checkout only."
-            : props.inline === true
-              ? "Use . for the whole folder, or a path inside it such as apps/web."
-              : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new task."}
+      <small
+        {...(!valid && props.inline === true ? { "data-invalid": true, role: "alert" } : {})}
+        title={note}
+      >
+        {note}
       </small>
     </div>
   );

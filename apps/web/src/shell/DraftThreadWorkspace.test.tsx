@@ -781,7 +781,7 @@ describe("DraftThreadWorkspace", () => {
       </ServerCodeProjectsContext.Provider>,
     );
     expect(screen.getByRole("button", { name: "Project: Service" })).toBeVisible();
-    expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
+    expect(screen.getByTitle("On a server: devbox:/home/build/service")).toBeVisible();
     // A server thread starts in its folder unless the person picks a worktree there.
     expect(screen.getByRole("button", { name: /^Where this thread works/ })).toHaveTextContent(
       "This checkout",
@@ -1545,7 +1545,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Keep this draft");
   });
 
-  it("shows the Create from Issues tab when issues-read is available", async () => {
+  it("shows the Create from GitHub tab when issues-read is available", async () => {
     const user = userEvent.setup();
     render(
       <DraftThreadWorkspace
@@ -1565,7 +1565,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
     await user.click(await screen.findByRole("button", { name: "Create from…" }));
-    expect(screen.getByRole("tab", { name: "Issues" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "GitHub" })).toBeVisible();
   });
 
   it("hides Create from when the GitHub plugin is disabled", async () => {

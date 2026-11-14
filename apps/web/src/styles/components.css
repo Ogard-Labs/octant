@@ -724,6 +724,51 @@ html[data-octant-reduced-motion="true"]
   font-size: var(--oct-text-xs);
 }
 
+/* A path or a name that gives up its middle: the head shrinks to an ellipsis,
+   the tail and any suffix stay whole. */
+.middle-ellipsis {
+  display: flex;
+  min-width: 0;
+  white-space: pre;
+}
+
+.middle-ellipsis__head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.middle-ellipsis__tail {
+  flex: 0 0 auto;
+}
+
+/* A popup's list before its data arrives: rows of the real rows' height, so
+   the popup is the size it will be and nothing moves when the rows come. */
+.popup-skeleton {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.popup-skeleton__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+}
+
+.popup-skeleton__row {
+  height: calc(var(--oct-menu-row-h) - var(--oct-space-1));
+  margin-inline: var(--oct-menu-row-inset);
+}
+
+/* A reserved row a choice has not made current: it keeps its place and stays
+   quiet and out of reach instead of leaving the layout. */
+[data-reserved][data-quiet="true"] {
+  opacity: var(--oct-disabled-opacity);
+  pointer-events: none;
+}
+
 /* The native activity overlay may keep translucency because it floats above
    the workspace instead of behaving like an application menu or form. */
 .thread-activity-pip__card,

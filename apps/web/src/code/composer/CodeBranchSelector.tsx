@@ -6,6 +6,7 @@ import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantPopover } from "../../ui/base/OctantPopover";
+import { PopupSkeletonRows } from "../../ui/base/PopupSkeletonRows";
 
 export interface CodeBranchSelectorProps {
   /** The currently selected base branch (short name, no remote prefix). */
@@ -44,6 +45,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
 
   return (
     <OctantPopover
+      align="start"
       className="code-branch-selector__menu"
       onOpenChange={(next) => {
         setOpen(next);
@@ -53,6 +55,8 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
         }
       }}
       open={open}
+      side="top"
+      sideOffset={6}
       title="Choose base branch"
       trigger={
         <>
@@ -79,11 +83,9 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
       </label>
       <div aria-label="Refs" className="code-branch-selector__list" role="listbox">
         {props.loading === true && (props.refs === undefined || props.refs.length === 0) ? (
-          <p className="octant-popover-empty" role="status">
-            Loading refs…
-          </p>
+          <PopupSkeletonRows label="Loading refs…" rows={6} />
         ) : filtered.length === 0 ? (
-          <p className="octant-popover-empty" role="status">
+          <p className="octant-popover-empty code-branch-selector__empty" role="status">
             {props.refs === undefined || props.refs.length === 0
               ? "No refs reported for this repository."
               : "No refs match the search."}
@@ -126,7 +128,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
       </div>
       {props.onStartFromOriginChange !== undefined ? (
         <div className="code-branch-selector__footer">
-          <span>Start from origin</span>
+          <span className="oct-menu-option">Start from origin</span>
           <OctantSwitch
             checked={props.startFromOrigin && props.startFromOriginAvailable === true}
             disabled={props.startFromOriginAvailable !== true}
