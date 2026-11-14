@@ -1140,6 +1140,15 @@ function rebaseLayout(
   return withPaneContext(layout, layout.context ?? from, to);
 }
 
+/**
+ * The pane's own authority context, if it holds one. A pane showing the
+ * welcome holds none: reconciliation turns a pane whose surface lost its
+ * authority into the welcome, and such a pane must not keep its Project in reach.
+ */
+function paneOwnContext(pane: WorkspacePane): WorkspaceContextKey | undefined {
+  return pane.surface.kind === "welcome" ? undefined : pane.context;
+}
+
 function withPaneContext(
   pane: WorkspacePane,
   context: WorkspaceContextKey | undefined,
@@ -1224,26 +1233,42 @@ export function admissionSet(
       visit(layout.second);
       return;
     }
-    const own = layout.context?.projectId;
+    const own = paneOwnContext(layout)?.projectId;
     if (own != null && !projects.some((id) => String(id) === String(own))) projects.push(own);
   };
   visit(workspace.layouts[mode]);
   return projects;
 }
 
-/** Whether one mode of a window reaches a Project: its lead or a visible pane's. */
+/** The context of a mode's active pane: its own when it holds another Project, else the lead's. */
+export function activePaneContext(
+  workspace: WindowWorkspace,
+  mode: OctantMode,
+): WorkspaceContextKey {
+  const lead = workspace.contextByMode[mode];
+  const pane = findPane(workspace.layouts[mode], workspace.activePaneIds[mode]);
+  return (pane === undefined ? undefined : paneOwnContext(pane)) ?? lead;
+}
+
+/**
+ * Whether one mode of a window reaches a Project: its lead or a visible pane's.
+ * `null` asks about Chat threads outside every Project, which a window reaches
+ * when its lead or one of its panes names no Project.
+ */
 export function windowAdmitsProject(
   workspace: WindowWorkspace,
   mode: OctantMode,
-  projectId: ProjectId,
+  projectId: ProjectId | null,
 ): boolean {
-  const target = String(projectId);
   const lead = workspace.contextByMode[mode].projectId;
-  if (lead !== null && String(lead) === target) return true;
+  if (sameProject(lead, projectId)) return true;
   const visit = (layout: WorkspaceLayoutNode): boolean =>
     layout.kind === "split"
       ? visit(layout.first) || visit(layout.second)
-      : layout.context?.projectId != null && String(layout.context.projectId) === target;
+      : (() => {
+          const own = paneOwnContext(layout);
+          return own !== undefined && sameProject(own.projectId, projectId);
+        })();
   return visit(workspace.layouts[mode]);
 }
 

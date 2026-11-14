@@ -23,6 +23,7 @@ import {
   type WindowWorkspace,
   type WorkspaceContextKey,
   type WorkspaceLayoutNode,
+  type WorkspacePane,
   type WindowId,
 } from "@octant/contracts";
 import {
@@ -861,6 +862,17 @@ function reconcilePreviewTabs(
         second: visit(layout.second, mode, activeProjectId),
       };
     }
+    // A pane of another Project is judged against its own Project.
+    if (layout.context !== undefined) {
+      return visitPane(layout, mode, layout.context.projectId);
+    }
+    return visitPane(layout, mode, activeProjectId);
+  };
+  const visitPane = (
+    layout: WorkspacePane,
+    mode: "chat" | "work" | "code",
+    activeProjectId: ProjectId | null,
+  ): WorkspaceLayoutNode => {
     const surface = layout.surface;
     if (surface.kind !== "preview") return { ...layout, surface: { ...surface } };
     const authority = classifyPreviewTabAuthority({
@@ -901,6 +913,17 @@ function reconcileCanvasTabs(
         second: visit(layout.second, mode, activeProjectId),
       };
     }
+    // A pane of another Project is judged against its own Project.
+    if (layout.context !== undefined) {
+      return visitPane(layout, mode, layout.context.projectId);
+    }
+    return visitPane(layout, mode, activeProjectId);
+  };
+  const visitPane = (
+    layout: WorkspacePane,
+    mode: "chat" | "work" | "code",
+    activeProjectId: ProjectId | null,
+  ): WorkspaceLayoutNode => {
     const surface = layout.surface;
     if (surface.kind !== "canvas") return { ...layout, surface: { ...surface } };
     const projection = persistence.canvasProjection.getById(surface.canvasId);
@@ -1052,8 +1075,11 @@ function reconcilePaneContexts(
       return { ...layout, first: visit(layout.first, mode), second: visit(layout.second, mode) };
     }
     const context = layout.context;
-    if (context === undefined || context.projectId === null) return layout;
+    if (context === undefined) return layout;
     const { context: _context, ...bare } = layout;
+    // A welcome holds no Project, so a pane turned into one drops its context.
+    if (layout.surface.kind === "welcome") return bare;
+    if (context.projectId === null) return layout;
     const welcome = { ...bare, surface: workspaceWelcomeSurface(mode, layout.surface.id) };
     const project = persistence.readProject(context.projectId);
     if (project === undefined && isServerProjectFor(server, mode, context.projectId)) {

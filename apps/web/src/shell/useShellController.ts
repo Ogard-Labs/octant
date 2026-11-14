@@ -1476,23 +1476,27 @@ function createWorkspaceMutation(
         mode: "chat",
         title: intent.title,
       };
+      // A thread already shown in a pane, of whichever Project, is selected
+      // where it is; only a thread the window does not show moves the window.
+      const existing = findVisibleSurfacePane(layout, surface);
       if (
-        isDifferentProject(latest.workspace, "chat", intent.projectId) ||
-        (intent.projectId !== undefined &&
-          latest.workspace.stowedLayouts.some(
-            (stowed) =>
-              stowed.context.mode === "chat" &&
-              stowed.context.projectId !== null &&
-              String(stowed.context.projectId) === String(intent.projectId),
-          )) ||
-        (intent.projectId === undefined && latest.workspace.contextByMode.chat.projectId !== null)
+        existing === undefined &&
+        (isDifferentProject(latest.workspace, "chat", intent.projectId) ||
+          (intent.projectId !== undefined &&
+            latest.workspace.stowedLayouts.some(
+              (stowed) =>
+                stowed.context.mode === "chat" &&
+                stowed.context.projectId !== null &&
+                String(stowed.context.projectId) === String(intent.projectId),
+            )) ||
+          (intent.projectId === undefined &&
+            latest.workspace.contextByMode.chat.projectId !== null))
       ) {
         return {
           operation: { kind: "switch-project-surface", mode: "chat", surface },
           message: `${intent.title} opened in this window.`,
         };
       }
-      const existing = findVisibleSurfacePane(layout, surface);
       return {
         operation: {
           kind: "open-surface",
@@ -1527,14 +1531,17 @@ function createWorkspaceMutation(
                 threadId: intent.threadId,
               },
             };
-      if (isDifferentProject(latest.workspace, "code", intent.projectId)) {
+      const existing = findVisibleSurfacePane(layout, surface);
+      if (
+        existing === undefined &&
+        isDifferentProject(latest.workspace, "code", intent.projectId)
+      ) {
         return {
           operation: { kind: "switch-project-surface", mode: "code", surface },
           message: `${intent.title} opened in this window.`,
           ...newWindowTarget,
         };
       }
-      const existing = findVisibleSurfacePane(layout, surface);
       return {
         operation: {
           kind: "open-surface",
@@ -1570,14 +1577,17 @@ function createWorkspaceMutation(
                 threadId: intent.threadId,
               },
             };
-      if (isDifferentProject(latest.workspace, "work", intent.projectId)) {
+      const existing = findVisibleSurfacePane(layout, surface);
+      if (
+        existing === undefined &&
+        isDifferentProject(latest.workspace, "work", intent.projectId)
+      ) {
         return {
           operation: { kind: "switch-project-surface", mode: "work", surface },
           message: `${intent.title} opened in this window.`,
           ...newWindowTarget,
         };
       }
-      const existing = findVisibleSurfacePane(layout, surface);
       return {
         operation: {
           kind: "open-surface",
@@ -2234,14 +2244,8 @@ function refuseCrossAuthority(
       ...offer,
     };
   }
-  if (isDifferentProject(workspace, mode, projectId)) {
-    throw {
-      category: "cross-context",
-      message:
-        "This surface belongs to a different Project. Open it in a new window to keep its authority.",
-      ...offer,
-    };
-  }
+  // Another Project of this mode and host joins as its own pane; the host
+  // resolves that pane's Project and judges every call on it.
 }
 
 function windowTargetForSurface(

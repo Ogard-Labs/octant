@@ -23,6 +23,7 @@ import {
   MAX_WORKSPACE_PANES,
   ShellPolicyRejected,
   WorkspaceContextRejected,
+  activePaneContext,
   admissionSet,
   applyWorkspaceOperation,
   recordPaneContext,
@@ -2501,6 +2502,18 @@ describe("panes of several Projects in one window", () => {
     ).toThrow(ShellPolicyRejected);
   });
 
+  it("names the active pane's own Project as the mode's active one, and the lead's for a lead pane", () => {
+    const mixed = mixedAB();
+    expect(activePaneContext(mixed, "code").projectId).toBe(projectB);
+    const leadActive = run(mixed, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: codePane(defaultWindowWorkspace(ids.window)).paneId,
+      surface: threadA,
+    });
+    expect(activePaneContext(leadActive, "code").projectId).toBe(projectA);
+  });
+
   it("drops a pane's own context when the pane comes to show a surface with none", () => {
     const mixed = mixedAB();
     const welcome = welcomeSurface(decodeWorkspaceTabId("00000000-0000-4000-8000-000000000106"));
@@ -2513,6 +2526,30 @@ describe("panes of several Projects in one window", () => {
     expect(windowAdmitsProject(replaced, "code", projectB)).toBe(false);
   });
 
+  it("reaches nothing through a pane that came to show the welcome while still naming its Project", () => {
+    const mixed = mixedAB();
+    const layout = mixed.layouts.code;
+    if (layout.kind !== "split") throw new Error("expected split");
+    const second = onlyPane(layout.second);
+    // Reconciliation swaps a lost surface for the welcome in place.
+    const emptied: WindowWorkspace = {
+      ...mixed,
+      layouts: {
+        ...mixed.layouts,
+        code: {
+          ...layout,
+          second: {
+            ...second,
+            surface: welcomeSurface(decodeWorkspaceTabId("00000000-0000-4000-8000-000000000107")),
+          },
+        },
+      },
+    };
+    expect(windowAdmitsProject(emptied, "code", projectB)).toBe(false);
+    expect(admissionSet(emptied, "code")).toEqual([projectA]);
+    expect(activePaneContext(emptied, "code").projectId).toBe(projectA);
+  });
+
   it("answers admission over a layout of a different Project in every pane in under 50 microseconds", () => {
     const base = defaultWindowWorkspace(ids.window);
     const count = MAX_WORKSPACE_PANES - 2;
@@ -2522,7 +2559,13 @@ describe("panes of several Projects in one window", () => {
       kind: "pane",
       nodeId: decodeLayoutNodeId(uuid("8001", index)),
       paneId: decodePaneId(uuid("8002", index)),
-      surface: welcomeSurface(decodeWorkspaceTabId(uuid("8003", index))),
+      surface: decodeWorkspaceTab({
+        kind: "project",
+        id: uuid("8003", index),
+        projectId: uuid("8004", index),
+        mode: "code",
+        title: "Project",
+      }),
       context: contextOf(decodeProjectId(uuid("8004", index))),
     });
     let layout: WorkspaceLayoutNode = pane(0);

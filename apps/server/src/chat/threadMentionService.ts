@@ -34,7 +34,9 @@ import {
   type ThreadMentionTranscriptEntry,
   type UnavailableThreadMention,
   UtcTimestamp,
+  type ProjectId,
   type WindowId,
+  type WindowWorkspace,
   type AggregateVersion,
   type SideChatSourceVersionFact,
   type ChatThreadView,
@@ -158,6 +160,16 @@ export interface ThreadMentionServiceOptions {
   readonly clock: () => string;
   /** Mints the sidecar thread id the registry claims before Chat is touched. */
   readonly uuid: () => string;
+  /**
+   * Whether a thread the window can Open may be read into the reader's turn.
+   * A window showing several Projects must not widen what a composer could
+   * attach in a window showing only its own; absent admits every openable one.
+   */
+  readonly admitsMention?: (input: {
+    readonly windowId: WindowId;
+    readonly readerThreadId: string | undefined;
+    readonly thread: ThreadMentionDirectoryThread;
+  }) => boolean;
 }
 
 /**
@@ -184,6 +196,7 @@ export class ThreadMentionService {
    * id and answering the caller from whichever lost.
    */
   readonly #openingSideChats = new Map<string, Promise<SideChatAdmission>>();
+  readonly #admitsMention: ThreadMentionServiceOptions["admitsMention"];
 
   constructor(options: ThreadMentionServiceOptions) {
     this.#directories = options.directories;
@@ -192,11 +205,12 @@ export class ThreadMentionService {
     this.#sideChatThreads = options.sideChatThreads;
     this.#clock = options.clock;
     this.#uuid = options.uuid;
+    this.#admitsMention = options.admitsMention;
   }
 
   async execute(
     input: unknown,
-    context: { readonly windowId: WindowId },
+    context: { readonly windowId: WindowId; readonly readerThreadId?: string },
   ): Promise<ThreadMentionCommandResult> {
     const command = decodeThreadMentionCommand(input);
     switch (command.kind) {
@@ -210,7 +224,7 @@ export class ThreadMentionService {
         return decodeThreadMentionCommandResult({
           kind: "mentions-resolved",
           requestId: command.requestId,
-          ...(await this.#resolve(context.windowId, command.threadIds)),
+          ...(await this.#resolve(context.windowId, command.threadIds, context.readerThreadId)),
         });
       case "open-side-chat":
         return await this.#openSideChat(context.windowId, command);
@@ -500,6 +514,7 @@ export class ThreadMentionService {
   async #resolve(
     windowId: WindowId,
     threadIds: ReadonlyArray<MentionableThreadId>,
+    readerThreadId?: string,
   ): Promise<{
     readonly mentions: ReadonlyArray<ResolvedThreadMention>;
     readonly unavailable: ReadonlyArray<UnavailableThreadMention>;
@@ -509,7 +524,10 @@ export class ThreadMentionService {
     const unavailable: UnavailableThreadMention[] = [];
     for (const threadId of threadIds) {
       const thread = openable.get(String(threadId));
-      if (thread === undefined) {
+      if (
+        thread === undefined ||
+        this.#admitsMention?.({ windowId, readerThreadId, thread }) === false
+      ) {
         // Fail closed: an Open the principal would be refused yields only the
         // opaque id back, never a title, mode, or placement.
         unavailable.push({ threadId, reason: "unauthorized" });
@@ -659,6 +677,21 @@ interface SideChatAdmission {
 const THREAD_MENTION_SOURCE_LABEL = "thread-mention";
 
 /**
+ * Whether a window reaches a mentioned Code thread's Project for a composer,
+ * as a window showing that composer alone would: a Code composer reaches its
+ * own Project, any other composer the window's Code lead. Another pane's
+ * Project never joins that reach by sitting beside the composer.
+ */
+export function codeMentionWithinReach(input: {
+  readonly workspace: WindowWorkspace;
+  readonly readerCodeProjectId: ProjectId | undefined;
+  readonly mentionedProjectId: ProjectId;
+}): boolean {
+  const reach = input.readerCodeProjectId ?? input.workspace.contextByMode.code.projectId;
+  return reach !== null && String(reach) === String(input.mentionedProjectId);
+}
+
+/**
  * Read the `#thread` mentions a turn names, on the window the turn was sent
  * from.
  *
@@ -710,7 +743,7 @@ export function threadMentionContextResolver(
     try {
       resolved = await threadMentions().execute(
         { kind: "resolve-mentions", requestId: randomUUID(), threadIds: threadMentionIds },
-        { windowId },
+        { windowId, readerThreadId },
       );
     } catch {
       return unreadable();
