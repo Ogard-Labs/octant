@@ -1,4 +1,5 @@
 import { Switch } from "../shadcn/switch";
+import { OctantTooltip } from "./OctantTooltip";
 
 export interface OctantSwitchProps {
   readonly checked: boolean;
@@ -13,7 +14,7 @@ export interface OctantSwitchProps {
 /** Octant switch adapter over the owned shadcn/Base UI Switch recipe. */
 export function OctantSwitch(props: OctantSwitchProps) {
   const disabledReason = props.disabled === true ? props.disabledReason : undefined;
-  return (
+  const control = (
     <Switch
       aria-description={disabledReason}
       aria-describedby={props.describedBy}
@@ -22,7 +23,14 @@ export function OctantSwitch(props: OctantSwitchProps) {
       className="octant-switch window-no-drag"
       disabled={props.disabled}
       onCheckedChange={(checked) => props.onCheckedChange(checked)}
-      title={disabledReason}
     />
+  );
+  if (disabledReason === undefined) return control;
+  // A disabled switch takes no pointer events, so a title on it never showed.
+  // The wrapper carries the hover explanation; the switch still speaks it.
+  return (
+    <OctantTooltip label={disabledReason}>
+      <span className="octant-switch__disabled-reason">{control}</span>
+    </OctantTooltip>
   );
 }

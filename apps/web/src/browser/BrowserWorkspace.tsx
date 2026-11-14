@@ -124,13 +124,14 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".octant-sheet__backdrop",
   ".octant-sheet__viewport",
   ".octant-sheet__popup",
-  // Floating chrome: notices, menus, popovers, tooltips and disclosures that
-  // can open over the page area. A tooltip on the Browser toolbar would
-  // otherwise open underneath the native view and never be seen.
+  // Floating chrome a click opens over the page area: notices, menus,
+  // popovers and disclosures. Tooltips stay out on purpose: they open on
+  // hover, and the page leaving the window whenever any tooltip in the window
+  // opened would flash it away. The Browser toolbar uses native titles, which
+  // the system draws above the native view.
   ".toast-stack",
   '[data-slot="popover-content"]',
   '[data-slot="combobox-content"]',
-  '[data-slot="tooltip-content"]',
   '[data-slot="select-content"]',
   '[data-slot="dropdown-menu-content"]',
   '[data-slot="context-menu-content"]',

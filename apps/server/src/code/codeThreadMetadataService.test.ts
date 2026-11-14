@@ -20,6 +20,7 @@ import {
   type CodeThreadMetadataInput,
   type CodeThreadOperationHistory,
 } from "./codeThreadMetadataService";
+import { summarizeThreadHistory } from "./codeOperationEventStore";
 
 describe("Code thread known pull-request identities", () => {
   it("recovers, deduplicates, and bounds exact identities from journal history", () => {
@@ -820,6 +821,90 @@ describe("CodeThreadMetadataService investigation-result gating", () => {
     ]);
 
     expect(view.threads[0]!.deliverySatisfaction).toBe("pending");
+  });
+});
+
+describe("Code thread history summary", () => {
+  it("answers the board, pull-request join and child readers as the whole history does", async () => {
+    const otherOperation = "00000000-0000-4000-8000-000000002099";
+    const at = (minute: number) => `2026-07-20T22:${String(minute).padStart(2, "0")}:00.000Z`;
+    const pullRequest = (number: number, state: "existing" | "merged") =>
+      ({
+        kind: "operation-result",
+        result: {
+          kind: "pull-request-state",
+          operationId: ids.operation,
+          state,
+          number,
+          url: `https://github.com/acme/repo/pull/${number}`,
+          headRepository: "acme/repo",
+          headBranch: "feature/x",
+          baseRepository: "acme/repo",
+          baseBranch: "development",
+        },
+      }) as never;
+    const events: Array<[CodeOperationEventFrame["event"], string, string?]> = [
+      [{ kind: "operation-state", state: "running" }, at(1)],
+      [{ kind: "child-activity", childId: "c1", state: "running", summary: "One" }, at(2)],
+      [{ kind: "child-activity", childId: "c2", state: "running", summary: "Two" }, at(9)],
+      [pullRequest(3, "existing"), at(3)],
+      [{ kind: "operation-result", result: journaledGitObserved() }, at(4)],
+      [
+        {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId: decodeCodeOperationId(otherOperation),
+            state: "running",
+          },
+        },
+        at(5),
+        otherOperation,
+      ],
+      [{ kind: "operation-state", state: "completed" }, at(6)],
+      [pullRequest(4, "existing"), at(7)],
+      [{ kind: "child-activity", childId: "c1", state: "completed", summary: "One done" }, at(8)],
+      [pullRequest(3, "merged"), at(10)],
+      [{ kind: "operation-result", result: journaledGitObserved({ omitLineTotals: true }) }, at(11)],
+      [{ kind: "child-activity", childId: "c2", state: "failed", summary: "Two failed" }, at(9)],
+      [
+        {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId: decodeCodeOperationId(ids.operation),
+            state: "running",
+          },
+        },
+        at(12),
+      ],
+    ];
+    for (let index = 0; index < 20; index += 1) {
+      events.push([{ kind: "operation-state", state: "running" }, at(12)]);
+    }
+    const frames = events.map(([event, occurredAt, operationId], index) =>
+      frame(event, occurredAt, index + 1, operationId),
+    );
+
+    const summary = summarizeThreadHistory(frames);
+    expect(summary.length).toBeLessThan(frames.length / 2);
+    for (let split = 0; split <= frames.length; split += 1) {
+      const extended = summarizeThreadHistory([
+        ...summarizeThreadHistory(frames.slice(0, split)),
+        ...frames.slice(split),
+      ]);
+      expect(extended).toEqual(summary);
+    }
+    expect(pullRequestIdentitiesFromHistory({ status: "ok", frames: summary })).toEqual(
+      pullRequestIdentitiesFromHistory({ status: "ok", frames }),
+    );
+    const project = async (history: CodeThreadOperationHistory) =>
+      (
+        await serviceFixture({ github: () => ({ status: "unavailable" }), history: () => history })
+          .service.project([input({ thread: thread({ outcomeKind: "investigation-result" }) })])
+      ).threads;
+    const whole = await project({ status: "ok", frames });
+    expect(await project({ status: "ok", frames: summary })).toEqual(whole);
   });
 });
 

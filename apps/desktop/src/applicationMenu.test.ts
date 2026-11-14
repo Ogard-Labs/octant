@@ -153,7 +153,11 @@ describe("Windows and Linux menu", () => {
     ]);
     item("Settings…")?.click?.({} as never, {} as never, {} as never);
     item("Prepare to shut down…")?.click?.({} as never, {} as never, {} as never);
-    item("Quit Octant")?.click?.({} as never, {} as never, { triggeredByAccelerator: true } as never);
+    item("Quit Octant")?.click?.(
+      {} as never,
+      {} as never,
+      { triggeredByAccelerator: true } as never,
+    );
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(onPrepareToShutDown).toHaveBeenCalledOnce();
     expect(onQuit).toHaveBeenCalledWith({ viaShortcut: true });

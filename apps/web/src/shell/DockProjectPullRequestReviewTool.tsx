@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
 import type {
   CodeProjectPullRequestActionCommand,
@@ -120,10 +121,10 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
       );
     };
     read();
-    const timer = setInterval(read, SWITCHES_REFRESH_MS);
+    const stopRefresh = scheduleVisibleInterval(read, SWITCHES_REFRESH_MS);
     return () => {
       active = false;
-      clearInterval(timer);
+      stopRefresh();
     };
   }, [
     props.query.number,

@@ -1367,7 +1367,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           truncated: turns.length > 64,
         });
       }
-      const history = codeBoardEventStore.historyForThread(
+      const history = codeBoardEventStore.summaryForThread(
         decodeCodeThreadId(String(parentThreadId)),
       );
       return observedChildren({

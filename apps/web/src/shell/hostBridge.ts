@@ -588,8 +588,6 @@ export interface OctantHostBridge
    * Absent on a host that does not report it, which is read as system frame.
    */
   readonly windowChrome?: "hidden-inset" | "system-frame";
-  /** Reports the window entering and leaving macOS full screen; returns an unsubscribe. */
-  readonly onFullScreenChange?: (listener: (fullScreen: boolean) => void) => () => void;
   readonly initialProjectTarget?: ProjectWindowTarget;
   readonly maximizeOrRestore: () => Promise<void> | void;
   readonly minimize: () => Promise<void> | void;

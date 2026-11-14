@@ -158,6 +158,7 @@ describe("extension popup host", () => {
   });
 
   it("closes when focus leaves the popup or its window moves or resizes", async () => {
+    geometryListeners.clear();
     const blurred = fakeView();
     const moved = fakeView();
     const views = [blurred, moved];

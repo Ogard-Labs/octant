@@ -56,16 +56,22 @@ const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 const MAX_STREAM_SCAN_EVENTS = 100_000;
 const MAX_REMEMBERED_REVIEW_SOURCES = 32;
 /**
- * How many decoded frames, across threads, the stores on one journal keep between history
- * reads. The board, the sidebar's pull-request join, and child observations
- * each read whole thread histories every few seconds while a window is open,
- * and decoding a 2,000-turn thread's 28,000 frames again for every read held
- * the event loop for 0.7 to 1.6 s at a time on a loaded machine. A remembered
- * frame measured about 425 bytes, so this bound (one thread at the scan
- * ceiling) holds the memory near 45 MB; past it the least recently read
- * threads are decoded afresh on their next read.
+ * How many decoded frames, across threads, the stores on one journal keep
+ * between whole-history reads. The board, the sidebar's pull-request join, and
+ * child observations read every few seconds while a window is open; they read
+ * the compact summary below, so whole histories are read only by commands. A
+ * remembered frame measured about 425 bytes, so this holds about 8.5 MB; past
+ * it the least recently read threads are decoded afresh on their next read.
  */
-const MAX_REMEMBERED_HISTORY_FRAMES = MAX_STREAM_SCAN_EVENTS;
+const MAX_REMEMBERED_HISTORY_FRAMES = 20_000;
+/**
+ * How many summary frames, across threads, stay remembered. Decoding a
+ * 2,000-turn thread's 28,000 frames for every periodic read held the event
+ * loop for 0.7 to 1.6 s on a loaded machine, and remembering whole histories
+ * to avoid that held up to 45 MB. A summary keeps a few frames per child, pull
+ * request, and kind, so this bound covers thousands of threads.
+ */
+const MAX_REMEMBERED_SUMMARY_FRAMES = 20_000;
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -205,14 +211,147 @@ interface RememberedHistories {
   frames: number;
 }
 const rememberedHistoriesByJournal = new WeakMap<JournalPort, RememberedHistories>();
+const rememberedSummariesByJournal = new WeakMap<JournalPort, RememberedHistories>();
 
-function rememberedHistoriesFor(journal: JournalPort): RememberedHistories {
-  let remembered = rememberedHistoriesByJournal.get(journal);
+function rememberedHistoriesFor(
+  journal: JournalPort,
+  byJournal = rememberedHistoriesByJournal,
+): RememberedHistories {
+  let remembered = byJournal.get(journal);
   if (remembered === undefined) {
     remembered = { byThread: new Map(), frames: 0 };
-    rememberedHistoriesByJournal.set(journal, remembered);
+    byJournal.set(journal, remembered);
   }
   return remembered;
+}
+
+type HistoryFrame = typeof CodeOperationEventFrame.Type;
+
+/**
+ * The frames of a thread's history that the board metadata, the sidebar's
+ * pull-request join and child observations read their whole answer from, in
+ * journal order. Each of those readers folds "latest wins" facts, so a frame a
+ * later frame supersedes for every reader is dropped:
+ *
+ * - the frame with the newest `occurredAt` (last activity);
+ * - per child, its last `child-activity` frame, the last of those with the
+ *   newest `occurredAt` (latest summary), and every frame carrying a provider
+ *   child observation, which observation history folds whole;
+ * - the last pull-request review, the last pull-request state, and per pull
+ *   request number the last frame that identifies it;
+ * - the last `git-observed` result;
+ * - provider-turn evidence: once a completed provider turn is proven, only the
+ *   frames that prove it; until then every turn start, provider turn result
+ *   and completed operation, since a later completion may pair with any.
+ *
+ * The rule is a pure function of the frames, and summarizing a summary
+ * followed by newer frames gives the summary of the whole history, so it is
+ * extended from the rows after it and rebuilt from the journal at any time.
+ */
+export function summarizeThreadHistory(
+  frames: ReadonlyArray<HistoryFrame>,
+): ReadonlyArray<HistoryFrame> {
+  const keep = new Set<number>();
+  let newestActivity: number | undefined;
+  let newestChildSummary: number | undefined;
+  const lastPerChild = new Map<string, number>();
+  let lastReview: number | undefined;
+  let lastState: number | undefined;
+  const lastPerPullRequest = new Map<number, number>();
+  let lastGitObserved: number | undefined;
+  const providerEvidence: Array<number> = [];
+  const providerTurnMarker = new Map<string, number>();
+  const completedOperations = new Map<string, number>();
+  let providerWitness: ReadonlyArray<number> | undefined;
+
+  frames.forEach((frame, index) => {
+    const newest = newestActivity === undefined ? undefined : frames[newestActivity];
+    if (newest === undefined || frame.occurredAt >= newest.occurredAt) newestActivity = index;
+    const event = frame.event;
+    if (event.kind === "child-activity") {
+      lastPerChild.set(event.childId, index);
+      const summary = newestChildSummary === undefined ? undefined : frames[newestChildSummary];
+      if (summary === undefined || frame.occurredAt >= summary.occurredAt) {
+        newestChildSummary = index;
+      }
+      if (event.observation !== undefined) keep.add(index);
+      return;
+    }
+    if (event.kind === "operation-result") {
+      const result = event.result;
+      if (result.kind === "pull-request-review") {
+        lastReview = index;
+        if (result.state === "observed") lastPerPullRequest.set(result.number, index);
+      } else if (result.kind === "pull-request-state") {
+        lastState = index;
+        if (result.state === "created" || result.state === "existing" || result.state === "merged")
+          lastPerPullRequest.set(result.number, index);
+      } else if (result.kind === "git-observed") {
+        lastGitObserved = index;
+      } else if (result.kind === "provider-turn-state" && providerWitness === undefined) {
+        providerEvidence.push(index);
+        if (result.state === "completed") providerWitness = [index];
+        else {
+          const operationId = String(result.operationId);
+          if (!providerTurnMarker.has(operationId)) providerTurnMarker.set(operationId, index);
+          const completed = completedOperations.get(operationId);
+          if (completed !== undefined) providerWitness = [completed, index];
+        }
+      }
+      return;
+    }
+    if (providerWitness !== undefined) return;
+    if (event.kind === "conversation-turn-started") {
+      providerEvidence.push(index);
+      const operationId = String(frame.operationId);
+      if (!providerTurnMarker.has(operationId)) providerTurnMarker.set(operationId, index);
+      const completed = completedOperations.get(operationId);
+      if (completed !== undefined) providerWitness = [completed, index];
+    } else if (event.kind === "operation-state" && event.state === "completed") {
+      providerEvidence.push(index);
+      const operationId = String(frame.operationId);
+      if (!completedOperations.has(operationId)) completedOperations.set(operationId, index);
+      const marker = providerTurnMarker.get(operationId);
+      if (marker !== undefined) providerWitness = [marker, index];
+    }
+  });
+
+  for (const index of [
+    newestActivity,
+    newestChildSummary,
+    lastReview,
+    lastState,
+    lastGitObserved,
+    ...lastPerChild.values(),
+    ...lastPerPullRequest.values(),
+    ...(providerWitness ?? providerEvidence),
+  ]) {
+    if (index !== undefined) keep.add(index);
+  }
+  return frames.filter((_frame, index) => keep.has(index));
+}
+
+function rememberBounded(
+  histories: RememberedHistories,
+  key: string,
+  history: RememberedHistory,
+  maximumFrames: number,
+): void {
+  forgetRemembered(histories, key);
+  histories.byThread.set(key, history);
+  histories.frames += history.frames.length;
+  for (const [oldestKey, oldest] of histories.byThread) {
+    if (histories.frames <= maximumFrames || oldestKey === key) break;
+    histories.byThread.delete(oldestKey);
+    histories.frames -= oldest.frames.length;
+  }
+}
+
+function forgetRemembered(histories: RememberedHistories, key: string): void {
+  const remembered = histories.byThread.get(key);
+  if (remembered === undefined) return;
+  histories.byThread.delete(key);
+  histories.frames -= remembered.frames.length;
 }
 
 export class CodeOperationEventStore {
@@ -221,6 +360,7 @@ export class CodeOperationEventStore {
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
   readonly #histories: RememberedHistories;
+  readonly #summaries: RememberedHistories;
   /** Compact metadata for a few open turn comparisons, never their streamed text. */
   readonly #reviewSources = new Map<
     string,
@@ -237,6 +377,7 @@ export class CodeOperationEventStore {
   constructor(options: CodeOperationEventStoreOptions) {
     this.#journal = options.journal;
     this.#histories = rememberedHistoriesFor(options.journal);
+    this.#summaries = rememberedHistoriesFor(options.journal, rememberedSummariesByJournal);
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     try {
@@ -779,6 +920,66 @@ export class CodeOperationEventStore {
     return { status: "ok", frames: read.frames };
   }
 
+  /**
+   * The thread's history reduced by {@link summarizeThreadHistory}, for the
+   * readers that poll it. It is remembered per thread and extended from only
+   * the rows after it, so a periodic read decodes what the thread did since the
+   * last one, and it is refused exactly where {@link historyForThread} is.
+   */
+  summaryForThread(threadIdInput: CodeThreadId):
+    | {
+        readonly status: "ok";
+        readonly frames: ReadonlyArray<typeof CodeOperationEventFrame.Type>;
+      }
+    | {
+        readonly status: "rebuild-required";
+      } {
+    let threadId: CodeThreadId;
+    try {
+      threadId = decodeCodeThreadId(threadIdInput);
+    } catch {
+      return { status: "rebuild-required" };
+    }
+    const key = String(threadId);
+    const summaries = this.#summaries;
+    const forget = () => forgetRemembered(summaries, key);
+    const head = this.#journal.aggregateTypeThreadHead({
+      aggregateType: "code-operation",
+      threadId: key,
+    });
+    if (head.eventCount > MAX_STREAM_SCAN_EVENTS) {
+      forget();
+      return { status: "rebuild-required" };
+    }
+    const remembered = summaries.byThread.get(key);
+    if (
+      remembered !== undefined &&
+      remembered.lastSequence === head.lastSequence &&
+      remembered.eventCount === head.eventCount
+    ) {
+      rememberBounded(summaries, key, remembered, MAX_REMEMBERED_SUMMARY_FRAMES);
+      return { status: "ok", frames: remembered.frames };
+    }
+    let read =
+      remembered !== undefined && remembered.lastSequence < head.lastSequence
+        ? this.#readHistory(threadId, remembered)
+        : undefined;
+    if (read === undefined || (read.status === "ok" && read.eventCount !== head.eventCount)) {
+      read = this.#readHistory(threadId, undefined);
+    }
+    if (read.status !== "ok") {
+      forget();
+      return read;
+    }
+    const summary: RememberedHistory = {
+      lastSequence: read.lastSequence,
+      eventCount: read.eventCount,
+      frames: summarizeThreadHistory(read.frames),
+    };
+    rememberBounded(summaries, key, summary, MAX_REMEMBERED_SUMMARY_FRAMES);
+    return { status: "ok", frames: summary.frames };
+  }
+
   #readHistory(
     threadId: CodeThreadId,
     from: RememberedHistory | undefined,
@@ -827,22 +1028,11 @@ export class CodeOperationEventStore {
   }
 
   #remember(key: string, history: RememberedHistory): void {
-    this.#forget(key);
-    const histories = this.#histories;
-    histories.byThread.set(key, history);
-    histories.frames += history.frames.length;
-    for (const [oldestKey, oldest] of histories.byThread) {
-      if (histories.frames <= MAX_REMEMBERED_HISTORY_FRAMES || oldestKey === key) break;
-      histories.byThread.delete(oldestKey);
-      histories.frames -= oldest.frames.length;
-    }
+    rememberBounded(this.#histories, key, history, MAX_REMEMBERED_HISTORY_FRAMES);
   }
 
   #forget(key: string): void {
-    const remembered = this.#histories.byThread.get(key);
-    if (remembered === undefined) return;
-    this.#histories.byThread.delete(key);
-    this.#histories.frames -= remembered.frames.length;
+    forgetRemembered(this.#histories, key);
   }
 
   /**

@@ -145,8 +145,8 @@ export function useHostFullScreen(hostBridge: OctantHostBridge | undefined): boo
   const [fullScreen, setFullScreen] = useState(false);
   useEffect(() => {
     setFullScreen(false);
-    if (hostBridge?.onFullScreenChange === undefined) return;
-    return hostBridge.onFullScreenChange(setFullScreen);
+    if (hostBridge?.subscribeWindowFullScreen === undefined) return;
+    return hostBridge.subscribeWindowFullScreen(setFullScreen);
   }, [hostBridge]);
   return fullScreen;
 }

@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { CodeLocalReview } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
@@ -699,13 +700,13 @@ function AppleWorkbenchSurface(props: {
   useEffect(() => {
     if (!followingLiveScreen) return;
     const abort = new AbortController();
-    const timer = setInterval(
+    const stopRefresh = scheduleVisibleInterval(
       () => void refreshRuntime(abort.signal).catch(() => undefined),
       3_000,
     );
     return () => {
       abort.abort();
-      clearInterval(timer);
+      stopRefresh();
     };
   }, [followingLiveScreen, refreshRuntime]);
 
