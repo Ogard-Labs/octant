@@ -5,6 +5,10 @@ import {
   refusePairingCodeListener,
   remoteListenerOrigin,
 } from "@octant/domain";
+import {
+  PAIRED_DEVICE_LIFETIMES,
+  type PairedDeviceLifetime,
+} from "@octant/contracts/remote-access";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
@@ -57,6 +61,21 @@ export interface RemoteAccessSettingsSectionProps {
   readonly ownerUnlock?: OwnerUnlockBridge | undefined;
   /** Reads the clock so a test can freeze ticket expiry. */
   readonly now?: () => number;
+  /** How long a paired device stays paired, a host setting; the row is absent without it. */
+  readonly pairedDeviceLifetime?: PairedDeviceLifetime | undefined;
+  readonly onPairedDeviceLifetimeChange?: ((lifetime: PairedDeviceLifetime) => void) | undefined;
+}
+
+const PAIRED_DEVICE_LIFETIME_LABELS: Readonly<Record<PairedDeviceLifetime, string>> = {
+  "7-days": "7 days",
+  "30-days": "30 days",
+  "90-days": "90 days",
+  "1-year": "1 year",
+  never: "Never expires",
+};
+
+function isPairedDeviceLifetime(value: string): value is PairedDeviceLifetime {
+  return (PAIRED_DEVICE_LIFETIMES as ReadonlyArray<string>).includes(value);
 }
 
 type ListenerState =
@@ -110,6 +129,8 @@ export function RemoteAccessSettingsSection({
   hub,
   ownerUnlock,
   now,
+  pairedDeviceLifetime,
+  onPairedDeviceLifetimeChange,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   const [listener, setListener] = useState<ListenerState>({ kind: "loading" });
@@ -756,6 +777,32 @@ export function RemoteAccessSettingsSection({
           </SettingsState>
         )}
       </SettingsSection>
+
+      {pairedDeviceLifetime === undefined || onPairedDeviceLifetimeChange === undefined ? null : (
+        <SettingsSection title="Pairing length">
+          <div className="setgroup">
+            <SettingRow
+              description="How long a device stays paired, counted from when it was paired and applied to devices already paired, so a shorter length can end some pairings now; Never expires means only Revoke ends a pairing."
+              focused={focusedSetting === "remote-paired-device-lifetime"}
+              label="Keep devices paired for"
+              scope="host"
+              settingId="remote-paired-device-lifetime"
+            >
+              <OctantSelectField
+                aria-label="Keep devices paired for"
+                onValueChange={(value) => {
+                  if (isPairedDeviceLifetime(value)) onPairedDeviceLifetimeChange(value);
+                }}
+                options={PAIRED_DEVICE_LIFETIMES.map((id) => ({
+                  id,
+                  label: PAIRED_DEVICE_LIFETIME_LABELS[id],
+                }))}
+                value={pairedDeviceLifetime}
+              />
+            </SettingRow>
+          </div>
+        </SettingsSection>
+      )}
 
       {/* Revoking is this page's destructive group, so it sits last. */}
       <SettingsPanel

@@ -997,7 +997,14 @@ paired phone does today. A browser guest reaches a spoke the way
 **Delegation.** An agent on spoke A delegates by asking A's host for a remote
 child run on B. A's host checks A's own rules first (the parent thread's mode
 and authority, and that subagents are allowed), then sends B a signed request
-naming the target Project, the task, and a narrowed authority. B then:
+naming the target Project, the task, and a narrowed authority. A thread that
+has read outside content meets the same rule as a helper on its own host
+(maintainer decision, 2026-11-13): at Full access it hands work on unasked;
+below Full access it needs its person's one answer for the thread, the same
+journaled `delegation` answer (`thread.standing-answer-recorded@1`) a helper on
+A asks for, so one answer covers both kinds of helper; Plan stays refused
+(`parent-tainted`). A Work thread cannot yet ask its person below Full access,
+so there it is still refused, as for a helper on A. B then:
 
 1. checks the peer grant and clamps the request to the smaller of the peer
    grant and B's own Project authority (equal or narrower, as for any child

@@ -6,6 +6,7 @@ import {
   type DeviceKeyRotatedV1,
   type DeviceRevokedV1,
   type DeviceCredentialExpiredV1,
+  type DeviceRegistrationDeadlineChangedV1,
   type HostKeyRotatedV1,
   type RemoteCommandReceiptRecordedV1,
   type RemoteSessionInvalidatedV1,
@@ -20,6 +21,7 @@ interface ProjectionStatements {
   readonly rotate: SqliteStatement;
   readonly revoke: SqliteStatement;
   readonly expire: SqliteStatement;
+  readonly deadline: SqliteStatement;
   readonly hostRotate: SqliteStatement;
   readonly sessionInvalidate: SqliteStatement;
   readonly receipt: SqliteStatement;
@@ -150,6 +152,16 @@ export class RemoteAccessProjection implements Projection {
         );
         return;
       }
+      case REMOTE_ACCESS_EVENT_NAMES.deviceRegistrationDeadlineChanged: {
+        const value = payload as DeviceRegistrationDeadlineChangedV1;
+        statements.deadline.run(
+          value.expiresAt,
+          value.deviceId,
+          value.hostId,
+          value.credentialGeneration,
+        );
+        return;
+      }
       case REMOTE_ACCESS_EVENT_NAMES.hostKeyRotated: {
         const value = payload as HostKeyRotatedV1;
         statements.hostRotate.run(
@@ -228,6 +240,9 @@ export class RemoteAccessProjection implements Projection {
       ),
       expire: connection.prepare(
         "UPDATE remote_device_projection SET state = ?, revoked_reason = ? WHERE device_id = ? AND host_id = ? AND credential_generation = ?",
+      ),
+      deadline: connection.prepare(
+        "UPDATE remote_device_projection SET expires_at = ? WHERE device_id = ? AND host_id = ? AND credential_generation = ? AND state = 'active'",
       ),
       hostRotate: connection.prepare(
         "UPDATE host_identity_projection SET key_fingerprint = ?, key_generation = ?, rotated_at = ? WHERE identity_key = 'host' AND host_id = ?",

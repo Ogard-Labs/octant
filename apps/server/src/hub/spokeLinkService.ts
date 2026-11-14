@@ -113,8 +113,7 @@ export function deviceLifecycleAt(
   devices: ReadonlyArray<{
     readonly deviceId: string;
     readonly state: "active" | "revoked" | "expired";
-    readonly createdAt: string;
-    readonly lastSeenAt: string;
+    readonly expiresAt: string;
   }>,
   deviceId: string,
   now: number,
@@ -125,8 +124,7 @@ export function deviceLifecycleAt(
   const verdict = evaluateDeviceRegistration({
     state: device.state,
     now,
-    createdAt: Date.parse(device.createdAt),
-    lastSeenAt: Date.parse(device.lastSeenAt),
+    expiresAt: Date.parse(device.expiresAt),
   });
   return verdict.kind === "active" ? "active" : "expired";
 }
