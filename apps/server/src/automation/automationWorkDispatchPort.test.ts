@@ -318,6 +318,34 @@ describe("createAutomationWorkDispatchPort", () => {
     expect(threads.execute).not.toHaveBeenCalled();
   });
 
+  it("creates no Work thread in a Project on a server that cannot be reached, saying so", async () => {
+    const threads = createThreads();
+    const port = createAutomationWorkDispatchPort({
+      threads,
+      turns: createTurns(),
+      clock: () => now,
+      uuid: () => "aa000000-0000-4000-8000-0000000000e0",
+      reachServer: async () => ({
+        kind: "unreachable",
+        message: "web1 could not be reached, so this routine ran nothing.",
+      }),
+    });
+
+    const outcome = await port.createThread({
+      run: workRun(),
+      threadId,
+      title: "Weekly summary",
+      scopeId,
+    });
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: "unavailable",
+      message: "web1 could not be reached, so this routine ran nothing.",
+    });
+    expect(threads.execute).not.toHaveBeenCalled();
+  });
+
   it("maps thread creation failures to typed unavailable/unauthorized/conflict reasons", async () => {
     const threads = createThreads({
       execute: vi.fn(async () => {

@@ -160,6 +160,97 @@ describe("secret guard refusals for host file tools", () => {
     expect(secretGuardSearchRefusal(home, options)).toContain("Refused");
     expect(secretGuardSearchRefusal(join(home, "project"), options)).toBeUndefined();
   });
+
+  it("refuses a search rooted inside a browser profile whose stores the list names by pattern", () => {
+    const home = fakeHome();
+    const profile = join(home, ".config/google-chrome/Default");
+    mkdirSync(join(profile, "Network"), { recursive: true });
+    writeFileSync(join(profile, "Network/Cookies"), "fake");
+    writeFileSync(join(profile, "Preferences"), "{}");
+    const options = { platform: "linux" as const, homeDirectory: home };
+    expect(secretGuardSearchRefusal(profile, options)).toContain(
+      "Browser cookies and saved logins",
+    );
+    expect(secretGuardSearchRefusal(join(home, ".config/nvim"), options)).toBeUndefined();
+  });
+
+  it("refuses a search when checking it for pattern-named stores could not finish", () => {
+    const home = fakeHome();
+    const crowded = join(home, ".config/crowded");
+    mkdirSync(crowded, { recursive: true });
+    for (let index = 0; index < 5_000; index += 1) writeFileSync(join(crowded, `f${index}`), "");
+    const refusal = secretGuardSearchRefusal(crowded, { platform: "linux", homeDirectory: home });
+    expect(refusal).toContain("could not finish");
+  });
+});
+
+describe("secret guard on a Windows host", () => {
+  const options = { platform: "win32" as const, homeDirectory: "C:\\Users\\Person" };
+
+  it("refuses Windows credential stores and home secrets named by drive-absolute paths", () => {
+    expect(
+      secretGuardRefusal(
+        "C:\\Users\\Person\\AppData\\Roaming\\Microsoft\\Credentials\\A1",
+        options,
+      ),
+    ).toContain("Keychains and password vaults");
+    expect(secretGuardRefusal("C:\\Users\\Person\\.aws\\credentials", options)).toContain(
+      "~/.aws/credentials",
+    );
+    expect(secretGuardRefusal("c:/users/person/.ssh/ID_RSA.", options)).toContain(
+      "SSH private keys",
+    );
+    expect(secretGuardRefusal("C:\\Users\\Person\\project\\README.md", options)).toBeUndefined();
+    expect(isProtectedSecretPath("~/.aws/credentials", options)).toBe(true);
+  });
+
+  it("refuses a share, device, drive-relative, or driveless rooted path instead of letting it through", () => {
+    for (const path of [
+      "\\\\localhost\\c$\\Users\\Person\\.aws\\credentials",
+      "\\\\?\\C:\\Users\\Person\\.aws\\credentials",
+      "C:.aws\\credentials",
+      "\\Users\\Person\\.aws\\credentials",
+    ]) {
+      expect(secretGuardRefusal(path, options), path).toContain("drive-absolute");
+    }
+    expect(secretGuardRefusal("project\\README.md", options)).toBeUndefined();
+  });
+
+  it("refuses every path when the home folder cannot be placed", () => {
+    expect(
+      secretGuardRefusal("C:\\work\\README.md", {
+        platform: "win32",
+        homeDirectory: "\\\\server\\profiles\\Person",
+      }),
+    ).toContain("home folder");
+  });
+
+  it("refuses a search rooted at or above a protected location even before the file exists", () => {
+    expect(secretGuardSearchRefusal("C:\\Users\\Person", options)).toContain(
+      "This search would read it",
+    );
+    expect(secretGuardSearchRefusal("C:\\Users\\Person\\AppData", options)).toContain("Refused");
+    expect(secretGuardSearchRefusal("C:\\Users\\Person\\project", options)).toBeUndefined();
+  });
+
+  it("refuses a search rooted inside a folder whose stores the list names by pattern", () => {
+    for (const root of [
+      "C:\\Users\\Person\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\abc.default",
+      "C:\\Users\\Person\\AppData\\Local\\Google\\Chrome\\User Data\\Default",
+    ]) {
+      expect(secretGuardSearchRefusal(root, options), root).toContain(
+        "Browser cookies and saved logins",
+      );
+    }
+  });
+
+  it("shows Windows locations in Settings instead of the Linux ones", () => {
+    const shown = secretGuardEntries(options).map((entry) =>
+      entry.kind === "path" ? entry.path : entry.directory,
+    );
+    expect(shown).toContain("/c:/users/person/appdata/roaming/microsoft/credentials");
+    expect(shown).not.toContain("/c:/users/person/.local/share/keyrings");
+  });
 });
 
 describe("secret guard on Linux", () => {
