@@ -115,7 +115,6 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import type { RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerStartTray } from "../composer/ComposerStartTray";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -153,7 +152,13 @@ import {
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
 /** One row of the start screen's recent-work list. */
-export type DraftRecentThread = RecentThreadListItem;
+/** One lifecycle-openable thread shown on a mode's start surface. */
+export interface DraftRecentThread {
+  readonly id: string;
+  readonly title: string;
+  readonly detail?: string;
+  readonly onOpen: () => void;
+}
 
 /**
  * Which start screen a draft is. **Home** is where Code lands with nothing
