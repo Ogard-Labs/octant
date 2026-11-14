@@ -134,9 +134,20 @@
 .toast {
   background: var(--octant-float-glass);
   border: 0;
+  /* A float's corner is the large token (a menu's rows sit 8px inside it, so
+     the row's 8px corner is concentric); a dialog and a sheet take one more. */
+  border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-pop);
   backdrop-filter: var(--octant-float-blur);
   -webkit-backdrop-filter: var(--octant-float-blur);
+}
+
+/* A dialog and the Settings sheet are a step above a menu. */
+.octant-dialog__popup,
+.octant-sheet__popup,
+.project-dialog,
+.folder-picker {
+  border-radius: var(--oct-radius-xl);
 }
 
 html[data-octant-reduced-transparency="true"]

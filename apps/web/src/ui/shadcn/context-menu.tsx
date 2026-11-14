@@ -30,7 +30,7 @@ export function ContextMenuContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            "window-no-drag min-w-[12rem] rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+            "window-no-drag min-w-[12rem] rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,
           )}
           {...props}
@@ -128,7 +128,7 @@ export function ContextMenuSubContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            "window-no-drag min-w-[12rem] rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+            "window-no-drag min-w-[12rem] rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,
           )}
           {...props}

@@ -77,7 +77,7 @@ export function ComboboxPopup({
   return (
     <ComboboxPrimitive.Popup
       className={cn(
-        "max-h-[min(320px,var(--available-height))] overflow-auto rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "max-h-[min(320px,var(--available-height))] overflow-auto rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="combobox-content"

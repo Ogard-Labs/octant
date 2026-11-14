@@ -1422,7 +1422,7 @@
   color: var(--oct-fg);
   background: var(--oct-bg);
   border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-xl);
   box-shadow: var(--octant-shadow-overlay);
   outline: 0;
   pointer-events: auto;
@@ -1461,7 +1461,7 @@
   color: var(--oct-fg);
   background: var(--octant-float);
   border: 1px solid var(--octant-bevel);
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-xl);
   box-shadow: var(--octant-shadow-pop);
   outline: 0;
   pointer-events: auto;

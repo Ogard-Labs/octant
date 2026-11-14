@@ -634,8 +634,8 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__popup")).toContain(
       "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
     );
-    // 12px now arrives as the system radius token (--oct-radius-md: 12px).
-    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-md)");
+    // A dialog's corner is the system's dialog token (--oct-radius-xl: 20px).
+    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-xl)");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
     // The wash behind a modal is the system scrim token rather than a literal.
@@ -891,7 +891,8 @@ describe("WindowChrome", () => {
       )?.[1] ?? "";
     expect(surface).toContain("background-color: var(--oct-glass-floor);");
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    expect(surface).toContain("box-shadow: none;");
+    // The surface's one soft shadow is not repainted by the glass material.
+    expect(surface).not.toContain("box-shadow");
     expect(surface).not.toContain("--oct-glass-stroke");
     expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
     // Under Window glass the box is a step lighter than the glass around

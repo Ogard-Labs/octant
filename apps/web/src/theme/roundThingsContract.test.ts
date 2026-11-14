@@ -61,6 +61,8 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".canvas-block__summary-dot",
   ".canvas-block__note::before",
   ".canvas-design__running-dot",
+  // The composer's box while it holds one row.
+  '.thread-composer__surface[data-shape="pill"]',
   ".chat-composer__model-options-dot",
   ".board-status-mark__dot",
   ".content-tab__attention",

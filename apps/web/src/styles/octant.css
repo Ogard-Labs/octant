@@ -197,6 +197,12 @@
   --oct-radius-sm: 8px;
   --oct-radius-md: 12px;
   --oct-radius-lg: 16px;
+  /* A dialog and the Settings sheet: one step above a menu's 16px. */
+  --oct-radius-xl: 20px;
+  /* The one soft shadow a resting object may cast: the composer's, and the
+     picker pinned to it. Ink at 7% on light, black at 30% on dark. */
+  --oct-shadow-float: 0 6px 24px -10px rgb(0 0 0 / 30%);
+  --oct-border-faint: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
   /* An object resting inside a 12px well: a board card in its column. One
      step under the well keeps the gap between the two corners even. */
   --oct-radius-inset: 8px;
@@ -434,6 +440,10 @@
   --oct-phone-h: 844px;
 }
 
+:root[data-octant-theme-mode="light"] {
+  --oct-shadow-float: 0 4px 18px -6px color-mix(in srgb, var(--octant-text-primary) 7%, transparent);
+}
+
 /* An explicit choice on <html> overrides the OS. Because every colour is
    a light-dark(), flipping color-scheme is the entire theme switch. */
 :root[data-theme="light"] {
@@ -541,7 +551,7 @@ svg :focus-visible {
    keyboard focus. So a closed dialog left a ring on the button that opened it
    and every field wore one the moment it opened, under a person who had only
    ever used the pointer. The edge stays for whoever is navigating by keyboard;
-   a field keeps its caret and a brighter border. See inputModality.ts. */
+   a field keeps its caret and a border at 30% ink. See inputModality.ts. */
 html[data-octant-input="pointer"] :focus-visible {
   outline: none;
 }
@@ -549,7 +559,7 @@ html[data-octant-input="pointer"] :focus-visible {
 html[data-octant-input="pointer"] [data-slot="input"]:focus-visible,
 html[data-octant-input="pointer"] [data-slot="textarea"]:focus-visible,
 html[data-octant-input="pointer"] [data-slot="combobox-input-group"]:focus-within {
-  border-color: var(--octant-border-strong);
+  border-color: color-mix(in srgb, var(--octant-text-primary) 30%, transparent);
 }
 
 /* ─── window manners ────────────────────────────────────────────────────
@@ -2121,7 +2131,7 @@ input.switch:checked::after {
   min-width: 200px;
   padding: var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-lg);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
   z-index: var(--oct-z-overlay);
@@ -2231,7 +2241,7 @@ input.switch:checked::after {
   border-color: var(--oct-border);
   background: var(--oct-surface);
   color: var(--oct-fg);
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-lg);
   box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
 }
 
@@ -2248,7 +2258,7 @@ input.switch:checked::after {
   padding: var(--oct-space-3) 12px;
   /* No border of its own: the overlay shadow already carries the hairline, and
      the two together drew a double ring. */
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-lg);
   background: var(--octant-float);
   color: var(--oct-fg);
   box-shadow: var(--octant-shadow-overlay);
@@ -2358,7 +2368,7 @@ input.switch:checked::after {
   min-width: 0;
   padding: var(--oct-space-3);
   border: 0;
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-lg);
   background: var(--octant-float);
   box-shadow: var(--octant-shadow-overlay);
   font-size: var(--oct-text-detail);
@@ -2526,7 +2536,7 @@ input.switch:checked::after {
 .palette {
   width: min(560px, calc(100vw - 2 * var(--oct-space-6)));
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-lg);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
   overflow: hidden;
@@ -5093,17 +5103,22 @@ input.switch:checked::after {
 .composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
   padding-inline: var(--oct-composer-inset);
 }
-/* The composer's one flat surface: the large radius at one line and at four.
-   Its attach and send buttons are controls at the control radius, 8px in from
-   the corner, so each is concentric with it to within a pixel. */
+/* The composer's surface: a full pill at one row and the large radius once it
+   grows (ThreadComposer sets data-shape from the box's height). It is the one
+   resting object that floats, so it carries one soft shadow and a faint
+   hairline. Its attach and send buttons are controls at the control radius,
+   8px in from the corner, so each is concentric with it to within a pixel. */
 .thread-composer__surface {
   min-width: 0;
   background: var(--octant-card);
   border: 0;
   border-radius: var(--oct-radius-lg);
-  box-shadow: none;
-  outline: 1px solid var(--oct-border);
+  box-shadow: var(--oct-shadow-float);
+  outline: 1px solid var(--oct-border-faint);
   outline-offset: -1px;
+}
+.thread-composer__surface[data-shape="pill"] {
+  border-radius: var(--oct-radius-pill);
 }
 /* The notice card: what the composer has to say about its thread or about
    sending, as the system's callout directly above the box, in the box's
@@ -6850,33 +6865,13 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 }
 
 /* Code Home's Up next and Continue cards are buttons, not the card recipe,
-   so they take the glass card's paints by name: the same fallback, material
-   and opt-outs, in the same order. */
+   so they paint the same flat card by name: the card fill and one inset
+   hairline, no shadow and no material. */
 .code-home__card {
-  background: var(--oct-surface);
-  box-shadow: 0 0 0 1px var(--oct-glass-stroke);
-}
-@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  .code-home__card {
-    background-color: var(--oct-glass-floor);
-    background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
-    backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
-    -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
-  }
-}
-html[data-octant-reduced-transparency="true"] .code-home__card {
-  background: var(--oct-surface);
-  box-shadow: 0 0 0 1px var(--oct-border);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-@media (prefers-reduced-transparency: reduce) {
-  .code-home__card {
-    background: var(--oct-surface);
-    box-shadow: 0 0 0 1px var(--oct-border);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
+  background: var(--octant-card);
+  box-shadow: none;
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 /* Input surfaces retain the glass material over the application ground,
@@ -6916,7 +6911,6 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
-      box-shadow: none;
     }
     /* The notice card above the box is the same glass: an opaque callout
        ground beside a translucent box read as a block. A tone is its tint

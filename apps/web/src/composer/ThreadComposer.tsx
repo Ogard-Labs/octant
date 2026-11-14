@@ -33,6 +33,9 @@ import {
   useActiveComposerThreadDropKey,
 } from "../chat/composerThreadDrop";
 
+/** One row with its 12px above and under is a 44px box; this leaves room for rounding. */
+const COMPOSER_ONE_ROW_MAX_HEIGHT = 52;
+
 /**
  * The trailing send control. Sending is refused while `disabled` is true or a
  * `disabledReason` stands; the reason's words are the caller's to surface (the
@@ -325,6 +328,22 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     prompt.setAttribute("aria-describedby", [...own, ...added].join(" "));
     prompt.dataset["composerDescribed"] = added.join(" ");
   });
+  // The box is a full pill while it holds one row and takes the large radius
+  // once it grows (a longer message, a queue, chips above the prompt), so the
+  // corner never swells with the height. The stylesheet reads data-shape.
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+    if (surface === null) return;
+    const apply = () => {
+      surface.dataset["shape"] =
+        surface.offsetHeight <= COMPOSER_ONE_ROW_MAX_HEIGHT ? "pill" : "box";
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, [props.held]);
   const noticeCard = (
     <ComposerNoticeCard idPrefix={noticeIdPrefix} notices={cards}>
       {notice}

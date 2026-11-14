@@ -36,7 +36,7 @@ export function SelectPopup({ className, ...props }: ComponentProps<typeof Selec
   return (
     <SelectPrimitive.Popup
       className={cn(
-        "z-[var(--oct-z-popup)] max-h-[18rem] min-w-[var(--anchor-width)] overflow-auto rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "z-[var(--oct-z-popup)] max-h-[18rem] min-w-[var(--anchor-width)] overflow-auto rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="select-content"

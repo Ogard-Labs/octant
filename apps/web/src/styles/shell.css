@@ -54,6 +54,15 @@
     var(--octant-text-primary)
   );
   --octant-panel-surface: var(--octant-panel-opaque);
+  /* The sidebar inside the framed panel is the panel's tone, a few steps toward
+     the ground at most, so the two sides of the seam read as one surface with
+     a line between them, and it is near-opaque so the application ground never
+     shows behind a row of text. Under Glass it keeps the glass tint instead. */
+  --octant-sidebar-fill: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--octant-panel-opaque) 90%, var(--octant-ground-opaque)) 97%,
+    transparent
+  );
   /* Every pane (the thread, a tool tile, the bottom panel, the dock's
      overview) is the pane fill, so the glass reads as one material. It is one
      flat colour, drawn as a layer so a recipe can stack a tint over it. */
@@ -458,12 +467,12 @@ html[data-octant-native-host="true"]
 
 .sidebar-rail__button:hover .sidebar-rail__face,
 .sidebar-rail__button:focus-visible .sidebar-rail__face {
-  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 3%, transparent);
   color: var(--oct-fg);
 }
 
 .sidebar-rail__button[aria-current="page"] .sidebar-rail__face {
-  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+  --sidebar-rail-fill: color-mix(in oklab, var(--oct-fg) 4%, transparent);
   color: var(--oct-fg);
 }
 
@@ -2168,6 +2177,18 @@ html[data-octant-native-host="true"]
     margin-bottom: var(--octant-panel-gap);
     padding-bottom: var(--oct-space-2);
     border-right: 0;
+  }
+
+  /* Inside the panel, under the band's line, the sidebar paints its own fill,
+     rounded to the outline's inner corner on its left side. */
+  .shell-frame:not(.shell--material-translucent) > .sidebar::before {
+    position: absolute;
+    z-index: -1;
+    inset: var(--oct-title-rail-h) 0 0;
+    border-radius: calc(var(--oct-radius-md) - 1px) 0 0 calc(var(--oct-radius-md) - 1px);
+    background: var(--octant-sidebar-fill);
+    content: "";
+    pointer-events: none;
   }
 
   /* The stage is the panel's right part. It keeps the gap to the window's
@@ -4069,8 +4090,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   justify-items: start;
   gap: var(--oct-space-1);
   padding: 12px var(--oct-space-4);
-  /* The edge is the glass ring (octant.css), the same one the cards above
-     and the composer wear; a border under it drew the edge twice. */
+  /* The edge is the inset hairline octant.css draws as an outline; a border
+     under it drew the edge twice. */
   border: 0;
   border-radius: var(--oct-radius-md);
   font-weight: 400;
@@ -4096,7 +4117,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 .code-home__card:hover:not(:disabled) {
-  box-shadow: 0 0 0 1px var(--oct-glass-stroke-strong);
+  background: color-mix(in srgb, var(--octant-text-primary) 3%, var(--octant-card));
 }
 
 /* Keep the thread title first and the state at the trailing edge. Container

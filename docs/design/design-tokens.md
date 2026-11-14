@@ -163,19 +163,21 @@ picker row; `--oct-nav-row-h` (32px) is a navigation or list row;
 `--oct-title-rail-h` (44px) is the title band. `--oct-control-height` and
 `-sm` (44 and 34px) are the touch sizes, not the desktop default.
 
-**Radius** ([Radii](../../DESIGN.md#radii)). Two numbers and
-a round exception. A control's outline is `--oct-radius-sm` (4px): every button,
+**Radius** ([Radii](../../DESIGN.md#radii)). Four numbers and
+a round exception. A control's outline is `--oct-radius-sm` (8px): every button,
 field, tab, menu and option row, filled list row, chip, and a capsule or track
 that only groups controls. A container's outline is `--oct-radius-md` (12px): a
-card, panel, well, menu, popover, dialog, the composer and a bubble.
+card, panel, well and a bubble. A floating surface (a menu, popover, select list,
+hover card, palette, toast) is `--oct-radius-lg` (16px), which is also the
+composer's box once it holds more than one row; at one row the composer is a
+full pill. A dialog and the Settings sheet are `--oct-radius-xl` (20px).
 `--oct-radius-inset` (8px) is an object resting inside a container.
 `--oct-radius-pill` is only for what is inherently round (a switch's track, an
 avatar, a status dot, a count badge, a spinner, a meter); never a control. A part
 inside a control takes the control radius less the padding between them, never
 below 2px, and a control inside a container keeps the control radius whatever
 the container's. A radius is a token, `0`, `50%`, or the 1 to 4px of a chart
-mark, never a bare pixel value. There is no `--oct-radius-lg` or
-`--oct-radius-composer`.
+mark, never a bare pixel value. There is no `--oct-radius-composer`.
 
 **Hairlines.** Panes and the lines between rows are divided by one 1px line in the
 ink at 10% (`--oct-hairline`; the app's pane line is the same mix);

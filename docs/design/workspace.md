@@ -916,7 +916,7 @@ and the framed panel's outline along the top and right, which clips the tiles to
 its rounded corners. The divider's hit area is 8px wide,
 centred on that line; it is empty at rest, shows the strong border while hovered
 and the meta ink while grabbed, and keeps no accent line after a click. At 960px and below the dock is a
-sheet over the page (a floating container with its own 12px corner) that holds
+sheet over the page (a floating container with its own 16px corner) that holds
 one tool, so its tile is the same flat pane with no neighbour: a tile is flat
 at every width, and no width gives one a corner of its own, a shadow or a gap. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,

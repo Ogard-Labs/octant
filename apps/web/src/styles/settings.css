@@ -14,8 +14,9 @@
   --oct-settings-reading-width: 920px;
   --oct-settings-control: 180px;
   --oct-settings-control-height: 28px;
-  /* The raised card every surface draws: one step above the page. */
-  --oct-settings-card-fill: var(--octant-card);
+  /* A group card is the page with a 2% wash of ink over it and one hairline,
+     so it reads as a quiet region of the page, not a raised object. */
+  --oct-settings-card-fill: color-mix(in srgb, var(--octant-text-primary) 2%, transparent);
   --oct-settings-tile-fill: color-mix(in oklab, var(--oct-fg) 8%, transparent);
   --oct-settings-row-inset: 16px;
 }
@@ -81,7 +82,7 @@
 html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
   .shell--material-translucent
   .settings-view {
-  --oct-settings-card-fill: var(--octant-card);
+  --oct-settings-card-fill: color-mix(in srgb, var(--octant-text-primary) 2%, transparent);
 }
 
 .settings-view__sidebar-titlebar,
@@ -3828,7 +3829,7 @@ html[data-octant-increased-contrast="true"]
 
 /* Settings as a sheet over the app. The sheet is the floating surface, so
    the rail and the page are clear on it and divided by one line, and a
-   section's card steps up from the sheet's own fill. The page's window
+   section's card is the sheet with a 2% wash of ink over it. The page's window
    chrome (the traffic-light inset, the bordered workspace panel, "Back to
    app") belongs to Settings as a whole window and is not drawn here. */
 .settings-view.settings-view--sheet {
@@ -3837,7 +3838,7 @@ html[data-octant-increased-contrast="true"]
   height: 100%;
   grid-template-columns: 232px minmax(0, 1fr);
   background: transparent;
-  --oct-settings-card-fill: var(--octant-float-control);
+  --oct-settings-card-fill: color-mix(in srgb, var(--octant-text-primary) 2%, transparent);
   --oct-settings-gutter: var(--oct-space-8);
 }
 

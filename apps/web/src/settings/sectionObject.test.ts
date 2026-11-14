@@ -45,7 +45,9 @@ describe("a settings section", () => {
     // Menus and popovers inside a row have to escape the card, so it never clips.
     expect(card).toMatch(/overflow:\s*visible/);
     expect(card).not.toMatch(/overflow:\s*hidden/);
-    expect(flat).toMatch(/--oct-settings-card-fill: var\(--octant-card\)/);
+    expect(flat).toMatch(
+      /--oct-settings-card-fill: color-mix\(in srgb, var\(--octant-text-primary\) 2%, transparent\)/,
+    );
   });
 
   it("rounds the first and last row to the card instead of clipping them", () => {

@@ -496,17 +496,22 @@ describe("the public-block visual language", () => {
     expect(styles).not.toMatch(/\.code-thread-workspace__composer\s*\{[^}]*box-shadow:\s*none/);
   });
 
-  it("draws the composer as one flat pill with a hairline and no shadow", () => {
+  it("draws the composer as a pill at one row with a faint hairline and one soft float shadow", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const frame = system.match(/^\.composer \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const surface = system.match(/^\.thread-composer__surface \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
 
-    for (const box of [frame, surface]) {
-      expect(box).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
-      expect(box).toMatch(/box-shadow:\s*none/);
-      expect(box).toMatch(/outline:\s*1px solid var\(--oct-border\)/);
-      expect(box).toMatch(/outline-offset:\s*-1px/);
-    }
+    expect(frame).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
+    expect(frame).toMatch(/box-shadow:\s*none/);
+    expect(frame).toMatch(/outline:\s*1px solid var\(--oct-border\)/);
+    expect(surface).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
+    expect(surface).toMatch(/box-shadow:\s*var\(--oct-shadow-float\)/);
+    expect(surface).toMatch(/outline:\s*1px solid var\(--oct-border-faint\)/);
+    expect(surface).toMatch(/outline-offset:\s*-1px/);
+    // One row is a full pill; the box takes the large radius once it grows.
+    expect(system).toMatch(
+      /\.thread-composer__surface\[data-shape="pill"\] \{\s*border-radius:\s*var\(--oct-radius-pill\);/,
+    );
     // A carded composer's box is the surface inside it: the frame draws no
     // second line around it.
     expect(system).toMatch(/\.composer\.composer--carded \{[^}]*outline:\s*0;/);
@@ -1831,7 +1836,7 @@ describe("shared recipes against the global stylesheets", () => {
     // rule strips the outline there. A field and the combobox share one rule.
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     expect(system).toMatch(
-      /\[data-slot="input"\]:focus-visible,\s*html\[data-octant-input="pointer"\] \[data-slot="textarea"\]:focus-visible,\s*html\[data-octant-input="pointer"\] \[data-slot="combobox-input-group"\]:focus-within\s*\{\s*border-color: var\(--octant-border-strong\);/,
+      /\[data-slot="input"\]:focus-visible,\s*html\[data-octant-input="pointer"\] \[data-slot="textarea"\]:focus-visible,\s*html\[data-octant-input="pointer"\] \[data-slot="combobox-input-group"\]:focus-within\s*\{\s*border-color: color-mix\(in srgb, var\(--octant-text-primary\) 30%, transparent\);/,
     );
   });
 

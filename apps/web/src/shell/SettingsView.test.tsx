@@ -1195,9 +1195,9 @@ describe("SettingsView", () => {
     expect(styles).toContain(
       ".shell--material-translucent :is(.settings-view__workspace, .settings-view__mobile-header) { background: transparent; }",
     );
-    // A section card is the card step under Glass, not a mix into the page.
+    // A section card is a 2% wash of ink over the sheet, not a mix into the page.
     expect(styles).toMatch(
-      /\.shell--material-translucent \.settings-view \{ --oct-settings-card-fill: var\(--octant-card\); \}/,
+      /\.shell--material-translucent \.settings-view \{ --oct-settings-card-fill: color-mix\(in srgb, var\(--octant-text-primary\) 2%, transparent\); \}/,
     );
   });
 
