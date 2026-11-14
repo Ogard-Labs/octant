@@ -14,6 +14,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { useRegisterComposerMenuAction } from "./ComposerMenuActions";
 import { ThreadStatsBlock } from "../threadStats/ThreadStats";
+import { ThreadNotesRows } from "../threadNotes/ThreadNotes";
 
 interface ThreadInfoPanel {
   /** Opens the panel, for a control elsewhere that leads to one of its rows. */
@@ -56,7 +57,17 @@ export function useThreadInfoAttention(key: string, needsPerson: boolean): void 
  * one of them holds a review, which must not restart each time the panel
  * opens.
  */
-export function ThreadInfo(props: { readonly children: ReactNode }) {
+export function ThreadInfo(props: {
+  readonly children: ReactNode;
+  /**
+   * The thread whose recap and notes the panel shows, and how a note goes
+   * into this thread's composer. Absent where the panel has no host thread.
+   */
+  readonly notes?: {
+    readonly threadId: string;
+    readonly onInsert?: (text: string) => void;
+  };
+}) {
   const [open, setOpen] = useState(false);
   const [flags, setFlags] = useState<ReadonlySet<string>>(() => new Set());
   const root = useRef<HTMLDivElement>(null);
@@ -152,6 +163,9 @@ export function ThreadInfo(props: { readonly children: ReactNode }) {
         >
           <ThreadStatsBlock />
           {props.children}
+          {props.notes === undefined ? null : (
+            <ThreadNotesRows onInsert={props.notes.onInsert} threadId={props.notes.threadId} />
+          )}
         </section>
       </div>
     </ThreadInfoContext.Provider>

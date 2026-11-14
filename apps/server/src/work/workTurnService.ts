@@ -277,6 +277,7 @@ export interface ServerWorkTurns {
   /** The turn's folder on the server and its tools there, or why it cannot run. */
   readonly bind: (
     thread: WorkThread,
+    turn: { readonly windowId: WindowId; readonly routineRun?: AutomationRunReference },
   ) =>
     | { readonly status: "bound"; readonly folder: string; readonly tools: AppManagedToolSet }
     | { readonly status: "refused"; readonly message: string };
@@ -1002,7 +1003,10 @@ export class WorkTurnService {
     const server =
       thread === undefined || this.#serverProjects?.holds(thread) !== true
         ? undefined
-        : this.#serverProjects.bind(thread);
+        : this.#serverProjects.bind(thread, {
+            windowId: authenticatedWindowId,
+            ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
+          });
     const accessible =
       server !== undefined
         ? String(thread?.projectId) === String(command.authority.projectId)

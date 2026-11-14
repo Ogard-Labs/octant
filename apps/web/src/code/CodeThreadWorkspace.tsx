@@ -45,6 +45,7 @@ import {
 } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -296,6 +297,11 @@ export interface CodeThreadWorkspaceProps {
    * prompts that wait for the person's decision. Absent on any other thread.
    */
   readonly coordinatorProposals?: ReactNode;
+  /**
+   * A coordinator's workers' pending approvals and questions, drawn as rows at
+   * the end of its transcript. Absent on any other thread.
+   */
+  readonly coordinatorWorkerAsks?: ReactNode;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
@@ -1707,6 +1713,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     serverUrl={props.serverUrl}
                     windowCapability={props.windowCapability}
                   />
+                  {props.coordinatorWorkerAsks}
                 </>
               }
               className="code-thread-workspace__conversation transcript-scroll"
@@ -2373,7 +2380,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
           info={
-            <ThreadInfo>
+            <ThreadInfo
+              notes={{
+                threadId: String(thread.id),
+                onInsert: (note) => {
+                  const next = draftWithNote(draft, note);
+                  draftRevisionRef.current += 1;
+                  setDraft(next);
+                  props.controller.setPendingDraft?.(next, next.length);
+                },
+              }}
+            >
               <ThreadGuardrailLevel
                 factsVersion={thread.version}
                 factsActivity={`${providerTurnOperationId ?? ""}:${props.controller.turnStatus}`}

@@ -138,7 +138,9 @@ import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessCards } from "../harness/ThreadHarnessCards";
 import {
+  CoordinatorWorkerAskRows,
   CoordinatorWorkerRequests,
+  type CoordinatorWorker,
   type CoordinatorWorkerRequestSource,
 } from "../code/CoordinatorWorkerRequests";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
@@ -1166,10 +1168,41 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
 }
 
 /**
+ * A coordinator's workers as the window's thread list names them, with the
+ * action that opens one, or undefined for any other thread. Reading them from
+ * the window's list means a worker this window cannot see is never listed.
+ */
+function coordinatorWorkersFor(
+  threadId: string,
+  props: WorkspaceViewProps,
+):
+  | {
+      readonly workers: ReadonlyArray<CoordinatorWorker>;
+      readonly onOpenWorker: (worker: CoordinatorWorker) => void;
+    }
+  | undefined {
+  // A partial controller (tests, an early render) may hold no navigation yet.
+  const threads = props.codeController.navigation ?? [];
+  const coordinator = threads.find((thread) => String(thread.threadId) === threadId);
+  if (coordinator?.coordinator !== true) return undefined;
+  const workers = threads.filter(
+    (thread) =>
+      thread.coordinatorThreadId !== undefined && String(thread.coordinatorThreadId) === threadId,
+  );
+  if (workers.length === 0) return undefined;
+  return {
+    workers: workers.map((thread) => ({ threadId: String(thread.threadId), title: thread.title })),
+    onOpenWorker: (worker) => {
+      const thread = workers.find((candidate) => String(candidate.threadId) === worker.threadId);
+      if (thread !== undefined)
+        props.onOpenCodeThread(thread.threadId, thread.title, thread.projectId);
+    },
+  };
+}
+
+/**
  * A coordinator's composer lists its workers' requests beside its child runs'
- * (docs/design/coordinator-threads.md#questions-and-approvals). Its workers
- * are read from the window's thread list, so a worker this window cannot see
- * is never listed.
+ * (docs/design/coordinator-threads.md#questions-and-approvals).
  */
 function coordinatorWorkerRequestsFor(
   surface: WorkspaceTab,
@@ -1177,26 +1210,35 @@ function coordinatorWorkerRequestsFor(
   props: WorkspaceViewProps,
 ): ReactNode {
   if (surface.kind !== "code-overview" || props.workerRequestSource === undefined) return null;
-  const threads = props.codeController.navigation;
-  const coordinator = threads.find((thread) => String(thread.threadId) === threadId);
-  if (coordinator?.coordinator !== true) return null;
-  const workers = threads.filter(
-    (thread) =>
-      thread.coordinatorThreadId !== undefined && String(thread.coordinatorThreadId) === threadId,
-  );
-  if (workers.length === 0) return null;
+  const coordinator = coordinatorWorkersFor(threadId, props);
+  if (coordinator === undefined) return null;
   return (
     <CoordinatorWorkerRequests
       source={props.workerRequestSource}
-      workers={workers.map((thread) => ({
-        threadId: String(thread.threadId),
-        title: thread.title,
-      }))}
-      onOpenWorker={(worker) => {
-        const thread = workers.find((candidate) => String(candidate.threadId) === worker.threadId);
-        if (thread !== undefined)
-          props.onOpenCodeThread(thread.threadId, thread.title, thread.projectId);
-      }}
+      workers={coordinator.workers}
+      onOpenWorker={coordinator.onOpenWorker}
+    />
+  );
+}
+
+/**
+ * The same requests as rows at the end of the coordinator's transcript, each
+ * answered in place (docs/design/coordinator-threads.md#questions-and-approvals).
+ * Like the composer's list, only a thread on this window's host reads them.
+ */
+function coordinatorWorkerAsksFor(
+  tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
+  props: WorkspaceViewProps,
+): ReactNode {
+  if (tab.kind !== "code-overview" || props.workerRequestSource === undefined) return undefined;
+  if ("hostId" in tab && tab.hostId !== undefined) return undefined;
+  const coordinator = coordinatorWorkersFor(String(tab.threadId), props);
+  if (coordinator === undefined) return undefined;
+  return (
+    <CoordinatorWorkerAskRows
+      source={props.workerRequestSource}
+      workers={coordinator.workers}
+      onOpenWorker={coordinator.onOpenWorker}
     />
   );
 }
@@ -1409,6 +1451,7 @@ function renderCodeTab(
   });
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   const coordinatorProposals = coordinatorProposalsFor(tab, props, codeController, project);
+  const coordinatorWorkerAsks = coordinatorWorkerAsksFor(tab, props);
   const content = (
     <Suspense
       fallback={
@@ -1435,6 +1478,7 @@ function renderCodeTab(
         holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
         {...(coordinatorProposals === undefined ? {} : { coordinatorProposals })}
+        {...(coordinatorWorkerAsks === undefined ? {} : { coordinatorWorkerAsks })}
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
