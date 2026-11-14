@@ -253,6 +253,7 @@ export type RemoteDependencies = {
     | "agentRunAdmission"
     | "agentRunOrchestration"
     | "externalContentIngestionStore"
+    | "parentRunsAtFullAccess"
     | "remoteDelegationHolder"
     | "threadStandingAnswers"
   > &
@@ -352,6 +353,7 @@ export function wireRemote(deps: RemoteDependencies) {
     agentMessageService,
     agentRunAdmission,
     agentRunOrchestration,
+    parentRunsAtFullAccess,
     authenticatedProductDispatch,
     automationCommandService,
     automationScheduler,
@@ -984,6 +986,7 @@ export function wireRemote(deps: RemoteDependencies) {
             externalContentIngested: (threadId) =>
               readThreadExternalContentTaint(persistence.connection, threadId)
                 .externalContentIngested,
+            runsAtFullAccess: parentRunsAtFullAccess,
             standingAnswerCovers: (threadId) =>
               threadStandingAnswers.covers(threadId, "delegation", true),
             sessionStatus: (threadId) => nativeHarnessSessions.read(threadId)?.session.status,

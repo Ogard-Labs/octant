@@ -16,6 +16,7 @@ function rules(sessionStatus: string | undefined): DelegationParentRules {
     creationPosture: () => "automatic",
     authorizeCreation: () => WORK_PARENT,
     externalContentIngested: () => false,
+    runsAtFullAccess: () => false,
     standingAnswerCovers: () => false,
     sessionStatus: () => sessionStatus,
   };
@@ -35,6 +36,7 @@ function markedParent(policy: "approval-gated" | "full-access" | "plan") {
         liveAuthority: { subagents: true, executionPolicy: policy },
       }),
       externalContentIngested: () => true,
+      runsAtFullAccess: () => policy === "full-access",
       standingAnswerCovers: () => answered,
     } satisfies DelegationParentRules,
   };

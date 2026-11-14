@@ -21,6 +21,12 @@ export interface DelegationParentRules {
   }) => DelegationParentFacts | undefined;
   readonly externalContentIngested: (threadId: string) => boolean;
   /**
+   * Whether the parent runs at Full access: its running turn's level, else the
+   * thread's own. The parent facts cannot say: a Work parent's child ceiling
+   * is approval-gated whatever the thread's level.
+   */
+  readonly runsAtFullAccess: (threadId: string) => boolean;
+  /**
    * Whether the person answered for this thread, after it read outside
    * content, that it may start helpers: the same `delegation` answer a helper
    * on this host asks for, so one answer covers both kinds of helper.
@@ -68,7 +74,7 @@ export function checkDelegationParent(
   if (
     outsideContentRefusesDelegation({
       externalContentIngested: rules.externalContentIngested(input.threadId),
-      fullAccessThread: policy === "full-access",
+      fullAccessThread: rules.runsAtFullAccess(input.threadId),
     }) &&
     !rules.standingAnswerCovers(input.threadId)
   ) {
