@@ -22,7 +22,10 @@ import {
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
-import { OutsideContentContext, type OutsideContentThread } from "../composer/OutsideContentNotice";
+import {
+  OutsideContentProvider,
+  type OutsideContentThread,
+} from "../composer/OutsideContentNotice";
 import { TaskAccessContext, type TaskAccessContextValue } from "../code/TaskAccessDetails";
 import { decodeContextSubjectRef } from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
@@ -915,15 +918,15 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                             surface={surface}
                           >
                             <TaskAccessContext value={taskAccessFor(surface, props)}>
-                              <OutsideContentContext
-                                value={outsideContentFor(surface, props.contextClient)}
+                              <OutsideContentProvider
+                                thread={outsideContentFor(surface, props.contextClient)}
                               >
                                 {onWelcomeGround(
                                   surface,
                                   props.welcomeGround === true,
                                   renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
                                 )}
-                              </OutsideContentContext>
+                              </OutsideContentProvider>
                             </TaskAccessContext>
                           </SurfaceLinkActionsProvider>
                         </ComposerContextMeterGate>

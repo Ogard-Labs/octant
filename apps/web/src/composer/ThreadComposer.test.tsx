@@ -5,7 +5,8 @@ import { decodeThreadExternalContentState } from "@octant/contracts/content-prov
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { OutsideContentContext } from "./OutsideContentNotice";
+import { OutsideContentProvider } from "./OutsideContentNotice";
+import { PermissionModePicker } from "../code/PermissionModePicker";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { FrozenBarScope } from "./frozenBarScope";
 import { ComposerStartTray } from "./ComposerStartTray";
@@ -472,7 +473,7 @@ describe("ThreadComposer", () => {
     );
   });
 
-  it("offers the outside-content review from a chip in the row under a marked thread's box and holds the clear while the thread is busy", async () => {
+  it("shows a marked thread's mark as a globe right before the mode control, only below Full access, and holds the clear while the thread is busy", async () => {
     const threadId = "40000000-0000-4000-8000-000000000001";
     const marked = decodeThreadExternalContentState({
       threadId,
@@ -486,37 +487,46 @@ describe("ThreadComposer", () => {
       readExternalContent: vi.fn(async () => marked),
       clearExternalContent: vi.fn(),
     } as unknown as ContextClient;
-    const { container } = render(
-      <OutsideContentContext value={{ client, mode: "work", threadId }}>
+    const composerAt = (value: "ask-first" | "full-access") => (
+      <OutsideContentProvider thread={{ client, mode: "work", threadId }}>
         <ThreadComposer
           presentation="follow-up"
           threadBusy
           input={<textarea aria-label="Message" className="composer-input" />}
           row={{
-            leading: <button type="button">Ask first</button>,
+            leading: <button type="button">Attach files</button>,
+            approval: (
+              <PermissionModePicker autoSupported={false} onChange={vi.fn()} value={value} />
+            ),
             actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
           }}
         />
-      </OutsideContentContext>,
+      </OutsideContentProvider>
     );
+    const { container, rerender } = render(composerAt("ask-first"));
 
-    const chip = await screen.findByRole("button", { name: "Outside content" });
-    // The chip stands in the row under the box, right after the access
-    // control; no card stands above the box and nothing of it is in the box.
-    const surface = container.querySelector(".thread-composer__surface");
-    const row = container.querySelector(".composer-row");
-    expect(surface).not.toContainElement(chip);
-    expect(row).toContainElement(chip);
-    expect(row?.firstElementChild).toBe(screen.getByRole("button", { name: "Ask first" }));
-    expect(screen.getByRole("button", { name: "Ask first" }).nextElementSibling).toContainElement(
-      chip,
-    );
+    const mark = await screen.findByRole("button", {
+      name: "This thread read outside content, so risky actions ask first. Review in Environment.",
+    });
+    // The globe stands in the row under the box, immediately before the mode
+    // control; nothing of it is in the box or in a card above it.
+    expect(container.querySelector(".thread-composer__surface")).not.toContainElement(mark);
+    expect(container.querySelector(".composer-row")).toContainElement(mark);
+    expect(mark.nextElementSibling).toBe(screen.getByRole("button", { name: /^Mode:/ }));
     expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement();
     const user = userEvent.setup();
-    await user.click(chip);
-    await user.click(await screen.findByRole("button", { name: "Review" }));
-    expect(await screen.findByRole("button", { name: "Clear the mark" })).toBeDisabled();
+    await user.click(mark);
+    expect(await screen.findByRole("button", { name: "Clear mark" })).toBeDisabled();
     await waitFor(() => expect(client.readExternalContent).toHaveBeenCalled());
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    rerender(composerAt("full-access"));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /Review in Environment/ }),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("renders only the capabilities the surface passes in", () => {

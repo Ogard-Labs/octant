@@ -1,5 +1,6 @@
 import { GitBranch } from "lucide-react";
 import { DockModuleBoundary } from "../shell/DockModuleBoundary";
+import { OutsideContentRow } from "../composer/OutsideContentNotice";
 import { EnvironmentSuggestedTasks } from "../followUps/FollowUpSuggestionChips";
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
 import type { ReactNode } from "react";
@@ -118,6 +119,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       </header>
       <div className="thread-environment-dock__body">
         <EnvironmentSuggestedTasks />
+        <OutsideContentRow />
         {props.children}
       </div>
     </section>

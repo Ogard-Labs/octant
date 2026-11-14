@@ -395,7 +395,7 @@ describe("agents managed tools", () => {
     expect(outcome.result).toMatchObject({
       status: "error",
       error: "delegate-tainted",
-      message: expect.stringContaining("clear that from the notice above the composer"),
+      message: expect.stringContaining("clear that from the Outside content row in Environment"),
     });
     expect(calls).toEqual([]);
   });

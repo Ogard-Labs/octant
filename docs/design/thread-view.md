@@ -215,6 +215,21 @@ the tag stays quiet. A call Octant refused because it named a protected secret
 file carries the same tag, naming that finding.
 Neither prompts.
 
+The thread itself says it is marked in two places, with no popover (a
+maintainer's choice, 2026-11-14). The Environment panel carries a calm row,
+"Outside content · read N times", with Review; its globe is in the warning ink
+only while the mark has effect, which is below Full access. In the composer's
+row a 16px warning globe with no words sits immediately before the mode
+control, only below Full access, named "This thread read outside content, so
+risky actions ask first. Review in Environment."; it appears and goes with the
+mode or a clear, never while the person types. Both open one dialog, "Outside
+content in this thread": the sources with their counts and times, one plain
+paragraph (the thread read text from outside Octant, risky actions ask first
+while it is marked, clearing says the person checked it and undoes nothing the
+model read, and new outside content marks it again), and the buttons Cancel
+and Clear mark. The mark stays server-owned: the renderer shows it and sends
+the existing clear.
+
 ## Subagents in a thread
 
 A thread's subagents sit in a card attached above the composer's message

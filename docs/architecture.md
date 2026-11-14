@@ -5356,15 +5356,22 @@ flowchart LR
   - On replay a clear deletes the thread's ingestion rows and zeroes its taint
     row, and the projection ignores an event at or below the last one it
     applied for that thread. A journal without the event replays unchanged.
-  - The surface is one notice in the composer of a Chat, Work, or Code thread
-    that a local window or, not built yet, a paired device has open, drawn only
-    while the thread is marked, with a
-    Review action. The notice reads the mark when the thread opens and again
-    when a turn starts or settles. Review lists the sources in plain words
-    with their counts and times (a row projected before the host recorded
-    times shows none), says that clearing removes nothing the model read and
-    that the next outside content marks the thread again, and holds Clear the
-    mark back while a turn is running or messages are queued. Every refusal
+  - The surface is two places for the thread a local window or, not built yet,
+    a paired device has open, drawn only while the thread is marked (a
+    maintainer's choice, 2026-11-14). In the thread's Environment panel, of
+    every kind that has one, an "Outside content · read N times" row with a
+    Review action; its globe takes the warning ink only while the mark has
+    effect, that is below Full access. In the composer's row, a 16px globe in
+    the warning ink with no words immediately before the mode control, only
+    below Full access, named "This thread read outside content, so risky
+    actions ask first. Review in Environment." Neither opens a popover: both
+    open the one Review dialog. The mark is read when the thread opens and
+    again when a turn starts or settles. Review ("Outside content in this
+    thread") lists the sources in plain words with their counts and times (a
+    row projected before the host recorded times shows none), says that
+    clearing says the person checked it, undoes nothing the model read, and
+    that new outside content marks the thread again, and holds Clear mark back
+    while a turn is running or messages are queued. Every refusal
     is shown as its own sentence, and a `stale` one reloads the list. A client
     that is not on a loopback host (`externalContentAvailable`) neither
     reads nor draws it. Approval prompts do not yet say that the mark is why
@@ -13352,8 +13359,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     an old account report cannot survive a failed refresh as a current fact.
     Every actual action still passes its own host admission. Routine-created
     Work and Code tasks read these same host inputs and running ceilings.
-    The existing outside-content notice qualifies its prompt explanation to
-    levels below Full access; review/clear remains a separate person act.
+    The Outside content row in Environment qualifies its warning to levels
+    below Full access; review/clear remains a separate person act.
   - **Older recorded levels replay as Full access.** A level journaled by
     the earlier design, which kept a sandboxed no-prompt level and a
     separate switch, replays as Full access; nothing recorded is dropped.

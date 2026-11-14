@@ -260,7 +260,7 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
                   {facts.outsideContent.effect === "recorded"
                     ? "Outside content is recorded at Full access; the mark does not add approval prompts."
                     : facts.outsideContent.effect === "gates"
-                      ? "This task read outside content, so some actions ask each time. Review the existing outside-content notice above the composer when the task is idle."
+                      ? "This task read outside content, so some actions ask each time. Review it from the Outside content row in Environment when the task is idle."
                       : "This task read outside content. Its current effect has not been reported."}
                 </p>
               ) : null}

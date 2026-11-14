@@ -630,15 +630,14 @@ describe("the public-block visual language", () => {
     expect(grown).toMatch(/"attach \. actions"/);
   });
 
-  it("keeps the outside-content chip in the row, and drops its words but not its globe in a narrow row", () => {
+  it("draws the outside-content mark as a warning globe in the row and a meta row in Environment, with the warning ink only while it has effect", () => {
     const css = readFileSync(join(webRoot, "composer/outside-content-notice.css"), "utf8");
-    const trigger =
-      /\.composer-row \.outside-content-chip__trigger\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-    expect(trigger).toMatch(/color:\s*var\(--oct-warn-fg\)/);
-    // No fill or edge at rest: the row's quiet treatment supplies none.
-    expect(trigger).not.toMatch(/background|border/);
+    const mark = /\.composer-row \.outside-content-mark > svg\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(mark).toMatch(/color:\s*var\(--oct-warn-fg\)/);
+    expect(mark).not.toMatch(/background|border/);
+    expect(css).toMatch(/\.outside-content-row\s*\{[^}]*color:\s*var\(--oct-meta\)/);
     expect(css).toMatch(
-      /@container composer-under \(max-width: 560px\)\s*\{\s*\.outside-content-chip__label\s*\{\s*display:\s*none/,
+      /\.outside-content-row\[data-effective="true"\] \.outside-content-row__icon\s*\{[^}]*color:\s*var\(--oct-warn-fg\)/,
     );
   });
 

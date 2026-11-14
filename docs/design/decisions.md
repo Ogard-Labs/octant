@@ -789,6 +789,7 @@ A thread that reads outside content is marked, and the mark follows the content 
 - Forks, Chat branches, follow-ups, side tasks, planner-confirmed threads, `#thread` mentions, Side Chats, delivered agent messages and Canvas reads and writes mark the new or reading thread.
 - The mark and the thread commit in one journal unit, and a mark that cannot be recorded refuses the creation or withholds the text.
 - A source a person cleared passes on nothing, and a Work-to-Code promotion starts unmarked because no agent-written text crosses.
+- A thread says it is marked as an "Outside content · read N times" row in its Environment panel and, below Full access only, a warning globe before the composer's mode control; both open one review dialog, and neither is a chip with a popover (maintainer choice, 2026-11-14). Detail: [Thread view](thread-view.md#outside-content-on-tool-rows).
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 

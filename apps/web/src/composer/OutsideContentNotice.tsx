@@ -6,10 +6,18 @@ import type {
   ThreadExternalContentState,
 } from "@octant/contracts/content-provenance";
 import { Globe } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { OctantPopover } from "../ui/base/OctantPopover";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
@@ -24,37 +32,59 @@ import "./outside-content-notice.css";
 export interface OutsideContentThread extends ExternalContentThread {
   readonly client: ContextClient;
 }
-export const OutsideContentContext = createContext<OutsideContentThread | undefined>(undefined);
+
+interface OutsideContentMark {
+  /** Whether the thread has read outside content since its mark was last cleared. */
+  readonly marked: boolean;
+  /** How many times it has read some. */
+  readonly reads: number;
+  /** Whether the mark has any effect: it asks nothing at Full access. */
+  readonly effective: boolean;
+  /** The access control reports whether the thread is at Full access. */
+  readonly reportFullAccess: (fullAccess: boolean) => void;
+  /** A turn is running or messages are queued: a clear would be refused. */
+  readonly reportBusy: (busy: boolean) => void;
+  /** Opens the review dialog; focus returns to `opener` when it closes. */
+  readonly review: (opener: HTMLElement | null) => void;
+}
+
+const OutsideContentMarkContext = createContext<OutsideContentMark | undefined>(undefined);
 
 /**
- * The chip for the thread around this composer, if it has read outside
- * content, in the row under the box. A paired device is refused the read, so
- * it never draws one.
+ * Owns the mark of the thread a pane shows, for the two places that say it
+ * (the Environment panel's row and the icon in the composer's row) and for the
+ * one review dialog both open. Server-owned: this only reads the mark and
+ * sends the person's clear. A paired device is refused the read, so it never
+ * shows a mark.
  */
-export function ComposerOutsideContentChip(props: {
-  /** A turn is running or messages are queued: a clear would be refused. */
-  readonly busy: boolean;
+export function OutsideContentProvider(props: {
+  readonly thread: OutsideContentThread | undefined;
+  readonly children: ReactNode;
 }) {
-  const thread = useContext(OutsideContentContext);
-  if (thread === undefined || !thread.client.externalContentAvailable) return null;
+  const { thread } = props;
+  if (thread === undefined || !thread.client.externalContentAvailable) {
+    return <>{props.children}</>;
+  }
   return (
-    <OutsideContentNotice
-      busy={props.busy}
+    <OutsideContentOwner
       client={thread.client}
       key={`${thread.mode}:${thread.threadId}`}
       mode={thread.mode}
       threadId={thread.threadId}
-    />
+    >
+      {props.children}
+    </OutsideContentOwner>
   );
 }
 
-export function OutsideContentNotice(props: OutsideContentThread & { readonly busy: boolean }) {
-  const { client, mode, threadId, busy } = props;
+function OutsideContentOwner(props: OutsideContentThread & { readonly children: ReactNode }) {
+  const { client, mode, threadId } = props;
   const [state, setState] = useState<ThreadExternalContentState>();
-  // The newest version the notice has accepted. A read answers whenever it
-  // likes, so one begun before a clear can arrive after it; the aggregate
-  // version says it is older, and it is dropped instead of bringing the
-  // notice back.
+  const [fullAccess, setFullAccess] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // The newest version accepted. A read answers whenever it likes, so one begun
+  // before a clear can arrive after it; the aggregate version says it is older,
+  // and it is dropped instead of bringing the mark back.
   const acceptedVersion = useRef(-1);
   const accept = useCallback((next: ThreadExternalContentState) => {
     if (next.version < acceptedVersion.current) return;
@@ -62,12 +92,7 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
     setState(next);
   }, []);
   const [reviewing, setReviewing] = useState<ThreadExternalContentState>();
-  const [open, setOpen] = useState(false);
-  const chip = useRef<HTMLSpanElement>(null);
-  // The dialog hands focus back to the chip's button, whose element belongs to
-  // the popover adapter.
-  const reviewButton = useRef<HTMLElement | null>(null);
-  reviewButton.current = chip.current?.querySelector("button") ?? null;
+  const opener = useRef<HTMLElement | null>(null);
 
   // A turn is what takes outside content in, so the mark is read again when
   // one starts and when it settles, not on a timer.
@@ -78,49 +103,29 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
       .then((next) => {
         if (!controller.signal.aborted) accept(next);
       })
-      // Without a read the notice keeps what it last knew; the clear itself
-      // names the version it needs and the host refuses a stale one.
+      // Without a read the mark keeps what it last knew; the clear itself names
+      // the version it needs and the host refuses a stale one.
       .catch(() => undefined);
     return () => controller.abort();
   }, [client, mode, threadId, busy, accept]);
 
+  const marked = state?.externalContentIngested === true;
+  const value: OutsideContentMark = {
+    marked,
+    reads: state?.ingestionCount ?? 0,
+    effective: !fullAccess,
+    reportFullAccess: setFullAccess,
+    reportBusy: setBusy,
+    review: (from) => {
+      if (state === undefined || !state.externalContentIngested) return;
+      opener.current = from;
+      setReviewing(state);
+    },
+  };
+
   return (
-    <>
-      {state?.externalContentIngested === true ? (
-        <span className="outside-content-chip" ref={chip}>
-          <OctantPopover
-            className="outside-content-popover"
-            onOpenChange={setOpen}
-            open={open}
-            side="top"
-            title="Outside content"
-            trigger={
-              <>
-                <Globe aria-hidden="true" size={14} />
-                <span className="outside-content-chip__label">Outside content</span>
-              </>
-            }
-            triggerClassName="outside-content-chip__trigger"
-            triggerLabel="Outside content"
-            triggerVariant="ghost"
-          >
-            <p className="outside-content-popover__text">
-              This thread has read outside content. Below Full access, some actions ask each time.
-            </p>
-            <OctantButton
-              onClick={() => {
-                setOpen(false);
-                setReviewing(state);
-              }}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Review
-            </OctantButton>
-          </OctantPopover>
-        </span>
-      ) : null}
+    <OutsideContentMarkContext value={value}>
+      {props.children}
       <OctantDialogPresence>
         {reviewing === undefined ? null : (
           <ReviewOutsideContentDialog
@@ -133,12 +138,83 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
               accept(next);
               setReviewing(undefined);
             }}
-            restoreFocus={reviewButton}
+            restoreFocus={opener}
             threadId={threadId}
           />
         )}
       </OctantDialogPresence>
-    </>
+    </OutsideContentMarkContext>
+  );
+}
+
+/** Tells the mark whether a turn is running, from the composer that knows. */
+export function useReportOutsideContentBusy(busy: boolean): void {
+  const report = useContext(OutsideContentMarkContext)?.reportBusy;
+  useEffect(() => report?.(busy), [report, busy]);
+}
+
+const MARK_TOOLTIP =
+  "This thread read outside content, so risky actions ask first. Review in Environment.";
+
+/**
+ * The mark in the composer's row, immediately before the access control: a
+ * globe in the warning ink and no words, only while the mark has effect. At
+ * Full access nothing shows. Rendered by the access control, which says whether
+ * the thread is at Full access.
+ */
+export function ComposerOutsideContentMark(props: { readonly fullAccess: boolean }) {
+  const mark = useContext(OutsideContentMarkContext);
+  const report = mark?.reportFullAccess;
+  const { fullAccess } = props;
+  useEffect(() => {
+    report?.(fullAccess);
+    return () => report?.(false);
+  }, [report, fullAccess]);
+  if (mark === undefined || !mark.marked || fullAccess) return null;
+  return (
+    <OctantTooltip label={MARK_TOOLTIP}>
+      <OctantButton
+        aria-label={MARK_TOOLTIP}
+        className="outside-content-mark"
+        onClick={(event) => mark.review(event.currentTarget)}
+        size="icon"
+        type="button"
+        variant="ghost"
+      >
+        <Globe aria-hidden="true" size={16} />
+      </OctantButton>
+    </OctantTooltip>
+  );
+}
+
+/**
+ * The thread's Environment row while it carries the mark: how many times it
+ * read outside content, and Review. The globe takes the warning ink only while
+ * the mark has effect.
+ */
+export function OutsideContentRow() {
+  const mark = useContext(OutsideContentMarkContext);
+  if (mark === undefined || !mark.marked) return null;
+  return (
+    <section
+      aria-label="Outside content"
+      className="outside-content-row"
+      data-effective={mark.effective ? "true" : "false"}
+    >
+      <Globe aria-hidden="true" className="outside-content-row__icon" size={14} />
+      <span className="outside-content-row__text">
+        Outside content · read {mark.reads === 1 ? "once" : `${String(mark.reads)} times`}
+      </span>
+      <OctantButton
+        className="outside-content-row__action"
+        onClick={(event) => mark.review(event.currentTarget)}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        Review
+      </OctantButton>
+    </section>
   );
 }
 
@@ -201,7 +277,7 @@ function ReviewOutsideContentDialog(
   return (
     <OctantConfirmDialog
       confirmDisabled={props.busy}
-      confirmLabel="Clear the mark"
+      confirmLabel="Clear mark"
       details={
         <div className="outside-content-review">
           <ul aria-label="Outside content this thread read" className="outside-content-sources">
@@ -233,13 +309,27 @@ function ReviewOutsideContentDialog(
       onConfirm={() => void clear()}
       pending={pending}
       restoreFocus={props.restoreFocus}
-      title="Outside content this thread read"
+      title="Outside content in this thread"
     >
-      Clearing the mark tells Octant you looked at what this thread read, so actions stop asking
-      because of it. It does not remove anything the model already read, and the next outside
-      content marks the thread again.
+      This thread read text from outside Octant: {readSummary(shown.sources)}. While it's marked,
+      risky actions ask you first. Clearing it says you've checked it; it doesn't undo what the
+      model read, and new outside content marks it again.
     </OctantConfirmDialog>
   );
+}
+
+/** The first few sources in words, each with its count: "command output, 2 times". */
+function readSummary(sources: ReadonlyArray<ThreadExternalContentSource>): string {
+  const named = sources.slice(0, 3).map((source) => {
+    const words = describeSource(source.sourceLabel);
+    const lower = /^(?:An? |Your |[A-Z][a-z])/.test(words)
+      ? `${words.charAt(0).toLowerCase()}${words.slice(1)}`
+      : words;
+    const times = source.ingestionCount === 1 ? "once" : `${String(source.ingestionCount)} times`;
+    return `${lower}, ${times}`;
+  });
+  const more = sources.length - named.length;
+  return more > 0 ? `${named.join("; ")}; and ${String(more)} more` : named.join("; ");
 }
 
 const REFUSAL_COPY: Record<ThreadExternalContentClearRefusal, string> = {

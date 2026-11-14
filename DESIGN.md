@@ -1246,7 +1246,10 @@ narrowest pane's width.
   columns, the context ring last under send. On a start screen it names the
   Project where the prompt's text starts (44px in). Under a thread's box it
   holds only how the next message runs: the model, the mode and the ring, plus
-  the outside-content mark at its start while that applies. The thread's
+  the outside-content mark, a 16px globe in the warning ink with no words
+  immediately before the mode control, only while the thread is below Full
+  access (at Full access nothing shows; it opens the same review as the
+  Environment panel's "Outside content · read N times" row). The thread's
   Project, branch, folder, pull requests and plan usage live in the Environment
   panel, and its info and plan proposal are items of the + menu: a full row
   truncated every label in a thread's column. Labels 12px meta, icons 16px,

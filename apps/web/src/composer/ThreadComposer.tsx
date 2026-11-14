@@ -9,7 +9,7 @@ import {
 import { ComposerNoticeCard, noticeCardId } from "./ComposerNoticeCard";
 import { useFrozenBar } from "./frozenBarScope";
 import { ComposerSubagents } from "./ComposerSubagents";
-import { ComposerOutsideContentChip } from "./OutsideContentNotice";
+import { useReportOutsideContentBusy } from "./OutsideContentNotice";
 import {
   Fragment,
   useCallback,
@@ -248,6 +248,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
+  useReportOutsideContentBusy(props.threadBusy === true);
   const frameClassName = `${baseClassName} composer--carded${followUp ? " composer--follow-up" : ""}`;
   // Where a new thread runs and how much of the plan is left stand in the
   // tray above the card, so the card holds only the prompt. Inside the card
@@ -388,10 +389,10 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     props.row.actions.kind === "send-or-stop"
       ? `composer-actions ${props.row.actions.cellClassName}`
       : "composer-actions";
-  // One row under the box, on the box's own columns: at the start, the
-  // outside-content mark when it applies; at the other end the model's name,
-  // the approval control and the context ring, the last two in cells as wide
-  // as send so the ring stands under it. Where the thread runs (Project,
+  // One row under the box, on the box's own columns: at the trailing end the
+  // model's name, the approval control (with the outside-content mark's icon
+  // before it, while that applies) and the context ring, the last two in cells
+  // as wide as send so the ring stands under it. Where the thread runs (Project,
   // branch, folder, pull requests) and its plan usage are in the Environment
   // panel, and its info and plan proposal are items of the + menu. Only the
   // surface's controls are inside `.composer-row`: the row restyles every
@@ -414,7 +415,6 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
         >
           {props.row.leading}
-          {followUp ? <ComposerOutsideContentChip busy={props.threadBusy === true} /> : null}
           <div className={trailingClassName}>
             {props.row.trailing}
             {props.row.approval}

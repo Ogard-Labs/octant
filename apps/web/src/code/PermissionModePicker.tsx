@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useId } from "react";
+import { ComposerOutsideContentMark } from "../composer/OutsideContentNotice";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
 import {
@@ -208,6 +209,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       : PERMISSION_MODE_OPTIONS.filter((option) => props.modes?.includes(option.id) === true);
   return (
     <>
+      <ComposerOutsideContentMark fullAccess={props.value === "full-access"} />
       <OctantMenuRoot>
         {/* An icon per mode in the composer's row; its name and tooltip state the
             mode. Only Full access adds its words, in the warning ink. */}
