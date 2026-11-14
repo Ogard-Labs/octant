@@ -271,23 +271,21 @@ under the fill).
   float colour at 96% with no tint image and no blur; a card over the ground
   under Glass is its card colour at 94%. A browser keeps the frosted fills,
   where the blur is drawn over an opaque page.
-- **A modal surface shows the window's coat, never the content, and no drawn
-  ground in its text.** In the desktop app a Settings sheet or a dialog is not
-  made dense on the glass coat alone, so the frost shows through it. Where a
-  ground is drawn (a picture, pixels or characters) it is the dense float, 96%
-  with no blur: at 66% the pixel ground's ridges ran across Settings' rows and
-  swatches. The ground stays one layer under the sidebar, the stage, the sheet
-  and its scrim, never over any of them. While one is open the layers that hold content (the rail, the
-  sidebar, the title band, the workspace and its docks) blur past reading
-  (5px, enough that 13px text cannot be read) and stay at 92% under a scrim of 12% black over the scrim's own motion (instantly under reduced
-  motion), and the modal keeps its float fill (66% dark, 78% light, no blur;
-  96% where a ground is drawn), so a person changing the appearance in Settings
-  watches the window change while no thread text, row, card or composer can be
-  read through it. Fading the layers out entirely hid exactly what Settings is
-  a sheet for. Only paint
-  changes: the content stays in place and inert, focus returns to its trigger,
-  and it comes back exactly as it was on close. A menu or popover is not modal
-  and keeps the dense float; a toast and a notice do too.
+- **Settings leaves the window as it is; a dialog blurs it.** Settings is a
+  sheet so a person can watch the window change while they change its
+  appearance, so behind it nothing is blurred or dimmed: only a 6% shade sets
+  the sheet apart. In the desktop app (whose renderer draws no backdrop filter)
+  the sheet itself is the dense float, 96%, so no thread text reads through
+  the sheet, while everything beside it stays visible; blurring the window
+  past reading hid exactly what Settings is a sheet for. Behind a dialog, a
+  decision rather than a view, the layers that hold content (the rail, the
+  sidebar, the title band, the workspace and its docks) blur past reading (5px)
+  and stay at 92%. Where a ground is drawn (a picture, pixels or characters) a
+  modal is the dense float with no blur. The ground stays one layer under the
+  sidebar, the stage, the sheet and its scrim, never over any of them. Only
+  paint changes: the content stays in place and inert, focus returns to its
+  trigger, and it comes back exactly as it was on close. A menu or popover is
+  not modal and keeps the dense float; a toast and a notice do too.
 - **Blur stays** where a surface has an opaque page under it: floats on an
   opaque window, the composer, bubbles and notice cards over the application
   ground in a browser, Zen's windows and bars in a browser, the activity

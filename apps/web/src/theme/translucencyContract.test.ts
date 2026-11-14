@@ -60,25 +60,25 @@ describe("window glass", () => {
     expect(Number(alpha)).toBeGreaterThanOrEqual(92);
   });
 
-  it("shows the window blurred past reading, not hidden, through a modal surface in the desktop app", () => {
+  it("leaves the window behind Settings untouched and blurs it only behind a dialog in the desktop app", () => {
     const css = read("styles/components.css");
-    const fade =
-      /html\[data-octant-native-host="true"\]:not\([\s\S]*?\):has\(\.octant-sheet__popup\[data-open\], \.octant-dialog__popup\[data-open\]\)\s*\.shell-frame\s*>\s*:is\(([^)]*)\)\s*\{([^}]*)\}/.exec(
+    const dialogFade =
+      /html\[data-octant-native-host="true"\]:not\([\s\S]*?\):has\(\.octant-dialog__popup\[data-open\]\)\s*\.shell-frame\s*>\s*:is\(([^)]*)\)\s*\{([^}]*)\}/.exec(
         css,
       );
-    // The layers that hold content blur past reading and dim, so Settings shows
-    // the window's appearance live without its words; the ground and frame stay.
+    // Behind a dialog the content layers blur past reading; the ground and frame stay.
     for (const layer of [".sidebar-rail", ".sidebar", ".window-chrome", ".workspace-layer"]) {
-      expect(fade?.[1]).toContain(layer);
+      expect(dialogFade?.[1]).toContain(layer);
     }
-    expect(fade?.[1]).not.toContain("app-backdrop");
-    expect(Number(/blur\((\d+)px\)/.exec(fade?.[2] ?? "")?.[1])).toBeGreaterThanOrEqual(4);
-    expect(fade?.[2]).not.toContain("opacity: 0;");
-    // Only paint changes, so focus and the content itself are untouched.
-    expect(fade?.[2]).not.toMatch(/visibility|display|pointer-events/);
-    // The modal keeps the float fill at its normal alpha, never the dense one.
-    expect(css).toContain("color-mix(in srgb, var(--octant-float) 66%, transparent)");
-    expect(css).toContain("color-mix(in srgb, var(--octant-float) 78%, transparent)");
+    expect(Number(/blur\((\d+)px\)/.exec(dialogFade?.[2] ?? "")?.[1])).toBeGreaterThanOrEqual(4);
+    expect(dialogFade?.[2]).not.toMatch(/visibility|display|pointer-events/);
+    // Settings is a sheet a person watches the window through: no rule blurs or
+    // dims the content layers for it, and the sheet itself is dense, so nothing
+    // reads through the sheet while everything beside it stays visible.
+    expect(css).not.toMatch(/:has\([^)]*\.octant-sheet__popup\[data-open\][^)]*\)\s*\.shell-frame/);
+    expect(css).toMatch(
+      /\.octant-sheet__popup \{\s*background: color-mix\(in srgb, var\(--octant-float\) 96%, transparent\);/,
+    );
   });
 
   it("keeps the ground under every content layer, the sheet and its scrim, and out of a modal's text", () => {
