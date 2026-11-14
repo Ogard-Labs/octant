@@ -578,6 +578,14 @@ describe("Claude Agent SDK port", () => {
     ],
     ["a sandbox on Plan", { ...openInput, executionPolicy: "plan", sandbox: openInput.sandbox }],
     [
+      "a Plan sandbox that lets no command out",
+      {
+        ...openInput,
+        executionPolicy: "plan",
+        sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: false },
+      },
+    ],
+    [
       "a sandbox rooted elsewhere",
       {
         ...openInput,

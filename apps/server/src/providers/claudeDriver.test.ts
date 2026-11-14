@@ -32,6 +32,7 @@ import type {
 import {
   CLAUDE_PLAN_CAPTURED_MESSAGE,
   claudeExecutionOptions,
+  claudeSandboxSettings,
   claudeFileToolSecretRefusal,
   claudeSearchesRunUnguarded,
   makeClaudeDriver,
@@ -1128,6 +1129,22 @@ describe("Claude execution policy", () => {
       }
     },
   );
+
+  it("lets a command out of Claude's sandbox only at Guarded and Reviewed, never in Plan or a Full access sandbox", () => {
+    expect(claudeSandboxSettings("approval-gated", projectRoot)?.allowUnsandboxedCommands).toBe(
+      true,
+    );
+    expect(claudeSandboxSettings("auto-accept-edits", projectRoot)?.allowUnsandboxedCommands).toBe(
+      true,
+    );
+    expect(
+      claudeSandboxSettings("full-access", projectRoot, [], undefined, true)
+        ?.allowUnsandboxedCommands,
+    ).toBe(false);
+    // Plan's commands run inside Octant's own profile, with no escape of Claude's to allow.
+    expect(claudeSandboxSettings("plan", projectRoot)).toBeUndefined();
+    expect(claudeSandboxSettings("plan", projectRoot, [], undefined, true)).toBeUndefined();
+  });
 
   it("configures the strict exact-root sandbox only for approval-gated sessions", async () => {
     for (const executionPolicy of ["full-access", "approval-gated", "plan"] as const) {

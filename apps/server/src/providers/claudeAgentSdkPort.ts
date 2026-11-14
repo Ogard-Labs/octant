@@ -917,6 +917,15 @@ function isExactPathTuple(value: unknown, expected: string): boolean {
   return Array.isArray(value) && value.length === 1 && value[0] === expected;
 }
 
+/**
+ * Whether Claude's sandbox lets a command out of it after the gate asks: only
+ * at Guarded and Reviewed. Plan's read-only rule and a Full access thread
+ * that kept its sandbox are held by the sandbox itself, not only the hook.
+ */
+export function claudeSandboxLetsCommandsOut(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits";
+}
+
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
     if (
@@ -945,7 +954,7 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
       sandbox.enabled !== true ||
       sandbox.failIfUnavailable !== true ||
       sandbox.autoAllowBashIfSandboxed !== false ||
-      sandbox.allowUnsandboxedCommands !== (input.executionPolicy !== "full-access") ||
+      sandbox.allowUnsandboxedCommands !== claudeSandboxLetsCommandsOut(input.executionPolicy) ||
       !hasExactKeys(sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
       return false;

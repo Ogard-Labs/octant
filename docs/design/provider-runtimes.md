@@ -659,7 +659,11 @@ such command asks through the gate at Guarded and Accept edits and goes to
 the reviewer at Reviewed, who sees the flag among the judged fields; a
 remembered answer never covers one, so each asks again. Its start is
 journaled with an "Unsandboxed" notice. Plan refuses it, since Plan's
-commands never leave its sandbox. Ordinary commands stay sandboxed, the
+commands never leave its sandbox: the flag is set only at Guarded, Accept
+edits and Reviewed, a Plan launch carries no Claude sandbox at all (its
+commands run inside Octant's own profile, where no flag reaches), and the
+SDK port refuses a Plan or Full access launch whose sandbox would let a
+command out, so the hook's refusal is not the only guard. Ordinary commands stay sandboxed, the
 secret-path refusals still apply to the file tools, and at Full access
 nothing changes: no command is sandboxed there, and a thread that kept its
 sandbox at Full access keeps `allowUnsandboxedCommands: false`.

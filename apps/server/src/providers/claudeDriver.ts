@@ -62,6 +62,7 @@ import {
   type ClaudePreToolDecision,
   type ClaudeSandboxSettings,
   type ClaudeToolDecision,
+  claudeSandboxLetsCommandsOut,
 } from "./claudeAgentSdkPort";
 import {
   CLAUDE_CHECKLIST_TOOL,
@@ -660,12 +661,12 @@ export function claudeSandboxSettings(
     enabled: true,
     failIfUnavailable: true,
     autoAllowBashIfSandboxed: false,
-    // Below Full access a command may leave the sandbox the way Claude Code
-    // lets it on its own (`dangerouslyDisableSandbox` on `Bash`); the gate
-    // asks about every such command and Plan refuses it (maintainer decision,
-    // 2026-11-14). A Full access thread that kept its sandbox chose it, so its
-    // commands stay inside.
-    allowUnsandboxedCommands: policy !== "full-access",
+    // At Guarded and Reviewed a command may leave the sandbox the way Claude
+    // Code lets it on its own (`dangerouslyDisableSandbox` on `Bash`); the
+    // gate asks about every such command (maintainer decision, 2026-11-14).
+    // Plan's read-only rule and a Full access thread that kept its sandbox
+    // let no command out, so the sandbox itself holds them, not only the hook.
+    allowUnsandboxedCommands: claudeSandboxLetsCommandsOut(policy),
     filesystem: {
       denyRead: ["/"],
       // An extra folder is granted exactly what the root is.
