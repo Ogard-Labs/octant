@@ -409,6 +409,67 @@ html[data-octant-increased-contrast="true"]
   transition-timing-function: var(--oct-ease-color);
 }
 
+/* A modal surface shows the ground, never the content. The desktop app's
+   window is transparent and its renderer draws no backdrop filter, so a sheet
+   or a dialog that is see-through would show the thread's text, the sidebar's
+   rows and the Home cards through it, and a blur cannot hide them. While one is
+   open the layers that hold content (the rail, the sidebar, the title band, the
+   workspace and its docks) fade to nothing over the scrim's own motion, and the
+   sheet keeps its float fill at the normal alpha, so the ground (colour,
+   picture, characters or pixels) and the glass coat show softly through it. The
+   ground and the frame stay. Only opacity changes: the content is still there,
+   inert behind the modal as before, keeps its focus target and returns exactly
+   as it was, and a screen reader loses nothing. A menu or popover is not modal
+   and keeps the dense float; reduced transparency and increased contrast keep
+   the opaque float and need no fade. */
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  ):has(.octant-sheet__popup[data-open], .octant-dialog__popup[data-open])
+  .shell-frame
+  > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+  opacity: 0;
+}
+
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  .shell-frame
+  > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+  transition: opacity var(--oct-motion-fast) var(--oct-ease-motion);
+}
+
+html[data-octant-reduced-motion="true"]
+  .shell-frame
+  > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-octant-native-host="true"]
+    .shell-frame
+    > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
+    transition: none;
+  }
+}
+
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  :is(.octant-sheet__popup, .octant-dialog__popup) {
+  background: color-mix(in srgb, var(--octant-float) 66%, transparent);
+}
+
+html[data-octant-native-host="true"][data-octant-theme-mode="light"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  )
+  :is(.octant-sheet__popup, .octant-dialog__popup) {
+  background: color-mix(in srgb, var(--octant-float) 78%, transparent);
+}
+
 /* A popup grows out of the point it is anchored to; a dialog has no anchor
    and settles about its own centre. */
 :is(

@@ -255,6 +255,17 @@ under the fill).
   float colour at 96% with no tint image and no blur; a card over the ground
   under Glass is its card colour at 94%. A browser keeps the frosted fills,
   where the blur is drawn over an opaque page.
+- **A modal surface shows the ground, never the content.** In the desktop app a
+  Settings sheet or a dialog is not made dense, because a dense fill would hide
+  the ground too. While one is open the layers that hold content (the rail, the
+  sidebar, the title band, the workspace and its docks) fade to opacity 0 over
+  the scrim's own motion (instantly under reduced motion) and the modal keeps
+  its float fill at the normal alpha (66% dark, 78% light, no blur), so the
+  ground (colour, picture, characters or pixels) and the glass coat show softly
+  through it and no thread text, row, card or composer does. Only opacity
+  changes: the content stays in place and inert, focus returns to its trigger,
+  and it comes back exactly as it was on close. A menu or popover is not modal
+  and keeps the dense float; a toast and a notice do too.
 - **Blur stays** where a surface has an opaque page under it: floats on an
   opaque window, the composer, bubbles and notice cards over the application
   ground in a browser, Zen's windows and bars in a browser, the activity
