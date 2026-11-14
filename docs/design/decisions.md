@@ -50,7 +50,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
-| [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 3       | 6            | 0                   |
+| [Remote access and pairing](#remote-access-and-pairing)                               | 10        | 4       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **252**   | **151** | **96**       | **5**               |
+| **All areas**                                                                         | **253**   | **152** | **96**       | **5**               |
 
 ## Principles and hard lines
 
@@ -2113,6 +2113,18 @@ A self-made listener pairs apps through a single-use, five-minute pairing code (
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Adding a computer in one step](../architecture.md#security-and-authority).
 
+### How long a paired device stays paired
+
+The person chooses how long a paired device's registration lasts, Never expires included (maintainer decision, 2026-11-13).
+
+- Choices are 7 days, 30 days, 90 days, 1 year and Never expires; the default is 30 days, the deadline every registration recorded before the setting existed. It is a host shell setting a local window or a device the host's own person paired changes, journaled with its actor; any other device session is refused.
+- The deadline is the pairing time plus the length; using a device does not move it. Sign-in and every signed request refuse a device past it as expired, before the expiry is reconciled, and the device must pair again. Revoke ends any pairing at any time; with Never expires it is the only end.
+- A change moves every still-current pairing to its pairing time plus the new length, journaled per device as the person in the same journal transaction as the setting, so neither commits without the other: a shorter length can expire devices at once, a longer one or Never lifts the deadline, and a pairing already past its deadline, expired or revoked is never revived.
+- While the listener is on, a device whose deadline passes is expired within one sweep (a minute), and its sessions and open product streams end as on Revoke.
+- Session lifetimes (idle and absolute, with rotation) are a separate mechanism and unchanged.
+
+Status: Built. Since: 2026-11-13. Detail: [Architecture: Security and authority, How long a pairing lasts](../architecture.md#security-and-authority).
+
 ### Pairing abuse limits
 
 Pairing is rate-limited and cleans up after itself.
@@ -3235,6 +3247,7 @@ Credentials and work move between spokes only by explicit, narrowed, journaled a
 - Subscription sign-ins held by a provider's own app are never copied; the hub can ask a spoke to sign in itself, and the person finishes it there.
 - An owner with a fresh unlock may copy an API key between hosts; both hosts journal the copy without the value.
 - Delegated work is clamped to the smaller of the peer grant and the receiving spoke's own Project authority, and journaled with the requesting peer.
+- Handing work to another spoke or peer host follows the rule for helpers on the same computer once the thread has read outside content: at Full access it is not refused, below Full access the thread needs its person's one answer for it, and Plan stays refused (maintainer decision, 2026-11-13). The answer is the same `delegation` standing answer a helper on this host asks for, so one answer covers both kinds of helper in the thread. Built in the delegating spoke's parent check. Not built yet: a Work thread, the one kind that names a member, cannot yet ask its person below Full access, so there it is still refused, as for a helper on its own host.
 - Agent messages between members reach only Code threads a person tagged Reachable on both ends, under the receiver's Message item; they grant nothing there, and the only turn one can start is a bounded, `agent`-initiated wake turn on an idle recipient whose person left Wake when a message arrives on. _Designed, not built._
 - Hub provisioning offers are data that land as proposals; auto-apply is per kind and off by default, and a routine always asks.
 - The hub's wake service and push sender are each off until turned on; the hub forwards sealed notifications unchanged.

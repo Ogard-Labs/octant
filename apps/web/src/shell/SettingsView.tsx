@@ -1464,8 +1464,12 @@ function ActiveSectionContent({
             bridge={administration}
             focusedSetting={focusedSetting}
             hub={hubAdministrationOf(props.hostBridge)}
+            onPairedDeviceLifetimeChange={(lifetime) =>
+              props.onSettingsChange({ pairedDeviceLifetime: lifetime })
+            }
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
+            pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
           />
           {agentAccess}
         </div>

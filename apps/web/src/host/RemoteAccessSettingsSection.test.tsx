@@ -333,6 +333,27 @@ describe("RemoteAccessSettingsSection", () => {
     await waitFor(() => expect(host.revokeAllRemoteDevices).toHaveBeenCalledTimes(1));
   });
 
+  it("lets the person choose how long a paired device stays paired, saying Never leaves only Revoke", async () => {
+    const user = userEvent.setup();
+    const onPairedDeviceLifetimeChange = vi.fn();
+    render(
+      <RemoteAccessSettingsSection
+        bridge={bridge(listening)}
+        onPairedDeviceLifetimeChange={onPairedDeviceLifetimeChange}
+        pairedDeviceLifetime="30-days"
+      />,
+    );
+    const select = await screen.findByRole("combobox", { name: "Keep devices paired for" });
+    expect(select).toHaveTextContent("30 days");
+    expect(screen.getByText(/only Revoke ends a pairing/)).toBeInTheDocument();
+    await user.click(select);
+    for (const label of ["7 days", "90 days", "1 year"]) {
+      expect(await screen.findByRole("option", { name: label })).toBeInTheDocument();
+    }
+    await user.click(await screen.findByRole("option", { name: "Never expires" }));
+    expect(onPairedDeviceLifetimeChange).toHaveBeenCalledWith("never");
+  });
+
   it("refuses a loopback or public address before it reaches the host", async () => {
     const user = userEvent.setup();
     render(<RemoteAccessSettingsSection bridge={bridge(off)} />);

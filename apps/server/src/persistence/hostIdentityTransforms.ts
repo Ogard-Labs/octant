@@ -22,6 +22,11 @@ export function createRuntimeHostIdentityMigrationRegistry(
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceKeyRotated, 1, migrateDirectHostIdentity)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRevoked, 1, migrateDirectHostIdentity)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceCredentialExpired, 1, migrateDirectHostIdentity)
+    .register(
+      REMOTE_ACCESS_EVENT_NAMES.deviceRegistrationDeadlineChanged,
+      1,
+      migrateDirectHostIdentity,
+    )
     .register(REMOTE_ACCESS_EVENT_NAMES.hostKeyRotated, 1, migrateDirectHostIdentity)
     .register(REMOTE_ACCESS_EVENT_NAMES.sessionInvalidated, 1, migrateDirectHostIdentity)
     .register(REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded, 1, migrateDirectHostIdentity)

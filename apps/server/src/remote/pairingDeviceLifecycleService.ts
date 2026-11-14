@@ -12,7 +12,9 @@ import {
   decodePairingRequestV1,
   decodePairingTicketV1,
   type DeviceId,
+  DEFAULT_PAIRED_DEVICE_LIFETIME,
   type DeviceRegistrationV1,
+  type PairedDeviceLifetime,
   type PairingDecisionV1,
   type PairingRequestV1,
   type PairingStatusResultV1,
@@ -21,10 +23,8 @@ import {
   type StableHostId,
 } from "@octant/contracts/remote-access";
 import {
-  DEVICE_ABSOLUTE_TTL_MS,
-  DEVICE_INACTIVITY_TTL_MS,
+  deviceRegistrationDeadline,
   evaluatePairingClaim,
-  nextDeviceExpiry,
   normalizeDeviceLabel,
   PAIRING_TICKET_TTL_MS,
 } from "@octant/domain/remote-access-policy";
@@ -103,6 +103,8 @@ export interface PairingDeviceLifecycleServiceOptions {
   readonly uuid?: () => string;
   readonly correlationId?: () => string;
   readonly actorId?: () => string;
+  /** How long a device paired now stays paired: the host setting, read at each pairing. */
+  readonly registrationLifetime?: () => PairedDeviceLifetime;
 }
 
 export interface CreatePairingTicketInput {
@@ -159,10 +161,12 @@ export class PairingDeviceLifecycleService {
   readonly #tickets = new Map<string, TicketRecord>();
   readonly #awaitingKeyStep = new Map<string, AwaitingKeyStep>();
   readonly #selectAggregateHead;
+  readonly #lifetime: () => PairedDeviceLifetime;
   readonly #selectDeviceSession;
 
   constructor(options: PairingDeviceLifecycleServiceOptions) {
     this.#hostId = options.hostId;
+    this.#lifetime = options.registrationLifetime ?? (() => DEFAULT_PAIRED_DEVICE_LIFETIME);
     this.#journal = options.journal;
     this.#connection = options.connection;
     this.#now = options.now ?? (() => Date.now());
@@ -456,7 +460,7 @@ export class PairingDeviceLifecycleService {
     const claim = record.claim!;
     const deviceId = this.#uuid() as DeviceId;
     const createdAt = now;
-    const expiresAt = nextDeviceExpiry({ createdAt, lastSeenAt: createdAt });
+    const expiresAt = deviceRegistrationDeadline({ createdAt, lifetime: this.#lifetime() });
     const device = decodeDeviceRegistrationV1({
       hostId: this.#hostId,
       deviceId,
@@ -559,7 +563,9 @@ export class PairingDeviceLifecycleService {
       protocolFloor: 1,
       credentialGeneration: 1,
       createdAt: new Date(createdAt).toISOString(),
-      expiresAt: new Date(nextDeviceExpiry({ createdAt, lastSeenAt: createdAt })).toISOString(),
+      expiresAt: new Date(
+        deviceRegistrationDeadline({ createdAt, lifetime: this.#lifetime() }),
+      ).toISOString(),
       lastSeenAt: new Date(createdAt).toISOString(),
       state: "active",
     });
@@ -843,6 +849,4 @@ function normalizeReasonCode(value: string): string | undefined {
 
 export const PAIRING_DEVICE_LIFECYCLE_CONSTANTS = {
   ticketTtlMs: PAIRING_TICKET_TTL_MS,
-  deviceAbsoluteTtlMs: DEVICE_ABSOLUTE_TTL_MS,
-  deviceInactivityTtlMs: DEVICE_INACTIVITY_TTL_MS,
 } as const;

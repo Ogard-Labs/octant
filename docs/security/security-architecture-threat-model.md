@@ -193,7 +193,10 @@ sandbox, storing, replacing or removing a provider key, the use of every credent
 of it is the authentication of the device and no longer a list of actions: the
 device key, the pinned host identity over TLS, pairing approved only by a party
 the host already trusts, pairing and sign-in rate limits, session idle and
-absolute expiry with rotation, device expiry and revocation, every action
+absolute expiry with rotation, device expiry at the pairing length the person
+chose (checked at every sign-in and request; with Never expires only revocation
+ends a pairing, a residual the person accepts by choosing it) and revocation,
+every action
 journaled with the device as its actor, and secrets that are redacted and held
 only by the credential broker, so a device can use or replace a credential and
 never read one back. The residual risk is accepted by that decision: a device in an attacker's hands while its session lives, or malware

@@ -1,11 +1,11 @@
 import { generateKeyPairSync } from "node:crypto";
+import { decodeEventActor } from "@octant/contracts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  DEVICE_ABSOLUTE_TTL_MS,
-  DEVICE_INACTIVITY_TTL_MS,
+  NEVER_EXPIRES_AT_MS,
   PAIRING_MAX_FAILED_ATTEMPTS,
   PAIRING_TICKET_TTL_MS,
 } from "@octant/domain/remote-access-policy";
@@ -14,7 +14,8 @@ import {
   MAX_UNDECIDED_PAIRING_CLAIMS,
 } from "@octant/domain/remote-protocol-policy";
 import { buildClientHelloTranscriptPayload } from "@octant/domain/remote-protocol-policy";
-import { decodeStableHostId } from "@octant/contracts/remote-access";
+import { decodeStableHostId, type PairedDeviceLifetime } from "@octant/contracts/remote-access";
+import { retimeDeviceRegistrations } from "./deviceRegistrationLifetime";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -60,6 +61,8 @@ afterEach(() => {
   }
 });
 
+const DAY_MS = 24 * 60 * 60 * 1_000;
+
 function createService(options?: {
   readonly nowMs?: number;
   readonly randomBytes?: (size: number) => Uint8Array;
@@ -69,6 +72,7 @@ function createService(options?: {
   readonly initializeHost?: boolean;
   readonly uuidSeed?: number;
   readonly clock?: { nowMs: number };
+  readonly lifetime?: { current: PairedDeviceLifetime };
 }) {
   const clock = options?.clock ?? { nowMs: options?.nowMs ?? nowMs };
   let connection = options?.connection;
@@ -124,6 +128,9 @@ function createService(options?: {
     },
     correlationId: () => correlationId,
     actorId: () => actorId,
+    ...(options?.lifetime === undefined
+      ? {}
+      : { registrationLifetime: () => options.lifetime?.current ?? "30-days" }),
   });
   return {
     service,
@@ -291,6 +298,61 @@ describe("PairingDeviceLifecycleService", () => {
     );
   });
 
+  it("pairs a device for the length the person chose, and moves only still-current pairings when it changes", () => {
+    const lifetime: { current: PairedDeviceLifetime } = { current: "never" };
+    const { service, connection, journal, clock } = createService({ lifetime });
+    const pair = (key: ReturnType<typeof testDeviceKey>) => {
+      const ticket = service.createTicket({ sourceClass: "lan-private" });
+      service.claimTicket(
+        claimInput(ticket.ticketId, ticket.ticketProof, {
+          devicePublicKey: key.publicPem,
+          deviceKeyFingerprint: key.fingerprint,
+        }),
+      );
+      return service.approveTicket({ ticketId: ticket.ticketId }).device;
+    };
+    const forever = pair(testDeviceKey());
+    expect(forever.expiresAt).toBe(new Date(NEVER_EXPIRES_AT_MS).toISOString());
+
+    lifetime.current = "30-days";
+    clock.nowMs = nowMs + 10 * DAY_MS;
+    const recent = pair(testDeviceKey());
+    const person = decodeEventActor({
+      kind: "remote-device",
+      actorId: forever.deviceId,
+      deviceId: forever.deviceId,
+    });
+    // Shortening to 7 days expires the device paired 10 days ago at once and
+    // counts the new one from its own pairing.
+    const shortened = retimeDeviceRegistrations({
+      journal,
+      connection,
+      lifetime: "7-days",
+      actor: person,
+      now: clock.nowMs,
+      uuid: () => crypto.randomUUID(),
+    });
+    expect(shortened.expiredNow).toEqual([forever.deviceId]);
+    const deadline = (deviceId: string) =>
+      readDeviceRegistrations(connection).find((device) => device.device_id === deviceId)
+        ?.expires_at;
+    expect(deadline(forever.deviceId)).toBe(new Date(nowMs + 7 * DAY_MS).toISOString());
+    expect(deadline(recent.deviceId)).toBe(new Date(clock.nowMs + 7 * DAY_MS).toISOString());
+
+    // "Never" lifts the deadline of the still-current pairing and does not
+    // revive the one that just lapsed.
+    retimeDeviceRegistrations({
+      journal,
+      connection,
+      lifetime: "never",
+      actor: person,
+      now: clock.nowMs,
+      uuid: () => crypto.randomUUID(),
+    });
+    expect(deadline(recent.deviceId)).toBe(new Date(NEVER_EXPIRES_AT_MS).toISOString());
+    expect(deadline(forever.deviceId)).toBe(new Date(nowMs + 7 * DAY_MS).toISOString());
+  });
+
   it("approves a claimed ticket into a durable device registration and denies duplicates", () => {
     const { service, connection, journal, projection } = createService({
       randomBytes: (size) => Uint8Array.from({ length: size }, (_, index) => index + 11),
@@ -302,11 +364,8 @@ describe("PairingDeviceLifecycleService", () => {
     expect(approved.device.state).toBe("active");
     expect(approved.device.credentialGeneration).toBe(1);
     expect(approved.device.deviceLabel).toBe("Ada's Safari");
-    expect(approved.device.expiresAt).toBe(
-      new Date(
-        Math.min(nowMs + DEVICE_ABSOLUTE_TTL_MS, nowMs + DEVICE_INACTIVITY_TTL_MS),
-      ).toISOString(),
-    );
+    // With no setting chosen, a pairing lasts the 30 days it always recorded.
+    expect(approved.device.expiresAt).toBe(new Date(nowMs + 30 * DAY_MS).toISOString());
     expect(fieldsMatching(approved, /ticketProof|cookie|csrf|private ?key/i)).toEqual([]);
     expect(JSON.stringify(approved)).not.toContain(ticket.ticketProof);
 
