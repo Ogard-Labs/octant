@@ -48,6 +48,10 @@ describe("AppearanceStore", () => {
       JSON.stringify({ picture: "soft-glow", effect: { kind: "sparkle" } }),
     );
     expect(odd.effect.kind).toBe("none");
+    const ascii = parseAppearancePreferences(
+      JSON.stringify({ picture: "soft-glow", effect: { kind: "ascii", cell: 3, levels: 4 } }),
+    );
+    expect(ascii.effect).toEqual({ kind: "ascii", cell: 6, levels: 4 });
   });
 
   it("keeps the picture and effect across a save and load", async () => {

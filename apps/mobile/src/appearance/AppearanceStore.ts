@@ -67,7 +67,10 @@ function parseEffect(value: unknown): GroundEffect {
   if (typeof value !== "object" || value === null) return DEFAULT_EFFECT;
   const record = value as Record<string, unknown>;
   const kind =
-    record.kind === "pixelate" || record.kind === "dither" || record.kind === "none"
+    record.kind === "pixelate" ||
+    record.kind === "dither" ||
+    record.kind === "ascii" ||
+    record.kind === "none"
       ? record.kind
       : "none";
   return clampEffect({
