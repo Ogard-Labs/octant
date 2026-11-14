@@ -36,7 +36,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 
 /* The wrappers the components still render add no box: their children are the
    grid's items. */
-.project-overview[data-project-type] :is(.project-overview__primary, .project-overview__inspectors, .code-project-overview) {
+.project-overview[data-project-type]
+  :is(.project-overview__primary, .project-overview__inspectors, .code-project-overview) {
   display: contents;
 }
 
@@ -194,7 +195,9 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: currentColor;
 }
 
-.project-overview[data-project-type] .project-overview__availability[data-state="quiet"] .project-overview__availability-dot {
+.project-overview[data-project-type]
+  .project-overview__availability[data-state="quiet"]
+  .project-overview__availability-dot {
   background: transparent;
   box-shadow: inset 0 0 0 1.5px currentColor;
 }
@@ -223,7 +226,9 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   gap: var(--oct-space-2);
 }
 
-.project-overview[data-project-type] .code-project-planner__controls > :is([role="combobox"], .octant-select) {
+.project-overview[data-project-type]
+  .code-project-planner__controls
+  > :is([role="combobox"], .octant-select) {
   min-width: 0;
   max-width: 100%;
 }
@@ -340,7 +345,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    no rows this way: the Context card follows the list even when the side cards
    run longer, and the short side cards never stretch to the list's height. */
 @container project-page (min-width: 880px) {
-  .projects-workspace--detail-only > .project-overview[data-project-type]:not([data-project-type="chat"]) {
+  .projects-workspace--detail-only
+    > .project-overview[data-project-type]:not([data-project-type="chat"]) {
     display: flow-root;
   }
 

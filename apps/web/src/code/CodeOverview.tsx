@@ -556,9 +556,7 @@ function CodeProjectThreadRow(props: {
   const { row } = props;
   const pinned = row.thread?.pinned === true;
   const meta = glanceThreadFacts(row.card);
-  const detail = [
-    ...detailThreadFacts(row.card, row.thread),
-  ];
+  const detail = [...detailThreadFacts(row.card, row.thread)];
   return (
     <article className="code-project-thread">
       {renaming && props.onRename !== undefined ? (

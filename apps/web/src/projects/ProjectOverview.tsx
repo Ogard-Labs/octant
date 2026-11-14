@@ -353,7 +353,12 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               </OctantButton>
             )}
             {canRelink && unavailable ? (
-              <OctantButton onClick={() => void relink()} size="sm" type="button" variant="secondary">
+              <OctantButton
+                onClick={() => void relink()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
                 Choose new root
               </OctantButton>
             ) : null}

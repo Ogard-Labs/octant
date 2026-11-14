@@ -58,10 +58,7 @@ export function CodeProjectPlanner(
       </header>
       {/* The one-line help sits in the card; the full rule is its tooltip and
           its accessible description. */}
-      <p
-        className="oct-row-detail code-project-planner__help"
-        title={PLANNER_RULE}
-      >
+      <p className="oct-row-detail code-project-planner__help" title={PLANNER_RULE}>
         One thread proposes tasks; you decide each.
         <span className="sr-only"> {PLANNER_RULE}</span>
       </p>
