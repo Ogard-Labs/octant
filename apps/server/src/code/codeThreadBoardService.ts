@@ -79,7 +79,8 @@ export interface CodeBoardRuntimeSource {
  * `running` or `waiting` row cannot pin an idle thread in In progress or
  * Waiting. Non-provider work is aggregated across every record.
  *
- * `executing` is any contributing work still running. `waiting` is narrower
+ * `executing` is the latest provider turn running, never other work: a
+ * person's terminal or test run does not make a thread Working. `waiting` is narrower
  * than "some record is not finished". A record in `waiting` or `ambiguous` is
  * an authoritative live wait whatever its kind: a Git push awaiting
  * credentials, a delivery or review step awaiting a decision, or an unresolved
@@ -122,9 +123,11 @@ export function boardRuntimeActivityFromWorks(
     live.turnParkedOnPerson === true &&
     latestTurn !== undefined &&
     latestTurn.work.state === "running";
-  const executing = contributing.some(
-    (entry) => entry.work.state === "running" && !(parked && entry === latestTurn),
-  );
+  // Only the agent's own turn makes a thread Working. A terminal, test run or
+  // Git step the person started stays `running` for as long as its process
+  // lives, often long after the turn ended ("Worked for 7s" beside a Working
+  // row); counting it filed idle threads under In progress.
+  const executing = latestTurn !== undefined && latestTurn.work.state === "running" && !parked;
   const asking = parked || contributing.some((entry) => entry.work.state === "waiting");
   const unconfirmed = contributing.some((entry) => entry.work.state === "ambiguous");
   // A push, creation, or comment is settled by looking at the remote; an

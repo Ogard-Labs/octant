@@ -6472,7 +6472,7 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
-  it("keeps a thread executing until its shell exits", async () => {
+  it("never calls a thread executing for its person's shell, and closes the record when it exits", async () => {
     const fixture = runtimeFixture({ terminalExit: { exitCode: 0 } });
     const terminalId = operationId(70);
 
@@ -6490,7 +6490,7 @@ describe("CodeOperationRuntime", () => {
     expect(fixture.runtimeWorks()).toEqual([
       { id: String(terminalId), kind: "terminal", state: "running" },
     ]);
-    expect(fixture.boardActivity()).toMatchObject({ executing: true });
+    expect(fixture.boardActivity()).toMatchObject({ executing: false });
 
     // A shell that ends on its own tells nobody. The next command that looks at
     // it is what closes the record, which is why every terminal command settles
