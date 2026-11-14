@@ -88,6 +88,9 @@ ipcRenderer.on(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.queue, (_event, value: unkn
 });
 
 window.addEventListener("DOMContentLoaded", () => {
+  // Focus starts inside the alertdialog before the challenge arrives, so Escape
+  // already cancels; render() then moves it to Cancel.
+  element("approval")?.focus();
   element("previous")?.addEventListener("click", () => send("previous"));
   element("next")?.addEventListener("click", () => send("next"));
   element("approve")?.addEventListener("click", () => send("approve"));

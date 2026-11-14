@@ -1,6 +1,6 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type { ThemeSettings, ThemeStyle } from "@octant/contracts/theme";
 import { THEME_PRESETS } from "@octant/theme";
-import { ChevronDown } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -22,6 +22,7 @@ import {
   isAppearancePresetAvailable,
   type FirstPartyPluginComponentId,
 } from "../shell/contributionRegistry";
+import { usePluginThemes } from "./pluginThemes";
 
 export function ThemeAppearanceEditor(props: {
   readonly controller: ThemeController;
@@ -46,9 +47,27 @@ export function ThemeAppearanceEditor(props: {
     draft?.mode === "dark" || (draft?.mode !== "light" && systemPrefersDark) ? "dark" : "light";
   // Stored "default" and the retired "vivid" both draw the colour look.
   const shownStyle: ThemeStyle = draft?.style === "mono" ? "mono" : "default";
-  const availablePresets = THEME_PRESETS.filter((preset) =>
-    isAppearancePresetAvailable(preset.id, props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE),
-  );
+  const pluginThemes = usePluginThemes();
+  const availablePresets = [
+    ...THEME_PRESETS.filter((preset) =>
+      isAppearancePresetAvailable(
+        preset.id,
+        props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE,
+      ),
+    ),
+    ...pluginThemes,
+  ];
+  const presetOptions = (mode: "light" | "dark") =>
+    availablePresets
+      .filter((preset) => preset.supportedModes.includes(mode))
+      .map((preset) => ({ id: String(preset.id), label: preset.displayName }));
+  // A stored preset that is no longer offered (its plugin was switched off or
+  // removed) draws the default theme, so the picker shows the default too.
+  // The stored choice is kept and returns with the plugin.
+  const shownPreset = (mode: "light" | "dark", stored: string | undefined) =>
+    stored !== undefined && presetOptions(mode).some((option) => option.id === stored)
+      ? stored
+      : "system";
   if (draft === undefined) {
     // The page's own sections do not wait on the theme: glass and reading are
     // shell settings, and they stayed reachable while the theme loaded before
@@ -142,10 +161,8 @@ export function ThemeAppearanceEditor(props: {
               aria-label="Light preset"
               className="settings-view__select"
               onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
-              options={availablePresets
-                .filter((preset) => preset.supportedModes.includes("light"))
-                .map((preset) => ({ id: preset.id, label: preset.displayName }))}
-              value={draft.lightPresetId ?? "system"}
+              options={presetOptions("light")}
+              value={shownPreset("light", draft.lightPresetId)}
             />
           </SettingRow>
           <SettingRow
@@ -158,10 +175,8 @@ export function ThemeAppearanceEditor(props: {
               aria-label="Dark preset"
               className="settings-view__select"
               onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
-              options={availablePresets
-                .filter((preset) => preset.supportedModes.includes("dark"))
-                .map((preset) => ({ id: preset.id, label: preset.displayName }))}
-              value={draft.darkPresetId ?? "system"}
+              options={presetOptions("dark")}
+              value={shownPreset("dark", draft.darkPresetId)}
             />
           </SettingRow>
           <SettingRow
@@ -331,25 +346,20 @@ export function ThemeAppearanceEditor(props: {
           </SettingRow>
         </div>
       </SettingsSection>
-      <details
+      <OctantCollapsible
+        chevron="end"
+        chevronSize={16}
         className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
         {...(focusedSetting === "appearance.theme-import-export" ? { open: true } : {})}
+        summary={<span>Import or export theme</span>}
       >
-        <summary>
-          <span>Import or export theme</span>
-          <ChevronDown
-            aria-hidden="true"
-            className="settings-theme-editor__disclosure-icon"
-            size={16}
-          />
-        </summary>
         <div className="setgroup settings-theme-editor__disclosure-body">
           <ThemeTransfer
             controller={theme}
             focused={focusedSetting === "appearance.theme-import-export"}
           />
         </div>
-      </details>
+      </OctantCollapsible>
     </div>
   );
 }
@@ -451,6 +461,7 @@ function TypographyControl(props: {
 function ThemeTransfer(props: { readonly controller: ThemeController; readonly focused: boolean }) {
   const [value, setValue] = useState("");
   const [dropped, setDropped] = useState<ReadonlyArray<string>>([]);
+  const pluginThemes = usePluginThemes();
   return (
     <div className="settings-view__theme-transfer">
       {dropped.length === 0 ? null : (
@@ -496,7 +507,7 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
           is reported rather than exported as if it had been kept. */}
         <OctantButton
           onClick={() => {
-            const exported = props.controller.exportTokens("css");
+            const exported = props.controller.exportTokens("css", pluginThemes);
             if (exported === undefined) return;
             setValue(exported.content);
             setDropped(exported.droppedOverrides.map((entry) => entry.role));
@@ -509,7 +520,7 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
         </OctantButton>
         <OctantButton
           onClick={() => {
-            const exported = props.controller.exportTokens("json");
+            const exported = props.controller.exportTokens("json", pluginThemes);
             if (exported === undefined) return;
             setValue(exported.content);
             setDropped(exported.droppedOverrides.map((entry) => entry.role));

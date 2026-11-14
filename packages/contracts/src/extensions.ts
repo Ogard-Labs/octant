@@ -300,6 +300,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "language-server",
   "debug-adapter",
   "cloud-machine-target",
+  "theme",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -522,6 +523,54 @@ export const ExtensionCanvasExportDeclaration = Schema.Struct({
 }).annotations(strict);
 export type ExtensionCanvasExportDeclaration = typeof ExtensionCanvasExportDeclaration.Type;
 
+const ExtensionThemeColor = Schema.String.pipe(Schema.pattern(/^#[0-9a-fA-F]{6}$/));
+const ExtensionThemeRole = /^[a-z][a-z0-9-]{0,63}$/;
+/**
+ * One mode's colours: semantic role names to six-digit hex colours and
+ * nothing else, so no value can carry a URL, stylesheet, or script. Which
+ * roles must be present, and whether text meets contrast, is decided by
+ * `@octant/theme` before the theme is listed.
+ */
+const ExtensionThemeTokens = Schema.Record({ key: Schema.String, value: ExtensionThemeColor }).pipe(
+  Schema.filter((tokens) => {
+    const roles = Object.keys(tokens);
+    return roles.length <= 128 && roles.every((role) => ExtensionThemeRole.test(role));
+  }),
+);
+export const ExtensionThemeMode = Schema.Literal("light", "dark");
+export type ExtensionThemeMode = typeof ExtensionThemeMode.Type;
+
+/**
+ * A community theme as data only: the colours of a preset in the semantic
+ * theme schema. It names no renderer code, font, image, video, or remote
+ * address, and a field it does not name is refused rather than ignored.
+ */
+export const ExtensionThemeDeclaration = Schema.Struct({
+  supportedModes: Schema.Array(ExtensionThemeMode).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(2),
+    Schema.filter((modes) => new Set(modes).size === modes.length),
+  ),
+  tokens: Schema.Struct({
+    light: Schema.optional(ExtensionThemeTokens),
+    dark: Schema.optional(ExtensionThemeTokens),
+  }).annotations(strict),
+  /** Inks for the application-ground dither, as the built-in presets carry. */
+  patternPalette: Schema.optional(
+    Schema.Array(ExtensionThemeColor).pipe(Schema.minItems(1), Schema.maxItems(6)),
+  ),
+})
+  .annotations(strict)
+  .pipe(
+    // Colours are given for exactly the modes the theme says it supports.
+    Schema.filter((theme) =>
+      ExtensionThemeMode.literals.every(
+        (mode) => theme.supportedModes.includes(mode) === (theme.tokens[mode] !== undefined),
+      ),
+    ),
+  );
+export type ExtensionThemeDeclaration = typeof ExtensionThemeDeclaration.Type;
+
 export const ExtensionComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
@@ -541,6 +590,8 @@ export const ExtensionComponent = Schema.Struct({
   canvasExport: Schema.optional(ExtensionCanvasExportDeclaration),
   /** A data-only Code capability, with no executable module. */
   codeTool: Schema.optional(CodeToolContribution),
+  /** Present exactly when `kind` is `theme`: colours as data, never code. */
+  theme: Schema.optional(ExtensionThemeDeclaration),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -743,6 +794,8 @@ export const ExtensionPackageManifest = Schema.Struct({
         if ((component.kind === "canvas-export-target") !== (component.canvasExport !== undefined))
           return false;
         if ((component.kind === "code-tool") !== (component.codeTool !== undefined)) return false;
+        if ((component.kind === "theme") !== (component.theme !== undefined)) return false;
+        if (component.kind === "theme" && component.declaredCapabilities.length > 0) return false;
         if (
           component.kind === "code-tool" &&
           (component.declaredCapabilities.length !== 1 ||

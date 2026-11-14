@@ -11,7 +11,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { ArtifactListRow } from "../artifacts/ArtifactListRow";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
-import { ShellState } from "../shell/ShellState";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantButton } from "../ui/base/OctantButton";
 
 const CanvasWorkspaceTab = lazy(() =>
@@ -82,9 +82,11 @@ export default function ArtifactsModule(props: Props) {
     return () => controller.abort();
   }, [projectId, props.canvasRevision, reloads, serverUrl, windowCapability]);
 
-  if (state.status === "loading") return <ShellState state="loading" title="Loading artifacts" />;
+  if (state.status === "loading") return <OctantEmpty state="loading" title="Loading artifacts" />;
   if (state.status === "unavailable") {
-    return <ShellState message={state.message} state="neutral" title="Artifacts are unavailable" />;
+    return (
+      <OctantEmpty message={state.message} state="neutral" title="Artifacts are unavailable" />
+    );
   }
 
   if (open !== undefined && open.projectId !== undefined) {
@@ -102,7 +104,7 @@ export default function ArtifactsModule(props: Props) {
           All artifacts
         </OctantButton>
         {tab.kind === "canvas" && props.canvasClient !== undefined ? (
-          <Suspense fallback={<ShellState state="loading" title="Loading canvas" />}>
+          <Suspense fallback={<OctantEmpty state="loading" title="Loading canvas" />}>
             <CanvasWorkspaceTab
               key={String(open.currentVersionId)}
               client={props.canvasClient}
@@ -113,7 +115,7 @@ export default function ArtifactsModule(props: Props) {
             />
           </Suspense>
         ) : (
-          <ShellState
+          <OctantEmpty
             message="This artifact could not be opened in the dock."
             state="neutral"
             title="Artifact is unavailable"
@@ -138,7 +140,7 @@ export default function ArtifactsModule(props: Props) {
       </div>
       <div className="dock-artifacts__body">
         {entries.length === 0 ? (
-          <ShellState
+          <OctantEmpty
             message="Canvas documents made in this Project appear here."
             state="neutral"
             title="No artifacts yet"

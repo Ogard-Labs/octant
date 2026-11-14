@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useCallback, useId, useMemo, useRef, useState } from "react";
 import {
   createDefaultDeviceKeyStore,
@@ -8,7 +9,6 @@ import type { RemotePairingClient, RemoteSessionBridge } from "@octant/client-ru
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { ShellState } from "../shell/ShellState";
 import { useRemotePairing } from "./useRemotePairing";
 import { RemoteShellView } from "./RemoteShellView";
 
@@ -324,7 +324,7 @@ interface RemotePairingFailedProps {
 function RemotePairingFailed(props: RemotePairingFailedProps) {
   const canRetry = props.category === "unavailable" || props.category === "rate-limited";
   return (
-    <ShellState
+    <OctantEmpty
       action={
         canRetry
           ? { label: "Try again", onClick: props.onRetry }
@@ -367,7 +367,7 @@ function RemotePairingShellState(props: {
 }) {
   return (
     <div className="remote-pairing__centered">
-      <ShellState message={props.message} state={props.state} title={props.title} />
+      <OctantEmpty message={props.message} state={props.state} title={props.title} />
     </div>
   );
 }

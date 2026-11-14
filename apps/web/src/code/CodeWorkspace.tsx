@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { CodeLocalReview } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
@@ -27,9 +28,9 @@ import {
 import { FolderGit2, LoaderCircle } from "lucide-react";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ShellState } from "../shell/ShellState";
 import { useTabActivatedThisSession } from "../shell/TabActivation";
 import {
+  OctantEmpty,
   OctantEmptyHeader,
   OctantEmptyDescription,
   OctantEmptyEyebrow,
@@ -197,6 +198,8 @@ export interface CodeWorkspaceProps {
    */
   /** A coordinator thread's proposed workers, shown above its composer. */
   readonly coordinatorProposals?: ReactNode;
+  /** A coordinator thread's workers' pending requests, as rows at the end of its transcript. */
+  readonly coordinatorWorkerAsks?: ReactNode;
   readonly onNewThreadInProject?: (
     projectId: import("@octant/contracts/projects").ProjectId,
   ) => void;
@@ -281,6 +284,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.coordinatorProposals === undefined
           ? {}
           : { coordinatorProposals: props.coordinatorProposals })}
+        {...(props.coordinatorWorkerAsks === undefined
+          ? {}
+          : { coordinatorWorkerAsks: props.coordinatorWorkerAsks })}
         {...(props.approvals?.updateAnchor === undefined
           ? {}
           : { updateApprovalAnchor: props.approvals.updateAnchor })}
@@ -309,7 +315,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     serverCodeProjectFor(serverCodeProjects, view.thread.projectId) !== undefined;
   if (serverThread && !SERVER_THREAD_TABS.has(props.tab.kind)) {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="On a server"
         message="This is not available for a Project on a server yet."
         state="neutral"
@@ -322,7 +328,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
   // checkout kind. This host reads none of it, so the tab says so.
   if (view.checkout.kind === "remote-root" && !serverThread) {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Remote folder"
         message="This thread's checkout is a folder on a remote machine, which Octant no longer supports."
         state="neutral"
@@ -699,13 +705,13 @@ function AppleWorkbenchSurface(props: {
   useEffect(() => {
     if (!followingLiveScreen) return;
     const abort = new AbortController();
-    const timer = setInterval(
+    const stopRefresh = scheduleVisibleInterval(
       () => void refreshRuntime(abort.signal).catch(() => undefined),
       3_000,
     );
     return () => {
       abort.abort();
-      clearInterval(timer);
+      stopRefresh();
     };
   }, [followingLiveScreen, refreshRuntime]);
 
@@ -1087,7 +1093,7 @@ function GitWorkspaceSurface(
 
   if (failure !== undefined) {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry Git observation", onClick: () => void observe() }}
         eyebrow="Code workspace"
         message={failure}
@@ -1161,7 +1167,7 @@ function PullRequestWorkspaceSurface(
 
   if (failure !== undefined) {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Retry pull request observation", onClick: () => void observe() }}
         eyebrow="Code workspace"
         message={failure}
@@ -1478,7 +1484,7 @@ function TerminalWorkspaceSurface(
   };
   if (props.checkoutAvailability === "waiting") {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Code terminal"
         message="Octant is reconnecting the authoritative worktree before repository processes can start."
         state="loading"
@@ -1488,7 +1494,7 @@ function TerminalWorkspaceSurface(
   }
   if (props.checkoutAvailability === "unavailable") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{
           label: "Use the Project's checkout",
           onClick: () => void rebindCheckout(),
@@ -1507,7 +1513,7 @@ function TerminalWorkspaceSurface(
   }
   if (reattaching || starting) {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Code terminal"
         message={
           reattaching
@@ -1564,7 +1570,7 @@ function TerminalWorkspaceSurface(
     );
   }
   return (
-    <ShellState
+    <OctantEmpty
       {...(props.threadPolicy === "plan"
         ? {}
         : { action: { label: "Start terminal", onClick: () => void start() } })}
@@ -1590,7 +1596,7 @@ function terminalRecoveryFailureCategory(error: unknown): string | undefined {
 
 function ApprovalUnavailable(props: { readonly surface: string }) {
   return (
-    <ShellState
+    <OctantEmpty
       eyebrow="Ask for approvals"
       message="Approvals are unavailable in this window. Reopen the task in the desktop app to continue."
       state="warning"
@@ -1601,7 +1607,7 @@ function ApprovalUnavailable(props: { readonly surface: string }) {
 
 function UnavailableProjection(props: { readonly message: string; readonly title: string }) {
   return (
-    <ShellState
+    <OctantEmpty
       eyebrow="Code workspace recovery"
       message={props.message}
       state="warning"

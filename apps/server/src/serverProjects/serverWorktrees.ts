@@ -78,6 +78,11 @@ git symbolic-ref --quiet --short HEAD 2>/dev/null
 printf '\\n'
 git for-each-ref --format='%(refname)%00%(worktreepath)' refs/heads refs/remotes`;
 
+/** The branch the Project's folder has checked out, or exit 1 when it is on none. */
+const CURRENT_BRANCH_SCRIPT = `${GIT_SWITCHES}
+cd -- "$1" 2>/dev/null || exit 3
+git symbolic-ref --quiet --short HEAD 2>/dev/null`;
+
 const REFUSALS: Readonly<Record<number, string>> = {
   3: "repository-mismatch",
   4: "repository-mismatch",
@@ -249,6 +254,38 @@ export async function listServerWorktreeRefs(
     }
   }
   return refs;
+}
+
+/** The branch a server Project's folder has checked out, read on its server now. */
+export type ServerCurrentBranch =
+  | { readonly kind: "branch"; readonly name: string }
+  | { readonly kind: "server-not-registered" }
+  | { readonly kind: "unreachable"; readonly message: string }
+  | { readonly kind: "no-branch" };
+
+/**
+ * The branch a routine's worktree on the server starts from: the one the
+ * Project's folder has checked out there, as a person's composer offers it
+ * first. Undefined for a Project that is not on a server.
+ */
+export async function serverCurrentBranch(
+  options: ServerWorktreeOptions,
+  projectId: string,
+): Promise<ServerCurrentBranch | undefined> {
+  const project = options.store.codeProject(projectId);
+  if (project === undefined) return undefined;
+  const address = options.store.addressOf(projectId);
+  if (address.kind !== "address") return { kind: "server-not-registered" };
+  const call = await options.connection.run(address.server, {
+    script: CURRENT_BRANCH_SCRIPT,
+    args: [project.folder],
+    timeoutMs: CALL_TIMEOUT_MS,
+    maxOutputBytes: 4_096,
+  });
+  if (call.status === "unreachable") return { kind: "unreachable", message: call.message };
+  if (call.status !== "ran") return { kind: "unreachable", message: "The server did not answer." };
+  const name = call.output.toString("utf8").trim();
+  return call.exitCode === 0 && name !== "" ? { kind: "branch", name } : { kind: "no-branch" };
 }
 
 /**

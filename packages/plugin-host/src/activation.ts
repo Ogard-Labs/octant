@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts/extensions";
 import type { OctantMode } from "@octant/contracts/modes";
 
-const rendererKinds = ["ui-surface", "appearance-pack", "preview-viewer"] as const;
+const rendererKinds = ["ui-surface", "appearance-pack", "preview-viewer", "theme"] as const;
 const providerDriverKind = ["provider-driver"] as const;
 // Chat never leases a desktop: a Chat Project has no root to send an artifact from.
 const desktopProviderKind = ["desktop-provider"] as const;

@@ -164,22 +164,47 @@ export function PatternSections() {
         />
       </Specimen>
       <Specimen
-        props={`.surface-empty > .surface-empty__icon + .oct-row-label + .oct-row-detail + .surface-empty__action`}
-        note="the quiet text empty state surfaces use"
+        props={`<OctantEmpty state layout="card" eyebrow title message action />`}
+        note="a named state inside a pane: the glyph comes from the state, the action is one button"
         wide
       >
-        <div className="surface-empty">
-          <span className="surface-empty__icon">
-            <SquareTerminal aria-hidden="true" size={20} />
-          </span>
-          <p className="oct-row-label">No terminals open</p>
-          <p className="oct-row-detail">Open one from the dock.</p>
-          <span className="surface-empty__action">
+        <OctantEmpty
+          action={{ label: "Retry connection", onClick: () => {} }}
+          eyebrow="Connection"
+          message="The local Octant server is unavailable."
+          state="disconnected"
+          title="Octant is disconnected"
+        />
+      </Specimen>
+      <Specimen
+        props={`<OctantEmpty state layout="page" title message action />`}
+        note="a state that is the whole window: the dotted mark, a centred title, a text link back"
+        wide
+      >
+        <OctantEmpty
+          action={{ label: "Sign in again", onClick: () => {} }}
+          layout="page"
+          message="Click Sign in again to refresh your session."
+          state="warning"
+          title="Your session expired"
+        />
+      </Specimen>
+      <Specimen
+        props={`<OctantEmpty layout="line" icon title detail action tone? />`}
+        note="the quiet text empty state surfaces use; tone lane for one empty column"
+        wide
+      >
+        <OctantEmpty
+          action={
             <OctantButton size="sm" type="button" variant="outline">
               Open terminal
             </OctantButton>
-          </span>
-        </div>
+          }
+          detail="Open one from the dock."
+          icon={<SquareTerminal aria-hidden="true" size={20} />}
+          layout="line"
+          title="No terminals open"
+        />
       </Specimen>
       <Specimen
         props={`.project-action-buttons: OctantButton size="sm" variant="ghost" + IconButton`}

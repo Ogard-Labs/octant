@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 import {
   ProjectId,
   type MovedThreadReference,
@@ -785,8 +786,11 @@ function ThreadMoveSheet(props: {
           <p className="thread-move-sheet__basis">{estimateBasis(sizes.rate, member.name)}</p>
         )}
       </section>
-      <details className="thread-move-sheet__section">
-        <summary className="thread-move-sheet__heading">Stays here</summary>
+      <OctantCollapsible
+        className="thread-move-sheet__section"
+        summary="Stays here"
+        summaryClassName="thread-move-sheet__heading"
+      >
         <ul className="thread-move-sheet__list">
           <li>Sign-ins and the provider's own session</li>
           <li>Full access and remembered approvals</li>
@@ -803,7 +807,7 @@ function ThreadMoveSheet(props: {
             </li>
           ) : null}
         </ul>
-      </details>
+      </OctantCollapsible>
       <p className="thread-move-sheet__consequence">
         This thread is erased from this computer once {member.name} has it.
         {stopsFirst
@@ -1006,10 +1010,13 @@ function HandoverSheet(props: {
               ? "This branch has no remote, so the work then stays on this computer."
               : `Then pushes it to ${preview.remote}, never forced. Continue it on any computer that can fetch the branch${props.destination === undefined ? "" : `; ${props.destination.name} is told about it`}.`}
           </p>
-          <details className="thread-move-sheet__section">
-            <summary className="thread-move-sheet__heading">The note</summary>
+          <OctantCollapsible
+            className="thread-move-sheet__section"
+            summary="The note"
+            summaryClassName="thread-move-sheet__heading"
+          >
             <pre className="thread-move-sheet__note">{preview.note}</pre>
-          </details>
+          </OctantCollapsible>
           <div className="thread-move-sheet__choice">
             <div className="thread-move-sheet__choice-text">
               <span className="thread-move-sheet__choice-label">Ask the agent to summarize</span>

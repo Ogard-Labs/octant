@@ -20,6 +20,8 @@ import {
 import { TranscriptOutputLimitNote } from "./outputLimitNote";
 import { useTranscriptFindIndex } from "./useTranscriptFindIndex";
 import { TranscriptFindBar } from "./TranscriptFindBar";
+import { ArrowDown } from "lucide-react";
+import { OctantButton } from "../ui/base/OctantButton";
 import {
   clearTranscriptMatches,
   findTranscriptMatches,
@@ -169,8 +171,15 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const manuallyOpenDisclosuresRef = useRef(new WeakSet<HTMLDetailsElement>());
   const findInputRef = useRef<HTMLInputElement>(null);
   const revealAfterQueryRef = useRef(false);
-  const [stickyIndexes, setStickyIndexes] = useState<ReadonlySet<number>>(() => new Set());
+  // Rows kept mounted for focus or an open disclosure, held by item key: an
+  // index would name a different row once older history is prepended above it.
+  const [stickyKeys, setStickyKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [liveMessage, setLiveMessage] = useState("");
+  // True while a following list has been scrolled away from its end; the
+  // floating Jump to latest control shows only then.
+  const [awayFromEnd, setAwayFromEnd] = useState(false);
+  // What had focus when Find opened, so closing the bar returns there.
+  const findReturnFocusRef = useRef<HTMLElement | null>(null);
   const items = props.items;
   const itemKey = props.itemKey;
   const find = useTranscriptFindIndex(
@@ -268,7 +277,10 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       if (revealIndex >= 0) extra.add(revealIndex);
       const pending = pendingFocusRef.current?.index;
       if (pending !== undefined) extra.add(pending);
-      for (const index of stickyIndexes) extra.add(index);
+      for (const key of stickyKeys) {
+        const index = keyIndex.get(key);
+        if (index !== undefined) extra.add(index);
+      }
       for (const index of pinnedFromKeys) extra.add(index);
       if (extra.size === 0) return extracted;
       const merged = new Set(extracted);
@@ -387,7 +399,8 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         (savedView?.kind === "transcript" &&
           Math.abs(savedView.width - (scrollElementRef.current?.clientWidth ?? 0)) > 1));
     appliedRevealKeyRef.current = undefined;
-    setStickyIndexes(new Set());
+    setStickyKeys(new Set());
+    setAwayFromEnd(false);
     setLiveMessage("");
     lastKeyRef.current = lastKeyOf(items, itemKey);
     countRef.current = items.length;
@@ -500,9 +513,22 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         // the same workspace section (the transcript's parent can be a column
         // that leaves the composer outside).
         const owner = root.closest("section") ?? root.parentElement;
-        if (target !== document.body && owner !== null && !owner.contains(target)) return;
+        // Choosing a thread in the sidebar leaves focus on its row; Find still
+        // belongs to the thread that opened, the one in the active pane.
+        const fromSidebar = target.closest(".sidebar-navigation") !== null;
+        const pane = root.closest<HTMLElement>(".workspace-pane");
+        const inActivePane = pane === null || pane.dataset.active === "true";
+        if (fromSidebar) {
+          if (!inActivePane) return;
+        } else if (target !== document.body && owner !== null && !owner.contains(target)) return;
       }
       event.preventDefault();
+      if (
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement !== findInputRef.current
+      ) {
+        findReturnFocusRef.current = document.activeElement;
+      }
       // Only the bar mounts synchronously; row indexing yields between batches.
       flushSync(() => setFindActive(true));
       findInputRef.current?.focus();
@@ -547,6 +573,27 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     items,
     virtualizer.getVirtualItems(),
   ]);
+
+  function closeFind(): void {
+    const returnTo = findReturnFocusRef.current;
+    findReturnFocusRef.current = null;
+    flushSync(() => setFindActive(false));
+    // Back to what the person was on; the transcript itself when that is gone.
+    if (returnTo !== null && returnTo.isConnected && returnTo !== document.body) {
+      returnTo.focus();
+    } else {
+      scrollElementRef.current?.focus();
+    }
+  }
+
+  function jumpToLatest(): void {
+    const scroll = scrollElementRef.current;
+    if (scroll === null) return;
+    followingRef.current = follows;
+    setAwayFromEnd(false);
+    if (items.length > 0) virtualizer.scrollToIndex(items.length - 1, { align: "end" });
+    scrollToContentEnd(scroll);
+  }
 
   function stepFind(direction: 1 | -1): void {
     if (find.pending || findCount === 0) return;
@@ -608,23 +655,40 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     );
   }
 
+  function keyAt(index: number): string | undefined {
+    const item = items[index];
+    return item === undefined ? undefined : itemKey(item, index);
+  }
+
   function pinIndex(index: number): void {
-    setStickyIndexes((current) => {
-      if (current.has(index)) return current;
+    const key = keyAt(index);
+    if (key === undefined) return;
+    setStickyKeys((current) => {
+      if (current.has(key)) return current;
       const next = new Set(current);
-      next.add(index);
+      next.add(key);
       return next;
     });
   }
 
   function unpinIndex(index: number): void {
-    setStickyIndexes((current) => {
-      if (!current.has(index)) return current;
+    const key = keyAt(index);
+    if (key === undefined) return;
+    setStickyKeys((current) => {
+      if (!current.has(key)) return current;
       const next = new Set(current);
-      next.delete(index);
+      next.delete(key);
       return next;
     });
   }
+
+  // A pinned row that left the list holds nothing up; drop its key.
+  useLayoutEffect(() => {
+    setStickyKeys((current) => {
+      if ([...current].every((key) => keyIndex.has(key))) return current;
+      return new Set([...current].filter((key) => keyIndex.has(key)));
+    });
+  }, [keyIndex]);
 
   function rowIndexFromTarget(target: EventTarget | null): number | undefined {
     if (!(target instanceof Element)) return undefined;
@@ -693,6 +757,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     const scroll = scrollElementRef.current;
     if (scroll === null) return;
     followingRef.current = follows && isAtContentEnd(scroll);
+    setAwayFromEnd(follows && !followingRef.current);
     if (firstKeyRef.current !== undefined)
       viewStore?.write(`transcript:${restoreKey}`, {
         kind: "transcript",
@@ -772,7 +837,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
             count={findCount}
             current={currentFindIndex}
             pending={find.pending}
-            onClose={() => setFindActive(false)}
+            onClose={closeFind}
             onQueryChange={(query) => {
               revealAfterQueryRef.current = true;
               setFindQuery(query);
@@ -799,6 +864,19 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         {props.trail}
         <TranscriptOutputLimitNote restoreKey={props.restoreKey} />
       </div>
+      {awayFromEnd ? (
+        <div className="transcript-jump-anchor">
+          <OctantButton
+            className="transcript-jump"
+            onClick={jumpToLatest}
+            size="sm"
+            variant="secondary"
+          >
+            <ArrowDown aria-hidden="true" />
+            Jump to latest
+          </OctantButton>
+        </div>
+      ) : null}
       <div aria-live="polite" className="sr-only" data-transcript-live="">
         {liveMessage}
       </div>

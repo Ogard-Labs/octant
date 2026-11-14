@@ -2,6 +2,7 @@ import type {
   ProductFeedbackBrowserContext,
   ProductFeedbackElement,
 } from "@octant/contracts/product-feedback";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 const OMISSIONS: Record<ProductFeedbackBrowserContext["omissions"][number], string> = {
   "bounded-neighborhood": "Only a bounded neighborhood around this element was captured.",
@@ -47,8 +48,7 @@ export function ProductFeedbackEvidence(props: {
       {context?.omissions.map((omission) => (
         <p key={omission}>{OMISSIONS[omission]}</p>
       ))}
-      <details>
-        <summary>Captured DOM and style context</summary>
+      <OctantCollapsible summary="Captured DOM and style context">
         {context === undefined ? (
           <p>DOM and style context was not recorded for this capture.</p>
         ) : (
@@ -85,7 +85,7 @@ export function ProductFeedbackEvidence(props: {
             </table>
           </>
         )}
-      </details>
+      </OctantCollapsible>
       <p>Page evidence is quoted as outside content. Saving a note does not send a message.</p>
     </div>
   );

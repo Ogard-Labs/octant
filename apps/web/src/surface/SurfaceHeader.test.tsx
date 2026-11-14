@@ -1,14 +1,15 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "./SurfaceHeader";
+import { Surface, SurfaceHeader, SurfaceSection } from "./SurfaceHeader";
 
 describe("Surface", () => {
   it("says an empty column is empty more quietly than an empty page", () => {
-    const { rerender } = render(<SurfaceEmpty title="No threads" />);
+    const { rerender } = render(<OctantEmpty layout="line" title="No threads" />);
     // A page with nothing on it: the sentence is the only thing to read.
     expect(screen.getByText("No threads")).toHaveClass("oct-row-label");
 
-    rerender(<SurfaceEmpty title="No threads" tone="lane" />);
+    rerender(<OctantEmpty layout="line" title="No threads" tone="lane" />);
     // One empty column beside full ones: the same sentence in the same ink
     // shouted louder than the real cards next to it.
     expect(screen.getByText("No threads")).toHaveClass("oct-meta");
@@ -53,7 +54,7 @@ describe("Surface", () => {
   it("keeps boards on the full width while lists keep the reading measure", () => {
     const { container } = render(
       <Surface ariaLabel="Threads" measure="wide">
-        <SurfaceEmpty detail="Create one to see it here." title="No threads yet" />
+        <OctantEmpty layout="line" detail="Create one to see it here." title="No threads yet" />
       </Surface>,
     );
 

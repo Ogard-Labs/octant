@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
@@ -142,8 +143,8 @@ export function useServerCodeProjectsSource(
   }, [client, servers, revision]);
   useEffect(() => {
     if (client === undefined) return;
-    const timer = window.setInterval(refresh, SERVER_PROJECT_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    const stopRefresh = scheduleVisibleInterval(refresh, SERVER_PROJECT_REFRESH_MS);
+    return () => stopRefresh();
   }, [client, refresh]);
   return useMemo(
     () => ({ catalog, projects, workProjects, refresh }),
