@@ -539,6 +539,22 @@ visible-page interval. The turn a wake-up starts opens with the host heading
 `Wake-up you scheduled earlier in this thread:` above its prompt. The rules
 are in [Architecture: wake-ups](../architecture.md#modes-chat-work-and-code).
 
+## Live tasks
+
+A Code thread whose last turn completed while background work it started
+(a dev server, a watch) still runs shows one row above the message queue, in
+the composer: an activity icon, each task's command on one line in monospace
+(its full text on hover, wrapping under each other at a narrow width),
+**Running** or the count running, and **Stop**, which stops the session and
+every task in it. With no live task, and while a turn holds the session (the
+turn shows its own task rows), the row takes no space. A failed stop shows a
+sentence under the row. The row refreshes on the thread's follow-up notices
+and on a slow visible-page interval. A turn the runtime starts by itself on
+the idle thread opens with the host's line `The agent started this turn by
+itself after background work it was running reported.` in place of a
+person's message. The rules are in
+[Provider runtimes](provider-runtimes.md#background-commands-and-runtime-started-turns).
+
 ## Credential requests
 
 A one-use credential request appears inline at the end of the Code conversation.

@@ -257,6 +257,13 @@ export interface CodeTurnRunnerInput {
   /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
   readonly wakeups?: ProviderWakeupSchedule;
   /**
+   * The runtime started this turn by itself in the thread's kept session
+   * (a background task ended or a watch reported). The turn attaches to what
+   * the runtime is already running instead of sending the prompt, which
+   * only records why the turn exists.
+   */
+  readonly runtimeTurn?: true;
+  /**
    * Records that the runtime's own web search, page fetch, or hosted tool put
    * outside content in front of the model. Without it such a call stops the
    * turn.
@@ -828,6 +835,15 @@ export class CodeTurnRunner {
             );
           }
           timing = startTurnMetrics(clock());
+          if (input.runtimeTurn === true) {
+            if (connection.attachRuntimeTurn === undefined) {
+              return yield* fail("failed", "This provider cannot open a turn it started itself.");
+            }
+            yield* connection
+              .attachRuntimeTurn(input.sessionId)
+              .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+            return;
+          }
           yield* connection
             .send({
               sessionId: input.sessionId,

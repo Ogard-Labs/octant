@@ -1,0 +1,333 @@
+import type { ProviderFailure, ProviderSessionId } from "@octant/contracts";
+import type {
+  ProviderBackgroundTask,
+  ProviderBackgroundWork,
+  ProviderConnection,
+  ProviderSessionHandle,
+  ProviderSessionResume,
+  ProviderSessionStart,
+} from "@octant/provider-sdk/driver";
+import { Effect, Exit, Scope } from "effect";
+
+/**
+ * Keeps a thread's provider session past the turn that opened it while its
+ * runtime still runs background work (maintainer decision, 2026-11-14). A
+ * turn completes when the model's reply is done; a dev server or a watch the
+ * turn started keeps running and shows as a live task in the thread. When
+ * the runtime starts a turn by itself afterwards (a task ended, a watch
+ * reported), the host opens a runtime-started turn for the thread, which
+ * reattaches to the same session.
+ *
+ * The session is always stopped, never orphaned: when its last task has
+ * ended and no turn runs, when the person stops the thread, when it has sat
+ * past the idle limit, when the host cannot open a turn for the runtime's
+ * own, when the next turn needs a session started differently (another
+ * level, model, or tool set), and at shutdown. A connection whose runtime
+ * keeps no background work past a turn is stopped at turn end, as before.
+ */
+
+/** Opens the runtime-started turn for a thread; `busy` asks again shortly. */
+export type RuntimeTurnStarter = (
+  key: string,
+) => Promise<
+  | { readonly status: "started" }
+  | { readonly status: "busy" }
+  | { readonly status: "refused"; readonly message: string }
+>;
+
+export interface OutlivingSessionsOptions {
+  /** Read whenever a session is left with only background work; null keeps it until another bound. */
+  readonly idleLimitMs: () => number | null;
+  readonly startRuntimeTurn: RuntimeTurnStarter;
+  /** Told whenever a thread's live tasks change, so its view refreshes. */
+  readonly onChanged?: (key: string) => void;
+  readonly onError?: (message: string, error: unknown) => void;
+  /** How long to wait before asking again when the thread was busy. */
+  readonly busyRetryMs?: number;
+}
+
+/** What a thread's live tasks look like to the person. */
+export interface LiveTasks {
+  readonly tasks: ReadonlyArray<ProviderBackgroundTask>;
+  /** A turn holds the session now (the person's, or one the runtime started). */
+  readonly turnRunning: boolean;
+}
+
+const BUSY_RETRIES = 20;
+
+interface Kept {
+  readonly key: string;
+  readonly connection: ProviderConnection;
+  readonly scope: Scope.CloseableScope;
+  /** The folder, folders, and permission setting the connection was acquired for. */
+  readonly acquiredFor: string;
+  session?:
+    | {
+        readonly sessionId: ProviderSessionId;
+        readonly handle: ProviderSessionHandle;
+        /** How the session was started; a turn needing anything else starts another. */
+        readonly startedAs: string;
+        unwatch?: () => void;
+      }
+    | undefined;
+  work?: ProviderBackgroundWork | undefined;
+  /** A host turn reads the connection now. */
+  leased: boolean;
+  idleTimer?: ReturnType<typeof setTimeout> | undefined;
+  runtimeTurnRequested: boolean;
+  disposed?: Promise<void>;
+}
+
+export class OutlivingSessions {
+  readonly #kept = new Map<string, Kept>();
+  readonly #options: OutlivingSessionsOptions;
+  #closed = false;
+
+  constructor(options: OutlivingSessionsOptions) {
+    this.#options = options;
+  }
+
+  /**
+   * The connection a thread's turn uses: the one its kept session lives on,
+   * or a new one from `open`. The connection belongs to this keeper, not to
+   * the turn's scope; the turn's `stop` decides whether it is kept, and a
+   * turn whose scope closes while it still holds the connection stops it.
+   */
+  acquire<R>(
+    key: string,
+    acquiredFor: string,
+    open: Effect.Effect<ProviderConnection, ProviderFailure, R | Scope.Scope>,
+  ): Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope> | Scope.Scope> {
+    return Effect.gen(this, function* () {
+      if (this.#closed) {
+        return yield* Effect.fail<ProviderFailure>({
+          category: "unavailable",
+          message: "The host is shutting down.",
+        });
+      }
+      const existing = this.#kept.get(key);
+      if (existing !== undefined && existing.leased) {
+        return yield* Effect.fail<ProviderFailure>({
+          category: "unavailable",
+          message: "Another turn of this thread holds its provider session.",
+        });
+      }
+      let kept = existing;
+      if (kept !== undefined && kept.acquiredFor !== acquiredFor) {
+        yield* Effect.promise(() => this.#dispose(existing as Kept));
+        kept = undefined;
+      }
+      if (kept === undefined) {
+        const scope = yield* Scope.make();
+        const connection = yield* Scope.extend(open, scope).pipe(
+          Effect.tapError(() => Scope.close(scope, Exit.void)),
+        ) as Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope>>;
+        kept = { key, connection, scope, acquiredFor, leased: false, runtimeTurnRequested: false };
+        this.#kept.set(key, kept);
+      }
+      const leased = kept;
+      this.#lease(leased);
+      // A turn that ends without settling the session (a failure before its
+      // stop, an interruption) never leaves it running unseen.
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          if (leased.leased) await this.#dispose(leased);
+        }),
+      );
+      return this.#leasedConnection(leased);
+    });
+  }
+
+  /** The live tasks a thread's kept session runs, or undefined when none is kept. */
+  liveTasks(key: string): LiveTasks | undefined {
+    const kept = this.#kept.get(key);
+    if (kept === undefined || kept.work === undefined || kept.work.ended) return undefined;
+    if (kept.work.tasks.length === 0 && !kept.leased) return undefined;
+    return { tasks: kept.work.tasks, turnRunning: kept.leased || kept.work.turnRunning };
+  }
+
+  /**
+   * The person stopped the thread with no turn running: its kept session,
+   * and every background task in it, is stopped. Answers whether one was.
+   */
+  async stopThread(key: string): Promise<boolean> {
+    const kept = this.#kept.get(key);
+    if (kept === undefined || kept.leased) return false;
+    await this.#dispose(kept);
+    return true;
+  }
+
+  /** Stops every kept session; nothing is kept after it. */
+  async close(): Promise<void> {
+    this.#closed = true;
+    await Promise.all([...this.#kept.values()].map((kept) => this.#dispose(kept)));
+  }
+
+  #lease(kept: Kept): void {
+    kept.leased = true;
+    kept.runtimeTurnRequested = false;
+    if (kept.idleTimer !== undefined) clearTimeout(kept.idleTimer);
+    kept.idleTimer = undefined;
+  }
+
+  #leasedConnection(kept: Kept): ProviderConnection {
+    const { connection } = kept;
+    const begin = (
+      input: ProviderSessionStart | ProviderSessionResume,
+      opened: (
+        withOutlive: ProviderSessionStart | ProviderSessionResume,
+      ) => Effect.Effect<ProviderSessionHandle, ProviderFailure>,
+    ) =>
+      Effect.gen(this, function* () {
+        const startedAs = sessionShape(input);
+        const live = kept.session;
+        if (
+          live !== undefined &&
+          String(live.sessionId) === String(input.sessionId) &&
+          live.startedAs === startedAs &&
+          kept.work !== undefined &&
+          !kept.work.ended
+        ) {
+          return live.handle;
+        }
+        // The next turn needs a session started differently, so the kept one
+        // and its background work stop first: a level change applies from
+        // the next session, never inside a running one.
+        if (live !== undefined) yield* Effect.promise(() => this.#stopSession(kept));
+        const handle = yield* opened({ ...input, outlivesTurn: true });
+        const watched = connection.backgroundWork?.(handle.sessionId);
+        kept.session = { sessionId: handle.sessionId, handle, startedAs };
+        if (watched !== undefined) {
+          kept.work = watched.current();
+          kept.session.unwatch = watched.watch((work) => this.#observe(kept, work));
+        } else {
+          kept.work = undefined;
+        }
+        return handle;
+      });
+    return {
+      ...connection,
+      start: (input) => begin(input, (next) => connection.start(next as ProviderSessionStart)),
+      resume: (input) => begin(input, (next) => connection.resume(next as ProviderSessionResume)),
+      stop: (sessionId) =>
+        Effect.promise(async () => {
+          if (this.#keepsPastTurn(kept, sessionId)) {
+            kept.leased = false;
+            this.#armIdleLimit(kept);
+            // A task may have ended, or the runtime started its own turn,
+            // while the turn was settling.
+            if (kept.work !== undefined) this.#observe(kept, kept.work);
+            return;
+          }
+          await this.#dispose(kept);
+        }),
+    };
+  }
+
+  #keepsPastTurn(kept: Kept, sessionId: ProviderSessionId): boolean {
+    const work = kept.work;
+    return (
+      !this.#closed &&
+      kept.session !== undefined &&
+      String(kept.session.sessionId) === String(sessionId) &&
+      work !== undefined &&
+      !work.ended &&
+      (work.tasks.length > 0 || work.runtimeTurnWaiting)
+    );
+  }
+
+  #observe(kept: Kept, work: ProviderBackgroundWork): void {
+    if (this.#kept.get(kept.key) !== kept) return;
+    kept.work = work;
+    this.#options.onChanged?.(kept.key);
+    if (work.ended) {
+      void this.#dispose(kept);
+      return;
+    }
+    if (kept.leased) return;
+    if (work.runtimeTurnWaiting) {
+      if (!kept.runtimeTurnRequested) {
+        kept.runtimeTurnRequested = true;
+        void this.#requestRuntimeTurn(kept, BUSY_RETRIES);
+      }
+      return;
+    }
+    if (work.tasks.length === 0 && !work.turnRunning) void this.#dispose(kept);
+  }
+
+  async #requestRuntimeTurn(kept: Kept, retries: number): Promise<void> {
+    let outcome: Awaited<ReturnType<RuntimeTurnStarter>>;
+    try {
+      outcome = await this.#options.startRuntimeTurn(kept.key);
+    } catch (error) {
+      outcome = { status: "refused", message: "The runtime's turn could not be opened." };
+      this.#options.onError?.("A runtime-started turn could not be opened.", error);
+    }
+    if (this.#kept.get(kept.key) !== kept || kept.leased) return;
+    if (outcome.status === "busy" && retries > 0) {
+      setTimeout(() => {
+        if (this.#kept.get(kept.key) === kept && !kept.leased) {
+          void this.#requestRuntimeTurn(kept, retries - 1);
+        }
+      }, this.#options.busyRetryMs ?? 1_000).unref?.();
+      return;
+    }
+    // A runtime turn nobody can read never runs on unseen.
+    if (outcome.status !== "started") await this.#dispose(kept);
+  }
+
+  #armIdleLimit(kept: Kept): void {
+    if (kept.idleTimer !== undefined) clearTimeout(kept.idleTimer);
+    const limit = this.#options.idleLimitMs();
+    if (limit === null) return;
+    kept.idleTimer = setTimeout(() => {
+      if (this.#kept.get(kept.key) === kept && !kept.leased) void this.#dispose(kept);
+    }, limit);
+    kept.idleTimer.unref?.();
+  }
+
+  async #stopSession(kept: Kept): Promise<void> {
+    const session = kept.session;
+    if (session === undefined) return;
+    kept.session = undefined;
+    kept.work = undefined;
+    session.unwatch?.();
+    await Effect.runPromise(
+      kept.connection.stop(session.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+    );
+  }
+
+  #dispose(kept: Kept): Promise<void> {
+    kept.disposed ??= (async () => {
+      if (this.#kept.get(kept.key) === kept) this.#kept.delete(kept.key);
+      kept.leased = false;
+      if (kept.idleTimer !== undefined) clearTimeout(kept.idleTimer);
+      try {
+        await this.#stopSession(kept);
+      } finally {
+        await Effect.runPromise(Scope.close(kept.scope, Exit.void)).catch((error: unknown) =>
+          this.#options.onError?.("A kept provider connection did not close cleanly.", error),
+        );
+        this.#options.onChanged?.(kept.key);
+      }
+    })();
+    return kept.disposed;
+  }
+}
+
+/**
+ * What a session was started with, beyond its id and cursor. Functions (the
+ * wake-up schedule) are the host's own and do not change the session.
+ */
+function sessionShape(input: ProviderSessionStart | ProviderSessionResume): string {
+  const {
+    sessionId: _sessionId,
+    wakeups: _wakeups,
+    outlivesTurn: _outlivesTurn,
+    ...rest
+  } = input as ProviderSessionStart & Partial<ProviderSessionResume>;
+  const { resumeCursor: _cursor, current: _current, ...shape } = rest;
+  return JSON.stringify(shape, (_key, value: unknown) =>
+    typeof value === "function" ? undefined : value,
+  );
+}

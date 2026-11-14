@@ -41,6 +41,7 @@ import type {
   ProviderSessionCompaction,
   ProviderSessionForkRequest,
   ProviderWakeupSchedule,
+  ProviderBackgroundWork,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -1278,8 +1279,8 @@ interface SessionState {
   releasePromise?: Promise<void>;
   /** The compaction `compact` asked for, until the runtime reports how it ended. */
   compaction?: ClaudePendingCompaction | undefined;
-  /** The runtime's background tasks still running, by its own task id. */
-  readonly backgroundTasks: Set<string>;
+  /** The runtime's background tasks still running, by its own task id, with what each does. */
+  readonly backgroundTasks: Map<string, string | undefined>;
   /** Whether the person's current turn started any background task. */
   startedBackgroundWork: boolean;
   /** Whether this runtime reports when it goes idle (`session_state_changed`). */
@@ -1287,7 +1288,54 @@ interface SessionState {
   heldTurn?: ClaudeHeldTurn | undefined;
   /** The person's turn's latest usage report as published, for a held turn to build on. */
   turnUsage?: ClaudeUsageEvent | undefined;
+  /**
+   * The host keeps this session past its turn (`outlivesTurn`): a turn is not
+   * held for background work, and a turn the runtime starts by itself waits
+   * in {@link runtimeTurn} for the host to attach one.
+   */
+  readonly outlivesTurn: boolean;
+  /** Whether the runtime last said it was idle; true until it says otherwise. */
+  runtimeIdle: boolean;
+  /** A turn the runtime started by itself while no host turn was open. */
+  runtimeTurn?: ClaudeRuntimeTurn | undefined;
+  readonly backgroundWatchers: Set<(work: ProviderBackgroundWork) => void>;
+  /** The value last told to the watchers, so a repeat is not told again. */
+  reportedBackgroundWork?: string;
 }
+
+/**
+ * A turn the runtime started by itself in a session the host keeps past its
+ * turn (maintainer decision, 2026-11-14). Its events wait here until the
+ * host opens a turn for it and attaches, so the host's turn reads them from
+ * the first; the runtime's own approvals wait on the same gate meanwhile.
+ */
+interface ClaudeRuntimeTurn {
+  attached: boolean;
+  readonly waiting: Array<ProviderRuntimeEvent>;
+  /** More events arrived before the host attached than are held. */
+  overflowed: boolean;
+}
+
+/** Whether the runtime reports that one of its tasks ended. */
+function endsBackgroundTask(
+  message: ClaudeDecodedMessage,
+): message is Extract<ClaudeDecodedMessage, { readonly kind: "task" }> {
+  return (
+    message.kind === "task" &&
+    (message.subtype === "task_notification" ||
+      (message.subtype === "task_updated" &&
+        (message.status === "completed" ||
+          message.status === "failed" ||
+          message.status === "killed")))
+  );
+}
+
+/**
+ * How many events a turn the runtime started by itself may hold before the
+ * host attaches a turn to it; past it the turn cannot be shown whole, so the
+ * attach fails and the session is stopped.
+ */
+const MAX_WAITING_RUNTIME_TURN_EVENTS = 1_024;
 
 /**
  * A person's turn the runtime finished while background work it started
@@ -2374,7 +2422,38 @@ function makeConnection(
       });
 
     const publish = (event: ProviderRuntimeEvent) => {
+      // A turn the runtime started by itself is read from its first event
+      // once the host has opened a turn for it.
+      const waiting = sessions.get(event.sessionId)?.runtimeTurn;
+      if (waiting !== undefined && !waiting.attached) {
+        if (waiting.waiting.length < MAX_WAITING_RUNTIME_TURN_EVENTS) waiting.waiting.push(event);
+        else waiting.overflowed = true;
+        return;
+      }
       Effect.runFork(PubSub.publish(events, event));
+    };
+    const backgroundWorkOf = (state: SessionState): ProviderBackgroundWork => ({
+      tasks: [...state.backgroundTasks].map(([taskId, description]) =>
+        description === undefined ? { taskId } : { taskId, description },
+      ),
+      turnRunning: state.pendingTurns > 0 || (state.reportsSessionState && !state.runtimeIdle),
+      runtimeTurnWaiting: state.runtimeTurn !== undefined && !state.runtimeTurn.attached,
+      ended: state.terminal || state.releasing || state.released,
+    });
+    /** Tells the host what a kept session runs now, when that changed. */
+    const reportBackgroundWork = (state: SessionState) => {
+      if (!state.outlivesTurn || state.backgroundWatchers.size === 0) return;
+      const work = backgroundWorkOf(state);
+      const key = JSON.stringify(work);
+      if (key === state.reportedBackgroundWork) return;
+      state.reportedBackgroundWork = key;
+      for (const watcher of [...state.backgroundWatchers]) {
+        try {
+          watcher(work);
+        } catch {
+          // A watcher that throws cannot change how the session runs.
+        }
+      }
     };
     const deactivate = (state: SessionState) => {
       if (!state.active) return;
@@ -2441,6 +2520,8 @@ function makeConnection(
           if (state.terminal && sessions.get(state.sessionId) === state) {
             sessions.delete(state.sessionId);
           }
+          reportBackgroundWork(state);
+          state.backgroundWatchers.clear();
         }
         if (releaseFailure !== undefined) throw releaseFailure;
       })();
@@ -2668,7 +2749,38 @@ function makeConnection(
         occurredAt: factories.clock() as UtcTimestamp,
       });
     };
+    /**
+     * The runtime started a turn by itself in a kept session with no host
+     * turn open: a background task ended or a watch reported. Its events are
+     * numbered on from the last turn's and wait for the host's turn, and it
+     * passes the same gate at the same level as a turn the host sent.
+     */
+    const openIdleRuntimeTurn = (state: SessionState) => {
+      const previous = state.context;
+      if (previous === undefined || state.claudeSessionId === undefined) return;
+      state.context = makeEventContext(state, state.claudeSessionId, previous.sequence);
+      for (const [taskId, task] of previous.taskIds) state.context.taskIds.set(taskId, task);
+      state.terminalResult = deferred<void>();
+      state.pendingTurns = 1;
+      state.hookDeliveries.push({ viaHook: false, delivered: false });
+      state.appToolsEnabled = false;
+      state.outputAccepted = true;
+      state.runtimeTurn = { attached: false, waiting: [], overflowed: false };
+      publish({
+        kind: "runtime-turn-started",
+        trigger: "background-task",
+        instanceId: options.instanceId,
+        sessionId: state.sessionId,
+        correlationId: state.correlationId,
+        sequence: state.context.sequence++,
+        occurredAt: factories.clock() as UtcTimestamp,
+      });
+    };
     const handleMessage = (state: SessionState, message: ClaudeDecodedMessage) => {
+      handleSessionMessage(state, message);
+      reportBackgroundWork(state);
+    };
+    const handleSessionMessage = (state: SessionState, message: ClaudeDecodedMessage) => {
       if (state.terminal) return;
       if (state.context === undefined) {
         if (
@@ -2720,6 +2832,11 @@ function makeConnection(
       }
       if (message.kind === "session-state") {
         state.reportsSessionState = true;
+        state.runtimeIdle = message.state === "idle";
+        if (state.outlivesTurn) {
+          if (message.state !== "idle" && state.pendingTurns === 0) openIdleRuntimeTurn(state);
+          return;
+        }
         const held = state.heldTurn;
         if (held === undefined) return;
         if (message.state === "idle") {
@@ -2728,6 +2845,21 @@ function makeConnection(
         } else if (!held.runtimeTurnOpen) {
           openRuntimeTurn(state, held);
         }
+        return;
+      }
+      if (
+        state.outlivesTurn &&
+        state.pendingTurns === 0 &&
+        state.compaction === undefined &&
+        CLAUDE_TURN_MESSAGE_KINDS.has(message.kind)
+      ) {
+        openIdleRuntimeTurn(state);
+      }
+      // Between turns of a kept session no turn shows what the runtime
+      // reports; a task's end only changes what runs, which the host reads
+      // from the session's background work.
+      if (state.outlivesTurn && state.context.terminal) {
+        if (endsBackgroundTask(message)) state.backgroundTasks.delete(message.taskId);
         return;
       }
       if (state.heldTurn !== undefined && CLAUDE_TURN_MESSAGE_KINDS.has(message.kind)) {
@@ -2749,7 +2881,10 @@ function makeConnection(
         }
       }
       if (message.kind === "task" && message.background === true && state.pendingTurns > 0) {
-        state.backgroundTasks.add(message.taskId);
+        state.backgroundTasks.set(
+          message.taskId,
+          message.description ?? state.backgroundTasks.get(message.taskId),
+        );
         state.startedBackgroundWork = true;
       }
       // A resumed session's stored task list opens its first turn.
@@ -2776,6 +2911,7 @@ function makeConnection(
         if (
           mapped.event.kind === "completed" &&
           state.pendingTurns > 0 &&
+          !state.outlivesTurn &&
           (state.heldTurn !== undefined ||
             (state.startedBackgroundWork &&
               (state.backgroundTasks.size > 0 || state.reportsSessionState)))
@@ -2793,6 +2929,7 @@ function makeConnection(
         if (isTerminalEvent(mapped.event)) {
           state.heldTurn = undefined;
           state.turnUsage = undefined;
+          state.runtimeTurn = undefined;
           state.startedBackgroundWork = false;
           state.terminalResult.resolve(undefined);
           clearAuthorityState(state);
@@ -2818,14 +2955,7 @@ function makeConnection(
         }
         state.outputAccepted = true;
       }
-      if (
-        message.kind === "task" &&
-        (message.subtype === "task_notification" ||
-          (message.subtype === "task_updated" &&
-            (message.status === "completed" ||
-              message.status === "failed" ||
-              message.status === "killed")))
-      ) {
+      if (endsBackgroundTask(message)) {
         // A task that ended hands the model a notice, so the runtime starts
         // a turn for it unless the turn running now takes it in.
         if (state.backgroundTasks.delete(message.taskId) && state.heldTurn !== undefined) {
@@ -2903,6 +3033,7 @@ function makeConnection(
         readonly nativeSetup?: ProviderNativeSetup;
         readonly compactionPoint?: ProviderCompactionPoint;
         readonly wakeups?: ProviderWakeupSchedule;
+        readonly outlivesTurn?: boolean;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -3784,9 +3915,12 @@ function makeConnection(
           active: true,
           releasing: false,
           released: false,
-          backgroundTasks: new Set(),
+          backgroundTasks: new Map(),
           startedBackgroundWork: false,
           reportsSessionState: false,
+          outlivesTurn: input.outlivesTurn === true && input.singleUse !== true,
+          runtimeIdle: true,
+          backgroundWatchers: new Set(),
         };
         callbackState = state;
         sessions.set(input.sessionId, state);
@@ -3992,6 +4126,7 @@ function makeConnection(
                 ? {}
                 : { compactionPoint: input.compactionPoint }),
               ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
+              ...(input.outlivesTurn === true ? { outlivesTurn: true } : {}),
             },
             signal,
             input.resumeCursor.value,
@@ -4049,6 +4184,12 @@ function makeConnection(
             failure("unsupported", "Claude takes JPEG, PNG, GIF and WebP images only."),
           );
         }
+        // The runtime's own turn is the host's to open first.
+        if (state.runtimeTurn !== undefined && !state.runtimeTurn.attached) {
+          return Effect.fail(
+            failure("unavailable", "Claude started a turn of its own after its background work."),
+          );
+        }
         // The runtime may still start turns of its own inside the held one,
         // so the message is steered into it rather than refused. The turn's
         // context goes inline in the steered text, as on a runtime too old
@@ -4081,6 +4222,7 @@ function makeConnection(
           state.appToolsEnabled = input.tools.length > 0;
           state.pendingTurns += 1;
           state.hookDeliveries.push(delivery);
+          reportBackgroundWork(state);
         }).pipe(
           Effect.zipRight(
             state.query.send({
@@ -4297,6 +4439,54 @@ function makeConnection(
             state.terminalResult.resolve(undefined);
           }
           await release(state);
+        }),
+      backgroundWork: (sessionId) => {
+        const state = sessions.get(sessionId);
+        if (state === undefined || !state.outlivesTurn) return undefined;
+        return {
+          current: () => backgroundWorkOf(state),
+          watch: (listener) => {
+            if (state.released) {
+              listener(backgroundWorkOf(state));
+              return () => undefined;
+            }
+            state.backgroundWatchers.add(listener);
+            return () => {
+              state.backgroundWatchers.delete(listener);
+            };
+          },
+        };
+      },
+      attachRuntimeTurn: (sessionId) =>
+        Effect.suspend(() => {
+          const state = sessions.get(sessionId);
+          const waiting = state?.runtimeTurn;
+          if (state === undefined || state.terminal || waiting === undefined || waiting.attached) {
+            return Effect.fail(failure("protocol", "No turn Claude started by itself is waiting."));
+          }
+          if (waiting.overflowed) {
+            return Effect.promise(async () => {
+              state.runtimeTurn = undefined;
+              closeAfterPublishedTerminal(state);
+              await release(state);
+            }).pipe(
+              Effect.zipRight(
+                Effect.fail(
+                  failure(
+                    "protocol",
+                    "Claude's own turn sent more than Octant holds before it opened.",
+                  ),
+                ),
+              ),
+            );
+          }
+          return Effect.sync(() => {
+            waiting.attached = true;
+            for (const event of waiting.waiting.splice(0)) {
+              Effect.runFork(PubSub.publish(events, event));
+            }
+            reportBackgroundWork(state);
+          });
         }),
       approvalCall: ({ sessionId, requestId }) =>
         sessions.get(sessionId)?.pendingApprovals.get(requestId)?.call,

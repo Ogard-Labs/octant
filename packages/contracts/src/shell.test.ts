@@ -102,6 +102,7 @@ const settings = {
   autoCompactLimitPercent: null,
   stalledTurnLimitMinutes: 30,
   providerToolCallPauseLimitMinutes: 120,
+  backgroundSessionIdleLimitMinutes: 120,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },

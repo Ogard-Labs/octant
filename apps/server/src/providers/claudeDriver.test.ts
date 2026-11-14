@@ -16,6 +16,7 @@ import {
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
 import type {
+  ProviderBackgroundWork,
   ProviderWakeup,
   ProviderWakeupRequest,
   ProviderWakeupSchedule,
@@ -8095,6 +8096,119 @@ describe("Claude background work", () => {
     await collected;
     expect(seen.map((event) => event.kind)).toEqual(["usage", "completed"]);
     await acquired.close();
+  });
+
+  describe("in a session the host keeps past its turn", () => {
+    async function startKeptTurn() {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          outlivesTurn: true,
+        }),
+      );
+      const seen: ProviderRuntimeEvent[] = [];
+      // Subscribes before it returns, as a turn runner does before it sends.
+      const follow = async () => {
+        const scope = Effect.runSync(Scope.make());
+        const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+        const done = Effect.runPromise(
+          Stream.runForEach(
+            events.pipe(
+              Stream.filter((event) => event.sessionId === sessionId),
+              Stream.takeUntil((event) =>
+                ["completed", "failed", "interrupted", "waiting"].includes(event.kind),
+              ),
+            ),
+            (event) => Effect.sync(() => seen.push(event)),
+          ).pipe(Effect.ensuring(Scope.close(scope, Exit.void))),
+        );
+        return { done };
+      };
+      const collected = (await follow()).done;
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "start the dev server",
+          attachments: [],
+          tools: [],
+        }),
+      );
+      const query = f.queries[0]!;
+      await query.emit(state("running"));
+      const watched = acquired.connection.backgroundWork?.(sessionId);
+      const reported: ProviderBackgroundWork[] = [];
+      watched?.watch((work) => reported.push(work));
+      return { acquired, query, seen, collected, follow, watched, reported };
+    }
+
+    it("completes the person's turn when the reply is done while its background command keeps running", async () => {
+      const { acquired, query, seen, collected, watched } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await collected;
+      expect(seen.at(-1)).toMatchObject({ kind: "completed" });
+      expect(watched?.current()).toMatchObject({
+        tasks: [{ taskId: "bash-1", description: "npm test" }],
+        runtimeTurnWaiting: false,
+        ended: false,
+      });
+      expect(query.close).not.toHaveBeenCalled();
+      await acquired.close();
+    });
+
+    it("holds a turn the runtime starts by itself until the host attaches one, then reads it from its start", async () => {
+      const { acquired, query, seen, collected, follow, watched, reported } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      seen.length = 0;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      await query.emit(text("The server stopped."));
+      expect(watched?.current()).toMatchObject({ tasks: [], runtimeTurnWaiting: true });
+      expect(reported.some((work) => work.runtimeTurnWaiting)).toBe(true);
+      // The person cannot send into a turn the runtime is running unseen.
+      await expect(
+        Effect.runPromise(
+          Effect.flip(
+            acquired.connection.send({ sessionId, prompt: "next", attachments: [], tools: [] }),
+          ),
+        ),
+      ).resolves.toMatchObject({ category: "unavailable" });
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await query.emit(completed(sdk));
+      await runtimeTurn;
+      const kinds = seen.map((event) => event.kind);
+      expect(kinds[0]).toBe("runtime-turn-started");
+      expect(kinds).toContain("text-delta");
+      expect(kinds.at(-1)).toBe("completed");
+      const sequences = seen.map((event) => event.sequence);
+      expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
+      await expect(
+        Effect.runPromise(Effect.flip(acquired.connection.attachRuntimeTurn!(sessionId))),
+      ).resolves.toMatchObject({ category: "protocol" });
+      await acquired.close();
+    });
+
+    it("stops the background command with the session when the person stops the thread", async () => {
+      const { acquired, query, collected, watched, reported } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await collected;
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      expect(query.close).toHaveBeenCalled();
+      expect(reported.at(-1)).toMatchObject({ ended: true });
+      expect(watched?.current().ended).toBe(true);
+      await acquired.close();
+    });
   });
 });
 

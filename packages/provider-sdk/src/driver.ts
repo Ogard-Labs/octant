@@ -139,6 +139,38 @@ export interface ProviderSessionStart {
   readonly compactionPoint?: ProviderCompactionPoint;
   /** The host's schedule for this session's thread; see {@link ProviderWakeupSchedule}. */
   readonly wakeups?: ProviderWakeupSchedule;
+  /**
+   * The host keeps this session past its turn while the runtime runs
+   * background work (see {@link ProviderConnection.backgroundWork}): a turn
+   * completes when the model's reply is done, and a turn the runtime starts
+   * by itself afterwards waits for the host to open one for it with
+   * {@link ProviderConnection.attachRuntimeTurn}. Absent, a driver that holds
+   * background work keeps the turn that started it open until the work ends.
+   */
+  readonly outlivesTurn?: boolean;
+}
+
+/** One background task a session's runtime still runs, as the person may see it. */
+export interface ProviderBackgroundTask {
+  readonly taskId: string;
+  readonly description?: string;
+}
+
+/**
+ * What a session the host keeps past its turn is doing between turns. A
+ * driver reports a new value whenever one of these changes.
+ */
+export interface ProviderBackgroundWork {
+  readonly tasks: ReadonlyArray<ProviderBackgroundTask>;
+  /** The runtime is running a turn: one the host sent, or one it started itself. */
+  readonly turnRunning: boolean;
+  /**
+   * The runtime started a turn by itself while no host turn was open; its
+   * events wait, unread, until the host attaches a turn to it.
+   */
+  readonly runtimeTurnWaiting: boolean;
+  /** The session ended; no later value follows. */
+  readonly ended: boolean;
 }
 
 /**
@@ -245,6 +277,8 @@ export interface ProviderSessionResume {
   readonly compactionPoint?: ProviderCompactionPoint;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly wakeups?: ProviderWakeupSchedule;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly outlivesTurn?: boolean;
 }
 
 export interface ProviderSessionCompactionRequest {
@@ -475,4 +509,25 @@ export interface ProviderConnection {
     input: ProviderUserInputAnswer,
   ) => Effect.Effect<void, ProviderFailure>;
   readonly answerTool: (input: ProviderToolAnswer) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * What a session started with `outlivesTurn` runs between turns, and a way
+   * to hear each change. Present only on a connection whose runtime can keep
+   * background work past a turn; undefined for a session it does not hold.
+   * `watch` answers a function that stops listening.
+   */
+  readonly backgroundWork?: (sessionId: ProviderSessionId) =>
+    | {
+        readonly current: () => ProviderBackgroundWork;
+        readonly watch: (listener: (work: ProviderBackgroundWork) => void) => () => void;
+      }
+    | undefined;
+  /**
+   * Opens the host's turn on a turn the runtime started by itself
+   * (`runtimeTurnWaiting`): the events it held go out on this connection's
+   * subscription, opened by `runtime-turn-started`, and the turn then runs
+   * and ends like one the host sent. Fails when no such turn waits.
+   */
+  readonly attachRuntimeTurn?: (
+    sessionId: ProviderSessionId,
+  ) => Effect.Effect<void, ProviderFailure>;
 }

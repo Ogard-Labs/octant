@@ -70,6 +70,8 @@ import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt"
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
+import { CodeLiveTasks } from "./CodeLiveTasks";
+import type { CodeSessionClient } from "./codeSessionClient";
 import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import {
@@ -330,6 +332,7 @@ export interface CodeThreadWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   /** The thread's wake-ups; absent builds one from the server address. */
   readonly wakeupClient?: ThreadWakeupClient;
+  readonly codeSessionClient?: CodeSessionClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -2530,6 +2533,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 serverUrl={props.serverUrl}
                 windowCapability={props.windowCapability}
                 client={props.wakeupClient}
+              />
+              <CodeLiveTasks
+                threadId={props.threadId}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+                client={props.codeSessionClient}
               />
               <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
             </>

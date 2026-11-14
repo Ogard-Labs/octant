@@ -795,9 +795,42 @@ as a `local_bash` task: the decoder reads its `task_started`,
 `task-progress` row, as it does a subagent's. When such a task ends, or a
 watch prints a line, the runtime wakes the model and starts a turn by itself.
 
-A session lasts one person's turn, so the driver holds that turn open
-instead of letting such a turn start after the runner has stopped the
-session. When the runtime's result arrives while a background task the turn
+In Code the session outlives its turn (maintainer decision, 2026-11-14). The
+turn completes when the model's reply is done; the background tasks keep
+running and show as live tasks above the thread's composer, with Stop. The
+host keeps the session (`OutlivingSessions`) and starts every Code session
+with `outlivesTurn`, which tells the driver not to hold the turn. When the
+runtime then starts a turn by itself while the thread is idle, the driver
+holds that turn's events, and its approvals wait on the gate, until the host
+opens a runtime-started turn for the thread: an ordinary Code turn started
+as the host at the thread's own level, whose recorded prompt says why it
+exists and is never sent. That turn reattaches to the kept session with
+`attachRuntimeTurn` instead of sending, reads the held events from their
+`runtime-turn-started` event (`trigger: "background-task"`), and is journaled
+and replayed like any other turn, the frame keeping the runtime as its
+origin. A person's send is refused while such a turn waits to be opened, and
+a turn needing a session started differently (another level, model, or tool
+set) stops the kept one, and its tasks, first. Between turns the runtime's
+own task frames are not shown in any turn; a task's end only changes the
+live tasks.
+
+The kept session is always stopped, never orphaned: when its last task has
+ended and no turn runs, when the person stops the thread (Stop on the live
+tasks, or a Stop with no turn running), after the background work limit with
+no turn in the thread (a host setting: 2 hours by default, Off for no bound),
+when the host cannot open the runtime's turn (the thread was archived, or
+stayed busy for 20 tries), when a turn ends without settling its session,
+and at shutdown. A runtime-started turn holds at most 1,024 events before it
+is opened; past that the session is stopped. Rationale: settling the person's
+turn keeps a dev server from holding it open forever, and opening the
+runtime's turn through the thread's ordinary admission reuses the gate, the
+journal, the stop and replay unchanged rather than adding a turn kind.
+
+Work and other callers (a child run, a single-use session) still keep the
+earlier lifecycle: a session lasts one person's turn, so the driver holds
+that turn open instead of letting such a turn start after the runner has
+stopped the session (a Work session that outlives its turn is not built
+yet). When the runtime's result arrives while a background task the turn
 started still runs, or before the runtime says it is idle, the completion is
 held. Each turn the runtime then starts is folded into the person's turn,
 opened by a `runtime-turn-started` event (`trigger: "background-task"`); its
@@ -839,16 +872,6 @@ the next turn as it does for any running turn. A `Monitor` call that asks for a 
 runtime process, outside the command sandbox and its network rules) or a
 watch for the whole session is refused before the gate. Plan keeps its
 read-only commands in the foreground: `run_in_background` is refused there.
-Rationale: holding the person's turn keeps one journaled turn per send and
-reuses the gate, the stop, and the session's one-turn lifetime unchanged; a
-host-side runner for turns that start on an idle thread would add a second
-turn lifecycle the thread model does not have. Decided and not built yet
-(maintainer decision, 2026-11-14): the person's turn completes when the
-model's reply is done while background tasks keep running and show as tasks
-in the thread, and a task's end opens a new runtime-started turn rather than
-reopening the old one; stopping the thread still ends every background task.
-It needs the session to outlive the person's turn and that host-side runner,
-so the hold above stays until both exist.
 
 #### Workflows
 

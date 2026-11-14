@@ -5749,6 +5749,69 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("opens a turn the runtime started by itself on the kept session instead of sending its prompt, and replays it as the runtime's", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      attachRuntimeTurn: vi.fn(() => Effect.void),
+    };
+    const startOperation = operationId(1383);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      isRuntimeStartedTurn: (operation) => operation === String(startOperation),
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.attachRuntimeTurn).toHaveBeenCalledWith(sessionId));
+      expect(connection.send).not.toHaveBeenCalled();
+      await Effect.runPromise(
+        Queue.offerAll(queue, [
+          providerEvent({ kind: "runtime-turn-started", trigger: "background-task" }),
+          providerEvent({ kind: "completed" }),
+        ]),
+      );
+      await vi.waitFor(async () =>
+        expect(terminalStates(await operationEvents(fixture.runtime, startOperation))).toEqual([
+          "completed",
+        ]),
+      );
+      const kinds = (await operationEvents(fixture.runtime, startOperation)).map(
+        (event) => event.kind,
+      );
+      expect(kinds.indexOf("runtime-turn-started")).toBeGreaterThan(
+        kinds.indexOf("conversation-turn-started"),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("stops the session a finished turn left running background work when the person stops the idle thread", async () => {
+    const stopThread = vi.fn(async () => true);
+    const fixture = runtimeFixture({
+      outlivingSessions: { acquire: vi.fn(), stopThread },
+    });
+    try {
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(1384),
+        threadId,
+        checkoutId,
+      });
+      expect(stopThread).toHaveBeenCalledWith(`code:${String(threadId)}`);
+      expect(result).toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("refuses a conversation window for a Project the window cannot access, before reading it", async () => {
     const fixture = runtimeFixture({ projectAccess: false });
     try {
@@ -10846,6 +10909,8 @@ function runtimeFixture(options: {
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   probeProvider?: Parameters<typeof createCodeOperationRuntime>[0]["probeProvider"];
+  isRuntimeStartedTurn?: Parameters<typeof createCodeOperationRuntime>[0]["isRuntimeStartedTurn"];
+  outlivingSessions?: Parameters<typeof createCodeOperationRuntime>[0]["outlivingSessions"];
   readonly resolveProviderDriver?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["resolveProviderDriver"];
@@ -11087,6 +11152,12 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.isRuntimeStartedTurn === undefined
+      ? {}
+      : { isRuntimeStartedTurn: options.isRuntimeStartedTurn }),
+    ...(options.outlivingSessions === undefined
+      ? {}
+      : { outlivingSessions: options.outlivingSessions }),
     ...(options.verifyModelToolsOnFirstUse === undefined
       ? {}
       : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),

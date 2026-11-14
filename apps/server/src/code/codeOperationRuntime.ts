@@ -106,6 +106,7 @@ import type {
   ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
+import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
 import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
@@ -875,6 +876,13 @@ export interface CodeOperationRuntimeOptions {
    * absent, or answering undefined, offers the runtime no wake-up tool.
    */
   readonly resolveThreadWakeups?: (thread: CodeThread) => ProviderWakeupSchedule | undefined;
+  /**
+   * Keeps a thread's provider session past its turn while the runtime runs
+   * background work. Absent, every session stops when its turn ends.
+   */
+  readonly outlivingSessions?: Pick<OutlivingSessions, "acquire" | "stopThread">;
+  /** Whether the host opened this turn for one the runtime started by itself. */
+  readonly isRuntimeStartedTurn?: (operationId: string) => boolean;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   readonly resolveSideChatReturns?: CodeOperationServiceOptions["resolveSideChatReturns"];
@@ -5164,7 +5172,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
-    if (active === undefined) return turnState("failed");
+    if (active === undefined) {
+      // No turn runs, but the session the last one left with background
+      // work may: Stop ends it and every task in it.
+      if (
+        input.turnOperationId === undefined &&
+        (await this.#options.outlivingSessions?.stopThread(codeSessionKey(input.thread.id))) ===
+          true
+      )
+        return turnState("interrupted");
+      return turnState("failed");
+    }
     if (
       input.turnOperationId !== undefined &&
       String(active.operationId) !== String(input.turnOperationId)
@@ -5876,6 +5894,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
           ...(nativeSetup === undefined ? {} : { nativeSetup }),
           ...(wakeups === undefined ? {} : { wakeups }),
+          ...(this.#options.isRuntimeStartedTurn?.(String(active.operationId)) === true
+            ? { runtimeTurn: true as const }
+            : {}),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {
@@ -5889,7 +5910,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   category: "unauthorized",
                   message: "Provider authority mismatch.",
                 });
-              return active.driver.acquire(acquireInput).pipe(
+              const keeper = this.#options.outlivingSessions;
+              return (
+                keeper === undefined
+                  ? active.driver.acquire(acquireInput)
+                  : keeper.acquire(
+                      codeSessionKey(active.thread.id),
+                      JSON.stringify([
+                        String(active.thread.providerInstanceId),
+                        acquireInput.projectRoot,
+                        acquireInput.extraFolders ?? [],
+                        acquireInput.permissionPersistence,
+                      ]),
+                      active.driver.acquire(acquireInput),
+                    )
+              ).pipe(
                 Effect.tap((connection) =>
                   Effect.sync(() => {
                     active.connection = connection;
@@ -6759,6 +6794,11 @@ function evidenceCapacityFailure(error: unknown): CodeOperationFailure | undefin
     message:
       "Local Code evidence storage is full. Back up this Octant profile and clear its local application data before retrying.",
   };
+}
+
+/** The key a Code thread's kept provider session is held under. */
+export function codeSessionKey(threadId: CodeThreadId): string {
+  return `code:${String(threadId)}`;
 }
 
 function normalizedOperationEvent(
