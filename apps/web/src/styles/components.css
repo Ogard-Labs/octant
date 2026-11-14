@@ -441,7 +441,7 @@ html[data-octant-native-host="true"]:not(
   .shell-frame
   > :is(.sidebar-rail, .sidebar, .window-chrome, .workspace-layer) {
   opacity: 0.92;
-  filter: blur(12px);
+  filter: blur(5px);
 }
 
 /* The blur already keeps the words out of reach, so the sheet's scrim only

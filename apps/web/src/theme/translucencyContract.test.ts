@@ -72,7 +72,7 @@ describe("window glass", () => {
       expect(fade?.[1]).toContain(layer);
     }
     expect(fade?.[1]).not.toContain("app-backdrop");
-    expect(Number(/blur\((\d+)px\)/.exec(fade?.[2] ?? "")?.[1])).toBeGreaterThanOrEqual(12);
+    expect(Number(/blur\((\d+)px\)/.exec(fade?.[2] ?? "")?.[1])).toBeGreaterThanOrEqual(4);
     expect(fade?.[2]).not.toContain("opacity: 0;");
     // Only paint changes, so focus and the content itself are untouched.
     expect(fade?.[2]).not.toMatch(/visibility|display|pointer-events/);

@@ -276,7 +276,7 @@ under the fill).
   swatches. The ground stays one layer under the sidebar, the stage, the sheet
   and its scrim, never over any of them. While one is open the layers that hold content (the rail, the
   sidebar, the title band, the workspace and its docks) blur past reading
-  (12px) and stay at 92% under a scrim of 12% black over the scrim's own motion (instantly under reduced
+  (5px, enough that 13px text cannot be read) and stay at 92% under a scrim of 12% black over the scrim's own motion (instantly under reduced
   motion), and the modal keeps its float fill (66% dark, 78% light, no blur;
   96% where a ground is drawn), so a person changing the appearance in Settings
   watches the window change while no thread text, row, card or composer can be
