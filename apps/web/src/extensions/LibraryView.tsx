@@ -94,8 +94,6 @@ export interface LibraryInspection {
 
 export interface LibraryViewProps {
   readonly items: ReadonlyArray<LibraryItem>;
-  /** The toggle between the views, kept in the section's actions. */
-  readonly actions: ReactNode;
   /** Set while the installed set has not been read yet. */
   readonly loading?: boolean;
   /** The local scan of Claude Code and Codex failed or has not answered. */
@@ -292,7 +290,6 @@ export function LibraryView(props: LibraryViewProps) {
 
   return (
     <SettingsSection
-      actions={props.actions}
       className="extensions-settings__section"
       description="Connectors, plugins, skills and MCP servers in one place. Nothing here is fetched to show it."
       title="Library"
@@ -358,12 +355,7 @@ export function LibraryView(props: LibraryViewProps) {
         {props.onOpenAccountTools === undefined ? null : (
           <p className="library__note">
             Want a tool inside Claude Code or Codex itself?{" "}
-            <OctantButton
-              onClick={props.onOpenAccountTools}
-              size="xs"
-              type="button"
-              variant="ghost"
-            >
+            <OctantButton onClick={props.onOpenAccountTools} type="button" variant="link">
               Add it to an account
             </OctantButton>
           </p>

@@ -1325,10 +1325,23 @@ Surface (measure 880px, or wide)
 The kit is `settings/primitives.tsx`; contents are in
 [Settings](docs/design/settings.md).
 
-- **Header**: the `h1` in the page title role; at most one line of secondary
-  description. An "On this page" row of text links appears for four sections or
-  more.
-- **Section**: a label (14/600 secondary), an optional one-line note, then one
+- **Header**: the `h1` in the page title role; at most one line of 12px
+  secondary description. The header is the same on every sub-tab and in every
+  load state: a page with sub-tabs (Skills & Extensions) draws its switch in
+  one strip under the header, and the views below take no actions of their
+  own. Content that loads reserves its space (`SettingsSkeletonRows`, rows at a
+  Settings row's height); a command's raw output is a `SettingsOutputWell`,
+  collapsed, 160px tall and scrollable.
+- **On this page**: one rule. Pages of four sections or more (General,
+  Appearance, Providers & Models, Octant Harness, Code, Computer use, GitHub,
+  Permissions, Data & storage, Sync; the list is `SETTINGS_OUTLINE_PAGES`) carry
+  a single-line row of quiet chips: 24px, 12px text, `--oct-fill-4`, a hover
+  wash, the section in view marked as the page scrolls. It never wraps: it
+  scrolls sideways under a fade at the edge that has more. Its slot is a fixed
+  28px on those pages, so chips arriving as sections mount move nothing. Other
+  pages, and any page whose sections change with a sub-tab, have no row.
+- **Section**: a heading (13/600 primary, so it never reads as the 12px
+  secondary description under it), an optional one-line note, then one
   group: `--oct-radius-md`, `--oct-settings-card-fill` (ink 2%), one hairline
   outline inside the box, `overflow: visible` (the first and last rows round
   themselves). Rows are divided by a hairline inset 16px.
@@ -1348,6 +1361,10 @@ The kit is `settings/primitives.tsx`; contents are in
 
 Every dialog is `OctantDialog`: 16px inset, the dialog title role, answers in
 one row at the trailing edge (the dismissing answer outlined first, the acting
+- **Buttons**: an action with words is a button with a fill at rest
+  (`secondary`, or `ghost` resting on `--oct-fill-4` inside Settings); never
+  bare text. Only an inline link in a sentence is text: the accent ink, an
+  underline when pointed at (`variant="link"`).
 answer filled last, both 28px). A dialog that draws to its edges sets its inset
 with one class. A sheet is for a page-sized surface with the app live behind it;
 a non-modal glass panel anchored in its surface (Zen) stays a panel. Dialogs and
@@ -1410,7 +1427,7 @@ glyph at its start, and sits under a group heading in the navigation group
 role (12px muted, the count at the right edge). A section's heading on a page
 or in a card (Settings, Inbox, Automations, a Project's Threads and its cards)
 is always the section label (14/600 secondary), never the primary ink or a
-lighter weight. An empty page or section is one line and at most one outline
+lighter weight; Settings' own section heading is the exception (13/600 primary). An empty page or section is one line and at most one outline
 button. Chips above a composer are 24px; the start screens' suggestion chips
 are the one borderless 28px chip (see Start screen).
 

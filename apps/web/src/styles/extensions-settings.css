@@ -1013,12 +1013,37 @@
   margin: var(--oct-space-3) 0;
 }
 
-/* The provider's own words after a command ran or a list was read. Plain text
-   in the alert's ink, wrapped, and bounded so a long answer scrolls. */
-.provider-tooling__output {
-  max-height: 240px;
+/* A list before its data arrives: rows at a Settings row's height. */
+.settings-skeleton__rows {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.settings-skeleton__row {
+  display: block;
+  height: 52px;
+  border-radius: var(--oct-radius-sm);
+}
+
+/* A command's own words: collapsed, then a code well of one fixed height that
+   scrolls, so a long answer never grows the page. */
+.settings-output-well {
+  margin-top: var(--oct-space-2);
+}
+
+.settings-output-well > summary {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  cursor: default;
+}
+
+.settings-output-well > pre {
+  height: 160px;
   overflow: auto;
   margin: var(--oct-space-2) 0 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-code);

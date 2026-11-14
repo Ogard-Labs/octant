@@ -250,7 +250,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   gap: var(--oct-space-1);
   margin: 0;
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
+  font-size: var(--oct-text-xs);
   line-height: 1.45;
   white-space: nowrap;
 }
@@ -265,18 +265,34 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex: 0 0 auto;
 }
 
-/* Plain text links to the page's own sections. Providers & Models has ten:
-   as chips they took two tall rows before the first control, and a row that
-   scrolled sideways with no scrollbar cut "Model endpoints" off at the edge
-   with no sign more followed. Short text links wrap onto a second line
-   instead, which costs one text line, not a row of chips. */
+/* "On this page": one line of quiet chips, never wrapped. The slot is a fixed
+   28px on every page that has one, so chips arriving as sections mount move
+   nothing. A row longer than the page scrolls sideways under a fade at the edge
+   that has more; the section the reader is in is marked as the page scrolls. */
+.settings-view__outline {
+  height: 28px;
+  min-width: 0;
+}
+
 .settings-view__outline ul {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--oct-space-1) var(--oct-space-4);
+  height: 100%;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--oct-space-1);
   margin: 0;
   padding: 0;
+  overflow-x: auto;
   list-style: none;
+  scrollbar-width: none;
+}
+
+.settings-view__outline ul::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-view__outline[data-more="true"] ul {
+  mask-image: linear-gradient(to right, black calc(100% - 32px), transparent);
 }
 
 .settings-view__outline li {
@@ -284,15 +300,50 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 .settings-view__outline-link {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  padding: 0 var(--oct-space-3);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
-  line-height: 1.45;
+  font-size: var(--oct-text-xs);
+  line-height: 1;
   text-decoration: none;
   white-space: nowrap;
 }
 
 .settings-view__outline-link:hover {
+  background: var(--oct-fill-3);
   color: var(--octant-text-primary);
+}
+
+.settings-view__outline-link[aria-current="location"] {
+  background: var(--oct-fill-2);
+  color: var(--octant-text-primary);
+}
+
+/* Buttons on a Settings page are never plain text. An action with words is a
+   button with a fill at rest (the ghost recipe's fill is a hover fill, so on
+   this surface it rests on the chip fill); only an inline link in a sentence is
+   text, in the accent ink with an underline when pointed at. A section's own
+   collapse toggle is its heading and keeps no fill. */
+.settings-view
+  [data-slot="button"][data-variant="ghost"]:not([data-size^="icon"]):not(
+    .settings-collapse__toggle
+  ) {
+  background: var(--oct-fill-4);
+}
+
+.settings-view
+  [data-slot="button"][data-variant="ghost"]:not([data-size^="icon"]):not(
+    .settings-collapse__toggle
+  ):hover {
+  background: var(--oct-fill-3);
+}
+
+.settings-view [data-slot="button"][data-variant="link"] {
+  color: var(--oct-accent);
 }
 
 /* The Saved mark has a slot of its own width, so it arriving and leaving moves
@@ -3141,8 +3192,8 @@ html[data-octant-increased-contrast="true"]
 .settings-view .settings-card-section.settings-card-section--open > h2,
 .settings-view .settings-card-section.settings-card-section--open > .settings-section-head > h2 {
   padding: 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
   line-height: var(--oct-line-label);
@@ -3161,7 +3212,7 @@ html[data-octant-increased-contrast="true"]
   padding: 0 0 var(--oct-space-3);
   line-height: var(--oct-line-detail);
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
+  font-size: var(--oct-text-xs);
 }
 
 /* The grouped card. A row list, a fact list, and a panel body are the three

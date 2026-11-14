@@ -62,7 +62,6 @@ beforeEach(() => {
 function renderLibrary(overrides: Partial<React.ComponentProps<typeof LibraryView>> = {}) {
   const props = {
     items: buildLibrary({ snapshot }),
-    actions: null,
     marketplaceFetchesEnabled: true,
     disabled: false,
     onOpen: vi.fn(),
