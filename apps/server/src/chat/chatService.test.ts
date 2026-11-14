@@ -179,9 +179,7 @@ function settings(): ChatSettings {
     defaultProviderInstanceId: ids.provider,
     defaultModelId: "model-a",
     defaultResearchEnabled: true,
-    // The fixture's provider reports a search of its own, which automatic
-    // routing now prefers; these tests exercise Octant's SearXNG tools.
-    defaultResearchRouting: "searxng",
+    defaultResearchRouting: "automatic",
     searxngBaseUrl: "https://search.example.test",
     defaultPersonalityInstructions: "Be calm.",
     version: 1 as AggregateVersion,
@@ -241,6 +239,16 @@ function withProbe(
       driver.probe ??
       ((input) => Effect.succeed(probeFor?.(String(input.instanceId)) ?? probeResult) as never),
   };
+}
+
+/**
+ * A provider with no search of its own, so automatic routing takes SearXNG
+ * and the turn carries Octant's web-search tool.
+ */
+function searxngResearchProbe(): ProviderProbeResult {
+  return probeFixture({
+    capabilities: { ...probeFixture().capabilities, nativeWebResearch: "unsupported" },
+  });
 }
 
 function openFixture(options?: {
@@ -2873,7 +2881,7 @@ describe("ChatService", () => {
   });
 
   it("creates a thread, uploads an attachment, sends a turn, and confines provider access to scratch", async () => {
-    const { service, fakeDriver, dataDirectory, contextHarness } = openFixture();
+    const { service, fakeDriver, dataDirectory, contextHarness } = openFixture({ probe: searxngResearchProbe() });
     const planSpy = vi.spyOn(contextHarness, "planTurn");
     const userProjectRoot = join(dataDirectory, "user-project-root");
     mkdtempSync(userProjectRoot);
@@ -3258,7 +3266,7 @@ describe("ChatService", () => {
         execute: vi.fn(async () => ({ result: { status: "built" } })),
       },
     }));
-    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext });
+    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext, probe: searxngResearchProbe() });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
@@ -3840,6 +3848,7 @@ describe("ChatService", () => {
             })
           : undefined;
       const { service, fakeDriver } = openFixture({
+        probe: searxngResearchProbe(),
         resolveExtensionSelectionContext,
         ...(resolveAppManagedTools === undefined ? {} : { resolveAppManagedTools }),
       });
@@ -7501,7 +7510,7 @@ describe("ChatService", () => {
   });
 
   it("leaves out the summary the compacted plan priced out of the request", async () => {
-    const probe = probeFixture();
+    const probe = searxngResearchProbe();
     const sent: Array<SentTurn> = [];
     const fixture = openFixture({
       probe,
