@@ -276,7 +276,7 @@ under the fill).
   swatches. The ground stays one layer under the sidebar, the stage, the sheet
   and its scrim, never over any of them. While one is open the layers that hold content (the rail, the
   sidebar, the title band, the workspace and its docks) blur past reading
-  (16px) and dim to 60% over the scrim's own motion (instantly under reduced
+  (12px) and stay at 92% under a scrim of 12% black over the scrim's own motion (instantly under reduced
   motion), and the modal keeps its float fill (66% dark, 78% light, no blur;
   96% where a ground is drawn), so a person changing the appearance in Settings
   watches the window change while no thread text, row, card or composer can be
@@ -463,7 +463,7 @@ fetched, never emoji.
 
 | Token                    | Value                                                  | Where it lives                                                                                                                                   |
 | ------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--octant-pane-line`     | ink 10% (srgb); strong border under increased contrast | The framed panel's outline and every pane divider                                                                                                |
+| `--octant-pane-line`     | ink 10% mixed into the pane's opaque colour (oklab); strong border under increased contrast | The framed panel's outline and every pane divider                                                                                                |
 | `--oct-hairline`         | ink 10% (oklab)                                        | Rows in a card, section rules, the title band's marks, tile bar rules, the edge of a card, a Settings group, an empty state and an approval card |
 | `--oct-hairline-strong`  | ink 14% (oklab)                                        | A divider that must be found (the rail's divider under a selected face)                                                                          |
 | `--oct-border-faint`     | ink 5% (srgb)                                          | The composer's outline                                                                                                                           |
@@ -674,15 +674,18 @@ hiddenInset` and no custom `trafficLightPosition` (it would grow the native
 **The framed panel.** Under the band the sidebar and the stage (the thread, its
 dock and the bottom panel) sit in one panel:
 
-- One 1px outline in `--octant-pane-line` at `--oct-radius-md` on every corner,
+- One 1px outline in `--octant-pane-line` (ink 10% mixed into the pane's opaque
+  colour, so it is one opaque colour over the sidebar, the stage and the ground)
+  at `--oct-radius-md` on every corner,
   drawn by the shell's `::after` above the content (z-index 6), its top edge on
   the band's lower edge and 4px (`--octant-panel-gap`, `--oct-space-1`) from the
   window's right and bottom edges. It has no fill and no shadow. The line
   starts and ends on itself: no open end at the rail or the window edge.
 - Inside, full-height 1px lines split the sidebar, the stage and the dock and
-  meet the outline at both ends. A pane draws its line on its top and left
-  edges only, so a shared edge is drawn once; the top one lies under the
-  outline and is clipped away.
+  meet the outline at both ends. A pane draws its line on its left edge, and on
+  its top edge only where it starts below another pane (the bottom panel); the
+  stage and the dock start on the outline's top edge, which draws it, so every
+  edge is drawn once at one strength.
 - The stage clips to the outline's inside (`clip-path: inset(calc(38px + 1px)
 1px 1px …)` with the inner radius), so no pane paints over a rounded corner.
 - Opaque, the sidebar paints `--octant-sidebar-fill` (its colour at 82%, so the
