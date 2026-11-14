@@ -1,6 +1,8 @@
 import {
+  MAX_BROWSER_ELEMENT_MARKUP_CHARACTERS,
   MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS,
   decodeProductFeedbackElement,
+  type BrowserElementMarkup,
   type ProductFeedbackElement,
 } from "@octant/contracts/product-feedback";
 import { redactedBrowserUrl, readBrowserFeedbackElement } from "@octant/domain";
@@ -15,6 +17,7 @@ export type BrowserFeedbackPointObservation =
       readonly cropDataUrl?: string;
       readonly url?: string;
       readonly title?: string;
+      readonly markup?: BrowserElementMarkup;
     }
   | { readonly status: "no-element" }
   | {
@@ -156,6 +159,13 @@ export async function captureBrowserFeedbackPoint(
     ) {
       throw new Error("Feedback description is invalid.");
     }
+    const markupRead = record(description.markup);
+    const markup =
+      typeof markupRead?.html === "string" &&
+      typeof markupRead.truncated === "boolean" &&
+      markupRead.html.length <= MAX_BROWSER_ELEMENT_MARKUP_CHARACTERS
+        ? { html: markupRead.html, truncated: markupRead.truncated }
+        : undefined;
     const crop = record(description.cropBounds);
     if (
       crop === undefined ||
@@ -212,6 +222,7 @@ export async function captureBrowserFeedbackPoint(
       element: selected,
       cropBlocked: description.cropBlocked || opaqueShadow,
       cropBounds: { x: crop.x, y: crop.y, width: crop.width, height: crop.height },
+      ...(markup === undefined ? {} : { markup }),
       ...(typeof result.title === "string" ? { title: result.title.trim().slice(0, 1_024) } : {}),
     };
   };
@@ -271,6 +282,7 @@ export async function captureBrowserFeedbackPoint(
       status: "described",
       element: { ...before.element, context: { ...context, captureId, omissions } },
       ...(cropDataUrl === undefined ? {} : { cropDataUrl }),
+      ...(before.markup === undefined ? {} : { markup: before.markup }),
       url: redactedBrowserUrl(before.frame.url).slice(0, 4_096),
       ...(before.title === undefined || before.title.length === 0 ? {} : { title: before.title }),
     };

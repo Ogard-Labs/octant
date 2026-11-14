@@ -16,12 +16,16 @@ export interface BrowserFeedbackElementRead {
     readonly height: number;
   };
   readonly cropBlocked: boolean;
+  /** The element's own markup for the Browser element picker; a note never keeps it. */
+  readonly markup: { readonly html: string; readonly truncated: boolean };
 }
 
 /**
  * Fixed host script, serialized into the document's isolated world. It reads
- * one selected element and a small structural neighborhood, never outerHTML or
- * form/editable values. The surrounding host owns origin/node/capture checks.
+ * one selected element and a small structural neighborhood, never form or
+ * editable values. Its markup is a bounded copy with those values, editable
+ * text and script/style bodies left out. The surrounding host owns
+ * origin/node/capture checks.
  */
 export function readBrowserFeedbackElement(argument: {
   readonly x: number;
@@ -202,6 +206,42 @@ export function readBrowserFeedbackElement(argument: {
       }
     }
   }
+  // A bounded copy, not outerHTML of the live node: a picked <body> would
+  // otherwise serialize the whole page, and the live markup carries typed
+  // values (`value` on inputs, editable text) the reads above never return.
+  const markupLimit = 4_096;
+  let nodeBudget = 400;
+  let markupCut = false;
+  const withheld = "script, style, noscript, template, textarea, select";
+  const copyOf = (source: Element): Element | null => {
+    const copy = source.cloneNode(false);
+    if (!(copy instanceof Element)) return null;
+    if (copy.matches("input, option, button, select, textarea")) copy.removeAttribute("value");
+    if (
+      source.matches(withheld) ||
+      source.matches("[contenteditable]:not([contenteditable=false])")
+    )
+      return copy;
+    for (const child of source.childNodes) {
+      if (nodeBudget <= 0) {
+        markupCut = true;
+        break;
+      }
+      nodeBudget -= 1;
+      if (child.nodeType === Node.TEXT_NODE) {
+        copy.appendChild(document.createTextNode((child.textContent ?? "").slice(0, 2_048)));
+      } else if (child instanceof Element) {
+        const nested = copyOf(child);
+        if (nested !== null) copy.appendChild(nested);
+      }
+    }
+    return copy;
+  };
+  const serialized = copyOf(element)?.outerHTML ?? "";
+  const markup = {
+    html: serialized.slice(0, markupLimit),
+    truncated: markupCut || serialized.length > markupLimit,
+  };
   const name = element.getAttribute("aria-label")?.trim();
   const role = element.getAttribute("role")?.trim();
   return {
@@ -232,5 +272,6 @@ export function readBrowserFeedbackElement(argument: {
     },
     cropBounds,
     cropBlocked,
+    markup,
   };
 }

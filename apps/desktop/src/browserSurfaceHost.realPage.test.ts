@@ -2473,6 +2473,10 @@ describe.skipIf(chrome === undefined)(
         } else {
           expect(result.element.selector).toBe("#feedback-save");
           expect(result.element.text).toBe("Save changes");
+          expect(result.markup).toEqual({
+            html: expect.stringMatching(/^<button id="feedback-save"[^>]*>Save changes<\/button>$/),
+            truncated: false,
+          });
           expect(result.element.context?.styles).toContainEqual({
             property: "color",
             value: "rgb(10, 20, 30)",

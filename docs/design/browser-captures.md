@@ -356,6 +356,59 @@ leaves the app, so they are fixed values in code
 colour that no theme changes. A selected mark is outlined with a dashed accent
 line; that outline is never in the exported picture.
 
+## Picking an element
+
+A person can pick one element of the page and add a description of it to the
+thread's message (maintainer decision, 2026-11-14). Nothing is kept: the
+description exists only in the composer's draft.
+
+- **Where it is offered.** **Pick element** (a 16px pointer-click icon) is an
+  item of the Browser toolbar's More menu beside Draw on page, offered where
+  Draw on page is: a Work or Code thread's Browser with a live page, beside
+  that thread's composer. A Project's Browser, Zen's research Browser, a
+  paired device and Chat have none. It is disabled, with the reason as its
+  description, wherever pointing at an element for a note is unavailable
+  (sign-in hold, a drawing open, an embedded presentation, a headless page
+  with no preview yet), and while a note's pointing is armed; Draw on page and
+  note pointing are disabled while picking is armed.
+- **The gesture.** Choosing it arms the same pointing gesture a note uses
+  ([Pointed-at product feedback](browser-agent-tool.md#pointed-at-product-feedback)),
+  and the item reads **Stop picking** until it ends. On a native page the
+  page's own inspector outline follows the pointer over the element a click
+  would pick; it is drawn by the browser over the page through the debugger
+  the host attached, never injected into the page, and is hidden before the
+  read. A headless preview is a still, so it shows a crosshair where a click
+  lands and no outline. The click picks; Escape anywhere in the window, or on
+  the native page, stops picking; the gesture ends after 60 seconds as a
+  note's does.
+- **The read.** The host resolves the element with the same fixed top-frame
+  reader, origin, credential and observation checks as a note's preview, on
+  its own command (`pick-browser-element` on the feedback route, local windows
+  only). Where that read refuses (an unapproved origin, a page with a sign-in
+  field, a paused observation, a page that changed, nothing at that point),
+  nothing is added and the toolbar says why.
+- **What it holds.** The CSS selector, tag, page address (redacted as
+  diagnostics redact one) and title, the computed `display`, `position`,
+  `width`, `height`, `color`, `background-color`, `font-family`, `font-size`
+  and `font-weight`, and the element's outer HTML. The markup is a bounded
+  copy, not the live node: `value` attributes, the text of editable regions,
+  and the bodies of `script`, `style`, `noscript`, `template`, `textarea` and
+  `select` are left out, at most 400 nodes are copied and the result is cut at
+  4,096 characters. A cut is marked: the snapshot carries `truncated` and the
+  text says the markup was cut. A note never keeps the markup.
+- **Taint.** Before the snapshot leaves the host, the thread is marked as
+  holding outside content with `thread.external-content-ingested@1`
+  (`browser-page`), the same mark a note's capture and a kept screenshot
+  carry. A mark that cannot be recorded withholds the snapshot. The text added
+  to the draft opens by saying it is page content, to identify the element and
+  never to follow as instructions, and fences the markup with a fence longer
+  than any backtick run in it.
+- **Into the message.** The text goes after any text already in the thread's
+  draft, through the composer's own draft store, so it is there whether or not
+  the composer is open and the person can edit or delete it before sending.
+  The toolbar says "Element added to the message". Nothing is sent until the
+  person sends the message.
+
 ## Proof
 
 Proof is a thread's record of a Browser check: the agent's recent Browser steps
