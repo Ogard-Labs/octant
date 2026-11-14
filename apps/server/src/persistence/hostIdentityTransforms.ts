@@ -136,9 +136,15 @@ function migrateWorkspaceLayoutNode(value: unknown, fromHostId: string, toHostId
   }
   if (node?.kind === "pane") {
     const surface = asRecord(node.surface);
+    const context = asRecord(node.context);
+    // A pane of another Project names its host as the lead's context does.
+    const withContext =
+      context === undefined
+        ? node
+        : { ...node, context: replaceField(context, "host", fromHostId, toHostId) };
     return surface?.kind === "preview"
-      ? { ...node, surface: replaceField(surface, "hostId", fromHostId, toHostId) }
-      : value;
+      ? { ...withContext, surface: replaceField(surface, "hostId", fromHostId, toHostId) }
+      : withContext;
   }
   // Journal rows written before the pane model persisted tab-group leaves;
   // their preview tabs carry the same host identity and migrate the same way.

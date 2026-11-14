@@ -280,6 +280,8 @@ export async function readCanvasForWindow(
 export function resolveCanvasActiveContext(bootstrap: ShellBootstrap): CanvasActiveContext {
   const { workspace } = bootstrap;
   const mode = workspace.activeMode;
+  // A Canvas rests only in its lead's Project (another Project's is not
+  // placed), so the lead is what a named Canvas is judged against.
   return { mode, projectId: workspace.contextByMode[mode].projectId };
 }
 

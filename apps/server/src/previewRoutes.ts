@@ -60,6 +60,8 @@ export interface PreviewActiveContext {
 export function resolvePreviewActiveContext(bootstrap: ShellBootstrap): PreviewActiveContext {
   const { workspace } = bootstrap;
   const mode = workspace.activeMode;
+  // A preview rests only in its lead's Project (another Project's is not
+  // placed), so the lead is what a named preview is judged against.
   const context = workspace.contextByMode[mode];
   const activeThreadId =
     mode === "code"
