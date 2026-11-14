@@ -40,10 +40,13 @@ and draws Drift, the nearest to the drifting field it drew; a Picture scene
 without a photo draws Drift too. Every scene is generated in code from a fixed
 seed, so it looks the same each time, and none ships an image. Each scene is laid
 out for what the window shows (a start screen that scrolls makes the ground as
-tall as its content) and dimmed toward the heading in the middle and the composer
-at the foot, which keep a fifth of its strength (Ridges keeps half, since its composer is
-opaque and its heading large), back to full about a third of the page out, so
-the brightest cells stay away from text. Motion is slow: ridges drift
+tall as its content) and dimmed behind the start screen's content column, across its
+full width and height, to a third of its strength (Ridges keeps half there, since its
+composer is opaque and its crests are the picture), back to full 140px past the
+column's edge, so the brightest cells stay away from text. Under the sidebar, where a
+ground runs there, every scene keeps a third. Ridges draws dark slopes in a fine dither
+that thins and fades downward under bright crests, and keeps the sky behind the heading
+and its subtitle empty, so the sun sits low toward a corner and no cell lies under text. Motion is slow: ridges drift
 a few cells a second, the sun and the burst breathe, the streaks slide. It runs at
 fifteen frames a second, stops while the document is hidden or the ground is off
 screen, caps its backing store at twice the display ratio, sets up in idle time,
@@ -71,9 +74,9 @@ shows on a fresh install: a canvas of small monospace letters and digits in the
 theme's primary ink, at most 15% opaque, that shows only inside slowly drifting
 patches and leaves the rest empty. Three patterns (round blotches, long
 horizontal currents, rings) take turns every twenty seconds and cross-fade over
-the last four. The middle of the page (of what the window shows, when the screen scrolls) is dimmed to 45% and comes back to full
-strength at 30% of the page's size out, so the heading and the composer stay on
-a calm page. The glyphs are painted once into a layer (a few per cent swap each
+the last four. Behind the start screen's content column, across its full width and height, the field is dimmed to a third of its
+strength (and under the sidebar where it runs there), and comes back to full strength 140px past the column's
+edge, so the heading, the cards and the composer stay on a calm page. The glyphs are painted once into a layer (a few per cent swap each
 frame), and a frame only rewrites one alpha value per cell, so the cost does not
 grow with the number of glyphs. It runs at about fifteen frames a second, and
 stops while the document is hidden or the field is off screen. Its backing store

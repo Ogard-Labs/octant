@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRipple } from "./appBackdropCharacters";
 import {
-  calmShare,
   cellWave,
   parseColor,
   printLevel,
@@ -233,18 +232,6 @@ describe("the two-tone print", () => {
       }
     }
     expect([...alphas].sort((a, b) => a - b)).toEqual([0, 167, 333, 500]);
-  });
-
-  it("keeps the middle of the page calmer than its edges", () => {
-    const centre = calmShare(720, 450, 1440, 900);
-    const edge = calmShare(40, 860, 1440, 900);
-    expect(centre).toBeLessThan(0.3);
-    expect(edge).toBeGreaterThan(0.95);
-  });
-
-  it("lets a floor of half keep more of the scene behind the heading", () => {
-    expect(calmShare(720, 450, 1440, 900, 0.5)).toBeCloseTo(0.5);
-    expect(calmShare(40, 860, 1440, 900, 0.5)).toBeGreaterThan(0.95);
   });
 
   it("gives only the bright warm cells of a picture the accent", () => {

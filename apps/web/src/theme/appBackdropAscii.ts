@@ -7,12 +7,19 @@ import {
   rippleBrightness,
   type Ripple,
 } from "./appBackdropCharacters";
+import {
+  COLUMN_SHARE,
+  columnShare,
+  readContentColumns,
+  readSidebarColumns,
+  type ContentColumn,
+} from "./appBackdropColumn";
 import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
 
 /**
  * The character ground: a field of small monospace letters and digits in the
  * theme's text ink, visible only inside slowly drifting patches and dimmed
- * toward the middle of the page so the heading and the composer stay clean.
+ * behind the start screen's content column so its text and cards stay clean.
  *
  * It is cheap on purpose. The glyphs are painted once into a layer (and a few
  * of them swap each frame); a frame only rewrites one alpha byte per cell in a
@@ -37,9 +44,8 @@ const FONT_FAMILY = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 
 /** The ink at its strongest. The field is texture, never text to be read. */
 export const PEAK_ALPHA = 0.15;
-/** The middle of the page keeps this share of the ink; it is full at 30% out. */
-export const CENTRE_SHARE = 0.45;
-const CENTRE_REACH = 0.3;
+/** Behind the content column the ink keeps this share; it is full past the margin. */
+export const CENTRE_SHARE = COLUMN_SHARE;
 /** Value noise below the first edge is empty, above the second it is full. */
 const PATCH_LOW = 0.52;
 const PATCH_HIGH = 0.82;
@@ -154,13 +160,6 @@ export function patchStrength(column: number, row: number, t: number): number {
   return smoothstep(PATCH_LOW, PATCH_HIGH, value);
 }
 
-/** The share of ink a cell keeps once the middle of the page is dimmed. */
-export function centreShare(x: number, y: number, width: number, height: number): number {
-  if (width <= 0 || height <= 0) return 1;
-  const distance = Math.hypot((x - width / 2) / width, (y - height / 2) / height);
-  return CENTRE_SHARE + (1 - CENTRE_SHARE) * smoothstep(0, CENTRE_REACH, distance);
-}
-
 /** The backing-store ratio for a field of this CSS size on this display. */
 export function fieldPixelRatio(width: number, height: number, display: number): number {
   const capped = Math.min(MAX_RATIO, display);
@@ -176,7 +175,7 @@ interface Surface {
   readonly layer: HTMLCanvasElement;
   readonly mask: HTMLCanvasElement;
   readonly maskImage: ImageData;
-  /** The centre dimming per cell, which only the size changes. */
+  /** The content column's dimming per cell, which only the size changes. */
   readonly shares: Float32Array;
   ink: string;
 }
@@ -186,6 +185,7 @@ function createSurface(
   width: number,
   height: number,
   ink: string,
+  contentColumn: ReadonlyArray<ContentColumn>,
 ): Surface | undefined {
   const columns = Math.max(1, Math.ceil(width / CELL_WIDTH));
   const rows = Math.max(1, Math.ceil(height / CELL_HEIGHT));
@@ -202,20 +202,13 @@ function createSurface(
   if (maskContext === null) return undefined;
   const glyphs = new Uint8Array(columns * rows);
   const shares = new Float32Array(columns * rows);
-  // A start screen that scrolls makes the field as tall as its content, whose
-  // middle is out of sight; the heading and the composer sit near the middle of
-  // what the window shows, so the dimming is measured against that.
-  const visibleHeight = Math.min(rows * CELL_HEIGHT, window.innerHeight);
+  // The column's text and cards run the field's full height, so every row is
+  // dimmed alike; only the distance from the column's edges varies.
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const index = row * columns + column;
       glyphs[index] = Math.floor(Math.random() * GLYPHS.length);
-      shares[index] = centreShare(
-        (column + 0.5) * CELL_WIDTH,
-        (row + 0.5) * CELL_HEIGHT,
-        columns * CELL_WIDTH,
-        visibleHeight,
-      );
+      shares[index] = columnShare((column + 0.5) * CELL_WIDTH, contentColumn);
     }
   }
   return {
@@ -323,7 +316,10 @@ export function runAsciiField(
       surface = undefined;
       return;
     }
-    surface = createSurface(canvas, rect.width, rect.height, readInk());
+    surface = createSurface(canvas, rect.width, rect.height, readInk(), [
+      ...readContentColumns(canvas, rect.width),
+      ...readSidebarColumns(canvas),
+    ]);
     if (surface !== undefined) paintLayer(surface, surface.layer, surface.ink);
     fieldAlpha = new Float32Array(surface === undefined ? 0 : surface.columns * surface.rows);
     fieldAt = Number.NEGATIVE_INFINITY;

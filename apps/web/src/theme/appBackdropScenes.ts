@@ -55,17 +55,19 @@ const RIDGE_COUNT = 5;
 
 /**
  * Five layered ridges, far to near. Each is a solid shape: a bright crest a few
- * cells thick, and a slope under it filled with shading that falls off
- * downward, so a nearer ridge occludes the one behind. Near layers are brighter
- * and larger. A broad accent sun sits on the horizon to one side, with a valley
- * cut beneath it, and the crests near it catch its light.
+ * cells thick, and a dark slope under it, dithered finely and sparser and
+ * fainter the further it falls, so a nearer ridge occludes the one behind.
+ * Near layers are brighter and larger. An accent sun sits low on the horizon
+ * toward one corner, with a valley cut beneath it, and the crests near it
+ * catch its light. The sky over the heading and the subtitle under it is kept
+ * empty, so no cell of the sun's halo sits under text.
  */
 function createRidges(columns: number, rows: number, seed: number): Scene {
   const tops = new Float32Array(RIDGE_COUNT * columns);
   const sunOnRight = hashUnit(seed, 1) >= 0.5;
   const horizon = rows * 0.56;
-  const sunX = columns * (sunOnRight ? 0.78 : 0.22);
-  const sunY = horizon - rows * 0.02;
+  const sunX = columns * (sunOnRight ? 0.84 : 0.16);
+  const sunY = horizon + rows * 0.02;
   // How near a column is to the sun, in [0, 1]: it lights crests and sinks the
   // far ridges into a valley so the sun's core stays in view.
   const nearSun = new Float32Array(columns);
@@ -95,10 +97,18 @@ function createRidges(columns: number, rows: number, seed: number): Scene {
 
   const sunGlow = (column: number, row: number): number => {
     const dx = (column - sunX) / (columns * 0.15 * breath);
-    const dy = (row - sunY) / (rows * 0.17 * breath);
+    const dy = (row - sunY) / (rows * 0.15 * breath);
     const squared = dx * dx + dy * dy;
     // A core that saturates to full accent inside a wide dithered halo.
     return Math.min(1, Math.exp(-squared * 1.2) * 1.5);
+  };
+
+  // The sky behind the heading and its subtitle: the middle of the page, from
+  // above the heading to just under the subtitle, feathered at its edges.
+  const quietSky = (column: number, row: number): number => {
+    const across = Math.abs(column / columns - 0.5);
+    const outsideRows = Math.max(0.36 - row / rows, row / rows - 0.53, 0);
+    return (1 - smoothstep(0.22, 0.28, across)) * (1 - smoothstep(0, 0.05, outsideRows));
   };
 
   return {
@@ -116,8 +126,9 @@ function createRidges(columns: number, rows: number, seed: number): Scene {
       if (ridge < 0) {
         // Sky: mostly empty, a sparse haze near the horizon, and the sun.
         const haze = Math.exp(-Math.max(0, horizon - row) / (rows * 0.05)) * 0.22;
-        out.ink = Math.min(1, haze + sun * 0.25);
-        out.glow = sun;
+        const open = 1 - quietSky(column, row);
+        out.ink = Math.min(1, haze + sun * 0.25) * open;
+        out.glow = sun * open;
         return;
       }
       const depth = ridge / (RIDGE_COUNT - 1);
@@ -126,10 +137,11 @@ function createRidges(columns: number, rows: number, seed: number): Scene {
       const fade = 0.55 + 0.45 * depth;
       // The crest: full ink for a cell or two, then gone by the fourth.
       const edge = 1 - smoothstep(1.2, 3.6, below);
-      // The slope: dense under the crest and falling off with depth below it,
-      // so each ridge reads as a filled shape against the one in front.
-      const fill = (0.4 + 0.15 * depth) * Math.exp(-below / (rows * (0.02 + 0.02 * depth)));
-      out.ink = Math.min(1, Math.max(fade * edge, (0.6 + 0.4 * depth) * fill));
+      // The slope: dark, a fine dither under the crest that thins out and fades
+      // with depth below it, so each ridge reads as a shape against the one in
+      // front without a grey fill.
+      const fill = (0.28 + 0.1 * depth) * Math.exp(-below / (rows * (0.014 + 0.014 * depth)));
+      out.ink = Math.min(1, Math.max(fade * edge, (0.5 + 0.5 * depth) * fill));
       // The sun's rim light on crests fades with distance from it, and warms
       // the upper slope it can see.
       const lit = (nearSun[x] ?? 0) * (0.45 + 0.55 * fade);

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CENTRE_SHARE,
   PEAK_ALPHA,
-  centreShare,
   fieldPixelRatio,
   patchStrength,
   runAsciiField,
 } from "./appBackdropAscii";
+import { COLUMN_MARGIN, columnShare, readContentColumns } from "./appBackdropColumn";
 
 /**
  * Canvases that record what a frame does. Each frame copies the glyph layer
@@ -170,9 +170,38 @@ describe("character ground", () => {
     expect(PEAK_ALPHA).toBeLessThanOrEqual(0.18);
   });
 
-  it("dims the middle of the page and is at full strength well away from it", () => {
-    expect(centreShare(500, 300, 1000, 600)).toBeCloseTo(CENTRE_SHARE, 5);
-    expect(centreShare(0, 0, 1000, 600)).toBe(1);
+  it("dims the ground behind the content column to a third and leaves the edges at full strength", () => {
+    const column = { left: 300, right: 700 };
+    expect(columnShare(500, [column])).toBeCloseTo(CENTRE_SHARE, 5);
+    expect(columnShare(300, [column])).toBeCloseTo(CENTRE_SHARE, 5);
+    expect(columnShare(column.left - COLUMN_MARGIN, [column])).toBe(1);
+    expect(columnShare(0, [column])).toBe(1);
+    expect(columnShare(column.right - 60 + COLUMN_MARGIN / 2, [column])).toBeGreaterThan(
+      CENTRE_SHARE,
+    );
+  });
+
+  it("measures the content column from the start screen it lies behind", () => {
+    document.body.innerHTML =
+      '<div id="stage"><div class="app-backdrop"><canvas id="ground"></canvas></div><div class="welcome"></div></div>';
+    const rect = (left: number, width: number) =>
+      ({
+        left,
+        right: left + width,
+        width,
+        top: 0,
+        bottom: 10,
+        height: 10,
+        x: left,
+        y: 0,
+      }) as DOMRect;
+    const ground = document.querySelector("canvas");
+    const content = document.querySelector<HTMLElement>(".welcome");
+    if (ground === null || content === null) throw new Error("The fixture lost its elements.");
+    ground.getBoundingClientRect = () => rect(100, 1000);
+    content.getBoundingClientRect = () => rect(300, 600);
+    expect(readContentColumns(ground, 1000)).toEqual([{ left: 200, right: 800 }]);
+    document.body.innerHTML = "";
   });
 
   it("caps the backing store by display ratio and by area", () => {

@@ -8,6 +8,7 @@ import {
   rippleBrightness,
   type Ripple,
 } from "./appBackdropCharacters";
+import { columnShare, readContentColumns, readSidebarColumns } from "./appBackdropColumn";
 import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
 import { createScene, type SceneKind, type SceneSample } from "./appBackdropScenes";
 
@@ -51,37 +52,14 @@ const WAVE_FRAME_MS = 1000 / 24;
 const WAVE_SECONDS = 1.9;
 /** The backing store never exceeds this ratio, however dense the display. */
 const MAX_RATIO = 2;
-/** The share of a scene that survives at the page's centre, where the heading sits. */
-const CALM_FLOOR = 0.2;
-/** Ridges keeps half its strength there: the composer is opaque, and the heading is large. */
+/** Behind the content column a scene keeps a third of its strength. */
+const CALM_FLOOR = 1 / 3;
+/** Ridges keeps half: the composer is opaque, and the crests are the picture. */
 const RIDGES_CALM_FLOOR = 0.5;
-/** How far from the centre the scene is back at full strength, as a share of the page. */
-const CALM_REACH = 0.36;
 
 function smoothstep(low: number, high: number, value: number): number {
   const x = Math.min(1, Math.max(0, (value - low) / (high - low)));
   return x * x * (3 - 2 * x);
-}
-
-/**
- * The share of a cell's strength that survives at (`x`, `y`) on a page of this
- * size: the heading in the middle and the composer at the foot keep a fifth,
- * and the page is back at full strength about a third of its size out.
- */
-export function calmShare(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  floor: number = CALM_FLOOR,
-): number {
-  if (width <= 0 || height <= 0) return 1;
-  const across = (x - width / 2) / width;
-  // Two places keep text over the ground: the heading near the middle, and
-  // the composer docked at the foot.
-  const heading = Math.hypot(across, ((y - height * 0.5) / height) * 0.85);
-  const composer = Math.hypot(across, ((y - height * 0.94) / height) * 1.4);
-  return floor + (1 - floor) * smoothstep(0, CALM_REACH, Math.min(heading, composer));
 }
 
 /**
@@ -404,22 +382,21 @@ export function runMovingPrint(
       source.scene === undefined
         ? undefined
         : createScene(source.scene, columns, sceneRows, source.seed);
-    // A scene is calmed toward the middle of what the window shows; a colour
-    // picture keeps every cell.
+    // A scene is calmed behind the start screen's content column, across its
+    // full height; a colour picture keeps every cell.
     shares = new Float32Array(columns * rows);
-    for (let row = 0; row < rows; row += 1) {
-      for (let column = 0; column < columns; column += 1) {
-        shares[row * columns + column] =
-          scene === undefined && twoTone === undefined
-            ? 1
-            : calmShare(
-                (column + 0.5) * cell,
-                (row + 0.5) * cell,
-                columns * cell,
-                visibleHeight,
-                source.scene === "ridges" ? RIDGES_CALM_FLOOR : CALM_FLOOR,
-              );
-      }
+    const contentColumn = readContentColumns(canvas, columns * cell);
+    const sidebarColumn = readSidebarColumns(canvas);
+    const floor = source.scene === "ridges" ? RIDGES_CALM_FLOOR : CALM_FLOOR;
+    for (let column = 0; column < columns; column += 1) {
+      const share =
+        scene === undefined && twoTone === undefined
+          ? 1
+          : Math.min(
+              columnShare((column + 0.5) * cell, contentColumn, floor),
+              columnShare((column + 0.5) * cell, sidebarColumn, CALM_FLOOR),
+            );
+      for (let row = 0; row < rows; row += 1) shares[row * columns + column] = share;
     }
   };
 
