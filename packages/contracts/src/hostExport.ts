@@ -12,7 +12,7 @@ import { CanvasDefinition, CanvasId } from "./canvas";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
-import { PersonInstructionsText } from "./octantInstructions";
+import { PersonInstructionsText, ProjectInstructionsText } from "./octantInstructions";
 import { PersonMemoryEntry } from "./personMemory";
 import { ProjectId, ProjectMemoryView } from "./projects";
 import { ThreadExportBundle } from "./threadExport";
@@ -129,6 +129,15 @@ const pageItems = <A, I, R>(item: Schema.Schema<A, I, R>) =>
 /** The instructions the person wrote for Octant, exactly as written. */
 export const HostExportInstructions = Schema.Struct({
   yours: PersonInstructionsText,
+  /** Each Project's instructions that are not empty. Absent in older cuts. */
+  projects: Schema.optional(
+    pageItems(
+      Schema.Struct({
+        projectId: ProjectId,
+        instructions: ProjectInstructionsText,
+      }).annotations(strict),
+    ),
+  ),
 }).annotations(strict);
 export type HostExportInstructions = typeof HostExportInstructions.Type;
 

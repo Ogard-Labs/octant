@@ -243,7 +243,10 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
       listProjects: () => [{ projectId, name: "Smoke project", type: "chat", lifecycle: "active" }],
       readProjectMemory: (id) => readProjectMemory(connection, decodeProjectId(id)),
       personMemoryEntries: () => [],
-      instructions: () => ({ yours: "Hand long research to a Work thread." }),
+      instructions: () => ({
+        yours: "Hand long research to a Work thread.",
+        projects: [{ projectId, instructions: "Ship from main only." }],
+      }),
       listCanvases: () => [],
       readSettings: () => ({ chatEnabled: true, workEnabled: true, themeMode: "dark" }),
       listProjectIds: () => [String(projectId)],
@@ -300,7 +303,12 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
     const firstBundle = assembleHostExportBundle(first.pages);
     expect(firstBundle.kind).toBe("exported");
     expect(firstBundle).toMatchObject({
-      bundle: { instructions: { yours: "Hand long research to a Work thread." } },
+      bundle: {
+        instructions: {
+          yours: "Hand long research to a Work thread.",
+          projects: [{ projectId, instructions: "Ship from main only." }],
+        },
+      },
     });
     if (firstBundle.kind !== "exported") return;
     expect(firstBundle.bundle.octant.format).toBe("octant.host-export/1");

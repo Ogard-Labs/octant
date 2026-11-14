@@ -12,9 +12,10 @@ owns the coordinator role ([Coordinator threads](coordinator-threads.md)).
 Status: partly built. Built: the contracts and journal events, your
 instructions as a `person-instructions` block in Chat, Work, and Code on every
 provider and in Octant Harness's system prompt, the route that changes them,
-the inspector label, Export my data, and the Your instructions field in
-Settings › General. Designed, not built: Project instructions and orchestration
-(delivery slices 3 and 4).
+the inspector label, Export my data, the Your instructions field in
+Settings › General, and Project instructions with their `project-instructions`
+block and field beside Project memory. Designed, not built: orchestration
+(delivery slice 4).
 
 ## Why
 
@@ -131,8 +132,14 @@ it. Limiting the texts to what only Octant knows keeps Octant a supplement.
 - On this host only. They are not synced to a hub or spoke and travel with no
   thread, the rule person memory follows.
 - Export my data carries them: an `instructions` page with the three texts.
-- Deleting a Project deletes its Project instructions. Turning off a text
+- Deleting a Project deletes its Project instructions. A Project is archived
+  rather than removed, so this is the Project-scoped purge that already erases
+  Project memory: it erases the `project-instructions` aggregate from the
+  journal and the host stops sending the block at once. Turning off a text
   (clearing it) sends nothing from the next session on.
+- A Project block's key names its Project, so a thread is never sent another
+  Project's text as a revision of its own. A change for a Project that is not
+  on this host is refused.
 
 ## Settings
 

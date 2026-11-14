@@ -420,7 +420,10 @@ export function wireChat(deps: ChatDependencies) {
       // The host setting, read when each attempt starts.
       toolStepsPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).toolStepsPerTurn,
-      octantInstructionBlocks: () => octantInstructions.contextBlocks(),
+      octantInstructionBlocks: ({ thread }) =>
+        octantInstructions.contextBlocks({
+          projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+        }),
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "chat",
