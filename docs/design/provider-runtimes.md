@@ -702,6 +702,17 @@ pre-tool grants (16) stay. A repeat of a forgotten id passes the whole gate
 again. Rationale: the earlier caps of 64 calls a turn and 256 a session
 failed long turns that Claude Code runs to the end in its own app.
 
+#### Image input
+
+Claude reports `nativeAttachments` as `supported` when its catalog has a model
+that takes images, which every Claude model does (maintainer decision,
+2026-11-14: it was `unsupported`). A turn's image attachments go to the
+runtime beside the message text as base64 `image` content blocks in the
+streamed user message; JPEG, PNG, GIF and WebP are the types the Messages API
+takes, and a turn with any other image type is refused before it is sent.
+Work, Code and Chat admit attachments by this capability as they do for
+Codex and OpenCode.
+
 #### Background commands and runtime-started turns
 
 `Bash` with `run_in_background` and `Monitor` command watches run outside

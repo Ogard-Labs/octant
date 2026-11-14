@@ -55,7 +55,9 @@ import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claud
 import {
   claudeNativeQueryOptions,
   isClaudeEffortLevel,
+  CLAUDE_IMAGE_MEDIA_TYPES,
   type ClaudeAgentSdkPort,
+  type ClaudeImageInput,
   type ClaudeDecodedMessage,
   type ClaudeEffortLevel,
   type ClaudeModelInfo,
@@ -195,6 +197,23 @@ function claudeTurnMessage(
     }),
     context: renderOctantInstructions(instructions),
   };
+}
+
+/**
+ * A turn's attachments as Claude image blocks, or undefined when one is a
+ * type the Messages API refuses; the capability check has already refused
+ * anything that is not an image.
+ */
+function claudeImages(
+  attachments: ProviderTurnInput["attachments"],
+): ReadonlyArray<ClaudeImageInput> | undefined {
+  const images: ClaudeImageInput[] = [];
+  for (const attachment of attachments) {
+    const mediaType = CLAUDE_IMAGE_MEDIA_TYPES.find((type) => type === attachment.mediaType);
+    if (mediaType === undefined) return undefined;
+    images.push({ mediaType, data: Buffer.from(attachment.bytes).toString("base64") });
+  }
+  return images;
 }
 
 /**
@@ -1663,6 +1682,12 @@ function observation(
       input.readiness === "ready"
         ? {
             ...availableCapabilities,
+            // Claude Code takes images as content blocks beside the message.
+            nativeAttachments: (input.models ?? []).some((model) =>
+              model.inputModalities.includes("image"),
+            )
+              ? "supported"
+              : "unsupported",
             sessionCompaction: {
               chat: sessionCompaction,
               work: sessionCompaction,
@@ -3684,6 +3709,12 @@ function makeConnection(
           model,
         );
         if (rejected !== undefined) return Effect.fail(rejected);
+        const images = claudeImages(input.attachments);
+        if (images === undefined) {
+          return Effect.fail(
+            failure("unsupported", "Claude takes JPEG, PNG, GIF and WebP images only."),
+          );
+        }
         // The runtime may still start turns of its own inside the held one,
         // so the message is steered into it rather than refused.
         if (state.heldTurn !== undefined) {
@@ -3702,6 +3733,7 @@ function makeConnection(
           state.promptHookRuns,
         );
         const delivery = { viaHook: message.context !== undefined, delivered: false };
+        const withImages = images.length === 0 ? message : { ...message, images };
         return Effect.sync(() => {
           if (state.context?.terminal === true && state.pendingTurns === 0) {
             state.context = makeEventContext(state, state.claudeSessionId!, state.context.sequence);
@@ -3716,7 +3748,7 @@ function makeConnection(
         }).pipe(
           Effect.zipRight(
             state.query.send({
-              ...message,
+              ...withImages,
               ...(delivery.viaHook
                 ? {
                     onContextDelivered: () => {

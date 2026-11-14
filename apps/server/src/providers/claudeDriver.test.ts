@@ -4770,6 +4770,49 @@ describe("Claude driver probe", () => {
     }
   });
 
+  it("sends an attached image to Claude as an image block, and refuses an image type Claude does not take", async () => {
+    const f = harness("subscription");
+    await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const png = {
+      attachmentId: "attachment-1",
+      displayName: "screen.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    } as const;
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "what is this?",
+        attachments: [png] as never,
+        tools: [],
+      }),
+    );
+    expect(f.queries.at(-1)?.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "what is this?",
+        images: [
+          { mediaType: "image/png", data: Buffer.from([137, 80, 78, 71]).toString("base64") },
+        ],
+      }),
+    );
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.send({
+          sessionId,
+          prompt: "and this?",
+          attachments: [{ ...png, mediaType: "image/heic" }] as never,
+          tools: [],
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "unsupported" });
+    await acquired.close();
+  });
+
   it("uses only provider-native auth for subscription and releases the probe query scope", async () => {
     const f = harness("subscription");
     const result = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
@@ -4793,7 +4836,8 @@ describe("Claude driver probe", () => {
         streaming: "supported",
         nativeChildAgents: "unsupported",
         harnessAutoReview: "supported",
-        nativeAttachments: "unsupported",
+        // Every model Claude Code offers takes images.
+        nativeAttachments: "supported",
         nativeWebResearch: "unsupported",
         appManagedTools: "supported",
         citations: "unsupported",

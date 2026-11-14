@@ -530,8 +530,25 @@ export type ClaudeDecodedMessage =
     }
   | { readonly kind: "ignored" };
 
+/** The image types Claude's Messages API takes as `image` content blocks. */
+export const CLAUDE_IMAGE_MEDIA_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+] as const;
+export type ClaudeImageMediaType = (typeof CLAUDE_IMAGE_MEDIA_TYPES)[number];
+
+/** One image the person attached, sent beside the message text as a base64 image block. */
+export interface ClaudeImageInput {
+  readonly mediaType: ClaudeImageMediaType;
+  readonly data: string;
+}
+
 export interface ClaudeUserMessage {
   readonly text: string;
+  /** Images the person attached, sent as image content blocks after the text. */
+  readonly images?: ReadonlyArray<ClaudeImageInput>;
   /**
    * Octant's context for this message, handed to Claude Code by the
    * `UserPromptSubmit` hook so the message itself is only the person's text.
@@ -604,9 +621,25 @@ export interface ClaudeAgentSdkPort {
   }) => Effect.Effect<ClaudeSessionMetadata | undefined, ProviderFailure>;
 }
 
+// Mutable because the SDK's `SDKUserMessage` content is; the port builds a
+// fresh one for each message and shares it with no caller.
+type ClaudeAgentSdkInputContent =
+  | string
+  | Array<
+      | { readonly type: "text"; readonly text: string }
+      | {
+          readonly type: "image";
+          readonly source: {
+            readonly type: "base64";
+            readonly media_type: ClaudeImageMediaType;
+            readonly data: string;
+          };
+        }
+    >;
+
 export interface ClaudeAgentSdkInputMessage {
   readonly type: "user";
-  readonly message: { readonly role: "user"; readonly content: string };
+  readonly message: { readonly role: "user"; readonly content: ClaudeAgentSdkInputContent };
   readonly parent_tool_use_id: null;
   readonly origin: { readonly kind: "human" };
   readonly uuid: `${string}-${string}-${string}-${string}-${string}`;
@@ -1758,7 +1791,14 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 catch: (error) => sanitizeFailure(error, "session discovery"),
               }),
               messages,
-              send: ({ text, context, onContextDelivered, appManagedTools = [], onAppToolCall }) =>
+              send: ({
+                text,
+                images = [],
+                context,
+                onContextDelivered,
+                appManagedTools = [],
+                onAppToolCall,
+              }) =>
                 request(async () => {
                   if (appManagedTools.length > 0) {
                     if (query?.setMcpServers === undefined || onAppToolCall === undefined) {
@@ -1845,7 +1885,23 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   try {
                     return await prompt.offer({
                       type: "user",
-                      message: { role: "user", content: text },
+                      message: {
+                        role: "user",
+                        content:
+                          images.length === 0
+                            ? text
+                            : [
+                                { type: "text", text },
+                                ...images.map((image) => ({
+                                  type: "image" as const,
+                                  source: {
+                                    type: "base64" as const,
+                                    media_type: image.mediaType,
+                                    data: image.data,
+                                  },
+                                })),
+                              ],
+                      },
                       parent_tool_use_id: null,
                       origin: { kind: "human" },
                       uuid: messageId,

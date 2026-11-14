@@ -820,6 +820,39 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test("sends attached images as image content blocks after the message text", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.send({
+            text: "what is this?",
+            images: [{ mediaType: "image/png", data: "iVBORw0KGgo=" }],
+          });
+          const offered = yield* Effect.promise(() => iterator.next());
+          expect(offered.value).toMatchObject({
+            message: {
+              role: "user",
+              content: [
+                { type: "text", text: "what is this?" },
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+                },
+              ],
+            },
+          });
+          yield* query.send({ text: "plain" });
+          const plain = yield* Effect.promise(() => iterator.next());
+          expect(plain.value).toMatchObject({ message: { role: "user", content: "plain" } });
+        }),
+      ),
+    );
+  });
+
   test("hands each message's Octant context to the prompt hook for that message alone", async () => {
     const harness = makeHarness();
 
