@@ -380,7 +380,7 @@ describe("the public-block visual language", () => {
     // over the sidebar, the stage and the ground; the strong border under
     // increased contrast.
     expect(shell).toMatch(
-      /\.shell\.shell-frame \{\s*--octant-pane-line: color-mix\(\s*in oklab,\s*var\(--octant-text-primary\) calc\(10% \* var\(--oct-contrast-scale, 1\)\),\s*var\(--octant-panel-opaque\)\s*\)/,
+      /\.shell\.shell-frame \{\s*--octant-pane-line: color-mix\(\s*in oklab,\s*var\(--octant-text-primary\) calc\(7% \* var\(--oct-contrast-scale, 1\)\),\s*var\(--octant-panel-opaque\)\s*\)/,
     );
     expect(panel('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
       /--octant-pane-line:\s*var\(--octant-border-strong\)/,
@@ -390,6 +390,9 @@ describe("the public-block visual language", () => {
     // the softer border, so no two rules in the dock read at different strengths.
     const dockStyles = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
     expect(dockStyles).not.toMatch(/inset 0 -1px 0 var\(--octant-border-soft\)/);
+    expect(dockStyles).toMatch(
+      /\.dock-tile\[data-dock-tile-edge="top"\]::after \{\s*border-top: 0;/,
+    );
     expect(panel(".browser-workspace__chrome")).toMatch(/border-bottom:[^;]*--octant-pane-line/);
     // The rail and the band draw no line or fill of their own: the sidebar
     // stands on the ground, and nothing is drawn across the rail.

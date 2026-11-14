@@ -2255,14 +2255,14 @@ html[data-octant-density="compact"]
      takes. It is a tenth of the ink, not the theme's border: on a near-black
      preset the border is a shade off the page and the panes ran together,
      and under Window glass it is lost on the tint. A share of the ink shows
-     on any fill, in dark, in light and on glass. It is mixed into the pane's
+     on any fill, in dark, in light and on glass (7%, a faint line). It is mixed into the pane's
      opaque colour instead of left translucent: over the sidebar's material,
      the stage's fill and the ground a translucent line read three different
      strengths, and an edge drawn twice read as double. */
   .shell.shell-frame {
     --octant-pane-line: color-mix(
       in oklab,
-      var(--octant-text-primary) calc(10% * var(--oct-contrast-scale, 1)),
+      var(--octant-text-primary) calc(7% * var(--oct-contrast-scale, 1)),
       var(--octant-panel-opaque)
     );
     isolation: isolate;

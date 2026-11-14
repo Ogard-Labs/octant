@@ -461,14 +461,14 @@ fetched, never emoji.
 
 ### Lines
 
-| Token                    | Value                                                                                       | Where it lives                                                                                                                                   |
-| ------------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--octant-pane-line`     | ink 10% mixed into the pane's opaque colour (oklab); strong border under increased contrast | The framed panel's outline and every pane divider                                                                                                |
-| `--oct-hairline`         | ink 10% (oklab)                                                                             | Rows in a card, section rules, the title band's marks, tile bar rules, the edge of a card, a Settings group, an empty state and an approval card |
-| `--oct-hairline-strong`  | ink 14% (oklab)                                                                             | A divider that must be found (the rail's divider under a selected face)                                                                          |
-| `--oct-border-faint`     | ink 5% (srgb)                                                                               | The composer's outline                                                                                                                           |
-| `--octant-border-strong` | theme role                                                                                  | A field's border, an outline button, a hovered divider, the rule beside reasoning                                                                |
-| `--octant-float-line`    | float 88% toward the ink                                                                    | A rule inside a floating surface                                                                                                                 |
+| Token                    | Value                                                                                      | Where it lives                                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--octant-pane-line`     | ink 7% mixed into the pane's opaque colour (oklab); strong border under increased contrast | The framed panel's outline and every pane divider                                                                                                |
+| `--oct-hairline`         | ink 10% (oklab)                                                                            | Rows in a card, section rules, the title band's marks, tile bar rules, the edge of a card, a Settings group, an empty state and an approval card |
+| `--oct-hairline-strong`  | ink 14% (oklab)                                                                            | A divider that must be found (the rail's divider under a selected face)                                                                          |
+| `--oct-border-faint`     | ink 5% (srgb)                                                                              | The composer's outline                                                                                                                           |
+| `--octant-border-strong` | theme role                                                                                 | A field's border, an outline button, a hovered divider, the rule beside reasoning                                                                |
+| `--octant-float-line`    | float 88% toward the ink                                                                   | A rule inside a floating surface                                                                                                                 |
 
 - Lines are 1px and drawn where they cost no layout: an `outline` with a
   negative offset on a card or the composer, a `border` on the panel's
@@ -682,7 +682,7 @@ hiddenInset` and no custom `trafficLightPosition` (it would grow the native
 **The framed panel.** Under the band the sidebar and the stage (the thread, its
 dock and the bottom panel) sit in one panel:
 
-- One 1px outline in `--octant-pane-line` (ink 10% mixed into the pane's opaque
+- One 1px outline in `--octant-pane-line` (ink 7% mixed into the pane's opaque
   colour, so it is one opaque colour over the sidebar, the stage and the ground)
   at `--oct-radius-md` on every corner,
   drawn by the shell's `::after` above the content (z-index 6), its top edge on
@@ -694,6 +694,7 @@ dock and the bottom panel) sit in one panel:
   its top edge only where it starts below another pane (the bottom panel); the
   stage and the dock start on the outline's top edge, which draws it, so every
   edge is drawn once at one strength.
+  A dock tile on the top edge draws no top line of its own; the outline does.
   A tile's header rule, its control row and the Browser's address row use the
   same line, so every hairline in the panel is one colour.
 - The stage clips to the outline's inside (`clip-path: inset(calc(38px + 1px)

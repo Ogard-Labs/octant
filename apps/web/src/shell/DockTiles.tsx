@@ -461,6 +461,7 @@ function Tile(props: {
       aria-label={content.label}
       className="dock-tile"
       data-dock-tile={content.surface}
+      data-dock-tile-edge={box.top === 0 ? "top" : undefined}
       data-focused={props.focused ? "true" : undefined}
       ref={(node) => {
         element.current = node;

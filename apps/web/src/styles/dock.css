@@ -911,6 +911,14 @@
     border-left: 1px solid var(--octant-pane-line);
   }
 }
+/* A tile on the dock's top edge starts on the framed panel's outline, which
+   draws that edge: a second line there can land a pixel off it and read as a
+   2px edge. */
+@media (min-width: 681px) {
+  .dock-tile[data-dock-tile-edge="top"]::after {
+    border-top: 0;
+  }
+}
 
 /* The tool gets a definite height to scroll within: the tile's body flexes to
    what the caption leaves, and the tool's own root flexes to the body, so a
