@@ -1003,6 +1003,24 @@ describe("Agent Plugin MCP session manager", () => {
                               },
                             },
                             {
+                              name: "pointer-ancestor-schema-id",
+                              inputSchema: {
+                                type: "object",
+                                properties: { value: { $ref: "#/hidden/check" } },
+                                hidden: {
+                                  $id: "nested",
+                                  check: {
+                                    type: "object",
+                                    properties: { next: { $ref: "#/hidden/regex" } },
+                                  },
+                                  regex: { type: "string" },
+                                  hidden: {
+                                    regex: { type: "string", pattern: "^(a+)+$" },
+                                  },
+                                },
+                              },
+                            },
+                            {
                               name: "expanding-reference-graph",
                               inputSchema: {
                                 $ref: branchingReference,

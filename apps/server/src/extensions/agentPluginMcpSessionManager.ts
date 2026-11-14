@@ -1246,6 +1246,18 @@ function localJsonPointerTarget(root: unknown, reference: string): unknown {
     const token = encodedToken.replaceAll("~1", "/").replaceAll("~0", "~");
     if (!Object.prototype.hasOwnProperty.call(target, token)) return undefined;
     target = (target as Readonly<Record<string, unknown>>)[token];
+    if (
+      target !== root &&
+      target !== null &&
+      typeof target === "object" &&
+      !Array.isArray(target) &&
+      Object.prototype.hasOwnProperty.call(target, "$id")
+    ) {
+      // Ajv changes the reference base at every nested resource. Resolving the
+      // final target against the document root would then inspect a different
+      // schema from the one Ajv compiles, so fail closed on the whole path.
+      return undefined;
+    }
   }
   return target;
 }
