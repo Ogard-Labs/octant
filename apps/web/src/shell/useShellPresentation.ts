@@ -412,6 +412,19 @@ export function useBackgroundImageLibrary(
         }
         return decodeHostAnswer(SidebarBackgroundMetadata)(await response.json());
       },
+      remove: async (backgroundId: string) => {
+        const response = await fetch(
+          new URL(`/api/theme/sidebar-backgrounds/${encodeURIComponent(backgroundId)}`, serverUrl),
+          { method: "DELETE", headers: headers(), redirect: "error" },
+        );
+        if (response.ok) return;
+        const body: unknown = await response.json().catch(() => undefined);
+        throw new Error(
+          typeof body === "object" && body !== null && "message" in body
+            ? String((body as { message: unknown }).message)
+            : `The photo could not be removed (${String(response.status)}).`,
+        );
+      },
     };
   }, [fetcher, serverUrl, windowCapability]);
 }
