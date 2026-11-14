@@ -23,6 +23,12 @@ export interface OctantTooltipProps {
    * and stays small so it covers as little of the sidebar as it must.
    */
   readonly compact?: boolean;
+  /**
+   * The key that does what the control does, as a quiet key cap after the
+   * label. It is a hint for a sighted reader: the control's own name stays the
+   * accessible name.
+   */
+  readonly shortcut?: string | undefined;
 }
 
 /**
@@ -115,6 +121,11 @@ export function OctantTooltip(props: OctantTooltipProps) {
             role="tooltip"
           >
             {props.label}
+            {props.shortcut === undefined ? null : (
+              <kbd aria-hidden="true" className="octant-tooltip__key">
+                {props.shortcut}
+              </kbd>
+            )}
           </TooltipPopup>
         </TooltipPositioner>
       </TooltipPortal>

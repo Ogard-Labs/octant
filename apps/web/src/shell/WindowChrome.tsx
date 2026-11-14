@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { useActionShortcut } from "../keybindings/useActionShortcut";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { IconButton } from "./IconButton";
 import { DockToolButtons } from "./DockToolButtons";
 import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
@@ -84,6 +86,7 @@ function useMeasuredClusterWidth(property: string): (node: HTMLDivElement | null
 }
 
 export function WindowChrome(props: WindowChromeProps) {
+  const newThreadShortcut = useActionShortcut("new-thread");
   const recoverZen = props.onRecoverZen;
   const trailing = useMeasuredClusterWidth("--octant-window-chrome-reserved-width");
   const leading = useMeasuredClusterWidth("--octant-window-chrome-leading-width");
@@ -115,12 +118,16 @@ export function WindowChrome(props: WindowChromeProps) {
             <WindowHistoryButtons className="window-chrome__button" history={props.history} />
           )}
           {props.onNewThread === undefined ? null : (
-            <IconButton
-              className="window-chrome__button window-chrome__new-thread"
-              icon={SquarePen}
-              label={props.newThreadLabel ?? "New task"}
-              onClick={props.onNewThread}
-            />
+            <OctantTooltip label={props.newThreadLabel ?? "New task"} shortcut={newThreadShortcut}>
+              <IconButton
+                className="window-chrome__button window-chrome__new-thread"
+                icon={SquarePen}
+                label={props.newThreadLabel ?? "New task"}
+                onClick={props.onNewThread}
+                // The tooltip names the button; a native title would say it twice.
+                title=""
+              />
+            </OctantTooltip>
           )}
         </div>
       )}

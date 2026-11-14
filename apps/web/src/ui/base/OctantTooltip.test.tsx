@@ -21,6 +21,20 @@ describe("OctantTooltip", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
+  it("draws the control's key as a key cap after the label and keeps it out of the name", async () => {
+    const user = userEvent.setup();
+    render(
+      <OctantTooltip label="New thread" shortcut="⌘N">
+        <OctantButton aria-label="New thread" type="button" />
+      </OctantTooltip>,
+    );
+
+    await user.hover(screen.getByRole("button", { name: "New thread" }));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("New thread⌘N");
+    expect(tooltip.querySelector("kbd")).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("does not open for focus that a click or a returning sheet caused", async () => {
     const user = userEvent.setup();
     render(

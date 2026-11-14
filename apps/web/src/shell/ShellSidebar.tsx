@@ -12,6 +12,8 @@ import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCe
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { useActionShortcut } from "../keybindings/useActionShortcut";
 import {
   resolveSidebarContributions,
   type FirstPartyPluginComponentId,
@@ -169,6 +171,7 @@ export interface ShellSidebarProps {
 const NEW_THREAD_DESTINATIONS = new Set(["new-chat", "new-code-thread", "new-work-thread"]);
 
 export function ShellSidebar(props: ShellSidebarProps) {
+  const newThreadShortcut = useActionShortcut("new-thread");
   const hostFirstPartyPluginsEffective = useFirstPartyPluginsEffective();
   const modes = enabledModes(props.settings);
   const searchAlwaysShown = props.settings.sidebarSearchPresentation === "field";
@@ -514,13 +517,17 @@ export function ShellSidebar(props: ShellSidebarProps) {
                       />
                     )}
                     {newThread === undefined || newThreadLabel === undefined ? null : (
-                      <IconButton
-                        className="sidebar__new-thread"
-                        data-navigation-id={newThreadId}
-                        icon={SquarePen}
-                        label={newThreadLabel}
-                        onClick={() => newThread()}
-                      />
+                      <OctantTooltip label={newThreadLabel} shortcut={newThreadShortcut}>
+                        <IconButton
+                          className="sidebar__new-thread"
+                          data-navigation-id={newThreadId}
+                          icon={SquarePen}
+                          label={newThreadLabel}
+                          onClick={() => newThread()}
+                          // The tooltip names the button; a native title would say it twice.
+                          title=""
+                        />
+                      </OctantTooltip>
                     )}
                     {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
                       <IconButton

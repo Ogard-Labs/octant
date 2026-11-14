@@ -11,6 +11,7 @@ import {
 import { Fragment, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
+import { useActionShortcut } from "../keybindings/useActionShortcut";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { iconForVisibleMode, modeLabels } from "./ModeSwitcher";
 import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
@@ -150,6 +151,7 @@ function railProjectTiles(
  * counts, the modes, and their Projects with it.
  */
 export function SidebarRail(props: SidebarRailProps) {
+  const newThreadShortcut = useActionShortcut("new-thread");
   const modes = visibleModes(props.modes);
   const activeMode = visibleModeOf(props.activeMode);
   const beside = props.placement === "beside";
@@ -178,6 +180,7 @@ export function SidebarRail(props: SidebarRailProps) {
               icon={SquarePen}
               label={props.newThread.label}
               onSelect={props.newThread.onSelect}
+              shortcut={newThreadShortcut}
             />
           )}
           {beside || props.onOpenSearch === undefined ? null : (
@@ -316,13 +319,21 @@ function RailButton(props: {
   readonly badge?: number;
   readonly active?: boolean;
   readonly onSelect?: () => void;
+  /** The key that does the same, drawn as a key cap in the label. */
+  readonly shortcut?: string | undefined;
   /** Which count this is; the Colour style gives its icon the tile's hue. */
   readonly tile?: SidebarTileId;
   readonly children?: ReactNode;
 }) {
   const Icon = props.icon;
   return (
-    <OctantTooltip align="center" compact label={props.label} side="right">
+    <OctantTooltip
+      align="center"
+      compact
+      label={props.label}
+      shortcut={props.shortcut}
+      side="right"
+    >
       <OctantButton
         aria-current={props.active === true ? "page" : undefined}
         aria-label={props.label}

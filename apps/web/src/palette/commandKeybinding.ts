@@ -8,6 +8,9 @@ import type { OctantKeybindingActionId } from "@octant/domain";
  * displays the chord that is actually in effect.
  */
 const COMMAND_KEYBINDING_ACTIONS: Readonly<Partial<Record<string, OctantKeybindingActionId>>> = {
+  "thread:new:chat": "new-thread",
+  "thread:new:work": "new-thread",
+  "thread:new:code": "new-thread",
   "thread:next-waiting": "next-waiting-thread",
   "workspace:zen-mode": "zen-mode",
   "workspace:context-usage": "context-usage",

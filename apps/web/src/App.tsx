@@ -328,6 +328,7 @@ import {
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
+import { useNewThreadShortcut } from "./shell/useNewThreadShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
@@ -1423,6 +1424,7 @@ function LaunchedShell(
     | undefined
   >(undefined);
   const activeMode = controller.workspace?.activeMode ?? "chat";
+  useNewThreadShortcut(() => startNewThreadDraft(activeMode));
   // Opening a Chat or Work thread from anywhere also counts as using that kind.
   useEffect(() => {
     if (activeMode === "code") return;

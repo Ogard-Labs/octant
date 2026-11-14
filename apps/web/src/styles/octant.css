@@ -2273,6 +2273,18 @@ input.switch:checked::after {
   font-size: var(--oct-text-sm);
   line-height: 1.25;
 }
+/* A key cap after the label: quieter than the words, on the chip's own
+   inverted ground, with no fill so it is not a second button. */
+.octant-tooltip__key {
+  margin-inline-start: var(--oct-space-2);
+  padding: 0 var(--oct-space-1);
+  border: 1px solid color-mix(in srgb, var(--oct-surface) 32%, transparent);
+  border-radius: var(--oct-radius-sm);
+  color: color-mix(in srgb, var(--oct-surface) 70%, transparent);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
 /* The rail's chip: one word, centred beside its button, as small as the
    label allows because it must lie over the sidebar. */
 .octant-tooltip--compact {
