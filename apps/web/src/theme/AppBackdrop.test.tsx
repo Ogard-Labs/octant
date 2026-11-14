@@ -73,40 +73,6 @@ describe("AppBackdrop", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("runs a start screen's ground behind the sidebar too, one level under it in the shell frame", async () => {
-    const { container } = render(
-      <div className="shell-frame">
-        <div className="welcome-stage">
-          <AppBackdrop
-            fetcher={vi.fn()}
-            placement="welcome"
-            resolved={{ ...dials, kind: "flowing", backgroundId: null }}
-          />
-        </div>
-      </div>,
-    );
-    const frame = container.querySelector(".shell-frame");
-    await waitFor(() =>
-      expect(
-        frame?.querySelector(':scope > .app-backdrop[data-placement="sidebar"]'),
-      ).not.toBeNull(),
-    );
-    expect(container.querySelectorAll('.app-backdrop[data-placement="welcome"]')).toHaveLength(1);
-  });
-
-  it("draws no second ground for the shell's own ground", () => {
-    const { container } = render(
-      <div className="shell-frame">
-        <AppBackdrop
-          fetcher={vi.fn()}
-          placement="shell"
-          resolved={{ ...dials, kind: "flowing", backgroundId: null }}
-        />
-      </div>,
-    );
-    expect(container.querySelector('[data-placement="sidebar"]')).toBeNull();
-  });
-
   it("asks the authenticated fetcher for the photo the ground names", async () => {
     const fetcher = vi.fn(
       async () => new Blob([new Uint8Array([0x89, 0x50])], { type: "image/png" }),

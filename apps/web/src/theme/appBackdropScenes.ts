@@ -63,20 +63,23 @@ const RIDGE_COUNT = 5;
  * are rim-lit in the accent. The sky over the heading and the subtitle under it
  * is kept empty, so no cell of the sun's halo sits under text.
  */
-function createRidges(columns: number, rows: number, seed: number): Scene {
+function createRidges(columns: number, rows: number, seed: number, lead: number): Scene {
+  // The picture is composed for the columns after `lead`; the lead columns
+  // continue it to the left, under the sidebar.
+  const composed = Math.max(1, columns - lead);
   const tops = new Float32Array(RIDGE_COUNT * columns);
   const sunOnRight = hashUnit(seed, 1) >= 0.5;
   const horizon = rows * 0.56;
   // The sun is a circle in cells, sized by the shorter side so it stays round
   // whatever the window's shape, and placed so its core clears the edge.
-  const sunRadius = Math.min(rows * 0.2, columns * 0.13);
-  const sunX = columns * (sunOnRight ? 0.81 : 0.19);
+  const sunRadius = Math.min(rows * 0.2, composed * 0.13);
+  const sunX = lead + composed * (sunOnRight ? 0.81 : 0.19);
   const sunY = horizon - rows * 0.03;
   // How near a column is to the sun, in [0, 1]: it lights crests and sinks the
   // far ridges into a valley so the sun's core stays in view.
   const nearSun = new Float32Array(columns);
   for (let column = 0; column < columns; column += 1) {
-    nearSun[column] = Math.exp(-(((column - sunX) / (columns * 0.34)) ** 2));
+    nearSun[column] = Math.exp(-(((column - sunX) / (composed * 0.34)) ** 2));
   }
   let breath = 1;
 
@@ -86,12 +89,12 @@ function createRidges(columns: number, rows: number, seed: number): Scene {
       const depth = ridge / (RIDGE_COUNT - 1);
       const base = horizon + rows * 0.33 * depth ** 1.1;
       const amplitude = rows * (0.08 + 0.1 * depth);
-      const width = columns * (0.3 - 0.035 * ridge);
+      const width = composed * (0.3 - 0.035 * ridge);
       // Far ridges drift slowest, so the layers slide against each other.
       const speed = 0.5 + 1.1 * depth;
       const sink = 0.85 - 0.5 * depth;
       for (let column = 0; column < columns; column += 1) {
-        const x = (column + t * speed * (sunOnRight ? 1 : -1)) / width + ridge * 17.3;
+        const x = (column - lead + t * speed * (sunOnRight ? 1 : -1)) / width + ridge * 17.3;
         const lowered = 1 - sink * (nearSun[column] ?? 0);
         tops[ridge * columns + column] = base - amplitude * hills(seed + ridge * 31, x) * lowered;
       }
@@ -110,7 +113,7 @@ function createRidges(columns: number, rows: number, seed: number): Scene {
   // The sky behind the heading and its subtitle: the middle of the page, from
   // above the heading to just under the subtitle, feathered at its edges.
   const quietSky = (column: number, row: number): number => {
-    const across = Math.abs(column / columns - 0.5);
+    const across = Math.abs((column - lead) / composed - 0.5);
     const outsideRows = Math.max(0.36 - row / rows, row / rows - 0.53, 0);
     return (1 - smoothstep(0.15, 0.32, across)) * (1 - smoothstep(0, 0.05, outsideRows));
   };
@@ -157,9 +160,10 @@ function createRidges(columns: number, rows: number, seed: number): Scene {
 const BURST_SPIN = 0.012;
 const BURST_RAYS = 20;
 
-function createBurst(columns: number, rows: number, seed: number): Scene {
+function createBurst(columns: number, rows: number, seed: number, lead: number): Scene {
   // The corner is the top right, away from the sidebar, which sits on the left.
-  const originX = columns * 0.99;
+  const composed = Math.max(1, columns - lead);
+  const originX = lead + composed * 0.99;
   const originY = rows * 0.02;
   const radius = new Float32Array(columns * rows);
   const angle = new Float32Array(columns * rows);
@@ -171,7 +175,7 @@ function createBurst(columns: number, rows: number, seed: number): Scene {
       angle[row * columns + column] = Math.atan2(dy, dx);
     }
   }
-  const reach = Math.max(columns * 0.62, rows * 0.9);
+  const reach = Math.max(composed * 0.62, rows * 0.9);
   let size = reach;
   const turn = hashUnit(seed, 2) * Math.PI * 2;
   let spin = turn;
@@ -202,13 +206,14 @@ function createBurst(columns: number, rows: number, seed: number): Scene {
 
 const STREAK_SLOPE = [0.6, 0.8] as const;
 
-function createDrift(seed: number): Scene {
+function createDrift(seed: number, lead: number): Scene {
   let slide = 0;
   return {
     frame: (t) => {
       slide = t * 0.32;
     },
-    read: (column, row, out) => {
+    read: (cell, row, out) => {
+      const column = cell - lead;
       // `across` runs perpendicular to the streaks and `along` runs with them.
       const across = column * STREAK_SLOPE[0] + row * STREAK_SLOPE[1];
       const along = column * STREAK_SLOPE[1] - row * STREAK_SLOPE[0];
@@ -236,16 +241,23 @@ function createDrift(seed: number): Scene {
   };
 }
 
-/** Builds a scene for a grid of `columns` × `rows` cells. */
+/**
+ * Builds a scene for a grid of `columns` × `rows` cells. The first `lead`
+ * columns lie under the sidebar: the scene is composed for the columns after
+ * them, so the picture sits where it would on the page alone, and it carries on
+ * into the lead as one continuous picture.
+ */
 export function createScene(
   kind: SceneKind,
   columns: number,
   rows: number,
   seed: number = SCENE_SEED,
+  lead: number = 0,
 ): Scene {
   const wide = Math.max(1, columns);
   const tall = Math.max(1, rows);
-  if (kind === "ridges") return createRidges(wide, tall, seed);
-  if (kind === "burst") return createBurst(wide, tall, seed);
-  return createDrift(seed);
+  const under = Math.min(Math.max(0, Math.round(lead)), wide - 1);
+  if (kind === "ridges") return createRidges(wide, tall, seed, under);
+  if (kind === "burst") return createBurst(wide, tall, seed, under);
+  return createDrift(seed, under);
 }

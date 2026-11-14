@@ -504,7 +504,7 @@ export interface WorkspaceViewProps {
     key?: DesktopRecipeKeyChange,
   ) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
-  readonly welcomeBackdrop?: ReactNode;
+  readonly welcomeGround?: boolean;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
@@ -839,7 +839,13 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         <TabActivationProvider
           {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
         >
-          <main className="workspace" hidden={props.hidden}>
+          <main
+            className="workspace"
+            hidden={props.hidden}
+            {...(props.welcomeGround === true && onlyStartScreens(props.layout)
+              ? { "data-octant-start-only": "true" }
+              : {})}
+          >
             {inlineNotice ? null : contextNotice}
             <SplitWorkspace
               key={JSON.stringify(props.workspace.contextByMode[props.mode])}
@@ -908,7 +914,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                               >
                                 {onWelcomeGround(
                                   surface,
-                                  props.welcomeBackdrop,
+                                  props.welcomeGround === true,
                                   renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
                                 )}
                               </OutsideContentContext>
@@ -950,15 +956,24 @@ export function WorkspaceView(props: WorkspaceViewProps) {
 
 /**
  * The start screens sit on the theme's ground; every other surface paints
- * its own. The stage exists only while a ground is configured, so a person
- * who chose "None" keeps the exact page they had.
+ * its own. The ground itself is one layer in the window frame (see
+ * `ShellFrame`), and it is shown only while every pane holds a start screen:
+ * a thread beside one paints its own fill over it. The stage exists only while
+ * a ground is configured, so a person who chose "None" keeps the exact page
+ * they had.
  */
-function onWelcomeGround(surface: WorkspaceTab, backdrop: ReactNode, content: ReactNode) {
-  if (backdrop === undefined || backdrop === null) return content;
+function onlyStartScreens(layout: WorkspaceLayoutNode): boolean {
+  if (layout.kind === "split") {
+    return onlyStartScreens(layout.first) && onlyStartScreens(layout.second);
+  }
+  return layout.surface.kind === "welcome" || layout.surface.kind === "draft-thread";
+}
+
+function onWelcomeGround(surface: WorkspaceTab, hasGround: boolean, content: ReactNode) {
+  if (!hasGround) return content;
   if (surface.kind !== "welcome" && surface.kind !== "draft-thread") return content;
   return (
     <div className="welcome-stage" data-octant-welcome-stage>
-      {backdrop}
       {content}
     </div>
   );

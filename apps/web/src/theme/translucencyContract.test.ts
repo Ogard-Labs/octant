@@ -114,14 +114,18 @@ describe("window glass", () => {
     );
   });
 
-  it("draws a start screen's ground behind the sidebar only where the sidebar's fill is translucent", () => {
+  it("runs a start screen's one ground under the sidebar only where the sidebar's fill is translucent", () => {
     const surface = read("styles/surface.css");
-    expect(surface).toContain('.app-backdrop[data-placement="sidebar"] {');
+    // One layer in the frame, shown only while a start screen is open, never a second copy.
+    expect(surface).not.toContain('data-placement="sidebar"');
     expect(surface).toMatch(
-      /\.shell-frame:not\(\.shell--sidebar-collapsed, \.shell--material-translucent\)\s*> \.app-backdrop\[data-placement="sidebar"\] \{[^}]*display: block;/,
+      /\.shell-frame:has\(main\.workspace\[data-octant-start-only\]:not\(\[hidden\]\)\)\s*> \.app-backdrop\[data-placement="welcome"\] \{[^}]*display: block;/,
     );
     expect(surface).toMatch(
-      /html:is\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)\s*\.shell-frame\s*> \.app-backdrop\[data-placement="sidebar"\] \{[^}]*display: none/,
+      /\.shell-frame:not\(\.shell--sidebar-collapsed, \.shell--material-translucent\)\s*> \.app-backdrop\[data-placement="welcome"\] \{[^}]*--oct-ground-under: var\(--octant-rendered-sidebar-width\);[^}]*--oct-ground-under-share: 33%;/,
+    );
+    expect(surface).toMatch(
+      /html:is\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)\s*\.shell-frame\s*> \.app-backdrop\[data-placement="welcome"\] \{[^}]*--oct-ground-under: 0px;/,
     );
   });
 });

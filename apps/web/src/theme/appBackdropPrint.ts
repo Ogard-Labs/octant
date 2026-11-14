@@ -383,10 +383,19 @@ export function runMovingPrint(
     // and its calm are measured against the window, not the page.
     const visibleHeight = Math.min(rows * cell, window.innerHeight || rows * cell);
     sceneRows = Math.max(1, Math.min(rows, Math.ceil(visibleHeight / cell)));
+    // A ground that runs under the sidebar is composed for the start screen's
+    // own stage, which begins where the sidebar ends.
+    const stageStart = document
+      .querySelector("main.workspace:not([hidden]) .welcome-stage")
+      ?.getBoundingClientRect().left;
+    const lead =
+      stageStart === undefined
+        ? 0
+        : Math.max(0, Math.round((stageStart - canvas.getBoundingClientRect().left) / cell));
     scene =
       source.scene === undefined
         ? undefined
-        : createScene(source.scene, columns, sceneRows, source.seed);
+        : createScene(source.scene, columns, sceneRows, source.seed, lead);
     // A scene is calmed behind the start screen's content column, across its
     // full height; a colour picture keeps every cell.
     shares = new Float32Array(columns * rows);

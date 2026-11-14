@@ -42,6 +42,11 @@ export interface ShellFrameProps {
    */
   readonly backdrop?: ReactNode;
   readonly backdropCoversSidebar?: boolean;
+  /**
+   * The theme's ground for the start screens: one layer in the frame, shown
+   * only while a start screen is open, running under the sidebar too.
+   */
+  readonly welcomeGround?: ReactNode;
   readonly typography?: ThemeTypography;
   readonly theme?: ThemeSettings;
   readonly availableFonts?: ReadonlyArray<string>;
@@ -127,6 +132,7 @@ export function ShellFrame(props: ShellFrameProps) {
         ) : (
           <>
             {props.backdrop}
+            {props.welcomeGround}
             {props.sidebarCollapsed && props.sidebarRail !== true ? null : props.sidebar}
             {props.sidebarResizable && !props.sidebarCollapsed ? (
               <ShellResizeHandle

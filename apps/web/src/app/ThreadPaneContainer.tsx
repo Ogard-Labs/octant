@@ -243,7 +243,7 @@ export interface ThreadPaneContainerProps {
   readonly settings: NonNullable<ShellController["settings"]>;
   readonly tabActivation: ShellController["tabActivation"];
   readonly threadStatsSummary: ReturnType<typeof useThreadTurnMetrics>;
-  readonly welcomeBackdrop?: ReactNode;
+  readonly welcomeGround?: boolean;
   readonly windowCapability: string;
   readonly workCreateThreadAvailable: boolean;
   readonly workNavigation: ReturnType<typeof useWorkThreadNavigation>;
@@ -338,7 +338,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     settings,
     tabActivation,
     threadStatsSummary,
-    welcomeBackdrop,
+    welcomeGround,
     windowCapability,
     workCreateThreadAvailable,
     workNavigation,
@@ -567,7 +567,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 <WorkspaceView
                   threadMenuItems={threadMenuItems}
                   {...(contextClient === undefined ? {} : { contextClient })}
-                  {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                  {...(welcomeGround === undefined ? {} : { welcomeGround })}
                   followUpSuggestions={{
                     client: followUpSuggestionClient,
                     sideTaskClient,

@@ -687,7 +687,7 @@
   height: 100%;
   flex: 1 1 auto;
   flex-direction: column;
-  background: var(--octant-app-background);
+  background: transparent;
 }
 
 /* Code Home is the one start screen taller than the pane: its cards and Up
@@ -724,27 +724,103 @@
   color: var(--octant-text-primary);
 }
 
-/* Under one start screen the ground softens behind the question, which sits
-   in the middle of the page, and fades out toward the foot, so the composer
-   docked there keeps a calm page to be read against.
+/* The ground for the start screens is one layer in the window frame, a level
+   under the sidebar, the title band and the panes, and it is shown only while
+   only start screens are open (a destination page hides the workspace, and the
+   ground goes with it; a thread beside one paints its own fill over it). It paints the page itself where the stage is, so the
+   stage and the panes above it stay clear, and on a wide window it runs on
+   under the sidebar as the same picture, so the sidebar's translucent fill
+   shows it softly. The drawn grounds dim themselves to a third there; the
+   others take the mask below.
 
-   The ground stays at z-index 0 and the start screen's own content is lifted
-   above it: at -1 the ground disappeared entirely behind the workspace fill,
-   and sharing a level with the content painted its dots over the greeting and
-   over the suggestion cards, which read as the cards being see-through. */
+   The ground stays under the start screen's content, which is lifted above it:
+   sharing a level with the content painted its dots over the greeting and over
+   the suggestion cards, which read as the cards being see-through. */
 .app-backdrop[data-placement="welcome"] {
+  /* How far the ground runs under the sidebar, and how much of its strength
+     survives there. Zero and all of it where the sidebar is left whole. */
+  --oct-ground-under: 0px;
+  --oct-ground-under-share: 100%;
+  --oct-ground-fade: linear-gradient(
+    to bottom,
+    currentColor 62%,
+    color-mix(in srgb, currentColor 35%, transparent) 80%,
+    transparent 94%
+  );
+  display: none;
+  z-index: -1;
+  left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
+  background: linear-gradient(var(--octant-app-background), var(--octant-app-background)) right top
+    / calc(100% - var(--oct-ground-under)) 100% no-repeat;
+}
+
+.shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
+  > .app-backdrop[data-placement="welcome"] {
+  display: block;
+}
+
+/* The pane fill the frame lays under every pane would hide the ground, so it
+   goes clear while only start screens are open. */
+.shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) > .workspace-layer::before {
+  background: transparent;
+}
+
+@media (min-width: 681px) {
+  .app-backdrop[data-placement="welcome"] {
+    top: var(--oct-title-rail-h);
+    right: var(--octant-panel-gap, 0px);
+    bottom: var(--octant-panel-gap, 0px);
+    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+  }
+
+  /* Under the sidebar only where its fill is translucent: not with it
+     collapsed, and not under Glass, which keep the sidebar whole. */
+  .shell-frame:not(.shell--sidebar-collapsed, .shell--material-translucent)
+    > .app-backdrop[data-placement="welcome"] {
+    --oct-ground-under: var(--octant-rendered-sidebar-width);
+    --oct-ground-under-share: 33%;
+    left: var(--octant-rail-offset, 0px);
+    border-radius: var(--oct-radius-md);
+  }
+}
+
+html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell-frame
+  > .app-backdrop[data-placement="welcome"] {
+  --oct-ground-under: 0px;
+  --oct-ground-under-share: 100%;
+  left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
+  border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .shell-frame > .app-backdrop[data-placement="welcome"] {
+    --oct-ground-under: 0px;
+    --oct-ground-under-share: 100%;
+    left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
+    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+  }
+}
+
+/* The picture layers soften behind the question, which sits in the middle of
+   the stage, and fade out toward the foot, so the composer docked there keeps
+   a calm page to be read against; under the sidebar they keep a third. The
+   mask is on the layers and not on the ground, so the page paint under them is
+   never cut away. */
+.app-backdrop[data-placement="welcome"] > * {
   mask-image:
     radial-gradient(
-      ellipse 560px 240px at 50% 44%,
+      ellipse 560px 240px at calc((100% + var(--oct-ground-under)) / 2) 44%,
       transparent 42%,
       color-mix(in srgb, currentColor 40%, transparent) 70%,
       currentColor 100%
     ),
+    var(--oct-ground-fade),
     linear-gradient(
-      to bottom,
-      currentColor 62%,
-      color-mix(in srgb, currentColor 35%, transparent) 80%,
-      transparent 94%
+      to right,
+      color-mix(in srgb, currentColor var(--oct-ground-under-share), transparent)
+        calc(var(--oct-ground-under) - 24px),
+      currentColor calc(var(--oct-ground-under) + 24px)
     );
   mask-size: 100% 100%;
   mask-repeat: no-repeat;
@@ -757,31 +833,20 @@
    suggestions and the Continue list read. There the ground fades out sooner so
    that text sits on calm paper; dark keeps the longer fade. */
 :root[data-octant-theme-mode="light"] .app-backdrop[data-placement="welcome"] {
-  mask-image:
-    radial-gradient(
-      ellipse 560px 240px at 50% 44%,
-      transparent 42%,
-      color-mix(in srgb, currentColor 40%, transparent) 70%,
-      currentColor 100%
-    ),
-    linear-gradient(
-      to bottom,
-      currentColor 56%,
-      color-mix(in srgb, currentColor 25%, transparent) 74%,
-      transparent 90%
-    );
+  --oct-ground-fade: linear-gradient(
+    to bottom,
+    currentColor 56%,
+    color-mix(in srgb, currentColor 25%, transparent) 74%,
+    transparent 90%
+  );
 }
 
-/* The character field and the pixel ground dim their own middle (see
-   appBackdropAscii.ts and appBackdropPrint.ts), so the question and the
-   composer read on a calm page without the ground being cut away in a fixed
+/* The character field and the pixel ground dim their own middle and their
+   sidebar (see appBackdropAscii.ts and appBackdropPrint.ts), so the question and
+   the composer read on a calm page without the ground being cut away in a fixed
    ellipse. Each fades in once it has drawn its first frame. */
-.app-backdrop[data-octant-app-backdrop="characters"][data-placement="welcome"],
-.app-backdrop[data-octant-app-backdrop="pixels"][data-placement="welcome"],
-:root[data-octant-theme-mode="light"]
-  .app-backdrop[data-octant-app-backdrop="characters"][data-placement="welcome"],
-:root[data-octant-theme-mode="light"]
-  .app-backdrop[data-octant-app-backdrop="pixels"][data-placement="welcome"] {
+.app-backdrop[data-octant-app-backdrop="characters"][data-placement="welcome"] > *,
+.app-backdrop[data-octant-app-backdrop="pixels"][data-placement="welcome"] > * {
   mask-image: none;
 }
 
@@ -813,39 +878,6 @@
     color-mix(in srgb, currentColor 45%, transparent) 75%,
     color-mix(in srgb, currentColor 20%, transparent) 100%
   );
-}
-
-/* A start screen's ground also runs behind the sidebar panel, one level under
-   it inside the shell frame, so the sidebar's translucent fill shows it
-   softly (the drawn grounds dim themselves to a third there). It is drawn only
-   where the sidebar's fill is translucent: not on a phone, not with the
-   sidebar collapsed, and not under Glass, reduced transparency or increased
-   contrast, which keep the sidebar whole. */
-.app-backdrop[data-placement="sidebar"] {
-  display: none;
-  z-index: -1;
-}
-
-@media (min-width: 681px) {
-  .shell-frame:not(.shell--sidebar-collapsed, .shell--material-translucent)
-    > .app-backdrop[data-placement="sidebar"] {
-    display: block;
-    inset: var(--oct-title-rail-h) auto 0 var(--octant-rail-offset, 0px);
-    width: var(--octant-rendered-sidebar-width);
-  }
-}
-
-html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
-  .shell-frame
-  > .app-backdrop[data-placement="sidebar"] {
-  display: none;
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .shell-frame:not(.shell--sidebar-collapsed, .shell--material-translucent)
-    > .app-backdrop[data-placement="sidebar"] {
-    display: none;
-  }
 }
 
 /* Under a Zen space the ground is the floor of the window, not a wash behind

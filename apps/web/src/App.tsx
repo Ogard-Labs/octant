@@ -7754,6 +7754,7 @@ function LaunchedShell(
         {...(shellBackdrop === undefined
           ? {}
           : { backdrop: shellBackdrop, backdropCoversSidebar: shellBackdropCoversSidebar })}
+        {...(welcomeBackdrop === undefined ? {} : { welcomeGround: welcomeBackdrop })}
         {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
         {...(themeController.draft?.typography === undefined && props.typography === undefined
           ? {}
@@ -8030,7 +8031,7 @@ function LaunchedShell(
                     serverUrl={props.launch.serverUrl}
                     settings={controller.settings}
                     threadStatsSummary={threadStatsSummary}
-                    {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                    {...(welcomeBackdrop === undefined ? {} : { welcomeGround: true })}
                     windowCapability={props.projectWindowCapability}
                     workCreateThreadAvailable={workCreateThreadAvailable}
                     workNavigation={workNavigation}

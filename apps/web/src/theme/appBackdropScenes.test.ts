@@ -32,6 +32,33 @@ describe("the built-in pixel scenes", () => {
     }
   });
 
+  it("carries a scene on under the sidebar without moving the picture on the stage", () => {
+    const stage = 90;
+    const lead = 30;
+    const rows = 56;
+    const sample: SceneSample = { ink: 0, glow: 0 };
+    for (const kind of KINDS) {
+      const alone = createScene(kind, stage, rows, SCENE_SEED);
+      const spanning = createScene(kind, stage + lead, rows, SCENE_SEED, lead);
+      alone.frame(2.5);
+      spanning.frame(2.5);
+      let under = 0;
+      for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < stage; column += 1) {
+          alone.read(column, row, sample);
+          const expected = [sample.ink, sample.glow];
+          spanning.read(column + lead, row, sample);
+          expect([sample.ink, sample.glow]).toEqual(expected);
+        }
+        for (let column = 0; column < lead; column += 1) {
+          spanning.read(column, row, sample);
+          under += sample.ink;
+        }
+      }
+      if (kind !== "burst") expect(under).toBeGreaterThan(0);
+    }
+  });
+
   it("keeps ink and glow between none and full", () => {
     for (const kind of KINDS) {
       for (const t of [0, 4.2, 61]) {

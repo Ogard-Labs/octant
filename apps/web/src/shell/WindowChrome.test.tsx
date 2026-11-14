@@ -547,11 +547,11 @@ describe("WindowChrome", () => {
       surface.match(/\.app-backdrop\[data-placement="welcome"\]\s*\{[^}]+\}/)?.[0] ?? "";
     const canvas = cssRule(".draft-thread__canvas");
 
-    // The ground paints at the shared level, so the start screen takes one of
-    // its own. Without it the dither's dots landed over the greeting and over
-    // the suggestion cards, which reads as the cards being see-through; at
-    // -1 the ground disappeared behind the workspace fill instead.
-    expect(ground).not.toContain("z-index");
+    // The ground is one layer in the frame under the panes, and the start
+    // screen's own content takes a level above the stage's. Sharing a level
+    // with the content painted the dither's dots over the greeting and over
+    // the suggestion cards, which reads as the cards being see-through.
+    expect(ground).toContain("z-index: -1;");
     expect(canvas).toContain("position: relative;");
     expect(canvas).toContain("z-index: 1;");
   });
