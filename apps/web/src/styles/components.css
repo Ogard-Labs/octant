@@ -84,6 +84,7 @@
 .octant-dialog__popup,
 .octant-sheet__popup,
 .octant-preview-card,
+.guided-tour__card,
 .octant-tooltip--card,
 .window-chrome__disclosure,
 .workspace-disclosure,
@@ -129,6 +130,7 @@
 [data-slot="select-content"],
 [data-slot="combobox-content"],
 .octant-preview-card,
+.guided-tour__card,
 .thread-info__panel,
 .palette,
 .toast {
@@ -164,6 +166,7 @@ html[data-octant-reduced-transparency="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
@@ -182,6 +185,7 @@ html[data-octant-increased-contrast="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
@@ -205,6 +209,7 @@ html[data-octant-increased-contrast="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
@@ -276,6 +281,7 @@ html[data-octant-increased-contrast="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast
@@ -311,6 +317,7 @@ html[data-octant-increased-contrast="true"]
     [data-slot="select-content"],
     [data-slot="combobox-content"],
     .octant-preview-card,
+    .guided-tour__card,
     .thread-info__panel,
     .palette,
     .toast

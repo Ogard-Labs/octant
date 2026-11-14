@@ -52,7 +52,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 9         | 3       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
-| [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
+| [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 16        | 11      | 5            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **251**   | **151** | **96**       | **4**               |
+| **All areas**                                                                         | **252**   | **152** | **96**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2237,6 +2237,18 @@ The desktop updater verifies a feed's Ed25519 signature against the compiled-in 
 - A Linux AppImage update verifies signature and hash before use, replaces the image atomically, and fails closed with the reason shown in Settings.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Update feed signing keys are per ring](../architecture.md#security-and-authority).
+
+### A guided tour on the first start
+
+A five-step tour points at the real controls once, on the first start after first-run setup, and can be taken again from the account menu.
+
+- The steps are New chat or New task, the Projects list, the Tools buttons in the title band, the composer and Settings. A step whose control is not on screen is skipped, and the label counts only the steps shown. _Here only._
+- It is offered only to an installation that started fresh: it is recorded as due while first-run setup is unanswered and opens once setup is answered and the window is quiet. A person who finished setup before the tour existed is never offered it. _Here only._
+- It never covers a dialog, a menu, Settings, Project create, a What's new announcement, Zen or an Inbox with anything waiting, and it closes when a dialog opens over it. _Here only._
+- Showing it, from the offer or the menu, records it as seen in renderer-local storage, as the host notices record their dismissals; no host setting, network call or count is involved. _Here only._
+- The card is a floating surface at the floating layer with an accent ring around the control; Escape closes, the arrows move, focus returns to where it was, and reduced motion removes the fade.
+
+Status: Built. Since: —. Detail: [Workspace: Guided tour](workspace.md#guided-tour).
 
 ### What's New after an update
 

@@ -1,6 +1,7 @@
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/contracts/code";
 import type { OctantMode } from "@octant/contracts/modes";
+import type { FirstRunOnboardingStatus } from "@octant/contracts/shell";
 import type { ProjectId } from "@octant/contracts/projects";
 import { CodeSearchDialog } from "../code/CodeSearchDialog";
 import { lazy, Suspense, useEffect, useRef } from "react";
@@ -28,6 +29,7 @@ import type {
   ThreadSearchThread,
 } from "./threadSearchViewModel";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { GuidedTour } from "../tour/GuidedTour";
 
 export interface ShellDialogHostCodeThreadView {
   readonly checkout: { readonly id: CodeCheckoutId };
@@ -71,6 +73,10 @@ export interface ShellDialogHostProps {
   readonly windowCapability?: string;
   readonly firstRun: FirstRunOnboardingProps;
   readonly whatsNew: WhatsNewController;
+  /** The host's answer to first-run setup; the tour is offered after it is answered. */
+  readonly firstRunStatus: FirstRunOnboardingStatus | undefined;
+  /** Settings is open or a thread needs an answer; the tour keeps out of the way. */
+  readonly tourBlocked: boolean;
   readonly announcement: string;
   readonly announcementSequence: number;
   readonly projectAnnouncement: string;
@@ -182,6 +188,18 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
         ) : null}
       </OctantDialogPresence>
       <WhatsNewAfterUpdate controller={props.whatsNew} />
+      <GuidedTour
+        blocked={
+          props.tourBlocked ||
+          props.createOpen ||
+          props.searchOpen ||
+          props.zenActive ||
+          props.firstRun.controller.pending ||
+          props.whatsNew.announcements !== undefined ||
+          props.whatsNew.notesOpen
+        }
+        firstRunStatus={props.firstRunStatus}
+      />
       <p
         aria-atomic="true"
         aria-live="polite"

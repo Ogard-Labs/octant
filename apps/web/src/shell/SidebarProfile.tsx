@@ -12,12 +12,14 @@ import {
   Layers,
   PanelLeft,
   Plug,
+  Route,
   Settings,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
+import { openGuidedTour } from "../tour/guidedTourState";
 import {
   OctantMenuGroup,
   OctantMenuGroupLabel,
@@ -145,6 +147,7 @@ export function SidebarProfile(props: SidebarProfileProps) {
                 {openZen === undefined ? null : (
                   <ProfileAction icon={Sparkles} label="Zen mode" onClick={openZen} />
                 )}
+                <ProfileAction icon={Route} label="Take the tour" onClick={openGuidedTour} />
               </OctantMenuGroup>
             </OctantMenuPopup>
           </OctantMenuPositioner>

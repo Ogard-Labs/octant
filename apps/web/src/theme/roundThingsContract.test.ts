@@ -53,6 +53,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".host-selector__dot",
   ".browser-workspace__server-dot",
   ".computers-card__dot",
+  ".guided-tour__dot",
   ".dock-card__dot",
   ".library__dot",
   ".project-tile__dot",

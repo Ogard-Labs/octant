@@ -14,16 +14,16 @@ What one screen or tool shows and does lives in the topic file that owns it.
 This document is the system those files build with; they never define a
 second palette, type scale, or control.
 
-| Screen or tool                                                                                                                                                | Owner                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Shell grid, tool row, content tabs, sidebar, icon rail, right dock, tool tiles, Environment, Browser toolbar, Board, Zen, pull requests, What's new, quitting | [Workspace: Presentation](docs/design/workspace.md#presentation)        |
-| Turn header, transcript, Reply detail, subagent and follow-up cards, plan meters, model picker, context meter, message queue                                  | [Thread view](docs/design/thread-view.md)                               |
-| Welcome screen, Code Home, first run                                                                                                                          | [Start screen](docs/design/start-screen.md)                             |
-| Settings sheet, groups and pages, Permissions, Usage                                                                                                          | [Settings](docs/design/settings.md)                                     |
-| The picture or drawn field behind pages                                                                                                                       | [Application ground](docs/design/application-ground.md)                 |
-| Canvas charts, tables, mockups, and designs                                                                                                                   | [Canvas visuals](docs/design/canvas-visuals.md)                         |
-| Moving a thread and Prepare to shut down                                                                                                                      | [Hub and spokes](docs/design/hub-and-spokes.md#moving-a-thread-screens) |
-| Browser captures strip and Draw on page                                                                                                                       | [Browser captures](docs/design/browser-captures.md)                     |
+| Screen or tool                                                                                                                                                             | Owner                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Shell grid, tool row, content tabs, sidebar, icon rail, right dock, tool tiles, Environment, Browser toolbar, Board, Zen, pull requests, What's new, guided tour, quitting | [Workspace: Presentation](docs/design/workspace.md#presentation)        |
+| Turn header, transcript, Reply detail, subagent and follow-up cards, plan meters, model picker, context meter, message queue                                               | [Thread view](docs/design/thread-view.md)                               |
+| Welcome screen, Code Home, first run                                                                                                                                       | [Start screen](docs/design/start-screen.md)                             |
+| Settings sheet, groups and pages, Permissions, Usage                                                                                                                       | [Settings](docs/design/settings.md)                                     |
+| The picture or drawn field behind pages                                                                                                                                    | [Application ground](docs/design/application-ground.md)                 |
+| Canvas charts, tables, mockups, and designs                                                                                                                                | [Canvas visuals](docs/design/canvas-visuals.md)                         |
+| Moving a thread and Prepare to shut down                                                                                                                                   | [Hub and spokes](docs/design/hub-and-spokes.md#moving-a-thread-screens) |
+| Browser captures strip and Draw on page                                                                                                                                    | [Browser captures](docs/design/browser-captures.md)                     |
 
 [Workspace behavior](docs/design/workspace.md) owns navigation and pane
 interactions; [architecture](docs/architecture.md) owns system and authority
@@ -932,7 +932,7 @@ CSS never suppresses, recolours, or adds a second ring, and the
 
 Layers are tokens. Page chrome stays at or below `--oct-z-overlay` (40); sticky
 parts of a page use `--oct-z-sticky` (20). Dialogs and sheets with their
-backdrops stand at `--oct-z-floating` (50), a notice at `--oct-z-toast` (55), and
+backdrops, and the guided tour's card and ring, stand at `--oct-z-floating` (50), a notice at `--oct-z-toast` (55), and
 everything a person opens to aim at (menus, context menus, popovers, selects,
 comboboxes, tooltips, hover cards) at `--oct-z-popup` (60). A notice sits above a
 dialog or sheet because under its backdrop it could be neither read nor

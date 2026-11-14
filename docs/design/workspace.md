@@ -2813,6 +2813,52 @@ When a verified app update finishes downloading, its notice offers a direct
 link to the Updates control; applying the update still requires an explicit
 request from the person.
 
+### Guided tour
+
+A short tour points at the real controls, once, on the first start. A card
+stands beside the control with a 2px ring in the accent around it, and nothing
+else on the page is dimmed. The card is a floating surface (the shared recipe in
+`components.css`, 336px wide) at `--oct-z-floating`: over the page, under a
+notice or a menu. It holds a picture of the feature, a label ("2 of 5 · Projects"
+in the accent text colour), a title, one or two short lines, progress dots, a
+quiet Back (absent on the first step), a filled Next (Done on the last), and a
+Close button. The picture is drawn from rows, chips and lines over a faint dotted
+grid, in ink and the accent, so it follows the theme in both schemes.
+
+| Step | Points at                                               | Says                                                                    |
+| ---- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1    | New chat or New task                                    | Start work in Chat, Work or Code; pick the agent and model              |
+| 2    | The Projects list in the sidebar (or the rail's button) | Each Project keeps its threads, files and settings together             |
+| 3    | The Tools buttons in the title band                     | Environment, Terminal, Review, Browser and Files open beside the thread |
+| 4    | The composer                                            | Attach files, choose the mode, see what the agent may do                |
+| 5    | Settings (the rail's button, else the account menu)     | Providers, look and feel, and permissions                               |
+
+A step whose control is not drawn (a hidden sidebar, a narrow window, a Chat
+thread with no tool buttons, a hidden tool) is skipped, and the label counts
+only the steps shown, so it never points at nothing. The ring and card follow the
+control as the window is resized or the layout changes; a step that loses its
+control mid-tour drops out, and the tour ends when none is left.
+
+Focus moves to Next when the card opens and returns to where it was when the
+tour closes (the account menu row when that element is gone). Escape closes the
+tour; Left and Right move between steps unless focus is in a field or a menu;
+Tab stays within the card. The card is a non-modal dialog: it does not trap
+the pointer, and the page behind stays usable. It fades in over 150ms and under
+reduced motion, from the system or the setting, it does not fade.
+
+It is offered once, to an installation that starts fresh: while first-run setup
+is unanswered the window records that the tour is due, and once the host reports
+setup completed or skipped the tour opens as soon as the window is quiet. It
+waits, and does not give up, while a dialog or menu is open, Settings or Project
+create is up, a What's new announcement is showing, Zen is active, or the Inbox
+counts anything that needs attention, and it closes if a dialog opens over it.
+A person who finished setup before the tour existed has no record and is never
+offered it. Showing the tour, however it was opened, records it as seen in the
+same renderer-local storage the host notices use for their dismissals; where the
+storage cannot be read the offer may come back, which is harmless. The account
+menu's "Take the tour" opens it again at any time, in any window with the
+sidebar showing, and records nothing else.
+
 ### Mode-specific utility chrome
 
 Chat admits only the Agents dock when helpers exist, it was explicitly requested,

@@ -8133,6 +8133,8 @@ function LaunchedShell(
           hostId={createHostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           whatsNew={whatsNew}
+          firstRunStatus={controller.settings?.firstRunOnboarding}
+          tourBlocked={controller.settingsOpen || inboxCount > 0}
           mode={projectCreateMode ?? controller.workspace.activeMode}
           onCloseCreate={() => {
             setCreateOpen(false);
