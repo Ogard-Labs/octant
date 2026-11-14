@@ -37,6 +37,7 @@ import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
 import type { BoardPendingRequestSource } from "../threadBoard/useBoardPendingRequests";
 import type { WorkThreadOpenTarget } from "../work/WorkThreadBoard";
 import type { ReviewPageProps } from "../review/ReviewPage";
+import type { TodosPageProps } from "../todos/TodosView";
 import type { ArchivedThreadEntry, ArchiveProject } from "./ArchiveView";
 import { SurfaceLoading } from "../surface/SurfaceLoading";
 import { ShellState } from "./ShellState";
@@ -72,6 +73,9 @@ const GitHubIssueBrowser = lazy(() =>
 );
 const InboxView = lazy(() =>
   import("../inbox/InboxView").then((module) => ({ default: module.InboxView })),
+);
+const TodosView = lazy(() =>
+  import("../todos/TodosView").then((module) => ({ default: module.TodosView })),
 );
 const ReviewPage = lazy(() =>
   import("../review/ReviewPage").then((module) => ({ default: module.ReviewPage })),
@@ -182,6 +186,8 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenInboxThread: (signal: ThreadAttentionSignal) => void;
   /** The Review page, where finished threads are triaged with single keys. */
   readonly reviewPage?: ReviewPageProps;
+  /** The person's to-do list, present while its page is open. */
+  readonly todosPage?: TodosPageProps;
   readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
   readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   readonly onOpenLinearIssues?: () => void;
@@ -228,6 +234,13 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           </LazyRailSurface>
         </div>
       ) : null}
+      {props.todosPage === undefined ? null : (
+        <div className="inbox-layer">
+          <LazyRailSurface label="To-dos">
+            <TodosView {...props.todosPage} />
+          </LazyRailSurface>
+        </div>
+      )}
       {props.reviewPage === undefined ? null : (
         <div className="review-layer">
           <LazyRailSurface label="Review">

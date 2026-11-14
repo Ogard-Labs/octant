@@ -92,6 +92,8 @@ export type Todo = typeof Todo.Type;
 /** The whole list, in rank order. */
 export const TodoListView = Schema.Struct({
   kind: Schema.Literal("todo-list"),
+  /** The list host's own id, which names that host's Projects in a link. */
+  hostId: StableHostId,
   todos: Schema.Array(Todo).pipe(Schema.maxItems(TODO_LIST_MAX)),
 }).annotations(strict);
 export type TodoListView = typeof TodoListView.Type;

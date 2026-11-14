@@ -3407,6 +3407,6 @@ A person keeps their own to-dos in one list that every device and computer they 
 - Edits to the title or notes are version-checked and refused as changed elsewhere when stale; there is no merge. An unreachable list host shows a stale, read-only list, and quick add keeps an unsent draft the person sends; nothing is queued as offline work.
 - A to-do's Project and thread links carry no authority. Starting opens that Project's ordinary new-thread draft on its own host, whose checks decide; the mode follows the Project; nothing starts until the person sends (not built yet).
 - Only the person ticks a to-do off; an agent never changes a to-do.
-- The destination and every name in code and copy are To-dos, never Tasks. The destination is not built yet.
+- The destination and every name in code and copy are To-dos, never Tasks. Built: the To-dos page on one host, with quick add, filters, editing in place, reordering, the sidebar row and its badge, and New to-do in the command palette and on a shortcut. Not built yet: Start and the thread state on a row, and live updates from other devices.
 
 Status: Partly built. Since: 2026-11-14. Detail: [To-dos](todos.md).
