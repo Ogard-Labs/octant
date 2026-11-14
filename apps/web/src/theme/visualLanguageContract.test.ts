@@ -344,9 +344,16 @@ describe("the public-block visual language", () => {
     // from the right and bottom, with the inner radius, so no pane paints over
     // a rounded corner or doubles the outline.
     const stage = inFrame(".shell-frame > .workspace-layer");
-    expect(stage).toMatch(/clip-path:\s*inset\(/);
-    expect(stage).toMatch(/calc\(var\(--oct-title-rail-h\) \+ 1px\) 1px 1px/);
+    expect(stage).toMatch(/clip-path:\s*inset\(\s*0 1px 1px/);
+    expect(stage).toMatch(/--octant-stage-top:\s*calc\(var\(--oct-title-rail-h\) \+ 1px\)/);
     expect(stage).toMatch(/calc\(var\(--oct-radius-md\) - 1px\)/);
+    // The pane header lives in the title band, inside this layer. The clip must
+    // not start at the band's line, or the header and its breadcrumb are cut
+    // away: the whole band stays in the mask, and only the panel's two top
+    // corners below it are cut.
+    expect(stage).not.toMatch(/inset\(\s*calc\(var\(--oct-title-rail-h\)/);
+    expect(stage).toMatch(/mask-size:\s*100% var\(--octant-stage-top\),/);
+    expect(stage).toMatch(/mask-position:\s*0 0,/);
     expect(stage).toMatch(/margin:\s*0 var\(--octant-panel-gap\) var\(--octant-panel-gap\)/);
     // A pane has no corner, shadow or gap of its own.
     const panes = frame.slice(0, frame.indexOf("The window controls float"));

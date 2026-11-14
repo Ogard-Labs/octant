@@ -2246,11 +2246,43 @@ html[data-octant-native-host="true"]
   .shell-frame > .workspace-layer {
     position: relative;
     margin: 0 var(--octant-panel-gap) var(--octant-panel-gap) var(--octant-stage-gap-left);
+    /* The layer starts at the window's top, because the pane header lives in the
+       title band above the panel. So the clip cannot start at the band's line:
+       it kept the band out of sight, and with it the header and its breadcrumb.
+       It clips the sides and the foot with the outline's inner radius, and the
+       panel's two top corners are cut by the mask, which keeps the band whole. */
+    --octant-stage-top: calc(var(--oct-title-rail-h) + 1px);
+    --octant-stage-radius: calc(var(--oct-radius-md) - 1px);
     clip-path: inset(
-      calc(var(--oct-title-rail-h) + 1px) 1px 1px var(--octant-stage-clip-left) round
-        var(--octant-stage-corner-left) calc(var(--oct-radius-md) - 1px)
-        calc(var(--oct-radius-md) - 1px) var(--octant-stage-corner-left)
+      0 1px 1px var(--octant-stage-clip-left) round 0 0 var(--octant-stage-radius)
+        var(--octant-stage-corner-left)
     );
+    mask-image:
+      linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000),
+      radial-gradient(
+        circle at 100% 100%,
+        #000 max(0px, calc(var(--octant-stage-corner-left) - 0.5px)),
+        transparent var(--octant-stage-corner-left)
+      ),
+      radial-gradient(
+        circle at 0 100%,
+        #000 calc(var(--octant-stage-radius) - 0.5px),
+        transparent var(--octant-stage-radius)
+      );
+    mask-size:
+      100% var(--octant-stage-top),
+      100% calc(100% - var(--octant-stage-top) - var(--octant-stage-radius)),
+      calc(100% - var(--octant-stage-clip-left) - var(--octant-stage-corner-left) - var(--octant-stage-radius) - 1px)
+        var(--octant-stage-radius),
+      var(--octant-stage-corner-left) var(--octant-stage-corner-left),
+      var(--octant-stage-radius) var(--octant-stage-radius);
+    mask-position:
+      0 0,
+      0 100%,
+      calc(var(--octant-stage-clip-left) + var(--octant-stage-corner-left)) var(--octant-stage-top),
+      var(--octant-stage-clip-left) var(--octant-stage-top),
+      right 1px top var(--octant-stage-top);
+    mask-repeat: no-repeat;
   }
 
   /* The thread's pane. It is a grid item rather than an absolute piece, so it
