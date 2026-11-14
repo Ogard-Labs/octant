@@ -762,7 +762,10 @@ A held turn takes messages (maintainer decision, 2026-11-14): a message the
 person sends while a turn is held, through the driver's `send` or `steer`,
 is delivered into it, the runtime answers it in a turn folded in as
 `runtime-turn-started` with `trigger: "person-message"` (never counted), and
-the held completion waits for that answer. A steered message goes in as text, the turn's
+the held completion waits for that answer. A message sent while a turn the
+runtime started is still open marks nothing, since that turn was already
+opened and counted as background work, so a later background start is never
+labelled as the person's. A steered message goes in as text, the turn's
 context inline as on a runtime without the prompt hook; one that carries
 images is refused with a reason (send them once the turn ends) rather than
 sent without them. `steer` answers `unsupported`

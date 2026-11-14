@@ -2404,10 +2404,13 @@ function makeConnection(
      * 2026-11-14: a held turn takes messages rather than refusing them). The
      * runtime answers it in a turn of its own, which is folded into the
      * person's turn as any runtime turn is, opened as `person-message`, so the
-     * held completion waits for that answer.
+     * held completion waits for that answer. A message sent while a turn
+     * the runtime started is still open marks nothing: that turn was opened
+     * and counted as background work, and marking the next one would label
+     * a later background start as the person's and leave it uncounted.
      */
     const steerHeldTurn = (state: SessionState, held: ClaudeHeldTurn, text: string) => {
-      held.steered = true;
+      if (!held.runtimeTurnOpen) held.steered = true;
       held.idle = false;
       return state.query.send({ text }).pipe(
         Effect.as("steered" as const),

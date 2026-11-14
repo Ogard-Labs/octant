@@ -7622,6 +7622,40 @@ describe("Claude background work", () => {
     await acquired.close();
   });
 
+  it("labels and counts a turn background work starts after the person steered into a runtime turn already open", async () => {
+    const { acquired, query, seen, collected } = await startTurn({ runtimeTurnsPerTurn: () => 2 });
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await query.emit(backgroundEnded);
+    await query.emit(state("running"));
+    await query.emit(text("Reading the results."));
+    // The runtime's own turn is open when the person's message arrives.
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "and format" })),
+    ).toBe("steered");
+    await query.emit({ ...backgroundStarted, taskId: "bash-2" });
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await query.emit({ ...backgroundEnded, taskId: "bash-2" });
+    await query.emit(state("running"));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    // A third wake would pass the limit of two, so the turn ends there.
+    await query.emit({ ...backgroundStarted, taskId: "bash-3" });
+    await query.emit(state("running"));
+    await query.emit(completed(sdk));
+    await collected;
+
+    expect(
+      seen
+        .filter((event) => event.kind === "runtime-turn-started")
+        .map((event) => (event.kind === "runtime-turn-started" ? event.trigger : undefined)),
+    ).toEqual(["background-task", "background-task"]);
+    expect(seen.filter((event) => event.kind === "completed")).toHaveLength(1);
+    await acquired.close();
+  });
+
   it("refuses to steer when no turn is held, so the message queue keeps it", async () => {
     const { acquired } = await startTurn();
     expect(
