@@ -27,10 +27,7 @@ as one glow that dithers from accent into ink into nothing. It never carries
 more than one accent colour. The ink is at most half opaque on a dark page, and
 the accent at most about seven-tenths there; on a light page the ink is dark, at
 most two-fifths opaque, and the glow stays about half as strong, so it stays
-faint. A Scene chooses what it draws. Ridges are five layered horizon lines from
-smooth noise: the far ones are fainter, each ridge's edge is its brightest line,
-and an accent sun sits on the horizon to one side, lighting only the edges it can
-see. Burst is a soft radial burst of about twenty rounded rays in the accent from
+faint. A Scene chooses what it draws. Ridges is the one bold scene, a picture rather than a texture: five layered ridges from smooth noise, each a solid shape. The crest is a bright, crisp line a few cells thick, near full ink, and the slope under it is filled with denser shading that falls off downward, so each layer occludes the one behind; near layers are larger and brighter, far ones fainter. A large accent sun sits on the horizon to one side, with a valley cut under it: its core saturates to full accent inside a wide dithered halo, and the crests near it catch its light in the accent, fading with distance from it. The sky above is mostly empty, with a sparse haze near the horizon. Ridges carries its own peak opacities above the caps just given: ink up to 0.96 and the accent to full on a dark page, ink up to 0.8 and the accent to 0.72 on a light one, which stays a little lighter. Burst is a soft radial burst of about twenty rounded rays in the accent from
 the top right corner, fading into dither, whose size breathes by a few per cent.
 Drift is diagonal streaks in the ink, in loose bands that break up along their
 length, with a few in the accent, sliding across the page. Your picture prints a
@@ -44,8 +41,9 @@ without a photo draws Drift too. Every scene is generated in code from a fixed
 seed, so it looks the same each time, and none ships an image. Each scene is laid
 out for what the window shows (a start screen that scrolls makes the ground as
 tall as its content) and dimmed toward the heading in the middle and the composer
-at the foot, which keep a fifth of its strength, back to full about a third of the
-page out, so the brightest cells stay away from text. Motion is slow: ridges drift
+at the foot, which keep a fifth of its strength (Ridges keeps half, since its composer is
+opaque and its heading large), back to full about a third of the page out, so
+the brightest cells stay away from text. Motion is slow: ridges drift
 a few cells a second, the sun and the burst breathe, the streaks slide. It runs at
 fifteen frames a second, stops while the document is hidden or the ground is off
 screen, caps its backing store at twice the display ratio, sets up in idle time,

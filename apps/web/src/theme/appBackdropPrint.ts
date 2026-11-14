@@ -32,6 +32,14 @@ const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((value)
  */
 const DARK_PAGE = { ink: 0.5, accent: 0.72 } as const;
 const LIGHT_PAGE = { ink: 0.4, accent: 0.36 } as const;
+/**
+ * Ridges is the one scene meant to be a picture rather than a texture: crisp
+ * crests at near full ink, filled slopes, and a sun that saturates to the
+ * accent. It carries its own peak opacities above the field caps. The light
+ * page stays a little lighter, since dark ink on pale paper reads louder.
+ */
+const RIDGES_DARK_PAGE = { ink: 0.96, accent: 1 } as const;
+const RIDGES_LIGHT_PAGE = { ink: 0.8, accent: 0.72 } as const;
 /** How far a passing wave pushes a cell, in cells. */
 const BOUNCE_CELLS = 2.2;
 /** How strongly the wave lights a cell toward the accent. */
@@ -45,6 +53,8 @@ const WAVE_SECONDS = 1.9;
 const MAX_RATIO = 2;
 /** The share of a scene that survives at the page's centre, where the heading sits. */
 const CALM_FLOOR = 0.2;
+/** Ridges keeps half its strength there: the composer is opaque, and the heading is large. */
+const RIDGES_CALM_FLOOR = 0.5;
 /** How far from the centre the scene is back at full strength, as a share of the page. */
 const CALM_REACH = 0.36;
 
@@ -58,14 +68,20 @@ function smoothstep(low: number, high: number, value: number): number {
  * size: the heading in the middle and the composer at the foot keep a fifth,
  * and the page is back at full strength about a third of its size out.
  */
-export function calmShare(x: number, y: number, width: number, height: number): number {
+export function calmShare(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  floor: number = CALM_FLOOR,
+): number {
   if (width <= 0 || height <= 0) return 1;
   const across = (x - width / 2) / width;
   // Two places keep text over the ground: the heading near the middle, and
   // the composer docked at the foot.
   const heading = Math.hypot(across, ((y - height * 0.5) / height) * 0.85);
   const composer = Math.hypot(across, ((y - height * 0.94) / height) * 1.4);
-  return CALM_FLOOR + (1 - CALM_FLOOR) * smoothstep(0, CALM_REACH, Math.min(heading, composer));
+  return floor + (1 - floor) * smoothstep(0, CALM_REACH, Math.min(heading, composer));
 }
 
 /**
@@ -348,7 +364,15 @@ export function runMovingPrint(
     const style = getComputedStyle(canvas);
     ink = parseColor(style.color) ?? [128, 128, 128];
     accent = parseColor(style.getPropertyValue("--octant-accent").trim()) ?? ink;
-    page = isDarkPage(ink) ? DARK_PAGE : LIGHT_PAGE;
+    const dark = isDarkPage(ink);
+    page =
+      source.scene === "ridges"
+        ? dark
+          ? RIDGES_DARK_PAGE
+          : RIDGES_LIGHT_PAGE
+        : dark
+          ? DARK_PAGE
+          : LIGHT_PAGE;
   };
 
   const fit = () => {
@@ -388,7 +412,13 @@ export function runMovingPrint(
         shares[row * columns + column] =
           scene === undefined && twoTone === undefined
             ? 1
-            : calmShare((column + 0.5) * cell, (row + 0.5) * cell, columns * cell, visibleHeight);
+            : calmShare(
+                (column + 0.5) * cell,
+                (row + 0.5) * cell,
+                columns * cell,
+                visibleHeight,
+                source.scene === "ridges" ? RIDGES_CALM_FLOOR : CALM_FLOOR,
+              );
       }
     }
   };

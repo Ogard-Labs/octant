@@ -53,25 +53,54 @@ describe("the built-in pixel scenes", () => {
     }
   });
 
-  it("puts the ridges' sun on one side of the horizon, with ink beneath it", () => {
+  it("puts the ridges' sun on one side of the horizon, saturated at its core, with ink beneath it", () => {
     const columns = 120;
     const rows = 70;
     const scene = createScene("ridges", columns, rows, SCENE_SEED);
     scene.frame(0);
     const sample: SceneSample = { ink: 0, glow: 0 };
-    const glowByColumn = Array.from({ length: columns }, () => 0);
+    let glowTotal = 0;
+    let glowMoment = 0;
+    let peak = 0;
     let lowerInk = 0;
     for (let row = 0; row < rows; row += 1) {
       for (let column = 0; column < columns; column += 1) {
         scene.read(column, row, sample);
-        glowByColumn[column] = Math.max(glowByColumn[column] ?? 0, sample.glow);
+        glowTotal += sample.glow;
+        glowMoment += sample.glow * column;
+        peak = Math.max(peak, sample.glow);
         if (row > rows * 0.75) lowerInk += sample.ink;
       }
     }
-    const brightest = glowByColumn.indexOf(Math.max(...glowByColumn));
-    expect(Math.abs(brightest - columns / 2)).toBeGreaterThan(columns * 0.15);
-    expect(Math.max(...glowByColumn)).toBeGreaterThan(0.8);
+    expect(Math.abs(glowMoment / glowTotal - columns / 2)).toBeGreaterThan(columns * 0.15);
+    expect(peak).toBe(1);
     expect(lowerInk).toBeGreaterThan(0);
+  });
+
+  it("draws the ridges' crests at near full ink over a mostly empty sky", () => {
+    const columns = 120;
+    const rows = 70;
+    const scene = createScene("ridges", columns, rows, SCENE_SEED);
+    scene.frame(0);
+    const sample: SceneSample = { ink: 0, glow: 0 };
+    let skyInk = 0;
+    let skyCells = 0;
+    let brightCells = 0;
+    for (let row = 0; row < rows * 0.3; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        scene.read(column, row, sample);
+        skyInk += sample.ink;
+        skyCells += 1;
+      }
+    }
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        scene.read(column, row, sample);
+        if (sample.ink > 0.9) brightCells += 1;
+      }
+    }
+    expect(skyInk / skyCells).toBeLessThan(0.02);
+    expect(brightCells).toBeGreaterThan(columns);
   });
 
   it("keeps a burst's glow to one corner", () => {

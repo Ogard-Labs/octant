@@ -242,6 +242,11 @@ describe("the two-tone print", () => {
     expect(edge).toBeGreaterThan(0.95);
   });
 
+  it("lets a floor of half keep more of the scene behind the heading", () => {
+    expect(calmShare(720, 450, 1440, 900, 0.5)).toBeCloseTo(0.5);
+    expect(calmShare(40, 860, 1440, 900, 0.5)).toBeGreaterThan(0.95);
+  });
+
   it("gives only the bright warm cells of a picture the accent", () => {
     const rgba = new Uint8ClampedArray(4 * 4);
     // Dark, grey, bright blue, bright orange.

@@ -53,36 +53,52 @@ function hills(seed: number, x: number): number {
 
 const RIDGE_COUNT = 5;
 
+/**
+ * Five layered ridges, far to near. Each is a solid shape: a bright crest a few
+ * cells thick, and a slope under it filled with shading that falls off
+ * downward, so a nearer ridge occludes the one behind. Near layers are brighter
+ * and larger. A broad accent sun sits on the horizon to one side, with a valley
+ * cut beneath it, and the crests near it catch its light.
+ */
 function createRidges(columns: number, rows: number, seed: number): Scene {
   const tops = new Float32Array(RIDGE_COUNT * columns);
   const sunOnRight = hashUnit(seed, 1) >= 0.5;
-  const horizon = rows * 0.64;
-  const sunX = columns * (sunOnRight ? 0.74 : 0.26);
-  const sunY = horizon - rows * 0.015;
+  const horizon = rows * 0.56;
+  const sunX = columns * (sunOnRight ? 0.78 : 0.22);
+  const sunY = horizon - rows * 0.02;
+  // How near a column is to the sun, in [0, 1]: it lights crests and sinks the
+  // far ridges into a valley so the sun's core stays in view.
+  const nearSun = new Float32Array(columns);
+  for (let column = 0; column < columns; column += 1) {
+    nearSun[column] = Math.exp(-(((column - sunX) / (columns * 0.3)) ** 2));
+  }
   let breath = 1;
 
   const frame = (t: number) => {
     breath = 1 + 0.08 * Math.sin(t * 0.7);
     for (let ridge = 0; ridge < RIDGE_COUNT; ridge += 1) {
       const depth = ridge / (RIDGE_COUNT - 1);
-      const base = horizon + rows * 0.19 * depth ** 1.1;
-      const amplitude = rows * (0.07 + 0.08 * depth);
-      const width = columns * (0.34 - 0.05 * ridge);
+      const base = horizon + rows * 0.33 * depth ** 1.1;
+      const amplitude = rows * (0.08 + 0.1 * depth);
+      const width = columns * (0.3 - 0.035 * ridge);
       // Far ridges drift slowest, so the layers slide against each other.
       const speed = 0.5 + 1.1 * depth;
+      const sink = 0.85 - 0.5 * depth;
       for (let column = 0; column < columns; column += 1) {
         const x = (column + t * speed * (sunOnRight ? 1 : -1)) / width + ridge * 17.3;
-        tops[ridge * columns + column] = base - amplitude * hills(seed + ridge * 31, x);
+        const lowered = 1 - sink * (nearSun[column] ?? 0);
+        tops[ridge * columns + column] = base - amplitude * hills(seed + ridge * 31, x) * lowered;
       }
     }
   };
   frame(0);
 
   const sunGlow = (column: number, row: number): number => {
-    const dx = (column - sunX) / (columns * 0.12 * breath);
-    const dy = (row - sunY) / (rows * 0.15 * breath);
+    const dx = (column - sunX) / (columns * 0.15 * breath);
+    const dy = (row - sunY) / (rows * 0.17 * breath);
     const squared = dx * dx + dy * dy;
-    return Math.min(1, Math.exp(-squared) * 0.95 + Math.exp(-squared * 7));
+    // A core that saturates to full accent inside a wide dithered halo.
+    return Math.min(1, Math.exp(-squared * 1.2) * 1.5);
   };
 
   return {
@@ -98,24 +114,26 @@ function createRidges(columns: number, rows: number, seed: number): Scene {
       }
       const sun = sunGlow(column, row);
       if (ridge < 0) {
-        // Sky: a faint haze that thickens toward the horizon, and the sun.
-        const haze = Math.exp(-Math.max(0, horizon - row) / (rows * 0.1)) * 0.22;
-        out.ink = Math.min(1, haze + Math.sqrt(sun) * 0.32);
+        // Sky: mostly empty, a sparse haze near the horizon, and the sun.
+        const haze = Math.exp(-Math.max(0, horizon - row) / (rows * 0.05)) * 0.22;
+        out.ink = Math.min(1, haze + sun * 0.25);
         out.glow = sun;
         return;
       }
       const depth = ridge / (RIDGE_COUNT - 1);
       const below = row - (tops[ridge * columns + x] ?? row);
-      // The far ridges are fainter; each ridge's edge is its brightest line.
-      const fade = 0.32 + 0.68 * depth;
-      const edge = Math.exp(-below / 1.15);
-      const body = 0.2 * Math.exp(-below / (rows * 0.06));
-      out.ink = Math.min(1, fade * (0.9 * edge + body));
-      // The sun lights the edges and upper slopes it can see.
-      out.glow = Math.min(
-        1,
-        sun * (0.9 * edge + 0.45 * Math.exp(-below / (rows * 0.03))) * (0.5 + 0.5 * fade),
-      );
+      // Far layers are fainter, near layers brighter.
+      const fade = 0.55 + 0.45 * depth;
+      // The crest: full ink for a cell or two, then gone by the fourth.
+      const edge = 1 - smoothstep(1.2, 3.6, below);
+      // The slope: dense under the crest and falling off with depth below it,
+      // so each ridge reads as a filled shape against the one in front.
+      const fill = (0.4 + 0.15 * depth) * Math.exp(-below / (rows * (0.02 + 0.02 * depth)));
+      out.ink = Math.min(1, Math.max(fade * edge, (0.6 + 0.4 * depth) * fill));
+      // The sun's rim light on crests fades with distance from it, and warms
+      // the upper slope it can see.
+      const lit = (nearSun[x] ?? 0) * (0.45 + 0.55 * fade);
+      out.glow = Math.min(1, Math.max(edge * lit * 1.4, fill * lit * 1.3));
     },
   };
 }
