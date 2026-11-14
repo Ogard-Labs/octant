@@ -1836,7 +1836,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 }
 
 /* Tool rows: what a turn did, one 28px row per call, between the turn header
-   and the reply. The name reads at the body size; the state sits at the
+   and the reply. The name reads at the detail size; the state sits at the
    right edge as quiet detail text with a 12px mark (a spinner while it runs,
    a check when it is done, a cross when it failed). Rows are parted by
    hairlines and share one indent, so a tool row is the same object in every
@@ -1868,8 +1868,14 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   cursor: default;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   list-style: none;
+  border-radius: var(--oct-radius-sm);
+}
+
+/* The pointer gets the soft wash the sidebar's rows take. */
+.turn-activity__disclosure > summary:hover {
+  background: var(--oct-wash-hover);
 }
 
 .turn-activity__disclosure > summary::-webkit-details-marker {
@@ -1891,7 +1897,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg-2);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -1924,7 +1930,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   min-width: 0;
   overflow: hidden;
   color: var(--oct-meta);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
