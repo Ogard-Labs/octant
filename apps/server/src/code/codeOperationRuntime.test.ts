@@ -4514,6 +4514,86 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("records each delivered approval answer in the turn's stream, so a re-read no longer offers it", async () => {
+    type AskedApprovalId = Extract<
+      OperationFrame["event"],
+      { kind: "approval-requested" }
+    >["approvalId"];
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    const startOperation = operationId(21);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const streamEvents = async () =>
+      (await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40)).map(
+        (frame) => frame.event,
+      );
+    const ask = async (requestId: string, index: number) => {
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId,
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
+      let approvalId: AskedApprovalId | undefined;
+      await vi.waitFor(async () => {
+        approvalId = (await streamEvents()).filter((event) => event.kind === "approval-requested")[
+          index
+        ]?.approvalId;
+        expect(approvalId).toBeDefined();
+      });
+      if (approvalId === undefined) throw new Error("Expected a provider approval");
+      return approvalId;
+    };
+    const answer = (
+      approvalId: AskedApprovalId,
+      decision: "approved" | "denied",
+      operation: number,
+    ) =>
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision,
+      });
+
+    const approved = await ask("provider-approval-answered-allow", 0);
+    await expect(answer(approved, "approved", 22)).resolves.toMatchObject({ state: "running" });
+    const denied = await ask("provider-approval-answered-deny", 1);
+    await expect(answer(denied, "denied", 23)).resolves.toMatchObject({ state: "running" });
+
+    // A window that reads the turn again from its start (a reopened thread, a
+    // second window) must see that both asks were answered, or it offers them
+    // again and an Approve on them is refused.
+    const answers = (await streamEvents()).filter((event) => event.kind === "approval-answered");
+    expect(answers).toEqual([
+      { kind: "approval-answered", approvalId: approved, decision: "approved" },
+      { kind: "approval-answered", approvalId: denied, decision: "denied" },
+    ]);
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
+    fixture.close();
+  });
+
   it("refuses a browser allow answered after the thread's posture changed, opening nothing", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const provider = providerConnection(queue);

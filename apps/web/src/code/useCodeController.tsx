@@ -564,7 +564,9 @@ export function useCodeController(options: CodeControllerOptions) {
   }, [conversationStarted]);
 
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
-    if (event.kind === "owner-approval-settled") {
+    // A replay of the turn's stream carries every ask from its start; the
+    // host's record of the answer is what withdraws one already answered.
+    if (event.kind === "owner-approval-settled" || event.kind === "approval-answered") {
       setProviderRequests((current) =>
         current.filter(
           (request) =>

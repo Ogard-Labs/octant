@@ -4797,6 +4797,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       )
         return turnState("failed");
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
+      if (ownerCurrent === undefined)
+        this.#recordApprovalAnswered(active, input.approvalId, input.decision);
       if (input.decision === "approved") return answeredTurnState(active.state);
       return this.#countDeniedApproval(active);
     }
@@ -4830,8 +4832,36 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         });
       }),
     );
+    // An owner's answer journals `owner-approval-settled` instead.
+    if (ownerCurrent === undefined)
+      this.#recordApprovalAnswered(active, input.approvalId, input.decision);
     if (input.decision === "approved") return answeredTurnState(active.state);
     return this.#countDeniedApproval(active);
+  }
+
+  /**
+   * Journals that a person's answer reached the asker, on the turn that asked.
+   * A re-read of the turn's stream otherwise offers the ask again, and its
+   * Approve is refused because nothing waits for it. The answer was already
+   * delivered, so a journal that refuses the row leaves the result as it is.
+   */
+  #recordApprovalAnswered(
+    active: ActiveTurn,
+    approvalId: string,
+    decision: "approved" | "denied",
+  ): void {
+    try {
+      const frame = this.#appendTurnEvent(active, {
+        event: {
+          kind: "approval-answered",
+          approvalId: CodeApprovalId.make(approvalId),
+          decision,
+        },
+      });
+      active.cursor = frame.cursor;
+    } catch {
+      // The provider already has the answer; the stream keeps the ask.
+    }
   }
 
   /**
