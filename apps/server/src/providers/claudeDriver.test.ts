@@ -39,6 +39,7 @@ import {
   claudeExecutionOptions,
   claudeSandboxSettings,
   claudeFileToolSecretRefusal,
+  claudeOwnRulesDecide,
   claudeSearchesRunUnguarded,
   makeClaudeDriver,
 } from "./claudeDriver";
@@ -852,7 +853,7 @@ describe("Claude execution policy", () => {
             toolUseId,
             signal,
           });
-        const asked = executionPolicy === "full-access" ? "allow" : "ask";
+        const asked = executionPolicy === "full-access" ? "allow" : "own-rules";
         for (const service of ["RemoteTrigger", "PushNotification", "Projects", "ClaudeDesign"]) {
           expect(open.withheldTools).not.toContain(service);
         }
@@ -879,7 +880,7 @@ describe("Claude execution policy", () => {
         // A notebook edit is a file edit inside the Project, and nothing more.
         const notebook = { notebook_path: `${projectRoot}/analysis.ipynb`, new_source: "1" };
         await expect(tool("NotebookEdit", notebook, "notebook")).resolves.toEqual({
-          behavior: executionPolicy === "approval-gated" ? "ask" : "allow",
+          behavior: executionPolicy === "approval-gated" ? "own-rules" : "allow",
         });
         await expect(
           tool(
@@ -1294,6 +1295,106 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("leaves a call Octant would ask about to the person's own permission rules while every Octant refusal still refuses", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const observed: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          observed.push(event);
+        }),
+      ),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    const call = (toolName: string, input: object, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    // No decision: Claude Code's own allow, ask, and deny rules run first.
+    await expect(call("Bash", { command: "bun run test" }, "rules-bash")).resolves.toEqual({
+      behavior: "own-rules",
+    });
+    const edit = { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" };
+    await expect(call("Edit", edit, "rules-edit")).resolves.toEqual({ behavior: "own-rules" });
+    // Octant's refusals answer before the person's rules could allow the call.
+    await expect(
+      call("Edit", { ...edit, file_path: "/tmp/octant-claude-elsewhere/a.ts" }, "outside"),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    // A question needs the person's answer, so Octant still asks it.
+    const question = {
+      questions: [
+        {
+          question: "Go?",
+          header: "Go",
+          options: [{ label: "Yes" }, { label: "No" }],
+          multiSelect: false,
+        },
+      ],
+    };
+    await expect(call("AskUserQuestion", question, "question")).resolves.toEqual({
+      behavior: "ask",
+    });
+    // A rule-allowed call never reaches the permission callback; its result
+    // releases its grant, so twenty of them leave no grant behind.
+    for (let index = 0; index < 20; index += 1) {
+      const toolUseId = `rule-allowed-${index}`;
+      await f.queries[0]!.emit({
+        kind: "stream-event",
+        sessionId: "sdk-session-1",
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId,
+            toolName: "Bash",
+            input: { command: `echo ${index}` },
+          },
+        },
+      });
+      await expect(call("Bash", { command: `echo ${index}` }, toolUseId)).resolves.toEqual({
+        behavior: "own-rules",
+      });
+      await f.queries[0]!.emit({
+        kind: "tool-results",
+        sessionId: "sdk-session-1",
+        results: [{ toolUseId, isError: false }],
+      });
+    }
+    // A call the person's rules leave to ask reaches `canUseTool` with its grant.
+    const asked = open.canUseTool({
+      toolName: "Bash",
+      input: { command: "bun run test" },
+      toolUseId: "rules-bash",
+      signal,
+    });
+    await vi.waitFor(() =>
+      expect(observed.some((event) => event.kind === "approval-request")).toBe(true),
+    );
+    expect(observed.some((event) => event.kind === "failed")).toBe(false);
+    await acquired.close();
+    await expect(asked).resolves.toMatchObject({ behavior: "deny" });
+    await Effect.runPromise(Fiber.join(subscriber));
+    // Plan, a question, and a wake-up keep Octant's own ask.
+    expect(claudeOwnRulesDecide("plan", "Bash")).toBe(false);
+    expect(claudeOwnRulesDecide("approval-gated", "AskUserQuestion")).toBe(false);
+    expect(claudeOwnRulesDecide("auto-accept-edits", "ScheduleWakeup")).toBe(false);
+    expect(claudeOwnRulesDecide("auto-accept-edits", "Bash")).toBe(true);
+  });
+
   it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
@@ -1475,7 +1576,7 @@ describe("Claude execution policy", () => {
         toolUseId: "missing-callback",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
 
     elapsedMs += 30_001;
     wallClock.mockReturnValue(1_000);
@@ -1488,7 +1589,7 @@ describe("Claude execution policy", () => {
         toolUseId: "next-tool",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     // The expired grant is tombstoned, so its tool-use ID never asks again.
     await expect(
       open.preToolUse({
@@ -1581,7 +1682,7 @@ describe("Claude execution policy", () => {
           toolUseId: `missing-${index}`,
           signal,
         }),
-      ).resolves.toEqual({ behavior: "ask" });
+      ).resolves.toEqual({ behavior: "own-rules" });
     }
     await expect(
       open.preToolUse({
@@ -1985,7 +2086,7 @@ describe("Claude execution policy", () => {
         toolUseId: "edit-inside",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     await expect(
       gatedOpen.preToolUse({
         sessionId: "sdk-session-1",
@@ -2071,7 +2172,7 @@ describe("Claude execution policy", () => {
         toolUseId: "edit-gated",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     const callback = open.canUseTool({ toolName: "Edit", input, toolUseId: "edit-gated", signal });
     const first = await Promise.race([
       approvalEvent.then((event) => ({ kind: "approval" as const, event })),
@@ -2121,7 +2222,7 @@ describe("Claude execution policy", () => {
         toolUseId: "bash-no-cwd",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     const callback = open.canUseTool({ toolName: "Bash", input, toolUseId: "bash-no-cwd", signal });
     const first = await Promise.race([
       approvalEvent.then((event) => ({ kind: "approval" as const, event })),
@@ -2386,7 +2487,7 @@ describe("Claude execution policy", () => {
         toolUseId: "bash-escape",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     const callback = open.canUseTool({
       toolName: "Bash",
       input,
@@ -3699,7 +3800,7 @@ describe("Claude execution policy", () => {
       acquired.connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
     );
     await expect(open.preToolUse({ ...request, toolUseId: "next-turn" })).resolves.toEqual({
-      behavior: "ask",
+      behavior: "own-rules",
     });
     await acquired.close();
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
@@ -4302,12 +4403,12 @@ describe("Claude artifact delivery", () => {
       // in the runtime process, so starting one asks the person first.
       expect(open.withheldTools).not.toContain("Workflow");
       await expect(ask("Workflow", { script: "export const meta = {}" }, "wf-1")).resolves.toEqual({
-        behavior: "ask",
+        behavior: "own-rules",
       });
       // A web read asks at Guarded, as Claude Code itself does.
       await expect(ask("WebFetch", { url: "https://example.invalid" }, "fetch-1")).resolves.toEqual(
         {
-          behavior: "ask",
+          behavior: "own-rules",
         },
       );
       // The account's own MCP server's tool asks at Guarded.
@@ -4397,7 +4498,7 @@ describe("Claude artifact delivery", () => {
             toolUseId,
             signal,
           });
-        const expected = executionPolicy === "full-access" ? "allow" : "ask";
+        const expected = executionPolicy === "full-access" ? "allow" : "own-rules";
         await expect(answer("WebSearch", `search-${executionPolicy}`)).resolves.toEqual({
           behavior: expected,
         });

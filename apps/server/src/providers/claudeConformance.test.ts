@@ -419,10 +419,11 @@ class ConformanceQuery implements ClaudeQueryPort {
       toolUseId: "approval-1",
       signal,
     } as const;
-    // Claude Code consults the permission callback only for a hook "ask";
-    // a hook "allow" runs the tool without it.
+    // Claude Code consults the permission callback for a hook "ask", and for
+    // a hook that answers nothing when no rule of the person's allows the
+    // call; a hook "allow" runs the tool without it.
     const gate = await this.input.preToolUse(request);
-    if (gate.behavior === "ask") {
+    if (gate.behavior === "ask" || gate.behavior === "own-rules") {
       void this.input.canUseTool({
         toolName: request.toolName,
         input,

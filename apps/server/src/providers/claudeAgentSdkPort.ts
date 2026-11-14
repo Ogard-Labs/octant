@@ -54,8 +54,15 @@ export type ClaudeToolDecision =
  * final and runs the tool without consulting `canUseTool`, so the hook can
  * only say "allow" for a call Octant would let through unasked; "ask" hands
  * the call to `canUseTool`, where approvals and questions are raised.
+ * "own-rules" answers nothing, so Claude Code's own permission rules (the
+ * person's `permissions.allow`, `ask`, and `deny`) run first and only a call
+ * they leave to ask reaches `canUseTool`: a forced "ask" skips the person's
+ * allow rules in the bundled runtime.
  */
-export type ClaudePreToolDecision = ClaudeToolDecision | { readonly behavior: "ask" };
+export type ClaudePreToolDecision =
+  | ClaudeToolDecision
+  | { readonly behavior: "ask" }
+  | { readonly behavior: "own-rules" };
 
 export interface ClaudeToolRequest {
   readonly toolName: string;
@@ -667,8 +674,9 @@ interface ClaudeAgentSdkHookOptions {
   readonly signal: AbortSignal;
 }
 
+/** A hook's answer; one with no `hookSpecificOutput` decides nothing. */
 interface ClaudeAgentSdkHookOutput {
-  readonly hookSpecificOutput: {
+  readonly hookSpecificOutput?: {
     readonly hookEventName: "PreToolUse";
     readonly permissionDecision: "allow" | "deny" | "ask";
     readonly permissionDecisionReason?: string;
@@ -1504,6 +1512,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   toolUseId,
                   signal: callback.signal,
                 });
+                if (decision.behavior === "own-rules") return {};
                 return {
                   hookSpecificOutput: {
                     hookEventName: "PreToolUse",

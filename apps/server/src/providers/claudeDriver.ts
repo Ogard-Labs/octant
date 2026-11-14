@@ -614,6 +614,36 @@ function claudeConfinedTarget(
   return projectRoot;
 }
 
+/**
+ * Tools whose ask stays Octant's own even where the person's permission rules
+ * would allow them: a question needs the person's answer, a publish snapshots
+ * the file the person approves, and a wake-up is answered by Octant from the
+ * thread's schedule and must never run in the runtime.
+ */
+const CLAUDE_OCTANT_ASKED_TOOLS = new Set<string>([
+  "AskUserQuestion",
+  CLAUDE_ARTIFACT_TOOL,
+  ...CLAUDE_WAKEUP_TOOLS,
+]);
+
+/**
+ * Whether a call the gate would ask about is left to Claude Code's own
+ * permission rules first. The bundled runtime skips its allow-rule check when
+ * a hook forces "ask", so a call the person's `permissions.allow` allows used
+ * to become an Octant approval anyway. Below Full access outside Plan, a call
+ * that passed every Octant refusal (secret paths, folders the session does
+ * not hold, Plan) is answered with no decision: the person's
+ * allow, ask, and deny rules run, and `canUseTool` sees only a real ask, as
+ * in Claude Code on its own (maintainer decision, 2026-11-14). Plan keeps
+ * Octant's ask for everything it asks about.
+ */
+export function claudeOwnRulesDecide(policy: ProviderExecutionPolicy, toolName: string): boolean {
+  return (
+    (policy === "approval-gated" || policy === "auto-accept-edits") &&
+    !CLAUDE_OCTANT_ASKED_TOOLS.has(toolName)
+  );
+}
+
 /** Whether this call is a Plan turn's shell command, which its sandbox confines. */
 function isPlanShellCommand(
   policy: ProviderExecutionPolicy,
@@ -2524,6 +2554,15 @@ function makeConnection(
         closeAfterPublishedTerminal(state);
         return;
       }
+      // A call Claude's own rules allowed runs without `canUseTool`, so its
+      // grant is released when its result arrives rather than held to expiry.
+      if (message.kind === "tool-results") {
+        for (const result of message.results) {
+          if (state.preToolRequests.delete(result.toolUseId)) {
+            state.settledToolUseIds.add(result.toolUseId);
+          }
+        }
+      }
       if (message.kind === "task" && message.background === true && state.pendingTurns > 0) {
         state.backgroundTasks.add(message.taskId);
         state.startedBackgroundWork = true;
@@ -3229,7 +3268,9 @@ function makeConnection(
           // raised. So the hook may only allow what `canUseTool` would let
           // through unasked; every call that needs an approval or a question
           // is answered "ask", which routes it to `canUseTool` with the grant
-          // recorded here. An allowed call holds no grant: nothing will come
+          // recorded here, or left to Claude Code's own permission rules (see
+          // `claudeOwnRulesDecide`), which reach `canUseTool` the same way
+          // when they ask. An allowed call holds no grant: nothing will come
           // to consume it, and sixteen unconsumed grants used to end the turn.
           const settledUnasked = (): ClaudePreToolDecision => {
             holdWorktree(activeState, request.toolName, requestInput, request.projectRoot);
@@ -3255,7 +3296,9 @@ function makeConnection(
               ...(outsideProject ? { outsideProject: true as const } : {}),
               ...(asksUnsandboxed ? { unsandboxed: true as const } : {}),
             });
-            return { behavior: "ask" };
+            return claudeOwnRulesDecide(input.executionPolicy, request.toolName)
+              ? { behavior: "own-rules" }
+              : { behavior: "ask" };
           };
           // A publish asks under every posture below Full access, which asks
           // nobody; the path checks above still refuse a file outside the Project.

@@ -701,6 +701,24 @@ secret-path refusals still apply to the file tools, and at Full access
 nothing changes: no command is sandboxed there, and a thread that kept its
 sandbox at Full access keeps `allowUnsandboxedCommands: false`.
 
+Below Full access outside Plan, a call the gate would ask about and that
+passed every Octant refusal (the secret guard and folders the session does
+not hold) is answered with no decision, so Claude Code's own
+permission rules run first: the person's `permissions.allow`, `ask`, and
+`deny` decide it, and only a call they leave to ask reaches `canUseTool`,
+where Octant raises its approval or Reviewed's reviewer decides (maintainer
+decision, 2026-11-14). A question (`AskUserQuestion`), an Artifact publish,
+and a wake-up keep Octant's own ask, because each needs an answer only Octant
+gives; Plan keeps Octant's ask for everything. A call the person's rules
+allow never meets `canUseTool`, so its grant is released when its result
+arrives. Rationale: the bundled runtime skips its allow-rule check when a
+hook forces "ask", so a call the person had allowed in their own settings
+used to become an Octant approval anyway. The command sandbox keeps
+`autoAllowBashIfSandboxed: false`, unlike Claude Code's default: running a
+sandboxed command unasked would end Guarded's approval for each command and
+Reviewed's review of it, which are built features; a person who wants a
+command to run unasked writes an allow rule for it.
+
 A call's working directory follows the session, as it does in Claude Code:
 after `cd apps/web` the hook names that folder, and the gate accepts any
 working directory inside the folders the session holds (the Project root,
