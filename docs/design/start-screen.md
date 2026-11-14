@@ -92,7 +92,12 @@ and Needs you wins. Matching runs before the five-row limit, so a row the limit
 hides still keeps its item out of a later section.
 
 A section header is the title in 12px meta ink with its count right-aligned; the
-first header also carries a small **…** menu with **Customize**. Rows have no card
+first header also carries a small **…** menu with **Customize**. Header and rows
+share one grid: the heading's left edge is the glyph column's left edge, and the
+count, a row's status word and a self-drawn row's actions all end at one right
+edge, a 24px gutter in from the list's edge, which holds only the menu. Every
+header keeps the same slots (title, a 12px busy mark, count, menu), so nothing
+shifts when a section starts or stops updating. Rows have no card
 behind them (a wash on hover and focus only) and sections are told apart by
 space, not boxes. A row is the Pull requests list's row: a state glyph at the
 16px step, the title at the 13px detail step, and one meta line at 12px
@@ -109,9 +114,32 @@ A source that has not looked or failed is said in one quiet line under the list
 (or, when nothing else is there, instead of "Nothing waiting on you"): the
 list never claims silence for a read it did not make. When every section is
 empty the list is one quiet line with a next step, "Nothing waiting on you. Start
-a thread above." Nothing moves under the pointer: the list draws only once every
-source has answered (or after 1.5 seconds, then with what it has), holding its
-place meanwhile, so a section that loads late never pushes rows already read.
+a thread above."
+
+**Loading and the cache.** Nothing moves while the list loads (principle 7). A
+row is one fixed height (52px) whether it is a skeleton, a stored row or a live
+one, and every section is laid out from the first frame in the fixed order:
+
+- **Stored answer.** The last settled list for this host and Project is kept in
+  the client (`localStorage`, one key, schema-versioned, at most 8 host and
+  Project entries and 48,000 characters, titles and meta already shown only; an
+  entry of another version, malformed or from a blocked or full store is ignored)
+  and painted on the first frame, with the same row count, See all line and, for
+  a self-drawn row, its measured height. Stored rows are inert (no row opens, See
+  all is disabled) and say nothing alarming; a 12px spinner in each updating
+  section's heading is the only sign. A section is replaced in place, row slots
+  keeping their height, as soon as every source that feeds it has answered; the
+  settled list is stored again.
+- **First start.** With nothing stored, Needs you, Your pull requests and
+  Continue (where a source feeds them) draw their heading and skeleton rows
+  (four, five for Your pull requests) with the same spinner. Once, when the rows
+  land, the sections below shift; the composer and anything above never do.
+- **Order and collapse.** A section sits where the order puts it and goes live
+  when its own sources have answered, so a fast section does not wait for a slow
+  one, and a slow one keeps its slot. A section that comes back empty collapses
+  only when nothing is drawn after it; otherwise it keeps its heading and one
+  quiet line, "Nothing right now.", for that visit. A source silent for 5 seconds
+  is no longer waited for.
 
 The ground behind the content column (the ASCII, pixel and picture grounds) keeps
 a fifth of its strength, a sixth on a light page, so the list sits on calm

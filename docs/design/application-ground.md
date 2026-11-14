@@ -109,12 +109,13 @@ Under the whole shell the field answers only a click on a start screen, never on
 in a thread or a list. While a ring is alive the field runs at about forty frames
 a second, and falls back to fifteen once it is gone. A saved choice always wins: only a fresh install and Reset take this default. Behind a
 start screen every ground, the ASCII field and the dithered scenes included,
-fades toward the foot of the window: full strength to about three fifths of its
-height, about a third of it across the lower third, and the window ground
-itself at the foot, as a mask on the ground layer under everything, so the
-composer and the words near it read over a busy picture. In the light theme it
-fades sooner, because dark text over a pale picture has less contrast headroom
-than light text over a dark one. A person
+fades toward the foot of the window: full strength down to 55% of the stage,
+then easing smoothly to the stage's own colour across the lower 45%, as a mask
+on the ground layer under everything, so the composer and the lists under the
+question always sit on a calm area. The ramp is the same in the light theme and
+in the dark (the page colour under the mask is what the ground fades into), and
+the dim behind the content column stays beside it, because the greeting and the
+lists sit in that column. A person
 may instead put the ground behind every page, from the workspace's leading
 edge, and under the sidebar too when they ask for it (see [Depth and material](../../DESIGN.md#depth-and-material)). Every
 surface that shows text or information softens it beneath one continuous

@@ -168,4 +168,19 @@ describe("window glass", () => {
       /html:is\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)\s*\.shell-frame\s*> \.app-backdrop\[data-placement="welcome"\] \{[^}]*--oct-ground-under: 0px;/,
     );
   });
+
+  it("fades a start screen's ground from full strength at 55% of the stage to nothing at its foot, on dark and light alike", () => {
+    const surface = read("styles/surface.css");
+    const rule = /\.app-backdrop\[data-placement="welcome"\] \{([^}]*?)display: none;/.exec(
+      surface,
+    );
+    const fade =
+      /--oct-ground-fade: linear-gradient\(([\s\S]*?)\);/.exec(rule?.[1] ?? "")?.[1] ?? "";
+    expect(fade).toMatch(/to bottom,\s*currentColor 55%/);
+    expect(fade).toMatch(/transparent 100%\s*$/);
+    // One ramp for both pages: no light-mode override that ends the fade sooner.
+    expect(surface).not.toMatch(
+      /data-octant-theme-mode="light"\] \.app-backdrop\[data-placement="welcome"\]/,
+    );
+  });
 });

@@ -4,6 +4,10 @@
    detail step, one meta line at the small step. */
 
 .home-list {
+  /* One right edge: a header's count, a row's status and a custom row's actions
+     all end a gutter in from the list's edge; the gutter holds only the menu. */
+  --home-list-gutter: 24px;
+  --home-list-row-h: 52px;
   display: grid;
   min-width: 0;
   gap: var(--oct-space-6);
@@ -50,13 +54,25 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The busy mark keeps its 12px slot in every header, so a header never changes
+   width when a section starts or stops updating. */
+.home-list__busy {
+  display: inline-flex;
+  flex: 0 0 var(--oct-icon-sm);
+  align-items: center;
+  justify-content: center;
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
+}
+
 .home-list__menu {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
-  width: var(--oct-space-8);
-  margin-inline-end: calc(var(--oct-space-2) * -1);
+  width: var(--home-list-gutter);
+  /* Takes back the header's gap, so the count ends where a row's status ends. */
+  margin-inline-start: calc(var(--oct-space-2) * -1);
 }
 
 .home-list__rows {
@@ -77,10 +93,13 @@
   justify-content: stretch;
   justify-items: start;
   width: 100%;
-  height: auto;
-  min-height: 48px;
+  /* The row's height is fixed, so a skeleton row and a stored or live one are
+     the same size and a section does not change height when its rows arrive. */
+  height: var(--home-list-row-h);
+  min-height: var(--home-list-row-h);
   gap: 2px var(--oct-space-3);
   padding: var(--oct-space-2);
+  padding-inline-end: calc(var(--oct-space-2) + var(--home-list-gutter));
   border: 0;
   border-radius: var(--oct-radius-sm);
   background: transparent;
@@ -161,6 +180,11 @@ button.home-list__row:hover {
   white-space: nowrap;
 }
 
+/* The place of a See all link in a skeleton, the small button's height. */
+.home-list__see-all-slot {
+  height: var(--oct-control-height-sm);
+}
+
 .home-list__see-all.home-list__see-all {
   justify-self: start;
   margin-inline: var(--oct-space-2);
@@ -181,4 +205,45 @@ button.home-list__row:hover {
 
 .home-list__empty > .home-list__menu {
   margin-inline-start: auto;
+}
+
+/* Rows that draw themselves share the list's edges: the left edge of a glyph
+   row's glyph and the right edge of a status. */
+.home-list__rows > li > .running-services__row {
+  min-height: var(--home-list-row-h);
+  padding-inline: var(--oct-space-2) calc(var(--oct-space-2) + var(--home-list-gutter));
+}
+
+/* Skeleton rows: the real row's grid and height, drawn as quiet shapes. */
+.home-list__row--skeleton {
+  align-items: center;
+}
+
+.home-list__skeleton-glyph {
+  grid-area: glyph;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--oct-radius-pill);
+}
+
+.home-list__skeleton-title {
+  grid-area: title;
+  width: 62%;
+  height: var(--oct-text-detail);
+}
+
+.home-list__skeleton-meta {
+  grid-area: meta;
+  width: 34%;
+  height: var(--oct-text-xs);
+}
+
+/* An emptied section keeps its heading and one quiet line, so what is under it
+   stays where it was. */
+.home-list__quiet {
+  margin: 0;
+  padding-inline: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-space-8);
 }

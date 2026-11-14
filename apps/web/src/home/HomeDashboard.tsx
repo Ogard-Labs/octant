@@ -22,6 +22,10 @@ export interface HomeDashboardProps {
    * Customize does not list them.
    */
   readonly extraRows?: ReadonlyArray<HomeListContributor> | undefined;
+  /** The host and Project the list is read for: the key its last answer is kept under. */
+  readonly cacheScope?: string | undefined;
+  /** Injectable for tests; defaults to the browser's local storage. */
+  readonly cacheStorage?: Pick<Storage, "getItem" | "setItem"> | undefined;
 }
 
 /**
@@ -85,7 +89,12 @@ export function HomeDashboard(props: HomeDashboardProps) {
   return (
     <section aria-label="Home cards" className="home-dashboard">
       {listed ? (
-        <HomeList contributors={contributors} menu={customize} />
+        <HomeList
+          cacheScope={props.cacheScope}
+          contributors={contributors}
+          menu={customize}
+          storage={props.cacheStorage}
+        />
       ) : (
         <div className="home-dashboard__bar">{customize}</div>
       )}

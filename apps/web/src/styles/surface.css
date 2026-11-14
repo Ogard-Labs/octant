@@ -770,17 +770,24 @@
    sharing a level with the content painted its dots over the greeting and over
    the suggestion cards, which read as the cards being see-through. */
 .app-backdrop[data-placement="welcome"] {
+  /* The ground is at full strength down to 55% of the stage, then eases to
+     the stage's own colour over the lower 45%, so the composer and the lists
+     beneath the question always sit on a calm area. One ramp for dark and light
+     pages alike: the mask only reads alpha, so the page colour under it is what
+     the ground fades into. */
+  --oct-ground-fade: linear-gradient(
+    to bottom,
+    currentColor 55%,
+    color-mix(in srgb, currentColor 78%, transparent) 63%,
+    color-mix(in srgb, currentColor 52%, transparent) 72%,
+    color-mix(in srgb, currentColor 26%, transparent) 82%,
+    color-mix(in srgb, currentColor 8%, transparent) 92%,
+    transparent 100%
+  );
   /* How far the ground runs under the sidebar, and how much of its strength
      survives there. Zero and all of it where the sidebar is left whole. */
   --oct-ground-under: 0px;
   --oct-ground-under-share: 100%;
-  --oct-ground-fade: linear-gradient(
-    to bottom,
-    currentColor 62%,
-    color-mix(in srgb, currentColor 62%, transparent) 74%,
-    color-mix(in srgb, currentColor 30%, transparent) 88%,
-    transparent 100%
-  );
   display: none;
   z-index: -1;
   left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
@@ -862,20 +869,6 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
   mask-repeat: no-repeat;
   mask-composite: intersect;
   -webkit-mask-composite: source-in;
-}
-
-/* Light ink on a light ground has far less contrast headroom than light ink on
-   a dark one, and the grey dots are busiest in the lower half, exactly where the
-   suggestions and the Continue list read. There the ground fades out sooner so
-   that text sits on calm paper; dark keeps the longer fade. */
-:root[data-octant-theme-mode="light"] .app-backdrop[data-placement="welcome"] {
-  --oct-ground-fade: linear-gradient(
-    to bottom,
-    currentColor 56%,
-    color-mix(in srgb, currentColor 58%, transparent) 68%,
-    color-mix(in srgb, currentColor 28%, transparent) 84%,
-    transparent 98%
-  );
 }
 
 /* The character field and the pixel ground dim their own middle and their

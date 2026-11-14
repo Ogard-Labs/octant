@@ -2517,6 +2517,7 @@ The sidebar speaks about what a thread is doing now with one fixed vocabulary, a
 
 - The vocabulary is Working, Needs attention, Snooze ended and New activity, owned by the domain package. Nothing to report is no status, and a failure is never inferred from silence.
 - The jump goes by strength of reason (approval, then question, then unreviewed finished turn), wraps, and adds no host read.
+- A start screen's ground is at full strength down to 55% of the stage and fades smoothly to the stage's own colour over the lower 45%, in both modes; the dim behind the content column stays (maintainer request, 2026-11-15).
 - Every sidebar view shows a short age by default (now, 12m, 3d, 52w, 2y; never past three characters), 12px meta ink, right-aligned in a fixed slot at one edge on every row. The end of a row is fixed in order and width: title, the slot (age, state in words, or the hover actions fading in over it), provider mark. Hover, focus and an open menu never move the mark or the title's truncation (maintainer request, 2026-11-15). A saved record equal to the old Activity default is read as never chosen and moves to the new default once.
 
 Status: Built. Since: —. Detail: [Workspace: Sidebar thread status](workspace.md#sidebar-thread-status) and [Jump to the next waiting thread](workspace.md#jump-to-the-next-waiting-thread).
@@ -2684,6 +2685,7 @@ Every start screen shows one question and its composer. Code Home adds one calm 
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards), [Start screen: The list](start-screen.md#the-list) and [Card registry](start-screen.md#card-registry).
+- The start list is laid out from its first frame and nothing above a section moves while it loads: rows are one fixed height whether skeleton, stored or live; the last settled answer per host and Project is painted first (inert, a small spinner in each updating heading) and replaced in place; a first start shows skeleton rows; counts, statuses and self-drawn actions end on one right edge with the menu in its own gutter (maintainer request, 2026-11-15; detail in [Start screen: The list](start-screen.md#the-list)).
 
 ### Needs you across surfaces
 
