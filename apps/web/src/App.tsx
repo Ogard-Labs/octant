@@ -7772,14 +7772,10 @@ function LaunchedShell(
             actions={actions}
             activeMode={activeMode}
             activeSurface={activeSurface}
-            {...(activeCodeThreadId === undefined || activeProjectId === undefined
+            {...(activeCodeThreadId === undefined
               ? {}
-              : {
-                  activeCodeThread: {
-                    threadId: String(activeCodeThreadId),
-                    projectId: activeProjectId,
-                  },
-                })}
+              : { activeCodeThreadId: String(activeCodeThreadId) })}
+            {...(activeProjectId === undefined ? {} : { activeProjectId })}
             codeBoardRevision={machineChanges.codeNavigation}
             bottomPanelAvailable={bottomPanelAvailable}
             bottomPanelPresentedOpen={bottomPanelPresentedOpen}

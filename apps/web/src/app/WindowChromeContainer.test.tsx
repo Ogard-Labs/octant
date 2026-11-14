@@ -12,8 +12,8 @@ beforeEach(() => {
 });
 
 const codeThread = {
-  threadId: "00000000-0000-4000-8000-000000000001",
-  projectId: "00000000-0000-4000-8000-000000000002" as ProjectId,
+  activeCodeThreadId: "00000000-0000-4000-8000-000000000001",
+  activeProjectId: "00000000-0000-4000-8000-000000000002" as ProjectId,
 };
 
 function cardWithChanges(
@@ -99,7 +99,7 @@ describe("the window chrome's dock toggle dot", () => {
 describe("the window chrome's uncommitted changes", () => {
   it("names the open Code thread's added and removed lines and opens the changes view", async () => {
     vi.mocked(useThreadBoardCard).mockReturnValue(observed(12, 3));
-    const { props } = chrome({ activeCodeThread: codeThread });
+    const { props } = chrome(codeThread);
 
     const button = screen.getByRole("button", {
       name: "Uncommitted changes: 12 lines added, 3 removed",
@@ -111,7 +111,7 @@ describe("the window chrome's uncommitted changes", () => {
 
   it("shows +0 −0 for a clean checkout", () => {
     vi.mocked(useThreadBoardCard).mockReturnValue(observed(0, 0));
-    chrome({ activeCodeThread: codeThread });
+    chrome(codeThread);
     expect(
       screen.getByRole("button", { name: "Uncommitted changes: 0 lines added, 0 removed" }),
     ).toHaveTextContent("+0−0");
@@ -124,7 +124,7 @@ describe("the window chrome's uncommitted changes", () => {
 
   it("leaves out a count the host marked stale", () => {
     vi.mocked(useThreadBoardCard).mockReturnValue(observed(12, 3, "stale"));
-    chrome({ activeCodeThread: codeThread });
+    chrome(codeThread);
     expect(screen.queryByRole("button", { name: /Uncommitted changes/ })).toBeNull();
   });
 });

@@ -24,7 +24,8 @@ export interface WindowChromeContainerProps {
   readonly activeMode: OctantMode;
   readonly activeSurface: string;
   /** The Code thread on screen, whose checkout the band measures; absent for a draft or another mode. */
-  readonly activeCodeThread?: { readonly threadId: string; readonly projectId: ProjectId };
+  readonly activeCodeThreadId?: string;
+  readonly activeProjectId?: ProjectId;
   /** Moves when the host says the Code board changed, so the count is read again. */
   readonly codeBoardRevision: number;
   readonly bottomPanelAvailable: boolean;
@@ -74,12 +75,13 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     sidebarRail,
     zenRecoveryNeeded,
   } = props;
-  const codeThread = props.activeCodeThread;
+  const codeThreadId = props.activeCodeThreadId;
+  const codeProjectId = props.activeProjectId;
   const card = useThreadBoardCard({
     loadBoard: actions.loadCodeBoard,
-    projectId: codeThread?.projectId,
-    threadId: codeThread?.threadId ?? "",
-    enabled: codeThread !== undefined,
+    projectId: codeProjectId,
+    threadId: codeThreadId ?? "",
+    enabled: codeThreadId !== undefined && codeProjectId !== undefined,
     changeRevision: props.codeBoardRevision,
   });
   const observed = card?.changedFiles;
