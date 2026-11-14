@@ -20,7 +20,13 @@ const person = decodeEventActor({
 describe("moving a thread to another provider account", () => {
   it("moves when the person asks while no turn runs", () => {
     expect(
-      decideProviderAccountMove({ actor: person, turnRunning: false, from: work, to: personal }),
+      decideProviderAccountMove({
+        actor: person,
+        turnRunning: false,
+        modelPoolOn: false,
+        from: work,
+        to: personal,
+      }),
     ).toEqual({ kind: "moves" });
     const device = decodeEventActor({
       kind: "remote-device",
@@ -28,8 +34,13 @@ describe("moving a thread to another provider account", () => {
       deviceId: "84000000-0000-4000-8000-0000000000c2",
     });
     expect(
-      decideProviderAccountMove({ actor: device, turnRunning: false, from: work, to: personal })
-        .kind,
+      decideProviderAccountMove({
+        actor: device,
+        turnRunning: false,
+        modelPoolOn: false,
+        from: work,
+        to: personal,
+      }).kind,
     ).toBe("moves");
   });
 
@@ -46,21 +57,29 @@ describe("moving a thread to another provider account", () => {
     });
     for (const actor of [undefined, agent, host]) {
       expect(
-        decideProviderAccountMove({ actor, turnRunning: false, from: work, to: personal }),
+        decideProviderAccountMove({
+          actor,
+          turnRunning: false,
+          modelPoolOn: false,
+          from: work,
+          to: personal,
+        }),
       ).toMatchObject({ kind: "refused", reason: "unattended" });
     }
   });
 
-  it("refuses while a turn runs and to an account of another provider, turned off, or the same", () => {
+  it("refuses while a turn runs or a model pool is on, and to an account of another provider, turned off, or the same", () => {
     const refusal = (input: Partial<Parameters<typeof decideProviderAccountMove>[0]>) =>
       decideProviderAccountMove({
         actor: person,
         turnRunning: false,
+        modelPoolOn: false,
         from: work,
         to: personal,
         ...input,
       });
     expect(refusal({ turnRunning: true })).toMatchObject({ reason: "turn-running" });
+    expect(refusal({ modelPoolOn: true })).toMatchObject({ reason: "model-pool" });
     expect(refusal({ to: { ...personal, driverKind: "codex" } })).toMatchObject({
       reason: "other-provider",
     });

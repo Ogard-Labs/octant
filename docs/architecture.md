@@ -6629,7 +6629,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   account, and the next turn starts there with the disclosed handoff of
   [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
   whose marker names the new account. The host accepts the move only from the
-  person, at a window or on a device they paired, and only while no turn runs;
+  person, at a window or on a device they paired, and only while no turn runs
+  and no model pool is on (the pool names the current account);
   a move from the host itself or an agent is refused, so there is no silent or
   automatic failover, rotation, or load-balancing between accounts (maintainer
   decision, 2026-11-14). Built for Chat; Work and Code move through the model

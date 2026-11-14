@@ -5,6 +5,7 @@ import type { ModelPickerSelection, PickerGroup } from "./modelPickerPolicy";
 export type ProviderAccountMoveRefusal =
   | "unattended"
   | "turn-running"
+  | "model-pool"
   | "same-account"
   | "account-missing"
   | "account-disabled"
@@ -21,6 +22,7 @@ export type ProviderAccountMoveDecision =
 const refusalMessages: Readonly<Record<ProviderAccountMoveRefusal, string>> = {
   unattended: "A thread moves to another account only when you ask for it.",
   "turn-running": "Wait for the running answer to finish before moving this thread.",
+  "model-pool": "Turn off the model pool first; its models stay on the current account.",
   "same-account": "This thread is already on that account.",
   "account-missing": "That account is no longer set up on this computer.",
   "account-disabled": "That account is turned off.",
@@ -41,6 +43,12 @@ function refused(reason: ProviderAccountMoveRefusal): ProviderAccountMoveDecisio
 export function decideProviderAccountMove(input: {
   readonly actor: EventActor | undefined;
   readonly turnRunning: boolean;
+  /**
+   * The thread routes its turns through a model pool. The pool names the
+   * current account's instance, so after a move the next turn would either
+   * refuse or go back to the old account while the move reported success.
+   */
+  readonly modelPoolOn: boolean;
   readonly from: Pick<ProviderInstance, "id" | "driverKind"> | undefined;
   readonly to: Pick<ProviderInstance, "id" | "driverKind" | "enabled"> | undefined;
 }): ProviderAccountMoveDecision {
@@ -52,6 +60,7 @@ export function decideProviderAccountMove(input: {
     return refused("unattended");
   }
   if (input.turnRunning) return refused("turn-running");
+  if (input.modelPoolOn) return refused("model-pool");
   if (input.to === undefined) return refused("account-missing");
   if (input.from !== undefined && String(input.from.id) === String(input.to.id)) {
     return refused("same-account");

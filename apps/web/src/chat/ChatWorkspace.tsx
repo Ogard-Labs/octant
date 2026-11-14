@@ -1095,6 +1095,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   ? {}
                   : {
                       moveToAccount: {
+                        // The host refuses this move too; the reason is the
+                        // same sentence so the menu says why before a click.
+                        ...(view.thread.multiModelPool === undefined
+                          ? {}
+                          : {
+                              unavailableReason:
+                                "Turn off the model pool first; its models stay on the current account.",
+                            }),
                         accounts: accountMoveTargets.map((group) => ({
                           id: group.instance.id,
                           name: group.instance.displayName,

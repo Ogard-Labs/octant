@@ -11793,6 +11793,31 @@ describe("handing a Chat conversation to a new provider session", () => {
       ).rejects.toThrow("only when you ask for it");
       expect(String(fixture.service.read(threadId).thread.providerInstanceId)).toBe(native);
     });
+
+    it("refuses to move a thread whose model pool is on, and leaves the thread unchanged", async () => {
+      const fixture = openMoving({ nativeConversationFor: ownsConversation });
+      const threadId = await answeredThread(fixture);
+      await fixture.service.execute({
+        kind: "select-chat-multi-model-pool",
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        pool: {
+          candidates: [
+            { hostId: "local", providerInstanceId: native, modelId: "model-a" },
+            { hostId: "local", providerInstanceId: native, modelId: "model-b" },
+          ],
+          mixedVendorEnabled: false,
+          fallbackAllowed: false,
+          higherCostFallbackAllowed: false,
+        },
+      } as never);
+      const before = fixture.service.read(threadId).thread;
+
+      await expect(moveAccount(fixture, threadId, { actor: person })).rejects.toThrow(
+        "Turn off the model pool",
+      );
+      expect(fixture.service.read(threadId).thread).toEqual(before);
+    });
   });
 
   it("lets a provider that keeps its own session give way to a host-held one without a handoff", async () => {

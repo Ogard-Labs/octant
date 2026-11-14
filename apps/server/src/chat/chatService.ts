@@ -2446,6 +2446,7 @@ export class ChatService {
     const decision = decideProviderAccountMove({
       actor,
       turnRunning: this.isTurnActive(current.id),
+      modelPoolOn: current.multiModelPool !== undefined,
       from: this.#persistence.readProviderInstance(
         decodeProviderInstanceId(current.providerInstanceId),
       ),

@@ -51,7 +51,10 @@ export interface ChatThreadActionsMenuProps {
    * Present when the thread's provider has other accounts set up. The host
    * decides whether the move is allowed; the menu only offers it.
    */
-  readonly moveToAccount?: Pick<MoveToAccountDialogProps, "accounts" | "onMove">;
+  readonly moveToAccount?: Pick<MoveToAccountDialogProps, "accounts" | "onMove"> & {
+    /** Why the move is not available now; the item shows it, disabled. */
+    readonly unavailableReason?: string;
+  };
   /** Present only when this window has a canvas surface to disclose. */
   readonly canvas?: {
     readonly open: boolean;
@@ -244,6 +247,9 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
             icon: <UserRoundCog aria-hidden="true" size={14} />,
             label: "Move to account…",
             value: "move-to-account",
+            ...(props.moveToAccount.unavailableReason === undefined
+              ? {}
+              : { disabled: true, description: props.moveToAccount.unavailableReason }),
           },
         ]),
     ...(props.canvas === undefined

@@ -136,6 +136,23 @@ describe("moving a Chat thread to another account from its actions menu", () => 
     expect(onMove).toHaveBeenCalledWith(personal);
   });
 
+  it("shows the move disabled with its reason while the thread's model pool is on", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn(async () => undefined);
+    render(
+      <ChatThreadActionsMenu
+        moveToAccount={{ accounts, onMove, unavailableReason: "Turn off the model pool first." }}
+        view={view}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    const item = await screen.findByRole("menuitemradio", { name: /Move to account…/ });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveTextContent("Turn off the model pool first.");
+    await user.click(item);
+    expect(screen.queryByRole("dialog", { name: "Move to account" })).toBeNull();
+  });
+
   it("keeps the dialog open with the host's refusal", async () => {
     const user = userEvent.setup();
     const onMove = vi.fn(

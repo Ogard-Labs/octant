@@ -1300,7 +1300,7 @@ Providers are multi-instance, and a thread stays on its instance until the perso
 - Two instances of the same driver cannot share one effective state directory.
 - Plan-usage readings come only from the provider's own process, are kept per account, and a failed refresh keeps the last snapshot with its age.
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
-- Move to account: the person moves a thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired) and while a turn runs. Built for Chat; Work and Code threads move through the model picker. Not built yet: an opt-in "on a usage limit, hand off to this account".
+- Move to account: the person moves a thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired), while a turn runs, and while the thread's model pool is on. Built for Chat; Work and Code threads move through the model picker. Not built yet: an opt-in "on a usage limit, hand off to this account".
 
 Status: Partly built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
 
