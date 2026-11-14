@@ -7,10 +7,11 @@ The picture or drawn field behind the start screens, or behind every page, and h
 The screen sits on the application ground, set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, a field
 of pulsing characters, a field of dithered pixels, a flowing colour field, or
-the plain page. A fresh install starts on Soft glow, one of three Gradient
-pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
-print, so the ground follows the window's scheme; the stylesheet swaps them
-by `data-octant-theme-mode`. A settings row written before the ground
+the plain page. A fresh install starts on Pulsing characters, behind the start
+screens only: the glow it replaces competed with the heading. Soft glow, Graphite
+and Sunset stay in the catalog as three Gradient pictures that each carry a light
+and a dark print, so the ground follows the window's scheme; the stylesheet
+swaps them by `data-octant-theme-mode`. A settings row written before the ground
 existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated, or
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. A printed picture is still unless a person sets
@@ -38,22 +39,24 @@ the ground is off-screen, and falls back to a few blurred radial gradients
 that use the same stops when that path is unavailable. A static grain at a few
 percent of opacity and a quiet vignette sit on top of either path so the wash
 does not band. It answers no clicks. Motion Still holds it on one frame; Wave
-lets the colour keep drifting. Reduced motion holds it still. Pulsing characters is the other drawn ground, and only when a person
-picks it: a grid of monospace letters and digits in the theme's primary ink,
-at most half opaque, whose brightness drifts in slow patches and breathes as
-a whole at twenty-four frames a second while a few glyphs swap. The field is
-drawn on the GPU in one pass, because painting each lit cell from the CPU was
-the cost (ten to sixteen milliseconds a frame at the larger window sizes,
-against a fraction of a millisecond on the GPU). A click over it
-on a start screen (behind every page, only there; a click in a thread or a
-list sends nothing) sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
-it grows, trailed by a fainter echo, and about one click in six draws a heart
-instead, and fades within two seconds. With the Mono style the ring
-is the ink, only brighter; the accent colours it otherwise. It carries no picture, so the effect controls do not apply, and it
-pauses while the window is hidden. Reduced motion holds it on one still frame
-and takes no rings. Behind a
-start screen the ground is masked away behind the composer and fades out below
-it, so the prompt and the recent-thread list read on the plain page; in the
+lets the colour keep drifting. Reduced motion holds it still. Pulsing characters is the default drawn ground, and the one a start screen
+shows on a fresh install: a canvas of small monospace letters and digits in the
+theme's primary ink, at most 15% opaque, that shows only inside slowly drifting
+patches and leaves the rest empty. Three patterns (round blotches, long
+horizontal currents, rings) take turns every twenty seconds and cross-fade over
+the last four. The middle of the page (of what the window shows, when the screen scrolls) is dimmed to 45% and comes back to full
+strength at 30% of the page's size out, so the heading and the composer stay on
+a calm page. The glyphs are painted once into a layer (a few per cent swap each
+frame), and a frame only rewrites one alpha value per cell, so the cost does not
+grow with the number of glyphs. It runs at about fifteen frames a second, and
+stops while the document is hidden or the field is off screen. Its backing store
+is capped at twice the display ratio and at about five million pixels, and its
+setup waits for idle time. It fades in over 1.2 seconds once it has
+drawn, sits behind the content with no pointer events and is hidden from
+assistive technology. Reduced motion, or Motion Still, holds it on one still
+frame. It answers no click. A saved choice always wins: only a fresh install and Reset take this default. Behind a
+start screen every other ground is masked away behind the composer and fades out
+below it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
 may instead put the ground behind every page, from the workspace's leading

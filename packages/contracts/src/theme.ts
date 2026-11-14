@@ -315,12 +315,12 @@ export const AppBackground = Schema.Union(
 export type AppBackground = typeof AppBackground.Type;
 
 // The retired pattern kind still decodes so older rows load. A new install
-// starts on the soft gradient: a flat page made the start screens read as an
-// empty grey box. Rows saved since the ground existed carry their own choice,
-// "none" included, so this reaches fresh installs and Reset only.
+// starts on the character field: a flat page made the start screens read as an
+// empty grey box, and a coloured glow behind the heading competed with it.
+// Rows saved since the ground existed carry their own choice, "none"
+// included, so this reaches fresh installs and Reset only.
 export const DEFAULT_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({
-  kind: "builtin",
-  presetId: "soft-glow",
+  kind: "characters",
 });
 
 // What a row written before the ground existed replays as. Those people saw

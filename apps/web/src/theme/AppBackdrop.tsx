@@ -1,6 +1,6 @@
 import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { runCharacterField } from "./appBackdropCharacters";
+import { runAsciiField } from "./appBackdropAscii";
 import { runFlowingField } from "./appBackdropFlowing";
 import { runMovingPrint } from "./appBackdropPrint";
 import {
@@ -123,8 +123,8 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   useEffect(() => {
     const canvas = charactersCanvas.current;
     if (!characters || canvas === null) return;
-    return runCharacterField(canvas, resolved.backgroundAnimated, wavesWithin);
-  }, [characters, wavesWithin, resolved.backgroundAnimated]);
+    return runAsciiField(canvas, resolved.backgroundAnimated);
+  }, [characters, resolved.backgroundAnimated]);
 
   const pixels = resolved.kind === "pixels";
   useEffect(() => {

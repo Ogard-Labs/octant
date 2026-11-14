@@ -446,7 +446,7 @@ describe("AppBackgroundSettings", () => {
     expect(screen.getByRole("radio", { name: "Warm walnut" })).toBeChecked();
   });
 
-  it("starts a fresh install on the soft gradient picture", () => {
+  it("starts a fresh install on the character field", () => {
     render(
       <AppBackgroundSettings
         background={DEFAULT_APP_BACKGROUND}
@@ -456,9 +456,8 @@ describe("AppBackgroundSettings", () => {
     );
 
     expect(screen.getByRole("combobox", { name: "Application background" })).toHaveTextContent(
-      "Built-in picture",
+      "Pulsing characters",
     );
-    expect(screen.getByRole("radio", { name: "Soft glow" })).toBeChecked();
   });
 
   it("shows a ground saved as the retired dot pattern as None, with nothing to tune", () => {
