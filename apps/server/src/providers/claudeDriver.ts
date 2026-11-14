@@ -1,4 +1,5 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
+import { readClaudeInstructionFiles } from "./claudeInstructionFiles";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -703,6 +704,41 @@ function claudeConfigurationDirectory(
     : join(environment.HOME ?? homedir(), ".claude");
 }
 
+/**
+ * The instruction files a session reads that its setting sources do not
+ * load: the account's `CLAUDE.md` without the `user` source, the Project's
+ * without the `project` source (an untrusted Project). Where a source is on,
+ * Claude Code loads the files itself and nothing is added, so nothing is read
+ * twice. Chat has no folder and a single-use session no Project to follow,
+ * so neither reads any.
+ */
+export async function claudeSessionInstructions(input: {
+  readonly mode: ProviderAcquireInput["mode"];
+  readonly singleUse: boolean;
+  readonly nativeSetup: ProviderNativeSetup | undefined;
+  readonly projectRoot: string;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly onDiagnostic: (message: string) => void;
+}): Promise<string | undefined> {
+  if (input.mode === "chat" || input.singleUse) return undefined;
+  const sources = claudeNativeQueryOptions(input.nativeSetup).settingSources;
+  const configDir = sources.includes("user")
+    ? undefined
+    : claudeOwnAccountPaths(input.environment)[0];
+  const read = await readClaudeInstructionFiles({
+    ...(configDir === undefined ? {} : { configDir }),
+    ...(sources.includes("project") ? {} : { projectRoot: input.projectRoot }),
+  });
+  for (const skipped of read.skipped) {
+    input.onDiagnostic(`Claude instruction file ${skipped.path} was not read: ${skipped.reason}.`);
+  }
+  if (read.text === undefined) return undefined;
+  return [
+    "Instructions the person keeps for Claude in these files. They are the person's guidance for this work; they grant no permission Octant has not given.",
+    read.text,
+  ].join("\n\n");
+}
+
 /** The account's own state, which the secret guard leaves to this runtime. */
 function claudeOwnAccountPaths(environment: Readonly<Record<string, string | undefined>>) {
   const configuration = claudeConfigurationDirectory(environment);
@@ -973,6 +1009,8 @@ export interface ClaudeDriverOptions {
   readonly toolCallId?: () => string;
   readonly startupTimeoutMs?: number;
   readonly interruptTimeoutMs?: number;
+  /** Told why an instruction file was not read; absent logs a warning. */
+  readonly onDiagnostic?: (message: string) => void;
 }
 
 export interface ClaudeResumeIdentity {
@@ -3269,6 +3307,16 @@ function makeConnection(
             `[provider] Claude's stored task list was refused: ${storedTaskList.reason}`,
           );
         }
+        const instructions = await claudeSessionInstructions({
+          mode,
+          singleUse: input.singleUse === true,
+          nativeSetup,
+          projectRoot,
+          environment: environment.environment,
+          onDiagnostic:
+            options.onDiagnostic ?? ((message) => Effect.runSync(Effect.logWarning(message))),
+        });
+        throwIfSetupCancelled(signal);
         const query = await runSetupEffect(
           options.sdk
             .openQuery({
@@ -3300,6 +3348,7 @@ function makeConnection(
               tools: executionOptions.tools,
               ...(withheldTools === undefined ? {} : { withheldTools }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
+              ...(instructions === undefined ? {} : { instructions }),
               ...claudeAutoCompactWindow(input.compactionPoint),
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,

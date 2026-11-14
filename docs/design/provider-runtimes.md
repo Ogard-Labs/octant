@@ -147,6 +147,27 @@ servers then share the process, such a launch is never attested as isolated,
 and Octant's app-managed tools are offered beside them below Full access, as
 at Full access, instead of being refused.
 
+Claude always reads the person's global `CLAUDE.md` and the Project's, in
+every Project and in Work, even before the Project is trusted (maintainer
+decision, 2026-11-14). Claude Code loads them only through the `user` and
+`project` setting sources, and the `project` source also loads the Project's
+settings and hooks, so it still waits for trust. Where a source is off,
+Octant reads the files itself (`claudeSessionInstructions` in
+`apps/server/src/providers/claudeDriver.ts`), as text with no authority,
+and sends them as the session's system prompt; the Agent SDK's own default
+is an empty custom prompt, so nothing is replaced. The account's file is
+`CLAUDE.md` in its config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`);
+the Project's are the files Claude Code's loader reads at its root
+(`CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md`)
+and the files they import with `@path`, up to five levels. Ancestors above
+the Project root are outside the Project and are not read, and Claude Code
+loads a nested folder's file only once it reads inside it, so neither is
+added. Where the source is on, Claude Code loads the files itself and Octant
+adds nothing, so nothing doubles. A file over 64 KiB, past 256 KiB in all,
+not UTF-8 text, or resolving through a symlink or import outside its folder
+is skipped and the reason logged. Chat (no folder) and single-use sessions
+read none.
+
 The setup is on by default for every key provider account at every level;
 the person turns it off per account or per thread
 ([Architecture: providers](../architecture.md#providers)). An account the

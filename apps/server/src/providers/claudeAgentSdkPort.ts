@@ -174,6 +174,14 @@ export interface ClaudeOpenQueryInput {
    * servers but Octant's own.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /**
+   * Instruction files Octant read for this session because its setting
+   * sources do not load them (`claudeSessionInstructions`), sent as the
+   * session's system prompt. The SDK's own default is an empty custom prompt
+   * (`systemPrompt` absent reads as `""` in agent-sdk 0.3.211), so this adds
+   * the files and replaces nothing.
+   */
+  readonly instructions?: string;
   /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
   readonly ownMemory?: true;
   /**
@@ -741,6 +749,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly model: string;
   readonly effort?: ClaudeEffortLevel;
   readonly pathToClaudeCodeExecutable: string;
+  readonly systemPrompt?: string;
   readonly resume?: string;
   readonly sessionId?: string;
   readonly persistSession?: false;
@@ -1486,6 +1495,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
               ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
+              ...(input.instructions === undefined ? {} : { systemPrompt: input.instructions }),
               ...(input.resumeSessionId === undefined ? {} : { resume: input.resumeSessionId }),
               ...(input.resumeSessionId === undefined && input.sessionId !== undefined
                 ? { sessionId: input.sessionId }

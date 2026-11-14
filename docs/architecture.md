@@ -2185,12 +2185,15 @@ read the same file on demand; nothing about its content is journaled. While
 disabled, Octant reads nothing from the folder for this purpose, adds no
 instruction, and writes nothing there; turning the setting off leaves an
 existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
-`CLAUDE.md`, or similar) into a user folder. Claude Work turns load no
-project settings or instruction files. Codex Work threads read the Project's
-`AGENTS.md` as Code threads do, by Codex's own discovery from the repository
-root down to the Project root (maintainer decision, 2026-11-14, replacing
-the zero `project_doc_max_bytes` budget Work threads had). This narrows the
-always-on behavior the status file had at first.
+`CLAUDE.md`, or similar) into a user folder. Claude Work turns read the
+person's global and the Project's `CLAUDE.md` as text with no authority,
+while the Project's settings and code still follow trust (maintainer
+decision, 2026-11-14; [Provider runtimes](design/provider-runtimes.md)).
+Codex Work threads read the Project's `AGENTS.md` as Code threads do, by
+Codex's own discovery from the repository root down to the Project root
+(maintainer decision, 2026-11-14, replacing the zero `project_doc_max_bytes`
+budget Work threads had). This narrows the always-on behavior the status file
+had at first.
 
 Work never silently becomes Code. When coding work is detected in a Work
 thread, the server records a **promotion proposal**: an offer to continue in

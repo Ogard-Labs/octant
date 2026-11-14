@@ -511,6 +511,16 @@ describe("Claude Agent SDK port", () => {
     expect(Object.keys(options?.sandbox?.network ?? {})).toEqual(["httpProxyPort"]);
   });
 
+  test("sends the instruction files Octant read as the session's system prompt", async () => {
+    const harness = makeHarness();
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(harness.port.openQuery({ ...openInput, instructions: "Project: use tabs." })),
+      ),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).toMatchObject({ systemPrompt: "Project: use tabs." });
+  });
+
   test("lets the sandbox reach every host when Network limits are off", async () => {
     const harness = makeHarness();
     const open = {
