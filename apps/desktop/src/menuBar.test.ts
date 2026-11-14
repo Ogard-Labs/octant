@@ -192,7 +192,7 @@ describe("macOS menu-bar host controls", () => {
     expect(menuBarTitle({ ...snapshot, attentionRequired: true }, fleet.threads())).toBe("!");
   });
 
-  it("offers Prepare to Shut Down… in a hub and shows a running batch's progress beside the glyph", () => {
+  it("offers Prepare to shut down… in a hub and shows a running batch's progress beside the glyph", () => {
     const snapshot = {
       state: "running" as const,
       ownership: "desktop-owned" as const,
@@ -205,11 +205,11 @@ describe("macOS menu-bar host controls", () => {
         .filter(Boolean);
 
     // Outside a hub there is nowhere to move to, so the menu bar stays as it was.
-    expect(labels({ offered: false })).not.toContain("Prepare to Shut Down…");
+    expect(labels({ offered: false })).not.toContain("Prepare to shut down…");
     expect(labels({ offered: true })).toEqual([
       "Open Octant",
       "New task…",
-      "Prepare to Shut Down…",
+      "Prepare to shut down…",
       "Local host",
       "Quit Octant",
     ]);
@@ -217,7 +217,7 @@ describe("macOS menu-bar host controls", () => {
       "Open Octant",
       "New task…",
       "Moving threads · 3 of 9",
-      "Prepare to Shut Down…",
+      "Prepare to shut down…",
       "Local host",
       "Quit Octant",
     ]);

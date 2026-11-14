@@ -13,6 +13,7 @@ import {
 import {
   defaultAgentRunAuthorityCeilingForMode,
   resolveAgentRunLiveParentGrant,
+  windowAdmitsProject,
 } from "@octant/domain";
 import type { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -138,7 +139,7 @@ export function authorizeAgentRunCreation(input: {
     chatThread !== undefined &&
     chatThread.lifecycle === "active" &&
     chatContext.mode === "chat" &&
-    String(chatContext.projectId) === String(chatThread.projectId ?? null) &&
+    windowAdmitsProject(workspace, "chat", chatThread.projectId ?? null) &&
     layoutContainsAgentRunThread(
       workspace.layouts.chat,
       String(chatThread.id),
@@ -172,7 +173,7 @@ export function authorizeAgentRunCreation(input: {
     workThread !== undefined &&
     workThread.lifecycle === "active" &&
     workContext.mode === "work" &&
-    String(workContext.projectId) === String(workThread.projectId) &&
+    windowAdmitsProject(workspace, "work", workThread.projectId) &&
     layoutContainsAgentRunThread(
       workspace.layouts.work,
       String(workThread.id),
@@ -215,7 +216,7 @@ export function authorizeAgentRunCreation(input: {
     codeThread !== undefined &&
     codeThread.lifecycle === "active" &&
     codeContext.mode === "code" &&
-    String(codeContext.projectId) === String(codeThread.projectId) &&
+    windowAdmitsProject(workspace, "code", codeThread.projectId) &&
     layoutContainsAgentRunThread(
       workspace.layouts.code,
       String(codeThread.id),

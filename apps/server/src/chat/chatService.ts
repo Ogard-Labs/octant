@@ -193,6 +193,7 @@ import {
 } from "@octant/domain/chat-provider-fallback-policy";
 import {
   decideConversationSession,
+  decideProviderAccountMove,
   defaultShellSettings,
   reapsStaleProviderSession,
   SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT,
@@ -382,12 +383,10 @@ const COMPACTION_SETTLED_EVENT_NAMES = new Set<string>([
 
 /**
  * How long streamed deltas share one journal append, so the authoritative
- * journal commits — and fsyncs, under `synchronous = FULL` — once per burst
- * instead of once per token: a 775-delta reply used to commit 775 times, and
- * one fsync per delta was the cost that pushed the store to NORMAL. A burst
- * is also flushed by every full attempt persist, so no delta outlives the
- * turn that streamed it; a crash loses at most this window's unflushed
- * deltas, never an fsynced one.
+ * journal commits once per burst instead of once per token: a 775-delta
+ * reply used to commit 775 times. A burst is also flushed by every full
+ * attempt persist, so no delta outlives the turn that streamed it; a process
+ * crash loses at most this window's unflushed deltas, never a committed one.
  */
 const STREAMED_DELTA_BATCH_WINDOW_MS = 100;
 
@@ -1748,6 +1747,10 @@ export class ChatService {
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#updateThread(command, executionContext?.actor),
           );
+        case "move-chat-thread-account":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#moveThreadAccount(command, executionContext?.actor),
+          );
         case "update-chat-settings":
           return await this.#updateThread(command, executionContext?.actor);
         case "send-chat-turn":
@@ -2423,6 +2426,48 @@ export class ChatService {
       }
     }
     return { kind: "thread-created", thread };
+  }
+
+  /**
+   * Moves the thread to another account of its provider by the ordinary
+   * provider change, so the next turn hands the conversation over with the
+   * same disclosed handoff a provider change makes. Only the person moves a
+   * thread: a host caller passes no actor and an agent passes its own, and
+   * either would be the silent account rotation the provider rules refuse.
+   */
+  async #moveThreadAccount(
+    command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "move-chat-thread-account" }>,
+    actor: EventActor | undefined,
+  ): Promise<ChatCommandResult> {
+    this.#assertReady();
+    const current = this.#requireActiveThread(decodeChatThreadId(command.threadId));
+    const decision = decideProviderAccountMove({
+      actor,
+      turnRunning: this.isTurnActive(current.id),
+      modelPoolOn: current.multiModelPool !== undefined,
+      from: this.#persistence.readProviderInstance(
+        decodeProviderInstanceId(current.providerInstanceId),
+      ),
+      to: this.#persistence.readProviderInstance(
+        decodeProviderInstanceId(command.providerInstanceId),
+      ),
+    });
+    if (decision.kind === "refused") {
+      throw new ChatServiceError({
+        category: decision.reason === "unattended" ? "unauthorized" : "unavailable",
+        message: decision.message,
+      });
+    }
+    return await this.#updateThread(
+      {
+        kind: "change-chat-provider",
+        threadId: command.threadId,
+        expectedVersion: command.expectedVersion,
+        providerInstanceId: command.providerInstanceId,
+        modelId: current.modelId,
+      },
+      actor,
+    );
   }
 
   async #updateThread(

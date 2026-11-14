@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { useEffect, useMemo, useState } from "react";
 import { createHostResourceClient } from "@octant/client-runtime/host-resource-client";
 import type { HostResourceSnapshot } from "@octant/contracts/host-resources";
@@ -72,7 +73,7 @@ export default function VitalsModule(props: Props) {
       inflight = undefined;
       if (stopped) return;
       // A platform the host cannot read will not change by asking again.
-      if (result.status === "unsupported") clearInterval(interval);
+      if (result.status === "unsupported") stopRefresh();
       setState((current) => {
         const history = "history" in current ? current.history : [];
         if (result.status === "refused") return { status: "refused" };
@@ -82,11 +83,11 @@ export default function VitalsModule(props: Props) {
         return { status: "live", history: appendVitalsSample(history, result.snapshot) };
       });
     };
-    const interval = setInterval(() => void read(), POLL_MS);
+    const stopRefresh = scheduleVisibleInterval(() => void read(), POLL_MS);
     void read();
     return () => {
       stopped = true;
-      clearInterval(interval);
+      stopRefresh();
       inflight?.abort();
     };
   }, [catalogUnknown, serverProjectId, serverUrl, windowCapability]);

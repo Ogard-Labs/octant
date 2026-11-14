@@ -13,6 +13,7 @@ import {
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantSeparator, OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -528,6 +529,11 @@ function Labels() {
             Disabled chip
           </OctantButton>
         </div>
+      </Specimen>
+      <Specimen adapters={["OctantCollapsible"]} props={`summary="Commit message" open?`} wide>
+        <OctantCollapsible summary="Commit message">
+          <p>Body text shows here once open.</p>
+        </OctantCollapsible>
       </Specimen>
       <Specimen adapters={["OctantSeparator"]} props={`orientation="horizontal" | "vertical"`} wide>
         <div className="gallery-row">

@@ -152,6 +152,7 @@ describe("CodeOperationService", () => {
       replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
       append: vi.fn(),
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
     };
     const git = {
       observe: vi.fn(),
@@ -819,6 +820,7 @@ describe("CodeOperationService", () => {
     const events = {
       append: vi.fn(),
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
       replay: vi.fn(() => ({
         status: "ok" as const,
         frames: [
@@ -968,6 +970,7 @@ describe("CodeOperationService", () => {
     const events = {
       append: vi.fn(),
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
       replay: vi.fn(() => ({
         status: "ok" as const,
         frames: [
@@ -1141,6 +1144,7 @@ describe("CodeOperationService", () => {
     const events = {
       append: vi.fn(),
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
       replay: vi.fn((input: { readonly afterCursor: number }) =>
         input.afterCursor === 0
           ? { status: "ok" as const, frames: firstPage, nextCursor: 256 }
@@ -1255,6 +1259,7 @@ describe("CodeOperationService", () => {
     const events = {
       append: vi.fn(),
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
       replay: vi.fn(() => ({
         status: "ok" as const,
         frames: [
@@ -3483,6 +3488,7 @@ function providerTurnFixture(
         );
     }),
     historyForThread: vi.fn(() => ({ status: "ok" as const, frames })),
+    summaryForThread: vi.fn(() => ({ status: "ok" as const, frames })),
   };
   const git = { checkpoint: vi.fn(async () => ({ status: "failed" as const })) };
   const evidence = { put: vi.fn(), read: vi.fn(async () => "does this still hold?") };
@@ -3552,6 +3558,7 @@ describe("CodeOperationService terminal readers", () => {
       replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
       append: vi.fn(),
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
     };
     const service = new CodeOperationService({
       authority: {
@@ -3904,6 +3911,7 @@ describe("CodeOperationService terminal Browser grant", () => {
       replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
       append: vi.fn(),
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
     };
     const authority = {
       readThread: vi.fn(() => thread()),
@@ -4321,6 +4329,7 @@ describe("CodeOperationService live terminal output", () => {
       replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
       append: vi.fn(),
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
     };
     const service = new CodeOperationService({
       authority: {

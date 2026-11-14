@@ -106,6 +106,19 @@ export function openBrowserExtension(options: {
     anchor: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
     size: { width: POPUP_WIDTH, height: POPUP_HEIGHT },
   });
+  // The popup is a native window above the renderer, so a press anywhere in the
+  // renderer is a press outside it and dismisses it as a popover would. Closing
+  // a popup that already closed itself is a no-op on the host.
+  const hostBridge = options.hostBridge;
+  if (hostBridge.closeBrowserExtensionPopup !== undefined) {
+    document.addEventListener(
+      "pointerdown",
+      () => {
+        void hostBridge.closeBrowserExtensionPopup?.();
+      },
+      { capture: true, once: true },
+    );
+  }
 }
 
 /**

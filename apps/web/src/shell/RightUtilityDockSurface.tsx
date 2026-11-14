@@ -1,3 +1,5 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { moveWithinTabList } from "../ui/base/radioGroupKeys";
 import { Plus, X } from "lucide-react";
 import {
   useContext,
@@ -15,7 +17,6 @@ import { endDockToolDrag, useDraggedDockTool } from "./dockToolDrag";
 import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
-import { ShellState } from "./ShellState";
 import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import {
   MINIMISABLE_DOCK_SURFACES,
@@ -263,11 +264,22 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   /** The Browser's pages: its bar in a tile, a row at the top of its body alone. */
   function pagesRow(selectedId: string | undefined) {
     return (
-      <div aria-label="Browser pages" className="dock-browser-pages" role="tablist">
+      <div
+        aria-label="Browser pages"
+        className="dock-browser-pages"
+        onKeyDown={moveWithinTabList}
+        role="tablist"
+      >
         {browserTabs.map((page) => (
-          <span className="dock-browser-pages__page content-tab" key={page.id}>
+          <span className="dock-browser-pages__page content-tab" key={page.id} role="presentation">
             <OctantButton
               aria-selected={page.id === selectedId}
+              tabIndex={
+                page.id ===
+                (browserTabs.some((tab) => tab.id === selectedId) ? selectedId : browserTabs[0]?.id)
+                  ? 0
+                  : -1
+              }
               className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
               onClick={() => props.onSelectSurface(page.id)}
               role="tab"
@@ -362,7 +374,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         available.kind === "surface" ? (
           renderToolBody(tab, tab.id, pages, !tiled)
         ) : (
-          <ShellState
+          <OctantEmpty
             message={unavailableMessage()}
             state="neutral"
             title={`${tool.label} is unavailable`}
@@ -418,14 +430,14 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       >
         {props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface" ? (
           quickToolsProjectId === undefined ? (
-            <ShellState state="neutral" title="Tools open once the task starts" />
+            <OctantEmpty state="neutral" title="Tools open once the task starts" />
           ) : (
             <StartQuickTools projectId={quickToolsProjectId} />
           )
         ) : props.resolution.kind === "closed" ? (
           <div className="dock-start">{props.overview}</div>
         ) : !tiled && props.resolution.kind === "unavailable" ? (
-          <ShellState
+          <OctantEmpty
             message={unavailableMessage()}
             state="neutral"
             title={`${activeSurface?.label ?? "Tool"} is unavailable`}

@@ -137,6 +137,7 @@ export * from "./providerCapacityPolicy";
 export * from "./modelCatalogPolicy";
 export * from "./modelPickerPolicy";
 export * from "./navigatorAssistantPolicy";
+export * from "./providerAccountMovePolicy";
 export * from "./providerAccountProfile";
 export * from "./providerAccountPlanUsage";
 export * from "./providerPolicy";

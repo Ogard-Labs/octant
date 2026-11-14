@@ -1,5 +1,6 @@
 import type { UsageActivityCell, UsageActivityState } from "@octant/contracts";
 import "./usageWorkspace.css";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export interface UsageActivityHeatmapProps {
   readonly cells: ReadonlyArray<UsageActivityCell>;
@@ -91,8 +92,7 @@ export function UsageActivityHeatmap(props: UsageActivityHeatmapProps) {
         ))}
       </div>
 
-      <details className="usage-heatmap__table-toggle">
-        <summary>Activity as a table</summary>
+      <OctantCollapsible className="usage-heatmap__table-toggle" summary="Activity as a table">
         <div className="usage-table-scroll">
           <table className="usage-table">
             <caption className="sr-only">Daily usage activity</caption>
@@ -124,7 +124,7 @@ export function UsageActivityHeatmap(props: UsageActivityHeatmapProps) {
             </tbody>
           </table>
         </div>
-      </details>
+      </OctantCollapsible>
     </section>
   );
 }

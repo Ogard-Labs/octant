@@ -173,7 +173,10 @@ describe("DraftThreadWorkspace", () => {
     const level = screen.getByRole("combobox", { name: "Workers start at" });
     expect(level).toHaveTextContent("Workers start at this thread's level or lower");
     await user.click(level);
-    await user.click(screen.getByRole("option", { name: "Workers always start at Full access" }));
+    // Base UI renders the popup's options a frame after the click; a slow runner needs the wait.
+    await user.click(
+      await screen.findByRole("option", { name: "Workers always start at Full access" }),
+    );
     expect(onChoicesChange).toHaveBeenLastCalledWith({ workerLevel: "full-access" });
     await user.type(screen.getByRole("spinbutton", { name: "Rounds" }), "4");
     expect(onChoicesChange).toHaveBeenLastCalledWith({ bounds: { rounds: 4 } });

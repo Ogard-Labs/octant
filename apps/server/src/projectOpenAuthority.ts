@@ -17,18 +17,15 @@ export function windowCanOpenProject(input: {
         readonly lifecycle: string;
       }
     | undefined;
-  readonly chatContext: { readonly mode: string; readonly projectId: string | null } | undefined;
+  /** Whether the window's Chat layout reaches a Project; absent for a principal with no window. */
+  readonly chatAdmits: ((projectId: ProjectId) => boolean) | undefined;
   readonly canAccessCodeProject: (projectId: ProjectId) => boolean;
 }): boolean {
-  const { project, chatContext } = input;
+  const { project, chatAdmits } = input;
   if (project === undefined) return false;
   switch (project.type) {
     case "chat":
-      return (
-        chatContext !== undefined &&
-        chatContext.mode === "chat" &&
-        String(chatContext.projectId) === String(project.id)
-      );
+      return chatAdmits !== undefined && chatAdmits(project.id);
     case "work":
       return project.lifecycle === "active";
     case "code":

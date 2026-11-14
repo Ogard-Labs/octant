@@ -1,3 +1,5 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
 import type {
   CodeProjectPullRequestActionCommand,
@@ -20,7 +22,6 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectPullRequestPersonAction } from "../code/ProjectPullRequestActions";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
-import { ShellState } from "./ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface DockProjectPullRequestReviewToolProps {
@@ -120,10 +121,10 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
       );
     };
     read();
-    const timer = setInterval(read, SWITCHES_REFRESH_MS);
+    const stopRefresh = scheduleVisibleInterval(read, SWITCHES_REFRESH_MS);
     return () => {
       active = false;
-      clearInterval(timer);
+      stopRefresh();
     };
   }, [
     props.query.number,
@@ -218,7 +219,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
   }
 
   if (workspace.status === "loading") {
-    return <ShellState state="loading" title="Loading review" />;
+    return <OctantEmpty state="loading" title="Loading review" />;
   }
 
   const view =
@@ -230,7 +231,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
 
   if (view === undefined) {
     return (
-      <ShellState
+      <OctantEmpty
         message={workspace.status === "error" ? workspace.message : "Detail is unavailable."}
         state="neutral"
         title="Review is unavailable"
@@ -240,7 +241,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
 
   if (view.detail.state === "empty") {
     return (
-      <ShellState
+      <OctantEmpty
         message="No authorized detail is cached for this pull request yet."
         state="neutral"
         title="Review"
@@ -250,7 +251,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
 
   if (view.detail.state === "unavailable") {
     return (
-      <ShellState
+      <OctantEmpty
         message="GitHub could not return detail for this pull request."
         state="neutral"
         title="Review is unavailable"

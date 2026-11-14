@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { useQuestionnaireDraft, type QuestionnaireDraftIdentity } from "./questionnaireDrafts";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useId, useRef, useState } from "react";
@@ -305,8 +306,7 @@ export function QuestionnaireSummary(props: {
   if (validated.status === "invalid")
     return <p role="status">Submitted answers are unavailable.</p>;
   return (
-    <details className="questionnaire-summary">
-      <summary>Answers sent · {props.prompt}</summary>
+    <OctantCollapsible className="questionnaire-summary" summary={`Answers sent · ${props.prompt}`}>
       <dl>
         {props.questionnaire.questions.map((question) => {
           const answer = validated.response.answers.find(
@@ -332,6 +332,6 @@ export function QuestionnaireSummary(props: {
           </div>
         )}
       </dl>
-    </details>
+    </OctantCollapsible>
   );
 }

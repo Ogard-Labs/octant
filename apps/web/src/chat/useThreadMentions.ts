@@ -23,6 +23,11 @@ export interface ThreadMentionsOptions {
   readonly requestId?: () => ThreadMentionRequestId;
   /** Enables the explicit Chat-to-Chat dialogue capability for this composer. */
   readonly dialogueEnabled?: boolean;
+  /**
+   * The composer's own thread, when it has one. The host lists only what this
+   * composer may attach: a Code thread its own Project's Code threads.
+   */
+  readonly readerThreadId?: MentionableThreadId;
   /** Chips restored with a persisted new-task draft after Settings unmounts. */
   readonly initialChips?: ReadonlyArray<ChatComposerThreadMentionChip>;
 }
@@ -90,6 +95,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
   const onSideChatOpenedRef = useRef(options.onSideChatOpened);
   onSideChatOpenedRef.current = options.onSideChatOpened;
   const newRequestId = useCallback(() => requestIdRef.current(), []);
+  const readerThreadId = options.readerThreadId;
   const [query, setQuery] = useState<string | undefined>(undefined);
   const [candidates, setCandidates] = useState<ReadonlyArray<ThreadMentionCandidate>>([]);
   const [chips, setChips] = useState<ReadonlyArray<ChatComposerThreadMentionChip>>(
@@ -116,7 +122,10 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     setBusy(true);
     void (async () => {
       try {
-        const hits = await client.search(newRequestId(), query, controller.signal);
+        const hits =
+          readerThreadId === undefined
+            ? await client.search(newRequestId(), query, controller.signal)
+            : await client.search(newRequestId(), query, controller.signal, readerThreadId);
         if (!controller.signal.aborted && mounted.current) setCandidates(hits);
       } catch {
         // A failed search shows no hits rather than stale ones; the `#text`
@@ -127,7 +136,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
       }
     })();
     return () => controller.abort();
-  }, [client, newRequestId, query]);
+  }, [client, newRequestId, query, readerThreadId]);
 
   // Chips are structured selections over the draft; when the user edits a chip
   // out of the text, it must stop contributing context.
@@ -205,14 +214,21 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
         mentionCount: chipsRef.current.length,
         draft: draftRef.current,
         searchThread: (threadId: string) =>
-          mentionClient.searchThread(newRequestId(), decodeMentionableThreadId(threadId)),
+          readerThreadId === undefined
+            ? mentionClient.searchThread(newRequestId(), decodeMentionableThreadId(threadId))
+            : mentionClient.searchThread(
+                newRequestId(),
+                decodeMentionableThreadId(threadId),
+                undefined,
+                readerThreadId,
+              ),
         onDraftChange: input.onDraftChange,
         onSelectCandidate,
         onStatus: setStatusMessage,
         ...(input.currentThreadId === undefined ? {} : { currentThreadId: input.currentThreadId }),
       });
     },
-    [client, newRequestId, onSelectCandidate],
+    [client, newRequestId, onSelectCandidate, readerThreadId],
   );
 
   const onRemoveChip = useCallback((threadId: MentionableThreadId) => {

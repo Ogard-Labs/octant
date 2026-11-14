@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   createProductFeedbackClient,
   ProductFeedbackClientFailure,
@@ -5,6 +6,7 @@ import {
 } from "@octant/client-runtime/product-feedback-client";
 import {
   decodeProductFeedbackCommand,
+  type BrowserElementSnapshot,
   type ProductFeedbackCommand,
   type ProductFeedbackNote,
   type ProductFeedbackPreview,
@@ -34,6 +36,11 @@ export interface ProductFeedback {
     readonly selectionId?: string;
     readonly expectedObservationRevision?: number;
   }) => Promise<boolean>;
+  /**
+   * Pick the element at a point for the composer. The host reads it and marks
+   * the thread as holding outside content; nothing is kept.
+   */
+  readonly pick: (input: Parameters<ProductFeedback["prepare"]>[0]) => Promise<BrowserElementPick>;
   readonly commit: (comment: string) => Promise<boolean>;
   readonly cancel: () => Promise<void>;
   readonly update: (
@@ -45,6 +52,21 @@ export interface ProductFeedback {
   readonly pauseRefresh: (paused: boolean) => void;
   readonly cancelPrepare: () => void;
 }
+
+export type BrowserElementPick =
+  | { readonly status: "picked"; readonly snapshot: BrowserElementSnapshot }
+  | { readonly status: "refused"; readonly message: string };
+
+const pickRefusalText: Partial<Record<ProductFeedbackRefusalReason, string>> = {
+  "thread-unavailable":
+    "This task or its local authority is no longer available. Reconnect and pick the element again.",
+  "surface-unavailable":
+    "The host cannot read this page right now, so nothing was added. A page with a sign-in field is never read.",
+  "element-unavailable": "There is no supported element at that spot. Pick another element.",
+  "capture-unavailable":
+    "The element could not be read and marked as page content, so nothing was added.",
+};
+const PICK_FAILED = "The element could not be picked. Pick it again.";
 
 const EMPTY_NOTES: ReadonlyArray<ProductFeedbackNote> = Object.freeze([]);
 const EMPTY_CROPS: Readonly<Record<string, string>> = Object.freeze({});
@@ -287,8 +309,8 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
   }, [perform, load]);
   useEffect(() => {
     void perform(load, false);
-    const timer = setInterval(() => void perform(load, false), 5_000);
-    return () => clearInterval(timer);
+    const stopRefresh = scheduleVisibleInterval(() => void perform(load, false), 5_000);
+    return () => stopRefresh();
   }, [owner, perform, load]);
 
   const pauseRefresh = useCallback(
@@ -407,6 +429,39 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
       ),
     [owner, previewHolder, perform, current, patch],
   );
+  const pick = useCallback(
+    async (input: Parameters<ProductFeedback["prepare"]>[0]): Promise<BrowserElementPick> => {
+      let picked: BrowserElementPick = { status: "refused", message: PICK_FAILED };
+      await perform(
+        async (signal) => {
+          const result = await owner.client?.execute(
+            decodeProductFeedbackCommand({
+              kind: "pick-browser-element",
+              threadId: owner.threadId,
+              ...input,
+            }),
+            signal,
+          );
+          if (!current(signal) || result === undefined) return false;
+          if (result.kind === "feedback-refused") {
+            picked = { status: "refused", message: pickRefusalText[result.reason] ?? PICK_FAILED };
+            return false;
+          }
+          if (
+            result.kind !== "browser-element-picked" ||
+            result.snapshot.threadId !== owner.threadId
+          )
+            throw new Error(PICK_FAILED);
+          picked = { status: "picked", snapshot: result.snapshot };
+          return true;
+        },
+        true,
+        "prepare",
+      );
+      return picked;
+    },
+    [owner, perform, current],
+  );
   const commit = useCallback(
     (comment: string) =>
       perform(async (signal) => {
@@ -500,6 +555,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
     busy: view.busy,
     message: view.message,
     prepare,
+    pick,
     commit,
     cancel,
     update,

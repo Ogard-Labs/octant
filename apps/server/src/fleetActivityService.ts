@@ -10,8 +10,8 @@ import {
   type ProjectId,
   type WindowId,
   type WindowWorkspace,
-  type WorkspaceContextKey,
 } from "@octant/contracts";
+import { admissionSet } from "@octant/domain/shell-policy";
 import { enabledModes } from "@octant/domain";
 
 /**
@@ -32,7 +32,7 @@ export function windowsBoundToAProject(
   for (const { workspace } of workspaces) {
     const { work, code } = workspace.contextByMode;
     if (work.projectId == null && code.projectId == null) continue;
-    const key = `${bindingKey(work)}|${bindingKey(code)}`;
+    const key = `${reachKey(workspace, "work")}|${reachKey(workspace, "code")}`;
     if (seen.has(key)) continue;
     seen.add(key);
     windows.push(workspace.windowId);
@@ -53,7 +53,7 @@ export function windowsBoundToACodeProject(
   for (const { workspace } of workspaces) {
     const { code } = workspace.contextByMode;
     if (code.projectId == null) continue;
-    const key = bindingKey(code);
+    const key = reachKey(workspace, "code");
     if (seen.has(key)) continue;
     seen.add(key);
     windows.push(workspace.windowId);
@@ -61,8 +61,14 @@ export function windowsBoundToACodeProject(
   return windows;
 }
 
-function bindingKey(context: WorkspaceContextKey): string {
-  return `${String(context.host)}:${String(context.projectId)}:${String(context.boundRoot)}`;
+/**
+ * Two windows answer a reach read alike only when they reach the same
+ * Projects: the same lead and the same Projects in their visible panes.
+ */
+function reachKey(workspace: WindowWorkspace, mode: "work" | "code"): string {
+  const context = workspace.contextByMode[mode];
+  const panes = admissionSet(workspace, mode).map(String).sort().join(",");
+  return `${String(context.host)}:${String(context.projectId)}:${String(context.boundRoot)}:${panes}`;
 }
 
 /** A thread whose turn the journal projects as queued or running. */

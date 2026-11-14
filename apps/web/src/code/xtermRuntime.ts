@@ -37,7 +37,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   if (options.describedBy !== undefined) {
     terminal.textarea?.setAttribute("aria-describedby", options.describedBy);
   }
-  const renderer = attachGpuRenderer(terminal);
+  const gpu = claimGpuWhileVisible(element, terminal);
   applyTerminalTypography(terminal, element, typography);
   terminal.write(options.output);
   const data = terminal.onData((value) => {
@@ -69,7 +69,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
       plateWatch.disconnect();
       data.dispose();
       resize.dispose();
-      renderer?.dispose();
+      gpu.dispose();
       terminal.dispose();
     },
     focus: () => terminal.focus(),
@@ -105,6 +105,83 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
 };
 
 /**
+ * Browsers cap live WebGL contexts per page (Chromium drops the oldest past
+ * roughly sixteen), and every open terminal tab held one even while hidden.
+ * Only visible terminals hold a GPU renderer, at most this many at a time;
+ * the rest paint with the DOM renderer. Disposing the addon keeps the
+ * Terminal's buffer, so a terminal returning to view repaints its scrollback.
+ */
+const MAX_GPU_TERMINALS = 4;
+
+interface GpuClaim {
+  visible: boolean;
+  /** Set once the GPU refused or lost a context; the terminal stays on DOM. */
+  refused: boolean;
+  renderer: { readonly dispose: () => void } | undefined;
+  readonly terminal: Terminal;
+}
+
+const gpuClaims = new Set<GpuClaim>();
+
+function gpuRenderersInUse(): number {
+  let count = 0;
+  for (const claim of gpuClaims) if (claim.renderer !== undefined) count += 1;
+  return count;
+}
+
+function grantWaitingGpuClaims(): void {
+  for (const claim of gpuClaims) {
+    if (gpuRenderersInUse() >= MAX_GPU_TERMINALS) return;
+    if (claim.visible && !claim.refused && claim.renderer === undefined) {
+      claim.renderer = attachGpuRenderer(claim.terminal, () => {
+        claim.renderer = undefined;
+        claim.refused = true;
+      });
+      if (claim.renderer === undefined) claim.refused = true;
+    }
+  }
+}
+
+function claimGpuWhileVisible(
+  element: HTMLElement,
+  terminal: Terminal,
+): { readonly dispose: () => void } {
+  // Without an observer (tests, older engines) a terminal counts as visible.
+  const claim: GpuClaim = {
+    visible: typeof IntersectionObserver === "undefined",
+    refused: false,
+    renderer: undefined,
+    terminal,
+  };
+  gpuClaims.add(claim);
+  const release = () => {
+    const renderer = claim.renderer;
+    claim.renderer = undefined;
+    renderer?.dispose();
+  };
+  const observer =
+    typeof IntersectionObserver === "undefined"
+      ? undefined
+      : new IntersectionObserver((entries) => {
+          const entry = entries.at(-1);
+          if (entry === undefined) return;
+          claim.visible = entry.isIntersecting;
+          if (!claim.visible && claim.renderer !== undefined) release();
+          grantWaitingGpuClaims();
+        });
+  observer?.observe(element);
+  grantWaitingGpuClaims();
+  return {
+    dispose: () => {
+      observer?.disconnect();
+      gpuClaims.delete(claim);
+      release();
+      grantWaitingGpuClaims();
+    },
+  };
+}
+
+/**
  * Moves painting onto the GPU, and gives up quietly when it cannot.
  *
  * The stock renderer draws every cell as DOM, which is what made a busy build
@@ -114,13 +191,17 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
  * Every one of those falls back to the DOM renderer, which is the behaviour
  * this terminal already had, so the worst case is no slower than before.
  */
-function attachGpuRenderer(terminal: Terminal): { readonly dispose: () => void } | undefined {
+function attachGpuRenderer(
+  terminal: Terminal,
+  onLost: () => void,
+): { readonly dispose: () => void } | undefined {
   try {
     const webgl = new WebglAddon();
     // A lost context is not recoverable in place: dispose the addon and let
     // xterm fall back, rather than leaving a terminal painting nothing.
     webgl.onContextLoss(() => {
       console.warn("Octant terminal lost its WebGL context; painting with the DOM renderer.");
+      onLost();
       webgl.dispose();
     });
     terminal.loadAddon(webgl);
