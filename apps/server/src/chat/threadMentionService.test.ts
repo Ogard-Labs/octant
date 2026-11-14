@@ -383,6 +383,35 @@ describe("ThreadMentionService resolve", () => {
     expect(result.unavailable).toEqual([{ threadId: secretThreadId, reason: "unauthorized" }]);
   });
 
+  it("lists only the threads the searching composer may attach", async () => {
+    const asked: Array<string | undefined> = [];
+    const service = new ThreadMentionService({
+      directories: [
+        directory("code", [
+          thread(chatThreadId, { mode: "code", title: "Same Project" }),
+          thread(secretThreadId, { mode: "code", title: "Other pane's Project" }),
+        ]),
+      ],
+      sidecars,
+      sideChatThreads: sideChatThreads(),
+      clock: () => "2026-08-14T11:00:00.000Z",
+      uuid: sequentialUuid(),
+      admitsMention: ({ readerThreadId, thread: candidate }) => {
+        asked.push(readerThreadId);
+        return String(candidate.threadId) !== String(secretThreadId);
+      },
+    });
+
+    const result = await service.execute(
+      { kind: "search-mentions", requestId, query: "", readerThreadId: String(workThreadId) },
+      { windowId },
+    );
+
+    if (result.kind !== "mentions-searched") throw new Error("expected search result");
+    expect(result.candidates.map((candidate) => candidate.title)).toEqual(["Same Project"]);
+    expect(asked).toContain(String(workThreadId));
+  });
+
   it("refuses, without reading it, a mention the window can Open but the composer may not reach", async () => {
     const code = directory(
       "code",

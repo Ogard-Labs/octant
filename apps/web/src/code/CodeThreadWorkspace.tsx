@@ -17,6 +17,7 @@ import { threadCompactionSubject } from "../context/CompactionDivider";
 import type { AutoReview } from "./autoReview";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import type { ProviderModelOptionValues, ThreadDocumentDelivery } from "@octant/contracts";
+import { decodeMentionableThreadId } from "@octant/contracts";
 import {
   MAX_CODE_THREAD_TITLE_LENGTH,
   type CodeApprovalId,
@@ -571,6 +572,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft,
+    readerThreadId: decodeMentionableThreadId(String(props.threadId)),
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,

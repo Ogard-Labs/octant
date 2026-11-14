@@ -218,7 +218,12 @@ export class ThreadMentionService {
         return decodeThreadMentionCommandResult({
           kind: "mentions-searched",
           requestId: command.requestId,
-          candidates: await this.#search(context.windowId, command.query, command.threadId),
+          candidates: await this.#search(
+            context.windowId,
+            command.query,
+            command.threadId,
+            command.readerThreadId === undefined ? undefined : String(command.readerThreadId),
+          ),
         });
       case "resolve-mentions":
         return decodeThreadMentionCommandResult({
@@ -479,8 +484,16 @@ export class ThreadMentionService {
     windowId: WindowId,
     query: string,
     threadId: MentionableThreadId | undefined,
+    readerThreadId: string | undefined,
   ): Promise<ReadonlyArray<ThreadMentionCandidate>> {
-    const directory = await this.#openable(windowId);
+    const all = await this.#openable(windowId);
+    // The list offers what this composer may attach, by the rule its send is
+    // judged by, so a pick is never refused at send for being out of reach.
+    const directory = new Map(
+      [...all].filter(
+        ([, thread]) => this.#admitsMention?.({ windowId, readerThreadId, thread }) !== false,
+      ),
+    );
     if (threadId !== undefined) {
       // A drop already names its thread. Ranking by its title would cap it out
       // behind eight similar or newer threads, so answer by id from the same

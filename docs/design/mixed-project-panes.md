@@ -642,10 +642,10 @@ Answered by a maintainer on 2026-11-14:
 | The persisted-workspace reader rebuilt panes field by field and dropped `context`                              | Fixed in slice 2; the host identity move carries it too                                                                                                                                                        |
 | A preview or Canvas of another Project, and Files for another pane's Project, are not placed                   | Kept refused in slice 2: the pure policy does not know their bound root; Files follow the lead. Revisit with slice 3                                                                                           |
 | A `#` mention's Code reach was the window's Code binding                                                       | Now the composing Code thread's own Project, or the Code lead for any other composer (`codeMentionWithinReach`), so a mixed window adds none (Q-6)                                                             |
-| The `#` picker still lists another pane's Code threads, which then resolve `unauthorized`                      | Follow-up: the search request names no composing thread, so filtering it needs a contract field; nothing is read                                                                                               |
+| The `#` picker still lists another pane's Code threads, which then resolve `unauthorized`                      | Fixed: a search names its composing thread (`readerThreadId`), and the host lists only what that composer may attach, by the rule its send is judged by                                                        |
 | A pane turned into the welcome by reconciliation kept its context                                              | A welcome pane reaches nothing (`paneOwnContext`), and preview and Canvas reconciliation judge a pane against its own Project                                                                                  |
 | `standingAuthority` judges only the window                                                                     | Migrated in slice 1                                                                                                                                                                                            |
-| A Work `#thread` read and the Work mention directory list every active Work Project, whatever the window binds | Found in slice 1; outside this design, recorded as a follow-up                                                                                                                                                 |
+| A Work `#thread` read and the Work mention directory list every active Work Project, whatever the window binds | Not a gap: every window may Open any active Work Project's thread by design (`windowCanOpenProject`), as the Work sidebar lists them; a turn's tools still reach only its own Project (slice 1)                |
 | Workspace and Decisions state "one visible tree belongs to one authority context"                              | Rewritten in slice 3                                                                                                                                                                                           |
 
 ### Change log
@@ -668,3 +668,6 @@ Answered by a maintainer on 2026-11-14:
 - 2026-11-14: Slice 3 built: every pane in a window of several Projects names
   its own Project at every width and never the lead's; the specs and the
   decision entry state the new rule; the design index lists this doc.
+- 2026-11-14: Follow-ups. The `#` picker lists only what the composer may
+  attach. The Work read note was wrong: every window may Open any active Work
+  Project's thread by design, so there is nothing to bind.
