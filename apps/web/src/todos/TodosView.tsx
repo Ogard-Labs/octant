@@ -121,7 +121,7 @@ export function TodosView(props: TodosPageProps) {
         title="To-dos"
       />
       <OctantCard className="todos-card">
-        <TodoQuickAdd onChange={send} projects={choices} />
+        <TodoQuickAdd onChange={change} projects={choices} />
         <div className="todos-card__filters">
           <OctantToggleGroup<TodoStateFilter>
             aria-label="Show to-dos"
@@ -408,7 +408,7 @@ function TodoRow(props: TodoRowProps) {
       }}
     >
       <div className="todo-row__line">
-        <button
+        <OctantButton
           aria-checked={done}
           aria-label={todo.title}
           className="todo-row__check"
@@ -423,14 +423,16 @@ function TodoRow(props: TodoRowProps) {
           }
           role="checkbox"
           type="button"
+          variant="bare"
         >
           {done ? <Check aria-hidden="true" size={12} /> : null}
-        </button>
-        <button
+        </OctantButton>
+        <OctantButton
           aria-expanded={props.selected}
           className="todo-row__open"
           onClick={props.onSelect}
           type="button"
+          variant="bare"
         >
           <span className="oct-row-label todo-row__title">{todo.title}</span>
           {todo.projects.length + todo.tags.length === 0 &&
@@ -453,7 +455,7 @@ function TodoRow(props: TodoRowProps) {
               ))}
             </span>
           )}
-        </button>
+        </OctantButton>
         <span className="todo-row__actions">
           <OctantMenu
             items={menuItems}
@@ -588,7 +590,9 @@ function TodoEditor(props: {
           }),
         );
       }
-      if (!sameStrings(tags, todo.tags)) {
+      // Tags are sent only when the person edited the field: a tag may hold a
+      // comma or start with #, which the comma-separated field cannot carry back.
+      if (tagText !== todo.tags.join(", ") && !sameStrings(tags, todo.tags)) {
         commands.push(decodeTodoCommand({ kind: "set-todo-tags", todoId: todo.id, tags }));
       }
       if (!sameStrings(chosen.map(projectKey), todo.projects.map(projectKey))) {
@@ -621,6 +625,7 @@ function TodoEditor(props: {
     <form
       aria-label={`Edit ${todo.title}`}
       className="todo-editor"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void save();
@@ -676,11 +681,7 @@ function TodoEditor(props: {
           })}
         </fieldset>
       )}
-      {problem === undefined ? null : (
-        <p className="oct-row-detail" role="alert">
-          {problem}
-        </p>
-      )}
+      {problem === undefined ? null : <OctantAlert tone="warning">{problem}</OctantAlert>}
       <div className="todo-editor__actions">
         <OctantButton onClick={props.onClose} size="sm" type="button" variant="ghost">
           Cancel

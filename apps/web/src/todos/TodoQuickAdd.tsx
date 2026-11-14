@@ -6,6 +6,8 @@ import {
 } from "@octant/contracts/todos";
 import { Folder, Hash, X } from "lucide-react";
 import { useId, useState, type RefObject } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import type { TodoChangeOutcome } from "./useTodoList";
 import {
@@ -34,6 +36,10 @@ export function TodoQuickAdd(props: TodoQuickAddProps) {
   const [problem, setProblem] = useState<string>();
   const [busy, setBusy] = useState(false);
   const problemId = useId();
+  // One id per draft, kept across failed sends: when the host saved the add
+  // but its answer was lost, sending again names the same to-do and adds it
+  // once. A new id is drawn only after a confirmed save.
+  const [draftId, setDraftId] = useState(() => crypto.randomUUID());
   const draft = parseQuickAdd(text, props.projects);
 
   async function add() {
@@ -46,7 +52,7 @@ export function TodoQuickAdd(props: TodoQuickAddProps) {
     try {
       command = decodeTodoCommand({
         kind: "add-todo",
-        todoId: decodeTodoId(crypto.randomUUID()),
+        todoId: decodeTodoId(draftId),
         title: draft.title,
         tags: draft.tags,
         projects: draft.projects,
@@ -60,6 +66,7 @@ export function TodoQuickAdd(props: TodoQuickAddProps) {
     setBusy(false);
     if (outcome.status === "saved") {
       setText("");
+      setDraftId(crypto.randomUUID());
       setProblem(undefined);
       props.onAdded?.();
       return;
@@ -97,38 +104,40 @@ export function TodoQuickAdd(props: TodoQuickAddProps) {
             <li className="todo-chip" key={projectKey(link)}>
               <Folder aria-hidden="true" size={12} />
               <span>{link.name}</span>
-              <button
+              <OctantButton
                 aria-label={`Remove ${link.name}`}
                 className="todo-chip__remove"
                 onClick={() =>
                   setText(withoutQuickAddWord(text, { project: link }, props.projects))
                 }
                 type="button"
+                variant="bare"
               >
                 <X aria-hidden="true" size={12} />
-              </button>
+              </OctantButton>
             </li>
           ))}
           {draft.tags.map((tag) => (
             <li className="todo-chip" key={`tag:${tag}`}>
               <Hash aria-hidden="true" size={12} />
               <span>{tag}</span>
-              <button
+              <OctantButton
                 aria-label={`Remove tag ${tag}`}
                 className="todo-chip__remove"
                 onClick={() => setText(withoutQuickAddWord(text, { tag }, props.projects))}
                 type="button"
+                variant="bare"
               >
                 <X aria-hidden="true" size={12} />
-              </button>
+              </OctantButton>
             </li>
           ))}
         </ul>
       )}
       {problem === undefined ? null : (
-        <p className="oct-row-detail todo-quick-add__problem" id={problemId} role="alert">
+        <OctantAlert className="todo-quick-add__problem" id={problemId} tone="warning">
           {problem}
-        </p>
+        </OctantAlert>
       )}
     </div>
   );

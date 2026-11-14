@@ -235,3 +235,24 @@
   justify-content: flex-end;
   gap: var(--oct-space-2);
 }
+
+/* These three are Octant buttons on the bare recipe; the recipe's height,
+   centring, weight and nowrap would clip a two-line row or stretch a mark. */
+.todo-row__check,
+.todo-row__open,
+.todo-chip__remove {
+  min-height: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.todo-row__open {
+  height: auto;
+  justify-items: start;
+  white-space: normal;
+}
+
+.todo-chip__remove {
+  width: auto;
+  height: auto;
+}

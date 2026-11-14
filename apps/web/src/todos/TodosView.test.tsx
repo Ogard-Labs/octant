@@ -168,6 +168,46 @@ describe("the To-dos page", () => {
     expect(field).toHaveFocus();
   });
 
+  it("adds a to-do once when the host saved it but its answer was lost", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    let lose = true;
+    const client: TodoClient = {
+      read: host.client.read,
+      change: async (command) => {
+        const answer = await host.client.change(command);
+        if (lose) {
+          lose = false;
+          throw new Error("The to-do could not be saved.");
+        }
+        return answer;
+      },
+    };
+    render(<Page client={client} />);
+    const field = await screen.findByRole("textbox", { name: "New to-do" });
+
+    await user.type(field, "Renew the passport{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be saved");
+    await user.type(field, "{Enter}");
+
+    await screen.findByRole("checkbox", { name: "Renew the passport" });
+    expect(host.view().todos.map((todo) => todo.title)).toEqual(["Renew the passport"]);
+  });
+
+  it("keeps a tag that holds a comma when only the title is edited", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Plan", tags: ["one,two"] });
+    render(<Page client={host.client} />);
+
+    await user.click(await screen.findByRole("button", { name: /^Plan/ }));
+    await user.type(screen.getByRole("textbox", { name: "Title" }), " the trip");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("checkbox", { name: "Plan the trip" });
+    expect(host.view().todos[0]?.tags).toEqual(["one,two"]);
+  });
+
   it("moves a to-do down from its menu", async () => {
     const user = userEvent.setup();
     const host = fakeHost();
