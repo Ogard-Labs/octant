@@ -783,9 +783,13 @@ configuration, where OpenCode appends it after every agent's built-in rules
 posture denies all. File reads (`read`, `glob`, `grep`, `list`) are allowed
 at every level on both versions, Plan included, so OpenCode reads inside the
 Project and its extra folders without asking, as Octant's Claude Code file
-gate does; `external_directory` still refuses every other folder below Full
-access, and at Full access it is allowed, as OpenCode allows it on its own
-(maintainer decision, 2026-11-14). The outside-folder allows come after the
+gate does. `external_directory` asks for every other folder below Full
+access, on 1.x, 2.x, and the ACP launch's configuration alike, is allowed at
+Full access, as OpenCode allows it on its own, and stays denied in Plan, which
+cannot approve anything (maintainer decision, 2026-11-14); the protected-file
+refusals below still apply. Below Full access the launch's OS sandbox still
+holds writes to the Project's folders, so an approved edit outside them fails
+there. The outside-folder rules come after the person's own rules and the
 namespaced-tool deny, whose `*_*` also matches `external_directory`. Under the
 catch-all `ask` they had asked at Guarded and never ran in Plan, which
 cannot approve anything (maintainer decision, 2026-11-14). Refusals come last
@@ -851,8 +855,9 @@ provider credentials live there), and applies them as allow after Octant's
 rules. Octant's denies still win, so Plan's denials hold (Work's shell
 and subagents follow the level as Code's do), and Octant itself never writes such a grant because
 it answers approvals `once`. With the setup on, the person's OpenCode rules
-apply over Octant's level rules, with Plan, the outside-directory refusal
-below Full access, and a mode's withheld tools still Octant's denies (built). Octant reads the
+apply over Octant's level rules, with Plan and a mode's withheld tools still
+Octant's denies and the outside-directory ask below Full access still
+Octant's (built). Octant reads the
 `permission` rules (and the 2.x `permissions` list) from the person's
 OpenCode configuration when a session starts, in the order they wrote them,
 and places them ahead of the level's first deny. It drops a bare catch-all

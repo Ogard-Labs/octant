@@ -656,9 +656,10 @@ describe("ACP child-server profiles", () => {
       OPENCODE_DISABLE_PROJECT_CONFIG: "1",
       OPENCODE_PURE: "1",
     });
+    // An approval-gated launch asks before reaching a folder outside the Project.
     expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? "{}")).toMatchObject({
       permissions: expect.arrayContaining([
-        { action: "external_directory", effect: "deny", resource: "*" },
+        { action: "external_directory", effect: "ask", resource: "*" },
         { action: "skill", effect: "deny", resource: "*" },
       ]),
     });

@@ -300,11 +300,14 @@ function opencodeConfiguration(executionPolicy: ProviderExecutionPolicy) {
       { action: "read", resource: "*", effect: "allow" },
       { action: "edit", resource: "*", effect: sideEffects },
       { action: "shell", resource: "*", effect: sideEffects },
-      // Outside folders only at Full access (maintainer decision, 2026-11-14).
+      // Outside folders ask below Full access and are allowed at it; Plan,
+      // which cannot approve anything, refuses them (maintainer decision,
+      // 2026-11-14).
       {
         action: "external_directory",
         resource: "*",
-        effect: executionPolicy === "full-access" ? "allow" : "deny",
+        effect:
+          executionPolicy === "full-access" ? "allow" : executionPolicy === "plan" ? "deny" : "ask",
       },
       { action: "skill", resource: "*", effect: "deny" },
       { action: "question", resource: "*", effect: "deny" },

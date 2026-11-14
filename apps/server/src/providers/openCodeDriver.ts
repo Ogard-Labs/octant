@@ -3288,7 +3288,7 @@ const PLAN_READ_TOOLS = [
  * approve anything. They now run without asking inside the Project and its
  * extra folders at every level, Plan included, as Octant's own file-read gate
  * for Claude Code does (maintainer decision, 2026-11-14); `external_directory`
- * still refuses every other folder below Full access.
+ * asks for every other folder below Full access, and Plan refuses one.
  */
 const PROJECT_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
 
@@ -3342,17 +3342,13 @@ export function permissionRules(
     rules = [{ permission: "*", pattern: "*", action: "allow" }];
   } else if (policy === "auto-accept-edits") {
     // Edits inside the bound directory proceed; everything else still asks,
-    // and reach outside the directory stays denied outright.
+    // reach outside the directory included (`outsideFolderAllows`).
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
       { permission: "edit", pattern: "*", action: "allow" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
     ];
   } else if (policy === "approval-gated") {
-    rules = [
-      { permission: "*", pattern: "*", action: "ask" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
-    ];
+    rules = [{ permission: "*", pattern: "*", action: "ask" }];
   } else {
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
@@ -3378,8 +3374,8 @@ export function permissionRules(
     ...posture,
   ];
   // The person's own rules apply over the level's allows and asks and under
-  // its denies, so Plan's denials and the outside-directory refusal below
-  // Full access stand.
+  // its denies, so Plan's denials stand, and Octant's outside-directory ask comes
+  // after them (`outsideFolderAllows`).
   rules = insertBeforeFirstDeny(
     rules,
     [...OPENCODE_ENV_READ_RULES, ...own.rules].map((rule) => ({
@@ -3444,21 +3440,17 @@ export function betaAgentPermissionRules(
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
   protectedPaths: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
-  const denyExternal: PermissionV2Ruleset = [
-    { action: "external_directory", resource: "*", effect: "deny" },
-  ];
   let rules: PermissionV2Ruleset;
   if (policy === "full-access") {
-    // Outside folders too, at Full access only (maintainer decision, 2026-11-14).
+    // Outside folders too, at Full access (maintainer decision, 2026-11-14).
     rules = [{ action: "*", resource: "*", effect: "allow" }];
   } else if (policy === "auto-accept-edits") {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
       { action: "edit", resource: "*", effect: "allow" },
-      ...denyExternal,
     ];
   } else if (policy === "approval-gated") {
-    rules = [{ action: "*", resource: "*", effect: "ask" }, ...denyExternal];
+    rules = [{ action: "*", resource: "*", effect: "ask" }];
   } else {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
@@ -3492,8 +3484,10 @@ export function betaAgentPermissionRules(
  * folder is no outside directory: reaching it is allowed, and the posture's
  * own rules then decide reads, edits and commands there exactly as they do in
  * the bound directory. Full access reaches every folder, as OpenCode does on
- * its own (maintainer decision, 2026-11-14). These come after the namespaced
- * tool deny, whose `*_*` also matches `external_directory`.
+ * its own; below it any other folder asks, and Plan, which cannot approve
+ * anything, keeps its deny (maintainer decision, 2026-11-14). These come after
+ * the person's own rules and the namespaced tool deny, whose `*_*` also
+ * matches `external_directory`, and before the protected-file refusals.
  */
 function outsideFolderAllows(
   policy: ProviderExecutionPolicy,
@@ -3502,11 +3496,16 @@ function outsideFolderAllows(
   if (policy === "full-access") {
     return [{ action: "external_directory", resource: "*", effect: "allow" }];
   }
-  return extraFolderPatterns(extraFolders).map((resource) => ({
-    action: "external_directory",
-    resource,
-    effect: "allow" as const,
-  }));
+  return [
+    ...(policy === "plan"
+      ? []
+      : [{ action: "external_directory", resource: "*", effect: "ask" as const }]),
+    ...extraFolderPatterns(extraFolders).map((resource) => ({
+      action: "external_directory",
+      resource,
+      effect: "allow" as const,
+    })),
+  ];
 }
 
 /**

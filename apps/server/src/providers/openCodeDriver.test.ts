@@ -931,7 +931,7 @@ describe("OpenCode driver", () => {
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "task", "ask"],
     ["approval-gated", "todowrite", "ask"],
-    ["approval-gated", "external_directory", "deny"],
+    ["approval-gated", "external_directory", "ask"],
     ["plan", "read", "allow"],
     ["approval-gated", "read", "allow"],
     ["approval-gated", "glob", "allow"],
@@ -990,7 +990,7 @@ describe("OpenCode driver", () => {
       expect(evaluatePermission(work, "bash")).toBe(shell);
       expect(evaluatePermission(work, "task")).toBe(shell);
       expect(evaluatePermission(work, "external_directory")).toBe(
-        executionPolicy === "full-access" ? "allow" : "deny",
+        executionPolicy === "full-access" ? "allow" : "ask",
       );
     },
   );
@@ -2318,10 +2318,10 @@ describe("OpenCode driver", () => {
         {
           type: "permission.v2.asked",
           properties: {
-            id: "perm-outside",
+            id: "perm-skill",
             sessionID: "provider-session",
-            action: "external_directory",
-            resources: ["/etc/hosts"],
+            action: "skill",
+            resources: ["review"],
           },
         } as unknown as Event,
         {
@@ -2948,10 +2948,10 @@ describe("OpenCode driver", () => {
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "shell", "ask"],
-    ["approval-gated", "external_directory", "deny"],
+    ["approval-gated", "external_directory", "ask"],
     ["auto-accept-edits", "edit", "allow"],
     ["auto-accept-edits", "bash", "ask"],
-    ["auto-accept-edits", "external_directory", "deny"],
+    ["auto-accept-edits", "external_directory", "ask"],
     ["full-access", "edit", "allow"],
     ["full-access", "bash", "allow"],
     ["full-access", "external_directory", "allow"],
@@ -2989,7 +2989,10 @@ describe("OpenCode driver", () => {
         // OpenCode's own `.env` refusal is kept under the read allow.
         expect(lastMatch(rules, "read", "/work/project/.env"), policy).toBe("deny");
         expect(lastMatch(rules, "read", "/work/project/.env.example"), policy).toBe("allow");
-        expect(lastMatch(rules, "external_directory", "/elsewhere/a.ts"), policy).toBe("deny");
+        // Below Full access an outside folder asks; Plan cannot approve, so it refuses.
+        expect(lastMatch(rules, "external_directory", "/elsewhere/a.ts"), policy).toBe(
+          policy === "plan" ? "deny" : "ask",
+        );
       }
     }
   });
@@ -3036,21 +3039,24 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(beta, "edit")).toBe("deny");
   });
 
-  it("lets a session reach a Project's extra folder and still denies every other outside folder", () => {
+  it("lets a session reach a Project's extra folder, asks for every other outside folder, and denies them in Plan", () => {
     for (const policy of ["plan", "approval-gated", "auto-accept-edits"] as const) {
+      const outsideRule = policy === "plan" ? "deny" : "ask";
       const beta = betaAgentPermissionRules(policy, "code", ["/work/notes"]);
       const allowed = beta.filter(
         (rule) => rule.action === "external_directory" && rule.effect === "allow",
       );
       expect(allowed.map((rule) => rule.resource)).toEqual(["/work/notes", "/work/notes/*"]);
-      // The outside-folder deny for every other path stays, and comes first,
-      // so only the folder is reopened; the posture's edit rule is unchanged.
-      const denyIndex = beta.findIndex(
+      // The rule for every other outside path comes first, so only the folder
+      // is reopened; the posture's edit rule is unchanged.
+      const otherIndex = beta.findIndex(
         (rule) =>
-          rule.action === "external_directory" && rule.resource === "*" && rule.effect === "deny",
+          rule.action === "external_directory" &&
+          rule.resource === "*" &&
+          rule.effect === outsideRule,
       );
-      expect(denyIndex).toBeGreaterThanOrEqual(0);
-      expect(denyIndex).toBeLessThan(beta.indexOf(allowed[0]!));
+      expect(otherIndex).toBeGreaterThanOrEqual(0);
+      expect(otherIndex).toBeLessThan(beta.indexOf(allowed[0]!));
       expect(evaluateV2Permission(beta, "edit")).toBe(
         evaluateV2Permission(betaAgentPermissionRules(policy, "code"), "edit"),
       );
@@ -3058,7 +3064,7 @@ describe("OpenCode driver", () => {
       expect(
         legacy.filter((rule) => rule.permission === "external_directory").map((rule) => rule),
       ).toEqual([
-        { permission: "external_directory", pattern: "*", action: "deny" },
+        { permission: "external_directory", pattern: "*", action: outsideRule },
         { permission: "external_directory", pattern: "/work/notes", action: "allow" },
         { permission: "external_directory", pattern: "/work/notes/*", action: "allow" },
       ]);
@@ -3123,25 +3129,39 @@ describe("OpenCode driver", () => {
     ).toBe("allow");
   });
 
-  it("reaches a folder outside the Project only at Full access, and still refuses a protected file there", () => {
+  it("asks for a folder outside the Project at Guarded, reaches it at Full access, refuses it in Plan, and still refuses a protected file there", () => {
     const outside = "/elsewhere/notes/a.ts";
     const key = join(homedir(), ".ssh", "id_ed25519");
-    const rulesFor = (policy: "full-access" | "approval-gated") => [
-      permissionRules(policy, "code", undefined, ["/work/notes"]).map((rule) => ({
+    const protectedPaths = [join(homedir(), ".ssh")];
+    const rulesFor = (policy: "full-access" | "approval-gated" | "plan") => [
+      permissionRules(
+        policy,
+        "code",
+        undefined,
+        ["/work/notes"],
+        false,
+        undefined,
+        protectedPaths,
+      ).map((rule) => ({
         action: rule.permission,
         resource: rule.pattern,
         effect: rule.action,
       })),
-      betaAgentPermissionRules(policy, "code", ["/work/notes"]),
+      betaAgentPermissionRules(policy, "code", ["/work/notes"], [], protectedPaths),
     ];
     for (const rules of rulesFor("full-access")) {
       expect(lastMatch(rules, "external_directory", outside)).toBe("allow");
       expect(lastMatch(rules, "read", key)).toBe("deny");
     }
     for (const rules of rulesFor("approval-gated")) {
-      expect(lastMatch(rules, "external_directory", outside)).toBe("deny");
+      expect(lastMatch(rules, "external_directory", outside)).toBe("ask");
+      // A protected file outside the Project is refused, not asked.
+      expect(lastMatch(rules, "read", key)).toBe("deny");
       // The Project's extra folder stays reachable below Full access.
       expect(lastMatch(rules, "external_directory", "/work/notes/todo.md")).toBe("allow");
+    }
+    for (const rules of rulesFor("plan")) {
+      expect(lastMatch(rules, "external_directory", outside)).toBe("deny");
     }
   });
 
@@ -3182,7 +3202,7 @@ describe("OpenCode driver", () => {
     expect(bridge).toBeDefined();
     expect(evaluateV2Permission(rules, "edit")).toBe("ask");
     expect(evaluateV2Permission(rules, "shell")).toBe("ask");
-    expect(evaluateV2Permission(rules, "external_directory")).toBe("deny");
+    expect(evaluateV2Permission(rules, "external_directory")).toBe("ask");
     expect(evaluateV2Permission(rules, "skill")).toBe("deny");
     expect(evaluateV2Permission(rules, "question")).toBe("allow");
     expect(evaluateV2Permission(rules, "other-server_tool")).toBe("deny");
@@ -3367,7 +3387,7 @@ describe("OpenCode driver", () => {
     const gatedRules = [...(gated?.betaPermissions ?? [])];
     expect(evaluateV2Permission(gatedRules, "shell")).toBe("allow");
     expect(evaluateV2Permission(gatedRules, "edit")).toBe("allow");
-    expect(evaluateV2Permission(gatedRules, "external_directory")).toBe("deny");
+    expect(evaluateV2Permission(gatedRules, "external_directory")).toBe("ask");
     expect(gated?.ownToolServers).toEqual(own.mcp);
 
     const plan = await launch("plan", false);
