@@ -425,6 +425,7 @@ export function codes(): CodeClient {
     updatedAt: now,
   } as const;
   return {
+    searchTranscript: vi.fn(async () => ({ query: "", hits: [], truncated: false })),
     bootstrap: vi.fn(
       async () =>
         ({

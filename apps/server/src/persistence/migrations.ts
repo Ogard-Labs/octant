@@ -2673,6 +2673,30 @@ CREATE INDEX validation_evidence_authority_idx
       DROP TABLE agent_access_credential_before_loopback;
     `,
   },
+  {
+    version: 106,
+    name: "create_code_transcript_search_projection",
+    // Code message search. A projection under a new name, so it has no
+    // checkpoint and the first start after this migration replays the whole
+    // journal into it; no backfill is written here. `thread_id` puts its rows
+    // in a thread purge's sweep.
+    sql: `
+      CREATE TABLE code_transcript_search_projection (
+        operation_id TEXT NOT NULL CHECK(length(trim(operation_id)) > 0),
+        content_role TEXT NOT NULL CHECK(content_role IN ('user', 'assistant')),
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        start_sequence INTEGER NOT NULL CHECK(start_sequence > 0),
+        part_count INTEGER NOT NULL CHECK(part_count >= 0),
+        rewound INTEGER NOT NULL CHECK(rewound IN (0, 1)),
+        body_text TEXT NOT NULL,
+        search_text TEXT NOT NULL,
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+        PRIMARY KEY (operation_id, content_role)
+      ) STRICT;
+      CREATE INDEX code_transcript_search_thread_idx
+        ON code_transcript_search_projection(thread_id, start_sequence);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

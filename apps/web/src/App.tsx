@@ -387,7 +387,12 @@ import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
-import { useChatTranscriptSearch } from "./chat/useChatTranscriptSearch";
+import {
+  chatTranscriptAnswer,
+  codeTranscriptAnswer,
+  useTranscriptSearch,
+  workTranscriptAnswer,
+} from "./shell/useTranscriptSearch";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
@@ -1798,10 +1803,21 @@ function LaunchedShell(
     query: searchQuery,
     enabled: searchOpen && activeMode === "chat",
   });
-  const transcriptChatSearch = useChatTranscriptSearch({
-    client: chatClient,
+  // Message text is searched in the mode the overlay searches, on that mode's
+  // host route, which applies the same listing authority as its sidebar.
+  const searchActiveModeTranscript = useCallback(
+    async (query: string) =>
+      activeMode === "chat"
+        ? chatTranscriptAnswer(await chatClient.searchTranscript(query))
+        : activeMode === "work"
+          ? workTranscriptAnswer(await workThreadClient.searchTranscript(query))
+          : codeTranscriptAnswer(await codeClient.searchTranscript(query)),
+    [activeMode, chatClient, codeClient, workThreadClient],
+  );
+  const transcriptSearch = useTranscriptSearch({
+    search: searchActiveModeTranscript,
     query: searchQuery,
-    enabled: searchOpen && activeMode === "chat",
+    enabled: searchOpen,
   });
   const workSettings = useWorkSettings(workThreadClient, machineChanges.workNavigation);
   const chatController = useChatController({
@@ -5927,9 +5943,7 @@ function LaunchedShell(
   const threadSearchArchivedListing = threadSearchArchivedListingForStatus(
     archivedChatSearch.status,
   );
-  const threadSearchContentListing = threadSearchContentListingForStatus(
-    transcriptChatSearch.status,
-  );
+  const threadSearchContentListing = threadSearchContentListingForStatus(transcriptSearch.status);
   const threadSearchProjects = [
     ...projectController.projects,
     ...projectController.archivedProjects,
@@ -8246,9 +8260,9 @@ function LaunchedShell(
           searchProjects={threadSearchProjects}
           searchListing={threadSearchListing}
           searchArchivedListing={threadSearchArchivedListing}
-          searchContentHits={transcriptChatSearch.hits}
+          searchContentHits={transcriptSearch.hits}
           searchContentListing={threadSearchContentListing}
-          searchContentTruncated={transcriptChatSearch.truncated}
+          searchContentTruncated={transcriptSearch.truncated}
           onSearchQueryChange={setSearchQuery}
           onCloseSearch={closeThreadSearch}
           onNewSearchThread={() => {

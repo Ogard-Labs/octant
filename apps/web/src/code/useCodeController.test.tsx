@@ -4301,6 +4301,7 @@ function evidenceText(contentId: string): string {
 function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
   const bootstrapFn = overrides.bootstrap ?? vi.fn(async () => bootstrap());
   return {
+    searchTranscript: vi.fn(),
     bootstrap: bootstrapFn,
     navigation: vi.fn(async () => {
       const next = await bootstrapFn();
