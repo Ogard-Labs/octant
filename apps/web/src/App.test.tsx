@@ -5096,20 +5096,20 @@ describe("App", () => {
     const sidebar = screen.getByRole("complementary", { name: "Octant sidebar" });
     expect(sidebar).toHaveClass("sidebar");
     expect(document.querySelectorAll(".shell-frame")).toHaveLength(1);
-    expect(document.querySelector(".shell-frame")?.children[0]).toBe(sidebar);
-    expect(document.querySelector(".shell-frame")?.children[1]).toHaveClass(
+    expect(document.querySelector(".shell-frame")?.children[1]).toBe(sidebar);
+    expect(document.querySelector(".shell-frame")?.children[2]).toHaveClass(
       "shell-frame__sidebar-resize",
     );
-    expect(document.querySelector(".shell-frame")?.children[2]).toBe(
+    expect(document.querySelector(".shell-frame")?.children[3]).toBe(
       screen.getAllByRole("banner")[0],
     );
-    expect(document.querySelector(".shell-frame")?.children[3]).toHaveClass("workspace-layer");
+    expect(document.querySelector(".shell-frame")?.children[4]).toHaveClass("workspace-layer");
     expect(sidebar).not.toHaveClass("window-drag-region");
     expect(sidebar.querySelector(".sidebar__drag-surface")).not.toBeInTheDocument();
     expect(sidebar.querySelector(".sidebar__chrome-actions")).toContainElement(
       within(sidebar).getByRole("button", { name: "Hide sidebar" }),
     );
-    expect(sidebar.querySelector(".sidebar__content")).toHaveClass("window-no-drag");
+    expect(sidebar.querySelector(".sidebar__content")).not.toHaveClass("window-no-drag");
     expect(within(sidebar).getByRole("group", { name: "Workspace mode" })).toHaveClass(
       "window-no-drag",
     );

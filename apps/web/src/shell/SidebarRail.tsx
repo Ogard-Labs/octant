@@ -168,11 +168,11 @@ export function SidebarRail(props: SidebarRailProps) {
       data-octant-sidebar-rail
     >
       {props.nativeHost ? (
-        <span aria-hidden="true" className="sidebar-rail__traffic-lights window-drag-region" />
+        <span aria-hidden="true" className="sidebar-rail__traffic-lights" />
       ) : null}
       <nav
         aria-label={beside ? "Destinations" : "Collapsed sidebar"}
-        className="sidebar-rail__column window-no-drag"
+        className="sidebar-rail__column"
       >
         <div className="sidebar-rail__scroll">
           {beside || props.newThread === undefined ? null : (

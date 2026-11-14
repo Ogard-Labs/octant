@@ -219,64 +219,25 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   app-region: drag;
 }
 
-.shell-frame__native-drag-strip {
+.shell-frame__title-band-drag {
   display: none;
 }
 
 /* `hiddenInset` does not make the renderer's transparent top edge draggable.
-   Reserve one explicit top-edge target after the traffic lights and collapsed
-   sidebar control. It carries no content, so no interactive child has to carve
-   a hole through a drag overlay. */
-html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
+   One drag layer covers the whole title band, edge to edge, and stands first in
+   the shell. Electron applies drag and no-drag rectangles in document order, a
+   later one overriding an earlier one, so every control in the band subtracts
+   itself with `window-no-drag` on its own box. No container that spans empty
+   band space is no-drag, and nothing after this layer is a drag region over the
+   band: either would carve a hole or cover a control. */
+html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   position: fixed;
-  z-index: 5;
   top: 0;
-  right: var(--octant-window-chrome-reserved-width, 148px);
-  left: 112px;
+  right: 0;
+  left: 0;
   display: block;
-  height: var(--octant-native-hidden-inset-titlebar-height);
-  pointer-events: auto;
-}
-
-/* The expanded-sidebar strip starts after traffic lights plus Hide sidebar.
-   Once the sidebar is gone, that 112px origin sits on Show sidebar / New thread
-   unless it moves to the measured leading cluster. */
-html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__native-drag-strip {
-  left: var(--octant-window-chrome-leading-width, 148px);
-}
-
-/* Beside a rail the chrome, and so its leading cluster, starts after it. */
-html[data-octant-native-host="true"] .shell--sidebar-rail .shell-frame__native-drag-strip {
-  left: calc(
-    var(--octant-rendered-sidebar-width) + var(--octant-window-chrome-leading-width, 148px)
-  );
-}
-
-/* The right dock's tab strip lives in the same band. The strip used to run
-   over it, so the tabs and their close controls dragged the window instead
-   of responding; it now ends where the dock begins. */
-html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__native-drag-strip {
-  right: max(
-    var(--octant-window-chrome-reserved-width, 148px),
-    min(var(--octant-context-sidebar-width, 0px), 50%)
-  );
-}
-
-/* With two columns of tools the dock may be wider than half, so the strip ends
-   where the dock's own width rule does, not at half the window. */
-html[data-octant-native-host="true"]
-  .shell--wide-context-open[data-dock-tile-columns="2"]
-  .shell-frame__native-drag-strip {
-  right: max(
-    var(--octant-window-chrome-reserved-width, 148px),
-    min(
-      var(--octant-context-sidebar-width, 0px),
-      calc(
-        100% - var(--octant-rendered-sidebar-width, 0px) -
-          var(--octant-tiled-primary-min, var(--octant-wide-primary-min))
-      )
-    )
-  );
+  height: var(--oct-title-rail-h);
+  pointer-events: none;
 }
 
 .window-no-drag,
@@ -285,17 +246,7 @@ html[data-octant-native-host="true"]
   app-region: no-drag;
 }
 
-/* Pane headers already own their empty draggable space. A sibling native
-   drag overlay crossed their close controls when the workspace material
-   established a stacking context: accessibility activation worked, but
-   pointer clicks dragged the window. Keep that overlay on the sidebar. */
-html[data-octant-native-host="true"]
-  .shell-frame:has(.workspace-pane__header)
-  .shell-frame__native-drag-strip {
-  right: calc(100% - var(--octant-rail-offset, 0px) - var(--octant-rendered-sidebar-width));
-}
-
-/* The chrome shares the visual title row with the top drag strip, the pane
+/* The chrome shares the visual title row with the band drag layer, the pane
    header, and whatever the workspace column paints under it; its controls
    explicitly opt out of dragging and the unused rail stays draggable
    underneath. The chrome must outrank every one of them outright — while it
@@ -363,7 +314,7 @@ html[data-octant-native-host="true"]
 
 /* The rail beside the open sidebar takes a column of its own in front of it.
    `--octant-rail-offset` moves everything placed at the sidebar's trailing
-   edge (the resize handle, the native drag strip, the glass/ground split)
+   edge (the resize handle, the band drag layer, the glass/ground split)
    right by the rail's width; the sidebar column keeps its own width rules,
    including the Projects pane and the wide-context clamp. */
 .shell.shell-frame.shell--rail-beside {
@@ -930,13 +881,6 @@ html[data-octant-native-host="true"]
   min-height: var(--oct-rail-button-h);
   flex: 0 0 auto;
   margin-left: 2px;
-}
-
-.sidebar__native-leading .sidebar__drag-surface {
-  display: block;
-  align-self: stretch;
-  flex: 1 1 auto;
-  min-width: 12px;
 }
 
 .sidebar__primary {
@@ -2354,7 +2298,7 @@ html[data-octant-density="compact"]
      to the pointer. The width the grid, the ground and the stage read glides,
      and they move together. The stage's corner and clip leave at once when it
      opens and arrive once the slide has landed when it shuts, so no notch shows
-     at the stage's left edge. The title band's drag strip and traffic-light
+     at the stage's left edge. The title band's drag layer and traffic-light
      reserve are placed by measured widths, not by this column. */
   .shell.shell-frame[data-octant-sidebar-sliding] {
     transition:

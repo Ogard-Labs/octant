@@ -75,34 +75,6 @@
   text-transform: none;
 }
 
-/* Under the title band the header's empty space is the window's handle. Drag
-   regions are rectangles, and a later drag rectangle outranks an earlier
-   no-drag one, so none of these may overlap a control of the band's trailing
-   cluster, which stands over the dock: they are the strips above and below
-   the cluster (8px each, the band's height less a 28px button, halved) and
-   the part of the header left of it. */
-.right-utility-dock__drag-space {
-  position: absolute;
-  left: 0;
-  right: 0;
-}
-
-.right-utility-dock__drag-space--top {
-  top: 0;
-  height: calc((var(--oct-title-rail-h) - var(--oct-rail-button-h)) / 2);
-}
-
-.right-utility-dock__drag-space--bottom {
-  bottom: 0;
-  height: calc((var(--oct-title-rail-h) - var(--oct-rail-button-h)) / 2);
-}
-
-.right-utility-dock__drag-space--lead {
-  top: 0;
-  bottom: 0;
-  right: var(--octant-window-chrome-reserved-width, 0px);
-}
-
 .right-utility-dock__tabs,
 .right-utility-dock__actions {
   position: relative;

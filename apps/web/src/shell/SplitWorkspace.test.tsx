@@ -857,9 +857,8 @@ describe("SplitWorkspace", () => {
       .querySelector(".workspace-pane__header")!;
     expect(header).not.toHaveClass("window-drag-region");
     expect(header.querySelector(".workspace-pane__grip")).toHaveClass("window-no-drag");
-    expect(header.querySelector(".workspace-pane__window-drag-space")).toHaveClass(
-      "window-drag-region",
-    );
+    // The band's one drag layer supplies the empty space; the header adds none.
+    expect(header.querySelector(".window-drag-region")).toBeNull();
   });
 
   it("keeps the splitter keyboard-operable inside a quiet hit target", () => {

@@ -807,10 +807,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   </OctantTabsList>
                 </OctantTabs>
               ) : null}
-              <span
-                aria-hidden="true"
-                className="workspace-pane__window-drag-space window-drag-region"
-              />
+              <span aria-hidden="true" className="workspace-pane__window-drag-space" />
               {/* Alone in the window there is nothing to close into; the × is a
                 split's control, for giving one pane's room back to the other. */}
               {props.layout.kind === "pane" ? null : (

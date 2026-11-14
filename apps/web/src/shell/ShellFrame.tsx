@@ -234,6 +234,12 @@ export function ShellFrame(props: ShellFrameProps) {
           <>{props.standaloneSurface}</>
         ) : (
           <>
+            {/* First in the shell, so every control after it can subtract itself. */}
+            <div
+              aria-hidden="true"
+              className="shell-frame__title-band-drag window-drag-region"
+              data-window-drag-band
+            />
             {props.backdrop}
             {props.welcomeGround}
             {props.sidebarCollapsed && props.sidebarRail !== true ? null : props.sidebar}
@@ -264,11 +270,6 @@ export function ShellFrame(props: ShellFrameProps) {
             >
               {props.workspace}
             </div>
-            <div
-              aria-hidden="true"
-              className="shell-frame__native-drag-strip window-drag-region"
-              data-native-window-drag-strip
-            />
           </>
         )}
         {props.children}

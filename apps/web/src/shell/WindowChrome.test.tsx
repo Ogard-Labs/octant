@@ -1463,16 +1463,7 @@ describe("WindowChrome", () => {
     expect(covered).toEqual(expect.arrayContaining(railClasses));
   });
 
-  it("keeps the native drag overlay away from split-pane pointer controls", () => {
-    const rule = cssRule(
-      'html[data-octant-native-host="true"] .shell-frame:has(.workspace-pane__header) .shell-frame__native-drag-strip',
-    );
-    expect(rule).toContain(
-      "right: calc(100% - var(--octant-rail-offset, 0px) - var(--octant-rendered-sidebar-width))",
-    );
-  });
-
-  it("leaves native dragging to the shell strip so pointer controls have no nested drag region", () => {
+  it("leaves native dragging to the shell's band layer so pointer controls have no nested drag region", () => {
     const { container } = render(
       <WindowChrome
         activeSurface="Welcome to Code"

@@ -462,7 +462,6 @@ export function ShellSidebar(props: ShellSidebarProps) {
                   history={props.history}
                 />
               )}
-              <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
             </div>
           ) : null}
           {props.applicationIdentity !== undefined ? (
@@ -473,7 +472,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
               />
             </div>
           ) : null}
-          <div className="sidebar__content window-no-drag" data-octant-sidebar-content>
+          <div className="sidebar__content" data-octant-sidebar-content>
             {props.environments === undefined || props.environments.hostStates.length < 2 ? null : (
               <EnvironmentFilter
                 hostStates={props.environments.hostStates}
@@ -650,7 +649,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           </div>
         </div>
         {props.projectsDirectory === undefined ? null : (
-          <section aria-label="Projects sidebar" className="sidebar__projects-pane window-no-drag">
+          <section aria-label="Projects sidebar" className="sidebar__projects-pane">
             {props.projectsDirectory}
           </section>
         )}

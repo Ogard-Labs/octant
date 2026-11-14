@@ -653,15 +653,17 @@ coat), painted once on the shell. Neither has a fill or line of its own.
 hiddenInset` and no custom `trafficLightPosition` (it would grow the native
   overlay and eat clicks; if a packaged run shows the lights off the band's
   centreline, the position to try is x 16, y 15, whose 44px overlay is the
-  band's height). The traffic lights sit in the band; the renderer
-  keeps `--octant-native-traffic-light-leading-width` (74px) clear before Show
-  sidebar, Back and Forward, and one blank drag strip
-  (`--octant-native-hidden-inset-titlebar-height`, 24px) reaches the top edge.
-  Interactive children carry `window-no-drag`. Every empty pixel of the band
-  drags the window, above the open dock too: only a control opts out, and a
-  container is never `window-no-drag` around a drag region, because a dock
-  marked so as a whole left the band's right-hand side undraggable. Test
-  title-bar controls in the packaged app.
+  band's height). The traffic lights sit in the band;
+  the renderer keeps `--octant-native-traffic-light-leading-width` (74px) clear
+  before Show sidebar, Back and Forward. One drag layer
+  (`shell-frame__title-band-drag`) covers the whole band, edge to edge, and is
+  the shell's first child. Electron applies drag and no-drag rectangles in
+  document order, a later one overriding an earlier one, so a control opts out
+  with `window-no-drag` on its own box. No container that spans empty band
+  space (sidebar, Projects pane, icon rail column, dock, chrome root) is
+  `window-no-drag`, and nothing after the layer is a drag region over the
+  band: either left the band's empty stretches undraggable. Test title-bar
+  controls in the packaged app.
 - **Changes in the band**: with a Code thread open the band's trailing cluster
   starts with its checkout's uncommitted line changes, "+added −removed" in the
   success and danger inks at the meta size with tabular numbers, as a button

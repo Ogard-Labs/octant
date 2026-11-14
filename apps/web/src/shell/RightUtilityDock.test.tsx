@@ -39,12 +39,13 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
 }
 
 describe("RightUtilityDock", () => {
-  it("does not mark the whole dock no-drag, so its header's empty space can move the window", () => {
+  it("does not mark the whole dock no-drag, so the band's drag layer reaches over its header", () => {
     render(<RightUtilityDock {...props()} />);
     const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
     // A no-drag ancestor overrides every drag region inside it.
     expect(dock).not.toHaveClass("window-no-drag");
-    expect(dock.querySelector(".right-utility-dock__toolbar > .window-drag-region")).not.toBeNull();
+    // The band's one drag layer reaches over the dock; no drag region of its own.
+    expect(dock.querySelector(".window-drag-region")).toBeNull();
   });
 
   it("renders one opaque docked landmark with bounded pointer and keyboard resize", () => {

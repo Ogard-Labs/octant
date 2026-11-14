@@ -152,27 +152,16 @@ describe("ShellFrame", () => {
       />,
     );
 
-    const dragTarget = container.querySelector("[data-native-window-drag-strip]");
-    expect(dragTarget).toHaveClass("shell-frame__native-drag-strip", "window-drag-region");
-    expect(cssRule(".shell-frame__native-drag-strip")).toContain("display: none;");
-    const nativeDragTarget = cssRule(
-      'html[data-octant-native-host="true"] .shell-frame__native-drag-strip',
-    );
-    expect(nativeDragTarget).toContain("position: fixed;");
-    expect(nativeDragTarget).toContain("top: 0;");
-    expect(nativeDragTarget).toContain("left: 112px;");
-    // One measured reserve now serves both the drag strip and the pane header,
-    // so the strip cannot end at a different place than the controls begin.
-    expect(nativeDragTarget).toContain("right: var(--octant-window-chrome-reserved-width, 148px);");
-    expect(nativeDragTarget).toContain(
-      "height: var(--octant-native-hidden-inset-titlebar-height);",
-    );
-    expect(nativeDragTarget).toContain("pointer-events: auto;");
-    expect(
-      cssRule(
-        'html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__native-drag-strip',
-      ),
-    ).toContain("left: var(--octant-window-chrome-leading-width, 148px);");
+    const dragTarget = container.querySelector("[data-window-drag-band]");
+    expect(dragTarget).toHaveClass("shell-frame__title-band-drag", "window-drag-region");
+    expect(container.firstElementChild?.firstElementChild).toBe(dragTarget);
+    expect(cssRule(".shell-frame__title-band-drag")).toContain("display: none;");
+    const band = cssRule('html[data-octant-native-host="true"] .shell-frame__title-band-drag');
+    expect(band).toContain("position: fixed;");
+    expect(band).toContain("top: 0;");
+    expect(band).toContain("left: 0;");
+    expect(band).toContain("right: 0;");
+    expect(band).toContain("height: var(--oct-title-rail-h);");
   });
 
   it("puts the navigation sidebar ahead of the window chrome in tab order", () => {
@@ -235,11 +224,11 @@ describe("ShellFrame", () => {
     });
     expect(shell).not.toHaveAttribute("data-client-frame");
     expect(shell?.children).toHaveLength(5);
-    expect(shell?.children[0]).toBe(screen.getByRole("complementary", { name: "Octant sidebar" }));
-    expect(shell?.children[1]).toHaveClass("shell-frame__sidebar-resize");
-    expect(shell?.children[2]).toBe(screen.getByRole("banner", { name: "Workspace actions" }));
-    expect(shell?.children[3]).toHaveClass("workspace-layer");
-    expect(shell?.children[4]).toHaveClass("shell-frame__native-drag-strip");
+    expect(shell?.children[0]).toHaveClass("shell-frame__title-band-drag");
+    expect(shell?.children[1]).toBe(screen.getByRole("complementary", { name: "Octant sidebar" }));
+    expect(shell?.children[2]).toHaveClass("shell-frame__sidebar-resize");
+    expect(shell?.children[3]).toBe(screen.getByRole("banner", { name: "Workspace actions" }));
+    expect(shell?.children[4]).toHaveClass("workspace-layer");
     expect(screen.getAllByRole("banner")).toHaveLength(1);
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });

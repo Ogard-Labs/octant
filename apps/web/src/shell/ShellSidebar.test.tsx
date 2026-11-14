@@ -127,7 +127,7 @@ describe("ShellSidebar", () => {
     expect(screen.queryByLabelText("Octant Nightly")).not.toBeInTheDocument();
     expect(container.querySelector(".sidebar__brand")).toBeNull();
     expect(container.querySelector("[data-traffic-light-safe-space]")).toBeInTheDocument();
-    expect(container.querySelector(".sidebar__drag-surface")).toBeInTheDocument();
+    expect(container.querySelector(".window-drag-region")).toBeNull();
     expect(container.querySelector(".sidebar__native-leading")).toContainElement(
       screen.getByRole("button", { name: "Hide sidebar" }),
     );
