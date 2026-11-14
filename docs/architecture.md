@@ -4951,8 +4951,9 @@ Octant has one web search, `web-search` (`WEB_SEARCH_TOOL_DEFINITION`): one
 name, one argument schema, and one result shape wherever a model meets it. It
 searches the SearXNG endpoint in Chat settings for a query of 1 to 512
 characters and returns that query with each result's title, URL, and snippet,
-5 results unless the call asks for 1 to 10. It opens no page. Searching an ordered list of
-backends under a data policy is designed, not built
+5 results unless the call asks for 1 to 10. It opens no page. Searching an
+ordered list of backends under a data policy, and a provider's own search in
+the native harness under that policy, are designed, not built
 ([Web search backends and data policy](design/web-search-backends.md)).
 
 - **Where.** A Chat thread is offered it on every provider while its research

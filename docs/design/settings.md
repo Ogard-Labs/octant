@@ -37,8 +37,9 @@ person brings to Settings, and a group lists its pages in this order: General
 (General alone: who you are, app-wide defaults, and what Octant tells you), Look &
 feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
 Voice & images, then Chat, Work and Code: which provider or model answers each
-job, and how each mode starts), Tools (Skills & Extensions, Computer use, Device
-tools, GitHub, Linear: what a running agent may reach), Safety (Permissions,
+job, and how each mode starts), Tools (Skills & Extensions, Web search, Computer use,
+Device tools, GitHub, Linear: what a running agent may reach; Web search is
+designed, not built, in [Web search backends](web-search-backends.md#settings)), Safety (Permissions,
 Secret stores, Memory: what an agent may touch, reach and remember), and
 Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
 computer stores and the other machines it talks to). An earlier Privacy & data
