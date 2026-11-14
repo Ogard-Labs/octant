@@ -928,7 +928,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 props.selectedProviderInstanceId === undefined
                   ? undefined
                   : String(props.selectedProviderInstanceId),
-              groups: props.providerGroups,
             }}
             startContext={
               <ComposerStartTray

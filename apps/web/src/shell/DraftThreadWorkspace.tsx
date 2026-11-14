@@ -1273,7 +1273,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 props.selectedProviderInstanceId === undefined
                   ? undefined
                   : String(props.selectedProviderInstanceId),
-              groups: props.providerGroups,
             }}
             startContext={
               <ComposerStartTray

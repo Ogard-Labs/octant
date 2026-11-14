@@ -209,7 +209,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 props.selectedProviderInstanceId === undefined
                   ? undefined
                   : String(props.selectedProviderInstanceId),
-              groups: props.providerGroups ?? [],
             }}
             startContext={
               <ComposerStartTray

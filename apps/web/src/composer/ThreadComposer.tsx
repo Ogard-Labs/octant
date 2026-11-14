@@ -23,7 +23,6 @@ import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ThreadPlanWindows } from "../threadStats/ThreadStats";
-import type { PickerGroup } from "@octant/domain";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
 import "./composer-plan-usage.css";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -159,8 +158,6 @@ export interface ThreadComposerProps {
    */
   readonly planUsage?: {
     readonly providerInstanceId: string | undefined;
-    /** Unused: the usage line needs no account names. Adapters may stop passing it. */
-    readonly groups?: ReadonlyArray<PickerGroup>;
   };
   readonly queue?: ReactNode;
   /**

@@ -424,7 +424,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 props.selectedProviderInstanceId === undefined
                   ? undefined
                   : String(props.selectedProviderInstanceId),
-              groups: props.providerGroups,
             }}
             startContext={
               <ComposerStartTray
