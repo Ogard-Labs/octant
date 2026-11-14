@@ -13,16 +13,21 @@ export const ASCII_RAMP = " .:-=+*#%@";
 export const ASCII_GLYPH_SIZE = 5;
 
 /**
- * Below six points a 5×5 glyph is narrower than the pixels that draw it and
- * the print reads as noise, so an ASCII cell is never smaller than this.
+ * Below ten points a 5×5 glyph reads as a checker pattern, not characters: at
+ * 6 and 8 points a phone screenshot of the print showed no legible glyph, so
+ * an ASCII cell is never smaller than this.
  */
-export const ASCII_MIN_CELL = 6;
+export const ASCII_MIN_CELL = 10;
 
 /** The cell an ASCII print starts at when the saved cell is too small to read. */
-export const ASCII_DEFAULT_CELL = 8;
+export const ASCII_DEFAULT_CELL = 14;
 
-/** How much of the cell's colour the ground between strokes keeps. */
-export const ASCII_GROUND_SHADE = 0.12;
+/**
+ * How much of the cell's colour the ground between strokes keeps. At 12% the
+ * near-black gaps over a light picture made titles laid on it hard to read;
+ * keeping half the colour leaves the glyphs visible but quiet.
+ */
+export const ASCII_GROUND_SHADE = 0.5;
 
 /**
  * One row per entry, top first; bit 4 is the leftmost pixel. Every glyph lights

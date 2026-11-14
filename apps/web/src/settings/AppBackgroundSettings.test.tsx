@@ -392,11 +392,11 @@ describe("AppBackgroundSettings", () => {
     // ASCII starts at a readable character size and offers no tones or Motion.
     await user.click(screen.getByRole("button", { name: "ASCII" }));
     expect(onChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ effect: "ascii", effectCell: 8 }),
+      expect.objectContaining({ effect: "ascii", effectCell: 14 }),
     );
     rerender(
       <AppBackgroundSettings
-        background={{ ...walnut, effect: "ascii", effectCell: 8 }}
+        background={{ ...walnut, effect: "ascii", effectCell: 14 }}
         library={library()}
         onChange={onChange}
       />,

@@ -400,7 +400,7 @@ describe("application background policy", () => {
       appBackground: { ...waving.appBackground, effect: "ascii" as const, effectCell: 3 },
     };
     expect(resolveAppBackground(ascii).backgroundAnimated).toBe(false);
-    expect(resolveAppBackground(ascii).effect).toEqual({ kind: "ascii", cell: 6, levels: 8 });
+    expect(resolveAppBackground(ascii).effect).toEqual({ kind: "ascii", cell: 10, levels: 8 });
     expect(
       resolveAppBackground({ ...ascii, appBackground: { ...ascii.appBackground, kind: "pixels" } })
         .effect.kind,
