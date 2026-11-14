@@ -119,6 +119,22 @@ export function CoordinatorWorkerRequests(props: {
 /** Settled rows kept in the transcript; older ones leave so the trail stays short. */
 const MAX_SETTLED_ASKS = 12;
 
+/**
+ * The requests a thread view keeps: every live one, and the most recent
+ * settled ones up to {@link MAX_SETTLED_ASKS}, in arrival order. An evicted
+ * request leaves storage, not only the screen, so a long-lived coordinator
+ * view does not grow with every request it has ever shown.
+ */
+export function retainedWorkerAsks<T>(
+  seen: ReadonlyMap<string, T>,
+  live: ReadonlySet<string>,
+): ReadonlyMap<string, T> {
+  const settled = [...seen.keys()].filter((key) => !live.has(key));
+  if (settled.length <= MAX_SETTLED_ASKS) return seen;
+  const evicted = new Set(settled.slice(0, settled.length - MAX_SETTLED_ASKS));
+  return new Map([...seen].filter(([key]) => !evicted.has(key)));
+}
+
 /** What an answer given in this row did, in the words its settled row reads. */
 function answeredHere(response: PendingRequestResponse): string {
   if (response.kind === "approve") return "Approved here";
@@ -170,17 +186,30 @@ export function CoordinatorWorkerAskRows(props: {
   useEffect(() => {
     setSeen((current) => {
       const fresh = waiting.filter((entry) => !current.has(pendingRequestKey(entry.request)));
-      if (fresh.length === 0) return current;
-      const next = new Map(current);
-      for (const entry of fresh) next.set(pendingRequestKey(entry.request), entry.request);
-      return next;
+      let next = current;
+      if (fresh.length > 0) {
+        const added = new Map(current);
+        for (const entry of fresh) added.set(pendingRequestKey(entry.request), entry.request);
+        next = added;
+      }
+      return retainedWorkerAsks(
+        next,
+        new Set(waiting.map((entry) => pendingRequestKey(entry.request))),
+      );
     });
   }, [waiting]);
+  // An outcome is kept only while its request's row is.
+  useEffect(() => {
+    setAnswers((current) =>
+      [...current.keys()].every((key) => seen.has(key))
+        ? current
+        : new Map([...current].filter(([key]) => seen.has(key))),
+    );
+  }, [seen]);
 
   const live = new Map(waiting.map((entry) => [pendingRequestKey(entry.request), entry]));
-  const settledKeys = [...seen.keys()].filter((key) => !live.has(key));
-  const dropped = new Set(settledKeys.slice(0, -MAX_SETTLED_ASKS));
-  const shown = [...seen].filter(([key]) => !dropped.has(key));
+  // The same bound on screen, for the render before the effect prunes storage.
+  const shown = [...retainedWorkerAsks(seen, new Set(live.keys()))];
   if (shown.length === 0) return null;
 
   async function answerInRow(request: PendingRequest, response: PendingRequestResponse) {

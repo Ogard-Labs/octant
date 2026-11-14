@@ -8,6 +8,7 @@ import { ThreadConnectionLostContext } from "../transcript/ThreadConnectionNotic
 import {
   CoordinatorWorkerAskRows,
   CoordinatorWorkerRequests,
+  retainedWorkerAsks,
   type CoordinatorWorker,
   type CoordinatorWorkerRequestSource,
 } from "./CoordinatorWorkerRequests";
@@ -233,5 +234,34 @@ describe("a coordinator's thread view showing its workers' requests as rows", ()
     });
     expect(await within(approvalRow).findByRole("status")).toHaveTextContent("Approved here");
     expect(within(approvalRow).queryByRole("button", { name: "Approve" })).toBeNull();
+  });
+
+  it("keeps only the 12 most recent settled requests once 20 have settled, on screen and in storage", async () => {
+    const asks = Array.from({ length: 20 }, (_, index) =>
+      approval("worker-1", "Fix the parser", `approval-${String(index + 1)}`),
+    );
+    const client = reader(asks, []);
+    const first = source(client, clients());
+    const { rerender } = render(
+      <CoordinatorWorkerAskRows source={first} workers={workers} onOpenWorker={vi.fn()} />,
+    );
+    const rows = await screen.findByRole("region", { name: "Workers' requests" });
+    await waitFor(() => expect(within(rows).getAllByRole("group")).toHaveLength(20));
+    // A change-feed signal brings the read in which every request has left.
+    rerender(
+      <CoordinatorWorkerAskRows
+        source={{ ...first, feedRevision: 1 }}
+        workers={workers}
+        onOpenWorker={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(within(rows).getAllByRole("group")).toHaveLength(12));
+    expect(within(rows).queryByText("Run: bun run test (approval-8)")).toBeNull();
+    expect(within(rows).getByText("Run: bun run test (approval-9)")).toBeInTheDocument();
+
+    const seen = new Map(asks.map((ask, index) => [String(index), ask]));
+    const kept = retainedWorkerAsks(seen, new Set());
+    expect([...kept.keys()]).toEqual(Array.from({ length: 12 }, (_, index) => String(index + 8)));
+    expect(retainedWorkerAsks(kept, new Set(["0"]))).toBe(kept);
   });
 });
