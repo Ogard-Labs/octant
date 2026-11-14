@@ -373,6 +373,13 @@ const CLAUDE_WAKEUP_TOOLS = new Set<string>([
 const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
+/**
+ * How many approvals, and how many pre-tool grants, a session holds at once.
+ * A call past either waits in line for a free slot instead of failing the
+ * turn: parallel subagents used to end a turn at the fifth approval or the
+ * seventeenth waiting call. The line is bounded by the tool uses a session
+ * remembers ({@link MAX_TRACKED_TOOL_USES}).
+ */
 const MAX_PENDING_APPROVALS = 4;
 const MAX_PRE_TOOL_GRANTS = 16;
 /**
@@ -1203,6 +1210,12 @@ interface SessionState {
   >;
   readonly pendingQuestions: Map<string, ClaudePendingQuestionState>;
   readonly preToolRequests: Map<string, ClaudePreToolGrant>;
+  /**
+   * Calls waiting for a free approval, question, or grant slot. Each is woken
+   * whenever a slot frees and checks again; every waiter is an admitted tool
+   * use, so the list is bounded by {@link MAX_TRACKED_TOOL_USES}.
+   */
+  readonly authorityWaiters: Array<() => void>;
   readonly approvalReuse: Set<string>;
   /** What each approved publish sent, by tool use, until its result arrives. */
   readonly publishedSnapshots: Map<string, ThreadPublishedSnapshot>;
@@ -1559,18 +1572,68 @@ function denyClaudeToolRequest(
   message: string,
 ): ClaudeToolDecision {
   if (state !== undefined) {
-    state.preToolRequests.delete(toolUseId);
+    if (state.preToolRequests.delete(toolUseId)) freeAuthoritySlot(state);
     if (state.observedToolUseIds.has(toolUseId)) state.settledToolUseIds.add(toolUseId);
   }
   return { behavior: "deny", message };
 }
 
+/** Whether a call that waited for a slot may still be put to the person. */
+function gateStillOpen(state: SessionState): boolean {
+  return !(
+    state.terminal ||
+    state.releasing ||
+    state.released ||
+    state.context === undefined ||
+    state.context.terminal
+  );
+}
+
+/** Wakes every call waiting for a slot; each checks again whether one is free. */
+function freeAuthoritySlot(state: SessionState): void {
+  for (const wake of state.authorityWaiters.splice(0)) wake();
+}
+
+/**
+ * Waits until a slot may have freed, the call is cancelled, or `wakeAfterMs`
+ * passes (when a held grant expires and so frees a slot by itself).
+ */
+function waitForAuthoritySlot(
+  state: SessionState,
+  signal: AbortSignal,
+  wakeAfterMs?: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const wake = () => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", wake);
+      const index = state.authorityWaiters.indexOf(wake);
+      if (index >= 0) state.authorityWaiters.splice(index, 1);
+      resolve();
+    };
+    if (signal.aborted) {
+      wake();
+      return;
+    }
+    if (wakeAfterMs !== undefined) timer = setTimeout(wake, Math.max(0, wakeAfterMs));
+    signal.addEventListener("abort", wake, { once: true });
+    state.authorityWaiters.push(wake);
+  });
+}
+
 function expireClaudePreToolGrants(state: SessionState, now: number): void {
+  let freed = false;
   for (const [toolUseId, grant] of state.preToolRequests) {
     if (grant.expiresAt > now) continue;
     state.preToolRequests.delete(toolUseId);
     state.settledToolUseIds.add(toolUseId);
+    freed = true;
   }
+  if (freed) freeAuthoritySlot(state);
 }
 
 /**
@@ -2228,6 +2291,7 @@ function makeConnection(
       state.pendingQuestions.clear();
       state.preToolRequests.clear();
       state.approvalReuse.clear();
+      freeAuthoritySlot(state);
     };
     const release = async (state: SessionState): Promise<void> => {
       if (state.releasePromise !== undefined) {
@@ -2560,6 +2624,7 @@ function makeConnection(
         for (const result of message.results) {
           if (state.preToolRequests.delete(result.toolUseId)) {
             state.settledToolUseIds.add(result.toolUseId);
+            freeAuthoritySlot(state);
           }
         }
       }
@@ -2988,6 +3053,7 @@ function makeConnection(
             return deny("Claude tool request did not pass the Octant authority gate.");
           }
           activeState.preToolRequests.delete(request.toolUseId);
+          freeAuthoritySlot(activeState);
           if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
             const refusal = artifactCallRefusal(request.input);
             if (refusal !== undefined) return deny(refusal);
@@ -3009,12 +3075,13 @@ function makeConnection(
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           }
-          if (request.toolName === "AskUserQuestion" && activeState.pendingQuestions.size > 0) {
-            terminal(activeState, {
-              kind: "failed",
-              failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
-            });
-            return deny("Claude user question state was exhausted.");
+          // One question set is put to the person at a time; another waits
+          // its turn, as a subagent's does while its parent's is open.
+          while (request.toolName === "AskUserQuestion" && activeState.pendingQuestions.size > 0) {
+            await waitForAuthoritySlot(activeState, request.signal);
+            if (request.signal.aborted || !gateStillOpen(activeState)) {
+              return deny("Claude user question was cancelled.");
+            }
           }
           if (request.toolName === "AskUserQuestion" && Object.hasOwn(request.input, "answers")) {
             return deny("Claude user question input was invalid.");
@@ -3036,15 +3103,14 @@ function makeConnection(
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           }
-          if (
+          while (
             request.toolName !== "AskUserQuestion" &&
             activeState.pendingApprovals.size >= MAX_PENDING_APPROVALS
           ) {
-            terminal(activeState, {
-              kind: "failed",
-              failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
-            });
-            return deny("Claude tool authority state was exhausted.");
+            await waitForAuthoritySlot(activeState, request.signal);
+            if (request.signal.aborted || !gateStillOpen(activeState)) {
+              return deny("Claude tool request was cancelled.");
+            }
           }
           const mapped = mapClaudeToolRequest(activeState.context!, request);
           if (mapped.kind === "question") {
@@ -3072,6 +3138,7 @@ function makeConnection(
               cancel: () => {
                 if (activeState.pendingQuestions.get(pending.requestId) === pending) {
                   activeState.pendingQuestions.delete(pending.requestId);
+                  freeAuthoritySlot(activeState);
                 }
                 activeState.settledToolUseIds.add(pending.providerToolUseId);
               },
@@ -3088,6 +3155,7 @@ function makeConnection(
             for (const [requestId, pending] of activeState.pendingApprovals) {
               if (pending.providerToolUseId !== request.toolUseId) continue;
               activeState.pendingApprovals.delete(requestId);
+              freeAuthoritySlot(activeState);
               activeState.settledToolUseIds.add(pending.providerToolUseId);
               pending.decision.resolve({
                 behavior: "deny",
@@ -3100,6 +3168,7 @@ function makeConnection(
           if (activeState.pendingApprovals.has(mapped.request.requestId)) {
             const existing = activeState.pendingApprovals.get(mapped.request.requestId)!;
             activeState.pendingApprovals.delete(mapped.request.requestId);
+            freeAuthoritySlot(activeState);
             existing.decision.resolve({
               behavior: "deny",
               message: "Claude approval correlation was duplicated.",
@@ -3130,6 +3199,7 @@ function makeConnection(
             cancel: () => {
               if (activeState.pendingApprovals.get(pending.requestId) === pending) {
                 activeState.pendingApprovals.delete(pending.requestId);
+                freeAuthoritySlot(activeState);
               }
               activeState.settledToolUseIds.add(pending.providerToolUseId);
             },
@@ -3277,16 +3347,25 @@ function makeConnection(
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           };
-          const askThroughGrant = (outsideProject = false): ClaudePreToolDecision => {
-            if (
+          const askThroughGrant = async (outsideProject = false): Promise<ClaudePreToolDecision> => {
+            // Past the grant cap a call waits for a slot: a grant frees when
+            // its call reaches `canUseTool`, its result arrives, or it expires.
+            while (
               !activeState.preToolRequests.has(request.toolUseId) &&
               activeState.preToolRequests.size >= MAX_PRE_TOOL_GRANTS
             ) {
-              terminal(activeState, {
-                kind: "failed",
-                failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
-              });
-              return deny("Claude tool authority state was exhausted.");
+              const oldest = Math.min(
+                ...[...activeState.preToolRequests.values()].map((grant) => grant.expiresAt),
+              );
+              await waitForAuthoritySlot(
+                activeState,
+                request.signal,
+                oldest - factories.authorityNow(),
+              );
+              if (request.signal.aborted || !gateStillOpen(activeState)) {
+                return deny("Claude tool request was cancelled.");
+              }
+              expireClaudePreToolGrants(activeState, factories.authorityNow());
             }
             activeState.preToolRequests.set(request.toolUseId, {
               workingDirectory: request.projectRoot,
@@ -3302,7 +3381,7 @@ function makeConnection(
           };
           // A publish asks under every posture below Full access, which asks
           // nobody; the path checks above still refuse a file outside the Project.
-          const decide = (): ClaudePreToolDecision =>
+          const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> =>
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
@@ -3537,6 +3616,7 @@ function makeConnection(
           pendingAppTools: new Map(),
           pendingQuestions: new Map(),
           preToolRequests: new Map(),
+          authorityWaiters: [],
           approvalReuse: new Set(),
           publishedSnapshots: new Map(),
           worktrees: new Set(),
@@ -4077,6 +4157,7 @@ function makeConnection(
           }
           return Effect.sync(() => {
             state.pendingApprovals.delete(answer.requestId);
+            freeAuthoritySlot(state);
             state.settledToolUseIds.add(pending.providerToolUseId);
             if (answer.approved) {
               let persistence: PermissionPersistence = "project-default";
@@ -4142,6 +4223,7 @@ function makeConnection(
             pending.received.set(index, normalizedAnswer);
             if (pending.received.size < pending.events.length) return;
             state.pendingQuestions.delete(pending.requestId);
+            freeAuthoritySlot(state);
             state.settledToolUseIds.add(pending.providerToolUseId);
             const answers = Object.fromEntries(
               pending.providerPrompts.map((prompt, position) => [

@@ -1650,7 +1650,7 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("terminal-fails once when unmatched pre-tool grants exhaust their hard cap", async () => {
+  it("queues calls past the grant and approval caps so twenty waiting calls and five parallel approvals all complete", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -1666,51 +1666,62 @@ describe("Claude execution policy", () => {
         }),
       ),
     );
-    await Promise.resolve();
-    const edit = (name: string) => ({
-      file_path: `${projectRoot}/${name}.txt`,
-      old_string: "before",
-      new_string: "after",
-    });
-    for (let index = 0; index < 16; index += 1) {
-      await expect(
-        open.preToolUse({
-          sessionId: "sdk-session-1",
-          projectRoot,
-          toolName: "Edit",
-          input: edit(String(index)),
-          toolUseId: `missing-${index}`,
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    const command = (index: number) => ({ command: `bun run job-${index}` });
+    // Twenty parallel subagent calls reach the hook before any reaches the
+    // permission callback; the four past the grant cap wait in line.
+    const hooks = Array.from({ length: 20 }, (_, index) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input: command(index),
+        toolUseId: `parallel-${index}`,
+        signal,
+      }),
+    );
+    const decisions: Promise<unknown>[] = [];
+    for (let index = 0; index < 20; index += 1) {
+      await expect(hooks[index]).resolves.toEqual({ behavior: "own-rules" });
+      // Each call then reaches `canUseTool`, freeing its grant; past four
+      // pending approvals the rest wait in line rather than ending the turn.
+      decisions.push(
+        open.canUseTool({
+          toolName: "Bash",
+          input: command(index),
+          toolUseId: `parallel-${index}`,
           signal,
         }),
-      ).resolves.toEqual({ behavior: "own-rules" });
+      );
     }
-    await expect(
-      open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot,
-        toolName: "Edit",
-        input: edit("overflow"),
-        toolUseId: "missing-overflow",
-        signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
-
-    await vi.waitFor(() => expect(observed.some((event) => event.kind === "failed")).toBe(true));
-    await vi.waitFor(() => expect(f.queries[0]?.close).toHaveBeenCalledOnce());
-    await expect(
-      open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot,
-        toolName: "Edit",
-        input: edit("late"),
-        toolUseId: "late-after-overflow",
-        signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
+    const approvalRequests = () =>
+      observed.filter(
+        (event): event is Extract<ProviderRuntimeEvent, { kind: "approval-request" }> =>
+          event.kind === "approval-request",
+      );
+    let answered = 0;
+    while (answered < 20) {
+      await vi.waitFor(() => expect(approvalRequests().length).toBeGreaterThan(answered));
+      // Never more than four approvals are put to the person at once.
+      expect(approvalRequests().length - answered).toBeLessThanOrEqual(4);
+      const next = approvalRequests()[answered]!;
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: next.requestId,
+          approved: true,
+        }),
+      );
+      answered += 1;
+    }
+    for (const decision of decisions) {
+      await expect(decision).resolves.toEqual({ behavior: "allow" });
+    }
+    expect(observed.some((event) => event.kind === "failed")).toBe(false);
     await acquired.close();
     await Effect.runPromise(Fiber.join(subscriber));
-    expect(observed.filter((event) => event.kind === "failed")).toHaveLength(1);
-    expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
   });
 
   it("completes a turn that makes far more than 64 tool calls", async () => {
@@ -1925,7 +1936,7 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("terminal-fails and settles every callback when pending approvals exceed their cap", async () => {
+  it("holds a fifth approval in line and settles every waiting call when the session ends", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -1976,11 +1987,12 @@ describe("Claude execution policy", () => {
       new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 0)),
     ]);
 
-    expect(immediate).toMatchObject({ behavior: "deny" });
-    await expect(Promise.all(pending)).resolves.toEqual(
-      Array.from({ length: 4 }, () => expect.objectContaining({ behavior: "deny" })),
+    expect(immediate).toBe("pending");
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
+    await acquired.close();
+    await expect(Promise.all([...pending, overflow])).resolves.toEqual(
+      Array.from({ length: 5 }, () => expect.objectContaining({ behavior: "deny" })),
     );
-    await vi.waitFor(() => expect(f.queries[0]?.close).toHaveBeenCalledOnce());
     const late = await Effect.runPromise(
       Effect.exit(
         acquired.connection.answerApproval({
@@ -1991,7 +2003,6 @@ describe("Claude execution policy", () => {
       ),
     );
     expect(String(late)).toContain("protocol");
-    await acquired.close();
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
   });
 
@@ -3090,7 +3101,7 @@ describe("Claude execution policy", () => {
     },
   );
 
-  it("terminal-fails and settles the active question when a second becomes pending", async () => {
+  it("holds a second question until the first is settled and settles both when the session ends", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -3125,21 +3136,22 @@ describe("Claude execution policy", () => {
       toolUseId: "question-cap-2",
       signal,
     });
-    await expect(
-      open.canUseTool({
-        toolName: "AskUserQuestion",
-        input: secondInput,
-        toolUseId: "question-cap-2",
-        signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
-    const firstOutcome = await Promise.race([
-      first,
+    const second = open.canUseTool({
+      toolName: "AskUserQuestion",
+      input: secondInput,
+      toolUseId: "question-cap-2",
+      signal,
+    });
+    const secondOutcome = await Promise.race([
+      second,
       new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 0)),
     ]);
 
-    expect(firstOutcome).toMatchObject({ behavior: "deny" });
-    await vi.waitFor(() => expect(f.queries[0]?.close).toHaveBeenCalledOnce());
+    expect(secondOutcome).toBe("pending");
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
+    await acquired.close();
+    await expect(first).resolves.toMatchObject({ behavior: "deny" });
+    await expect(second).resolves.toMatchObject({ behavior: "deny" });
     const late = await Effect.runPromise(
       Effect.exit(
         acquired.connection.answerUserInput({
@@ -3150,7 +3162,6 @@ describe("Claude execution policy", () => {
       ),
     );
     expect(String(late)).toContain("protocol");
-    await acquired.close();
   });
 
   it("keeps user questions interactive in Full access without creating an approval", async () => {

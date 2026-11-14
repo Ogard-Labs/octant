@@ -731,10 +731,17 @@ refuse every hook whose working directory was not the Project root, so one
 
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
-grant are never forgotten, and the caps on pending approvals (4) and
-pre-tool grants (16) stay. A repeat of a forgotten id passes the whole gate
-again. Rationale: the earlier caps of 64 calls a turn and 256 a session
-failed long turns that Claude Code runs to the end in its own app.
+grant are never forgotten. At most four approvals are put to the person at
+once, one question set at a time, and sixteen pre-tool grants are held; a
+call past any of these waits in line for a free slot instead of failing the
+turn (maintainer decision, 2026-11-14), and a call still waiting when the
+session ends is refused with the rest. A grant frees when its call reaches
+`canUseTool`, its result arrives, or it expires. The line is bounded by the
+256 remembered ids. A repeat of a forgotten id passes the whole gate again.
+Rationale: the earlier caps of 64 calls a turn and 256 a session failed long
+turns that Claude Code runs to the end in its own app, and failing at the
+fifth approval or the seventeenth waiting call let parallel subagents end a
+turn.
 
 #### Image input
 
