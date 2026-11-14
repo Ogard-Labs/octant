@@ -123,7 +123,7 @@ suggestions are one compact row of label-only chips directly under the composer
 they fill in, above the cards (under the cards they were a screen away from
 the box they act on), and
 Work's Write, Learn, Plan, and Explore starters use the same chip (`StartSuggestionChip`:
-a borderless 28px pill with 12px text, a resting ink fill of 4% and a deeper
+a borderless 28px chip with 12px text, a resting ink fill of 4% and a deeper
 one, 8%, on hover and keyboard focus); the prompt rides as the
 chip's tooltip and description and fills the composer when chosen, nothing more.
 
@@ -515,8 +515,9 @@ With a Project chosen the question names it, "What should we work on in
 {Project}?", on one line: a long name truncates with an ellipsis and the full
 name is its title, and choosing another Project changes the words in place
 without moving anything below.
-One quiet line under it, at the detail step in muted ink, says
-"Pick a project, or just start typing". The start screen names no time of day
+On Code and Work one quiet line under it, at the detail step in muted ink,
+says "Pick a project, or just start typing"; Chat's start screen is the
+heading alone, and its composer's placeholder carries the sentence. The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
 sidebar. Once a Code start screen has a Project chosen, its quick tools are
 the Project's own Terminal and Browser (a server Project's Terminal only) as plain rows in the right dock's body,

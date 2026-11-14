@@ -163,7 +163,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     <section aria-label="Chat welcome" className="draft-thread chat-welcome">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading />
+          <WelcomeHeading hint={false} />
         </div>
         <div className="composer-stack">
           <ThreadComposer
@@ -264,7 +264,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                   atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder={presentation.composerPlaceholder}
+                placeholder="Ask anything, or pick a Project to begin…"
                 ref={textareaRef}
                 rows={3}
                 value={prompt}

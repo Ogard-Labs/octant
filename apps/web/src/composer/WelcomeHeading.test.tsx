@@ -18,6 +18,12 @@ describe("WelcomeHeading", () => {
     expect(screen.queryByText(/Pick a Project/)).toBeNull();
   });
 
+  it("leaves the line under the question out when the composer says it", () => {
+    render(<WelcomeHeading hint={false} />);
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+    expect(screen.queryByText(/just start typing/i)).toBeNull();
+  });
+
   it("asks the general question when no Project is chosen", () => {
     render(<WelcomeHeading projectName="   " />);
     expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();

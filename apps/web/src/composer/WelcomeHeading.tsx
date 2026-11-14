@@ -35,6 +35,8 @@ function OctantMark() {
  */
 export function WelcomeHeading(props: {
   readonly projectChosen?: boolean;
+  /** False leaves the quiet line out; Chat says it in the composer's placeholder. */
+  readonly hint?: boolean;
   /** The chosen Project's display name; the question then names it. */
   readonly projectName?: string;
 }) {
@@ -61,11 +63,13 @@ export function WelcomeHeading(props: {
       )}
       {/* With a Project already chosen, asking for one reads as if the choice
           did not take. */}
-      <p className="oct-row-detail welcome__status">
-        {props.projectChosen === true
-          ? "Just start typing"
-          : "Pick a Project, or just start typing"}
-      </p>
+      {props.hint === false ? null : (
+        <p className="oct-row-detail welcome__status">
+          {props.projectChosen === true
+            ? "Just start typing"
+            : "Pick a Project, or just start typing"}
+        </p>
+      )}
     </Fragment>
   );
 }
