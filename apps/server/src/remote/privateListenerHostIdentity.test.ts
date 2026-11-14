@@ -12,6 +12,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import {
   existingPrivateListenerSigning,
+  privateListenerHostId,
   resolvePrivateListenerHostIdentity,
 } from "./privateListenerHostIdentity";
 
@@ -36,6 +37,18 @@ function makeDirectory(): string {
 }
 
 describe("private listener host identity", () => {
+  it("gives the id alone without making key material, and the listener later uses that same id", () => {
+    const directory = makeDirectory();
+    const connection = freshConnection(directory);
+
+    const hostId = privateListenerHostId({ connection, dataDirectory: directory });
+    expect(existsSync(join(directory, "remote", "private-listener-host-key.pem"))).toBe(false);
+    expect(privateListenerHostId({ connection, dataDirectory: directory })).toBe(hostId);
+    expect(
+      resolvePrivateListenerHostIdentity({ connection, dataDirectory: directory }).hostId,
+    ).toBe(hostId);
+  });
+
   it("provisions a stable host id, display name, and signing port with owner-only key material", () => {
     const directory = makeDirectory();
     const connection = freshConnection(directory);

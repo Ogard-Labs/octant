@@ -162,6 +162,7 @@ export type ShellActions = {
   /** Puts the active pane back on its mode's start screen. */
   readonly openHome: () => void;
   readonly openInbox: () => void;
+  readonly openTodos: () => void;
   readonly openLinearIssues: () => void;
   readonly openLinkInApp: (
     request: Parameters<NonNullable<WorkspaceViewProps["onOpenLink"]>>[0],
@@ -285,6 +286,7 @@ export type ShellActions = {
   readonly setGithubIssuesOpen: Dispatch<SetStateAction<boolean>>;
   readonly setImageLibraryOpen: Dispatch<SetStateAction<boolean>>;
   readonly setInboxOpen: Dispatch<SetStateAction<boolean>>;
+  readonly setTodosOpen: Dispatch<SetStateAction<boolean>>;
   readonly setLinearIssuesOpen: Dispatch<SetStateAction<boolean>>;
   readonly setPendingDraftBranch: Dispatch<SetStateAction<string | undefined>>;
   readonly setPendingDraftPrompt: Dispatch<SetStateAction<string | undefined>>;

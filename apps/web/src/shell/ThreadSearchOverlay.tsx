@@ -38,10 +38,7 @@ export interface ThreadSearchOverlayProps {
    * printed as an empty Archived group.
    */
   readonly archivedListing?: ThreadSearchListingStatus;
-  /**
-   * Chat message-body hits from the host transcript-search route. Work and Code
-   * leave this empty in the first slice.
-   */
+  /** The current mode's message-body hits from the host transcript-search route. */
   readonly contentHits?: ReadonlyArray<ThreadSearchContentHit>;
   readonly contentListing?: ThreadSearchListingStatus;
   readonly contentTruncated?: boolean;
@@ -87,8 +84,8 @@ function optionId(index: number): string {
  * One current-mode thread Search overlay.
  *
  * Title matches use only the threads the host already listed for this window.
- * In Chat, contentHits from the host transcript-search route add snippet rows
- * that deep-link to a turn. Project, `Recents`, and `Unfiled` are printed as
+ * In every mode, contentHits from the host transcript-search route add snippet
+ * rows that name the turn holding the match. Project, `Recents`, and `Unfiled` are printed as
  * folder words on a row, never as filters.
  */
 export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {

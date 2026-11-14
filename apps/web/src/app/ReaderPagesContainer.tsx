@@ -18,6 +18,7 @@ import { ProjectsDirectory } from "../projects/ProjectsDirectory";
 import type { useProjectController } from "../projects/useProjectController";
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { ReviewActionOutcome, ReviewPageProps } from "../review/ReviewPage";
+import type { TodosPageProps } from "../todos/TodosView";
 import type { buildReviewEntries, ReviewEntry } from "../review/reviewModel";
 import type { createReviewSource } from "../review/reviewSource";
 import type { ArchivedThreadEntry } from "../shell/ArchiveView";
@@ -116,6 +117,8 @@ export interface ReaderPagesContainerProps {
   readonly imageProfiles: WorkspaceRailLayersProps["imageProfiles"];
   readonly inboxAttentionItems: ReturnType<typeof buildInboxAttentionItems>;
   readonly inboxOpen: boolean;
+  /** Present while the To-dos page is open. */
+  readonly todosPage?: TodosPageProps;
   readonly isNarrow: boolean;
   readonly linearClient: WorkspaceRailLayersProps["linearClient"];
   readonly linearIssuesOpen: boolean;
@@ -183,6 +186,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     imageProfiles,
     inboxAttentionItems,
     inboxOpen,
+    todosPage,
     isNarrow,
     linearClient,
     linearIssuesOpen,
@@ -420,6 +424,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
         onDismissRailPlaceholder={() => actions.setRailPlaceholder(undefined)}
         inboxOpen={inboxOpen}
+        {...(todosPage === undefined ? {} : { todosPage })}
         {...(reviewPageProps === undefined ? {} : { reviewPage: reviewPageProps })}
         onCloseInbox={() => actions.setInboxOpen(false)}
         inboxAttentionItems={inboxAttentionItems}

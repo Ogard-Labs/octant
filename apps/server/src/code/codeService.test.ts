@@ -1,4 +1,5 @@
-import { decodeProjectWorkingFolderId } from "@octant/contracts";
+import { decodeCodeOperationId, decodeProjectWorkingFolderId } from "@octant/contracts";
+import type { CodeTranscriptSearchRows } from "../persistence/codeTranscriptSearchProjection";
 import {
   decodeCodeRelativePath,
   decodeAgentProfile,
@@ -604,6 +605,55 @@ describe("CodeService reads", () => {
 
     expect(navigation.threads.map((entry) => entry.id)).toEqual([thread().id]);
     expect(JSON.stringify(navigation)).not.toContain("turnStartedAt");
+  });
+
+  it("searches message text only in threads the window may browse and lists a waiting thread as live", async () => {
+    const waiting = thread({ lifecycle: "waiting" });
+    const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({ threads: [waiting, hidden] });
+    fixture.access.canBrowseProject.mockImplementation((projectId) => projectId === ids.project);
+    const operationId = decodeCodeOperationId("00000000-0000-4000-8000-000000009001");
+    const searchCodeTranscript = vi.fn(
+      (_query: string, visible: ReadonlySet<string>): CodeTranscriptSearchRows => ({
+        // A match the projection should never have returned still stays out.
+        matches: [waiting.id, hidden.id].map((threadId) => ({
+          threadId,
+          operationId,
+          snippet: "fix the parser",
+          matchRanges: [{ start: 8, end: 14 }],
+        })),
+        truncated: visible.size > 1,
+      }),
+    );
+    Object.assign(fixture.persistence, { searchCodeTranscript });
+
+    const result = await fixture.service.searchTranscript(ids.window, " parser ");
+
+    expect(searchCodeTranscript).toHaveBeenCalledWith("parser", new Set([String(waiting.id)]));
+    expect(result).toEqual({
+      query: "parser",
+      truncated: false,
+      hits: [
+        {
+          threadId: waiting.id,
+          operationId,
+          title: waiting.title,
+          lifecycle: "active",
+          projectId: ids.project,
+          snippet: "fix the parser",
+          matchRanges: [{ start: 8, end: 14 }],
+        },
+      ],
+    });
+    await expect(fixture.service.searchTranscript(ids.window, "x".repeat(201))).rejects.toThrow(
+      "Code transcript search query is too long.",
+    );
+  });
+
+  it("answers Code message search as unavailable where the host keeps no search projection", async () => {
+    await expect(
+      serviceFixture().service.searchTranscript(ids.window, "parser"),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
   });
 
   it("re-observes a shared existing checkout only once during restart bootstrap", async () => {

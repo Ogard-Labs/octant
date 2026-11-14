@@ -258,13 +258,13 @@ describe("sidebar destination preference helpers", () => {
   it("swaps a destination with its neighbour and stores only the arrangement that differs", () => {
     const moved = moveSidebarDestination(untouched, "inbox", "down");
     expect(moved.order[0]).toBe("new-thread");
-    expect(moved.order.slice(1, 3)).toEqual(["board", "inbox"]);
+    expect(moved.order.slice(1, 3)).toEqual(["todos", "inbox"]);
     const restored = moveSidebarDestination(moved, "inbox", "up");
     expect(
       sidebarDestinationOrder(restored)
         .map((destination) => destination.id)
         .slice(0, 3),
-    ).toEqual(["new-thread", "inbox", "board"]);
+    ).toEqual(["new-thread", "inbox", "todos"]);
     // Back at the untouched shell, nothing deviates from canonical order.
     expect(restored.order).toEqual([]);
   });

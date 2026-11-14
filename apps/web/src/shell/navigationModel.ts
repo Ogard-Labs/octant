@@ -28,6 +28,7 @@ export type SidebarNavigationDescriptorId =
   | "image-library"
   | "plugins"
   | "inbox"
+  | "todos"
   | "thread-board"
   | "pull-requests"
   | "github-issues"
@@ -56,6 +57,8 @@ export interface SidebarNavigationInput {
    * still needs the user who is working in another.
    */
   readonly inbox: NavigationAvailability;
+  /** The person's own to-do list, read from this host; every mode shows it. Absent is unavailable. */
+  readonly todos?: NavigationAvailability;
   readonly projects: NavigationAvailability;
   readonly threadBoard: NavigationAvailability;
   readonly pullRequests: NavigationAvailability;
@@ -324,6 +327,7 @@ const descriptors = {
   "new-work-thread": { id: "new-work-thread", label: "New task" },
   "new-code-thread": { id: "new-code-thread", label: "New task" },
   inbox: { id: "inbox", label: "Inbox" },
+  todos: { id: "todos", label: "To-dos" },
   automations: { id: "automations", label: "Automations" },
   agents: { id: "agents", label: "Agents" },
   "artifact-library": { id: "artifact-library", label: "Artifacts" },
@@ -344,12 +348,14 @@ export function buildSidebarNavigation(
       return [
         ...(input.createThread === "available" ? [descriptors["new-chat"]] : []),
         ...(input.inbox === "available" ? [descriptors.inbox] : []),
+        ...(input.todos === "available" ? [descriptors.todos] : []),
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
     case "work":
       return [
         ...(input.createThread === "available" ? [descriptors["new-work-thread"]] : []),
         ...(input.inbox === "available" ? [descriptors.inbox] : []),
+        ...(input.todos === "available" ? [descriptors.todos] : []),
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
@@ -357,6 +363,7 @@ export function buildSidebarNavigation(
       return [
         ...(input.createThread === "available" ? [descriptors["new-code-thread"]] : []),
         ...(input.inbox === "available" ? [descriptors.inbox] : []),
+        ...(input.todos === "available" ? [descriptors.todos] : []),
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
         ...(input.githubIssues === "available" ? [descriptors["github-issues"]] : []),
         ...(input.pullRequests === "available" ? [descriptors["pull-requests"]] : []),
@@ -410,6 +417,7 @@ export interface SidebarDestination {
 export const SIDEBAR_DESTINATIONS: ReadonlyArray<SidebarDestination> = [
   { id: "new-thread", label: "New thread", placement: "primary" },
   { id: "inbox", label: "Inbox", placement: "primary" },
+  { id: "todos", label: "To-dos", placement: "primary" },
   { id: "board", label: "Board", placement: "primary" },
   { id: "github-issues", label: "Issues", placement: "primary" },
   { id: "pull-requests", label: "Pull requests", placement: "primary" },
@@ -544,6 +552,8 @@ function destinationRowId(
           : "new-code-thread";
     case "inbox":
       return "inbox";
+    case "todos":
+      return "todos";
     case "board":
       return "thread-board";
     case "pull-requests":

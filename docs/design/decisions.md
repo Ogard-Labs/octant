@@ -54,7 +54,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 17        | 12      | 5            | 0                   |
+| [Workspace](#workspace)                                                               | 18        | 13      | 5            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **257**   | **154** | **100**      | **3**               |
+| **All areas**                                                                         | **258**   | **155** | **99**       | **4**               |
 
 ## Principles and hard lines
 
@@ -2469,6 +2469,16 @@ batches without starving later rows during streaming.
 
 Status: Built. Since: 2026-11-10. Detail: [Find in a thread](workspace.md#find-in-a-thread-and-a-new-thread-from-a-selection).
 
+### Message search in every mode
+
+Thread Search matches message text in Chat, Work, and Code, on the desktop and the phone, through one host read per mode (maintainer request, 2026-11-14).
+
+- Each mode's read lists exactly the threads its sidebar and Archived group list, applies that listing authority on the host before the hit cap, and never searches a deleted thread or a turn a rewind removed.
+- A hit names the turn that holds the match: the Chat or Work turn, or the operation of a Code provider turn. Queries, hit counts, and snippets share one set of bounds, and a query's LIKE wildcards are text.
+- The reads are GETs a paired device reaches under the overview read grant. Code text is searched through a rebuildable projection of the operation journal that joins a reply's streamed parts; Work text is searched in the rebuildable turn projection.
+
+Status: Built. Since: 2026-11-14. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects) and [Host reads and commands](host-reads-and-commands.md).
+
 ### Mode-first navigation and Projects
 
 The window is mode-first: a persistent sidebar, a central workspace and an optional right dock. Mode changes alter content, authority and density, never the navigation grammar.
@@ -3463,6 +3473,6 @@ A person keeps their own to-dos in one list that every device and computer they 
 - Edits to the title or notes are version-checked and refused as changed elsewhere when stale; there is no merge. An unreachable list host shows a stale, read-only list, and quick add keeps an unsent draft the person sends; nothing is queued as offline work.
 - A to-do's Project and thread links carry no authority. Starting opens that Project's ordinary new-thread draft on its own host, whose checks decide; the mode follows the Project; nothing starts until the person sends (not built yet).
 - Only the person ticks a to-do off; an agent never changes a to-do.
-- The destination and every name in code and copy are To-dos, never Tasks. The destination is not built yet.
+- The destination and every name in code and copy are To-dos, never Tasks. Built: the To-dos page on one host, with quick add, filters, editing in place, reordering, the sidebar row and its badge, and New to-do in the command palette and on a shortcut. Not built yet: Start and the thread state on a row, and live updates from other devices.
 
 Status: Partly built. Since: 2026-11-14. Detail: [To-dos](todos.md).

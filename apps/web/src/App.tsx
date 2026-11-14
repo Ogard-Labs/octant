@@ -365,6 +365,10 @@ import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
+import { countTodos } from "./todos/todoListModel";
+import type { TodosPageProps } from "./todos/TodosView";
+import { useTodoList } from "./todos/useTodoList";
+import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
 import {
@@ -387,7 +391,12 @@ import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
-import { useChatTranscriptSearch } from "./chat/useChatTranscriptSearch";
+import {
+  chatTranscriptAnswer,
+  codeTranscriptAnswer,
+  useTranscriptSearch,
+  workTranscriptAnswer,
+} from "./shell/useTranscriptSearch";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
@@ -1076,6 +1085,8 @@ function LaunchedShell(
   // Deliberately not cleared on mode switch: what waits on the user spans
   // every mode, so the Inbox survives moving between them.
   const [inboxOpen, setInboxOpen] = useState(false);
+  // The person's to-do list spans every mode, as the Inbox does.
+  const [todosOpen, setTodosOpen] = useState(false);
   // Like the Inbox, what finished and waits for a look spans the window, so
   // moving between modes keeps the page; its list follows the active mode's
   // To review count.
@@ -1798,10 +1809,21 @@ function LaunchedShell(
     query: searchQuery,
     enabled: searchOpen && activeMode === "chat",
   });
-  const transcriptChatSearch = useChatTranscriptSearch({
-    client: chatClient,
+  // Message text is searched in the mode the overlay searches, on that mode's
+  // host route, which applies the same listing authority as its sidebar.
+  const searchActiveModeTranscript = useCallback(
+    async (query: string) =>
+      activeMode === "chat"
+        ? chatTranscriptAnswer(await chatClient.searchTranscript(query))
+        : activeMode === "work"
+          ? workTranscriptAnswer(await workThreadClient.searchTranscript(query))
+          : codeTranscriptAnswer(await codeClient.searchTranscript(query)),
+    [activeMode, chatClient, codeClient, workThreadClient],
+  );
+  const transcriptSearch = useTranscriptSearch({
+    search: searchActiveModeTranscript,
     query: searchQuery,
-    enabled: searchOpen && activeMode === "chat",
+    enabled: searchOpen,
   });
   const workSettings = useWorkSettings(workThreadClient, machineChanges.workNavigation);
   const chatController = useChatController({
@@ -2478,6 +2500,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     inboxOpen ||
+    todosOpen ||
     reviewOpen ||
     githubIssuesOpen ||
     linearIssuesOpen ||
@@ -2672,6 +2695,26 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  const todoList = useTodoList(launchedClients.todoClient);
+  const todosCount =
+    todoList.read.status === "loading" || todoList.read.view === undefined
+      ? 0
+      : countTodos(todoList.read.view.todos).waiting;
+  const todoProjects = useMemo(
+    () =>
+      projectController.allProjects
+        .filter((project) => project.lifecycle === "active")
+        .map((project) => ({ id: project.id, name: project.name })),
+    [projectController.allProjects],
+  );
+  const [todoQuickAddOpen, setTodoQuickAddOpen] = useState(false);
+  const openTodoQuickAdd = () => setTodoQuickAddOpen(true);
+  useNewTodoShortcut(openTodoQuickAdd);
+  const todosPage: TodosPageProps = {
+    list: todoList,
+    projects: todoProjects,
+    onClose: () => setTodosOpen(false),
+  };
   const inboxAttentionItems = useMemo(
     () =>
       buildInboxAttentionItems(
@@ -5191,6 +5234,7 @@ function LaunchedShell(
     projectsListOpen,
     selectedProjectTabId ?? "",
     inboxOpen,
+    todosOpen,
     reviewOpen,
     workBoardOpen,
     codeBoardOpen,
@@ -5358,6 +5402,7 @@ function LaunchedShell(
       openImageLibrary,
       openHome,
       openInbox,
+      openTodos,
       openLinearIssues,
       openLinkInApp,
       openLinkedProjectPullRequestThread,
@@ -5453,6 +5498,7 @@ function LaunchedShell(
       setGithubIssuesOpen,
       setImageLibraryOpen,
       setInboxOpen,
+      setTodosOpen,
       setLinearIssuesOpen,
       setPendingDraftBranch,
       setPendingDraftPrompt,
@@ -5599,6 +5645,7 @@ function LaunchedShell(
     projectsListOpen ||
     railPlaceholder !== undefined ||
     inboxOpen ||
+    todosOpen ||
     reviewOpen ||
     codeBoardOpen ||
     workBoardOpen ||
@@ -5675,23 +5722,25 @@ function LaunchedShell(
       ? "projects"
       : inboxOpen
         ? "inbox"
-        : workBoardOpen || codeBoardOpen
-          ? "thread-board"
-          : codePullRequestsOpen
-            ? "pull-requests"
-            : githubIssuesOpen
-              ? "github-issues"
-              : linearIssuesOpen
-                ? "linear-issues"
-                : automationCenterOpen
-                  ? "automations"
-                  : agentsCenterOpen
-                    ? "agents"
-                    : artifactLibraryOpen
-                      ? "artifact-library"
-                      : imageLibraryOpen
-                        ? "image-library"
-                        : undefined;
+        : todosOpen
+          ? "todos"
+          : workBoardOpen || codeBoardOpen
+            ? "thread-board"
+            : codePullRequestsOpen
+              ? "pull-requests"
+              : githubIssuesOpen
+                ? "github-issues"
+                : linearIssuesOpen
+                  ? "linear-issues"
+                  : automationCenterOpen
+                    ? "automations"
+                    : agentsCenterOpen
+                      ? "agents"
+                      : artifactLibraryOpen
+                        ? "artifact-library"
+                        : imageLibraryOpen
+                          ? "image-library"
+                          : undefined;
   // Back and forward step through the pages and tabs this window opened.
   // A window still loading or recovering has no workspace yet, so no place.
   const historyPane =
@@ -5927,9 +5976,7 @@ function LaunchedShell(
   const threadSearchArchivedListing = threadSearchArchivedListingForStatus(
     archivedChatSearch.status,
   );
-  const threadSearchContentListing = threadSearchContentListingForStatus(
-    transcriptChatSearch.status,
-  );
+  const threadSearchContentListing = threadSearchContentListingForStatus(transcriptSearch.status);
   const threadSearchProjects = [
     ...projectController.projects,
     ...projectController.archivedProjects,
@@ -5949,6 +5996,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     inboxOpen ||
+    todosOpen ||
     reviewOpen ||
     githubIssuesOpen ||
     linearIssuesOpen ||
@@ -6221,6 +6269,7 @@ function LaunchedShell(
       review: openReview,
       archive: openArchive,
       inbox: openInbox,
+      todos: openTodos,
       "thread-board": openThreadBoard,
       "pull-requests": openPullRequests,
       "github-issues": openGithubIssues,
@@ -6251,6 +6300,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setInboxOpen(false);
+    setTodosOpen(false);
     setReviewOpen(false);
     setGithubIssuesOpen(false);
     setLinearIssuesOpen(false);
@@ -6510,6 +6560,11 @@ function LaunchedShell(
   function openInbox() {
     closeWorkspaceReaders();
     setInboxOpen(true);
+  }
+
+  function openTodos() {
+    closeWorkspaceReaders();
+    setTodosOpen(true);
   }
 
   // The To review tile, the start screen's review card, and the palette all
@@ -7642,6 +7697,8 @@ function LaunchedShell(
           },
         }),
     onOpenReview: openReview,
+    onOpenTodos: openTodos,
+    onNewTodo: openTodoQuickAdd,
     ...(nextWaiting === undefined ? {} : { onJumpToNextWaiting: jumpToNextWaiting }),
     ...(zen.enabled
       ? {
@@ -7902,6 +7959,7 @@ function LaunchedShell(
               hosts={hosts}
               imageLibraryAvailable={imageGenerationClient !== undefined}
               inboxCount={inboxCount}
+              todosCount={todosCount}
               linearIssuesRead={linearIssuesRead}
               navigation={navigationModel}
               navigatorAvailable={navigatorAssistant.state.kind === "ready"}
@@ -7986,6 +8044,7 @@ function LaunchedShell(
                       imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
                       inboxAttentionItems={inboxAttentionItems}
                       inboxOpen={inboxOpen}
+                      {...(todosOpen ? { todosPage } : {})}
                       isNarrow={isNarrow}
                       linearClient={linearClient}
                       linearIssuesOpen={linearIssuesOpen}
@@ -8246,9 +8305,9 @@ function LaunchedShell(
           searchProjects={threadSearchProjects}
           searchListing={threadSearchListing}
           searchArchivedListing={threadSearchArchivedListing}
-          searchContentHits={transcriptChatSearch.hits}
+          searchContentHits={transcriptSearch.hits}
           searchContentListing={threadSearchContentListing}
-          searchContentTruncated={transcriptChatSearch.truncated}
+          searchContentTruncated={transcriptSearch.truncated}
           onSearchQueryChange={setSearchQuery}
           onCloseSearch={closeThreadSearch}
           onNewSearchThread={() => {
@@ -8517,6 +8576,14 @@ function LaunchedShell(
                 >
                   <OctantCommandProvider commands={octantCommands}>
                     <OctantDialogPresence>
+                      {todoQuickAddOpen ? (
+                        <TodoQuickAddDialog
+                          list={todoList}
+                          onClose={() => setTodoQuickAddOpen(false)}
+                          open
+                          projects={todoProjects}
+                        />
+                      ) : null}
                       {projectActionRun === undefined ? null : (
                         <ProjectActionRunDialog
                           key={JSON.stringify(projectActionRun.target)}

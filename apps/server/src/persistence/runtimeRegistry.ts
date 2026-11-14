@@ -359,6 +359,7 @@ import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
 import { AgentProfileProjection } from "./agentProfileProjection";
 import { ChatProjection } from "./chatProjection";
 import { CodeProjection } from "./codeProjection";
+import { CodeTranscriptSearchProjection } from "./codeTranscriptSearchProjection";
 import { ContextProjection } from "./contextProjection";
 import { EventRegistry } from "./eventRegistry";
 import { ProjectionRegistry } from "./projection";
@@ -931,6 +932,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ShellProjection())
       .register(new ChatProjection())
       .register(new CodeProjection())
+      .register(new CodeTranscriptSearchProjection())
       .register(agentRunProjection)
       .register(canvasProjection)
       .register(automationProjection)

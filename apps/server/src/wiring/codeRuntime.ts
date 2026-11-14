@@ -172,6 +172,9 @@ export function withCodeOperationRuntime(
     ...(service.searchFiles === undefined
       ? {}
       : { searchFiles: service.searchFiles.bind(service) }),
+    ...(service.searchTranscript === undefined
+      ? {}
+      : { searchTranscript: service.searchTranscript.bind(service) }),
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
@@ -218,6 +221,9 @@ function withCodeBoard(
     ...(service.searchFiles === undefined
       ? {}
       : { searchFiles: service.searchFiles.bind(service) }),
+    ...(service.searchTranscript === undefined
+      ? {}
+      : { searchTranscript: service.searchTranscript.bind(service) }),
     queryBoard,
     ...(service.executeOperation === undefined
       ? {}
