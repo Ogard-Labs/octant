@@ -1090,12 +1090,27 @@ features:
   the person's own configuration would replace; so their home configuration
   and Devin's own subagents stay off, and Kilo's other Project configuration
   stays off because no Kilo release was read for the files it would load.
-  Grok Build's `GROK_SUBAGENTS` and every agent's own subagents stay off: none
-  of these agents names a child session Octant could show as a child run.
   What an agent reads from its own profile folder by itself (Goose's, Gemini
   CLI's, GitHub Copilot's, Cline's, Qwen Code's, GLM Agent's, and Grok
   Build's) loads as before; the switch cannot hold it back, so it is not
   reported as a setup feature.
+
+Each agent's own subagents run in Work and Code outside Plan, at every level
+there, wherever the person's setup carries them (maintainer decision,
+2026-11-14), as Mistral Vibe's do; Plan and Chat run none (`acpSubagentsRun`).
+Octant releases the switch it holds: Grok Build's `GROK_SUBAGENTS` guard, and
+Devin's `subagents_enabled` in its managed configuration; these two report the
+`subagents` feature. The others keep no switch Octant sets, so their own
+subagents run as they always did and are not reported as a setup feature. A
+permission request that names a call Octant never saw is a subagent's: in a
+session whose subagents run it is shown through the ordinary approval path as
+"A <agent> subagent asks to run a tool. <agent> doesn't say which." with Allow
+and Deny under the thread's level, instead of failing the turn; in Plan and
+Chat it still fails the turn. No agent but Mistral Vibe names a child session,
+so their subagents are not shown as child runs and `nativeChildAgents` stays
+unavailable for every ACP agent. Not built yet: a journal record and an
+outside-content mark for a subagent run Octant cannot see; the approval card
+is today the only trace of one.
 
 Kimi Code's own slash commands run in Work and Code outside Plan, as in its
 own app (maintainer decision, 2026-11-14); the probe still pins the reviewed

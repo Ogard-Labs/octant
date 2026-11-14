@@ -95,6 +95,8 @@ export interface AcpProcessProfile {
   readonly managedFiles: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
+    /** The agent's own subagents run in this launch (`acpSubagentsRun`). */
+    readonly ownSubagents?: boolean;
   }) => ReadonlyArray<AcpManagedFile>;
   readonly hostAuthentication?: AcpHostAuthentication;
   /**
@@ -311,6 +313,22 @@ function opencodeConfiguration(executionPolicy: ProviderExecutionPolicy) {
 }
 
 /**
+ * Whether an ACP agent's own subagents run in a launch: wherever the person's
+ * setup carries them, in Work and Code outside Plan, at every level there
+ * (maintainer decision, 2026-11-14). Plan stays read-only and Chat keeps no
+ * folder or shell, so neither runs them.
+ */
+export function acpSubagentsRun(
+  mode: AcpSessionMode | undefined,
+  executionPolicy: ProviderExecutionPolicy,
+  setup: ProviderNativeSetup | undefined,
+): boolean {
+  return (
+    setup?.subagents === true && executionPolicy !== "plan" && (mode === "work" || mode === "code")
+  );
+}
+
+/**
  * The default own setup of an ACP agent: what the launch holds back of a
  * Project, its `forbiddenRootEntries`, becomes readable once the Project is
  * trusted for the agent, which `projectCode` carries only in Work and Code
@@ -325,10 +343,18 @@ function releasesTrustedProject(
     readonly context?: ReadonlyArray<string>;
     readonly guards?: (setup: ProviderNativeSetup) => ReadonlyArray<string>;
     readonly hostEntries?: (setup: ProviderNativeSetup) => ReadonlyArray<string>;
+    /** The guard that keeps the agent's own subagents off. */
+    readonly subagentGuard?: string;
   } = {},
 ): NonNullable<AcpProcessProfile["nativeSetup"]> {
-  return (setup) => ({
-    releasedGuards: options.guards?.(setup) ?? [],
+  return (setup, launch) => ({
+    releasedGuards: [
+      ...(options.guards?.(setup) ?? []),
+      ...(options.subagentGuard !== undefined &&
+      acpSubagentsRun(launch.mode, launch.executionPolicy, setup)
+        ? [options.subagentGuard]
+        : []),
+    ],
     releasedRootEntries: setup.projectCode
       ? rootEntries
       : providerRunsAsItself(setup)
@@ -341,20 +367,20 @@ function releasesTrustedProject(
 /**
  * What an ACP agent reports it loads through its own setup: a trusted
  * Project's code, and whichever features its launch otherwise holds back.
- * The agent's own subagents stay off, since none of these agents names a
- * child session Octant could show as a child run, and the web tools are those
- * it never had switched off. What an agent reads from its own profile folder
+ * `subagents` is reported where Octant holds a switch for them (Grok Build's
+ * guard, Devin's managed configuration); the web tools are those the agent
+ * never had switched off. What an agent reads from its own profile folder
  * by itself (Goose's, Gemini CLI's, GitHub Copilot's, Cline's, Qwen Code's,
  * GLM Agent's and Grok Build's own configuration) is loaded as before and is
  * not counted here, because the switch cannot hold it back.
  */
 function acpOwnSetupSupport(
-  supported: ReadonlyArray<"skills" | "toolServers" | "hooks">,
+  supported: ReadonlyArray<"subagents" | "skills" | "toolServers" | "hooks">,
 ): NonNullable<ProviderCapabilities["nativeSetup"]> {
-  const support = (feature: "skills" | "toolServers" | "hooks") =>
+  const support = (feature: "subagents" | "skills" | "toolServers" | "hooks") =>
     supported.includes(feature) ? ("supported" as const) : ("unsupported" as const);
   return {
-    subagents: "unsupported",
+    subagents: support("subagents"),
     webTools: "unsupported",
     skills: support("skills"),
     toolServers: support("toolServers"),
@@ -534,9 +560,9 @@ const DEVIN_CONFIGURATION = {
     agents_standard: false,
   },
   plugin_dirs: [],
-  // Devin enables native subagents by default. Octant owns delegation and
-  // exposes its own bounded AgentRun surface, so the provider's run_subagent
-  // and read_subagent tools must be absent from every managed session.
+  // Devin enables native subagents by default. A launch without the
+  // person's subagents keeps its run_subagent and read_subagent tools absent;
+  // one with them sets this true (`managedFiles` below).
   subagents_enabled: false,
   auto_update: false,
   notify: "never",
@@ -601,7 +627,7 @@ const devinProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Devin is not authenticated. Run the provider-owned Devin login, then retry.",
-  nativeSetupSupport: acpOwnSetupSupport([]),
+  nativeSetupSupport: acpOwnSetupSupport(["subagents"]),
   process: {
     agentName: "affogato",
     versionPattern: /^devin (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*) \([0-9a-f]+\)\r?\n?$/,
@@ -620,10 +646,17 @@ const devinProfile: AcpProviderProfile = {
       "auto",
       "acp",
     ],
-    managedFiles: ({ managedHome }) => [
+    // Its own subagents follow the person's setup in Work and Code outside
+    // Plan (`acpSubagentsRun`); everywhere else the managed configuration
+    // keeps `subagents_enabled` false.
+    managedFiles: ({ managedHome, ownSubagents }) => [
       {
         path: devinConfigPath(managedHome),
-        content: `${JSON.stringify(DEVIN_CONFIGURATION, null, 2)}\n`,
+        content: `${JSON.stringify(
+          { ...DEVIN_CONFIGURATION, subagents_enabled: ownSubagents === true },
+          null,
+          2,
+        )}\n`,
       },
       {
         // Devin 3000.3 moved MCP configuration out of config.json. Keep the
@@ -936,7 +969,7 @@ const grokProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Grok Build is not authenticated. Run grok login (or grok login --device-auth on a headless host), then retry.",
-  nativeSetupSupport: acpOwnSetupSupport([]),
+  nativeSetupSupport: acpOwnSetupSupport(["subagents"]),
   process: {
     // display-only now; identity is verified via verifyAgentInfo below (real
     // initialize responses have no agentInfo field)
@@ -992,8 +1025,10 @@ const grokProfile: AcpProviderProfile = {
     // In a Project trusted for Grok Build outside Plan, the trust list is
     // readable again, so Grok's own folder trust decides what of the Project
     // loads, as it does on its own.
+    // Its own subagents, in Work and Code outside Plan, unset `GROK_SUBAGENTS`.
     nativeSetup: releasesTrustedProject([], {
       hostEntries: (setup) => (setup.projectCode ? ["trusted_folders.toml"] : []),
+      subagentGuard: "GROK_SUBAGENTS",
     }),
     hostAuthentication: {
       kind: "directory",

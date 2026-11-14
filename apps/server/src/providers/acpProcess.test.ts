@@ -2353,6 +2353,31 @@ describe("ACP agents running as themselves", () => {
     }
   });
 
+  it("starts an agent's own subagents at Guarded in Code and keeps them off in Plan and Chat", () => {
+    const grokGuard = (
+      executionPolicy: "approval-gated" | "plan",
+      mode: "code" | "chat",
+      nativeSetup: ProviderNativeSetup = everything,
+    ) =>
+      sanitizeAcpEnvironment(grok, {}, { managedHome: "/x", executionPolicy, mode, nativeSetup })
+        .GROK_SUBAGENTS;
+    expect(grokGuard("approval-gated", "code")).toBeUndefined();
+    expect(grokGuard("plan", "code", untrusted)).toBe("0");
+    expect(grokGuard("approval-gated", "chat")).toBe("0");
+    expect(grokGuard("approval-gated", "code", { ...everything, subagents: false })).toBe("0");
+
+    const devinConfig = (ownSubagents: boolean) =>
+      JSON.parse(
+        devin.process.managedFiles({
+          managedHome: "/x",
+          executionPolicy: "approval-gated",
+          ownSubagents,
+        })[0]?.content ?? "{}",
+      ) as { readonly subagents_enabled: boolean };
+    expect(devinConfig(true).subagents_enabled).toBe(true);
+    expect(devinConfig(false).subagents_enabled).toBe(false);
+  });
+
   it("keeps Goose's Project plugins and skills unreadable until the Project is trusted", async () => {
     const target = fixture(goose);
     const confinement = makeAcpConfinementLive({

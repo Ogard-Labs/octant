@@ -57,7 +57,7 @@ import type {
   AcpProcessPort,
   AcpSessionMode,
 } from "./acpProcess";
-import type { AcpProviderProfile } from "./acpProfiles";
+import { acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
@@ -272,6 +272,30 @@ function baseCapabilities(
     acpClientCapabilities: "supported",
     nativeSetup: profile.nativeSetupSupport ?? NO_NATIVE_SETUP,
   } as const;
+}
+
+/**
+ * What an approval says when the agent asks about a call Octant never saw.
+ * The agent's own subagents run in Work and Code outside Plan wherever the
+ * person's setup carries them (maintainer decision, 2026-11-14), and a
+ * subagent's request names a call only the child saw, so it is shown plainly
+ * with Allow and Deny under the thread's level instead of failing the turn. A
+ * profile with its own sentence keeps it everywhere; elsewhere, and in Chat
+ * and Plan, such a request still fails the turn.
+ */
+function unnamedPermission(
+  profile: AcpProviderProfile,
+  mode: AcpSessionMode,
+  executionPolicy: ProviderExecutionPolicy,
+  nativeSetup: ProviderNativeSetup | undefined,
+): { readonly unnamedPermissionDescription?: string } {
+  if (profile.unnamedPermissionDescription !== undefined) {
+    return { unnamedPermissionDescription: profile.unnamedPermissionDescription };
+  }
+  if (!acpSubagentsRun(mode, executionPolicy, nativeSetup)) return {};
+  return {
+    unnamedPermissionDescription: `A ${profile.displayName} subagent asks to run a tool. ${profile.displayName} doesn't say which.`,
+  };
 }
 
 /** Every ACP agent but a key provider loads none of its own setup. */
@@ -1222,6 +1246,7 @@ function makeConnection(
         readonly modelId: string;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly tools: ReadonlyArray<ProviderToolDefinition>;
+        readonly nativeSetup?: ProviderNativeSetup;
       },
       source: AcpNewSessionResult,
       scope: Scope.CloseableScope,
@@ -1249,9 +1274,7 @@ function makeConnection(
         ...(profile.childRunMetaKey === undefined
           ? {}
           : { childRunMetaKey: profile.childRunMetaKey }),
-        ...(profile.unnamedPermissionDescription === undefined
-          ? {}
-          : { unnamedPermissionDescription: profile.unnamedPermissionDescription }),
+        ...unnamedPermission(profile, mode, input.executionPolicy, input.nativeSetup),
         ...(profile.unseenChildCalls === undefined
           ? {}
           : { unseenChildCalls: profile.unseenChildCalls }),

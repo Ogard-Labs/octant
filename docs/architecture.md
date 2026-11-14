@@ -6539,8 +6539,10 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   Every other ACP agent is a key provider too (maintainer decision,
   2026-11-14): a Project trusted for it loads the Project entries its launch
   otherwise holds back, Kimi Code reads its home skills, servers, plugins,
-  and hooks with the setup, Kilo its own skills, and Kimi Code's own slash
-  commands run outside Plan; each reports only those features
+  and hooks with the setup, Kilo its own skills, each agent's own subagents
+  run in Work and Code outside Plan with an honest approval card for a
+  request naming no call Octant saw, and Kimi Code's own slash commands run
+  outside Plan; each reports only those features
   ([detail](design/provider-runtimes.md#acp-agents-run-as-themselves)).
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the

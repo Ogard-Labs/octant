@@ -2639,6 +2639,82 @@ describe("ACP provider driver profile quirks", () => {
     );
   });
 
+  it("shows another ACP agent's unattributed subagent request at Guarded with honest text, refuses it on Deny, and fails it in Plan", async () => {
+    const goose = acpProviderProfiles.goose;
+    const ownSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: false,
+    } as const;
+    const run = (executionPolicy: "approval-gated" | "plan") => {
+      const { driver, client } = fixture(goose);
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy,
+              nativeSetup:
+                executionPolicy === "plan"
+                  ? { ...ownSetup, toolServers: false, hooks: false }
+                  : ownSetup,
+            });
+            const events: ProviderRuntimeEvent[] = [];
+            yield* Effect.forkScoped(
+              Stream.runForEach(yield* connection.subscribe, (event) =>
+                Effect.sync(() => {
+                  if (event.kind === "approval-request" || event.kind === "failed") {
+                    events.push(event);
+                  }
+                }),
+              ),
+            );
+            yield* Effect.sleep("1 millis");
+            client.request({
+              kind: "request",
+              id: "subagent-permission",
+              method: "session/request_permission",
+              params: {
+                sessionId: "agent-session-1",
+                toolCall: { toolCallId: "child-call-3" },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "reject", name: "Reject", kind: "reject_once" },
+                ],
+              },
+            });
+            yield* Effect.sleep("5 millis");
+            const card = events[0];
+            if (card?.kind === "approval-request") {
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: card.requestId,
+                approved: false,
+              });
+            }
+            return { events, client };
+          }),
+        ),
+      );
+    };
+
+    const guarded = await run("approval-gated");
+    expect(guarded.events).toHaveLength(1);
+    const card = guarded.events[0];
+    if (card?.kind !== "approval-request") throw new Error("approval missing");
+    expect(card.description).toBe("A Goose subagent asks to run a tool. Goose doesn't say which.");
+    expect(guarded.client.respondPermission).toHaveBeenCalledWith("subagent-permission", "reject");
+
+    // Plan runs no subagents, so such a request still fails the turn.
+    const plan = await run("plan");
+    expect(plan.events.some((event) => event.kind === "approval-request")).toBe(false);
+  });
+
   it("answers a gated session form exactly once and cancels only its pending native callback", async () => {
     const { driver, client } = fixture(
       { ...vibe, elicitationVersions: ["3.0.3"] },

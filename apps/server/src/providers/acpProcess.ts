@@ -20,7 +20,7 @@ import type {
   ProviderNativeSetup,
 } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
-import type { AcpProviderProfile, AcpSessionMode } from "./acpProfiles";
+import { acpSubagentsRun, type AcpProviderProfile, type AcpSessionMode } from "./acpProfiles";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -295,7 +295,11 @@ function canonicalTemporaryDirectory(
 
 function writeManagedFiles(
   profile: AcpProviderProfile,
-  input: { readonly managedHome: string; readonly executionPolicy: ProviderExecutionPolicy },
+  input: {
+    readonly managedHome: string;
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly ownSubagents?: boolean;
+  },
 ): Effect.Effect<void, ProviderFailure> {
   return Effect.try({
     try: () => {
@@ -472,7 +476,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           }).hostEntries,
         );
         const hostReadPaths = yield* canonicalExistingReadPaths(profile);
-        yield* writeManagedFiles(profile, { managedHome, executionPolicy: input.executionPolicy });
+        yield* writeManagedFiles(profile, {
+          managedHome,
+          executionPolicy: input.executionPolicy,
+          ownSubagents: acpSubagentsRun(input.mode, input.executionPolicy, input.nativeSetup),
+        });
         const root =
           input.root === input.managedHome
             ? managedHome
