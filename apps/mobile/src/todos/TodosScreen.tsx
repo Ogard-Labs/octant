@@ -52,7 +52,14 @@ export function TodosScreen(props: TodosScreenProps) {
         ? MOBILE_COPY.todosUnsaved
         : MOBILE_COPY.todosUnreachable;
 
+  // A reconnect to the same computer hands a new transport object; the list,
+  // the draft and its id belong to the computer, so only a new computer resets
+  // them. Requests always go through the newest transport.
+  const transportRef = useRef(transport);
+  transportRef.current = transport;
+
   const load = useCallback(async () => {
+    const transport = transportRef.current;
     if (transport === undefined) return;
     const shownFor = generation.current;
     const ticket = ++reads.current;
@@ -66,7 +73,7 @@ export function TodosScreen(props: TodosScreenProps) {
         result.status === "refused" ? result.refusal.message : failureText(result.reason, false),
       );
     }
-  }, [transport]);
+  }, []);
 
   useEffect(() => {
     // Another computer is another list: nothing of the last one carries over.
@@ -88,7 +95,7 @@ export function TodosScreen(props: TodosScreenProps) {
       clearInterval(timer);
       subscription.remove();
     };
-  }, [load]);
+  }, [load, transportId]);
 
   const send = async (command: TodoCommand): Promise<boolean> => {
     // A ref, not the busy state: two taps in one tick both saw busy as false.
@@ -99,6 +106,9 @@ export function TodosScreen(props: TodosScreenProps) {
     // A read already in flight began before this change; its answer is older.
     reads.current += 1;
     const result = await changeMobileTodos(transport, command);
+    // A read that started while this change was in flight may have seen the
+    // list before it; its answer is older than this one.
+    reads.current += 1;
     // The computer changed meanwhile, and its reset already cleared the send.
     if (shownFor !== generation.current) return false;
     sending.current = false;
@@ -122,8 +132,10 @@ export function TodosScreen(props: TodosScreenProps) {
       setProblem(MOBILE_COPY.todosTooLong);
       return;
     }
+    const submitted = text;
     if (await send(draft.command)) {
-      setText("");
+      // Text typed while the add was in flight is the next to-do; keep it.
+      setText((current) => (current === submitted ? "" : current));
       draftId.current = globalThis.crypto.randomUUID();
     }
   };
