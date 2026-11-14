@@ -510,6 +510,10 @@ role: regular weight, -0.012em tracking, the primary ink in every style and
 never the accent). The approved size is 24px on a 30px line; the type scale
 has no 24px step and `ui:check` refuses a raw size, so the nearest token,
 `--oct-text-2xl` (26px), carries it on the 30px line, and phone width uses 20px.
+With a Project chosen the question names it, "What should we work on in
+{Project}?", on one line: a long name truncates with an ellipsis and the full
+name is its title, and choosing another Project changes the words in place
+without moving anything below.
 One quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the

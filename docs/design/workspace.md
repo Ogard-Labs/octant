@@ -2107,7 +2107,10 @@ height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
 view's own choice, edited in Settings › Sidebar › Thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
-rather than left as a gap. The Project tree and the Activity feed draw the same
+rather than left as a gap. The last-updated age sits at the first line's
+trailing edge and reads now, 12m, 5h, 3d, 2w, then a short date, flooring each
+unit; it updates once a minute from one shared clock and carries the full date
+and time as its tooltip and accessible label. The Project tree and the Activity feed draw the same
 row: up to three lines (see [the sidebar in DESIGN.md](../../DESIGN.md)). A small top
 line names where the thread lives, in a fixed order (the Project's mark and name,
 then the branch in the mono face) and ends with the thread's state in words
