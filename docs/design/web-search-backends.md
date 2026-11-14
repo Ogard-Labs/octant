@@ -146,8 +146,10 @@ whatever the backends are:
 - `octant` offers `web-search` when an eligible backend exists.
 - `provider-native` offers the provider's own search when the provider supports
   it and the policy allows it (below).
-- `automatic` takes `octant` when an eligible backend exists, else
-  `provider-native`, as today's order does.
+- `automatic` keeps the order Architecture's Web search section gives
+  between the two, counting a route as ready only when the policy allows it.
+  A person who wants their own backends ahead of a provider's search chooses
+  `octant`.
 
 A native harness thread in Work and Code follows `automatic`. A turn offers
 one search, never `web-search` beside a provider's own. Under a policy that
@@ -204,7 +206,9 @@ query or under which terms. The probe reports `supported` on the two origins
 above and Architecture's capability table records it once built.
 
 **One search per request.** The request caps the provider's built-in search at
-one call: Anthropic's `max_uses: 1`, and the Responses `max_tool_calls: 1`. The
+one call: Anthropic's `max_uses: 1`, and the Responses `max_tool_calls: 1`,
+which caps built-in tool calls across a response and leaves function calls
+alone (OpenAI's SDK types, checked November 2026). The
 stream adapter enforces the same cap itself: a second built-in search in one
 response fails that step as `unsupported`, as any built-in tool does today, so
 a provider that ignores the cap cannot search again on what it just read. Every
@@ -245,7 +249,8 @@ person already turns on per account
 ([Architecture: providers](../architecture.md#providers)). Octant cannot set
 which search mode a vendor runtime uses, so the policy limits that switch:
 
-- Under Any, `webTools` is the person's choice, as today.
+- Under Any, `webTools` follows the native-setup policy
+  ([Provider runtimes](provider-runtimes.md)), as today.
 - Under any other policy, `webTools` is off, and Settings › Providers shows the
   switch locked with the policy as its reason. Its journaled value does not
   change, so returning to Any restores the person's choice.
