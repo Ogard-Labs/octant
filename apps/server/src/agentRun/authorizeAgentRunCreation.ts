@@ -1,11 +1,13 @@
 import {
   decodeChatThreadId,
   decodeCodeThreadId,
+  decodeWorkThreadId,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunParentThreadId,
   type CodeThread,
   type WindowId,
+  type WorkAccess,
   type WorkspaceLayoutNode,
 } from "@octant/contracts";
 import {
@@ -84,6 +86,35 @@ const codeThreadLiveGrant = (thread: CodeThread): AgentRunAuthority =>
  * host supplies this; without one the thread is judged as it is stored.
  */
 export type CodeParentActiveTurn = (thread: CodeThread) => CodeThread;
+
+/**
+ * Whether a parent thread runs at Full access: the level its running turn
+ * holds, which a routine or a narrowed turn may hold below the thread's own,
+ * or with no turn running the thread's own as it stands now. This is not the
+ * authority a child is given: a Work parent's children are always capped at
+ * approval-gated, so that cap cannot say whether the parent is at Full access.
+ */
+export function parentRunsAtFullAccess(
+  input: {
+    readonly persistence: Pick<PersistenceService, "readCodeThread">;
+    readonly workThreadProjection: Pick<WorkThreadProjection, "read">;
+    readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
+    readonly codeParentActiveTurn: CodeParentActiveTurn;
+  },
+  parentThreadId: string,
+): boolean {
+  try {
+    const work = input.workThreadProjection.read(decodeWorkThreadId(parentThreadId));
+    if (work !== undefined) {
+      return (input.runningWorkTurnAccess(parentThreadId) ?? work.access) === "full-access";
+    }
+    const code = input.persistence.readCodeThread(decodeCodeThreadId(parentThreadId));
+    return code !== undefined && input.codeParentActiveTurn(code).executionPolicy === "full-access";
+  } catch {
+    // An id neither mode decodes is a Chat thread, which has no Full access.
+    return false;
+  }
+}
 
 export function authorizeAgentRunCreation(input: {
   readonly persistence: PersistenceService;

@@ -33,12 +33,14 @@ import { describe, expect, it, vi } from "vitest";
 import { WINDOW_AUTHORITY_TTL_MS, WindowAuthorityStore } from "../windowAuthorityStore";
 import { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
 import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import { checkDelegationParent } from "../hub/delegationParentCheck";
 import { codeParentActiveTurnFrom } from "../wiring/authority";
 import { resolveAgentRunControlFacts } from "./agentRunControlService";
 import {
   authorizeAgentRunCreation,
   boundAgentRunLiveAuthority,
   layoutContainsAgentRunThread,
+  parentRunsAtFullAccess,
   scheduledAgentRunLiveAuthority,
 } from "./authorizeAgentRunCreation";
 
@@ -409,6 +411,49 @@ describe("authorizeAgentRunCreation", () => {
       projectId: String(ids.project),
       canonicalRoot: "/home/folder",
     });
+  });
+
+  it("lets a Full access Work thread that read outside content hand work to another spoke unasked", () => {
+    const thread = decodeWorkThread({ ...workThread(), access: "full-access" });
+    const workspace = withSurface(
+      {
+        ...defaultWindowWorkspace(ids.window),
+        contextByMode: {
+          ...defaultWindowWorkspace(ids.window).contextByMode,
+          work: contextKeyForProject("work", LOCAL_HOST_ID, ids.project, "/home/folder"),
+        },
+      },
+      "work",
+      decodeWorkspaceTab({
+        kind: "work-thread",
+        id: ids.tab,
+        threadId: thread.id,
+        mode: "work",
+        title: thread.title,
+      }),
+    );
+    const check = checkDelegationParent(
+      {
+        creationPosture: () => "automatic",
+        authorizeCreation: ({ threadId }) =>
+          authorize({ workspace, work: thread, project: workProject(), parentThreadId: threadId }),
+        externalContentIngested: () => true,
+        runsAtFullAccess: (threadId) =>
+          parentRunsAtFullAccess(
+            {
+              persistence: { readCodeThread: () => undefined },
+              workThreadProjection: { read: () => thread },
+              runningWorkTurnAccess: () => undefined,
+              codeParentActiveTurn: (code) => code,
+            },
+            threadId,
+          ),
+        standingAnswerCovers: () => false,
+        sessionStatus: () => undefined,
+      },
+      { mode: "work", threadId: String(thread.id), windowId: String(ids.window) },
+    );
+    expect(check.status).toBe("allowed");
   });
 
   it("refuses a Work parent on a different Project than the window", () => {
