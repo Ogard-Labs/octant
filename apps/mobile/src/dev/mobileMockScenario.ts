@@ -973,8 +973,9 @@ function createMockTransport(input: {
             gitOperationId: (command as { readonly gitOperationId?: string }).gitOperationId,
             head: codeCheckout.head,
             stateToken: "9".repeat(64),
-            status: [],
-            changedPaths: [],
+            // One untracked file beside the diff's edits, so Review shows a "New file" row.
+            status: [{ path: "docs/notes/mobile-panes.md", index: "?", worktree: "?" }],
+            changedPaths: ["docs/notes/mobile-panes.md"],
             diff: { contentId: diffId, digest: "8".repeat(64), byteLength, truncated: false },
             remotes: [],
             upstream: null,
