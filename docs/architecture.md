@@ -6389,10 +6389,16 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   hooks, MCP servers, and plugins are the person's own setup, so Octant offers
   them rather than switching them off. The switch-offs elsewhere in these
   specifications describe what is built today; each is marked against this
-  rule. Where a native feature reaches beyond Octant's view, the
-  [guardrail level](#security-and-authority) decides its default: at Guarded
-  and Reviewed it is off until the person turns it on for the account,
-  Project, or thread; at Full access it is on, in Work and Code alike.
+  rule. The person's own setup is on by default at every level, as it is in
+  the provider's own app: Octant adds capabilities to a provider and does not
+  take its core features away (maintainer decision, 2026-11-14, replacing
+  the earlier default that kept it off at Guarded and Reviewed until the
+  person turned it on). Each call still meets the thread's
+  [guardrail level](#security-and-authority): Guarded asks, Reviewed's
+  reviewer decides, Full access runs without asking. The person may turn it
+  off for an account or a thread; a Project's own hooks, MCP servers, and
+  plugins still load only once the person trusts that Project for that
+  provider, as the providers' own folder-trust prompts require.
   Plan stays read-only and Chat's filesystem and shell stay withheld at
   every level. Octant still journals and shows a native child
   run, marks outside content a native web tool read, and reports each
@@ -6416,14 +6422,15 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   follows its own per-account setting, off by default
   ([Modes](#modes-chat-work-and-code)).
 
-  How the person turns it on (built):
+  How the person turns it off, and trusts a Project (built):
 
   - **Account.** Settings › Providers shows **Run <provider> as itself** on
     each Claude Code, Codex, OpenCode, and Mistral Vibe account. It sends
     `set-provider-native-setup`, which a local window or a device the host's own person paired sends (maintainer decision, 2026-11-12), and journals
     `provider.instance-native-setup-changed@1` with the account's whole
-    record; the field is `nativeSetup` on the instance, absent when off, and
-    no configuration change or new account carries it. Any other provider's
+    record; the field is `nativeSetup` on the instance: absent is on, the
+    default, `false` is the person's off, and a `true` left by the earlier
+    default reads as on. No configuration change or new account carries it. Any other provider's
     account, and any other ACP agent, is refused, by the policy and by the
     journal's own decoder.
   - **Project.** A Work or Code Project's **Trusted providers** lists the key
@@ -11188,8 +11195,8 @@ that is not yet effective for the thread is refused and never reaches the model.
   The Claude, Codex, Mistral Vibe, and OpenCode rows describe a session with
   the person's own setup off.
   Under [Key providers run as themselves](#providers) their own Project and
-  home skill loading is allowed: on at Full access, and on at Guarded and
-  Reviewed once the person turns it on for the account or Project. Built for
+  home skill loading is on by default at every level, and stays on at Full
+  access or in a trusted Project when the person turned the account off. Built for
   Claude Code: the query reads the account's home settings with `skills:
 "all"`, and a Project's skills, which Claude Code reads only with the
   Project's settings, in a Project trusted for Claude Code. Built for Codex:
@@ -11243,8 +11250,7 @@ that is not yet effective for the thread is refused and never reaches the model.
   For Claude Code, Mistral Vibe, and OpenCode this denial is today's build,
   not the rule: in a Project the person trusted for that provider, a key
   provider loads the Project's hooks, MCP servers, and plugins as it would
-  outside Octant, on at Full access and on at Guarded and Reviewed
-  once the person turns it on ([Key providers run as themselves](#providers);
+  outside Octant, at every level ([Key providers run as themselves](#providers);
   built for Claude Code, which reads the Project's `project` and `local`
   settings and its `.mcp.json` in a trusted Project, and for Mistral Vibe,
   whose launch in a trusted Project unsets `VIBE_TOOL_PATHS` and no longer

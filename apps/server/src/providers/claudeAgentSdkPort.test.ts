@@ -3074,6 +3074,13 @@ describe("Claude running as itself", () => {
     });
   });
 
+  test("keeps Claude's own memory working for an account that turned it on while its home settings load", () => {
+    expect(claudeNativeQueryOptions(ownSetup, true).settings).toEqual({});
+    expect(claudeNativeQueryOptions({ ...ownSetup, hooks: false }, true).settings).toEqual({
+      disableAllHooks: true,
+    });
+  });
+
   test("opens the query with the person's own setup and a subagent's call reaches the gate", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
     const preToolUse = vi.fn(async () => ({ behavior: "ask" as const }));

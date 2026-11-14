@@ -76,11 +76,13 @@ switches, at every level; a subagent's requests come back on its own thread
 id and are answered through the parent's session. Mistral Vibe keeps
 `VIBE_ENABLE_SUBAGENTS="false"` except at Full access in Work and Code.
 
-The runtime's own web search and fetch are the exception to "off until the
-person turns it on": Work and Code sessions outside Plan carry them at every
-level (`webTools` alone on), asking below Full access and marking the thread.
-That alone does not count as running as itself, so OpenCode keeps Octant's
-permissions and `once` approvals and Mistral Vibe keeps
+The setup is on by default for every key provider account at every level;
+the person turns it off per account or per thread
+([Architecture: providers](../architecture.md#providers)). An account the
+person turned off still carries the runtime's own web search and fetch in
+Work and Code outside Plan (`webTools` alone on), asking below Full access and
+marking the thread. That alone does not count as running as itself, so
+OpenCode keeps Octant's permissions and `once` approvals and Mistral Vibe keeps
 `VIBE_INCLUDE_PROJECT_CONTEXT="false"`.
 
 Plan's read-only rule, Chat's withheld filesystem and shell, and the

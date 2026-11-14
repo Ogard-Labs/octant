@@ -10,11 +10,22 @@ export function isKeyProviderDriverKind(kind: ProviderDriverKind): kind is KeyPr
   return (KEY_PROVIDER_DRIVER_KINDS as ReadonlyArray<string>).includes(kind);
 }
 
+/**
+ * Whether a key provider account runs as itself. On unless the person turned
+ * it off: Octant adds to a provider and does not take its own features away
+ * (maintainer decision, 2026-11-14).
+ */
+export function accountRunsAsItself(instance: {
+  readonly nativeSetup?: boolean | undefined;
+}): boolean {
+  return instance.nativeSetup !== false;
+}
+
 export interface ProviderNativeSetupInput {
   readonly driverKind: ProviderDriverKind;
   readonly mode: "chat" | "work" | "code";
   readonly executionPolicy: ProviderExecutionPolicy;
-  /** The account's own switch: `nativeSetup` on the provider instance. */
+  /** The account's own switch, on unless the person turned it off (`accountRunsAsItself`). */
   readonly accountAllows: boolean;
   /** The Work or Code Project lists this provider in `nativeProviders`. Always false in Chat. */
   readonly projectTrusts: boolean;
@@ -27,11 +38,13 @@ export interface ProviderNativeSetupInput {
 }
 
 /**
- * What a key provider's session may load of its own. At Guarded and Reviewed
- * nothing loads until the person turns it on for the account or trusts the
- * Project for that provider; at Full access it is on, as it is in the
- * provider's own app. Undefined means every feature stays off, which is the
- * answer for every provider that is not a key provider.
+ * What a key provider's session may load of its own. The account's switch is
+ * on unless the person turned it off, so at every level a session loads the
+ * person's own subagents, web tools, skills, and tool servers, as it does in
+ * the provider's own app; each call still meets the thread's level. With the
+ * account turned off, Full access and a trusted Project still turn it on.
+ * Undefined means every feature stays off, which is the answer for every
+ * provider that is not a key provider.
  *
  * A thread's own choice overrides all of it: off loads nothing, on loads as
  * the account switch does.
@@ -55,10 +68,11 @@ export function resolveProviderNativeSetup(
   const fullAccess = input.mode !== "chat" && input.executionPolicy === "full-access";
   const plan = input.executionPolicy === "plan";
   if (!accountAllows && !projectTrusts && !fullAccess) {
-    // Web search and fetch are the runtime's own and load nothing of the
-    // person's configuration, so Work and Code keep them on by default; each
-    // call still asks below Full access and marks the thread. Plan stays
-    // read-only and Chat searches through its research route instead.
+    // An account the person turned off still keeps the runtime's own web
+    // search and fetch in Work and Code: they load nothing of the person's
+    // configuration, each call still asks below Full access and marks the
+    // thread. Plan stays read-only and Chat searches through its research
+    // route instead.
     return chatOrPlan(input.mode, plan) ? undefined : WEB_TOOLS_ONLY;
   }
   const chat = input.mode === "chat";
