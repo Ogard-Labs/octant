@@ -19,10 +19,17 @@ export function useMinuteTick(): Date {
 }
 
 /**
- * `seed` kept current while the component stays mounted: the shell hands down
- * a clock that moves only on snooze wakes, and a relative-time label below it
- * still has to move every minute without re-rendering the shell.
+ * `seed`, moved forward by the minutes elapsed since it last changed. The
+ * shell hands down a clock that moves only on snooze wakes, and a
+ * relative-time label below it still has to move every minute without
+ * re-rendering the shell.
  */
 export function useMinuteNow(seed: number): number {
-  return Math.max(seed, useMinuteTick().getTime());
+  const tick = useMinuteTick().getTime();
+  const [anchor, setAnchor] = useState({ seed, at: tick });
+  if (anchor.seed !== seed) {
+    setAnchor({ seed, at: tick });
+    return seed;
+  }
+  return seed + (tick - anchor.at);
 }

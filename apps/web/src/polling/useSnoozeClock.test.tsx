@@ -23,9 +23,12 @@ describe("useSnoozeClock", () => {
     });
     // Three hours out the label reads in hours, so twenty minutes draw nothing new.
     expect(renders.mock.calls.length).toBe(before);
-    act(() => {
-      vi.advanceTimersByTime(160 * 60_000 + 1_000);
-    });
+    // Each re-render schedules the next look, so the time passes in steps.
+    for (let minute = 0; minute < 161; minute += 1) {
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+    }
     expect(result.current.getTime()).toBeGreaterThanOrEqual(Date.parse("2026-09-07T13:00:00.000Z"));
   });
 });

@@ -761,21 +761,35 @@ describe("Run and debug panel", () => {
     const store = new CodeDebugWindowState();
     const { client } = fakeHost({ deepStack: 150 });
     vi.mocked(client.configurations).mockResolvedValue(listed(true));
-    render(
-      <RunDebugPanel
-        checkoutId={checkoutId}
-        client={client}
-        pollMs={fast}
-        store={store}
-        threadId={threadId}
-      />,
-    );
-    await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
-    const stack = await screen.findByRole("region", { name: "Call stack" });
-    const selected = await within(stack).findByRole("button", { current: true });
-    expect(selected).toHaveTextContent("main");
-    expect(within(stack).getAllByRole("listitem").length).toBeLessThan(152);
-    expect(selected.closest("li")).toHaveAttribute("aria-setsize", "152");
+    // jsdom lays nothing out; the stack box and its rows report real heights.
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.classList.contains("run-debug__frames-scroll")) return 280;
+        return this.hasAttribute("data-index") ? 28 : (offsetHeight?.get?.call(this) ?? 0);
+      },
+    });
+    try {
+      render(
+        <RunDebugPanel
+          checkoutId={checkoutId}
+          client={client}
+          pollMs={fast}
+          store={store}
+          threadId={threadId}
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
+      const stack = await screen.findByRole("region", { name: "Call stack" });
+      const selected = await within(stack).findByRole("button", { current: true });
+      expect(selected).toHaveTextContent("main");
+      expect(within(stack).getAllByRole("listitem").length).toBeLessThan(152);
+      expect(selected.closest("li")).toHaveAttribute("aria-setsize", "152");
+    } finally {
+      if (offsetHeight === undefined) Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+      else Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+    }
   });
 
   it("keeps a selected child's stop when the program's slower stack read answers after the switch", async () => {
