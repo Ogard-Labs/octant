@@ -614,8 +614,20 @@ the person a next step. In light the card is workspace white on the
 as a sunken field. Code welcome keeps one stable question while Project and
 Environment sit on the context row above the composer
 (`.composer-tray--start`, rendered before the card inside `.composer-stack`),
-on the page ground with no band chrome. The base-branch chip joins that row
-once a Project is chosen. Environment is the
+on the page ground with no band chrome. The **Where** chip joins that row
+once a Project is chosen. It reads the branch and the place, such as `main ·
+This checkout` or `octant/fix-login · New worktree`, and replaces the former
+folder, branch and checkout chips. It opens one panel, "Where should this
+thread work?", a radio group (arrow keys move, Escape closes and returns focus
+to the chip): **This checkout** names the Project's folder in meta ink and
+"on <current branch>", read only; **New worktree** says "isolated copy, its
+own branch" and, once chosen, shows the base-branch picker and the branch name
+the host will create. Below sit a quiet **Subfolder** row (the working folder
+fields) and, when a Project's remembered default can be recorded, **Remember
+for this Project**. Choosing only sets the draft's workspace; the worktree is
+created with the thread. The chip's width may follow the choice; nothing else
+in the row moves when the panel opens. Existing worktrees are not offered: the
+host cannot start a new thread in one. Work keeps its working-folder chip. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
 creating a second environment model. Every create composer shows Environment
