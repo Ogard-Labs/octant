@@ -63,7 +63,9 @@ export function GlassSurface(props: GlassSurfaceProps) {
           tint={recipe.blurTint}
         />
       ) : null}
-      <View style={[styles.fill, { backgroundColor: fill }, props.contentStyle]}>
+      {/* The outer chrome already carries the fill; painting it again here
+          stacked two translucent layers and read as a solid panel. */}
+      <View style={[styles.fill, flat ? { backgroundColor: fill } : null, props.contentStyle]}>
         {props.children}
       </View>
     </View>
