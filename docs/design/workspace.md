@@ -2232,7 +2232,9 @@ because those transcripts do not yet jump to a turn
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view
-picker uses, not an icon in the header. That row stands in the same place in
+picker uses, not an icon in the header. The phone's Work and Code tabs offer the
+same three as a segmented control above their thread list
+([Mobile maturity](mobile-maturity.md#exists-today)). That row stands in the same place in
 all three, with the Project tree's own Projects heading under it, so pressing
 the switch moves nothing but the list. Status headings carry their count in
 meta ink after the label ("Needs input 2"), the same face as the feed's folded

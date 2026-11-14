@@ -669,6 +669,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 
 - Chat and Work can be switched off in Settings; Code is always available, and disabling a mode never deletes its data.
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
+- The phone follows the same shape: its tab bar has Work and Code, Work lists Chat and Work threads together, and each tab offers the sidebar's Status, Projects, and Activity arrangements (maintainer request, 2026-11-14). Detail: [Mobile maturity](mobile-maturity.md#exists-today).
 - The mode switcher is the Work and Code icon pair at the top of the sidebar, not in the title band; each mode's name is its tooltip and accessible name (maintainer request, 2026-11-09). Detail: [Workspace: Sidebar](workspace.md#sidebar).
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
 - Project memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. Person memory, beside it, crosses Projects ([Person memory across Projects](#person-memory-across-projects)). _Here only._

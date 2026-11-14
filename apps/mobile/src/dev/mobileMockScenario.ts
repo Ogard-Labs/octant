@@ -655,7 +655,15 @@ function createMockTransport(input: {
         );
       }
       if (request.method === "GET" && request.path === "/api/work/threads/bootstrap") {
-        return mockJsonResponse(decodeWorkThreadBootstrap({ threads: workThreads }));
+        // The seeded Work thread has a turn running, so Status shows a Working row.
+        return mockJsonResponse(
+          decodeWorkThreadBootstrap({
+            threads: workThreads,
+            runtime: workThreads
+              .filter((thread) => String(thread.id) === WORK_THREAD_ID)
+              .map((thread) => ({ threadId: thread.id, executing: true })),
+          }),
+        );
       }
       if (request.method === "GET" && request.path.startsWith("/api/work/turns/transcript/")) {
         const threadId = decodeURIComponent(

@@ -33,13 +33,27 @@ import { CodeDeliveryTargetSheet } from "./CodeDeliveryTargetSheet";
 import { createRequestGuard } from "./requestGuard";
 import { usePlacement } from "./usePlacement";
 import { CountTile } from "../ui/CountTile";
-import { LargeTitle, ListRow, ListSection, ToolbarButton } from "../ui/NativeChrome";
+import {
+  LargeTitle,
+  ListRow,
+  ListSection,
+  SegmentedControl,
+  ToolbarButton,
+} from "../ui/NativeChrome";
+import {
+  arrangeMobileThreads,
+  MOBILE_THREAD_ARRANGEMENTS,
+  type MobileThreadArrangement,
+} from "./threadArrangement";
 import { hostHealthTone } from "../hosts/hostHealthTone";
 import type { AgentListView } from "./AgentsListScreen";
 import { summarizeMobileInboxFailures } from "./mobileInboxAvailability";
 
 export interface InboxHomeScreenProps {
   readonly homeMode: MobileHomeView;
+  /** The Work or Code tab's chosen arrangement; each tab keeps its own. */
+  readonly arrangement: MobileThreadArrangement;
+  readonly onSelectArrangement: (arrangement: MobileThreadArrangement) => void;
   readonly onOpenAgents: (view: AgentListView) => void;
   readonly onOpenWorkspace: (hostId: string) => void;
   readonly onAddWorkspace: () => void;
@@ -52,7 +66,6 @@ export interface InboxHomeScreenProps {
 const HOME_RECENT_LIMIT = 5;
 
 const VIEW_TITLES: Record<Exclude<MobileHomeView, "inbox">, string> = {
-  chat: "Chat",
   work: "Work",
   code: "Code",
 };
@@ -83,6 +96,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const [workProjects, setWorkProjects] = useState<ReadonlyArray<MobileWorkProjectOption>>([]);
   const [codeProjects, setCodeProjects] = useState<ReadonlyArray<MobileCodeProjectOption>>([]);
   const [workProjectId, setWorkProjectId] = useState<string | undefined>();
+  // The Work tab's composer starts a Chat (no folder) until a Project is picked,
+  // the lighter of the two: a folder grants filesystem reach, no folder grants none.
+  const [workInFolder, setWorkInFolder] = useState(false);
   const [codeProjectId, setCodeProjectId] = useState<string | undefined>();
   const [codeRetry, setCodeRetry] = useState<MobileCodeCreationRetry | undefined>();
   const [deliveryTargetProposal, setDeliveryTargetProposal] = useState<
@@ -223,8 +239,26 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const selectedWorkProject = workProjects.find((project) => project.projectId === workProjectId);
   const selectedCodeProject = codeProjects.find((project) => project.projectId === codeProjectId);
   const modeRows = useMemo(
-    () => (props.homeMode === "inbox" ? [] : rows.filter((row) => row.mode === props.homeMode)),
+    () =>
+      props.homeMode === "inbox"
+        ? []
+        : rows.filter((row) =>
+            props.homeMode === "work"
+              ? row.mode === "work" || row.mode === "chat"
+              : row.mode === props.homeMode,
+          ),
     [props.homeMode, rows],
+  );
+  const projectName = useCallback(
+    (row: MobileInboxRow): string | undefined =>
+      (row.mode === "code" ? codeProjects : workProjects).find(
+        (project) => project.projectId === row.projectId,
+      )?.name,
+    [codeProjects, workProjects],
+  );
+  const groups = useMemo(
+    () => arrangeMobileThreads({ rows: modeRows, arrangement: props.arrangement, projectName }),
+    [modeRows, projectName, props.arrangement],
   );
   const counts = useMemo(() => inboxStatusCounts(rows), [rows]);
   const priorityRows = useMemo(() => inboxPriorityRows(rows, HOME_RECENT_LIMIT), [rows]);
@@ -318,10 +352,18 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     placementLabel !== undefined
       ? `${MOBILE_COPY.newThreadsUse} ${placementLabel}`
       : MOBILE_COPY.composerDisclaimerShort;
-  const modePresentation =
+  const tabCreateMode: MobileCreateMode | undefined =
     props.homeMode === "inbox"
       ? undefined
-      : mobileCreateModePresentation(props.homeMode, {
+      : props.homeMode === "work"
+        ? workInFolder && workProjects.length > 0
+          ? "work"
+          : "chat"
+        : props.homeMode;
+  const modePresentation =
+    tabCreateMode === undefined
+      ? undefined
+      : mobileCreateModePresentation(tabCreateMode, {
           placementLabel,
           workProjectName: selectedWorkProject?.name,
           codeProjectName: selectedCodeProject?.name,
@@ -334,8 +376,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       : props.homeMode === "code"
         ? codeProjectId
         : undefined;
-  const currentCreateMode: MobileCreateMode =
-    props.homeMode === "inbox" ? composerMode : props.homeMode;
+  const currentCreateMode: MobileCreateMode = tabCreateMode ?? composerMode;
   const composerProjectLabel =
     composerMode === "code"
       ? selectedCodeProject?.name
@@ -439,6 +480,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           marginBottom: space.sm,
         },
         failureRow: { paddingBottom: space.sm },
+        arrangement: { paddingHorizontal: space.md, paddingBottom: space.sm },
         retry: {
           color: colors.accent,
           fontSize: typography.detail.fontSize,
@@ -450,7 +492,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   );
 
   const statusColor = (row: MobileInboxRow): string => {
-    const status = inboxWorkStatus(row.status, row.reviewState);
+    const status = inboxWorkStatus(row.status, row.reviewState, row.live);
     if (status === "Needs attention") return colors.warning;
     if (status === "Working") return colors.attention;
     if (status === "In review") return colors.merged;
@@ -459,9 +501,17 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
 
   const threadRow = (row: MobileInboxRow, showMode: boolean, last: boolean) => (
     <ListRow
-      detail={`${showMode ? `${row.mode === "code" ? "Code" : "Work"} · ` : ""}${
-        hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)
-      }`}
+      detail={`${
+        showMode
+          ? `${row.mode === "code" ? "Code" : row.mode === "chat" ? "Chat" : "Work"} · `
+          : props.arrangement === "projects"
+            ? ""
+            : `${formatScreenshotSafeLabel(
+                row.projectId === undefined
+                  ? MOBILE_COPY.noProject
+                  : (projectName(row) ?? "Project"),
+              )} · `
+      }${hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)}`}
       icon={modeIcon(row.mode)}
       key={`${row.hostId}:${row.mode}:${row.threadId}`}
       label={formatScreenshotSafeLabel(row.title)}
@@ -470,7 +520,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       testID={`mobile-home-thread-row-${row.mode}-${row.threadId}`}
       {...(showMode
         ? {
-            value: inboxWorkStatus(row.status, row.reviewState),
+            value: inboxWorkStatus(row.status, row.reviewState, row.live),
             valueTone: statusColor(row),
             accessory: "none" as const,
           }
@@ -550,10 +600,8 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             <Text style={styles.projectLabel}>
               {props.homeMode === "code" ? "Repository" : "Project"}
             </Text>
-            {selectableProjects.length === 0 ? (
-              <Text style={styles.empty}>
-                {props.homeMode === "code" ? MOBILE_COPY.codeNoProject : MOBILE_COPY.workNoProject}
-              </Text>
+            {selectableProjects.length === 0 && props.homeMode === "code" ? (
+              <Text style={styles.empty}>{MOBILE_COPY.codeNoProject}</Text>
             ) : (
               <ScrollView
                 contentContainerStyle={styles.projectScrollContent}
@@ -561,16 +609,38 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                 showsHorizontalScrollIndicator={false}
                 style={styles.projectScroll}
               >
+                {props.homeMode === "work" ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: !workInFolder }}
+                    onPress={() => setWorkInFolder(false)}
+                    style={[styles.projectChip, !workInFolder ? styles.projectChipSelected : null]}
+                    testID="mobile-home-project-none"
+                  >
+                    <Text
+                      style={[
+                        styles.projectName,
+                        !workInFolder ? styles.projectNameSelected : null,
+                      ]}
+                    >
+                      {MOBILE_COPY.workNoFolder}
+                    </Text>
+                  </Pressable>
+                ) : null}
                 {selectableProjects.map((project) => {
-                  const selected = project.projectId === selectedProjectId;
+                  const selected =
+                    project.projectId === selectedProjectId &&
+                    (props.homeMode !== "work" || workInFolder);
                   return (
                     <Pressable
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                       key={project.projectId}
                       onPress={() => {
-                        if (props.homeMode === "work") setWorkProjectId(project.projectId);
-                        else setCodeProjectId(project.projectId);
+                        if (props.homeMode === "work") {
+                          setWorkProjectId(project.projectId);
+                          setWorkInFolder(true);
+                        } else setCodeProjectId(project.projectId);
                         setCodeRetry(undefined);
                       }}
                       style={[styles.projectChip, selected ? styles.projectChipSelected : null]}
@@ -695,9 +765,28 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             {!loading && modeRows.length === 0 && transportError === undefined ? (
               <Text style={styles.empty}>{MOBILE_COPY.inboxNoThreads}</Text>
             ) : modeRows.length > 0 ? (
-              <ListSection title={MOBILE_COPY.homeRecent}>
-                {modeRows.map((row, index) => threadRow(row, false, index === modeRows.length - 1))}
-              </ListSection>
+              <>
+                <View style={styles.arrangement}>
+                  <SegmentedControl
+                    onSelect={props.onSelectArrangement}
+                    optionTestID={(id) => `mobile-home-arrangement-${id}`}
+                    options={MOBILE_THREAD_ARRANGEMENTS}
+                    selected={props.arrangement}
+                    testID="mobile-home-arrangement"
+                  />
+                </View>
+                {groups.map((group) => (
+                  <ListSection
+                    key={group.id}
+                    testID={`mobile-home-group-${group.id}`}
+                    title={`${formatScreenshotSafeLabel(group.label)}  ${group.rows.length}`}
+                  >
+                    {group.rows.map((row, index) =>
+                      threadRow(row, false, index === group.rows.length - 1),
+                    )}
+                  </ListSection>
+                ))}
+              </>
             ) : null}
           </View>
         )}

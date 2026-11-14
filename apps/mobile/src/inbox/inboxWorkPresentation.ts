@@ -5,8 +5,14 @@ export type InboxWorkSectionId = "attention" | "working" | "review" | "recent";
 function sectionFor(
   status: string,
   reviewState?: MobileInboxRow["reviewState"],
+  live?: MobileInboxRow["live"],
 ): InboxWorkSectionId {
+  // The host's runtime report is the authority on what a thread is doing now.
+  // A thread's lifecycle is "active" whether or not a turn runs, so reading
+  // "active" as working counted every open thread as Working.
+  if (live === "needs-input") return "attention";
   if (reviewState === "changes-requested") return "attention";
+  if (live === "working") return "working";
   if (reviewState === "pending" || reviewState === "approved") return "review";
   const lower = status.toLowerCase();
   if (
@@ -19,12 +25,7 @@ function sectionFor(
   ) {
     return "attention";
   }
-  if (
-    lower.includes("active") ||
-    lower.includes("run") ||
-    lower.includes("progress") ||
-    lower.includes("working")
-  ) {
+  if (lower.includes("run") || lower.includes("progress") || lower.includes("working")) {
     return "working";
   }
   return "recent";
@@ -33,8 +34,9 @@ function sectionFor(
 export function inboxWorkStatus(
   status: string,
   reviewState?: MobileInboxRow["reviewState"],
+  live?: MobileInboxRow["live"],
 ): string {
-  const section = sectionFor(status, reviewState);
+  const section = sectionFor(status, reviewState, live);
   if (section === "attention") return "Needs attention";
   if (section === "working") return "Working";
   if (section === "review") return "In review";
@@ -57,7 +59,7 @@ export function inboxStatusCounts(rows: ReadonlyArray<MobileInboxRow>): InboxSta
   for (const row of rows) {
     if (row.mode === "chat") continue;
     all += 1;
-    const section = sectionFor(row.status, row.reviewState);
+    const section = sectionFor(row.status, row.reviewState, row.live);
     if (section === "working") working += 1;
     else if (section === "attention") needsAttention += 1;
     else if (section === "review") inReview += 1;
@@ -87,7 +89,7 @@ export function inboxPriorityRows(
     .map((row, index) => ({
       row,
       index,
-      rank: SECTION_ORDER[sectionFor(row.status, row.reviewState)],
+      rank: SECTION_ORDER[sectionFor(row.status, row.reviewState, row.live)],
     }))
     .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .slice(0, limit)
