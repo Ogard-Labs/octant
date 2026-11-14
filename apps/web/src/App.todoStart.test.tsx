@@ -132,4 +132,33 @@ describe("starting a thread from a to-do", () => {
     );
     expect(change).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "link-todo-thread" }));
   });
+
+  it("links the thread when Start reuses a Chat draft that was already open", async () => {
+    const user = userEvent.setup();
+    const { todos, change } = todoClient();
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+        todoClient={todos}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "New chat" }));
+    await screen.findByRole("region", { name: "New Octant Chat thread" });
+
+    await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
+    await user.click(await screen.findByRole("button", { name: "Start Draft the launch post" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Chat" }));
+    const draft = await screen.findByRole("region", { name: "New Octant Chat thread" });
+    expect(await within(draft).findByText("From to-do")).toBeVisible();
+    await user.click(within(draft).getByRole("button", { name: "Create thread" }));
+
+    await waitFor(() =>
+      expect(change).toHaveBeenCalledWith(expect.objectContaining({ kind: "link-todo-thread" })),
+    );
+  });
 });

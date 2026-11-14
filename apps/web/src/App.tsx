@@ -375,6 +375,8 @@ interface TodoStartInProgress {
   readonly todoId: string;
   readonly title: string;
   readonly mode: OctantMode;
+  /** The Project the draft is for; absent for a Chat start in no Project. */
+  readonly projectId?: string;
   /** The draft it opened, as `pane:surface`, once that draft is in front. */
   readonly draft?: string;
 }
@@ -5750,25 +5752,36 @@ function LaunchedShell(
         );
   const historyPaneId = historyPane?.paneId;
   const historyTabId = historyPane?.surface.id;
-  // A to-do's source belongs to the one draft its Start opened. The first
-  // draft in front after Start is that draft; leaving it for anything else
-  // drops the source, so a later send elsewhere is never linked to the to-do.
+  // A to-do's source belongs to the one draft its Start opened: the first
+  // draft in front for the same mode and Project. That may be a draft that was
+  // already open, which Start reuses with the same pane and surface, so the
+  // check also runs when the source is set. Leaving that draft for anything
+  // else drops the source, so a later send elsewhere is never linked.
+  const frontSurface = historyPane?.surface;
   const frontDraft =
-    historyPane?.surface.kind === "draft-thread"
-      ? `${String(historyPane.paneId)}:${String(historyPane.surface.id)}`
+    frontSurface?.kind === "draft-thread"
+      ? `${String(historyPane?.paneId ?? "")}:${String(frontSurface.id)}`
+      : undefined;
+  const frontDraftProjectId =
+    frontSurface?.kind === "draft-thread" && frontSurface.projectId !== undefined
+      ? String(frontSurface.projectId)
       : undefined;
   const frontPlace = `${activeMode}:${String(historyPaneId ?? "")}:${String(historyTabId ?? "")}`;
   useEffect(() => {
     const start = todoStartRef.current;
     if (start === undefined) return;
     if (start.draft === undefined) {
-      if (frontDraft !== undefined && activeMode === start.mode) {
+      if (
+        frontDraft !== undefined &&
+        activeMode === start.mode &&
+        frontDraftProjectId === start.projectId
+      ) {
         setTodoStart({ ...start, draft: frontDraft });
       }
       return;
     }
     if (frontDraft !== start.draft || activeMode !== start.mode) setTodoStart(undefined);
-  }, [frontPlace]);
+  }, [frontPlace, todoStart]);
   // Review and the archive are reader pages too, opened from elsewhere than the
   // sidebar; without their own place, Back skipped straight past them.
   const historyPage: WindowPage | undefined = reviewOpen
@@ -6604,7 +6617,12 @@ function LaunchedShell(
     setDraftPendingMessage(undefined);
     resetNewTaskDraft(mode);
     setPendingDraftPrompt(todo.notes === "" ? todo.title : `${todo.title}\n\n${todo.notes}`);
-    setTodoStart({ todoId: String(todo.id), title: todo.title, mode });
+    setTodoStart({
+      todoId: String(todo.id),
+      title: todo.title,
+      mode,
+      ...(project === undefined ? {} : { projectId: String(project.id) }),
+    });
     // A Chat start files the thread in no Project, so the draft must not keep
     // the Project the last Chat draft chose.
     if (project === undefined) setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
@@ -8224,7 +8242,7 @@ function LaunchedShell(
                     {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
                     pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                     {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
-                    {...(todoStart === undefined || todoStart.mode !== activeMode
+                    {...(todoStart?.draft === undefined || todoStart.draft !== frontDraft
                       ? {}
                       : {
                           draftTodoSource: {
