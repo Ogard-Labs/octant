@@ -68,6 +68,7 @@ import {
   type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
+  type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
@@ -76,6 +77,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionHandle,
+  ProviderSessionForkRequest,
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
 import { BROWSER_TOOL_HOST_LINE, browserUseSelection } from "@octant/plugin-host/browser-use";
@@ -8755,6 +8757,7 @@ describe("provider switch handoff", () => {
     fixture: ReturnType<typeof runtimeFixture>,
     drivers: ReturnType<typeof twoHarnesses>,
     instanceId: CodeThread["providerInstanceId"],
+    nativeAnchor?: string,
   ) {
     await fixture.runtime.execute(windowId, {
       kind: "start-provider-turn",
@@ -8770,7 +8773,13 @@ describe("provider switch handoff", () => {
       instanceId,
       eventOn(instanceId, { kind: "text-delta", text: "First reply." }),
     );
-    await drivers.offer(instanceId, eventOn(instanceId, { kind: "completed" }));
+    await drivers.offer(
+      instanceId,
+      eventOn(instanceId, {
+        kind: "completed",
+        ...(nativeAnchor === undefined ? {} : { nativeAnchor }),
+      }),
+    );
     await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
   }
 
@@ -9060,6 +9069,90 @@ describe("provider switch handoff", () => {
         operationId(87),
       ]);
       expect(page.turns[1]?.handoff).toMatchObject({ reason: "rewind" });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("continues the runtime's own session copied at the last kept turn's anchor after a rewind", async () => {
+    const drivers = twoHarnesses();
+    const forkSession = vi.fn((_input: ProviderSessionForkRequest) =>
+      Effect.succeed<ProviderResumeCursor | undefined>({
+        driverKind: "claude",
+        value: "claude-session-cut-back",
+      }),
+    );
+    const fixture = runtimeFixture({
+      resolveProviderDriver: async (current) => ({
+        ...(await drivers.resolveProviderDriver(current)),
+        forkSession,
+      }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance, "assistant-message-1");
+      await finishSecondTurn(fixture, drivers, providerInstance);
+      await fixture.runtime.execute(windowId, rewindFrom(85));
+
+      await sendAfterRewind(fixture);
+      const connection = drivers.connection(providerInstance);
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(3));
+      expect(forkSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          instanceId: providerInstance,
+          anchor: "assistant-message-1",
+          mode: "code",
+        }),
+      );
+      expect(connection.resume).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          resumeCursor: { driverKind: "claude", value: "claude-session-cut-back" },
+        }),
+      );
+      const context = vi.mocked(connection.send).mock.calls[2]![0].context ?? [];
+      expect(context.map((block) => block.text).join("\n")).not.toContain("rewound the thread");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(87), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind-native-session", throughOperationId: operationId(84) });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("goes back with the text handoff when the last kept turn recorded no anchor", async () => {
+    const drivers = twoHarnesses();
+    const forkSession = vi.fn((_input: ProviderSessionForkRequest) =>
+      Effect.succeed<ProviderResumeCursor | undefined>({
+        driverKind: "claude",
+        value: "never-used",
+      }),
+    );
+    const fixture = runtimeFixture({
+      resolveProviderDriver: async (current) => ({
+        ...(await drivers.resolveProviderDriver(current)),
+        forkSession,
+      }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      await finishSecondTurn(fixture, drivers, providerInstance);
+      await fixture.runtime.execute(windowId, rewindFrom(85));
+
+      await sendAfterRewind(fixture);
+      const connection = drivers.connection(providerInstance);
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(3));
+      expect(forkSession).not.toHaveBeenCalled();
+      expect(connection.start).toHaveBeenCalledTimes(2);
+      const context = vi.mocked(connection.send).mock.calls[2]![0].context ?? [];
+      expect(context.map((block) => block.text).join("\n")).toContain("rewound the thread");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(87), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind" });
     } finally {
       await fixture.runtime.close();
       fixture.close();
@@ -11093,6 +11186,8 @@ function runtimeFixture(options: {
     ...(options.forkProviderSession === undefined
       ? {}
       : { forkProviderSession: options.forkProviderSession }),
+    nativeTurnAnchor: (anchorThreadId, anchorOperationId) =>
+      conversationReader.nativeTurnAnchor(anchorThreadId, decodeCodeOperationId(anchorOperationId)),
     credentialResolver: options.credentialResolver ?? { resolve: async () => options.credential },
     supportsAttachments: () => true,
     takeProductFeedbackForTurn: createProductFeedbackTurnPort({

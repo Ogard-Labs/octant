@@ -206,6 +206,8 @@ export interface CodeTurnEvent {
   readonly reconciliation?: CodeObservationReconciliation;
   readonly executionPolicy?: CodeThread["executionPolicy"];
   readonly permissionPersistence?: PermissionPersistence;
+  /** Where the turn ends in the runtime's own session; only on `completion`. */
+  readonly nativeAnchor?: string;
 }
 
 export interface CodeTurnRunnerInput {
@@ -1233,7 +1235,11 @@ function normalizeProviderEvent(
     case "failed":
       return Effect.succeed({ ...base, category: "failure", text: text(event.failure.message) });
     case "completed":
-      return Effect.succeed({ ...base, category: "completion" });
+      return Effect.succeed({
+        ...base,
+        category: "completion",
+        ...(event.nativeAnchor === undefined ? {} : { nativeAnchor: event.nativeAnchor }),
+      });
   }
 }
 

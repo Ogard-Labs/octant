@@ -1,4 +1,5 @@
 import {
+  forkSession as forkClaudeSession,
   listSessions as listClaudeSessions,
   query as queryClaude,
   type Options as ClaudeSdkOptions,
@@ -369,6 +370,11 @@ export type ClaudeDecodedMessage =
       readonly kind: "assistant";
       readonly sessionId: string;
       readonly messageId: string;
+      /**
+       * The SDK's id for this message in the session transcript, which
+       * `forkSession` and `resumeSessionAt` cut at. Absent when not reported.
+       */
+      readonly uuid?: string;
       readonly error?: string;
       readonly content: readonly ClaudeAssistantContent[];
       readonly usage: ClaudeUsage;
@@ -631,6 +637,17 @@ export interface ClaudeAgentSdkPort {
     readonly projectRoot: string;
     readonly configDirectory?: string;
   }) => Effect.Effect<ClaudeSessionMetadata | undefined, ProviderFailure>;
+  /**
+   * Copies a session of this Project into a new one ending at (and holding)
+   * the message `upToMessageId`, with fresh message ids, and returns the new
+   * session's id. The source is not changed. Absent on a port that cannot.
+   */
+  readonly forkSession?: (input: {
+    readonly sessionId: string;
+    readonly projectRoot: string;
+    readonly upToMessageId: string;
+    readonly configDirectory?: string;
+  }) => Effect.Effect<string, ProviderFailure>;
 }
 
 // Mutable because the SDK's `SDKUserMessage` content is; the port builds a
@@ -898,6 +915,11 @@ export interface ClaudeAgentSdkBridge {
     readonly dir: string;
     readonly includeWorktrees: false;
   }) => Promise<unknown>;
+  /** The SDK's own session copy; absent on a bridge that cannot make one. */
+  readonly forkSession?: (
+    sessionId: string,
+    options: { readonly dir: string; readonly upToMessageId: string },
+  ) => Promise<unknown>;
 }
 
 export interface ClaudeAgentSdkPortOptions {
@@ -1213,6 +1235,8 @@ function liveBridge(): ClaudeAgentSdkBridge {
       });
     },
     listSessions: (options) => listClaudeSessions(options),
+    forkSession: (sessionId, options) =>
+      forkClaudeSession(sessionId, { dir: options.dir, upToMessageId: options.upToMessageId }),
   };
 }
 
@@ -1280,6 +1304,7 @@ function killAndConfirmExit(
 
 export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): ClaudeAgentSdkPort {
   const sdk = options.sdk ?? liveBridge();
+  const copySession = sdk.forkSession;
   const inputCapacity = options.inputCapacity ?? DEFAULT_INPUT_CAPACITY;
 
   return {
@@ -2029,5 +2054,25 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
         },
         catch: (error) => sanitizeFailure(error, "session lookup"),
       }),
+    ...(copySession === undefined
+      ? {}
+      : {
+          forkSession: ({ sessionId, projectRoot, upToMessageId, configDirectory }) =>
+            Effect.tryPromise({
+              try: async () => {
+                const forked: unknown = await withClaudeAccountDirectory(configDirectory, () =>
+                  copySession(sessionId, { dir: projectRoot, upToMessageId }),
+                );
+                const id =
+                  typeof forked === "object" && forked !== null && "sessionId" in forked
+                    ? forked.sessionId
+                    : undefined;
+                if (typeof id !== "string" || id.trim().length === 0 || id === sessionId)
+                  throw new Error("Claude did not name the copied session.");
+                return id;
+              },
+              catch: (error) => sanitizeFailure(error, "session copy"),
+            }),
+        }),
   };
 }

@@ -2577,11 +2577,16 @@ now also move back in place. Chat's differences are under **Chat** below.
 - **Removed turns stop reaching the model.** A session recorded before the
   rewind still holds them, so it is never resumed as it stands. A provider
   that reports `sessionRollback` continues a copy of its own session cut back
-  at the last kept turn (`rewind-native-session`); today that is the Octant
-  Harness, whose transcript copy is the one a harness fork makes. Every other
-  provider reports it unsupported in its capability report, and the next turn
-  starts a fresh session with a disclosed text handoff of the kept turns
-  (`rewind`), journaled before the prompt is sent, as a provider switch's is.
+  at the last kept turn (`rewind-native-session`): the Octant Harness, whose
+  transcript copy is the one a harness fork makes, and Claude Code, whose
+  Agent SDK copies a session through a message (`forkSession` with
+  `upToMessageId`) at the anchor the kept turn's completion journaled (see
+  [native session anchors](#native-session-anchors)). Every other provider
+  reports it unsupported in its capability report, and the next turn starts a
+  fresh session with a disclosed text handoff of the kept turns (`rewind`),
+  journaled before the prompt is sent, as a provider switch's is. A provider
+  that reports it still goes back with the handoff when the kept turn has no
+  anchor (a turn journaled before anchors were recorded) or the copy fails.
   A host that rebuilds the conversation itself each turn rebuilds it from the
   kept turns. With no turn kept the thread starts again as it did at first,
   and a fork's first turn carries its source's conversation again.
@@ -2663,12 +2668,20 @@ now also move back in place. Chat's differences are under **Chat** below.
   and leaves `sessionRollback` to Work and Code.
 
 Rationale: provider-owned runtimes (Claude Code, Codex, OpenCode, ACP agents)
-each have their own way back in a session, but Octant could not prove any of
-them cuts at exactly the kept turn without a paid live turn, and a wrong cut
-would hand the model a turn the person removed while the transcript says it is
-gone. A fresh session with a disclosed handoff is the one path whose content
-the host chooses and journals, so those providers report `sessionRollback`
-unsupported until a driver proves its own rollback. Rewinding only the
+each have their own way back in a session, and a wrong cut would hand the
+model a turn the person removed while the transcript says it is gone. Octant
+therefore cuts only at an id the runtime itself reported for the end of a
+turn, never at a guessed position: Claude Code's copy ends at the last
+assistant message the kept turn reported, which its SDK copies inclusively
+with fresh ids, leaving the source untouched (maintainer principle,
+2026-11-14: a workflow that works in the provider's own app works in
+Octant). Codex reports its turn ids and Octant journals them, but stays on
+the handoff: its `thread/fork` (with `lastTurnId`, app-server v2 from
+rust-v0.162.1) leaves the copy loaded in the app-server that made it, and a
+thread loaded there is refused by another app-server's resume until that
+process ends, so the copy would have to be made on the lease that resumes
+it, inside the resume, after the host can still fall back to a text
+handoff. OpenCode and ACP agents report no anchor and keep the handoff. Rewinding only the
 conversation changes nothing but the thread's own record, so it is gated as a
 read (it runs in Plan and asks for no approval); any rewind that puts files
 back is gated as the in-place restore it performs.
@@ -9090,8 +9103,10 @@ handoff.
 **Fork handoff (Code).** A fork's first session (no session recorded on the
 fork yet) carries the source's conversation through the fork point, never
 past it. When the fork's provider instance and model can take up the
-source's own session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
-below), the fork resumes that copy and is sent no text. Otherwise, including
+source's own session there (the Octant Harness, `seedCodeForkHarnessSession`,
+below; Claude Code when the fork works in the source's own folder, since its
+sessions are kept per folder, see [native session anchors](#native-session-anchors)),
+the fork resumes that copy and is sent no text. Otherwise, including
 every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
 bounded `throughOperationId`): the source's accepted prompts and completed
@@ -9110,6 +9125,24 @@ sent, with the fork origin and the fork's provider and model: reason `fork`
 with the counts, taint and a content reference to the exact blocks sent, and
 fixed `false` native-session and hidden-reasoning values; or reason
 `fork-native-session` with `nativeSessionTransferred: true` and no content.
+
+<a id="native-session-anchors"></a>**Native session anchors.** A runtime's
+`completed` event may name where the turn ends in its own session
+(`nativeAnchor`): Claude Code reports the transcript id of the turn's last
+assistant message, Codex its turn id. The host journals it on the turn's
+completed `operation-state` (an additive field, absent from older turns).
+A driver that copies its own session offers `forkSession` in the provider
+SDK; the host asks it, for a fork's first session or a rewound thread's next
+one, with the kept turn's recorded session and anchor, and resumes the copy
+it returns. The driver returns nothing when the copy cannot be exact: Claude
+Code copies only for the source's own folder, mode and sign-in, because
+resume looks for a session under its folder in the account's directory. The
+copy is made before the prompt is sent, so any refusal or failure falls back
+to the text handoff, and the journal, file checkpoints and transcript are
+the same either way: the rewind's own record still removes the turns, and
+files go back only through Octant's checkpoints (the SDK's own
+`rewindFiles` is not used, since a second restore beside the checkpoint's
+would disagree with the journal).
 A recovered start reads that record back like a provider switch's: a text
 record is sent again without reading the source, and a native record whose
 copy cannot be taken up again refuses rather than sending text it did not
@@ -15086,7 +15119,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `appManagedToolsAtFullAccess` | `absent`                                                                                                                           | `absent`                                                                                                 | `absent` in the static block; reported `mixed` once a connection check proved the runtime accepts the tool endpoint without the exclusivity proof | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `acpClientCapabilities`       | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `supported`                                                                                                                                         | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `modelSwitch`                 | `supported`                                                                                                                        | `supported`                                                                                              | `supported`; the resume names the thread's current model on every prompt                                                                          | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `absent`; Octant replays history, so the model may change                               | `absent`; Octant replays history, so the model may change                                                 | `absent`; Octant replays history, so the model may change                                    | `absent`                              |
-  | `sessionRollback`             | `absent`; a rewind starts a fresh session with a text handoff                                                                      | `absent`; same                                                                                           | `absent`; same                                                                                                                                    | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
+  | `sessionRollback`             | `supported`; a rewind continues a copy of its session cut at the kept turn's anchor, or a text handoff when it has none            | `absent`; a rewind starts a fresh session with a text handoff                                            | `absent`; same                                                                                                                                    | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
   | `forceStop`                   | `supported`                                                                                                                        | `unsupported`; one process serves every thread                                                           | `unsupported`; one process serves every thread                                                                                                    | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `sessionCompaction.chat`      | `supported`; `unavailable` when the install lacks `/compact`                                                                       | `supported`; `unavailable` before Codex 0.162.1                                                          | `unavailable`; `supported` from 2.2.0                                                                                                             | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
   | `sessionCompaction.work`      | as Chat                                                                                                                            | as Chat                                                                                                  | as Chat                                                                                                                                           | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |

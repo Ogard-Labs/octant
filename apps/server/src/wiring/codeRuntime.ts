@@ -29,6 +29,7 @@ import {
   decodeThreadWorkingDirectory,
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
+  type CodeOperationId,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -1492,6 +1493,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             throughOperationId,
             ...(afterOperationId === undefined ? {} : { afterOperationId }),
           }),
+        nativeTurnAnchor: (threadId, operationId) => {
+          let decoded: CodeOperationId;
+          try {
+            decoded = decodeCodeOperationId(operationId);
+          } catch {
+            return undefined;
+          }
+          return codeBoardEventStore.nativeTurnAnchor(threadId, decoded);
+        },
         forkProviderSession: (input) =>
           seedCodeForkHarnessSession(
             {

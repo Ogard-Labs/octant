@@ -64,6 +64,7 @@ import {
   ProviderModelId,
   ProviderSessionId,
   ProviderContextBreakdown,
+  ProviderNativeAnchor,
   ProviderResumeCursor,
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
@@ -1753,6 +1754,12 @@ const OperationStateEvent = Schema.Struct({
   kind: Schema.Literal("operation-state"),
   state: Schema.Literal("running", "waiting", "completed", "interrupted", "failed"),
   failure: Schema.optional(CodeOperationFailure),
+  /**
+   * On the provider's own completion: where the turn ends in the runtime's
+   * session, which a native fork or rewind cuts at. Absent on every other
+   * state, and on turns journaled before Octant recorded it.
+   */
+  nativeAnchor: Schema.optional(ProviderNativeAnchor),
 }).annotations(strict);
 const ConversationTurnStartedEvent = Schema.Struct({
   toolCatalogHandoff: Schema.optional(Schema.Boolean),

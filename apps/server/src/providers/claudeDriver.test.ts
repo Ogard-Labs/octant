@@ -276,6 +276,13 @@ function harness(
         sessions.get(sdkSessionId)?.projectRoot === root ? sessions.get(sdkSessionId) : undefined,
       ),
     ),
+    forkSession: vi.fn(({ sessionId: sdkSessionId, projectRoot: root, upToMessageId }) =>
+      Effect.sync(() => {
+        const copied = `${sdkSessionId}-through-${upToMessageId}`;
+        sessions.set(copied, { sessionId: copied, projectRoot: root, lastModified: 11 });
+        return copied;
+      }),
+    ),
   };
   const process: ClaudeProcessPort = {
     probeVersion: vi.fn(() => Effect.succeed(options.runtimeVersion ?? "2.1.211")),
@@ -6582,6 +6589,85 @@ describe("Claude single-use sessions", () => {
     expect(f.queries).toHaveLength(4);
     expect(f.resumeIdentityPort.put).not.toHaveBeenCalled();
     expect(f.resumeIdentities.size).toBe(0);
+  });
+});
+
+describe("Claude session copies for a fork or rewind", () => {
+  it("copies the session through the anchor and resumes the copy under the new session", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    const started = await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    const source = started.resumeCursor;
+    if (source === undefined) throw new Error("The session reported no cursor.");
+
+    const copied = await Effect.runPromise(
+      f.driver.forkSession!({
+        instanceId,
+        sessionId: otherSessionId,
+        source,
+        anchor: "assistant-message-7",
+        projectRoot,
+        mode: "code",
+        modelId,
+      }),
+    );
+    expect(f.sdk.forkSession).toHaveBeenCalledWith({
+      sessionId: source.value,
+      projectRoot,
+      upToMessageId: "assistant-message-7",
+    });
+    expect(copied).toEqual({
+      driverKind: "claude",
+      value: `${source.value}-through-assistant-message-7`,
+      binding: { instanceId, sessionId: otherSessionId, projectRoot, mode: "code", modelId },
+    });
+    if (copied === undefined) throw new Error("No copy was made.");
+
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId: otherSessionId,
+        resumeCursor: copied,
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(f.opens.at(-1)).toMatchObject({ resumeSessionId: copied.value });
+    await Effect.runPromise(acquired.connection.stop(otherSessionId));
+    await acquired.close();
+  });
+
+  it("makes no copy for another folder or mode, so the fork reads its source as text", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    const started = await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+    const source = started.resumeCursor;
+    if (source === undefined) throw new Error("The session reported no cursor.");
+    const request = {
+      instanceId,
+      sessionId: otherSessionId,
+      source,
+      anchor: "assistant-message-7",
+      projectRoot,
+      mode: "code" as const,
+      modelId,
+    };
+
+    for (const differing of [
+      { projectRoot: "/tmp/octant-claude-fork-worktree" },
+      { mode: "work" as const },
+      { source: { driverKind: "codex" as const, value: source.value } },
+    ]) {
+      expect(
+        await Effect.runPromise(f.driver.forkSession!({ ...request, ...differing })),
+      ).toBeUndefined();
+    }
+    expect(f.sdk.forkSession).not.toHaveBeenCalled();
   });
 });
 

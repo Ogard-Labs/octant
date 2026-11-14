@@ -874,6 +874,24 @@ gate, and a `remote_agent` task stays an unsupported frame. Rationale: a
 workflow is a batch of subagents, so the subagent switch, display, and gate
 cover it unchanged, and the held turn covers its background lifetime.
 
+#### Fork and rewind
+
+A Code fork or rewind continues a copy of Claude's own session rather than a
+text handoff where it can (maintainer principle, 2026-11-14). Each completed
+turn reports the transcript id of its last assistant message (the
+`SDKAssistantMessage.uuid` the Agent SDK documents for `resumeSessionAt`),
+which the host journals as the turn's native anchor. The driver's
+`forkSession` calls the SDK's own `forkSession(sessionId, { dir,
+upToMessageId })` under the account's directory, which copies the
+transcript through that message with fresh ids and leaves the source alone,
+records the copy's resume identity for the new Octant session, and returns
+its cursor; the turn then resumes it as any session. Claude keeps a session
+under its folder and resume looks there, so a copy is made only for the
+source's own folder, mode and sign-in: a fork onto its own worktree, a turn
+with no anchor, or a failed copy goes back with the text handoff
+([Architecture: native session anchors](../architecture.md#native-session-anchors)).
+`rewindFiles` is not used; files go back through Octant's checkpoints.
+
 #### Wake-ups the model schedules
 
 `ScheduleWakeup` (a delay, held to one minute to one hour), `CronCreate` (a

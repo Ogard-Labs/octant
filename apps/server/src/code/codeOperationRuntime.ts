@@ -87,6 +87,7 @@ import {
   type ProviderCapabilities,
   type ProviderNativeSetup,
   type ProviderRuntimeEvent,
+  type ProviderInstanceId,
   type ProviderResumeCursor,
   type ProviderProbeResult,
   type WindowId,
@@ -915,6 +916,21 @@ export interface CodeOperationRuntimeOptions {
     readonly checkoutRoot: string;
     readonly secrets: ReadonlyArray<string>;
   }) => Promise<ProviderResumeCursor | undefined>;
+  /**
+   * Where a completed turn ends in its runtime's own session, as the journal
+   * recorded it, for a driver that copies its own session (`forkSession`).
+   * Absent, or undefined for a turn, means that turn goes back as text.
+   */
+  readonly nativeTurnAnchor?: (
+    threadId: CodeThreadId,
+    operationId: string,
+  ) =>
+    | {
+        readonly providerInstanceId: ProviderInstanceId;
+        readonly resumeCursor: ProviderResumeCursor;
+        readonly anchor: string;
+      }
+    | undefined;
   readonly resolveProfileSkills?: CodeOperationServiceOptions["resolveProfileSkills"];
   readonly resolveSelectedExtensions?: CodeOperationServiceOptions["resolveSelectedExtensions"];
   readonly pinnedExtensionIds?: CodeOperationServiceOptions["pinnedExtensionIds"];
@@ -3360,15 +3376,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // lapsed during driver and credential preparation copies nothing.
       if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
         return refuseRevokedAdmission();
-      const seeded = await this.#options
-        .forkProviderSession?.({
-          fork: input.thread,
-          origin: forkOrigin,
-          sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.providerRoot ?? input.checkoutRoot,
-          secrets,
-        })
-        .catch(() => undefined);
+      const seeded = await this.#forkSession(driver, {
+        fork: input.thread,
+        origin: forkOrigin,
+        sessionId: decodeProviderSessionId(input.sessionId),
+        checkoutRoot: input.providerRoot ?? input.checkoutRoot,
+        secrets,
+      });
       if (seeded !== undefined) {
         resumeCursor = seeded;
         forkSeeded = true;
@@ -3389,15 +3403,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ) {
       if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
         return refuseRevokedAdmission();
-      const seeded = await this.#options
-        .forkProviderSession?.({
-          fork: input.thread,
-          origin: { threadId: input.thread.id, throughOperationId: lastKeptTurn },
-          sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.providerRoot ?? input.checkoutRoot,
-          secrets,
-        })
-        .catch(() => undefined);
+      const seeded = await this.#forkSession(driver, {
+        fork: input.thread,
+        origin: { threadId: input.thread.id, throughOperationId: lastKeptTurn },
+        sessionId: decodeProviderSessionId(input.sessionId),
+        checkoutRoot: input.providerRoot ?? input.checkoutRoot,
+        secrets,
+      });
       if (seeded !== undefined) {
         resumeCursor = seeded;
         // The copy's history is the kept turns', not the newest turn's (a
@@ -4079,6 +4091,51 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (String(source.projectId) !== String(thread.projectId))
       return { status: "refused", reason: "foreign-project" };
     return { status: "readable", source };
+  }
+
+  /**
+   * A copy of a session cut back at a kept turn, for a fork's first session
+   * or a rewound thread's next one. A runtime that copies its own session
+   * (`forkSession`) is asked first, at the turn's journaled anchor; the host's
+   * own harness transcript copy is tried next. Undefined when neither can make
+   * an exact copy, including a turn journaled before its anchor was recorded,
+   * so the caller sends the text handoff instead.
+   */
+  async #forkSession(
+    driver: ProviderDriver,
+    input: {
+      readonly fork: CodeThread;
+      readonly origin: NonNullable<CodeThread["forkedFrom"]>;
+      readonly sessionId: ProviderSessionId;
+      readonly checkoutRoot: string;
+      readonly secrets: ReadonlyArray<string>;
+    },
+  ): Promise<ProviderResumeCursor | undefined> {
+    const copySession = driver.forkSession;
+    if (copySession !== undefined) {
+      const anchor = this.#options.nativeTurnAnchor?.(
+        input.origin.threadId,
+        input.origin.throughOperationId,
+      );
+      if (
+        anchor !== undefined &&
+        String(anchor.providerInstanceId) === String(input.fork.providerInstanceId)
+      ) {
+        const copied = await Effect.runPromise(
+          copySession({
+            instanceId: input.fork.providerInstanceId,
+            sessionId: input.sessionId,
+            source: anchor.resumeCursor,
+            anchor: anchor.anchor,
+            projectRoot: input.checkoutRoot,
+            mode: "code",
+            modelId: input.fork.modelId,
+          }),
+        ).catch(() => undefined);
+        if (copied !== undefined) return copied;
+      }
+    }
+    return this.#options.forkProviderSession?.(input).catch(() => undefined);
   }
 
   /** A fork's text handoff: the source's conversation through the fork point. */
@@ -6883,7 +6940,12 @@ function normalizedOperationEvent(
   ) {
     return { kind: "runtime-turn-started", trigger: event.status };
   }
-  if (event.category === "completion") return { kind: "operation-state", state: "completed" };
+  if (event.category === "completion")
+    return {
+      kind: "operation-state",
+      state: "completed",
+      ...(event.nativeAnchor === undefined ? {} : { nativeAnchor: event.nativeAnchor }),
+    };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };
   if (event.category === "interruption") {
     // The provider's sentence is the only reason the person will ever see, so

@@ -349,12 +349,36 @@ export interface ProviderDriver {
   readonly acquire: (
     input: ProviderAcquireInput,
   ) => Effect.Effect<ProviderConnection, ProviderFailure, Scope.Scope>;
+  /**
+   * Copies a session this driver opened into a new one that ends at a turn's
+   * native anchor (as its `completed` event reported it), for a fork or a
+   * rewind, and returns the cursor that resumes the copy under `sessionId`.
+   * The source is never changed. Undefined when the copy cannot be exact
+   * (another folder, mode or sign-in than the source's), so the host falls
+   * back to a text handoff. Present only on a driver whose runtime makes the
+   * copy itself.
+   */
+  readonly forkSession?: (
+    input: ProviderSessionForkRequest,
+  ) => Effect.Effect<ProviderResumeCursor | undefined, ProviderFailure>;
   readonly beginAuthentication?: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderAuthenticationAttempt, ProviderFailure, Scope.Scope>;
   readonly completeAuthentication?: (
     input: ProviderProbeInput & { readonly attemptId: string },
   ) => Effect.Effect<void, ProviderFailure, Scope.Scope>;
+}
+
+export interface ProviderSessionForkRequest {
+  readonly instanceId: ProviderInstanceId;
+  /** The Octant session the copy is resumed under. */
+  readonly sessionId: ProviderSessionId;
+  /** The source session, as its turn's `provider-session-ready` recorded it. */
+  readonly source: ProviderResumeCursor;
+  readonly anchor: string;
+  readonly projectRoot: string;
+  readonly mode: "work" | "code";
+  readonly modelId: ProviderModelId;
 }
 
 export interface ProviderToolVerificationInput {

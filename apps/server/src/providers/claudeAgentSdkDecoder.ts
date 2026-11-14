@@ -1433,6 +1433,9 @@ export function decodeMessage(
       kind: "assistant",
       sessionId: message.session_id,
       messageId: assistant.id,
+      ...(typeof message.uuid === "string" && message.uuid.trim().length > 0
+        ? { uuid: message.uuid }
+        : {}),
       ...(message.error === undefined ? {} : { error: message.error }),
       content: assistant.content.map((content) => decodeAssistantContent(content, input)),
       usage: decodeUsage(assistant.usage, true),

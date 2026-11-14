@@ -2825,6 +2825,10 @@ export type ProviderApprovalCall = typeof ProviderApprovalCall.Type;
 /** The most of a runtime tool's result the Watcher is handed. */
 export const OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS = 65_536;
 
+/** A point in a runtime's own session, as the runtime names it. */
+export const ProviderNativeAnchor = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
+export type ProviderNativeAnchor = typeof ProviderNativeAnchor.Type;
+
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -3225,6 +3229,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     resumeCursor: Schema.optional(ProviderResumeCursor),
     /** Present only when the runtime said why this reply stopped. */
     stopReason: Schema.optional(ProviderOutputStopReason),
+    /**
+     * Where this turn ends in the runtime's own session, in the runtime's own
+     * terms (Claude's last assistant message id, a Codex turn id), so a fork
+     * or rewind can ask the runtime to cut its session there. Absent when the
+     * runtime names no such point.
+     */
+    nativeAnchor: Schema.optional(ProviderNativeAnchor),
   }).annotations(strict),
 );
 export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;
