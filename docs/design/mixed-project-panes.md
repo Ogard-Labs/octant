@@ -51,7 +51,7 @@ other thread in a separate window placed beside this one.
 | FR-9  | A mixed layout survives reload and restart, and reconciles against Projects that were archived or relinked meanwhile                                                                                   | Must     | After B is archived, the restored window shows B's pane as the mode welcome and no longer reaches B                                                                                                                                | S3      |
 | FR-10 | Windows that show one Project behave exactly as today                                                                                                                                                  | Must     | The existing shell policy, workspace, Code access and Browser authority suites pass unchanged                                                                                                                                      | S2, S3  |
 | FR-11 | Plugin and skill enablement resolve on the pane's own Project                                                                                                                                          | Must     | A plugin enabled for A only contributes its dock tool to the A pane and not to the B pane                                                                                                                                          | S6      |
-| FR-12 | A thread from another Project cannot be attached as context to a composer, by drop or by `#` mention                                                                                                   | Must     | Dropping a B thread on the A pane's composer, or choosing it from `#`, leaves the draft unchanged and says "This thread is in another Project"; nothing of B is read                                                               | S2, S9  |
+| FR-12 | Mixing adds no context-attach reach: a composer may attach, by drop or by `#` mention, exactly the threads it could in a one-Project window                                                            | Must     | With an A pane and a B pane open, the A composer's `#` list and drop accept exactly what a window showing only A accepts; a B Code thread it could not reach before is refused and nothing of it is read                           | S2, S9  |
 | FR-13 | A sidebar click on another Project's thread moves the window as today                                                                                                                                  | Must     | Clicking a B thread in a window showing only A switches the window to B and stows A's layout, as today                                                                                                                             | S9      |
 | FR-14 | Clicking a thread that is part of a stowed mixed layout brings that whole mixed layout back                                                                                                            | Must     | A window shows A and B side by side; the person clicks a C thread (the window moves to C), then clicks the B thread: the A and B layout returns with B's pane active                                                               | S9      |
 | FR-15 | Server (SSH) Projects mix with local Projects and with each other                                                                                                                                      | Must     | A server Work Project thread dropped beside a local Work thread shows in its own pane; its Files panel reads only server metadata; its terminal opens only while the window admits it                                              | S9, S10 |
@@ -233,9 +233,10 @@ projectId)`. It guarantees: a pane's Project comes from the server-side
   and `P` is the turn's own Project. The Work and Chat turn paths, Chat context
   reads and the Browser authority resolver get the same narrowing. It guarantees
   a turn never reaches another pane's Project, whatever the window admits (D-2).
-- **Composer context attach** (drop and `#` mention) is judged on the
-  composer's own thread's Project, not on what the window admits, so a thread
-  of another Project is refused (FR-12).
+- **Composer context attach** (drop and `#` mention) keeps today's rule, a
+  thread this window can Open, judged on the window's lead context and never
+  on its admission set, so another pane's Project never becomes attachable
+  through the mix (FR-12, Q-6).
 - **Pane presentation** reads pane contexts from the bootstrap and change feed;
   it may refuse early for speed but never admits on its own.
 
@@ -367,7 +368,7 @@ redraws pane marks from them.
 | R7 Admission grows large                                                                                                 | NFR-1: no count limit by maintainer decision; the existing 64-pane and 512 KiB layout limits bound it, and D-2 keeps a large set from widening any turn               |
 | R8 A restored layout revives reach to an archived or relinked Project                                                    | FR-9: per-pane reconciliation on restart and on every stowed restore                                                                                                  |
 | R9 A missed equality site keeps the old rule and refuses, or a new site trusts the lead only                             | One helper (`windowAdmitsProject`) and a check in slice 2 that refuses `contextByMode[...].projectId` comparisons outside the domain helper                           |
-| R10 Another Project's content enters a turn through the composer                                                         | FR-12: context attach is judged on the composer's thread's Project                                                                                                    |
+| R10 Another Project's content enters a turn through the composer                                                         | FR-12: context attach is judged on the lead context, never the admission set                                                                                          |
 | R11 A server Project's SSH session outlives its pane                                                                     | CON-3: its terminal checks read `windowAdmitsProject`, so closing the pane retires the session as a window switch does today                                          |
 
 ### NFR mechanisms
@@ -438,7 +439,8 @@ since is found where it is now.
 
 | Requirement                    | Capability | Component                                 | Slice |
 | ------------------------------ | ---------- | ----------------------------------------- | ----- |
-| FR-2, FR-8, FR-12              | Judge      | Turn standing authority                   | 1     |
+| FR-2, FR-8                     | Judge      | Turn standing authority                   | 1     |
+| FR-12                          | Judge      | Window admission check                    | 2     |
 | FR-1, FR-3, FR-4, NFR-1, NFR-2 | Admit      | Workspace contract and policy             | 2     |
 | FR-9, FR-10, FR-13, FR-14      | Persist    | Workspace policy, shell service           | 2     |
 | FR-11, CON-2                   | Judge      | Window admission check, pane presentation | 2     |
@@ -447,11 +449,11 @@ since is found where it is now.
 
 ## 7. Build plan
 
-| Slice | What it delivers                                                                                                                                                                                                                                | Requirement IDs                                                         | Status  |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------- |
-| 1     | Turn standing authority narrows to the turn's own Project in Chat, Work and Code (window-held tools, `#thread` reads, Chat context, Browser resolver); composer attach judged on the composer's thread. No visible change; mixing still refused | FR-2, FR-8, FR-10, FR-12                                                | Planned |
-| 2     | Pane context in the contract; policy admission for every mode and for server Projects; `windowAdmitsProject` at every site with a check against new equality sites; stow and restore of mixed layouts; reconciliation; renderer stops refusing  | FR-1, FR-3, FR-4, FR-9, FR-11, FR-13, FR-14, FR-15, NFR-1, NFR-2, CON-3 | Planned |
-| 3     | Presentation: Project mark in every pane title, Project-named approvals, Needs you rows and terminal tabs; rendered QA at split widths; Workspace, Architecture, Server Projects and Decisions updated                                          | FR-5, FR-6, FR-7                                                        | Planned |
+| Slice | What it delivers                                                                                                                                                                                                                                                                                      | Requirement IDs                                                                | Status           |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------- |
+| 1     | Turn standing authority narrows to the turn's own Project in Chat, Work and Code (window-held tools, `#thread` reads, Chat context, Browser resolver). No visible change; mixing still refused                                                                                                        | FR-2, FR-8, FR-10                                                              | Done (49846f777) |
+| 2     | Pane context in the contract; policy admission for every mode and for server Projects; `windowAdmitsProject` at every site with a check against new equality sites; stow and restore of mixed layouts; reconciliation; renderer stops refusing; mention and drop resolution stays on the lead context | FR-12, FR-1, FR-3, FR-4, FR-9, FR-11, FR-13, FR-14, FR-15, NFR-1, NFR-2, CON-3 | Planned          |
+| 3     | Presentation: Project mark in every pane title, Project-named approvals, Needs you rows and terminal tabs; rendered QA at split widths; Workspace, Architecture, Server Projects and Decisions updated                                                                                                | FR-5, FR-6, FR-7                                                               | Planned          |
 
 Slices 2 and 3 should land together or 3 directly after 2, because a mixed window
 without the Project marks is the R4 risk. Slice 1 is safe to land alone.
@@ -479,7 +481,7 @@ whether a window may reach a Project.
   the thread's own Project.
 - **Chat Side Chat file reads** call the Code read outside standing authority,
   so after the request ends they refuse. That fails closed and is left alone.
-- **Composer attach** waits on Q-6.
+- **Composer attach** needs nothing in slice 1: a maintainer answered Q-6 with (a), so the mention rule stays as it is and slice 2 keeps it on the lead context when admission becomes a set.
 - **Failure modes.** A turn whose thread moves Project keeps its old
   `projectId` until it ends, so its calls refuse for the new Project, as a
   rebind refuses today. No persisted data changes; no migration.
@@ -495,7 +497,7 @@ whether a window may reach a Project.
 | A Code turn's `#thread` read, terminal read and board call for a Project other than its own refuse `unauthorized` under standing authority          | Server (codeProjectAccess, Code runtime) | 1     |
 | A Work turn, a Chat turn's context read and a Browser call get the same narrowing                                                                   | Server                                   | 1     |
 | The same calls for a turn's own Project succeed in a one-Project window, unchanged                                                                  | Server                                   | 1     |
-| Dropping, or `#`-choosing, another Project's thread on a composer leaves the draft unchanged and reads nothing of it                                | Server + web integration                 | 1     |
+| With A and B panes open, the A composer's `#` list and drop accept exactly what an A-only window accepts                                            | Server + web integration                 | 2     |
 | `split-pane` of a B thread into an A window is admitted in Chat, Work and Code; the pane records B's context; the lead stays A                      | Domain (shellPolicy)                     | 2     |
 | A surface claiming B but naming a C thread records C, or refuses when C is not active                                                               | Domain                                   | 2     |
 | Cross-mode and cross-host placements refuse with their messages                                                                                     | Domain                                   | 2     |
@@ -512,19 +514,25 @@ whether a window may reach a Project.
 
 ## 8. Open questions
 
-| ID  | Question                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Blocks                              |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| Q-6 | Today a `#` mention or a dropped thread may name any thread this window can Open, which already crosses Projects (a Chat thread mentioning a Work thread, a Work thread mentioning another Work Project's thread). Does FR-12 mean (a) a mixed window adds no reach beyond that, so another pane's Project never becomes mentionable through the mix, or (b) every composer may attach only threads of its own Project, which removes today's cross-Project mentions? | FR-12, the composer part of slice 1 |
+All questions are answered.
 
-Q-1 to Q-5 were answered by a maintainer on 2026-11-14.
+Answered by a maintainer on 2026-11-14:
 
-| ID  | Question                                                                 | Answer                                                                 | Now in            |
-| --- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ----------------- |
-| Q-1 | Which modes mix?                                                         | All modes, built at once (each mode inside its own layout)             | FR-1, slice 2     |
-| Q-2 | May another Project's thread be attached as context to a composer?       | No                                                                     | FR-12             |
-| Q-3 | Does a sidebar click on another Project's thread keep moving the window? | Yes, and clicking back on a thread of the mixed view restores the view | FR-13, FR-14, D-3 |
-| Q-4 | How many Projects may one window reach?                                  | No limit; screen size and the person decide                            | NFR-1             |
-| Q-5 | Do server (SSH) Projects mix with local ones?                            | Yes                                                                    | FR-15, CON-3      |
+| ID  | Question                                                                                | Answer                                                                 | Now in            |
+| --- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------- |
+| Q-1 | Which modes mix?                                                                        | All modes, built at once (each mode inside its own layout)             | FR-1, slice 2     |
+| Q-2 | May another Project's thread be attached as context to a composer?                      | No                                                                     | FR-12             |
+| Q-3 | Does a sidebar click on another Project's thread keep moving the window?                | Yes, and clicking back on a thread of the mixed view restores the view | FR-13, FR-14, D-3 |
+| Q-4 | How many Projects may one window reach?                                                 | No limit; screen size and the person decide                            | NFR-1             |
+| Q-5 | Do server (SSH) Projects mix with local ones?                                           | Yes                                                                    | FR-15, CON-3      |
+| Q-6 | Does FR-12 remove today's cross-Project mentions, or only forbid new reach from mixing? | Only new reach: today's mentions stay                                  | FR-12, slice 2    |
+
+### Verification
+
+| Criterion               | Test                                                                                                    | Result                                 | Change    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------- | --------- |
+| FR-2, FR-8 (Code turns) | `codeProjectAccess.test.ts` "reaches only the turn's own Project, even when the window reaches another" | Pass; fails with the narrowing removed | 49846f777 |
+| FR-10                   | Existing standing, routine, queued-device, provider cloud, git hunk and Code runtime suites (386 tests) | Pass                                   | 49846f777 |
 
 ## 9. Codebase deltas and change log
 
@@ -550,3 +558,5 @@ Q-1 to Q-5 were answered by a maintainer on 2026-11-14.
 - 2026-11-14: Approved by a maintainer. Slice 1 detailed design written; the
   Code turn narrowing built. Q-6 raised: what FR-12 means for today's
   cross-Project mentions.
+- 2026-11-14: Q-6 answered (a): mixing adds no attach reach; today's mention
+  rule stays and slice 2 keeps it on the lead context. Slice 1 done.
