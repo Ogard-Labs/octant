@@ -179,7 +179,9 @@ function settings(): ChatSettings {
     defaultProviderInstanceId: ids.provider,
     defaultModelId: "model-a",
     defaultResearchEnabled: true,
-    defaultResearchRouting: "automatic",
+    // The fixture's provider reports a search of its own, which automatic
+    // routing now prefers; these tests exercise Octant's SearXNG tools.
+    defaultResearchRouting: "searxng",
     searxngBaseUrl: "https://search.example.test",
     defaultPersonalityInstructions: "Be calm.",
     version: 1 as AggregateVersion,
