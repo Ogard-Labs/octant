@@ -2065,10 +2065,9 @@ describe("SettingsView", () => {
     });
     expect(fullAccess).toHaveValue(0);
     expect(screen.getByText(/0 means no limit/)).toBeVisible();
-    // The fixed stop that guards against a runaway turn is said where the limit is set.
-    expect(
-      screen.getByText(/still stops after 4,096 runtime events, whatever this is set to/),
-    ).toBeVisible();
+    // The event stop follows the limit, and is said where the limit is set.
+    expect(screen.getByText(/stops after 64 runtime events for each step kept/)).toBeVisible();
+    expect(screen.getByText(/no event count stops the turn/)).toBeVisible();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Decrease Tool steps kept per turn" }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({ toolStepsPerTurn: 63 });

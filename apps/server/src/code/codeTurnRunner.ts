@@ -1,6 +1,7 @@
 import type { Questionnaire } from "@octant/contracts";
 import { isAbsolute } from "node:path";
 import {
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   decodeCodeRelativePath,
   type CodeThread,
   type PermissionPersistence,
@@ -23,6 +24,7 @@ import {
   observeTurnMetrics,
   providerAvailabilityFromFailure,
   startTurnMetrics,
+  turnRuntimeEventBudget,
 } from "@octant/domain";
 import {
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
@@ -51,6 +53,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
+  AnsweredRequests,
   countsTowardTurnEventBudget,
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
   DEFAULT_STALLED_TURN_LIMIT_MS,
@@ -58,6 +61,7 @@ import {
   makeIdleTimeout,
   makeStreamedOutputBudget,
   makeTurnTextParagraphs,
+  MAX_REMEMBERED_ANSWERED_REQUESTS,
   MAX_TURN_STREAMED_OUTPUT_BYTES,
   STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
@@ -68,7 +72,6 @@ const MAX_CODE_TURN_FIELD_BYTES = 8 * 1024;
 const MAX_CODE_TURN_INPUT_ITEMS = 64;
 // Discrete events only (tool calls, approvals, file changes); streaming
 // deltas are exempt. Agentic turns routinely run hundreds of tool calls.
-const DEFAULT_MAX_EVENTS = 4_096;
 // Inactivity window, not a wall clock: a turn lives as long as the provider
 // keeps producing events. Long-running tools (test suites, builds) can be
 // silent for minutes.
@@ -305,8 +308,18 @@ export interface CodeTurnRunnerInput {
 }
 
 export interface CodeTurnRunnerOptions {
-  /** Maximum discrete (non-delta) provider events per turn. */
+  /**
+   * A fixed number of discrete (non-delta) provider events per turn, for a
+   * caller with no host setting to read. Without it the budget follows the
+   * person's tool-step limit for the level the turn runs at.
+   */
   readonly maxEvents?: number;
+  /**
+   * The tool-step limit for a turn at the given level, `undefined` when it is
+   * off. Read as each turn starts. Absent keeps the default limit below Full
+   * access and no limit at Full access.
+   */
+  readonly toolStepLimit?: (fullAccess: boolean) => number | undefined;
   /**
    * The host's stalled-turn limit in milliseconds, `null` when it is Off.
    * Read as each turn starts, so a changed setting applies to the next turn
@@ -326,13 +339,17 @@ export interface CodeTurnRunnerOptions {
 }
 
 export class CodeTurnRunner {
-  readonly #maxEvents: number;
+  readonly #maxEvents: number | undefined;
+  readonly #toolStepLimit: (fullAccess: boolean) => number | undefined;
   readonly #stalledTurnLimitMs: () => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #maxStreamedOutputBytes: number;
 
   constructor(options: CodeTurnRunnerOptions = {}) {
-    this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+    this.#maxEvents = options.maxEvents;
+    this.#toolStepLimit =
+      options.toolStepLimit ??
+      ((fullAccess) => (fullAccess ? undefined : DEFAULT_THREAD_TOOL_STEPS_PER_TURN));
     this.#maxStreamedOutputBytes = options.maxStreamedOutputBytes ?? MAX_TURN_STREAMED_OUTPUT_BYTES;
     const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
     this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
@@ -341,7 +358,10 @@ export class CodeTurnRunner {
   }
 
   run(input: CodeTurnRunnerInput): Effect.Effect<void, CodeTurnFailure, Scope.Scope> {
-    const maxEvents = this.#maxEvents;
+    const maxEvents =
+      this.#maxEvents ??
+      turnRuntimeEventBudget(this.#toolStepLimit(input.thread.executionPolicy === "full-access")) ??
+      Number.POSITIVE_INFINITY;
     const stalledTurnLimitMs = this.#stalledTurnLimitMs;
     const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
     const streamedOutput = makeStreamedOutputBudget(this.#maxStreamedOutputBytes);
@@ -386,7 +406,7 @@ export class CodeTurnRunner {
       const toolNames = new Map<string, string>();
       let providerCompleted = false;
       let responseText = "";
-      const answeredToolRequestIds = new Set<string>();
+      const answeredToolRequests = new AnsweredRequests();
 
       // The outcome write must survive losing the settlement race: after a
       // cancel, the abort path and the provider's own interrupted event both
@@ -675,7 +695,7 @@ export class CodeTurnRunner {
                     yield* Effect.promise(() =>
                       input.onTurnCompleted!({
                         text: responseText,
-                        toolCalls: answeredToolRequestIds.size,
+                        toolCalls: answeredToolRequests.count,
                         turn: endOfTurn(outputLimited ? "max-tokens" : "end-of-turn"),
                       }).catch(() => undefined),
                     );
@@ -689,8 +709,7 @@ export class CodeTurnRunner {
                     if (boundedEvent.kind !== "tool-request") {
                       return yield* fail("failed", "Provider event sanitization failed closed.");
                     }
-                    if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
-                    answeredToolRequestIds.add(sanitizedEvent.requestId);
+                    if (!answeredToolRequests.answer(sanitizedEvent.requestId)) return;
                     const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
                     const allowed = toolSet?.definitions.some(
                       (definition) => definition.name === sanitizedEvent.toolName,
@@ -912,6 +931,13 @@ function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): Cod
   if (event.toolCallId === undefined) return event;
   if (event.category === "tool" && event.status === "started" && event.toolName !== undefined) {
     toolNames.set(event.toolCallId, event.toolName);
+    // A turn with no event budget has no end to its calls; the oldest
+    // call's name is forgotten past the bound, and its outcome then goes
+    // without one, as an outcome for an unseen call does.
+    for (const oldest of toolNames.keys()) {
+      if (toolNames.size <= MAX_REMEMBERED_ANSWERED_REQUESTS) break;
+      toolNames.delete(oldest);
+    }
     return event;
   }
   if (event.category !== "observation" || event.toolName !== undefined) return event;

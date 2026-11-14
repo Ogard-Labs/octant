@@ -4951,10 +4951,19 @@ have no row.
   host reads the setting when a turn starts. Spend ceilings and every other
   hard line are unchanged. Rationale: a count of rows protects nothing a
   person cannot get back, so it is a default; the bytes it used to cost are
-  gone with the next rule. One bound stays fixed: a Chat or Work turn stops
-  after 4,096 discrete runtime events (streamed text does not count),
-  whatever this setting says, because it guards against a runaway turn
-  (maintainer decision, 2026-11-13). The Full access row in Settings says so.
+  gone with the next rule. A turn's event budget follows the same setting
+  (maintainer decision, 2026-11-14, replacing the fixed 4,096-event stop of
+  2026-11-13): a Chat, Work or Code turn stops after 64 discrete runtime
+  events (streamed text does not count) for each tool step its limit keeps,
+  so the default 64 steps keep the 4,096 events a turn had, and a limit that
+  is off (Full access at 0, the default there) stops no turn on an event
+  count; the spend ceiling, the stalled-turn limit, the streamed-output budget
+  and Stop still bound it. Code reads the same two numbers by the level its
+  turn runs at. No ceiling ends a turn the person did not choose to bound.
+  Memory stays bounded without the count: the answered-request ids a runner
+  keeps to refuse a repeat, and the tool names Code carries to a call's
+  outcome, forget their oldest settled entries past 4,096
+  (`AnsweredRequests` in `apps/server/src/providers/turnBudget.ts`).
 - **A step is journaled and streamed as a change.** Chat journals each tool
   event as `chat.attempt-tool-step@1`, carrying the one step that changed
   (none when the list only became truncated) and the attempt's `updatedAt`;

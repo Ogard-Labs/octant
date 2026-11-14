@@ -206,7 +206,7 @@ import {
   LOCAL_HOST_ID,
   MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_THREAD_TOOL_STEPS_SETTING,
-  MAX_TURN_RUNTIME_EVENTS,
+  RUNTIME_EVENTS_PER_TOOL_STEP,
 } from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
@@ -1748,7 +1748,7 @@ function ActiveSectionContent({
           <SettingsSection title="Tool steps">
             <div className="setgroup">
               <SettingRow
-                description={`How many tool calls a Chat or Work turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row.`}
+                description={`How many tool calls a Chat, Work or Code turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row. A turn stops after ${RUNTIME_EVENTS_PER_TOOL_STEP} runtime events for each step kept.`}
                 focused={focusedSetting === settingId("tool-steps-per-turn")}
                 label="Tool steps kept per turn"
                 scope="host"
@@ -1763,7 +1763,7 @@ function ActiveSectionContent({
                 />
               </SettingRow>
               <SettingRow
-                description={`The same limit for a Work turn that runs at Full access. 0 means no limit: every call is kept, and the spend ceiling is what bounds the turn. A turn still stops after ${MAX_TURN_RUNTIME_EVENTS.toLocaleString("en-US")} runtime events, whatever this is set to.`}
+                description="The same limit for a Work or Code turn that runs at Full access. 0 means no limit: every call is kept, no event count stops the turn, and the spend ceiling is what bounds it."
                 focused={focusedSetting === settingId("tool-steps-per-turn-full-access")}
                 label="Tool steps kept per turn at Full access"
                 scope="host"
