@@ -835,6 +835,37 @@ describe("native harness loop", () => {
     expect(requests[0]?.system).toContain("octant_browser:");
     expect(requests[0]?.history).toEqual([{ role: "user", text: "hello" }]);
   });
+
+  it("puts your instructions in the system prompt after Octant's own, and person memory in the message", async () => {
+    const { transport, requests } = scriptedTransport([{ text: "ok", toolCalls: [] }]);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const events = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({
+            sessionId,
+            prompt: "hello",
+            context: [
+              { kind: "instructions", text: "Octant's rule." },
+              { kind: "person-instructions", key: "octant-person-instructions", text: "Yours." },
+              { kind: "person-memory", text: "Remembered." },
+              { kind: "instructions", text: "Octant's tool note." },
+            ],
+            attachments: [],
+            tools: [],
+          });
+          yield* Fiber.join(events);
+        }),
+      ),
+    );
+    expect(requests[0]?.system).toBe("Octant's rule.\n\nOctant's tool note.\n\nYours.");
+    expect(requests[0]?.history.at(-1)?.text).toContain("Remembered.");
+    expect(requests[0]?.history.at(-1)?.text).not.toContain("Yours.");
+  });
 });
 
 /** An endpoint that is down: its retries run out on every request. */
