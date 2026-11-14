@@ -1358,18 +1358,16 @@ strong {
   padding: 2px 0 2px 4px;
 }
 
-/* A header that shows a title (data-header-kind="title") starts its text on
-   the edge of the thread's text column below, so the eye reads one line down
-   from the title to the transcript. The edge is read from the column's own
-   width (`--oct-thread-column`, one property both rules use): half of what the
-   pane leaves beside it, never under the 20px the panel's gutter holds. The
+/* A header that shows a title (data-header-kind="title") starts its text 16px
+   after the stage's left edge, like a toolbar title in a Mac app's unified
+   title bar: left-aligned and vertically centred in the band. The edge is the
+   pane's own, so the title does not move when a thread opens or closes or the
+   dock opens; only a resize or toggle of the sidebar moves the stage. The
    grip's own 4px padding and 1px border are taken off so the text, not the
-   grip's fill, stands on it. The percentage is the pane's width, as the
-   column's is. A header that shows content tabs keeps its own insets: the
-   tabs lead it, and no title is there to line up. */
+   grip's fill, stands on the 16px. A header that shows content tabs keeps its
+   own insets: the tabs lead it, and no title is there to line up. */
 .workspace-pane__header[data-header-kind="title"] {
-  --pane-title-edge: max(var(--oct-space-5), calc((100% - var(--oct-thread-column)) / 2));
-  --pane-title-start: calc(var(--pane-title-edge) - var(--oct-space-1) - 1px);
+  --pane-title-start: calc(var(--oct-space-4) - var(--oct-space-1) - 1px);
   padding-left: var(--pane-title-start);
 }
 
@@ -1439,7 +1437,7 @@ html[data-octant-native-host="true"]
   padding-left: var(--octant-window-chrome-leading-width, 148px);
 }
 .shell--sidebar-collapsed .workspace-pane__header[data-header-kind="title"] {
-  padding-left: max(var(--octant-window-chrome-leading-width, 148px), var(--pane-title-start));
+  padding-left: calc(var(--octant-window-chrome-leading-width, 148px) + var(--pane-title-start));
 }
 
 /* Native header padding must not cover the leading controls when navigation
@@ -1450,7 +1448,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 html[data-octant-native-host="true"]
   .shell--sidebar-collapsed
   .workspace-pane__header[data-header-kind="title"] {
-  padding-left: max(var(--octant-window-chrome-leading-width, 148px), var(--pane-title-start));
+  padding-left: calc(var(--octant-window-chrome-leading-width, 148px) + var(--pane-title-start));
 }
 .shell--sidebar-collapsed
   .workspace-split[data-orientation="horizontal"]

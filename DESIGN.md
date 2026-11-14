@@ -642,8 +642,13 @@ coat), painted once on the shell. Neither has a fill or line of its own.
 - **Title band**: `--oct-title-rail-h` (44px, the height of a Mac window's
   unified title bar with a toolbar; 38px read as cramped in the desktop app). Its controls are 28px
   (`--oct-rail-button-h`) with the control corner, 4px apart, on an 8px inset at
-  both ends. The band's text starts on the thread column's edge (the larger of
-  a 20px gutter and half of the pane less the thread measure). A slot a Project
+  both ends. The band's title (the Project mark and name, the thread title, the
+  device chip) is left-aligned and vertically centred, starting 16px after the
+  stage's left edge, as a toolbar title does in a Mac app: after the sidebar's
+  trailing edge when the sidebar is open, after the chrome's leading cluster
+  when it is collapsed or only a rail shows. It does not move when a thread
+  opens or closes or the dock opens, only when the sidebar is resized or
+  toggled. A slot a Project
   fills only sometimes takes no room while empty.
 - **Icon rail**: `--oct-rail-w`, 52px, a little wider than the band is tall:
   at 44px its 32px faces had 6px either side and the rail read as a thin strip. Faces are 32px, 2px apart (the button's `rail` variant); the first face is

@@ -222,20 +222,20 @@ describe("the shell's edges and gaps", () => {
     expect(rule(octant, ".thread-column")).toContain("var(--oct-thread-column)");
   });
 
-  it("starts a thread's title text on the edge of the thread's column, with the mark and the request chip after it", () => {
+  it("starts a thread's title text 16px after the stage's edge, with the mark and the request chip after it", () => {
     const header = rule(root, '.workspace-pane__header[data-header-kind="title"]');
+    // The title's edge no longer reads the thread column, so it cannot move
+    // when a thread opens or the dock narrows the pane.
+    expect(header).not.toContain("thread-column");
     expect(header).toMatch(
-      /--pane-title-edge:\s*max\(var\(--oct-space-5\), calc\(\(100% - var\(--oct-thread-column\)\) \/ 2\)\);/,
-    );
-    expect(header).toMatch(
-      /--pane-title-start:\s*calc\(var\(--pane-title-edge\) - var\(--oct-space-1\) - 1px\);/,
+      /--pane-title-start:\s*calc\(var\(--oct-space-4\) - var\(--oct-space-1\) - 1px\);/,
     );
     expect(header).toMatch(/padding-left:\s*var\(--pane-title-start\);/);
     // A header with content tabs keeps the insets it had: the tabs lead it.
     expect(rule(root, ".workspace-pane__header")).toMatch(/padding:\s*2px 0 2px 4px;/);
     expect(splitWorkspace).toContain('data-header-kind={showTabs ? "tabs" : "title"}');
     expect(root).toMatch(
-      /\.shell--sidebar-collapsed \.workspace-pane__header\[data-header-kind="title"\] \{\s*padding-left: max\(var\(--octant-window-chrome-leading-width, 148px\), var\(--pane-title-start\)\);/,
+      /\.shell--sidebar-collapsed \.workspace-pane__header\[data-header-kind="title"\] \{\s*padding-left: calc\(var\(--octant-window-chrome-leading-width, 148px\) \+ var\(--pane-title-start\)\);/,
     );
     expect(root).toMatch(
       /\.shell--sidebar-collapsed \.workspace-pane__header \{\s*padding-left: var\(--octant-window-chrome-leading-width, 148px\);/,
