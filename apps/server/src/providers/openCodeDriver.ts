@@ -3116,6 +3116,27 @@ function opencodeRemembersApproval(
   return runtimeKind !== "beta" || providerRunsAsItself(state.nativeSetup);
 }
 
+/**
+ * OpenCode's own tools that only look: its task list, code and language-server
+ * lookups, directory listing, and web reads. Plan cannot approve anything, so
+ * a tool left under Plan's catch-all `ask` never ran there; Plan now runs these
+ * without asking on both runtimes (maintainer decision, 2026-11-14: Octant
+ * adds to a provider and does not take its core features away). The task list
+ * is OpenCode's own session state, not a file. A web read still marks the
+ * thread as outside content, as in Work and Code (`openCodeEventMapper.ts`).
+ * Edits, the shell, child agents, and outside folders stay denied in Plan, and
+ * the person's own deny rules still apply over these allows.
+ */
+const PLAN_READ_TOOLS = [
+  "todowrite",
+  "todoread",
+  "codesearch",
+  "lsp",
+  "list",
+  "webfetch",
+  "websearch",
+] as const;
+
 export function permissionRules(
   policy: ProviderExecutionPolicy,
   _mode: "chat" | "work" | "code",
@@ -3146,25 +3167,26 @@ export function permissionRules(
   } else {
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
+      ...PLAN_READ_TOOLS.map((permission) => ({
+        permission,
+        pattern: "*",
+        action: "allow" as const,
+      })),
       { permission: "edit", pattern: "*", action: "deny" },
       { permission: "bash", pattern: "*", action: "deny" },
       { permission: "task", pattern: "*", action: "deny" },
       { permission: "external_directory", pattern: "*", action: "deny" },
-      { permission: "todowrite", pattern: "*", action: "deny" },
     ];
   }
   // The person's own rules apply over the level's allows and asks and under
   // its denies, so Plan's denials and the outside-directory refusal stand.
   rules = insertBeforeFirstDeny(
     rules,
-    own.rules
-      // Plan keeps asking before it reaches outside; its web tools are the level's.
-      .filter((rule) => policy !== "plan" || !/^web(?:fetch|search)$/u.test(rule.action))
-      .map((rule) => ({
-        permission: rule.action,
-        pattern: rule.resource,
-        action: rule.effect,
-      })),
+    own.rules.map((rule) => ({
+      permission: rule.action,
+      pattern: rule.resource,
+      action: rule.effect,
+    })),
     (rule) => rule.action === "deny",
   );
   // Work and Code share one capability set at the thread's level, so a Work
@@ -3235,12 +3257,10 @@ export function betaAgentPermissionRules(
   } else {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
+      ...PLAN_READ_TOOLS.map((action) => ({ action, resource: "*", effect: "allow" as const })),
       { action: "edit", resource: "*", effect: "deny" },
       ...BETA_SHELL_AND_SUBAGENT_DENY,
       { action: "external_directory", resource: "*", effect: "deny" },
-      { action: "todowrite", resource: "*", effect: "deny" },
-      { action: "webfetch", resource: "*", effect: "deny" },
-      { action: "websearch", resource: "*", effect: "deny" },
     ];
   }
   rules = insertBeforeFirstDeny(rules, ownRules, (rule) => rule.effect === "deny");

@@ -11,6 +11,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderCapabilitySupport,
   type ProviderFailure,
+  type ProviderInputModality,
   type ProviderInstanceId,
   type ProviderModelOptionValues,
   type ProviderNativeSetup,
@@ -37,6 +38,7 @@ import {
 } from "./acpUsage";
 import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import {
+  attachmentMediaTypeToModality,
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
   textOnlyInputModalities,
@@ -63,6 +65,7 @@ import {
   type AcpConfigOptionsResult,
   type AcpMcpHttpServer,
   type AcpNewSessionResult,
+  type AcpPromptImage,
   type AcpPromptResult,
   type AcpServerRequest,
   type AcpServerRequestMessage,
@@ -101,7 +104,11 @@ export interface AcpClientPort {
     meta?: Readonly<Record<string, unknown>>,
   ) => Promise<AcpNewSessionResult>;
   readonly closeSession: (sessionId: string) => Promise<void>;
-  readonly prompt: (sessionId: string, prompt: string) => Promise<AcpPromptResult>;
+  readonly prompt: (
+    sessionId: string,
+    prompt: string,
+    images?: ReadonlyArray<AcpPromptImage>,
+  ) => Promise<AcpPromptResult>;
   readonly setConfigOption: (
     sessionId: string,
     configId: string,
@@ -166,6 +173,8 @@ interface AcpRetainedRuntime {
   readonly client: AcpClientPort;
   readonly managedTools: AcpManagedToolsLease | undefined;
   readonly appManagedTools: ProviderCapabilitySupport;
+  /** Whether this process's `initialize` reply advertised image prompt blocks. */
+  readonly imageInput: boolean;
   readonly version: string;
   readonly commands: Set<string>;
   readonly compatibility: string;
@@ -363,11 +372,23 @@ function providerFailure(
   }
 }
 
+const ACP_IMAGE_INPUT_MODALITIES: readonly ProviderInputModality[] = ["text", "image"];
+
+/**
+ * Whether the agent's own `initialize` reply says it takes image prompt
+ * blocks. Attachments reach an ACP agent only then; otherwise it stays
+ * text only (maintainer decision, 2026-11-14).
+ */
+function acceptsImagePrompts(initialized: AcpConnection["initialized"]): boolean {
+  return initialized.agentCapabilities.promptCapabilities?.image === true;
+}
+
 function normalizeModels(
   profile: AcpProviderProfile,
   options: ReadonlyArray<AcpSessionConfigOption>,
   models: AcpSessionModelState | undefined,
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
+  imageInput = false,
 ) {
   const model = options.find((option) => option.id === "model");
   // The config option and the session's model state are two ACP spellings of
@@ -412,7 +433,9 @@ function normalizeModels(
         reasoning !== undefined || declaredLevels.length > 0
           ? ("supported" as const)
           : ("unavailable" as const),
-      inputModalities: textOnlyInputModalities,
+      // ACP advertises image prompts for the agent, not per model, so every
+      // model it lists carries what the agent said it accepts.
+      inputModalities: imageInput ? ACP_IMAGE_INPUT_MODALITIES : textOnlyInputModalities,
       // The agent reasons, and that capability is reported above. A level is
       // declared only because the session applies it: the driver sets the
       // profile's reasoning option, or carries it in the session metadata, when
@@ -488,7 +511,8 @@ function normalizeProbe(
   credentialStatus?: "stored",
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
 ): ProviderProbeResult {
-  const models = normalizeModels(profile, options, sessionModels, optionsByModel);
+  const imageInput = acceptsImagePrompts(initialized);
+  const models = normalizeModels(profile, options, sessionModels, optionsByModel, imageInput);
   const reasoning =
     resolveReasoningOption(profile, options) !== undefined ||
     models.some((model) => model.reasoning === "supported")
@@ -512,6 +536,7 @@ function normalizeProbe(
         negotiatedAppManagedTools(initialized, profile, version),
         version,
       ),
+      nativeAttachments: imageInput ? "supported" : "unsupported",
       resume,
       reasoning,
     },
@@ -1757,6 +1782,7 @@ function makeConnection(
               client,
               managedTools: runtimeTools,
               appManagedTools,
+              imageInput: acceptsImagePrompts(connection.initialized),
               version: connection.version,
               commands: new Set(
                 !commandsMismatch && commandSessionId === source.sessionId ? startupCommands : [],
@@ -1984,7 +2010,25 @@ function makeConnection(
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
             const { bridgeTools } = partitionTools(input.tools);
-            const validationInput = { ...input, tools: bridgeTools };
+            // Attachments go only to an agent that advertised image prompts,
+            // and only as images; anything else is refused, not dropped.
+            if (input.attachments.length > 0) {
+              if (!state.runtime.imageInput) {
+                return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
+              }
+              if (
+                input.attachments.some(
+                  (attachment) => attachmentMediaTypeToModality(attachment.mediaType) !== "image",
+                )
+              ) {
+                return Effect.fail(failure("unsupported", `${name} takes only image attachments.`));
+              }
+            }
+            const images: ReadonlyArray<AcpPromptImage> = input.attachments.map((attachment) => ({
+              mimeType: attachment.mediaType,
+              data: Buffer.from(attachment.bytes).toString("base64"),
+            }));
+            const validationInput = { ...input, attachments: [], tools: bridgeTools };
             return rejectUnsupportedChatTurn(validationInput, {
               ...capabilities,
               appManagedTools: state.appManagedTools,
@@ -2020,7 +2064,7 @@ function makeConnection(
                 if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
                 state.promptActive = true;
                 void state.client
-                  .prompt(state.sourceSessionId, prompt)
+                  .prompt(state.sourceSessionId, prompt, images)
                   .then((result) => {
                     state.promptActive = false;
                     void cancelForms(state);
@@ -2206,10 +2250,17 @@ function makeConnection(
                 }
               });
             }
-            if (profile.userQuestions === "unsupported") {
+            // The refusal names what the probe reported for this release, so a
+            // form-asking agent on an unverified release says `unavailable`.
+            const questions = baseCapabilities(
+              profile,
+              undefined,
+              state.runtime.version,
+            ).userQuestions;
+            if (questions !== "supported") {
               return Effect.fail(
                 failure(
-                  "unsupported",
+                  questions,
                   `${name} cannot request user input through its current ACP runtime.`,
                 ),
               );

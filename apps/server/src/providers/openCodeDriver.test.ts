@@ -931,7 +931,13 @@ describe("OpenCode driver", () => {
     ["plan", "bash", "deny"],
     ["plan", "task", "deny"],
     ["plan", "external_directory", "deny"],
-    ["plan", "todowrite", "deny"],
+    ["plan", "todowrite", "allow"],
+    ["plan", "todoread", "allow"],
+    ["plan", "codesearch", "allow"],
+    ["plan", "lsp", "allow"],
+    ["plan", "list", "allow"],
+    ["plan", "webfetch", "allow"],
+    ["plan", "websearch", "allow"],
   ] as const)(
     "maps %s %s through official last-match permission semantics",
     async (policy, permission, action) => {
@@ -1055,7 +1061,7 @@ describe("OpenCode driver", () => {
         ),
       ),
     );
-    for (const permission of ["edit", "bash", "task", "external_directory", "todowrite"]) {
+    for (const permission of ["edit", "bash", "task", "external_directory"]) {
       expect(evaluatePermission(fixture.createdPermissions[0]!, permission)).toBe("deny");
     }
 
@@ -2751,9 +2757,13 @@ describe("OpenCode driver", () => {
     ["plan", "shell", "deny"],
     ["plan", "subagent", "deny"],
     ["plan", "external_directory", "deny"],
-    ["plan", "todowrite", "deny"],
-    ["plan", "webfetch", "deny"],
-    ["plan", "websearch", "deny"],
+    ["plan", "todowrite", "allow"],
+    ["plan", "todoread", "allow"],
+    ["plan", "codesearch", "allow"],
+    ["plan", "lsp", "allow"],
+    ["plan", "list", "allow"],
+    ["plan", "webfetch", "allow"],
+    ["plan", "websearch", "allow"],
     ["plan", "read", "ask"],
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
@@ -2768,6 +2778,23 @@ describe("OpenCode driver", () => {
   ] as const)("maps 2.x agent permission rules for %s %s as %s", (policy, action, effect) => {
     const rules = betaAgentPermissionRules(policy, "code");
     expect(evaluateV2Permission(rules, action)).toBe(effect);
+  });
+
+  it("keeps a person's own web-fetch deny in Plan while Plan's edits stay denied over their allow", () => {
+    const own = {
+      rules: [
+        { action: "webfetch", resource: "*", effect: "deny" },
+        { action: "edit", resource: "*", effect: "allow" },
+      ],
+      toolServers: false,
+    } as const;
+    const legacy = permissionRules("plan", "code", undefined, [], false, own);
+    expect(evaluatePermission(legacy, "webfetch")).toBe("deny");
+    expect(evaluatePermission(legacy, "websearch")).toBe("allow");
+    expect(evaluatePermission(legacy, "edit")).toBe("deny");
+    const beta = betaAgentPermissionRules("plan", "code", [], own.rules);
+    expect(evaluateV2Permission(beta, "webfetch")).toBe("deny");
+    expect(evaluateV2Permission(beta, "edit")).toBe("deny");
   });
 
   it("lets a session reach a Project's extra folder and still denies every other outside folder", () => {

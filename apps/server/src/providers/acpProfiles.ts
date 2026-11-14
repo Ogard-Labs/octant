@@ -575,10 +575,12 @@ const vibeProfile: AcpProviderProfile = {
   reasoningOptionId: "thinking",
   // Vibe's ACP mode ids are its agent profile names, and those names moved:
   // `chat` was removed in 2.23.3 and `default` became `ask` in 2.24.1, so the
-  // names below and the version floor have to agree. `accept-edits` is never
-  // selected: it auto-approves edits inside the agent, which would bypass
-  // Octant's approval bridge. `auto-approve` is Vibe's own answer to its
-  // prompts, so a Code thread at Reviewed that chose it runs in that mode
+  // names below and the version floor have to agree. `accept-edits` approves
+  // Vibe's own file writes and edits and asks for everything else, which is
+  // Octant's Accept edits level, so a Work or Code thread at that level runs
+  // in it inside the Accept edits wall, which holds writes to the Project
+  // (maintainer decision, 2026-11-14). `auto-approve` is Vibe's own answer to
+  // its prompts, so a Code thread at Reviewed that chose it runs in that mode
   // inside the same confined launch as Guarded; the host withdraws it on a
   // thread marked by outside content.
   sessionMode: (mode, policy, autoReview) => {
@@ -586,6 +588,7 @@ const vibeProfile: AcpProviderProfile = {
     if (policy === "plan") return "plan";
     if (policy === "full-access") return "auto-approve";
     if (autoReview === true && mode === "code") return "auto-approve";
+    if (policy === "auto-accept-edits") return "accept-edits";
     return "ask";
   },
   ownReviewer: true,
@@ -604,6 +607,11 @@ const vibeProfile: AcpProviderProfile = {
   },
   chatSessionRoot: "managed-home",
   userQuestions: "unsupported",
+  // Vibe 3.0.3 asks its questions as an ACP form elicitation, which the
+  // shared questionnaire carries (maintainer decision, 2026-11-14). The
+  // `session/request_permission` question shape above stays unsupported:
+  // this release never sends it.
+  elicitationVersions: ["3.0.3"],
   resumeMethod: "session/load",
   closesSessions: true,
   authenticateOnProbe: false,
@@ -636,9 +644,14 @@ const vibeProfile: AcpProviderProfile = {
       // A subagent's permission request reaches `session/request_permission`
       // on the parent's session naming only the subagent's own history entry,
       // which the parent's updates never announced, so Octant cannot show
-      // what it asks or hold it to a tool kind's rule. They run only where
-      // nothing asks: at Full access in Work and Code, once the person allows
-      // them. A release without the setting ignores the variable.
+      // what it asks or hold it to a tool kind's rule. Read again from the
+      // 3.0.3 source on 2026-11-14: `_answer_callback` sends only
+      // `ToolCallUpdate(tool_call_id=related_entry_id)`, with no title, kind,
+      // or input, and the child's entries never reach the parent's updates,
+      // so there is still nothing to show or route through the parent's
+      // approval path. They run only where nothing asks: at Full access in
+      // Work and Code, unless the person turns them off. A release without
+      // the setting ignores the variable.
       VIBE_ENABLE_SUBAGENTS: "false",
       // Vibe's Keychain lookup spawns /usr/bin/security, but the confined
       // launch forbids exec; disable it so Vibe reports a missing key instead
@@ -651,8 +664,9 @@ const vibeProfile: AcpProviderProfile = {
       // agent makes `session/new` fail outright (-31002). `enabled_agents` takes
       // precedence over `disabled_agents` and still excludes every discovered
       // third-party agent, and pinning the default to the approval-gated agent
-      // keeps a session from opening on an edit-approving one.
-      VIBE_ENABLED_AGENTS: '["ask","plan","auto-approve"]',
+      // keeps a session from opening on an edit-approving one; `accept-edits`
+      // is listed only so an Accept edits thread can select it.
+      VIBE_ENABLED_AGENTS: '["ask","plan","accept-edits","auto-approve"]',
       VIBE_DEFAULT_AGENT: "ask",
       // Skills have no `default_skill` to resolve, so the deny-all form is safe here.
       VIBE_DISABLED_SKILLS: '["*"]',
@@ -690,20 +704,39 @@ const vibeProfile: AcpProviderProfile = {
     // so it comes with any of it. A trusted Project's `.vibe` entries become
     // readable again, and Vibe's own folder-trust list still decides whether
     // it loads them. Telemetry, update checks, notifications, the voice and
-    // narrator features, the keyring, and the agent allowlist stay as above.
+    // narrator features, and the keyring stay as above. Skills include the
+    // registry skills the person's own configuration opts into. Where its
+    // subagents run, the person's custom and installed agents and their own
+    // agent lists apply too, since a subagent runs as one of those agents;
+    // everywhere else the agent allowlist above holds, so a session opens
+    // and switches only on the modes Octant selects (maintainer decision,
+    // 2026-11-14).
     nativeSetup: (setup, launch) => {
       const on = providerRunsAsItself(setup);
+      const subagents =
+        setup.subagents &&
+        launch.executionPolicy === "full-access" &&
+        (launch.mode === "work" || launch.mode === "code");
       return {
         releasedGuards: [
           ...(on ? ["VIBE_INCLUDE_PROJECT_CONTEXT"] : []),
-          ...(setup.skills ? ["VIBE_SKILL_PATHS", "VIBE_DISABLED_SKILLS"] : []),
+          ...(setup.skills
+            ? [
+                "VIBE_SKILL_PATHS",
+                "VIBE_DISABLED_SKILLS",
+                "VIBE_EXPERIMENTAL_ENABLE_REGISTRY_SKILLS",
+              ]
+            : []),
           ...(setup.toolServers ? ["VIBE_MCP_SERVERS", "VIBE_ENABLE_CONNECTORS"] : []),
           ...(setup.hooks ? ["VIBE_ENABLE_EXPERIMENTAL_HOOKS"] : []),
           ...(setup.projectCode ? ["VIBE_TOOL_PATHS"] : []),
-          ...(setup.subagents &&
-          launch.executionPolicy === "full-access" &&
-          (launch.mode === "work" || launch.mode === "code")
-            ? ["VIBE_ENABLE_SUBAGENTS"]
+          ...(subagents
+            ? [
+                "VIBE_ENABLE_SUBAGENTS",
+                "VIBE_AGENT_PATHS",
+                "VIBE_INSTALLED_AGENTS",
+                "VIBE_ENABLED_AGENTS",
+              ]
             : []),
         ],
         releasedRootEntries: setup.projectCode

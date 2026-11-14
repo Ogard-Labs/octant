@@ -67,7 +67,7 @@ it("passes conformance at Full access for an agent whose shell runs without aski
     expectedFailureCategories: {
       staleResume: "stale-resume",
       unknownApproval: "protocol",
-      unknownUserInput: profile.userQuestions === "supported" ? "protocol" : "unsupported",
+      unknownUserInput: unknownQuestionCategory(profile),
     },
     isReleased: () => fixture.active() === 0 && fixture.released() >= 3,
   });
@@ -111,7 +111,7 @@ describe.each(Object.values(acpProviderProfiles))(
         expectedFailureCategories: {
           staleResume: "stale-resume",
           unknownApproval: "protocol",
-          unknownUserInput: profile.userQuestions === "supported" ? "protocol" : "unsupported",
+          unknownUserInput: unknownQuestionCategory(profile),
         },
         isReleased: () => fixture.active() === 0 && fixture.released() >= 3,
       });
@@ -162,6 +162,15 @@ describe.each(Object.values(acpProviderProfiles))(
   },
 );
 
+/**
+ * How an unknown answer is refused: a form-asking agent reports questions
+ * `unavailable` on this fixture's release, which is outside its verified list.
+ */
+function unknownQuestionCategory(profile: AcpProviderProfile) {
+  if (profile.elicitationVersions !== undefined) return "unavailable" as const;
+  return profile.userQuestions === "supported" ? ("protocol" as const) : ("unsupported" as const);
+}
+
 function createFixture(
   profile: AcpProviderProfile,
   client: AcpClientPort = new ConformanceClient(profile),
@@ -172,7 +181,7 @@ function createFixture(
     protocolVersion: 1,
     agentCapabilities: {
       loadSession: true,
-      promptCapabilities: { image: true, audio: false, embeddedContext: true },
+      promptCapabilities: { image: false, audio: false, embeddedContext: true },
       sessionCapabilities: { list: {}, resume: {} },
     },
     authMethods: [{ id: "provider-auth" }],

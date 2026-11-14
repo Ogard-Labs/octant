@@ -132,6 +132,8 @@ export interface PiConfinementOptions {
   readonly temporaryDirectory?: string;
   readonly credentialPath?: string;
   readonly modelsPath?: string;
+  /** The person's own Pi agent folder; defaults to `~/.pi/agent`. */
+  readonly ownSetupPath?: string;
 }
 
 export interface PiProcessOptions {
@@ -362,6 +364,85 @@ function piWallPolicy(input: {
     : input.executionPolicy;
 }
 
+/**
+ * What of the person's own Pi setup a launch loads. Pi runs as it does on its
+ * own (maintainer decision, 2026-11-14), so Work and Code load the person's
+ * skills, prompt templates and context files at every level, and their
+ * extensions outside Plan. Pi is not a key provider, so no account or thread
+ * switch reaches this driver: the default is set here. Plan stays read-only:
+ * an extension is code that runs in Pi's own process, so Plan loads none and
+ * keeps read, grep, find and ls only. Chat has no tools and loads none of it.
+ * The person's extension tools stay outside the `--tools` list, which names
+ * Pi's built-ins and Octant's own tools, so the approval bridge still decides
+ * every side effect below Full access.
+ *
+ * Pi's own discovery stays off (`--no-extensions`, `--no-skills`,
+ * `--no-prompt-templates`) and the person's resources are named by path:
+ * discovery would also start Pi's built-in extensions, its MCP client among
+ * them, and a Project's own `.pi` resources are a Project's code, which Pi
+ * is never trusted with here. Context files are Pi's own discovery, since a
+ * Project's `AGENTS.md` is instruction text every runtime may read; the
+ * person's global one is linked into the managed home where Pi looks for it.
+ */
+export function piOwnSetup(
+  mode: PiSessionMode,
+  executionPolicy: ProviderExecutionPolicy,
+): { readonly resources: boolean; readonly extensions: boolean } {
+  const resources = mode !== "chat";
+  return { resources, extensions: resources && executionPolicy !== "plan" };
+}
+
+/** The person's own Pi resources found in their agent folder, by absolute path. */
+export interface PiOwnResources {
+  readonly skills?: string;
+  readonly prompts?: string;
+  /** Each top-level extension file or folder, as Pi's own discovery would find it. */
+  readonly extensions: ReadonlyArray<string>;
+}
+
+const NO_OWN_RESOURCES: PiOwnResources = { extensions: [] };
+
+/** Octant's approval and tool bridge, written into the managed home for each launch. */
+export const PI_BRIDGE_FILE_NAME = "octant-approval-bridge.ts";
+
+/**
+ * What the person keeps in their Pi agent folder that a launch may load. Their
+ * sessions, settings, credentials and installed packages are not read here.
+ */
+export function readPiOwnResources(ownSetupPath: string): PiOwnResources {
+  const directory = (name: string): string | undefined => {
+    const path = join(ownSetupPath, name);
+    try {
+      return statSync(path).isDirectory() ? path : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const extensionsDirectory = directory("extensions");
+  let extensions: ReadonlyArray<string> = [];
+  if (extensionsDirectory !== undefined) {
+    try {
+      extensions = readdirSync(extensionsDirectory, { withFileTypes: true })
+        .filter(
+          (entry) =>
+            !entry.name.startsWith(".") &&
+            (entry.isDirectory() || (entry.isFile() && /\.(?:ts|js)$/u.test(entry.name))),
+        )
+        .map((entry) => join(extensionsDirectory, entry.name))
+        .sort();
+    } catch {
+      extensions = [];
+    }
+  }
+  const skills = directory("skills");
+  const prompts = directory("prompts");
+  return {
+    ...(skills === undefined ? {} : { skills }),
+    ...(prompts === undefined ? {} : { prompts }),
+    extensions,
+  };
+}
+
 export function piArguments(
   bridgePath: string,
   sessionDirectory: string,
@@ -370,6 +451,7 @@ export function piArguments(
   executionPolicy: ProviderExecutionPolicy,
   appToolNames: ReadonlyArray<string> = [],
   resumePath?: string,
+  ownResources: PiOwnResources = NO_OWN_RESOURCES,
 ): ReadonlyArray<string> {
   // Work and Code share one capability set at the thread's level, so a Work
   // session starts with Pi's bash as a Code session does.
@@ -381,6 +463,7 @@ export function piArguments(
         : ALL_TOOLS.split(",");
   const selectedTools = [...builtInTools, ...appToolNames];
   const tools = selectedTools.length === 0 ? ["--no-tools"] : ["--tools", selectedTools.join(",")];
+  const own = piOwnSetup(mode, executionPolicy);
   return [
     "--mode",
     "rpc",
@@ -388,10 +471,15 @@ export function piArguments(
     "--no-extensions",
     "--extension",
     bridgePath,
+    ...(own.extensions ? ownResources.extensions.flatMap((path) => ["--extension", path]) : []),
     "--no-skills",
     "--no-prompt-templates",
+    ...(own.resources && ownResources.skills !== undefined ? ["--skill", ownResources.skills] : []),
+    ...(own.resources && ownResources.prompts !== undefined
+      ? ["--prompt-template", ownResources.prompts]
+      : []),
     "--no-themes",
-    "--no-context-files",
+    ...(own.resources ? [] : ["--no-context-files"]),
     ...tools,
     "--session-dir",
     sessionDirectory,
@@ -551,6 +639,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
     options.sandboxPath ?? (platform === "darwin" ? "/usr/bin/sandbox-exec" : "/usr/bin/bwrap");
   const credentialPath = options.credentialPath ?? join(homedir(), ".pi/agent/auth.json");
   const modelsPath = options.modelsPath ?? join(homedir(), ".pi/agent/models.json");
+  const ownSetupPath = options.ownSetupPath ?? join(homedir(), ".pi/agent");
   return {
     prepare: (input) =>
       Effect.gen(function* () {
@@ -599,7 +688,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
             failure("invalid-configuration", "Pi app-managed tool name collides with a built-in."),
           );
         }
-        const bridgePath = join(piHome, "octant-approval-bridge.ts");
+        const bridgePath = join(piHome, PI_BRIDGE_FILE_NAME);
         yield* Effect.try({
           try: () => {
             writeFileSync(
@@ -611,6 +700,9 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
             chmodSync(bridgePath, 0o600);
             prepareProviderOwnedLink(piHome, credentialPath, "auth.json");
             prepareProviderOwnedLink(piHome, modelsPath, "models.json");
+            // Pi reads its global context file from its agent folder, which is
+            // the managed home; `--no-context-files` keeps Chat from reading it.
+            prepareProviderOwnedLink(piHome, join(ownSetupPath, "AGENTS.md"), "AGENTS.md");
           },
           catch: () =>
             failure("invalid-configuration", "Pi managed configuration could not be prepared."),
@@ -632,6 +724,8 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
             failure("invalid-configuration", "Pi app-managed tool bridge must be loopback HTTP."),
           );
         }
+        const own = piOwnSetup(input.mode, input.executionPolicy);
+        const ownResources = own.resources ? readPiOwnResources(ownSetupPath) : NO_OWN_RESOURCES;
         const args = piArguments(
           bridgePath,
           sessionDirectory,
@@ -640,6 +734,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           input.executionPolicy,
           tools.map((tool) => tool.name),
           resumePath,
+          ownResources,
         );
         const wall = piWallPolicy(input);
         if (wall === "full-access") {
@@ -687,6 +782,17 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           ...(existsSync(credentialPath) ? [credentialPath] : []),
           ...(existsSync(modelsPath) ? [modelsPath] : []),
         ];
+        // The person's resources live in their home, which the wall otherwise
+        // keeps private; only what this launch loads is opened, read-only.
+        const globalContext = join(ownSetupPath, "AGENTS.md");
+        const ownSetupPaths = own.resources
+          ? [
+              ...(ownResources.skills === undefined ? [] : [ownResources.skills]),
+              ...(ownResources.prompts === undefined ? [] : [ownResources.prompts]),
+              ...(own.extensions ? ownResources.extensions : []),
+              ...(existsSync(globalContext) ? [globalContext] : []),
+            ]
+          : [];
         const confinement = makeProcessConfinementLive({
           platform,
           sandboxPath,
@@ -719,6 +825,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...(packageRoot === undefined ? [] : [packageRoot]),
                 temporaryDirectoryPath,
                 ...credentialPaths,
+                ...ownSetupPaths,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
               ],
               privateHomeAllowPaths: [
@@ -728,6 +835,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 configuredBinaryDirectory,
                 ...(packageRoot === undefined ? [] : [packageRoot]),
                 ...credentialPaths,
+                ...ownSetupPaths,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
               ],
               ...(platform === "darwin" && (bridgeRule !== undefined || input.servers !== undefined)

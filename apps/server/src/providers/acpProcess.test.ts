@@ -2207,6 +2207,7 @@ describe("Mistral Vibe running as itself", () => {
       "VIBE_ENABLE_CONNECTORS",
       "VIBE_ENABLE_EXPERIMENTAL_HOOKS",
       "VIBE_TOOL_PATHS",
+      "VIBE_EXPERIMENTAL_ENABLE_REGISTRY_SKILLS",
     ]) {
       expect(own, name).not.toHaveProperty(name);
     }
@@ -2227,10 +2228,11 @@ describe("Mistral Vibe running as itself", () => {
     expect(readOnly.VIBE_TOOL_PATHS).toBe("[]");
   });
 
-  it("lets Vibe start its own subagents only at Full access in Work or Code, once the person allows them", () => {
+  it("lets Vibe start its own subagents, as the person's own agents, only at Full access in Work or Code", () => {
     expect(sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x" }).VIBE_ENABLE_SUBAGENTS).toBe(
       "false",
     );
+    const agentGuards = ["VIBE_AGENT_PATHS", "VIBE_INSTALLED_AGENTS", "VIBE_ENABLED_AGENTS"];
     for (const [executionPolicy, mode, nativeSetup, released] of [
       ["full-access", "code", everything, true],
       ["full-access", "work", everything, true],
@@ -2248,6 +2250,11 @@ describe("Mistral Vibe running as itself", () => {
       expect(environment.VIBE_ENABLE_SUBAGENTS, `${executionPolicy} ${mode}`).toBe(
         released ? undefined : "false",
       );
+      for (const name of agentGuards) {
+        expect(environment[name], `${name} ${executionPolicy} ${mode}`).toBe(
+          released ? undefined : vibe.process.guards[name],
+        );
+      }
     }
   });
 
