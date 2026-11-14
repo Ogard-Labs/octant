@@ -4096,7 +4096,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
-    if (active.connection === undefined) return turnState("failed");
+    if (active.connection === undefined) {
+      return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
+    }
     const questionnaire = active.providerQuestionnaires.get(input.requestId);
     if (
       questionnaire !== undefined &&
