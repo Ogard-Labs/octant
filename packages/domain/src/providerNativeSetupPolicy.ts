@@ -53,8 +53,14 @@ export function resolveProviderNativeSetup(
   const accountAllows = input.accountAllows || input.threadChoice === "on";
   const projectTrusts = input.mode !== "chat" && input.projectTrusts;
   const fullAccess = input.mode !== "chat" && input.executionPolicy === "full-access";
-  if (!accountAllows && !projectTrusts && !fullAccess) return undefined;
   const plan = input.executionPolicy === "plan";
+  if (!accountAllows && !projectTrusts && !fullAccess) {
+    // Web search and fetch are the runtime's own and load nothing of the
+    // person's configuration, so Work and Code keep them on by default; each
+    // call still asks below Full access and marks the thread. Plan stays
+    // read-only and Chat searches through its research route instead.
+    return chatOrPlan(input.mode, plan) ? undefined : WEB_TOOLS_ONLY;
+  }
   const chat = input.mode === "chat";
   return {
     subagents: true,
@@ -64,6 +70,32 @@ export function resolveProviderNativeSetup(
     hooks: !plan && !chat,
     projectCode: projectTrusts && !plan,
   };
+}
+
+const WEB_TOOLS_ONLY: ProviderNativeSetup = {
+  subagents: false,
+  webTools: true,
+  skills: false,
+  toolServers: false,
+  hooks: false,
+  projectCode: false,
+};
+
+function chatOrPlan(mode: ProviderNativeSetupInput["mode"], plan: boolean): boolean {
+  return mode === "chat" || plan;
+}
+
+/**
+ * Whether a setup loads anything of the person's own configuration: rules,
+ * skills, tool servers, hooks, subagents, or a Project's code. The runtime's
+ * web tools alone do not, so a session with only those on is not running as
+ * itself and keeps Octant's own permissions and approvals.
+ */
+export function providerRunsAsItself(setup: ProviderNativeSetup | undefined): boolean {
+  return (
+    setup !== undefined &&
+    (setup.subagents || setup.skills || setup.toolServers || setup.hooks || setup.projectCode)
+  );
 }
 
 /**

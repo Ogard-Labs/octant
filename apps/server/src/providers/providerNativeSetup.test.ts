@@ -60,8 +60,17 @@ function sources(instance: ProviderInstance, project: Project) {
   };
 }
 
+const WEB_TOOLS_ONLY = {
+  subagents: false,
+  webTools: true,
+  skills: false,
+  toolServers: false,
+  hooks: false,
+  projectCode: false,
+};
+
 describe("a session's native setup read from the journal", () => {
-  it("stays off for an account and Project the person never changed", () => {
+  it("keeps only the runtime's web search on for an account and Project the person never changed", () => {
     expect(
       sessionNativeSetup(sources(codex(), codeProject()), {
         providerInstanceId: codex().id,
@@ -69,7 +78,7 @@ describe("a session's native setup read from the journal", () => {
         mode: "code",
         executionPolicy: "approval-gated",
       }),
-    ).toBeUndefined();
+    ).toEqual(WEB_TOOLS_ONLY);
   });
 
   it("turns on with the account's switch, and loads the Project's code only once the Project trusts this provider", () => {
@@ -99,7 +108,7 @@ describe("a session's native setup read from the journal", () => {
         mode: "code",
         executionPolicy: "approval-gated",
       }),
-    ).toBeUndefined();
+    ).toEqual(WEB_TOOLS_ONLY);
   });
 
   it("never lets a Project's trust reach a Chat thread", () => {

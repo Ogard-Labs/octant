@@ -335,6 +335,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](.
 The key providers run inside Octant as they run on their own, with their native subagents, web tools, skills, home configuration, and a trusted Project's hooks, MCP servers and plugins, plus Octant's journal and views.
 
 - Where a native feature reaches beyond Octant's view, the level decides its default: off until the person turns it on at Guarded and Reviewed, on at Full access, in Work and Code alike.
+- One exception: the runtime's own web search and fetch are on by default in Work and Code outside Plan, at every level, because they load nothing of the person's configuration. Each call still asks below Full access and marks the thread; with only these on a session is not running as itself, so OpenCode keeps Octant's permissions and `once` approvals and Mistral Vibe keeps its Project-context guard. A thread's Off still withholds them; Chat and Plan keep them off until the person turns the setup on (maintainer request, 2026-11-14).
 - Plan stays read-only and Chat's filesystem and shell stay withheld at every level.
 - Turning a native feature on never turns on a provider's own memory, telemetry or self-update. The provider's own memory has a setting of its own per key provider account, off by default; telemetry and self-update stay off (maintainer request, 2026-11-12). Built for Claude Code (its auto-memory) and Codex (its memories), in Work and Code sessions outside Plan: a person at a local window or a paired device sets it (maintainer decision, 2026-11-12; not built yet: today a paired device is refused), the change is journaled, and Run as itself, a trusted Project and Full access never turn it on. OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant sets, so their accounts carry no setting. Not built yet: Chat, where it stays off at every setting.
 - Octant still journals a native child run, marks outside content a native web tool read, and reports each capability honestly.
@@ -583,6 +584,7 @@ Octant has one web search definition, `web-search`, offered to every Chat provid
 - A harness Chat thread gets it once, from the harness; the turn adds no second copy.
 - A missing, empty or over-long query is invalid and searches nothing; no other text stands in for it.
 - A successful result marks the thread as having read outside content. The harness's tainted-query refusal applies to harness threads, as before, and not to a Chat thread on another provider.
+- Automatic research routing prefers the provider's own search when the provider has one and falls back to SearXNG, so a fresh install can search with no endpoint configured (maintainer request, 2026-11-14).
 
 Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md#web-search).
 

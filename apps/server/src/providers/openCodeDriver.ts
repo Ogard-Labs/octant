@@ -1,3 +1,4 @@
+import { providerRunsAsItself } from "@octant/domain";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
 import {
   openCodeOwnRulesAllow,
@@ -1471,7 +1472,7 @@ function makeConnection(
      * loads unless the setup is on for the session.
      */
     const ownSetupFor = (setup: ProviderNativeSetup | undefined): ResolvedOwnSetup | undefined => {
-      if (setup === undefined) return undefined;
+      if (!providerRunsAsItself(setup) || setup === undefined) return undefined;
       const own = (options.readOwnSetup ?? readOpenCodeOwnSetup)();
       return {
         rules: own.rules,
@@ -3112,7 +3113,7 @@ function opencodeRemembersApproval(
   persistence: PermissionPersistence,
 ): boolean {
   if (persistence !== "project-default") return false;
-  return runtimeKind !== "beta" || state.nativeSetup !== undefined;
+  return runtimeKind !== "beta" || providerRunsAsItself(state.nativeSetup);
 }
 
 export function permissionRules(

@@ -4955,7 +4955,9 @@ characters and returns that query with each result's title, URL, and snippet,
 
 - **Where.** A Chat thread is offered it on every provider while its research
   is on and its research route is ready through SearXNG; a provider-native
-  route uses the provider's own search instead. The native harness offers the
+  route uses the provider's own search instead. Automatic routing picks the
+  provider's own search first and SearXNG only when the provider has none, so
+  a fresh install searches without an endpoint. The native harness offers the
   same definition as its own tool in Work and Code, and in Chat under the
   same research grant ([Native harness](#native-harness)). A harness Chat
   thread gets it once, from the harness's own tool set: the turn adds no second
