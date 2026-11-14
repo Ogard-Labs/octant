@@ -50,9 +50,14 @@ function clientOf(entries: ReadonlyArray<unknown>): ProviderUsageLimitsClient {
 }
 
 describe("plan usage above the composer", () => {
-  it("shows the share left of the selected provider's shortest and longest windows", async () => {
+  it("lists each window of the selected account with what is left and when it resets", async () => {
+    const soon = new Date(Date.now() + 4 * 60 * 60_000 + 59 * 60_000 + 10_000).toISOString();
+    const later = new Date(Date.now() + 19 * 60 * 60_000 + 24 * 60 * 60_000 + 10_000).toISOString();
     const client = clientOf([
-      entry(codex, [window("codex:secondary_7d", 0.57), window("codex:primary_5h", 0.15)]),
+      entry(codex, [
+        { ...window("codex:primary_5h", 0.15), resetsAt: soon },
+        { ...window("codex:secondary_7d", 0.57), resetsAt: later },
+      ]),
       entry(claude, [window("five_hour", 0.9), window("seven_day", 0.9)]),
     ]);
     render(
@@ -62,36 +67,48 @@ describe("plan usage above the composer", () => {
     );
 
     const group = await screen.findByRole("group", { name: "Plan usage left" });
-    expect(within(group).getByText("5h")).toBeVisible();
-    expect(within(group).getByText("85%")).toBeVisible();
-    expect(within(group).getByText("week")).toBeVisible();
-    expect(within(group).getByText("43%")).toBeVisible();
-    // Each meter says its window and its share in one name.
-    expect(within(group).getByRole("img", { name: /85% left$/ })).toBeVisible();
-    expect(within(group).getByRole("img", { name: /43% left$/ })).toBeVisible();
+    expect(group).toHaveTextContent("85% 4h 59m · 43% 1d 19h");
+    expect(
+      within(group).getByRole("img", { name: "5-hour window, codex: 85% left, resets in 4h 59m" }),
+    ).toBeVisible();
+    expect(
+      within(group).getByRole("img", { name: "7-day window, codex: 43% left, resets in 1d 19h" }),
+    ).toBeVisible();
     // Another account's windows never stand in for the one the thread will use.
-    expect(within(group).queryByText("10%")).toBeNull();
+    expect(group).not.toHaveTextContent("10%");
   });
 
-  it("draws a spent window's smooth bar empty", async () => {
-    const client = clientOf([entry(codex, [window("codex:primary_5h", 1)])]);
-    const { container } = render(
+  it("marks a window close to its limit in words and a spent one as reached", async () => {
+    const resetsAt = new Date(Date.now() + 3 * 60 * 60_000 + 17 * 60_000 + 10_000).toISOString();
+    const client = clientOf([
+      entry(codex, [
+        { ...window("codex:primary_5h", 0.92), resetsAt },
+        { ...window("codex:secondary_7d", 1), status: "exhausted", resetsAt },
+      ]),
+    ]);
+    render(
       <PlanUsageProvider barStyle="smooth" client={client}>
         <ComposerPlanUsage providerInstanceId={codex} />
       </PlanUsageProvider>,
     );
 
     const group = await screen.findByRole("group", { name: "Plan usage left" });
-    expect(within(group).getByText("0%")).toBeVisible();
-    const fill = container.querySelector<HTMLElement>(".plan-usage__bar--smooth > span");
-    expect(fill?.style.width).toBe("0%");
-    // Nothing in the stylesheet may give the fill a floor: with a 6px minimum
-    // a spent window drew a ninth of the track, and every share under that
-    // looked the same.
-    const css = readFileSync(resolve(process.cwd(), "src/usage/plan-usage-meters.css"), "utf8");
-    const rule = css.match(/\.plan-usage__bar--smooth > span \{[^}]*\}/)?.[0] ?? "";
-    expect(rule).not.toBe("");
-    expect(rule).not.toMatch(/min-width/);
+    const near = within(group).getByRole("img", {
+      name: "5-hour window, codex: 8% left, close to its limit, resets in 3h 17m",
+    });
+    expect(near).toHaveAttribute("data-level", "near");
+    const spent = within(group).getByRole("img", {
+      name: "7-day window, codex: limit reached, resets in 3h 17m",
+    });
+    expect(spent).toHaveAttribute("data-level", "spent");
+    expect(spent).toHaveTextContent("0%");
+  });
+
+  it("keeps the line's figures tabular and lets it shrink instead of pushing its neighbours", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/usage/plan-usage-line.css"), "utf8");
+    const rule = css.match(/\.plan-usage-line \{[^}]*\}/)?.[0] ?? "";
+    expect(rule).toMatch(/font-variant-numeric: tabular-nums/);
+    expect(rule).toMatch(/min-width: 0/);
   });
 
   it("shows nothing when the provider reports no plan window", async () => {

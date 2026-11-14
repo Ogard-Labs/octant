@@ -1,7 +1,7 @@
 /* The start screen's context row, just above the box: where the
-   thread runs on the left, how much of the plan is left on the right. It has
-   no fill or edge of its own, like a thread's strip, and the meters drop to
-   their own right-aligned line when the chips leave no room. */
+   thread runs on the left, what is left of each plan window on the right, as one line of text. It has
+   no fill or edge of its own, like a thread's strip, and the line drops to
+   its own right-aligned line when the chips leave no room. */
 .composer-start {
   display: flex;
   flex-wrap: wrap;
@@ -18,7 +18,7 @@
   min-width: 0;
 }
 
-/* The meter's cell is reserved whether or not the chosen provider reports a
+/* The usage cell is reserved whether or not the chosen provider reports a
    window, so switching Chat and a folder (each may pick another provider)
    never changes how much room the chips have. */
 .composer-start__usage {
@@ -29,7 +29,7 @@
   margin-left: auto;
 }
 
-.composer-start__usage > .plan-usage {
+.composer-start__usage > .plan-usage-line {
   padding: 0 var(--oct-space-2);
 }
 

@@ -178,6 +178,16 @@ describe("ComposerModelPicker", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("leaves a close-to-limit account to the plan usage line and raises no warning", async () => {
+    render(
+      <PlanUsageProvider barStyle="smooth" client={usageClient(0.9)}>
+        <ComposerUsageWarning groups={groups()} selectedProviderInstanceId={String(providerB)} />
+      </PlanUsageProvider>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("marks a reached limit red and keeps a dismissed warning away when the composer comes back", async () => {
     const warningFor = () => (
       <PlanUsageProvider barStyle="smooth" client={usageClient()}>
@@ -1074,7 +1084,7 @@ describe("ComposerModelPicker", () => {
 });
 
 /** A host that last saw the first account out of its five-hour window and the second with room. */
-function usageClient(): ProviderUsageLimitsClient {
+function usageClient(secondUtilization = 0.2): ProviderUsageLimitsClient {
   const observedAt = new Date().toISOString();
   const resetsAt = new Date(Date.now() + 3 * 60 * 60_000 + 30_000).toISOString();
   const entry = (id: typeof providerA, status: "allowed" | "exhausted", utilization: number) => ({
@@ -1107,7 +1117,7 @@ function usageClient(): ProviderUsageLimitsClient {
   const snapshot = {
     version: 1,
     refreshedAt: observedAt,
-    entries: [entry(providerA, "exhausted", 1), entry(providerB, "allowed", 0.2)],
+    entries: [entry(providerA, "exhausted", 1), entry(providerB, "allowed", secondUtilization)],
   };
   return { list: vi.fn(async () => snapshot) } as unknown as ProviderUsageLimitsClient;
 }

@@ -3,16 +3,14 @@ import { X } from "lucide-react";
 import { useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
-import { isConstrained, roomOf } from "./providerRoom";
+import { roomOf } from "./providerRoom";
 import { resetPhrase } from "./railUsageReading";
 import { useProviderRooms } from "./useProviderRooms";
 
 /**
  * Warnings the person put away in this window, by account and standing, each
  * until the reset time it showed. A dismissed warning stays away across threads
- * until that time passes or it gets worse (close to the limit becomes at the
- * limit), since either is news the person has not seen yet. The reset time is
- * an expiry, not part of the key: a provider that reports its reset as a
+ * until that time passes. The reset time is an expiry, not part of the key: a provider that reports its reset as a
  * countdown gives a slightly different time on every reading.
  */
 const dismissedUntil = new Map<string, number | undefined>();
@@ -32,13 +30,13 @@ function spokenName(displayName: string): string {
 }
 
 /**
- * Warns above a new thread's composer when the chosen account has reached, or
- * nearly reached, the plan limit the host last observed, with the reset time.
+ * Warns above a new thread's composer when the chosen account has reached the
+ * plan limit the host last observed, with the reset time. Close to the limit is
+ * not said here: the plan usage line says it by its colour and words.
  * It only tells: it offers no other account, so which one runs is never a
  * click away from the warning, and it never blocks sending, because the
  * provider's own limit stays the authority on whether a turn runs. Nothing
- * renders without an observed limit. Close to the limit is amber, at the limit
- * red, and the person can put either away.
+ * renders without an observed limit. The warning is red and the person can put it away.
  */
 export function ComposerUsageWarning(props: {
   readonly groups: ReadonlyArray<PickerGroup>;
@@ -49,7 +47,7 @@ export function ComposerUsageWarning(props: {
   const { selectedProviderInstanceId } = props;
   if (selectedProviderInstanceId === undefined) return null;
   const room = roomOf(rooms, selectedProviderInstanceId);
-  if (!isConstrained(room)) return null;
+  if (room.standing !== "limited") return null;
   const dismissalKey = `${selectedProviderInstanceId}|${room.standing}`;
   if (isDismissed(dismissalKey, Date.now())) return null;
   const current = props.groups.find(
@@ -57,7 +55,6 @@ export function ComposerUsageWarning(props: {
   );
   const name = current === undefined ? "This account" : spokenName(current.instance.displayName);
   const reset = resetPhrase(room.resetsAt, Date.now());
-  const limited = room.standing === "limited";
   return (
     <div className="composer-usage-warning-row">
       <OctantAlert
@@ -77,12 +74,10 @@ export function ComposerUsageWarning(props: {
           </OctantButton>
         }
         className="composer-usage-warning"
-        tone={limited ? "danger" : "warning"}
+        tone="danger"
       >
         <p>
-          {limited
-            ? `${name} has reached its usage limit.`
-            : `${name} is close to its usage limit.`}
+          {`${name} has reached its usage limit.`}
           {reset === undefined ? null : <span className="callout__second">{` ${reset}.`}</span>}
         </p>
       </OctantAlert>
