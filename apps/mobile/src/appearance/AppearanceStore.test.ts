@@ -51,7 +51,7 @@ describe("AppearanceStore", () => {
     const ascii = parseAppearancePreferences(
       JSON.stringify({ picture: "soft-glow", effect: { kind: "ascii", cell: 3, levels: 4 } }),
     );
-    expect(ascii.effect).toEqual({ kind: "ascii", cell: 6, levels: 4 });
+    expect(ascii.effect).toEqual({ kind: "ascii", cell: 10, levels: 4 });
   });
 
   it("keeps the picture and effect across a save and load", async () => {

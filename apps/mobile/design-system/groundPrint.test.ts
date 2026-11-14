@@ -40,7 +40,7 @@ describe("ground print", () => {
   });
 
   it("never prints ASCII smaller than a glyph can read", () => {
-    expect(clampEffect({ kind: "ascii", cell: 2, levels: 4 }).cell).toBe(6);
+    expect(clampEffect({ kind: "ascii", cell: 2, levels: 4 }).cell).toBe(10);
     expect(clampEffect({ kind: "ascii", cell: 10, levels: 4 }).cell).toBe(10);
   });
 

@@ -35,16 +35,16 @@ describe("ASCII print", () => {
     expect(asciiLevel(0.55)).toBe(5);
   });
 
-  it("never prints a cell smaller than six points", () => {
-    expect(asciiCell(2)).toBe(6);
-    expect(asciiCell(10)).toBe(10);
+  it("never prints a cell smaller than ten points", () => {
+    expect(asciiCell(2)).toBe(10);
+    expect(asciiCell(12)).toBe(12);
   });
 
   it("draws a white cell's glyph strokes in its colour over a darkened ground", () => {
     const printed = printAsciiCells(new Uint8ClampedArray([250, 250, 250, 255]), 1, 1);
     expect(printed).toHaveLength(ASCII_GLYPH_SIZE * ASCII_GLYPH_SIZE * 4);
     // The "@" glyph leaves its top-left corner dark and lights the pixel beside it.
-    expect(Array.from(printed.slice(0, 4))).toEqual([30, 30, 30, 255]);
+    expect(Array.from(printed.slice(0, 4))).toEqual([125, 125, 125, 255]);
     expect(Array.from(printed.slice(4, 8))).toEqual([250, 250, 250, 255]);
   });
 });
