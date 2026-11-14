@@ -203,6 +203,23 @@ export function ProjectIconProvider(props: {
 }
 
 /**
+ * Asks for every known Project's icon as soon as the Project is known, not when
+ * a row that shows it first mounts. The sidebar lists one mode's threads at a
+ * time, so a Project seen only in the other mode had no answer yet: switching
+ * mode drew its letter tile and swapped to the picture about 200ms later.
+ * `load` keeps each answer for the session, so this asks once per Project.
+ */
+export function ProjectIconPrefetch(props: { readonly projectIds: ReadonlyArray<string> }) {
+  const source = useContext(ProjectIconContext);
+  const ids = props.projectIds.join("\n");
+  useEffect(() => {
+    if (source === undefined || ids === "") return;
+    for (const projectId of ids.split("\n")) void source.load(projectId);
+  }, [source, ids]);
+  return null;
+}
+
+/**
  * Which icon a Project shows, for a menu that offers to change it. It loads the
  * icon once, like a mark does, and asks again whenever the icon changes.
  */

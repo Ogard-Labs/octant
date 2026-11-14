@@ -8,6 +8,7 @@ const shell = read("shell.css");
 const dock = read("dock.css");
 const settings = read("settings.css");
 const octant = read("octant.css");
+const surface = read("surface.css");
 const chat = read("chat.css");
 const usage = read("usage.css");
 const projectThreads = read("project-threads.css");
@@ -332,6 +333,12 @@ describe("the shell's edges and gaps", () => {
     expect(rule(octant, ".composer-input")).toMatch(/line-height:\s*var\(--oct-composer-line\)/);
     expect(rule(octant, ".composer-field__attach,\n.composer-field__actions")).toContain(
       "var(--oct-composer-line)",
+    );
+  });
+
+  it("keeps the start screen's composer where the arrived list leaves it, so late rows and cards move nothing", () => {
+    expect(rule(surface, ".welcome:has(> .home-start) > .welcome__heading")).toMatch(
+      /flex:\s*0 0 auto/,
     );
   });
 });

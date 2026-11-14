@@ -369,7 +369,7 @@ import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
 } from "./projects/ProjectActionRunDialog";
-import { ProjectIconProvider } from "./projects/ProjectIcon";
+import { ProjectIconPrefetch, ProjectIconProvider } from "./projects/ProjectIcon";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import {
   ServerCodeProjectsContext,
@@ -5050,6 +5050,10 @@ function LaunchedShell(
       new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
     [projectController.allProjects],
   );
+  const projectIconIds = useMemo(
+    () => projectController.allProjects.map((project) => String(project.id)),
+    [projectController.allProjects],
+  );
   const workingNowProjectNames = useMemo(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
@@ -8641,6 +8645,7 @@ function LaunchedShell(
                               serverUrl={props.launch.serverUrl}
                               windowCapability={props.projectWindowCapability}
                             >
+                              <ProjectIconPrefetch projectIds={projectIconIds} />
                               <ProjectThreadsProvider value={projectThreadsAccess}>
                                 <NewTaskDraftsContext.Provider value={newTaskDrafts}>
                                   <StreamRepliesContext.Provider

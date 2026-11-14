@@ -62,7 +62,11 @@ same stylesheets and described in
    another control. A control that a choice adds or removes keeps a reserved
    slot (hidden, not collapsed), a row keeps its items in one order in every
    state, and something appearing above an anchored surface (a notice above the
-   composer) grows away from it instead of pushing it. A popup opens at its final size and keeps it: data
+   composer) grows away from it instead of pushing it. Data still on its way
+   never places what is already drawn: the start screen's composer sits where the
+   arrived list leaves it and late rows fill the space below, and a mode switch
+   draws the target mode's list whole on its first frame, its pictures asked for
+   before any row shows them. A popup opens at its final size and keeps it: data
    arriving, a choice made inside it or a toggle that reveals detail never
    resizes or moves it. Its width and height are fixed, a list scrolls inside
    them, loading draws skeleton rows of the real rows' height, and the rows a

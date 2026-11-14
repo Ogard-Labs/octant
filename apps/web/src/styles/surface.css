@@ -523,6 +523,16 @@
   text-align: center;
 }
 
+/* With a list under the composer (Code's recent work) the question keeps its own
+   height instead of taking the free height. Taking it put the composer at the
+   foot while the list was still empty, then rode it up about 200px as the rows
+   and cards arrived (measured: 446px, 314px, 217px over 1.7s). The composer now
+   sits where the arrived list would leave it, so late data fills the space
+   below and moves nothing. */
+.welcome:has(> .home-start) > .welcome__heading {
+  flex: 0 0 auto;
+}
+
 .welcome__mark {
   margin-bottom: var(--oct-space-2);
   color: var(--octant-text-primary);
