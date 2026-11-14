@@ -2,6 +2,7 @@ import type {
   AppBackground,
   AppBackgroundEffect,
   AppBackgroundPercent,
+  AppBackgroundScene,
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
@@ -79,8 +80,20 @@ function carry(background: AppBackground) {
     effectCell: background.effectCell,
     effectTones: background.effectTones,
     ...(background.motion === undefined ? {} : { motion: background.motion }),
+    ...(background.scene === undefined ? {} : { scene: background.scene }),
   };
 }
+
+/** What the pixel ground can draw; a row saved before scenes existed shows Drift. */
+const SCENES = [
+  { id: "ridges", label: "Ridges" },
+  { id: "burst", label: "Burst" },
+  { id: "drift", label: "Drift" },
+  { id: "picture", label: "Your picture" },
+] as const satisfies ReadonlyArray<{ id: AppBackgroundScene; label: string }>;
+
+/** A fresh pixel ground opens on Ridges at the bolder four shades the scenes are drawn for. */
+const FIELD_TONES = 4;
 
 /** The effect a row shows: a photo saved before the choice existed reads its dither switch. */
 function currentEffect(background: AppBackground): AppBackgroundEffect {
@@ -135,26 +148,39 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const library = props.library;
   const background = props.background;
-  const selectedId = background.kind === "photo" ? String(background.backgroundId) : null;
+  const field = background.kind === "pixels";
+  const scene: AppBackgroundScene = (field ? background.scene : undefined) ?? "drift";
+  const selectedId =
+    background.kind === "photo"
+      ? String(background.backgroundId)
+      : field && scene === "picture" && background.backgroundId !== undefined
+        ? String(background.backgroundId)
+        : null;
   const selectedPresetId = background.kind === "builtin" ? background.presetId : null;
   const selectedPreset = ZEN_BUILTIN_BACKGROUNDS.find((preset) => preset.id === selectedPresetId);
   const [catalogOpen, setCatalogOpen] = useState(selectedPresetId === null);
-  const showPhoto = choice === "photo" || selectedId !== null;
+  const showPhoto =
+    choice === "photo" ||
+    selectedId !== null ||
+    (choice === "pixels" && field && scene === "picture");
   const showBuiltin = choice === "builtin" || selectedPresetId !== null;
   const showDials = choiceFor(background.kind) !== "none";
   const picture = background.kind === "builtin" || background.kind === "photo";
-  const field = background.kind === "pixels";
   const savedEffect = currentEffect(background);
   // The pixel field has no plain print; a field saved without one dithers.
   const effect: AppBackgroundEffect = field && savedEffect === "none" ? "dither" : savedEffect;
   const printed = (picture && effect !== "none") || field;
+  // A picture is printed, whether the ground is a photo or the pixel ground's
+  // Picture scene.
+  const printedPicture = picture || (field && scene === "picture");
   const motion = currentMotion(background);
   const moves = printed || background.kind === "characters" || background.kind === "flowing";
   // A photo dithered before the effect choice existed prints at 2 px and 4
   // colours. Moving one slider saves an explicit effect, which retires that
   // legacy reading, so the untouched slider's value is saved with it rather
   // than jumping to the decoded default.
-  const legacyPrint = background.effect === undefined && effect === "dither";
+  const legacyPrint =
+    background.kind === "photo" && background.effect === undefined && effect === "dither";
   const printCell = legacyPrint ? 2 : background.effectCell;
   const printTones = legacyPrint ? 4 : background.effectTones;
 
@@ -186,7 +212,21 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   }, [library, showPhoto]);
 
   const choose = (kind: string) => {
-    if (kind === "none" || kind === "characters" || kind === "pixels" || kind === "flowing") {
+    if (kind === "pixels") {
+      setChoice(kind);
+      setStatus(undefined);
+      // Arriving from another ground opens Ridges, drawn for four shades; a
+      // person's own shade count and scene are kept when they come back.
+      const tones = background.effectTones === 8 ? FIELD_TONES : background.effectTones;
+      props.onChange({
+        ...carry(background),
+        kind,
+        scene: background.scene ?? "ridges",
+        effectTones: tones,
+      });
+      return;
+    }
+    if (kind === "none" || kind === "characters" || kind === "flowing") {
       setChoice(kind);
       setStatus(undefined);
       props.onChange({ ...carry(background), kind });
@@ -205,10 +245,17 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     props.onChange({ ...carry(background), kind: "builtin", presetId });
   };
 
+  // Under the pixel ground a photo is the Picture scene's, printed in two
+  // tones; anywhere else it is a photo ground.
+  const withPhoto = (backgroundId: SidebarBackgroundMetadata["id"]): AppBackground =>
+    choice === "pixels" && field
+      ? { ...carry(background), kind: "pixels", scene: "picture", backgroundId }
+      : { ...carry(background), kind: "photo", backgroundId };
+
   const pick = (photo: SidebarBackgroundMetadata) => {
     setStatus(undefined);
     setLibraryOpen(false);
-    props.onChange({ ...carry(background), kind: "photo", backgroundId: photo.id });
+    props.onChange(withPhoto(photo.id));
   };
 
   const setPhotoOpacity = (value: number) => {
@@ -225,7 +272,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     try {
       const uploaded = await library.upload(file);
       setPhotos((current) => [uploaded, ...current.filter((photo) => photo.id !== uploaded.id)]);
-      props.onChange({ ...carry(background), kind: "photo", backgroundId: uploaded.id });
+      props.onChange(withPhoto(uploaded.id));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The photo could not be uploaded.");
     } finally {
@@ -239,7 +286,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     <>
       <div className="setgroup">
         <SettingRow
-          description="What sits behind Octant: a built-in picture, your own photo, pulsing characters, dithered pixels, flowing colour, or none."
+          description="What sits behind Octant: a built-in picture, your own photo, the ASCII field, the pixel ground, flowing colour, or none."
           focused={props.focused === true}
           label="Background"
           labelledBySection
@@ -253,14 +300,33 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
             options={[
               { id: "builtin", label: "Built-in picture" },
               { id: "photo", label: "Your photo" },
-              { id: "characters", label: "Pulsing characters" },
-              { id: "pixels", label: "Dithered pixels" },
+              { id: "characters", label: "ASCII field" },
+              { id: "pixels", label: "Pixel ground" },
               { id: "flowing", label: "Flowing" },
               { id: "none", label: "None" },
             ]}
             value={choice}
           />
         </SettingRow>
+        {field ? (
+          <SettingRow
+            description="Layered ridges with a sun on the horizon, a burst of rays, drifting streaks, or your own photo in the same two tones."
+            label="Scene"
+            scope="app"
+            settingId="app-background-scene"
+          >
+            <OctantSelectField
+              aria-label="Pixel ground scene"
+              className="settings-view__select"
+              onValueChange={(next) => {
+                const chosen = SCENES.find((option) => option.id === next);
+                if (chosen !== undefined) props.onChange({ ...background, scene: chosen.id });
+              }}
+              options={SCENES.map((option) => ({ id: option.id, label: option.label }))}
+              value={scene}
+            />
+          </SettingRow>
+        ) : null}
       </div>
       {showBuiltin ? (
         <details
@@ -541,7 +607,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           {moves ? (
             <SettingRow
               description={
-                picture
+                printedPicture
                   ? "Still keeps the print as it is. Wave sends a wave through its pixels when you click a start screen."
                   : background.kind === "flowing"
                     ? "Still holds one frame. Wave lets the colour field keep drifting."

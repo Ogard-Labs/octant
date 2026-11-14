@@ -777,26 +777,33 @@
     );
 }
 
-/* The character field dims its own middle (see appBackdropAscii.ts), so the
-   question and the composer read on a calm page without the ground being cut
-   away in a fixed ellipse. It fades in once it has drawn its first frame. */
+/* The character field and the pixel ground dim their own middle (see
+   appBackdropAscii.ts and appBackdropPrint.ts), so the question and the
+   composer read on a calm page without the ground being cut away in a fixed
+   ellipse. Each fades in once it has drawn its first frame. */
 .app-backdrop[data-octant-app-backdrop="characters"][data-placement="welcome"],
+.app-backdrop[data-octant-app-backdrop="pixels"][data-placement="welcome"],
 :root[data-octant-theme-mode="light"]
-  .app-backdrop[data-octant-app-backdrop="characters"][data-placement="welcome"] {
+  .app-backdrop[data-octant-app-backdrop="characters"][data-placement="welcome"],
+:root[data-octant-theme-mode="light"]
+  .app-backdrop[data-octant-app-backdrop="pixels"][data-placement="welcome"] {
   mask-image: none;
 }
 
-.app-backdrop__characters {
+.app-backdrop__characters,
+.app-backdrop__pixels {
   opacity: 0;
   transition: opacity var(--oct-motion-ground-in) var(--oct-ease-standard);
 }
 
-.app-backdrop__characters[data-ready="true"] {
+.app-backdrop__characters[data-ready="true"],
+.app-backdrop__pixels[data-ready="true"] {
   opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-backdrop__characters {
+  .app-backdrop__characters,
+  .app-backdrop__pixels {
     transition: none;
   }
 }

@@ -364,6 +364,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "background pixel size square cell dither",
         },
         {
+          id: settingId("app-background-scene"),
+          label: "Background scene",
+          scope: "app",
+          keywords:
+            "background pixel ground scene ridges mountains burst rays drift streaks dither",
+        },
+        {
           id: settingId("app-background-effect-tones"),
           label: "Background colours",
           scope: "app",

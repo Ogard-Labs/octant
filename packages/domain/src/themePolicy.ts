@@ -1,4 +1,9 @@
-import type { AppBackgroundEffect, ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
+import type {
+  AppBackgroundEffect,
+  AppBackgroundScene,
+  ThemeSettings,
+  ThemeTypography,
+} from "@octant/contracts/theme";
 import { getZenBuiltinBackground } from "@octant/contracts/zen";
 import { resolveTypographyProjection } from "@octant/theme/typography";
 
@@ -87,6 +92,8 @@ export interface ResolvedAppBackground {
     readonly cell: number;
     readonly levels: number;
   };
+  /** What the pixel ground draws; absent for every other ground. */
+  readonly scene?: AppBackgroundScene;
   /** 0..1, ready for the renderer. */
   readonly photoOpacity: number;
   readonly scope: "welcome" | "everywhere";
@@ -172,11 +179,20 @@ export function resolveAppBackground(
     };
   }
   if (background.kind === "pixels") {
+    // A pixel ground saved before scenes existed has none and reads as Drift.
+    // The Picture scene needs a photo; without one there is nothing to print,
+    // so it draws Drift rather than an empty page.
+    const picture = background.scene === "picture" && background.backgroundId !== undefined;
+    const scene: AppBackgroundScene =
+      background.scene === undefined || (background.scene === "picture" && !picture)
+        ? "drift"
+        : background.scene;
     return {
       ...tuning,
       effect: { ...effect, kind: effect.kind === "pixelate" ? "pixelate" : "dither" },
+      scene,
       kind: "pixels",
-      backgroundId: null,
+      backgroundId: picture ? String(background.backgroundId) : null,
       backgroundUrl: null,
       backgroundStillUrl: null,
       backgroundLightUrl: null,

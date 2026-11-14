@@ -9,43 +9,63 @@ import {
   type Ripple,
 } from "./appBackdropCharacters";
 import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
+import { createScene, type SceneKind, type SceneSample } from "./appBackdropScenes";
 
 /**
  * The moving print: a ground drawn as square cells, one canvas pixel per cell
  * scaled up without smoothing, so a click can push a wave through the cells.
- * It prints either the pixel field (the theme's ink in slow drifting waves) or
- * a picture's cells. A still print draws one frame and takes no clicks; a
- * moving one bounces the cells outward from each click and lights the wave in
- * the theme's accent, the way the character field's ring does.
+ * It prints a built-in scene or a picture. A scene (and a picture printed in
+ * two tones) uses the theme's ink at a few ordered-dither levels and the accent
+ * for one glow; a picture printed in colour keeps its own colours. A still
+ * print draws one frame and takes no clicks; a moving one bounces the cells
+ * outward from each click and lights the wave in the theme's accent, the way
+ * the character field's ring does.
  */
 
 /** The 4×4 ordered-dither thresholds, in [0, 1). */
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((value) => value / 16);
 
-/** The field's brightest cell; it is texture behind the work, never content. */
-const FIELD_MAX_ALPHA = 0.42;
+/**
+ * The most opaque an ink cell and an accent cell get, by the page they sit on.
+ * A glow on a light page stays fainter: dark ink and a warm accent on pale
+ * paper read much louder than light cells on a dark page.
+ */
+const DARK_PAGE = { ink: 0.5, accent: 0.72 } as const;
+const LIGHT_PAGE = { ink: 0.4, accent: 0.36 } as const;
 /** How far a passing wave pushes a cell, in cells. */
 const BOUNCE_CELLS = 2.2;
 /** How strongly the wave lights a cell toward the accent. */
 const GLOW = 0.6;
-/** The field drifts at twelve frames a second; a wave runs at twenty-four. */
-const IDLE_FRAME_MS = 1000 / 12;
+/** A scene drifts at fifteen frames a second; a wave runs at twenty-four. */
+const IDLE_FRAME_MS = 1000 / 15;
 const WAVE_FRAME_MS = 1000 / 24;
 /** A wave and its echo are gone after this long. */
 const WAVE_SECONDS = 1.9;
+/** The backing store never exceeds this ratio, however dense the display. */
+const MAX_RATIO = 2;
+/** The share of a scene that survives at the page's centre, where the heading sits. */
+const CALM_FLOOR = 0.2;
+/** How far from the centre the scene is back at full strength, as a share of the page. */
+const CALM_REACH = 0.36;
+
+function smoothstep(low: number, high: number, value: number): number {
+  const x = Math.min(1, Math.max(0, (value - low) / (high - low)));
+  return x * x * (3 - 2 * x);
+}
 
 /**
- * The field's brightness at a cell, in [0, 1]: three travelling waves meet in
- * drifting patches. Fractional cells are allowed, which is how a wave's push
- * shows in the field.
+ * The share of a cell's strength that survives at (`x`, `y`) on a page of this
+ * size: the heading in the middle and the composer at the foot keep a fifth,
+ * and the page is back at full strength about a third of its size out.
  */
-export function fieldLevel(column: number, row: number, t: number): number {
-  const waves =
-    Math.sin(column * 0.07 + t * 0.32) +
-    Math.sin(row * 0.11 - t * 0.24) +
-    Math.sin((column + row) * 0.04 + t * 0.45);
-  const patch = Math.max(0, waves / 3);
-  return Math.min(1, Math.pow(patch, 1.3) * 1.45);
+export function calmShare(x: number, y: number, width: number, height: number): number {
+  if (width <= 0 || height <= 0) return 1;
+  const across = (x - width / 2) / width;
+  // Two places keep text over the ground: the heading near the middle, and
+  // the composer docked at the foot.
+  const heading = Math.hypot(across, ((y - height * 0.5) / height) * 0.85);
+  const composer = Math.hypot(across, ((y - height * 0.94) / height) * 1.4);
+  return CALM_FLOOR + (1 - CALM_FLOOR) * smoothstep(0, CALM_REACH, Math.min(heading, composer));
 }
 
 /**
@@ -65,6 +85,91 @@ export function printLevel(
   if (!dithered) return Math.round(clamped * steps) / steps;
   const threshold = BAYER[(row & 3) * 4 + (column & 3)] ?? 0;
   return Math.min(steps, Math.floor(clamped * steps + threshold)) / steps;
+}
+
+/** One printed cell of a two-tone print. */
+export interface Toned {
+  /** Whether the cell is the accent rather than the ink. */
+  accent: boolean;
+  /** 0..1 opacity of the cell. */
+  alpha: number;
+}
+
+/**
+ * Prints one cell in the two tones: the ink at `levels` ordered-dither steps,
+ * or, where the glow stands higher than the ink, the accent. The accent only
+ * ever appears where `glow` is above zero, so it stays a single glow and the
+ * rest of the page reads as ink.
+ */
+export function toneCell(
+  ink: number,
+  glow: number,
+  levels: number,
+  dithered: boolean,
+  column: number,
+  row: number,
+  page: { readonly ink: number; readonly accent: number },
+  into: Toned,
+): void {
+  const inkLevel = printLevel(ink, levels, dithered, column, row);
+  const glowLevel = printLevel(glow, levels, dithered, column, row);
+  if (glowLevel > inkLevel) {
+    into.accent = true;
+    into.alpha = glowLevel * page.accent;
+    return;
+  }
+  into.accent = false;
+  into.alpha = inkLevel * page.ink;
+}
+
+/** A picture read as brightness and warmth per cell, ready to print in two tones. */
+export interface TwoTonePicture {
+  readonly columns: number;
+  readonly rows: number;
+  /** Brightness stretched to the picture's own range, in [0, 1]. */
+  readonly light: Float32Array;
+  /** How strongly a cell wants the accent: bright and warm, in [0, 1]. */
+  readonly glow: Float32Array;
+}
+
+/**
+ * Reduces a picture's cells to brightness and glow. Brightness is stretched
+ * between the picture's 4th and 96th percentile so a flat or dim photo still
+ * uses every ink level; the glow takes the brightest warm cells, so a sunset
+ * lights in the accent and a grey photo does not.
+ */
+export function toTwoTone(cells: PictureCells): TwoTonePicture {
+  const count = cells.columns * cells.rows;
+  const light = new Float32Array(count);
+  const warmth = new Float32Array(count);
+  const histogram = new Uint32Array(64);
+  for (let index = 0; index < count; index += 1) {
+    const red = (cells.rgba[index * 4] ?? 0) / 255;
+    const green = (cells.rgba[index * 4 + 1] ?? 0) / 255;
+    const blue = (cells.rgba[index * 4 + 2] ?? 0) / 255;
+    const value = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    light[index] = value;
+    warmth[index] = Math.max(0, red - blue);
+    const bin = Math.min(63, Math.floor(value * 64));
+    histogram[bin] = (histogram[bin] ?? 0) + 1;
+  }
+  const percentile = (share: number) => {
+    let seen = 0;
+    for (let bin = 0; bin < 64; bin += 1) {
+      seen += histogram[bin] ?? 0;
+      if (seen >= count * share) return (bin + 1) / 64;
+    }
+    return 1;
+  };
+  const low = percentile(0.04);
+  const high = Math.max(low + 0.05, percentile(0.96));
+  const glow = new Float32Array(count);
+  for (let index = 0; index < count; index += 1) {
+    const stretched = Math.min(1, Math.max(0, ((light[index] ?? 0) - low) / (high - low)));
+    light[index] = stretched;
+    glow[index] = smoothstep(0.5, 0.95, stretched * (0.4 + 2.2 * (warmth[index] ?? 0)));
+  }
+  return { columns: cells.columns, rows: cells.rows, light, glow };
 }
 
 export interface CellWave {
@@ -175,11 +280,27 @@ export interface MovingPrintSource {
     readonly source: CanvasImageSource;
     readonly size: { readonly width: number; readonly height: number };
   };
+  /**
+   * A built-in scene to draw in two tones. With a picture and no scene, the
+   * picture is printed in its own colours; with `twoTone` set it is printed in
+   * the theme's ink and accent instead.
+   */
+  readonly scene?: SceneKind;
+  readonly twoTone?: boolean;
+  readonly seed?: number;
+}
+
+/** Whether the ink is light, which is how the print tells a dark page from a pale one. */
+function isDarkPage(color: readonly [number, number, number]): boolean {
+  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] > 140;
 }
 
 /**
  * Draws the print into `canvas` and, when `animated`, keeps it answering
- * clicks (and, for the field, drifting) until the returned stop is called.
+ * clicks (and, for a scene, drifting) until the returned stop is called.
+ * Setup waits for idle time, drawing stops while the document is hidden or the
+ * canvas is off screen, and the canvas is marked `data-ready` after its first
+ * frame so the stylesheet can fade it in.
  */
 export function runMovingPrint(
   canvas: HTMLCanvasElement,
@@ -201,14 +322,25 @@ export function runMovingPrint(
   let rows = 0;
   let pixels: ImageData | undefined;
   let picture: PictureCells | undefined;
+  let twoTone: TwoTonePicture | undefined;
+  let scene: ReturnType<typeof createScene> | undefined;
+  let shares = new Float32Array(0);
+  let sceneRows = 0;
   let ripples: ReadonlyArray<Ripple> = [];
   let waves: CellWave[] = [];
   let blockColumns = 1;
   let frame: number | undefined;
   let nextFrame: ReturnType<typeof setTimeout> | undefined;
+  let idle: number | undefined;
   let lastDrawn = 0;
+  let begun = false;
+  let stopped = false;
+  let onScreen = true;
   let ink: readonly [number, number, number] = [128, 128, 128];
   let accent: readonly [number, number, number] = ink;
+  let page: { readonly ink: number; readonly accent: number } = DARK_PAGE;
+  const sample: SceneSample = { ink: 0, glow: 0 };
+  const toned: Toned = { accent: false, alpha: 0 };
 
   // The ink and accent only move when the theme rewrites the root element,
   // which the observer below reports, so they are read then, not per frame.
@@ -216,11 +348,12 @@ export function runMovingPrint(
     const style = getComputedStyle(canvas);
     ink = parseColor(style.color) ?? [128, 128, 128];
     accent = parseColor(style.getPropertyValue("--octant-accent").trim()) ?? ink;
+    page = isDarkPage(ink) ? DARK_PAGE : LIGHT_PAGE;
   };
 
   const fit = () => {
     const rect = canvas.getBoundingClientRect();
-    const ratio = displayPixelRatio();
+    const ratio = Math.min(MAX_RATIO, displayPixelRatio());
     canvas.width = Math.max(1, Math.round(rect.width * ratio));
     canvas.height = Math.max(1, Math.round(rect.height * ratio));
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -236,17 +369,41 @@ export function runMovingPrint(
       source.picture === undefined
         ? undefined
         : samplePicture(source.picture.source, source.picture.size, columns, rows);
+    twoTone = picture !== undefined && source.twoTone === true ? toTwoTone(picture) : undefined;
+    // A start screen that scrolls makes the canvas as tall as its content,
+    // whose middle is out of sight. A scene is composed for what the window
+    // shows, and the heading and the composer sit within that, so the scene
+    // and its calm are measured against the window, not the page.
+    const visibleHeight = Math.min(rows * cell, window.innerHeight || rows * cell);
+    sceneRows = Math.max(1, Math.min(rows, Math.ceil(visibleHeight / cell)));
+    scene =
+      source.scene === undefined
+        ? undefined
+        : createScene(source.scene, columns, sceneRows, source.seed);
+    // A scene is calmed toward the middle of what the window shows; a colour
+    // picture keeps every cell.
+    shares = new Float32Array(columns * rows);
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        shares[row * columns + column] =
+          scene === undefined && twoTone === undefined
+            ? 1
+            : calmShare((column + 0.5) * cell, (row + 0.5) * cell, columns * cell, visibleHeight);
+      }
+    }
   };
 
   const draw = (now: number) => {
     if (pixels === undefined) return;
     const t = (now - started) / 1000;
     ripples = ripples.filter((ripple) => t - ripple.start <= WAVE_SECONDS);
+    scene?.frame(t);
     const out = pixels.data;
     // The wave is smooth across a few pixels, so small cells share one
     // reading per block: at 2px cells a full-window wave measured about 40ms
     // a frame computed per cell, and about a quarter of that per 2×2 block.
     const stride = Math.max(1, Math.round(4 / cell));
+    const darkPage = isDarkPage(ink);
     let wave = STILL;
     for (let row = 0; row < rows; row += 1) {
       for (let column = 0; column < columns; column += 1) {
@@ -259,35 +416,60 @@ export function runMovingPrint(
             waves[Math.floor(row / stride) * blockColumns + Math.floor(column / stride)] ?? STILL;
         }
         const at = (row * columns + column) * 4;
-        if (picture === undefined) {
-          const level = printLevel(
-            fieldLevel(column - wave.dx, row - wave.dy, t),
+        if (scene !== undefined || twoTone !== undefined) {
+          const sourceColumn = Math.min(columns - 1, Math.max(0, Math.round(column - wave.dx)));
+          const sourceRow = Math.min(rows - 1, Math.max(0, Math.round(row - wave.dy)));
+          const calm = shares[row * columns + column] ?? 1;
+          if (scene !== undefined) {
+            if (sourceRow < sceneRows) scene.read(sourceColumn, sourceRow, sample);
+            else {
+              sample.ink = 0;
+              sample.glow = 0;
+            }
+          } else if (twoTone !== undefined) {
+            const index =
+              Math.min(twoTone.rows - 1, sourceRow) * twoTone.columns +
+              Math.min(twoTone.columns - 1, sourceColumn);
+            const brightness = twoTone.light[index] ?? 0;
+            // On a pale page the ink is dark, so the dark parts of the picture
+            // take the ink and its bright, warm parts keep the glow.
+            // A steeper curve leaves mid-tones empty, so a photo reads as its
+            // shapes and not as a grey blanket; the pale page takes less ink.
+            sample.ink = (darkPage ? brightness : 1 - brightness) ** 1.6 * (darkPage ? 0.8 : 0.45);
+            sample.glow = twoTone.glow[index] ?? 0;
+          }
+          // The wave's light goes through the same print as the scene, so the
+          // ring stays in cells rather than a soft blur.
+          toneCell(
+            sample.ink * calm,
+            Math.max(sample.glow * calm, wave.glow * GLOW),
             levels,
             dithered,
             column,
             row,
+            page,
+            toned,
           );
-          // The wave's light goes through the same print as the field, so
-          // the ring stays in cells rather than a soft blur.
-          const glow = printLevel(wave.glow * GLOW, levels, dithered, column, row);
-          const lit = glow > level;
-          const color = lit ? accent : ink;
+          const color = toned.accent ? accent : ink;
           out[at] = color[0];
           out[at + 1] = color[1];
           out[at + 2] = color[2];
-          out[at + 3] = Math.round(255 * (lit ? glow * 0.85 : level * FIELD_MAX_ALPHA));
+          out[at + 3] = Math.round(255 * toned.alpha);
           continue;
         }
         const sourceColumn = Math.min(
-          picture.columns - 1,
+          (picture?.columns ?? 1) - 1,
           Math.max(0, Math.round(column - wave.dx)),
         );
-        const sourceRow = Math.min(picture.rows - 1, Math.max(0, Math.round(row - wave.dy)));
+        const sourceRow = Math.min(
+          (picture?.rows ?? 1) - 1,
+          Math.max(0, Math.round(row - wave.dy)),
+        );
         const glow =
           wave.glow === 0 ? 0 : printLevel(wave.glow * GLOW * 0.6, levels, true, column, row);
-        const from = (sourceRow * picture.columns + sourceColumn) * 4;
+        const from = (sourceRow * (picture?.columns ?? 1) + sourceColumn) * 4;
         for (let channel = 0; channel < 3; channel += 1) {
-          const value = (picture.rgba[from + channel] ?? 0) / 255;
+          const value = (picture?.rgba[from + channel] ?? 0) / 255;
           // Pixelate keeps a picture's colours, as the still print does;
           // only dither steps them down.
           const printed = dithered ? printLevel(value, levels, true, column, row) : value;
@@ -304,18 +486,25 @@ export function runMovingPrint(
     context.drawImage(grid, 0, 0, columns * cell, rows * cell);
   };
 
+  const halt = () => {
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    if (nextFrame !== undefined) clearTimeout(nextFrame);
+    frame = undefined;
+    nextFrame = undefined;
+  };
+
   // A timer waits out each frame interval and one animation frame draws, for
   // the reason given on the character field's tick: asking for a frame at
   // every vsync kept the compositor busy even when most of them drew nothing.
   const tick = (now: number) => {
     frame = undefined;
-    if (document.hidden) return;
+    if (document.hidden || !onScreen || stopped) return;
     lastDrawn = now;
     draw(now);
     scheduleNext();
   };
   const schedule = (intervalMs: number) => {
-    if (frame !== undefined) return;
+    if (frame !== undefined || stopped) return;
     if (nextFrame !== undefined) clearTimeout(nextFrame);
     nextFrame = setTimeout(
       () => {
@@ -325,9 +514,10 @@ export function runMovingPrint(
       Math.max(0, lastDrawn + intervalMs - performance.now()),
     );
   };
-  // The field keeps drifting and a wave runs at twice its pace; a picture has
+  // A scene keeps drifting and a wave runs at twice its pace; a picture has
   // nothing to move between waves, so it rests until the next click.
   const scheduleNext = () => {
+    if (!begun || document.hidden || !onScreen) return;
     const waving = ripples.length > 0;
     if (!waving && picture !== undefined) return;
     schedule(waving ? WAVE_FRAME_MS : IDLE_FRAME_MS);
@@ -335,12 +525,13 @@ export function runMovingPrint(
   // A hidden window ends the loop above; it starts again on return.
   const visibility = () => {
     if (!document.hidden) scheduleNext();
+    else halt();
   };
 
   // Clicks are read on the window, like the character field's, and kept only
   // when they land over the print.
   const wave = (event: PointerEvent) => {
-    if (!acceptsRipple(event.target, ripplesWithin)) return;
+    if (!begun || !acceptsRipple(event.target, ripplesWithin)) return;
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -350,30 +541,53 @@ export function runMovingPrint(
     ripples = [...ripples, { ...ripple, heart: false }];
     // A click may land mid-way through an idle wait or while a picture
     // rests; the wave's first frame is due at its own, faster, cadence.
+    halt();
     scheduleNext();
   };
 
-  fit();
-  readTheme();
-  lastDrawn = performance.now();
-  draw(lastDrawn);
+  // Setup waits for idle time, so the first paint of the page is not delayed.
+  const begin = () => {
+    idle = undefined;
+    begun = true;
+    fit();
+    readTheme();
+    lastDrawn = performance.now();
+    draw(lastDrawn);
+    canvas.dataset["ready"] = "true";
+    if (animated) scheduleNext();
+  };
+  const hasIdle = typeof window.requestIdleCallback === "function";
+  if (hasIdle) idle = window.requestIdleCallback(begin, { timeout: 600 });
+  else idle = window.setTimeout(begin, 1);
   if (animated) {
-    scheduleNext();
     window.addEventListener("pointerdown", wave, { passive: true });
     document.addEventListener("visibilitychange", visibility);
   }
   const refit = () => {
+    if (!begun) return;
     fit();
     draw(performance.now());
   };
   const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(refit);
   observer?.observe(canvas);
+  const screenObserver =
+    typeof IntersectionObserver === "undefined"
+      ? undefined
+      : new IntersectionObserver((entries) => {
+          const latest = entries[entries.length - 1];
+          if (latest === undefined) return;
+          onScreen = latest.isIntersecting;
+          if (onScreen) scheduleNext();
+          else halt();
+        });
+  screenObserver?.observe(canvas);
   const stopPixelRatio = watchDisplayPixelRatio(refit);
   // The ink and accent are copied into pixels, so a theme switch redraws.
   const themeObserver =
     typeof MutationObserver === "undefined"
       ? undefined
       : new MutationObserver(() => {
+          if (!begun) return;
           readTheme();
           draw(performance.now());
         });
@@ -382,12 +596,18 @@ export function runMovingPrint(
     attributeFilter: ["style", "class", "data-octant-theme-mode"],
   });
   return () => {
-    if (frame !== undefined) cancelAnimationFrame(frame);
-    if (nextFrame !== undefined) clearTimeout(nextFrame);
+    stopped = true;
+    halt();
+    if (idle !== undefined) {
+      if (hasIdle) window.cancelIdleCallback(idle);
+      else window.clearTimeout(idle);
+    }
     window.removeEventListener("pointerdown", wave);
     document.removeEventListener("visibilitychange", visibility);
     observer?.disconnect();
+    screenObserver?.disconnect();
     stopPixelRatio();
     themeObserver?.disconnect();
+    delete canvas.dataset["ready"];
   };
 }

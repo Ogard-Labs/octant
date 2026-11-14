@@ -39,7 +39,10 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   const wavesWithin = placement === "shell" ? START_SCREEN_SELECTOR : undefined;
   const [photo, setPhoto] = useState<DecodedPhoto | null>(null);
   const active = resolved.kind !== "none";
-  const photoId = resolved.kind === "photo" ? resolved.backgroundId : null;
+  // The pixel ground's Picture scene reads its photo the same way a photo
+  // ground does, and prints it in two tones on its own canvas.
+  const photoId =
+    resolved.kind === "photo" || resolved.kind === "pixels" ? resolved.backgroundId : null;
   // A built-in printed through an effect is drawn on the canvas from its
   // still frame, like a photo; left plain it stays a CSS image, which keeps
   // an animated preset moving.
@@ -127,12 +130,31 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   }, [characters, wavesWithin, resolved.backgroundAnimated]);
 
   const pixels = resolved.kind === "pixels";
+  const scene = resolved.scene;
   useEffect(() => {
     const canvas = pixelsCanvas.current;
     if (!pixels || canvas === null) return;
-    return runMovingPrint(canvas, {}, resolved.effect, resolved.backgroundAnimated, wavesWithin);
+    // A Picture scene draws nothing until its photo has been read.
+    const printed =
+      scene === "picture"
+        ? photo === null
+          ? undefined
+          : { picture: { source: photo.source, size: photo.size }, twoTone: true }
+        : scene === undefined
+          ? undefined
+          : { scene };
+    if (printed === undefined) return;
+    return runMovingPrint(
+      canvas,
+      printed,
+      resolved.effect,
+      resolved.backgroundAnimated,
+      wavesWithin,
+    );
   }, [
     pixels,
+    scene,
+    photo,
     wavesWithin,
     resolved.backgroundAnimated,
     resolved.effect.kind,
@@ -208,7 +230,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
           <div aria-hidden="true" className="app-backdrop__flowing-grain" />
         </div>
       ) : null}
-      {pictureSource === null ? null : (
+      {pictureSource === null || pixels ? null : (
         <canvas
           className="app-backdrop__photo"
           data-dithered={resolved.effect.kind === "none" ? "false" : "true"}

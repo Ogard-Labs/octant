@@ -355,6 +355,8 @@ describe("application background policy", () => {
       backgroundAnimated: true,
       // The field is always printed: dither unless a person picked plain pixels.
       effect: { kind: "dither", cell: 4, levels: 5 },
+      // A row saved before scenes existed draws Drift.
+      scene: "drift",
     });
     const still = {
       ...settings,
@@ -368,6 +370,31 @@ describe("application background policy", () => {
     };
     expect(resolveAppBackground(pixelate).effect.kind).toBe("pixelate");
     expect(resolveAppBackground({ ...settings, increasedContrast: true }).kind).toBe("none");
+  });
+
+  it("draws the scene a pixel ground chose, and falls back to Drift for a picture it has no photo for", () => {
+    const pixels = (extra: Record<string, unknown>): ThemeSettings => ({
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, kind: "pixels", ...extra } as never,
+    });
+    expect(resolveAppBackground(pixels({ scene: "ridges" }))).toMatchObject({
+      kind: "pixels",
+      scene: "ridges",
+      backgroundId: null,
+    });
+    expect(resolveAppBackground(pixels({ scene: "picture", backgroundId: photoId }))).toMatchObject(
+      { scene: "picture", backgroundId: photoId },
+    );
+    expect(resolveAppBackground(pixels({ scene: "picture" }))).toMatchObject({
+      scene: "drift",
+      backgroundId: null,
+    });
+    expect(
+      resolveAppBackground({
+        ...baseSettings,
+        appBackground: { ...baseSettings.appBackground, kind: "characters" },
+      }).scene,
+    ).toBeUndefined();
   });
 
   it("waves a printed picture only when a person chose Wave, and never under reduced motion", () => {

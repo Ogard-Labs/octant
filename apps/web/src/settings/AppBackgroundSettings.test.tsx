@@ -119,7 +119,7 @@ describe("AppBackgroundSettings", () => {
     });
   });
 
-  it("saves dithered pixels in one choice, then sizes, shades, and stills the field", async () => {
+  it("saves the pixel ground in one choice, then picks its scene, sizes, shades, and stills it", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const { rerender } = render(
@@ -131,8 +131,14 @@ describe("AppBackgroundSettings", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Application background" }));
-    await user.click(await screen.findByRole("option", { name: "Dithered pixels" }));
-    expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "pixels" });
+    await user.click(await screen.findByRole("option", { name: "Pixel ground" }));
+    // It opens on Ridges at the four shades the scenes are drawn for.
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...dials,
+      kind: "pixels",
+      scene: "ridges",
+      effectTones: 4,
+    });
 
     const field = { ...DEFAULT_APP_BACKGROUND, kind: "pixels" as const };
     rerender(<AppBackgroundSettings background={field} library={library()} onChange={onChange} />);
@@ -145,6 +151,15 @@ describe("AppBackgroundSettings", () => {
     );
     expect(screen.getByRole("slider", { name: "Pixel size" })).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Colours" })).toBeInTheDocument();
+    // A row saved before scenes existed shows Drift; the picker offers all four.
+    const scene = screen.getByRole("combobox", { name: "Pixel ground scene" });
+    expect(scene).toHaveTextContent("Drift");
+    await user.click(scene);
+    expect(await screen.findAllByRole("option")).toHaveLength(4);
+    await user.click(screen.getByRole("option", { name: "Burst" }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "pixels", scene: "burst" }),
+    );
     const motion = screen.getByRole("group", { name: "Background motion" });
     expect(within(motion).getByRole("button", { name: "Wave" })).toHaveAttribute(
       "aria-pressed",
@@ -154,7 +169,26 @@ describe("AppBackgroundSettings", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ motion: "still" }));
   });
 
-  it("saves pulsing characters as the ground in one choice, keeping every dial", async () => {
+  it("saves a photo under the Picture scene as part of the pixel ground, not as a photo ground", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "pixels", scene: "picture" }}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Choose an uploaded photo" }));
+    await user.click(await screen.findByRole("radio", { name: "harbour.png" }));
+
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "pixels", scene: "picture", backgroundId: PHOTO_ID }),
+    );
+  });
+
+  it("saves the ASCII field as the ground in one choice, keeping every dial", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(
@@ -166,7 +200,7 @@ describe("AppBackgroundSettings", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Application background" }));
-    await user.click(await screen.findByRole("option", { name: "Pulsing characters" }));
+    await user.click(await screen.findByRole("option", { name: "ASCII field" }));
 
     expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "characters" });
   });
@@ -456,7 +490,7 @@ describe("AppBackgroundSettings", () => {
     );
 
     expect(screen.getByRole("combobox", { name: "Application background" })).toHaveTextContent(
-      "Pulsing characters",
+      "ASCII field",
     );
   });
 

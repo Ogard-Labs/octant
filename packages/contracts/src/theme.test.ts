@@ -538,6 +538,32 @@ describe("application background contracts", () => {
     expect(() => decodeAppBackground({ kind: "theme", scope: "sidebar" })).toThrow();
   });
 
+  it("decodes a pixel ground with and without a scene, so a print saved before scenes still loads", () => {
+    // A row saved before scenes existed carries none; the policy reads it as Drift.
+    expect(decodeAppBackground({ kind: "pixels" })).toEqual({ kind: "pixels", ...tuning });
+    expect(decodeAppBackground({ kind: "pixels", effect: "pixelate", motion: "wave" })).toEqual({
+      kind: "pixels",
+      ...tuning,
+      effect: "pixelate",
+      motion: "wave",
+    });
+    for (const scene of ["ridges", "burst", "drift", "picture"] as const) {
+      expect(decodeAppBackground({ kind: "pixels", scene })).toMatchObject({
+        kind: "pixels",
+        scene,
+      });
+    }
+    expect(
+      decodeAppBackground({
+        kind: "pixels",
+        scene: "picture",
+        backgroundId: "00000000-0000-4000-8000-000000000b01",
+      }),
+    ).toMatchObject({ scene: "picture", backgroundId: "00000000-0000-4000-8000-000000000b01" });
+    expect(() => decodeAppBackground({ kind: "pixels", scene: "waterfall" })).toThrow();
+    expect(() => decodeAppBackground({ kind: "pixels", backgroundId: "x" })).toThrow();
+  });
+
   it("replays settings written before the application background existed as the plain page", () => {
     expect(decodeThemeSettings(validSettings).appBackground).toEqual({ kind: "none", ...tuning });
     // A fresh install is the one place the character field arrives on its own.

@@ -226,6 +226,16 @@ export type AppBackgroundEffect = typeof AppBackgroundEffect.Type;
 export const AppBackgroundMotion = Schema.Literal("still", "pulse", "wave");
 export type AppBackgroundMotion = typeof AppBackgroundMotion.Type;
 
+/**
+ * What the pixel ground draws. Ridges are layered horizon lines with a sun
+ * glow on the horizon, Burst is a soft radial burst of rays toward a corner,
+ * Drift is diagonal streaks, and Picture prints a person's photo in the same
+ * two tones. Absent on a pixel ground saved before scenes existed, which
+ * resolves to Drift, the nearest to the drifting field those rows drew.
+ */
+export const AppBackgroundScene = Schema.Literal("ridges", "burst", "drift", "picture");
+export type AppBackgroundScene = typeof AppBackgroundScene.Type;
+
 /** CSS pixels per effect cell, and colour steps per channel for dither. */
 export const AppBackgroundEffectCell = Schema.Int.pipe(Schema.between(2, 16));
 export const AppBackgroundEffectTones = Schema.Int.pipe(Schema.between(2, 16));
@@ -248,6 +258,8 @@ const AppBackgroundTuning = {
   effectCell: Schema.optionalWith(AppBackgroundEffectCell, { default: () => 3 }),
   effectTones: Schema.optionalWith(AppBackgroundEffectTones, { default: () => 8 }),
   motion: Schema.optional(AppBackgroundMotion),
+  /** What the pixel ground draws; read by no other kind. */
+  scene: Schema.optional(AppBackgroundScene),
 };
 
 /** Retired: the drawn dot pattern. It decodes and resolves to the plain page. */
@@ -278,12 +290,15 @@ const CharactersAppBackground = Schema.Struct({
 }).annotations(strict);
 
 /**
- * A field of square cells in the theme's own ink, its brightness drifting in
- * slow waves and printed through an ordered dither (or plain pixels). It
- * carries no picture; the effect cell and tones size it.
+ * The pixel ground: square cells in the theme's own ink at a few ordered-dither
+ * levels, with the accent as one glow, drawn as a built-in scene (ridges,
+ * burst, drift) or as a person's photo in the same two tones. The effect cell
+ * and tones size it.
  */
 const PixelsAppBackground = Schema.Struct({
   kind: Schema.Literal("pixels"),
+  /** The photo the Picture scene prints, from the shared image library. */
+  backgroundId: Schema.optional(SidebarBackgroundId),
   ...AppBackgroundTuning,
 }).annotations(strict);
 

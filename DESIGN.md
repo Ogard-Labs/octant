@@ -80,8 +80,8 @@ is not available explains why and offers the next useful action, or stays out
 of the primary layout. The one thing allowed to be decorative is the
 [application ground](docs/design/application-ground.md): a first-party picture
 or a person's photo, shown plain or through one print effect, or the field of
-Pulsing characters, Dithered pixels, or Flowing colour, behind the start
-screens or behind every page.
+ASCII field, the Pixel ground (ridges, a burst, streaks, or a photo in two
+tones), or Flowing colour, behind the start screens or behind every page.
 
 ## Voice
 
@@ -817,11 +817,11 @@ leave on `--oct-ease-color`. The spin (`--oct-motion-spin`, 900ms), pulse
 are tokens too. One value with one meaning has one token: a duration, a weight
 or a space is never defined twice under two names. There is no decorative
 entrance animation and no ambient motion behind the work by default. The one exception is
-the default ground, the Pulsing characters, which drifts only behind a start
+the default ground, the ASCII field, which drifts only behind a start
 screen, at about fifteen frames a second, and stops while the window is hidden;
 a click on empty ground sends a ring (now and then a heart) through it for under
 two seconds, at about forty frames a second while it lives.
-An animated built-in picture, Dithered pixels, and Flowing grounds, and a printed
+An animated built-in picture, the Pixel ground (at about fifteen frames a second), and Flowing grounds, and a printed
 picture set to Wave are the other moving grounds a person may choose, and reduced
 motion holds each on a still frame. Running state has a textual or shape
 distinction in addition to motion. `prefers-reduced-motion` and the persisted

@@ -6,8 +6,8 @@ The picture or drawn field behind the start screens, or behind every page, and h
 
 The screen sits on the application ground, set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, a field
-of pulsing characters, a field of dithered pixels, a flowing colour field, or
-the plain page. A fresh install starts on Pulsing characters, behind the start
+of pulsing characters (the ASCII field), the pixel ground, a flowing colour field, or
+the plain page. A fresh install starts on the ASCII field, behind the start
 screens only: the glow it replaces competed with the heading. Soft glow, Graphite
 and Sunset stay in the catalog as three Gradient pictures that each carry a light
 and a dark print, so the ground follows the window's scheme; the stylesheet
@@ -19,13 +19,42 @@ its Motion to Wave: then a click on a start screen pushes a ring outward
 through its cells, each cell sampled from a little further in as the ring's
 edge passes and lit toward the accent through the same dither, so the ring
 stays in pixels; between clicks the print rests and draws nothing. A ground
-saved with the retired dot pattern resolves to the plain page. Dithered pixels
-is a drawn ground of square cells in the theme's primary ink, at most about
-two-fifths opaque, whose brightness drifts in slow overlapping waves at twelve
-frames a second and prints through a 4×4 ordered dither (or plain pixels) at
-the chosen pixel size and number of shades; a click on a start screen sends
-the same pushing, accent-lit ring through it at twenty-four frames a second,
-for under two seconds. Flowing is a drawn ground of large, soft, edgeless
+saved with the retired dot pattern resolves to the plain page. The pixel ground
+is the ASCII field's counterpart: a drawn ground of square cells, three CSS
+pixels each by default, in the theme's primary ink at a few ordered-dither
+levels (a 4×4 Bayer threshold, four shades by default), with the theme's accent
+as one glow that dithers from accent into ink into nothing. It never carries
+more than one accent colour. The ink is at most half opaque on a dark page, and
+the accent at most about seven-tenths there; on a light page the ink is dark, at
+most two-fifths opaque, and the glow stays about half as strong, so it stays
+faint. A Scene chooses what it draws. Ridges are five layered horizon lines from
+smooth noise: the far ones are fainter, each ridge's edge is its brightest line,
+and an accent sun sits on the horizon to one side, lighting only the edges it can
+see. Burst is a soft radial burst of about twenty rounded rays in the accent from
+the top right corner, fading into dither, whose size breathes by a few per cent.
+Drift is diagonal streaks in the ink, in loose bands that break up along their
+length, with a few in the accent, sliding across the page. Your picture prints a
+photo from the host's library in the same two tones: its brightness is stretched
+to the photo's own range and printed in ink (dark ink on a light page, so shadows
+take the ink there), and only its brightest warm cells take the accent, so a
+sunset glows and a grey photo does not; it is read at the cell grid first, so it
+costs no more memory than the grid. A ground saved before scenes existed has none
+and draws Drift, the nearest to the drifting field it drew; a Picture scene
+without a photo draws Drift too. Every scene is generated in code from a fixed
+seed, so it looks the same each time, and none ships an image. Each scene is laid
+out for what the window shows (a start screen that scrolls makes the ground as
+tall as its content) and dimmed toward the heading in the middle and the composer
+at the foot, which keep a fifth of its strength, back to full about a third of the
+page out, so the brightest cells stay away from text. Motion is slow: ridges drift
+a few cells a second, the sun and the burst breathe, the streaks slide. It runs at
+fifteen frames a second, stops while the document is hidden or the ground is off
+screen, caps its backing store at twice the display ratio, sets up in idle time,
+and fades in over 1.2 seconds once it has drawn. Reduced motion, or Motion Still,
+holds one frame. A click on a start screen sends the same pushing, accent-lit ring
+through it at twenty-four frames a second for under two seconds. The effect
+(Pixelate or Dither), cell size, shade count and scope are set as for any print,
+and Settings › Appearance › Background lists the ASCII field and the Pixel ground
+side by side, the latter with its scene; choosing it from another ground opens Ridges at four shades. Flowing is a drawn ground of large, soft, edgeless
 colour that drifts like ink in water, and only when a person picks it. Four
 stops are taken from the theme's accent in OKLCH — a near-black deep tone, a
 dark saturated reading of the accent, a brighter accent tone, and a vivid glow
@@ -39,7 +68,7 @@ the ground is off-screen, and falls back to a few blurred radial gradients
 that use the same stops when that path is unavailable. A static grain at a few
 percent of opacity and a quiet vignette sit on top of either path so the wash
 does not band. It answers no clicks. Motion Still holds it on one frame; Wave
-lets the colour keep drifting. Reduced motion holds it still. Pulsing characters is the default drawn ground, and the one a start screen
+lets the colour keep drifting. Reduced motion holds it still. The ASCII field (Pulsing characters) is the default drawn ground, and the one a start screen
 shows on a fresh install: a canvas of small monospace letters and digits in the
 theme's primary ink, at most 15% opaque, that shows only inside slowly drifting
 patches and leaves the rest empty. Three patterns (round blotches, long

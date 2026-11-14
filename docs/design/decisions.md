@@ -2390,6 +2390,7 @@ A new window, its background and its drafts behave predictably.
 
 - Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed, subject to the active pane having an eligible dock subject. The bottom panel starts closed. An explicit show or hide is restored per window later.
 - A photo ground comes from the host's background image library (8 MiB, 4096x4096, PNG, JPEG or WebP). The host refuses to delete a photo while it is showing, and ground settings are kept across kinds. _Here only._
+- The pixel ground is the ASCII field's alternative, not a replacement: the default stays the ASCII field. It draws a generated scene (ridges, burst or drift) or a photo in the same two tones, the theme's ink at a few ordered-dither levels plus the accent as one glow, calmed toward the heading and composer. A pixel ground saved before scenes existed has none and draws Drift. _Here only._
 - While an everywhere background covers the sidebar, the sidebar's own background is not drawn and its controls are disabled with a note; saved sidebar values are kept. _Here only._
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
 - If first-turn startup fails after the task opens, the provisional prompt is withdrawn and its text returns to the composer with the refusal reason. _Here only._
