@@ -190,7 +190,7 @@ typing for the wrong Project because the panes look alike).
 | Workspace contract (`packages/contracts`) | Each pane carries its own context key; the window's per-mode context stays the lead Project                                | FR-1, FR-9, FR-15                            |
 | Workspace policy (`packages/domain`)      | Resolves a pane's context from its surface, admits or refuses, derives the admission set, stows and restores mixed layouts | FR-1, FR-3, FR-4, FR-13, FR-14, NFR-1, NFR-2 |
 | Window admission check (`apps/server`)    | One helper, `windowAdmitsProject`, replacing every equality site, server Project checks included                           | FR-2, FR-8, FR-10, FR-15, CON-3              |
-| Turn standing authority (`apps/server`)   | A turn's window-held calls and context reads are judged on the window's admission and on the turn's own Project            | FR-2, FR-8, FR-12                            |
+| Turn standing authority (`apps/server`)   | A turn's window-held calls and context reads are judged on the window's admission and on the turn's own Project            | FR-2, FR-8                                   |
 | Pane presentation (`apps/web`)            | Project mark in every pane title, dock and bottom panel per active pane, approvals labelled, drag no longer refused        | FR-5, FR-6, FR-7, FR-11                      |
 
 ### Domain concepts
