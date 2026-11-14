@@ -4421,7 +4421,7 @@ describe("App", () => {
       } else if (entry === "thread search") {
         await user.keyboard("{Control>}k{/Control}");
         await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
-        const dialog = await screen.findByRole("dialog", { name: "Search Code threads" });
+        const dialog = await screen.findByRole("dialog", { name: "Search threads" });
         await user.click(within(dialog).getByRole("button", { name: "New task" }));
       } else {
         await act(async () => startNewAgent?.());
@@ -5203,12 +5203,12 @@ describe("App", () => {
     // one centered, mode-scoped thread finder.
     await user.click(screen.getByRole("button", { name: "Search" }));
     await user.type(screen.getByRole("searchbox", { name: "Filter threads" }), "{Enter}");
-    const search = screen.getByRole("combobox", { name: "Search Code threads" });
+    const search = screen.getByRole("combobox", { name: "Search threads" });
     expect(search).toBeVisible();
     await waitFor(() => expect(search).toHaveFocus());
-    expect(screen.getByRole("dialog", { name: "Search Code threads" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Search threads" })).toBeVisible();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Search Code threads" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Search threads" })).toBeNull();
   }, 15_000);
 
   it("lists an archived Chat thread the host search reports in the Archived group", async () => {
@@ -5229,7 +5229,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Chat threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Chat threads" }), "Retired");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Retired");
 
     // The Chat bootstrap is deliberately active-only, so the Archived group can
     // only ever be filled by the host's own lifecycle-spanning thread search.
@@ -5257,7 +5257,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Chat threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Chat threads" }), "Retired");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Retired");
 
     expect(
       await screen.findByText(
@@ -5306,7 +5306,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Code threads" }), "Controller");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Controller");
     await user.click(await screen.findByRole("option", { name: /Controller foundation/ }));
 
     // The hit's thread lives in "Octant" while this window's Code context is

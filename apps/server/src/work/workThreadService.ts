@@ -520,6 +520,32 @@ export class WorkThreadService {
    * projection, so the search reads them there rather than from a store; a
    * rewound turn has left the thread's order and is not matched.
    */
+  /**
+   * The threads search may look in, newest first: exactly what the sidebar and
+   * its Archived group list. A thread being deleted, or one in a Project that
+   * is gone or not a Work Project, is never searched.
+   */
+  listSearchableThreads(_authenticatedWindowId: WindowId): ReadonlyArray<WorkThread> {
+    this.#assertReady();
+    return this.#searchableThreads();
+  }
+
+  #searchableThreads(): WorkThread[] {
+    return this.#projection
+      .list()
+      .filter((thread) => {
+        if (thread.lifecycle !== "active" && thread.lifecycle !== "archived") return false;
+        if (this.#serverProjects?.holdsThread(thread) === true) return true;
+        const project = this.#persistence.readProject(thread.projectId);
+        return project?.type === "work" && project.lifecycle === "active";
+      })
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          String(left.id).localeCompare(String(right.id)),
+      );
+  }
+
   async searchTranscript(
     _authenticatedWindowId: WindowId,
     query: string,
@@ -532,19 +558,7 @@ export class WorkThreadService {
     }
     const needle = normalizeSearchText(trimmed);
     try {
-      const threads = this.#projection
-        .list()
-        .filter((thread) => {
-          if (thread.lifecycle !== "active" && thread.lifecycle !== "archived") return false;
-          if (this.#serverProjects?.holdsThread(thread) === true) return true;
-          const project = this.#persistence.readProject(thread.projectId);
-          return project?.type === "work" && project.lifecycle === "active";
-        })
-        .sort(
-          (left, right) =>
-            right.updatedAt.localeCompare(left.updatedAt) ||
-            String(left.id).localeCompare(String(right.id)),
-        );
+      const threads = this.#searchableThreads();
       const hits: WorkTranscriptSearch["hits"][number][] = [];
       for (const thread of threads) {
         const lifecycle = thread.lifecycle === "archived" ? "archived" : "active";

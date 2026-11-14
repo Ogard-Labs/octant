@@ -54,7 +54,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 18        | 13      | 5            | 0                   |
+| [Workspace](#workspace)                                                               | 19        | 13      | 6            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **258**   | **155** | **100**      | **3**               |
+| **All areas**                                                                         | **259**   | **155** | **101**      | **3**               |
 
 ## Principles and hard lines
 
@@ -2481,6 +2481,17 @@ Thread Search matches message text in Chat, Work, and Code, on the desktop and t
 - The reads are GETs a paired device reaches under the overview read grant. Code text is searched through a rebuildable projection of the operation journal that joins a reply's streamed parts; Work text is searched in the rebuildable turn projection.
 
 Status: Built. Since: 2026-11-14. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects) and [Host reads and commands](host-reads-and-commands.md).
+
+### Search across modes
+
+Thread Search looks in Chat, Work, and Code at once through one host read, `GET /api/search`, matching thread titles, prompts, replies, and what tools did (maintainer request, 2026-11-14).
+
+- Every word of a query must appear in the turn or title, in any order and ignoring case; text in double quotes must appear as written. A turn shows once, by the text that holds the most words. Title matches come first, then message matches, then tool matches, newest thread first.
+- Each mode names the threads it lists for the caller (its sidebar and Archived group), and only those are searched, before the hit cap, so neither a hit nor `truncated` reveals a thread the caller could not open. A mode that cannot list is reported unavailable rather than failing the search. The read is a GET a paired device reaches under the overview read grant.
+- Tool text is each tool step's name and summary, the files a Work turn wrote, and the newest output of a Code terminal (bounded per turn). A full-text index rebuilt from the journal holds it; a streamed piece is written once, so a long reply costs no more to index late than early.
+- Built: the host read and index, and the desktop overlay's All, Chat, Work, and Code filter. Not built yet: the phone still uses each mode's message search.
+
+Status: Partly built. Since: 2026-11-14. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects) and [Host reads and commands: Search across modes](host-reads-and-commands.md#search-across-modes).
 
 ### Mode-first navigation and Projects
 

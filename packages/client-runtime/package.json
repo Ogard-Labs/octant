@@ -37,6 +37,7 @@
     "./github-clone-client": "./src/githubCloneClient.ts",
     "./host-client": "./src/hostClient.ts",
     "./host-resource-client": "./src/hostResourceClient.ts",
+    "./thread-search-client": "./src/threadSearchClient.ts",
     "./host-control-client": "./src/hostControlClient.ts",
     "./shield-servers-client": "./src/shieldServersClient.ts",
     "./server-projects-client": "./src/serverProjectsClient.ts",

@@ -207,6 +207,47 @@ match across a burst boundary is found. It is a derived projection rebuilt from
 the operation journal, marks the turns a conversation rewind removed so they
 are not matched, and its rows are swept by a thread purge.
 
+## Search across modes
+
+`GET /api/search?q=&scope=` searches Chat, Work, and Code at once; `scope` is
+`all` (the default), `chat`, `work`, or `code`. Any other query key, a repeated
+key, an unknown scope, another method, or a window identity in the query is
+refused, and a paired device reaches it under the overview read grant. The
+query shares the message-search bounds (at most 200 characters, trimmed, empty
+answers no hits), and an answer holds at most 50 hits with `truncated`.
+
+Each mode names the threads it lists for the caller, by the same rules as its
+message search above; only those are searched, before the cap. A mode that
+cannot list (not running, or not ready) is named in `unavailable` and the
+others are still searched. Each hit carries its mode, the thread, its title,
+`active` or `archived`, its Project when it has one, when the thread last
+changed, the field that matched (`title`, `prompt`, `reply`, or `tool`), the
+turn that holds it (a Chat or Work `turnId`, or a Code `operationId`; none for
+a title), and a snippet of at most 160 characters with every term marked.
+
+Every word of the query must appear, in any order and ignoring case; text in
+double quotes is one phrase that must appear as written, and at most eight
+terms count. A turn matches when each term appears somewhere in it (its prompt,
+any piece of its reply, or its tool text) and is shown once, by the text that
+holds the most terms, a prompt before a reply before tool text on a tie. Title
+matches come first, then message matches, then tool matches, each newest
+thread first and newest turn first within a thread.
+
+The `thread-search` projection holds a trigram full-text index, so any run of
+three or more characters matches without reading every row; a shorter term is
+read from the matching rows. It holds each thread's title; each turn's prompt;
+its reply, one row per streamed piece, each led in by the end of the piece
+before it so a word split across two pieces still matches; and its tool text:
+each tool step's name and summary, the files a Work turn wrote, and a Code
+terminal's output, its newest 64 pieces of at most 32 KB each, a redraw
+replacing what it showed. A title, prompt, or Work reply keeps at most its
+first 256 KB, and a turn's joined tool steps their newest 32 KB.
+The projection is derived and rebuilt from the journal; Chat and Code text is
+read from their content stores when an event applies. A turn an edit
+superseded or a rewind removed leaves the index, a deleted Chat thread's rows
+go with it, and a thread purge sweeps its rows; the index's own tables are
+kept in step by triggers, so a data reset clears it through its content table.
+
 ## Hand off
 
 Hand off is `POST /api/threads/hand-off`. The behavior rule is in

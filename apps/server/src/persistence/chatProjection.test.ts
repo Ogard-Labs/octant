@@ -15,6 +15,7 @@ import { applyMigrations, MIGRATIONS } from "./migrations";
 import { rebuildProjection } from "./projection";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
+import { searchThreads } from "./threadSearchProjection";
 import {
   CHAT_SETTINGS_AGGREGATE_ID,
   readChatContent,
@@ -736,6 +737,31 @@ describe("ChatProjection", () => {
     // Each delta writes the same number of rows: the earlier deltas' bodies
     // are not read and rewritten again as the reply grows.
     expect(new Set(indexWrites).size).toBe(1);
+
+    // Search across modes finds the turn by words spread over its prompt and
+    // two reply pieces, and the deleted thread leaves it.
+    const visible = [{ mode: "chat" as const, threadId: ids.thread, updatedAt: now }];
+    expect(
+      searchThreads(connection, "ask walrus quokka", visible, 50).matches.map((match) => [
+        match.anchorId,
+        match.field,
+      ]),
+    ).toEqual([[ids.turn, "reply"]]);
+    expect(searchThreads(connection, "neutral", visible, 50).matches).toEqual([
+      expect.objectContaining({ field: "title", anchorId: "" }),
+    ]);
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2 + deltas.length,
+      events: [
+        pending("chat.deleted@1", { kind: "deleted", threadId: ids.thread, deletedAt: now }),
+      ],
+    });
+    expect(
+      connection
+        .prepare("SELECT COUNT(*) AS count FROM thread_search_document WHERE thread_id = ?")
+        .get(ids.thread),
+    ).toEqual({ count: 0 });
     connection.close();
   });
 
@@ -999,7 +1025,10 @@ describe("ChatProjection", () => {
       );
       bytesPerDelta.push(boundBytes - before);
     }
-    expect(bytesPerDelta.at(-1)).toBe(bytesPerDelta[1]);
+    // Search across modes leads each piece in with the end of the reply so
+    // far, which grows only until it reaches its fixed length; from there on a
+    // late delta writes exactly what an earlier one did.
+    expect(bytesPerDelta.at(-1)).toBe(bytesPerDelta[99]);
 
     const streamedIds = Array.from({ length: deltaCount + 1 }, (_, index) => contentId(index));
     const readAttempt = () =>

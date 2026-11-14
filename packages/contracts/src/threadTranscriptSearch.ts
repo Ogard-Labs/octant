@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import {
+  ChatThreadId,
   ChatTranscriptSearchMatchRange,
+  ChatTurnId,
   MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
@@ -72,3 +74,68 @@ export type CodeTranscriptSearch = typeof CodeTranscriptSearch.Type;
 
 export const decodeWorkTranscriptSearch = Schema.decodeUnknownSync(WorkTranscriptSearch);
 export const decodeCodeTranscriptSearch = Schema.decodeUnknownSync(CodeTranscriptSearch);
+
+/**
+ * Search across every mode: one host read that matches thread titles, the
+ * person's prompts, the replies, and what tools did (a step's summary, the
+ * files it wrote, a terminal's output) in Chat, Work and Code at once.
+ */
+export const THREAD_SEARCH_SCOPES = ["all", "chat", "work", "code"] as const;
+export const ThreadSearchScope = Schema.Literal(...THREAD_SEARCH_SCOPES);
+export type ThreadSearchScope = typeof ThreadSearchScope.Type;
+
+/**
+ * Where in the thread the text matched. A title hit names no turn; every other
+ * field names the turn that holds it.
+ */
+export const ThreadSearchField = Schema.Literal("title", "prompt", "reply", "tool");
+export type ThreadSearchField = typeof ThreadSearchField.Type;
+
+const ThreadSearchHitFields = {
+  ...TranscriptSearchHitFields,
+  field: ThreadSearchField,
+  /** When the thread last changed, so a client can order or label hits. */
+  updatedAt: Schema.String,
+};
+
+export const ChatThreadSearchHit = Schema.Struct({
+  mode: Schema.Literal("chat"),
+  threadId: ChatThreadId,
+  turnId: Schema.optional(ChatTurnId),
+  ...ThreadSearchHitFields,
+  // A Chat thread may sit in no Project.
+  projectId: Schema.optional(ProjectId),
+}).annotations(strict);
+
+export const WorkThreadSearchHit = Schema.Struct({
+  mode: Schema.Literal("work"),
+  threadId: WorkThreadId,
+  turnId: Schema.optional(WorkTurnId),
+  ...ThreadSearchHitFields,
+}).annotations(strict);
+
+export const CodeThreadSearchHit = Schema.Struct({
+  mode: Schema.Literal("code"),
+  threadId: CodeThreadId,
+  operationId: Schema.optional(CodeOperationId),
+  ...ThreadSearchHitFields,
+}).annotations(strict);
+
+export const ThreadSearchHit = Schema.Union(
+  ChatThreadSearchHit,
+  WorkThreadSearchHit,
+  CodeThreadSearchHit,
+);
+export type ThreadSearchHit = typeof ThreadSearchHit.Type;
+
+export const ThreadSearch = Schema.Struct({
+  query: Schema.String.pipe(Schema.maxLength(MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH)),
+  scope: ThreadSearchScope,
+  hits: Schema.Array(ThreadSearchHit).pipe(Schema.maxItems(MAX_CHAT_TRANSCRIPT_SEARCH_HITS)),
+  truncated: Schema.Boolean,
+  /** Modes the host could not search for this caller; their threads are not in `hits`. */
+  unavailable: Schema.Array(Schema.Literal("chat", "work", "code")),
+}).annotations(strict);
+export type ThreadSearch = typeof ThreadSearch.Type;
+
+export const decodeThreadSearch = Schema.decodeUnknownSync(ThreadSearch);

@@ -1200,6 +1200,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     kind: "exact" as const,
+    path: "/api/search",
+    methods: ["GET"] as const,
+    // `?q=&scope=`; the route refuses every other query key itself.
+    takesSearchQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
     path: "/api/replica-sync/status",
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
@@ -1256,7 +1264,8 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
-    allowQuery: match.kind === "prefix" || "namesProjectInQuery" in match,
+    allowQuery:
+      match.kind === "prefix" || "namesProjectInQuery" in match || "takesSearchQuery" in match,
   };
 });
 

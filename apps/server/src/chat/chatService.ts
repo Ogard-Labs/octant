@@ -1581,6 +1581,22 @@ export class ChatService {
     };
   }
 
+  /**
+   * The threads search may look in: active and archived threads, never a
+   * deleted one or a hidden Side Chat sidecar, as transcript search lists.
+   */
+  listSearchableThreads(): ReadonlyArray<ChatThread> {
+    this.#assertReady();
+    const hidden = this.#hiddenThreadIds();
+    return this.#persistence
+      .readChatThreads()
+      .filter(
+        (thread) =>
+          (thread.lifecycle === "active" || thread.lifecycle === "archived") &&
+          !hidden.has(String(thread.id)),
+      );
+  }
+
   read(threadId: ChatThreadId): ChatThreadView {
     return readChatThreadView(this.#persistence, threadId);
   }
