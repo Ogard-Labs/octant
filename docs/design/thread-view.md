@@ -401,6 +401,16 @@ interface text, and model choices stay in a bounded scrollable popup.
 Sent messages do not repeat an access caption; the underlying history remains
 authoritative.
 
+## Image preview
+
+An image attached in a composer, and an image on a sent message, is a button
+named "Preview <name>". It opens a modal lightbox on the shared dialog: one
+frame 32px inside the window for every image, the image fitted inside it, its
+filename and size beneath, with "n of m" when the message has several. Arrow
+keys step between the images of that message or composer; Escape or a press
+outside closes it and returns focus to the thumbnail. Stepping never resizes
+the frame.
+
 ## Model picker
 
 The compact model picker uses explicit horizontal provider selection, sub-provider

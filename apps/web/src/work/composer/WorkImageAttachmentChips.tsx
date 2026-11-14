@@ -1,4 +1,6 @@
 import { X } from "lucide-react";
+import { useState } from "react";
+import { ImagePreviewDialog } from "../../composer/ImagePreviewDialog";
 import type { WorkComposerImages } from "./useWorkComposerImages";
 import { OctantButton } from "../../ui/base/OctantButton";
 
@@ -17,18 +19,27 @@ export function WorkImageAttachmentChips(props: {
   readonly withMessage?: boolean;
 }) {
   const images = props.images;
+  const [previewIndex, setPreviewIndex] = useState<number>();
   const message = props.withMessage === false ? undefined : images.message;
   if (images.staged.length === 0 && message === undefined) return null;
   return (
     <div className="composer-chips work-composer-adapter__attachments" aria-label="Attached images">
-      {images.staged.map((attachment) => (
+      {images.staged.map((attachment, index) => (
         <span className="chip work-composer-adapter__attachment" key={attachment.id}>
-          <img
-            alt={attachment.displayName}
-            className="work-composer-adapter__attachment-thumb"
-            src={attachment.previewUrl}
-          />
-          <span className="work-composer-adapter__attachment-name">{attachment.displayName}</span>
+          <OctantButton
+            aria-label={`Preview ${attachment.displayName}`}
+            className="image-preview-trigger window-no-drag"
+            onClick={() => setPreviewIndex(index)}
+            type="button"
+            variant="bare"
+          >
+            <img
+              alt={attachment.displayName}
+              className="work-composer-adapter__attachment-thumb"
+              src={attachment.previewUrl}
+            />
+            <span className="work-composer-adapter__attachment-name">{attachment.displayName}</span>
+          </OctantButton>
           <OctantButton
             aria-label={`Remove ${attachment.displayName}`}
             className="chip-x window-no-drag"
@@ -40,6 +51,17 @@ export function WorkImageAttachmentChips(props: {
           </OctantButton>
         </span>
       ))}
+      <ImagePreviewDialog
+        images={images.staged.map((attachment) => ({
+          id: attachment.id,
+          name: attachment.displayName,
+          url: attachment.previewUrl,
+          bytes: attachment.file.size,
+        }))}
+        index={previewIndex}
+        onClose={() => setPreviewIndex(undefined)}
+        onIndexChange={setPreviewIndex}
+      />
       {message === undefined ? null : (
         <span className="work-composer-adapter__hint" role="status">
           {message}
