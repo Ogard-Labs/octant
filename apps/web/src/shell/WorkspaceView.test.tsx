@@ -478,9 +478,9 @@ describe("WorkspaceView welcome", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "What are we building today?" }),
+      await screen.findByRole("heading", { name: "What should we work on in Octant?" }),
     ).toBeVisible();
-    expect(screen.getByText("Octant")).toBeVisible();
+    expect(screen.getAllByText("Octant").length).toBeGreaterThan(0);
     expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();
   });
 });

@@ -1079,10 +1079,7 @@ describe("SettingsView", () => {
     ]) {
       expect(screen.getByRole("checkbox", { name })).toBeChecked();
     }
-    for (const name of [
-      "Branch on Activity rows",
-      "Pull request on Activity rows",
-    ]) {
+    for (const name of ["Branch on Activity rows", "Pull request on Activity rows"]) {
       expect(screen.getByRole("checkbox", { name })).not.toBeChecked();
     }
     // A Projects row sits under its Project, so it offers no Project detail.
