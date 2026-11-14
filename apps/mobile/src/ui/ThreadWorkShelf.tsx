@@ -33,7 +33,7 @@ export function ThreadWorkShelf(props: {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        wrap: { gap: space.sm, marginBottom: space.sm },
+        wrap: { gap: space.xs },
         summary: {
           flexDirection: "row",
           alignItems: "center",
@@ -50,7 +50,8 @@ export function ThreadWorkShelf(props: {
         },
         chevron: { color: colors.textSecondary, fontSize: 14, fontWeight: "500" },
         followUp: {
-          paddingVertical: space.sm,
+          paddingTop: 0,
+          paddingBottom: space.sm,
           paddingHorizontal: space.md,
           gap: space.xs,
         },

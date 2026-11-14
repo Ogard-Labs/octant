@@ -261,7 +261,7 @@ export function ListRow(props: ListRowProps) {
     () =>
       StyleSheet.create({
         row: {
-          minHeight: props.detail === undefined ? 46 : 58,
+          minHeight: props.detail === undefined ? 44 : 52,
           flexDirection: "row",
           alignItems: "center",
           paddingLeft: space.md,
@@ -278,7 +278,7 @@ export function ListRow(props: ListRowProps) {
         bareIcon: { width: 26, marginRight: 12, alignItems: "center" },
         main: {
           flex: 1,
-          minHeight: props.detail === undefined ? 46 : 58,
+          minHeight: props.detail === undefined ? 44 : 52,
           flexDirection: "row",
           alignItems: "center",
           paddingRight: space.md,
@@ -288,7 +288,7 @@ export function ListRow(props: ListRowProps) {
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.hairline,
         },
-        text: { flex: 1, paddingVertical: 8, gap: 2 },
+        text: { flex: 1, paddingVertical: 6, gap: 1 },
         label: {
           color: colors.textPrimary,
           fontSize: typography.rowLabel.fontSize,

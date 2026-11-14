@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { mix, radii, space, typography, useTheme, withAlpha } from "../../design-system";
+import { mix, radii, typography, useTheme, withAlpha } from "../../design-system";
 import type { MobileIconName } from "./IconButton";
 
 export interface CountTileProps {
@@ -30,25 +30,26 @@ export function CountTile(props: CountTileProps) {
       StyleSheet.create({
         pressable: { flex: 1, borderRadius: radii.md },
         face: {
-          minHeight: 76,
+          minHeight: 64,
           justifyContent: "space-between",
-          padding: 12,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
           borderRadius: radii.md,
           borderWidth: StyleSheet.hairlineWidth,
           overflow: "hidden",
         },
         top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
         count: {
-          fontSize: 26,
+          fontSize: 24,
           fontWeight: "600",
           letterSpacing: -0.6,
           fontVariant: ["tabular-nums"],
-          lineHeight: 30,
+          lineHeight: 28,
         },
         label: {
           fontSize: typography.detail.fontSize,
           fontWeight: "500",
-          marginTop: space.xs,
+          marginTop: 2,
         },
       }),
     [],
