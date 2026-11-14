@@ -170,9 +170,11 @@ export function parseMobileUnifiedDiff(text: string): ReadonlyArray<MobileDiffFi
   let inHunk = false;
   for (const line of text.split("\n")) {
     if (line.startsWith("diff --git ")) {
-      const match = / b\/(.+)$/.exec(line);
+      // A plain search, not a regex: `/ b\/(.+)$/` backtracks polynomially on
+      // a header holding many " b/" runs, and the diff text comes from the host.
+      const pathStart = line.indexOf(" b/");
       current = {
-        path: match?.[1] ?? line.slice(11),
+        path: pathStart >= 0 ? line.slice(pathStart + 3) : line.slice(11),
         additions: 0,
         deletions: 0,
         binary: false,
